@@ -243,6 +243,42 @@ describe('inbound newsletter service', () => {
     expect(outcome.status).toBe('processed');
   });
 
+  it('matches a domain pattern against the sending subdomains a bulk mailer uses', async () => {
+    // What the user actually saved after subscribing to a Substack newsletter.
+    await service.setSources([
+      { id: 'ff', label: 'FF', fromPatterns: ['@substack.com'], subjectPatterns: [], enabled: true },
+    ]);
+
+    // Substack delivers from a sending shard, so the address is not literally
+    // "@substack.com" anywhere in it.
+    const outcome = await service.ingest(
+      toEmailMessage({
+        messageId: 'shard-1',
+        from: 'bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com',
+        subject: 'Week 1 Notes',
+        date: '2026-08-13T12:00:00.000Z',
+        html: CLEAN_NEWSLETTER,
+      }),
+    );
+    expect(outcome.status).toBe('processed');
+  });
+
+  it('does not let a domain pattern match a lookalike domain', async () => {
+    await service.setSources([
+      { id: 'ff', label: 'FF', fromPatterns: ['@substack.com'], subjectPatterns: [], enabled: true },
+    ]);
+    const outcome = await service.ingest(
+      toEmailMessage({
+        messageId: 'lookalike-1',
+        from: 'editor@notsubstack.com',
+        subject: 'Week 1 Notes',
+        date: '2026-08-13T12:00:00.000Z',
+        html: CLEAN_NEWSLETTER,
+      }),
+    );
+    expect(outcome.status).toBe('quarantined');
+  });
+
   it('reports the sender as configured only once the user saves one', async () => {
     const fresh = new NewsletterService(await createTestDb());
     expect(await fresh.isSenderConfigured()).toBe(false);

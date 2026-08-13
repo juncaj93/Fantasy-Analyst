@@ -142,6 +142,26 @@ export interface NewsletterSourceConfig {
   enabled?: boolean;
 }
 
+/**
+ * Does one sender address satisfy one configured pattern?
+ *
+ * A pattern written as a domain (`@substack.com`) covers that domain's
+ * subdomains too. Bulk senders deliver from sending shards — Substack's
+ * envelope is `...@mg-d0.substack.com` — so a plain substring test would reject
+ * the very mail the user meant to accept, while `@substack.com` looks like it
+ * should obviously match.
+ *
+ * The dot is required: `@substack.com` must not match `@notsubstack.com`.
+ */
+export function senderMatches(from: string, pattern: string): boolean {
+  if (!from || !pattern) return false;
+  if (!pattern.startsWith('@')) return from.includes(pattern);
+
+  const domain = from.slice(from.lastIndexOf('@') + 1);
+  const wanted = pattern.slice(1);
+  return domain === wanted || domain.endsWith(`.${wanted}`);
+}
+
 export function qualifies(
   message: EmailMessage,
   sources: NewsletterSourceConfig[],
@@ -156,7 +176,7 @@ export function qualifies(
   for (const source of sources) {
     if (source.enabled === false) continue;
     const fromOk = source.fromPatterns.some((p) =>
-      candidates.some((from) => from.includes(p.toLowerCase())),
+      candidates.some((from) => senderMatches(from, p.toLowerCase())),
     );
     if (!fromOk) continue;
     const patterns = source.subjectPatterns ?? [];

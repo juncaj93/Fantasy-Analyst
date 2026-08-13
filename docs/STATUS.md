@@ -240,6 +240,11 @@ indistinguishable from the subscription breaking.
   alternative, rather than accepted and quietly useless.
 - `From:` values arrive as `Display Name <a@b.com>`; the display name is never
   matched against.
+- A domain pattern covers that domain's **subdomains**. `@substack.com` has to
+  accept `...@mg-d0.substack.com`, because that is where the mail actually comes
+  from — a plain substring test rejected exactly the mail the user meant to
+  accept. The dot is required, so `@substack.com` still does not match
+  `@notsubstack.com`.
 
 ## Known limitations
 
