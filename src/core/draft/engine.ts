@@ -65,7 +65,12 @@ export interface ComponentScore {
   label: string;
   /** Raw, human-meaningful value (e.g. "+8 picks of value"). */
   display: string;
-  /** Normalised score in [-1, 1]. */
+  /**
+   * Normalised score in [-1, 1].
+   *
+   * One exception: market value goes below -1, without limit, so that a large
+   * reach cannot be outvoted by the smaller components put together.
+   */
   score: number;
   weight: number;
   /** score * weight — what actually moved the ranking. */
@@ -120,7 +125,15 @@ export function marketValueComponent(adp: number | null, currentPick: number, te
   const scale = Math.max(6, teams || 12);
   // Asymmetric: falling value counts fully, reaching is damped by half.
   const raw = delta >= 0 ? delta / scale : delta / (scale * 2);
-  const score = clamp(raw, -1, 1);
+  // Value saturates; a reach does not.
+  //
+  // A player who fell 100 picks is not ten times better than one who fell ten,
+  // because you can only spend the one pick — so the upside caps at 1. A reach
+  // has no such ceiling: taking a player 160 picks early is not "somewhat bad",
+  // it is unjustifiable, and capping it at -1 made every distant player look
+  // identical. That is what let a quarterback with an ADP of 202 reach the top
+  // ten of the board at pick 38, on roster need alone.
+  const score = Math.min(raw, 1);
   return {
     key: 'market_value',
     label: 'ADP value',

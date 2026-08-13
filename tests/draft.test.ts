@@ -161,6 +161,23 @@ describe('individual components', () => {
     expect(Math.abs(reach.score)).toBeLessThan(fall.score);
   });
 
+  /**
+   * A ceiling on value is right — you only get to spend the one pick. A ceiling
+   * on reaching is not: it made every distant player score the same, so the
+   * board was decided by roster need and a quarterback with an ADP of 202 came
+   * ninth at pick 38.
+   */
+  it('keeps getting worse the further the reach goes', () => {
+    const near = marketValueComponent(60, 38, 10);
+    const far = marketValueComponent(202, 38, 10);
+    expect(far.score).toBeLessThan(near.score);
+    expect(far.score).toBeLessThan(-1);
+  });
+
+  it('caps the reward for a player who fell a long way', () => {
+    expect(marketValueComponent(1, 200, 10).score).toBe(1);
+  });
+
   it('marks a missing ADP unknown with zero contribution', () => {
     const c = marketValueComponent(null, 20, 12);
     expect(c.unknown).toBe(true);
@@ -203,6 +220,22 @@ describe('rankAvailablePlayers', () => {
       ctx,
     );
   }
+
+  /**
+   * The board is a market-value board first. Roster need breaks near ties; it
+   * does not promote a player nobody else would take for another fifteen rounds.
+   */
+  it('will not float a far-off player over a close one on roster need', () => {
+    const [qb, rb] = [players.find((p) => p.position === 'QB')!, players.find((p) => p.position === 'RB')!];
+    const ranked = rankAvailablePlayers(
+      [
+        { player: qb, adp: 202, adpRank: 202, signal: null },
+        { player: rb, adp: 16, adpRank: 16, signal: null },
+      ],
+      { ...ctx, rosterCounts: { QB: 0, RB: 2, WR: 3, TE: 1 } },
+    );
+    expect(ranked[0]!.playerId).toBe(rb.id);
+  });
 
   it('exposes every component with its weight and contribution', () => {
     const [top] = board();

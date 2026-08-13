@@ -75,6 +75,12 @@ export class DraftBoardService {
 
     const mySlot = slotForRoster(draft.slotToRosterId, myRosterRecord?.rosterId ?? null);
     const next = mySlot == null ? null : nextPickForSlot(mySlot, teams, rounds, draft.type, currentPick);
+    // Without a slot there is no "your next pick", so survival and scarcity are
+    // both computed against an unknown horizon. Say so rather than let the board
+    // look confident about numbers it could not work out.
+    if (myRosterRecord && mySlot == null) {
+      warnings.push('Sleeper has not published your draft slot yet, so "who lasts until your next pick" is guesswork');
+    }
 
     // Players already taken.
     const takenIds = new Set(picks.map((p) => p.playerId).filter((id): id is string => !!id));
