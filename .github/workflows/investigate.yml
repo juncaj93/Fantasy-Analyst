@@ -1,0 +1,77 @@
+name: Investigate
+
+# Read-only fact-finding, run on demand.
+#
+# The development sandbox cannot reach Cloudflare or most of the internet, so
+# questions like "is there a domain available for the newsletter address?" or
+# "does this odds provider still have a free tier?" are answered here instead of
+# by guessing — or by asking a human something a machine can look up.
+#
+# Nothing in this workflow changes anything. It only reads and prints.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloudflare domains and email routing
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "https://api.cloudflare.com/client/v4$1"; }
+
+          echo "=== Zones (domains) on this account ==="
+          zones=$(api "/zones?per_page=50")
+          echo "$zones" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              if (!r.success) { console.log('could not list zones:', JSON.stringify(r.errors)); return; }
+              if (!r.result.length) { console.log('(no domains on this account)'); return; }
+              for (const z of r.result) console.log(z.id, z.name, z.status);
+            })"
+
+          for id in $(echo "$zones" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              if (r.success) for (const z of r.result) console.log(z.id);
+            })"); do
+            name=$(echo "$zones" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s); const z=r.result.find(z=>z.id===process.argv[1]);
+                console.log(z ? z.name : '?');
+              })" "$id")
+
+            echo
+            echo "=== $name: email routing ==="
+            api "/zones/$id/email/routing" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s);
+                if (!r.success) { console.log('  not available:', JSON.stringify(r.errors)); return; }
+                console.log('  enabled:', r.result.enabled, '| status:', r.result.status, '| name:', r.result.name);
+              })"
+
+            echo "=== $name: existing MX records (does real email already use this domain?) ==="
+            api "/zones/$id/dns_records?type=MX&per_page=20" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s);
+                if (!r.success) { console.log('  could not read DNS:', JSON.stringify(r.errors)); return; }
+                if (!r.result.length) { console.log('  (none — no mail currently delivered to this domain)'); return; }
+                for (const d of r.result) console.log('  ', d.name, '->', d.content, 'priority', d.priority);
+              })"
+          done
+
+      - name: The Odds API — free tier and NFL player prop markets
+        run: |
+          set -uo pipefail
+          echo "=== pricing page ==="
+          curl -s -L https://the-odds-api.com/ | tr '>' '>\n' | grep -iEo '[^<]*(free|500|requests)[^<]*' | head -20 || true
+          echo
+          echo "=== documented NFL player prop market keys ==="
+          curl -s -L https://the-odds-api.com/sports-odds-data/betting-markets.html \
+            | grep -oE 'player_[a-z_]+' | sort -u | head -40 || true
+          echo
+          echo "=== sports endpoint reachable without a key? (expect 401) ==="
+          curl -s -o /dev/null -w 'status %{http_code}\n' https://api.the-odds-api.com/v4/sports || true
