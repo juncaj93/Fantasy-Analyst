@@ -16,6 +16,7 @@
 
 import {
   editDistance,
+  givenNameVariants,
   initialForm,
   normalizeName,
   normalizePosition,
@@ -331,22 +332,39 @@ function fuzzyCandidates(
   const init = initialForm(name);
   if (init) for (const p of index.byInitial(init)) pool.set(p.id, p);
 
+  // "Cameron" against "Cam" is four inserted characters — past any sane fuzzy
+  // threshold — so the long and short forms of a given name are measured too,
+  // and the closest form wins.
+  const forms = [name, ...givenNameVariants(name)];
+
   const scored: MatchCandidate[] = [];
   for (const p of pool.values()) {
-    const dist = editDistance(name, p.normalizedName || normalizeName(p.fullName), 3);
+    const canonical = p.normalizedName || normalizeName(p.fullName);
+    let dist = Number.POSITIVE_INFINITY;
+    let viaVariant = false;
+    for (const [i, form] of forms.entries()) {
+      const d = editDistance(form, canonical, 3);
+      if (d < dist) {
+        dist = d;
+        viaVariant = i > 0;
+      }
+    }
     if (dist > 3) continue;
     const sameTeam = !!team && p.team === team;
     const samePos = !!position && p.position === position;
-    let confidence = CONFIDENCE.fuzzy - dist * 0.1;
+    // A variant match is a match on a different spelling, not on the name as
+    // written, so it never claims the confidence of an exact one.
+    let confidence = CONFIDENCE.fuzzy - dist * 0.1 - (viaVariant ? 0.05 : 0);
     if (sameTeam) confidence += 0.15;
     if (samePos) confidence += 0.07;
     if (!p.active) confidence -= 0.2;
+    const how = viaVariant ? `short form of "${p.firstName}"` : `edit distance ${dist}`;
     scored.push({
       playerId: p.id,
       player: p,
       method: 'fuzzy',
       confidence: Math.max(0, Math.min(0.95, Number(confidence.toFixed(3)))),
-      detail: `edit distance ${dist}${sameTeam ? ', same team' : ''}${samePos ? ', same position' : ''}`,
+      detail: `${how}${sameTeam ? ', same team' : ''}${samePos ? ', same position' : ''}`,
       editDistance: dist,
     });
   }

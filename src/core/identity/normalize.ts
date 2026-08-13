@@ -61,6 +61,61 @@ export function normalizedFirstName(input: string): string {
 }
 
 /**
+ * Given names that sources shorten, paired with their long form.
+ *
+ * Sleeper calls the Titans quarterback "Cam Ward"; ADP sources call him
+ * "Cameron Ward". Four inserted characters is past any sane fuzzy threshold, so
+ * without this the row simply finds nothing — which is how a first-round
+ * quarterback ended up missing from the draft board entirely.
+ *
+ * Deliberately short and boring. This is not a nickname dictionary: it holds
+ * only mechanical shortenings of the same name, never "Ken" for "Kenneth
+ * Gainwell"-style guesses about who someone means. Anything less mechanical
+ * belongs in the alias list the user controls.
+ */
+const GIVEN_NAME_PAIRS: [short: string, long: string][] = [
+  ['cam', 'cameron'],
+  ['chris', 'christopher'],
+  ['dan', 'daniel'],
+  ['dave', 'david'],
+  ['greg', 'gregory'],
+  ['jon', 'jonathan'],
+  ['josh', 'joshua'],
+  ['matt', 'matthew'],
+  ['mike', 'michael'],
+  ['nick', 'nicholas'],
+  ['rob', 'robert'],
+  ['sam', 'samuel'],
+  ['tim', 'timothy'],
+  ['tom', 'thomas'],
+  ['tony', 'anthony'],
+  ['will', 'william'],
+  ['zach', 'zachary'],
+];
+
+const GIVEN_NAME_VARIANTS = new Map<string, string[]>();
+for (const [short, long] of GIVEN_NAME_PAIRS) {
+  GIVEN_NAME_VARIANTS.set(short, [...(GIVEN_NAME_VARIANTS.get(short) ?? []), long]);
+  GIVEN_NAME_VARIANTS.set(long, [...(GIVEN_NAME_VARIANTS.get(long) ?? []), short]);
+}
+
+/**
+ * Other spellings of the same name, differing only in the given name.
+ *
+ * Returns the alternatives, never the input itself, and an empty list when the
+ * given name has no known long or short form.
+ */
+export function givenNameVariants(input: string): string[] {
+  const n = normalizeName(input);
+  const tokens = n.split(' ').filter(Boolean);
+  if (tokens.length < 2) return [];
+  const alternatives = GIVEN_NAME_VARIANTS.get(tokens[0]!);
+  if (!alternatives) return [];
+  const rest = tokens.slice(1).join(' ');
+  return alternatives.map((given) => `${given} ${rest}`);
+}
+
+/**
  * "F. Last" / "F Last" initial form, e.g. "j jefferson" for Justin Jefferson.
  * Returns '' when the name has fewer than two tokens.
  */

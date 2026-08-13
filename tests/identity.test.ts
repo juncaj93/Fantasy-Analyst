@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PlayerIndex,
   editDistance,
+  givenNameVariants,
   initialForm,
   normalizeName,
   normalizePosition,
@@ -196,5 +197,58 @@ describe('resolvePlayer — matching ladder', () => {
 
   it('handles an empty name without throwing', () => {
     expect(resolvePlayer({ name: '' }, TEST_INDEX).status).toBe('unmatched');
+  });
+});
+
+
+/**
+ * Sleeper calls the Titans quarterback "Cam Ward"; ADP sources call him
+ * "Cameron Ward". Four inserted characters is past the fuzzy threshold, so
+ * without this he simply is not on the draft board.
+ */
+describe('short and long forms of a given name', () => {
+  const index = new PlayerIndex([
+    player({ id: 'cw', fullName: 'Cam Ward', team: 'TEN', position: 'QB' }),
+    player({ id: 'mh', fullName: 'Michael Harris', team: 'SEA', position: 'WR' }),
+  ]);
+
+  it('offers the other spelling, never the one it was given', () => {
+    expect(givenNameVariants('Cameron Ward')).toEqual(['cam ward']);
+    expect(givenNameVariants('Cam Ward')).toEqual(['cameron ward']);
+  });
+
+  it('has nothing to say about a name it does not know', () => {
+    expect(givenNameVariants('Puka Nacua')).toEqual([]);
+    expect(givenNameVariants('Cameron')).toEqual([]);
+  });
+
+  it('resolves the long form to the player Sleeper lists short', () => {
+    const result = resolvePlayer({ name: 'Cameron Ward', team: 'TEN', position: 'QB' }, index);
+    expect(result.status).toBe('matched');
+    expect(result.playerId).toBe('cw');
+  });
+
+  it('resolves the short form to the player Sleeper lists long', () => {
+    const result = resolvePlayer({ name: 'Mike Harris', team: 'SEA', position: 'WR' }, index);
+    expect(result.status).toBe('matched');
+    expect(result.playerId).toBe('mh');
+  });
+
+  /**
+   * The variant is a different spelling, so it must not be waved through on the
+   * strength of the name alone — the same guards as any other fuzzy match.
+   */
+  it('will not commit a variant without the team and position to back it', () => {
+    expect(resolvePlayer({ name: 'Cameron Ward' }, index).status).not.toBe('matched');
+  });
+
+  /** The name as written still wins; a variant only fills a gap. */
+  it('prefers the player whose name matches exactly', () => {
+    const both = new PlayerIndex([
+      player({ id: 'short', fullName: 'Chris Johnson', team: 'KC', position: 'RB' }),
+      player({ id: 'long', fullName: 'Christopher Johnson', team: 'KC', position: 'RB' }),
+    ]);
+    expect(resolvePlayer({ name: 'Chris Johnson', team: 'KC', position: 'RB' }, both).playerId).toBe('short');
+    expect(resolvePlayer({ name: 'Christopher Johnson', team: 'KC', position: 'RB' }, both).playerId).toBe('long');
   });
 });
