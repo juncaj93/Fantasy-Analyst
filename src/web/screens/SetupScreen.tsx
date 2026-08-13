@@ -280,17 +280,27 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
   return (
     <div className="card" data-testid="panel-adp">
       <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Draft rankings (Underdog ADP)
+        Draft order
       </div>
-      <div className="faint" style={{ marginBottom: 8 }}>
-        Download today's ADP as a CSV, then choose the file or paste it below. You can import a fresh
-        one any time before your draft — the newest import is the one used.
+      <div className="card card-tight" data-testid="adp-source">
+        <strong>
+          {status.adp.rankedPlayers.toLocaleString()} players ranked by Sleeper
+        </strong>
+        <div className="faint">
+          This is Sleeper&rsquo;s own ranking of who goes around which pick, and it updates with the
+          player list every morning. Nothing to download, nothing to keep in step.
+        </div>
+        <div className="faint" style={{ marginTop: 4 }}>
+          It is a ranking, not a measured average of real drafts — close enough to answer
+          &ldquo;will they still be there at my next pick?&rdquo;, and labelled honestly so you know
+          what it is.
+        </div>
       </div>
       {banner}
 
       {status.adp.imported ? (
         <div className="card card-tight">
-          <strong>In use: {status.adp.label}</strong>
+          <strong>Overriding Sleeper: {status.adp.label}</strong>
           <div className="faint">
             Captured {formatDate(status.adp.capturedAt)} · {status.adp.matched} of {status.adp.totalRows} players
             matched
@@ -298,6 +308,13 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
           </div>
         </div>
       ) : null}
+
+      <details style={{ marginTop: 10 }}>
+        <summary className="muted">Use my own rankings instead</summary>
+        <div className="faint" style={{ margin: '6px 0' }}>
+          Optional. Import a CSV or paste one, and it replaces Sleeper&rsquo;s order until you
+          import a newer one.
+        </div>
 
       <div className="field">
         <label htmlFor="adp-file">Choose a file</label>
@@ -317,7 +334,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
 
       <div className="field">
         <label htmlFor="adp-label">Name this snapshot (optional)</label>
-        <input id="adp-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Underdog ADP — today" />
+        <input id="adp-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="My rankings — today" />
       </div>
 
       <div className="field">
@@ -368,6 +385,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
           </div>
         </div>
       ) : null}
+      </details>
     </div>
   );
 }

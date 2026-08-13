@@ -57,7 +57,7 @@ test.describe('draft room', () => {
     await expect(page.getByText('Pick', { exact: true })).toBeVisible();
     await expect(page.getByText('Until you', { exact: true })).toBeVisible();
     await expect(page.getByTestId('board-league-name')).toHaveText('Demo Dynasty');
-    await expect(page.getByText(/ADP Demo Underdog ADP/)).toBeVisible();
+    await expect(page.getByText(/Draft order/)).toBeVisible();
   });
 
   test('ranks available players and hides drafted ones', async ({ page }) => {

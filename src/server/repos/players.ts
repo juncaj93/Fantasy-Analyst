@@ -17,6 +17,7 @@ interface PlayerRow {
   normalized_name: string;
   aliases_json: string;
   external_ids_json: string;
+  draft_rank: number | null;
 }
 
 function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer {
@@ -33,6 +34,7 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     normalizedName: row.normalized_name,
     aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
     externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
+    draftRank: row.draft_rank ?? null,
   };
 }
 
@@ -41,6 +43,14 @@ export class PlayerRepo {
 
   async count(): Promise<number> {
     const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  /** How many active players Sleeper gives a draft-order rank. */
+  async countRanked(): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
+      .first<{ n: number }>();
     return Number(row?.n ?? 0);
   }
 
@@ -99,8 +109,9 @@ export class PlayerRepo {
           .prepare(
             `INSERT INTO players (
                id, sleeper_player_id, full_name, first_name, last_name, team, position,
-               status, active, normalized_name, aliases_json, external_ids_json, created_at, updated_at
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               status, active, normalized_name, aliases_json, external_ids_json, draft_rank,
+               created_at, updated_at
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                sleeper_player_id = excluded.sleeper_player_id,
                full_name         = excluded.full_name,
@@ -113,6 +124,7 @@ export class PlayerRepo {
                normalized_name   = excluded.normalized_name,
                aliases_json      = excluded.aliases_json,
                external_ids_json = excluded.external_ids_json,
+               draft_rank        = excluded.draft_rank,
                updated_at        = excluded.updated_at`,
           )
           .bind(
@@ -128,6 +140,7 @@ export class PlayerRepo {
             p.normalizedName,
             toJson(p.aliases),
             toJson(p.externalIds ?? {}),
+            p.draftRank ?? null,
             now,
             now,
           ),

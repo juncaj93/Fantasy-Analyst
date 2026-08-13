@@ -81,6 +81,10 @@ export interface SetupStatus {
     rosterFound: boolean;
   };
   adp: {
+    /** How many players Sleeper ranks — the default draft order. */
+    rankedPlayers: number;
+    /** 'Sleeper' unless an imported file is overriding it. */
+    source: string;
     imported: boolean;
     label: string | null;
     capturedAt: string | null;
@@ -131,8 +135,9 @@ export class SetupService {
   }
 
   async status(): Promise<SetupStatus> {
-    const [playerCount, league, snapshot, newsletter, vegasFreshness] = await Promise.all([
+    const [playerCount, rankedPlayers, league, snapshot, newsletter, vegasFreshness] = await Promise.all([
       this.players.count(),
+      this.players.countRanked(),
       this.leagues.getSelectedLeague(),
       this.adp.latest(),
       this.newsletterStatus(),
@@ -181,12 +186,18 @@ export class SetupService {
       },
       {
         id: 'adp',
-        title: 'Underdog ADP',
-        state: snapshot ? 'ok' : 'warn',
-        summary: snapshot
-          ? `${snapshot.label} — ${snapshot.matchedCount} of ${snapshot.rowCount} players matched`
-          : 'No draft rankings imported yet',
-        action: snapshot ? null : 'Import an ADP file before your draft.',
+        title: 'Draft order',
+        // Sleeper ranks players in its own player list, which the app already
+        // syncs, so there is nothing to import and nothing to keep in step.
+        state: rankedPlayers > 0 ? 'ok' : 'warn',
+        summary:
+          rankedPlayers > 0
+            ? `${rankedPlayers.toLocaleString()} players ranked by Sleeper${snapshot ? `, overridden by ${snapshot.label}` : ''}`
+            : 'No draft order yet',
+        action:
+          rankedPlayers > 0
+            ? null
+            : 'Tap Update player list on the Sleeper step to pull the draft order.',
       },
       {
         id: 'newsletter',
@@ -228,6 +239,8 @@ export class SetupService {
         rosterFound,
       },
       adp: {
+        rankedPlayers,
+        source: snapshot ? 'imported file' : 'Sleeper',
         imported: !!snapshot,
         label: snapshot?.label ?? null,
         capturedAt: snapshot?.capturedAt ?? null,

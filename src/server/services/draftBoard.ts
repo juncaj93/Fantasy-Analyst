@@ -71,14 +71,24 @@ export class DraftBoardService {
     // Players already taken.
     const takenIds = new Set(picks.map((p) => p.playerId).filter((id): id is string => !!id));
 
-    // Frozen ADP snapshot for this draft (explicit link, else the latest one).
+    // Draft order comes from Sleeper's own ranking, which the nightly player
+    // sync already carries. An imported ranking file, if one exists, still
+    // wins: a file the user chose is a deliberate statement about their draft,
+    // and Sleeper's ranking is only the default.
     const snapshotMeta = draft.adpSnapshotId
       ? await this.adp.get(draft.adpSnapshotId)
       : await this.adp.latest();
-    if (!snapshotMeta) warnings.push('no ADP snapshot imported — market value and survival are unavailable');
-    const adpValues = snapshotMeta ? await this.adp.valuesByPlayer(snapshotMeta.id) : new Map();
+    const importedValues = snapshotMeta ? await this.adp.valuesByPlayer(snapshotMeta.id) : new Map();
 
     const allPlayers = await this.players.listAll();
+    const rankOf = (player: CanonicalPlayer): number | null =>
+      importedValues.get(player.id)?.adp ?? player.draftRank ?? null;
+    const rankedCount = allPlayers.filter((p) => p.active && rankOf(p) != null).length;
+    if (rankedCount === 0) {
+      warnings.push(
+        'no draft order available — update the player list on the Sleeper step, or import a ranking file',
+      );
+    }
     const byId = new Map(allPlayers.map((p) => [p.id, p]));
 
     // My roster composition drives need.
@@ -97,26 +107,19 @@ export class DraftBoardService {
       };
     });
 
-    // Candidate pool: ranked ADP players who are still available.
+    // Candidate pool: ranked players who are still available. Unranked players
+    // are included only when nothing is ranked at all, so the board degrades to
+    // "everyone" rather than to nothing.
     const positionFilter = opts.position ? opts.position.toUpperCase() : null;
-    const candidates: CanonicalPlayer[] = [];
-    for (const [playerId, value] of adpValues) {
-      if (takenIds.has(playerId)) continue;
-      const player = byId.get(playerId);
-      if (!player || !player.active) continue;
-      if (positionFilter && player.position !== positionFilter) continue;
-      void value;
-      candidates.push(player);
-    }
-    // Without a snapshot, fall back to every active fantasy player so the board
-    // is still usable (clearly flagged as degraded).
-    if (candidates.length === 0 && !snapshotMeta) {
-      for (const player of allPlayers) {
-        if (!player.active || takenIds.has(player.id)) continue;
-        if (positionFilter && player.position !== positionFilter) continue;
-        candidates.push(player);
-      }
-    }
+    const eligible = (player: CanonicalPlayer): boolean =>
+      player.active &&
+      !takenIds.has(player.id) &&
+      (!positionFilter || player.position === positionFilter);
+
+    const candidates: CanonicalPlayer[] = allPlayers.filter(
+      (p) => eligible(p) && (rankedCount === 0 || rankOf(p) != null),
+    );
+    candidates.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
 
     const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
@@ -125,8 +128,8 @@ export class DraftBoardService {
     const recommendations = rankAvailablePlayers(
       candidates.map((player) => ({
         player,
-        adp: adpValues.get(player.id)?.adp ?? null,
-        adpRank: adpValues.get(player.id)?.rank ?? null,
+        adp: rankOf(player),
+        adpRank: importedValues.get(player.id)?.rank ?? player.draftRank ?? null,
         signal: signals.get(player.id) ?? null,
       })),
       {

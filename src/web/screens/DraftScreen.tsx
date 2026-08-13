@@ -112,12 +112,13 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
           </button>
         </div>
         <div className="badge-row">
+          {/* Where the draft order came from, named honestly. */}
           {board.adpSnapshot ? (
             <Badge>
-              ADP {board.adpSnapshot.label} · {formatDate(board.adpSnapshot.capturedAt)}
+              Draft order: {board.adpSnapshot.label} · {formatDate(board.adpSnapshot.capturedAt)}
             </Badge>
           ) : (
-            <Badge tone="warn">no ADP snapshot</Badge>
+            <Badge>Draft order: Sleeper</Badge>
           )}
           {Object.entries(board.rosterCounts).map(([pos, n]) => (
             <Badge key={pos}>

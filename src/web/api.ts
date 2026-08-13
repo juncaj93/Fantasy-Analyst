@@ -236,6 +236,8 @@ export interface SetupStatus {
     rosterFound: boolean;
   };
   adp: {
+    rankedPlayers: number;
+    source: string;
     imported: boolean;
     label: string | null;
     capturedAt: string | null;

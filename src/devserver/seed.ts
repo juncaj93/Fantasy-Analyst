@@ -23,18 +23,18 @@ import { NewsletterService } from '../server/services/newsletterService.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
 export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
-  '1001': { player_id: '1001', first_name: 'Marcus', last_name: 'Vance', full_name: 'Marcus Vance', team: 'KC', position: 'RB', active: true, injury_status: null },
-  '1002': { player_id: '1002', first_name: 'Devin', last_name: 'Okafor', full_name: 'Devin Okafor', team: 'CIN', position: 'WR', active: true, injury_status: null },
-  '1003': { player_id: '1003', first_name: 'Trey', last_name: 'Halloran', full_name: 'Trey Halloran', team: 'SF', position: 'QB', active: true, injury_status: null },
-  '1004': { player_id: '1004', first_name: 'Andre', last_name: 'Sotelo', full_name: 'Andre Sotelo', team: 'DAL', position: 'TE', active: true, injury_status: 'Questionable' },
-  '1005': { player_id: '1005', first_name: 'Kai', last_name: 'Brennan', full_name: 'Kai Brennan', team: 'BUF', position: 'WR', active: true, injury_status: null },
-  '1006': { player_id: '1006', first_name: 'Julian', last_name: 'Reyes', full_name: 'Julian Reyes', team: 'MIA', position: 'RB', active: true, injury_status: null },
-  '1007': { player_id: '1007', first_name: 'Owen', last_name: 'Fitzgerald', full_name: 'Owen Fitzgerald', team: 'PHI', position: 'WR', active: true, injury_status: null },
-  '1008': { player_id: '1008', first_name: 'Silas', last_name: 'Mbeki', full_name: 'Silas Mbeki', team: 'GB', position: 'RB', active: true, injury_status: null },
-  '1009': { player_id: '1009', first_name: 'Nate', last_name: 'Kowalski', full_name: 'Nate Kowalski', team: 'DET', position: 'TE', active: true, injury_status: null },
-  '1010': { player_id: '1010', first_name: 'Rhys', last_name: 'Donnelly', full_name: 'Rhys Donnelly', team: 'LAR', position: 'QB', active: true, injury_status: null },
-  '1011': { player_id: '1011', first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: null },
-  '1012': { player_id: '1012', first_name: 'Bo', last_name: 'Ashworth', full_name: 'Bo Ashworth', team: 'SEA', position: 'RB', active: true, injury_status: null },
+  '1001': { player_id: '1001', search_rank: 1, first_name: 'Marcus', last_name: 'Vance', full_name: 'Marcus Vance', team: 'KC', position: 'RB', active: true, injury_status: null },
+  '1002': { player_id: '1002', search_rank: 2, first_name: 'Devin', last_name: 'Okafor', full_name: 'Devin Okafor', team: 'CIN', position: 'WR', active: true, injury_status: null },
+  '1003': { player_id: '1003', search_rank: 3, first_name: 'Trey', last_name: 'Halloran', full_name: 'Trey Halloran', team: 'SF', position: 'QB', active: true, injury_status: null },
+  '1004': { player_id: '1004', search_rank: 4, first_name: 'Andre', last_name: 'Sotelo', full_name: 'Andre Sotelo', team: 'DAL', position: 'TE', active: true, injury_status: 'Questionable' },
+  '1005': { player_id: '1005', search_rank: 5, first_name: 'Kai', last_name: 'Brennan', full_name: 'Kai Brennan', team: 'BUF', position: 'WR', active: true, injury_status: null },
+  '1006': { player_id: '1006', search_rank: 6, first_name: 'Julian', last_name: 'Reyes', full_name: 'Julian Reyes', team: 'MIA', position: 'RB', active: true, injury_status: null },
+  '1007': { player_id: '1007', search_rank: 7, first_name: 'Owen', last_name: 'Fitzgerald', full_name: 'Owen Fitzgerald', team: 'PHI', position: 'WR', active: true, injury_status: null },
+  '1008': { player_id: '1008', search_rank: 8, first_name: 'Silas', last_name: 'Mbeki', full_name: 'Silas Mbeki', team: 'GB', position: 'RB', active: true, injury_status: null },
+  '1009': { player_id: '1009', search_rank: 9, first_name: 'Nate', last_name: 'Kowalski', full_name: 'Nate Kowalski', team: 'DET', position: 'TE', active: true, injury_status: null },
+  '1010': { player_id: '1010', search_rank: 10, first_name: 'Rhys', last_name: 'Donnelly', full_name: 'Rhys Donnelly', team: 'LAR', position: 'QB', active: true, injury_status: null },
+  '1011': { player_id: '1011', search_rank: 11, first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: null },
+  '1012': { player_id: '1012', search_rank: 12, first_name: 'Bo', last_name: 'Ashworth', full_name: 'Bo Ashworth', team: 'SEA', position: 'RB', active: true, injury_status: null },
 };
 
 export const DEMO_ADP_CSV = `name,position,team,adp,rank

@@ -26,6 +26,15 @@ export interface CanonicalPlayer {
   aliases: string[];
   /** Non-Sleeper external ids, keyed by source (e.g. `gsis`, `odds:the-odds-api`). */
   externalIds?: Record<string, string>;
+  /**
+   * Sleeper's draft-order ranking — roughly "around which pick this player
+   * goes". Null when Sleeper does not rank the player.
+   *
+   * Deliberately not called ADP: it is one source's ranking, not an average of
+   * observed drafts, and the difference matters when it drives a
+   * recommendation.
+   */
+  draftRank?: number | null;
 }
 
 export interface PlayerAlias {

@@ -115,9 +115,24 @@ describe('setup status — configured deployment', () => {
     expect(step(status, 'league').summary).toContain('Half PPR');
   });
 
-  it('summarises the ADP import with match counts', async () => {
+  /**
+   * Draft order comes from Sleeper's player list, so it is ready as soon as
+   * players are synced — there is no file to import and nothing to go stale.
+   */
+  it('reports draft order as ready once Sleeper has ranked players', async () => {
     const status = await service(db).status();
-    expect(step(status, 'adp').summary).toMatch(/\d+ of \d+ players matched/);
+    const adp = step(status, 'adp');
+    expect(adp.title).toBe('Draft order');
+    expect(adp.state).toBe('ok');
+    expect(adp.summary).toMatch(/ranked by Sleeper/);
+    expect(status.adp.rankedPlayers).toBeGreaterThan(0);
+  });
+
+  it('says plainly when an imported file is overriding Sleeper', async () => {
+    const status = await service(db).status();
+    // The demo data imports a ranking file, which is allowed to win.
+    expect(status.adp.source).toBe('imported file');
+    expect(step(status, 'adp').summary).toContain('overridden by');
   });
 
   it('counts newsletter activity', async () => {

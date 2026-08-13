@@ -201,24 +201,26 @@ Tap **League**, then **Use this** next to the league you want.
 If it warns that your team was not found, the Sleeper username you connected
 does not own a team in that league — reconnect with the right username.
 
-## B3. Underdog ADP
+## B3. Draft order
 
-Tap **Underdog ADP**.
+**Nothing to do.** Draft order comes from Sleeper's own ranking of who goes
+around which pick, and it refreshes with the player list every morning. Tap
+**Draft order** and it tells you how many players are ranked.
 
-Download today's ADP from Underdog as a CSV, then either:
+It is a ranking, not a measured average of real drafts — close enough to answer
+"will they still be there at my next pick?", and labelled as Sleeper's ranking
+so you always know what it is.
 
-- tap **Choose a file** and pick it, or
-- paste the contents into the box.
-
-Tap **Import rankings**. You will then see exactly what happened:
+If you would rather use your own rankings, open **Use my own rankings instead**
+and import a CSV or paste one. It replaces Sleeper's order until you import a
+newer one, and it reports exactly what happened:
 
 - how many players were matched
 - how many need a decision
 - how many were not recognised
 - how many rows were skipped, and why
 
-Nothing is silently thrown away. Import a fresh file any time before your draft;
-the newest one is the one used.
+Nothing is silently thrown away.
 
 ## B4. Newsletter
 
@@ -277,6 +279,14 @@ without it and says clearly when a betting line is missing rather than guessing.
 - **Review** — anything the app was not confident about. Accept, change, mark as
   the wrong player, or ignore. Your decisions always win, even if the same
   newsletter is read again.
+
+  Scoring is one line: good news **+1**, bad news **−1**, neutral or
+  self-contradicting news **does not count**. Every item counts once, however
+  dramatic it is — the app still shows you how serious each one is, it just does
+  not let one sentence outweigh three.
+
+  Under **Wrong player?** you can also teach the app a name. Pick the right
+  player and it remembers, so "JSN" is a question once rather than every week.
 - **Draft** — your draft board on draft day, with the reasoning behind every
   recommendation.
 - **Team** — your roster, plus this week's lineup: the best line-up for your

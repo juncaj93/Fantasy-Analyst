@@ -84,6 +84,11 @@ export interface SleeperPlayer {
   injury_status?: string | null;
   active?: boolean | null;
   search_full_name?: string | null;
+  /**
+   * Sleeper's draft-order ranking. Unranked players carry a large sentinel
+   * rather than being absent, so it is read defensively.
+   */
+  search_rank?: number | null;
   years_exp?: number | null;
   gsis_id?: string | null;
   espn_id?: number | string | null;

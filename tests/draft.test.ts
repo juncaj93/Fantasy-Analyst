@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toCanonicalPlayers } from '../src/core/sleeper/transform.ts';
 import {
   DEFAULT_WEIGHTS,
   marketValueComponent,
@@ -282,5 +283,34 @@ describe('rankAvailablePlayers', () => {
 
   it('handles an empty pool', () => {
     expect(rankAvailablePlayers([], ctx)).toEqual([]);
+  });
+});
+
+/**
+ * Draft order now comes from Sleeper's own ranking, carried on the player
+ * record by the nightly sync, so the board works with no file imported.
+ */
+describe('Sleeper draft rank', () => {
+  const dump = {
+    a: { player_id: 'a', full_name: 'Top Back', position: 'RB', team: 'KC', active: true, search_rank: 1 },
+    b: { player_id: 'b', full_name: 'Mid Receiver', position: 'WR', team: 'SF', active: true, search_rank: 48 },
+    c: { player_id: 'c', full_name: 'Deep Bench', position: 'TE', team: 'NYJ', active: true, search_rank: 9999999 },
+    d: { player_id: 'd', full_name: 'No Rank', position: 'WR', team: 'LAR', active: true },
+  };
+
+  it('carries the rank through from the player dump', () => {
+    const players = toCanonicalPlayers(dump);
+    const byName = new Map(players.map((p) => [p.fullName, p]));
+    expect(byName.get('Top Back')!.draftRank).toBe(1);
+    expect(byName.get('Mid Receiver')!.draftRank).toBe(48);
+  });
+
+  it('treats the unranked sentinel as unranked, not as a very late pick', () => {
+    const players = toCanonicalPlayers(dump);
+    const byName = new Map(players.map((p) => [p.fullName, p]));
+    // 9,999,999 is Sleeper's "not ranked", and reading it literally would make
+    // the player look merely undrafted-late rather than unknown.
+    expect(byName.get('Deep Bench')!.draftRank).toBeNull();
+    expect(byName.get('No Rank')!.draftRank).toBeNull();
   });
 });

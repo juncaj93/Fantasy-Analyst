@@ -29,6 +29,17 @@ export const FANTASY_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
  * canonical `id`. Only fantasy-relevant positions are retained (the raw dump
  * contains every NFL player including practice squad linemen).
  */
+/**
+ * Sleeper ranks most fantasy-relevant players and parks everyone else at a
+ * sentinel far outside any draft. Treat that sentinel as "not ranked" rather
+ * than letting a rank of 9999999 look like a real, very late pick.
+ */
+function draftRank(p: SleeperPlayer): number | null {
+  const raw = p.search_rank;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return raw > 0 && raw < 100_000 ? raw : null;
+}
+
 export function toCanonicalPlayers(
   raw: Record<string, SleeperPlayer>,
   opts: { keepInactive?: boolean } = {},
@@ -66,6 +77,7 @@ export function toCanonicalPlayers(
       normalizedName: normalizeName(fullName),
       aliases: defaultAliases(fullName, firstName, lastName),
       externalIds,
+      draftRank: draftRank(p),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

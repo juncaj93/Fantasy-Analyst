@@ -284,7 +284,9 @@ What honesty cost here, concretely:
   `JK Dobbins`, `Kenneth Gainwell` vs `Kenny Gainwell`). Each is one tap to
   resolve, and none of them was resolved by the machine.
 
-### Underdog ADP cannot be fetched
+### Underdog ADP cannot be fetched (no longer needed)
+
+Superseded by Sleeper's draft rank, but recorded because it was checked:
 
 Checked directly rather than assumed:
 
@@ -302,6 +304,33 @@ imported through Setup. Open ADP-ish mirrors do exist — FantasyPros ECR is
 reachable — but substituting a different source under the name "Underdog ADP"
 would quietly change what the draft board's market value means, so it is not
 done. Underdog stays the ADP source of truth or there is no ADP.
+
+## Milestone 10 — nicknames, plain scoring, and Sleeper as the draft order (done)
+
+**Nicknames can be taught.** Three things were each half-present and together
+made "JSN" unfixable: resolving a name did not remember it, so it returned every
+week; single-token mentions were only ever matched against surnames, so a stored
+nickname still would not have matched; and the identity card only offered
+candidate buttons, so a name with *no* candidates — exactly the case needing
+help — could only be dismissed. Resolving now remembers by default, aliases are
+checked before anything is guessed, and there is always a search box.
+
+**Scoring is one line long.** Good news +1, bad news -1, neutral or
+self-contradicting news does not count. Every item counts once however dramatic
+it is. The rules still grade severity 1-3 and it is still shown, but it no
+longer lets one sentence outweigh three — a tally you cannot predict is a tally
+you cannot trust. Review states this where the decisions are made.
+
+**Draft order comes from Sleeper.** Sleeper's public player dump — already
+synced nightly — ranks ~2,500 players in draft order, so the best-ball import
+is gone as the primary path. No export, no file, nothing to keep in step.
+
+Named `draft_rank`, not `adp`, throughout: it is one source's ranking, not an
+average of observed drafts, and the UI says so. Sleeper parks unranked players
+at a sentinel (9,999,999); read literally that would make a player look merely
+undrafted-late rather than unknown, so it is treated as unranked. An imported
+file still wins if one exists — a file the user chose is a deliberate statement
+about their draft.
 
 ## Known limitations
 
