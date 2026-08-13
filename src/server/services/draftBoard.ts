@@ -96,7 +96,7 @@ export class DraftBoardService {
     const rankedCount = allPlayers.filter((p) => p.active && rankOf(p) != null).length;
     if (rankedCount === 0) {
       warnings.push(
-        'no draft order imported — players are ranked by news and roster need only. Sleeper does not publish ADP, so import a ranking file on the Draft order step.',
+        'no draft order yet — players are ranked by news and roster need only, which is a poor substitute. Sleeper ADP for this league is fetched each morning; import a ranking file if you need one before then.',
       );
     }
     const byId = new Map(allPlayers.map((p) => [p.id, p]));

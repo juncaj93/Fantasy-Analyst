@@ -200,7 +200,9 @@ export class SetupService {
         summary: snapshot
           ? `${snapshot.label} — ${snapshot.matchedCount} of ${snapshot.rowCount} players matched`
           : 'No rankings imported yet',
-        action: snapshot ? null : 'Import a ranking file before your draft.',
+        action: snapshot
+          ? null
+          : 'Sleeper ADP for this league refreshes each morning. Import a ranking file if you need one sooner.',
       },
       {
         id: 'newsletter',
