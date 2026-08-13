@@ -133,7 +133,15 @@ export class RepairService {
    * Keyed on the review id so re-running is a no-op rather than a duplicate.
    */
   private evidenceFor(
-    review: { id: number; sourceMessageId: string; sourceDate: string; excerpt: string; proposedPolarity: string | null; proposedCategory: string | null },
+    review: {
+      id: number;
+      sourceMessageId: string;
+      sourceDate: string;
+      excerpt: string;
+      proposedPolarity: string | null;
+      proposedCategory: string | null;
+      proposedMagnitude: number;
+    },
     player: { id: string; fullName: string },
     alias: string,
   ) {
@@ -149,7 +157,11 @@ export class RepairService {
       contextSummary: null,
       category: review.proposedCategory,
       polarity: (review.proposedPolarity ?? 'neutral') as 'positive' | 'negative' | 'neutral',
-      magnitude: polaritySign(review.proposedPolarity) === 0 ? 0 : 1,
+      // The magnitude the item was always worth. An imported tally row carries
+      // its net score ("JSN +11" is worth 11, not 1); a newsletter sentence
+      // carries the magnitude its rule assigned. Neutral news is worth nothing
+      // either way, so it stays at 0.
+      magnitude: polaritySign(review.proposedPolarity) === 0 ? 0 : Math.abs(review.proposedMagnitude),
       confidence: 'high' as const,
       confidenceScore: 1,
       ruleId: 'user_identity_repair',

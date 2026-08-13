@@ -22,6 +22,11 @@ export interface UnresolvedReview {
   excerpt: string;
   sourceDate: string;
   proposedPolarity: string | null;
+  /**
+   * What the item is worth once assigned. Absent on rows written before
+   * magnitude was carried, which were all worth 1 by definition.
+   */
+  proposedMagnitude?: number;
   candidates: { playerId: string; name: string; team: string; position: string; detail: string }[];
 }
 
@@ -83,13 +88,17 @@ export function groupUnresolved(reviews: UnresolvedReview[], now = new Date().to
       groups.set(key, group);
     }
 
-    const sign = polaritySign(review.proposedPolarity);
+    // Weighted by what the item is actually worth, not by how many rows there
+    // are: one imported tally row reading "JSN +11" costs the user 11, and
+    // saying it costs 1 understates the only number that decides what to fix
+    // first.
+    const delta = polaritySign(review.proposedPolarity) * Math.abs(review.proposedMagnitude ?? 1);
     group.reviewIds.push(review.id);
     group.items++;
-    group.net += sign;
+    group.net += delta;
 
     const ageDays = (nowMs - Date.parse(review.sourceDate)) / DAY_MS;
-    if (Number.isFinite(ageDays) && ageDays <= 30) group.net30 += sign;
+    if (Number.isFinite(ageDays) && ageDays <= 30) group.net30 += delta;
 
     group.spellings.set(raw, (group.spellings.get(raw) ?? 0) + 1);
     for (const candidate of review.candidates) {
@@ -130,7 +139,13 @@ export function suspiciousZeroBoosts(
   netByPlayerId: Map<string, number>,
   opts: { minItems?: number; minNet?: number } = {},
 ): ZeroBoostSuspicion[] {
-  const minItems = opts.minItems ?? 2;
+  // Weight decides, not row count. Before magnitude was carried, every item was
+  // worth ±1, so "at least two items" was the only way to say "more than a
+  // passing mention". Now one imported tally row can be worth +11 by itself, and
+  // requiring two rows would hide the single loudest case in the app — which is
+  // JSN, the exact example this feature was written for. A lone ±1 sentence
+  // still does not qualify, because it does not clear `minNet`.
+  const minItems = opts.minItems ?? 1;
   const minNet = opts.minNet ?? 2;
 
   const out: ZeroBoostSuspicion[] = [];

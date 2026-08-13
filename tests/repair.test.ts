@@ -128,6 +128,7 @@ describe('confirming a name', () => {
           candidates: [{ playerId: 'jsn', name: 'Jaxon Smith-Njigba', team: 'SEA', position: 'WR', detail: 'alias' }],
           proposedPolarity: 'positive',
           proposedCategory: 'usage',
+          proposedMagnitude: 1,
         },
       ]);
     }
