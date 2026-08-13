@@ -129,6 +129,26 @@ jobs:
                           r.lastReceivedStatus ? '(' + r.lastReceivedStatus + ')' : '');
             })"
 
+          echo "=== ledger and derived tallies ==="
+          curl -s "$url/api/overview" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              let r; try { r = JSON.parse(s); } catch { console.log('  unreadable'); return; }
+              console.log('  players:          ', r.players);
+              console.log('  waiting in review:', r.pendingEvidence, 'evidence,', r.pendingIdentity, 'names');
+              console.log('  adp snapshot:     ', r.adpSnapshot ? r.adpSnapshot.label ?? 'present' : '(none yet)');
+            })"
+
+          # A tally is only real if it survived into the derived cache, so check
+          # one player end to end rather than trusting the insert count.
+          echo "=== spot-check a backfilled player ==="
+          curl -s "$url/api/players?q=Puka" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              let r; try { r = JSON.parse(s); } catch { console.log('  unreadable'); return; }
+              const p = (r.players || [])[0];
+              if (!p) { console.log('  (not found)'); return; }
+              console.log('  ', p.name, '| net', p.signal?.raw?.net, 'from', p.signal?.raw?.items, 'item(s)');
+            })"
+
           echo "=== recent inbound mail ==="
           curl -s "$url/api/newsletter/messages" | node -e "
             let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
