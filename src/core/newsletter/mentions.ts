@@ -103,6 +103,27 @@ export function detectMentions(
     // Single-token (surname or unique first name) fallback.
     const normalized = normalizeName(first.text);
     if (!normalized) continue;
+
+    // A nickname the user taught the app is checked before anything is guessed.
+    // Short forms like "JSN" are one token and are not anybody's surname, so
+    // without this the nickname could be stored and still never match.
+    const aliasHits = index.byAliasKey(normalized).filter((p) => p.active);
+    if (aliasHits.length === 1) {
+      const player = aliasHits[0]!;
+      mentions.push(
+        toMention(first.text, first.start, first.end, {
+          status: 'matched',
+          playerId: player.id,
+          method: 'alias',
+          confidence: 0.95,
+          candidates: [],
+          reason: `"${first.text}" is a saved nickname for ${player.fullName}`,
+        }, false),
+      );
+      consumed.add(i);
+      continue;
+    }
+
     const surnameHits = index.bySurnameKey(normalized).filter((p) => p.active);
     if (surnameHits.length === 0) continue;
 

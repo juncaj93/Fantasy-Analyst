@@ -223,6 +223,62 @@ describe('API with seeded data', () => {
     }
   });
 
+  /**
+   * The point of teaching the app a nickname is that it stops being a question.
+   * "JSN" that has to be answered every week is not resolved, it is deferred.
+   */
+  it('remembers a nickname so the same name matches next time', async () => {
+    const found = await json<{ players: { id: string; name: string }[] }>(
+      get('/api/players?q=Vance', cookie),
+    );
+    const player = found.players[0]!;
+
+    const saved = await json<{ aliases: string[] }>(
+      post(`/api/players/${player.id}/aliases`, { alias: 'MV' }, cookie),
+    );
+    expect(saved.aliases).toContain('MV');
+
+    // The nickname now resolves through the ordinary identity path.
+    const ingested = await json<{ evidenceInserted: number }>(
+      post(
+        '/api/newsletter/ingest',
+        {
+          messageId: 'alias-check-1',
+          from: 'editor@demo.newsletter',
+          subject: 'Camp',
+          date: new Date().toISOString(),
+          html: '<p>MV was named the starter.</p>',
+          force: true,
+        },
+        cookie,
+      ),
+    );
+    expect(ingested.evidenceInserted).toBeGreaterThan(0);
+  });
+
+  it('refuses a nickname that already belongs to someone else', async () => {
+    const vance = (await json<{ players: { id: string }[] }>(get('/api/players?q=Vance', cookie)))
+      .players[0]!;
+    await json(post(`/api/players/${vance.id}/aliases`, { alias: 'MV' }, cookie));
+
+    const other = (await json<{ players: { id: string }[] }>(get('/api/players?q=Okafor', cookie)))
+      .players[0]!;
+
+    const res = await app(post(`/api/players/${other.id}/aliases`, { alias: 'MV' }, cookie), env);
+    expect(res.status).toBe(409);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain('already means');
+  });
+
+  it('can forget a nickname again', async () => {
+    const found = await json<{ players: { id: string }[] }>(get('/api/players?q=Vance', cookie));
+    const player = found.players[0]!;
+    await json(post(`/api/players/${player.id}/aliases`, { alias: 'Temp Nick' }, cookie));
+    await json(post(`/api/players/${player.id}/aliases`, { alias: 'Temp Nick', remove: true }, cookie));
+    const after = await json<{ aliases: string[] }>(get(`/api/players/${player.id}/aliases`, cookie));
+    expect(after.aliases).not.toContain('Temp Nick');
+  });
+
   it('refuses a bounce address as the expected sender, and says why', async () => {
     const res = await app(
       post(

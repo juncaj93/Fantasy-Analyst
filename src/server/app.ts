@@ -677,7 +677,14 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const repo = new PlayerRepo(ctx.env.db);
     const player = await repo.getById(ctx.params['id']!);
     if (!player) return errorResponse('player not found', 404);
-    return jsonResponse({ playerId: player.id, name: player.fullName, aliases: player.aliases });
+    const stored = await repo.listAliases(player.id);
+    return jsonResponse({
+      playerId: player.id,
+      name: player.fullName,
+      // What was taught, separately from what the name implies.
+      aliases: stored.map((a) => a.alias),
+      derived: player.aliases,
+    });
   });
 
   /**
@@ -717,8 +724,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     }
 
     await repo.addAlias(player.id, alias, key, 'user');
-    const updated = await repo.getById(player.id);
-    return jsonResponse({ ok: true, playerId: player.id, name: player.fullName, aliases: updated?.aliases ?? [] });
+    const stored = await repo.listAliases(player.id);
+    return jsonResponse({
+      ok: true,
+      playerId: player.id,
+      name: player.fullName,
+      aliases: stored.map((a) => a.alias),
+    });
   });
 
   // ------------------------------------------------------------------- vegas

@@ -152,6 +152,21 @@ export class PlayerRepo {
   }
 
   /**
+   * The nicknames stored for a player.
+   *
+   * `getById` reports the deterministic ones derived from the name ("M. Vance");
+   * these are the ones somebody actually taught the app, which is what the
+   * nickname UI needs to show and be able to remove.
+   */
+  async listAliases(playerId: string): Promise<{ alias: string; normalized: string; source: string }[]> {
+    const rows = await this.db
+      .prepare('SELECT alias, normalized_alias, source FROM player_aliases WHERE player_id = ? ORDER BY alias')
+      .bind(playerId)
+      .all<{ alias: string; normalized_alias: string; source: string }>();
+    return rows.results.map((r) => ({ alias: r.alias, normalized: r.normalized_alias, source: r.source }));
+  }
+
+  /**
    * Forget a nickname.
    *
    * Scoped to one player so removing a nickname cannot disturb another player
