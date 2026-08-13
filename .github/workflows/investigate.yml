@@ -200,6 +200,53 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
+      - name: What the board actually shows now
+        run: |
+          set -uo pipefail
+          url=https://fantasy-analyst.juncaj93.workers.dev
+
+          curl -s "$url/api/setup/status" -o /tmp/status.json
+          node -e "
+            const fs = require('fs');
+            const s = JSON.parse(fs.readFileSync('/tmp/status.json', 'utf8'));
+            const f = s.league?.adpFormat;
+            console.log('league:  ', s.league?.name, '|', s.league?.scoringLabel);
+            console.log('format:  ', f ? [f.scoringFormat, f.draftType, f.qbType].join(' / ') : '(none)');
+            console.log('ranking: ', s.adp?.label ?? '(none)', '|', s.adp?.matched, 'of', s.adp?.totalRows, 'matched');
+            fs.writeFileSync('/tmp/draft-id.txt', s.league?.draftId ?? '');
+          "
+
+          echo
+          echo '=== players tab, as ordered by rank plus tally ==='
+          curl -s "$url/api/players?limit=20" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              console.log('ranking source:', r.rankingSource ?? '(none)');
+              for (const p of r.players ?? []) {
+                console.log(' ', String(p.draftRank ?? '-').padStart(5), '->',
+                  String(p.adjustedRank ?? '-').padStart(6), p.position, p.name, '(' + p.team + ')',
+                  p.signal?.raw?.net ? 'net ' + p.signal.raw.net : '');
+              }
+            })"
+
+          draft=$(cat /tmp/draft-id.txt)
+          if [ -n "$draft" ]; then
+            echo
+            echo "=== draft board, top 20 ==="
+            curl -s "$url/api/drafts/$draft/board?limit=20" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                let r; try { r = JSON.parse(s); } catch { console.log('unreadable:', s.slice(0,300)); return; }
+                if (r.error) { console.log('error:', r.error); return; }
+                console.log('status:', r.status, '| pick', r.currentPick, 'of', r.teams * r.rounds,
+                            '| my next:', r.myNextPick ?? '(unknown)');
+                for (const w of r.warnings ?? []) console.log('  warning:', w);
+                for (const rec of r.recommendations ?? []) {
+                  console.log(' ', String(rec.adp ?? '-').padStart(6), rec.position, rec.name,
+                              '| total', rec.total, '|', (rec.reasons ?? [])[0] ?? '');
+                }
+              })"
+          fi
+
       - name: beatadp.com — can we ask for this league's format, and is the tail sane?
         run: node scripts/probe-beatadp.mjs
 
