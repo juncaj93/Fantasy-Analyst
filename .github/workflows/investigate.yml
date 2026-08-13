@@ -16,6 +16,13 @@ jobs:
   investigate:
     runs-on: ubuntu-latest
     steps:
+      # Some probes run the repo's own parsers, so a source that changes shape
+      # fails here rather than in the app.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Cloudflare domains and email routing
         env:
           # The deploy token is scoped to Workers and D1 and cannot read DNS.
@@ -193,46 +200,8 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
-      - name: beatadp.com — extract the inline ADP rows
-        run: |
-          set -uo pipefail
-          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
-
-          curl -sL -o /tmp/adp.html -H "user-agent: $UA" --max-time 30 https://www.beatadp.com/platform-adp || true
-          echo "page bytes: $(wc -c < /tmp/adp.html)"
-
-          # The page is a Next.js App Router render: its data arrives as RSC
-          # "flight" chunks pushed into self.__next_f, so the rows are already
-          # in the HTML and no API call is needed.
-          node -e "
-            const fs = require('fs');
-            const html = fs.readFileSync('/tmp/adp.html', 'utf8');
-
-            // Every chunk is a JS string literal; decoding them rebuilds the payload.
-            const chunks = [...html.matchAll(/self\.__next_f\.push\(\[1,\s*\"((?:[^\"\\\\]|\\\\.)*)\"\]\)/g)];
-            console.log('flight chunks:', chunks.length);
-            let flight = '';
-            for (const m of chunks) {
-              try { flight += JSON.parse('\"' + m[1] + '\"'); } catch {}
-            }
-            console.log('flight bytes:', flight.length);
-            fs.writeFileSync('/tmp/flight.txt', flight);
-
-            for (const probe of ['Ja\'Marr Chase', 'Gibbs', 'Bijan', 'adp', 'sleeper']) {
-              console.log('  contains', JSON.stringify(probe), ':', flight.includes(probe));
-            }
-
-            // Show the shape around the first player-looking object.
-            const i = flight.search(/Bijan|Ja'Marr|Gibbs/);
-            if (i > 0) {
-              console.log('--- context ---');
-              console.log(flight.slice(Math.max(0, i - 700), i + 700));
-            } else {
-              console.log('no player names in the flight payload');
-              console.log('--- sample ---');
-              console.log(flight.slice(0, 600));
-            }
-          "
+      - name: beatadp.com — can we ask for this league's format, and is the tail sane?
+        run: node scripts/probe-beatadp.mjs
 
       - name: Underdog — is there a fetchable ADP source?
         run: |
