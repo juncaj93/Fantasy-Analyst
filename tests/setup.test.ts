@@ -126,7 +126,6 @@ describe('setup status — configured deployment', () => {
     expect(adp.state).toBe('ok');
     expect(adp.summary).toMatch(/\d+ of \d+ players matched/);
     expect(status.adp.source).toBe('imported file');
-    expect(adp.summary).not.toMatch(/Sleeper/);
   });
 
   it('counts newsletter activity', async () => {

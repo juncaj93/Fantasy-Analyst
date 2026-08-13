@@ -97,7 +97,7 @@ export function PlayersScreen() {
             <div className="player-row-metrics">
               <Signal net={p.signal?.raw.net ?? 0} items={p.signal?.raw.items ?? 0} label="lifetime" />
               <span className="metric">
-                21d <strong>{p.signal?.last21.net ?? 0}</strong>
+                21d <strong>{p.signal?.last30.net ?? 0}</strong>
               </span>
               {/* Say where the order came from, and what the news changed. */}
               {p.draftRank != null ? (
@@ -155,7 +155,7 @@ function PlayerDetailView({ detail, onBack }: { detail: PlayerDetail; onBack: ()
             {(
               [
                 ['Last 7d', signal.last7],
-                ['Last 21d', signal.last21],
+                ['Last 21d', signal.last30],
                 ['Season', signal.seasonToDate],
                 ['Lifetime', signal.raw],
               ] as const

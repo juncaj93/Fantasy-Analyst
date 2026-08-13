@@ -95,7 +95,7 @@ describe('aggregatePlayerSignal', () => {
   it('keeps recent windows separate from the lifetime tally', () => {
     const signal = aggregatePlayerSignal('p1', items, { now: NOW });
     expect(signal.last7.net).toBe(1); // +2 (2d) and -1 (3d)
-    expect(signal.last21.net).toBe(2); // adds +1 from 15 days ago
+    expect(signal.last30.net).toBe(2); // adds +1 from 15 days ago
     expect(signal.raw.net).toBe(0);
   });
 

@@ -26,7 +26,7 @@ const STANDARD_SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FL
 function signal(net: number, items = 2): PlayerSignal {
   const s = emptySignal('x');
   s.raw = { positive: Math.max(0, net), negative: Math.max(0, -net), net, items };
-  s.last21 = { ...s.raw };
+  s.last30 = { ...s.raw };
   return s;
 }
 
@@ -186,13 +186,26 @@ describe('individual components', () => {
     expect(c.display).toBe('no ADP');
   });
 
-  it('saturates the news component so a huge tally cannot run away', () => {
-    expect(newsComponent('news_recent', 50, 20).score).toBe(1);
-    expect(newsComponent('news_recent', -50, 20).score).toBe(-1);
+  it('saturates each news window so a huge tally cannot run away', () => {
+    expect(newsComponent('news_lifetime', 50, 20).score).toBe(1);
+    expect(newsComponent('news_lifetime', -50, 20).score).toBe(-1);
+  });
+
+  /** A week holds fewer items than a career, so it maxes out sooner. */
+  it('saturates shorter windows sooner', () => {
+    expect(newsComponent('news_7d', 3, 2).score).toBe(1);
+    expect(newsComponent('news_lifetime', 3, 2).score).toBeLessThan(1);
+  });
+
+  it('damps a recent window that contradicts the lifetime record', () => {
+    const plain = newsComponent('news_30d', 5, 3);
+    const damped = newsComponent('news_30d', 5, 3, DEFAULT_WEIGHTS, 0.5);
+    expect(damped.score).toBeCloseTo(plain.score * 0.5, 5);
+    expect(damped.display).toContain('damped');
   });
 
   it('marks an absent news signal unknown rather than negative', () => {
-    const c = newsComponent('news_recent', 0, 0);
+    const c = newsComponent('news_lifetime', 0, 0);
     expect(c.unknown).toBe(true);
     expect(c.contribution).toBe(0);
   });
@@ -242,7 +255,16 @@ describe('rankAvailablePlayers', () => {
     const [top] = board();
     const keys = top!.components.map((c) => c.key);
     expect(keys).toEqual(
-      expect.arrayContaining(['market_value', 'need', 'scarcity', 'league_fit', 'news_recent', 'news_raw', 'survival']),
+      expect.arrayContaining([
+        'market_value',
+        'need',
+        'scarcity',
+        'league_fit',
+        'news_lifetime',
+        'news_30d',
+        'news_7d',
+        'survival',
+      ]),
     );
     for (const c of top!.components) {
       // Contributions are rounded to 3dp for display stability.
@@ -316,8 +338,103 @@ describe('rankAvailablePlayers', () => {
     expect(ranked[0]?.counterpoints.join(' ')).toContain('awaiting your review');
   });
 
-  it('uses the documented default weights', () => {
-    expect(DEFAULT_WEIGHTS.marketValue).toBeGreaterThan(DEFAULT_WEIGHTS.newsRecent * 5);
+  /**
+   * Lifetime carries the most weight of the three windows: a player favoured
+   * all offseason should still be favoured on draft day.
+   */
+  it('weights lifetime above the recent windows, and market above all of them', () => {
+    expect(DEFAULT_WEIGHTS.newsLifetime).toBeGreaterThan(DEFAULT_WEIGHTS.news30);
+    expect(DEFAULT_WEIGHTS.news30).toBeGreaterThan(DEFAULT_WEIGHTS.news7);
+    const allNews = DEFAULT_WEIGHTS.newsLifetime + DEFAULT_WEIGHTS.news30 + DEFAULT_WEIGHTS.news7;
+    expect(DEFAULT_WEIGHTS.marketValue).toBeGreaterThan(allNews);
+  });
+
+  /**
+   * The brief's calibration requirement, stated as tests: the user's research
+   * has to be able to visibly reorder close decisions, or keeping the tally is
+   * pointless — while still losing to a large market gap.
+   *
+   * `signalOf` builds a PlayerSignal with the three windows set directly.
+   */
+  describe('how far the tally can move a player', () => {
+    const signalOf = (lifetime: number, d30 = 0, d7 = 0) => ({
+      playerId: 'x',
+      raw: { positive: 0, negative: 0, net: lifetime, items: Math.max(1, Math.abs(lifetime)) },
+      last7: { positive: 0, negative: 0, net: d7, items: d7 === 0 ? 0 : Math.abs(d7) },
+      last30: { positive: 0, negative: 0, net: d30, items: d30 === 0 ? 0 : Math.abs(d30) },
+      seasonToDate: { positive: 0, negative: 0, net: lifetime, items: 1 },
+      categoryBreakdown: {},
+      pendingCount: 0,
+      mixedCount: 0,
+      lastEvidenceAt: null,
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    });
+
+    const two = (aAdp: number, aSignal: unknown, bAdp: number, bSignal: unknown, overrides = {}) => {
+      const [a, b] = [players[0]!, players[1]!];
+      return rankAvailablePlayers(
+        [
+          { player: a, adp: aAdp, adpRank: aAdp, signal: aSignal as never },
+          { player: b, adp: bAdp, adpRank: bAdp, signal: bSignal as never },
+        ],
+        { ...ctx, currentPick: 40, nextPick: 52, ...overrides },
+      ).map((r) => r.playerId);
+    };
+
+    it('lets a strong lifetime tally beat a modestly better ADP', () => {
+      expect(two(48, signalOf(12, 4), 44, null)[0]).toBe(players[0]!.id);
+    });
+
+    it('lets a strong negative tally fall below a modestly worse ADP', () => {
+      expect(two(50, signalOf(-10, -4), 54, null)[0]).toBe(players[1]!.id);
+    });
+
+    it('adds to the effect when recent momentum agrees', () => {
+      const withMomentum = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(8, 5, 3) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      )[0]!.total;
+      const without = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(8) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      )[0]!.total;
+      expect(withMomentum).toBeGreaterThan(without);
+    });
+
+    it('deepens the penalty when recent momentum agrees downward', () => {
+      const worse = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(-8, -5, -3) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      )[0]!.total;
+      const milder = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(-8) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      )[0]!.total;
+      expect(worse).toBeLessThan(milder);
+    });
+
+    /** The line the tally must not cross. */
+    it('still loses to a large market gap', () => {
+      expect(two(90, signalOf(15, 6, 3), 42, null)[0]).toBe(players[1]!.id);
+    });
+
+    it('says so when the tally is what moved the player', () => {
+      const [top] = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(12, 4) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      );
+      expect(top!.reasons.join(' ')).toContain('strong lifetime signal');
+      expect(top!.reasons.join(' ')).toMatch(/about \d+ spots?/);
+    });
+
+    it('trusts both less when recent news contradicts the lifetime record', () => {
+      const [conflicted] = rankAvailablePlayers(
+        [{ player: players[0]!, adp: 48, adpRank: 48, signal: signalOf(10, -4) as never }],
+        { ...ctx, currentPick: 40, nextPick: 52 },
+      );
+      expect(conflicted!.newsConflicted).toBe(true);
+      expect(conflicted!.counterpoints.join(' ')).toContain('contradicts the lifetime record');
+    });
   });
 
   it('handles an empty pool', () => {

@@ -87,12 +87,12 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     unknown: expectation.points == null,
   });
 
-  const recentNet = input.signal?.last21.net ?? 0;
-  const recentItems = input.signal?.last21.items ?? 0;
+  const recentNet = input.signal?.last30.net ?? 0;
+  const recentItems = input.signal?.last30.items ?? 0;
   const recentValue = clamp(recentNet * NEWS_POINTS_PER_UNIT, -NEWS_RECENT_CAP, NEWS_RECENT_CAP);
   components.push({
     key: 'news_recent',
-    label: 'Recent news (21d)',
+    label: 'Recent news (30d)',
     display: recentItems === 0 ? 'no recent evidence' : `${recentNet > 0 ? '+' : ''}${recentNet} net over ${recentItems} item(s)`,
     value: round2(recentValue),
     unknown: recentItems === 0,

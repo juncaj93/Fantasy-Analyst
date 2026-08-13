@@ -60,8 +60,10 @@ export interface DraftRecommendation {
   adp: number | null;
   adpValue: number | null;
   survivalProbability: number | null;
-  newsRawNet: number;
-  newsRecentNet: number;
+  newsLifetimeNet: number;
+  news30Net: number;
+  news7Net: number;
+  newsConflicted: boolean;
   components: ComponentScore[];
   total: number;
   reasons: string[];
@@ -100,7 +102,7 @@ export interface PlayerSignal {
   playerId: string;
   raw: SignalWindow;
   last7: SignalWindow;
-  last21: SignalWindow;
+  last30: SignalWindow;
   seasonToDate: SignalWindow;
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
   pendingCount: number;

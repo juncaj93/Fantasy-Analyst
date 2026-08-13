@@ -297,7 +297,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           team: p?.team ?? '',
           status: p?.status ?? null,
           newsNet: signal?.raw.net ?? 0,
-          recentNet: signal?.last21.net ?? 0,
+          recentNet: signal?.last30.net ?? 0,
           pending: signal?.pendingCount ?? 0,
         };
       });

@@ -69,7 +69,7 @@ export interface PlayerSignal {
   playerId: string;
   raw: SignalWindow;
   last7: SignalWindow;
-  last21: SignalWindow;
+  last30: SignalWindow;
   seasonToDate: SignalWindow;
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
   /** Items awaiting review; excluded from every window above. */

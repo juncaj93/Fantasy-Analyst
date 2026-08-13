@@ -166,7 +166,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
 
   // --- ADP snapshot ---
   const index = await playerRepo.buildIndex();
-  const adpResult = importAdpSnapshot(DEMO_ADP_CSV, index, { label: 'Demo Underdog ADP', source: 'underdog' });
+  const adpResult = importAdpSnapshot(DEMO_ADP_CSV, index, { label: 'Demo Sleeper ADP', source: 'demo' });
   const adpRepo = new AdpRepo(db);
   const { snapshot } = await adpRepo.save(adpResult);
   await leagueRepo.setDraftSnapshot('demo-draft', snapshot.id);
