@@ -325,6 +325,23 @@ export class EvidenceRepo {
   }
 
   /** Read the derived cache for a set of players. */
+  /**
+   * Every player the ledger has counted evidence for.
+   *
+   * Trade discovery starts here rather than from the whole player list: a
+   * player nobody has written about has no trade signal, and scoring three
+   * thousand of them to say so is work with no reader.
+   */
+  async playerIdsWithEvidence(): Promise<string[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT DISTINCT player_id FROM evidence_items
+          WHERE review_status IN ('auto_applied','accepted','corrected')`,
+      )
+      .all<Record<string, unknown>>();
+    return rows.results.map((r) => String(r['player_id'])).filter(Boolean);
+  }
+
   async getSignals(playerIds: string[]): Promise<Map<string, PlayerSignal>> {
     const out = new Map<string, PlayerSignal>();
     if (playerIds.length === 0) return out;

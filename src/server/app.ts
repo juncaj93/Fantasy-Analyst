@@ -45,6 +45,7 @@ import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
+import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 
@@ -742,6 +743,12 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     await repo.resolveIdentityReview(id, body.playerId, 'resolved');
     return jsonResponse({ ok: true, status: 'resolved', remembered });
+  });
+
+  // -------------------------------------------------------------- trades ---
+  router.get('/api/trades', async (ctx) => {
+    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
+    return jsonResponse(await new TradeService(ctx.env.db).build({ limit }));
   });
 
   // ------------------------------------------------------- help my scores ---

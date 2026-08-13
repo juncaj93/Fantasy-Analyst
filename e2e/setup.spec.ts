@@ -104,7 +104,9 @@ test.describe('newsletter setup', () => {
   test('rejects an obviously wrong sender in plain words', async ({ page }) => {
     await page.getByLabel('Newsletter sender address or domain').fill('not an address');
     await page.getByRole('button', { name: 'Save sender' }).click();
-    await expect(page.locator('.notice')).toContainText('does not look like');
+    // Scoped to this panel: Setup can carry other notices (Help my scores), and
+    // a bare `.notice` would match several.
+    await expect(page.getByTestId('panel-newsletter').locator('.notice')).toContainText('does not look like');
   });
 
   test('reports activity for the seeded newsletter', async ({ page }) => {

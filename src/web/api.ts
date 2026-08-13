@@ -355,3 +355,35 @@ export interface RepairStatus {
   suspicions: { alias: string; net: number; items: number; candidate: { playerId: string; name: string } }[];
   summary: { names: number; items: number; net: number; headline: string };
 }
+
+
+/** Trade intelligence: what has changed lately, and who holds them. */
+export interface TradeSuggestion {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+  ownership: 'mine' | 'other' | 'free';
+  verdict: string;
+  label: string;
+  windows: {
+    lifetime: number;
+    season: number;
+    last30: number;
+    last7: number;
+    items30: number;
+    itemsLifetime: number;
+  };
+  urgency: number;
+  confidence: 'high' | 'medium' | 'low';
+  reasons: string[];
+  counterpoints: string[];
+}
+
+export interface TradeBoard {
+  league: { id: string; name: string } | null;
+  sections: { verdict: string; label: string; players: TradeSuggestion[] }[];
+  suggestions: TradeSuggestion[];
+  considered: number;
+  warnings: string[];
+}

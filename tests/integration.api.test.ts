@@ -265,6 +265,39 @@ describe('API with seeded data', () => {
     });
   });
 
+  describe('trades', () => {
+    it('groups suggestions into labelled sections', async () => {
+      const body = await json<{
+        league: { name: string } | null;
+        sections: { verdict: string; players: unknown[] }[];
+        considered: number;
+      }>(get('/api/trades', cookie));
+      expect(body.league?.name).toBeTruthy();
+      expect(body.considered).toBeGreaterThan(0);
+      expect(body.sections.every((s) => s.players.length > 0)).toBe(true);
+    });
+
+    /** A player nobody rosters is an add, never a trade. */
+    it('never calls a free agent a trade target', async () => {
+      const body = await json<{ suggestions: { ownership: string; verdict: string }[] }>(
+        get('/api/trades', cookie),
+      );
+      for (const s of body.suggestions) {
+        if (s.ownership === 'free') expect(s.verdict).not.toBe('trade_target');
+        if (s.verdict === 'trade_target') expect(s.ownership).toBe('other');
+      }
+    });
+
+    it('explains every suggestion it makes', async () => {
+      const body = await json<{ suggestions: { reasons: string[] }[] }>(get('/api/trades', cookie));
+      for (const s of body.suggestions) expect(s.reasons.length).toBeGreaterThan(0);
+    });
+
+    it('is readable without unlocking', async () => {
+      expect((await app(new Request('https://app.test/api/trades'), env)).status).toBe(200);
+    });
+  });
+
   it('never republishes newsletter bodies through the public message log', async () => {
     // Bodies are retained server-side so rules can be re-run, but reads on this
     // site are public and the newsletter is someone else's work.

@@ -12,13 +12,15 @@ import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
 import { SetupScreen } from './screens/SetupScreen.tsx';
+import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 
-type Tab = 'draft' | 'team' | 'players' | 'review' | 'setup';
+type Tab = 'draft' | 'team' | 'trades' | 'players' | 'review' | 'setup';
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
   { id: 'draft', label: 'Draft', glyph: '◈' },
   { id: 'team', label: 'Team', glyph: '▤' },
+  { id: 'trades', label: 'Trades', glyph: '⇄' },
   { id: 'players', label: 'Players', glyph: '⌕' },
   { id: 'review', label: 'Review', glyph: '✓' },
   { id: 'setup', label: 'Setup', glyph: '⚙' },
@@ -89,6 +91,7 @@ export function App() {
         {error ? <Notice tone="error">{error}</Notice> : null}
         {tab === 'draft' ? <DraftScreen leagues={leagues} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
+        {tab === 'trades' ? <TradesScreen /> : null}
         {tab === 'players' ? <PlayersScreen /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
         {tab === 'setup' ? (
