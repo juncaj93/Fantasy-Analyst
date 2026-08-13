@@ -11,7 +11,12 @@ import { computeNeed, computeScarcity } from '../src/core/draft/need.ts';
 import { adpSpread, estimateSurvival } from '../src/core/draft/survival.ts';
 import { emptySignal } from '../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../src/core/evidence/types.ts';
-import { buildRosterShape, buildScoringProfile, leagueFitMultipliers } from '../src/core/sleeper/scoring.ts';
+import {
+  adpFormatForLeague,
+  buildRosterShape,
+  buildScoringProfile,
+  leagueFitMultipliers,
+} from '../src/core/sleeper/scoring.ts';
 import { TEST_PLAYERS } from './helpers/players.ts';
 
 const HALF_PPR = buildScoringProfile({ rec: 0.5, pass_td: 4 }, []);
@@ -312,5 +317,37 @@ describe('Sleeper draft rank', () => {
     // the player look merely undrafted-late rather than unknown.
     expect(byName.get('Deep Bench')!.searchRank).toBeNull();
     expect(byName.get('No Rank')!.searchRank).toBeNull();
+  });
+});
+
+/**
+ * Which published ADP applies. Getting this wrong is not a small error: full-PPR
+ * ADP in a half-PPR league is wrong everywhere at once, and quietly.
+ */
+describe('the ADP format a league drafts in', () => {
+  const format = (scoring: Record<string, number>, positions: string[], settings = {}) =>
+    adpFormatForLeague(buildScoringProfile(scoring, positions), buildRosterShape(positions), settings);
+
+  it('reads half PPR from the scoring settings', () => {
+    expect(format({ rec: 0.5 }, ['QB', 'RB', 'WR', 'TE', 'FLEX', 'BN']).scoringFormat).toBe('HALF_PPR');
+  });
+
+  it('separates full PPR and standard', () => {
+    expect(format({ rec: 1 }, ['QB', 'RB', 'BN']).scoringFormat).toBe('PPR');
+    expect(format({ rec: 0 }, ['QB', 'RB', 'BN']).scoringFormat).toBe('STANDARD');
+  });
+
+  it('is 1QB unless the league starts more than one', () => {
+    expect(format({ rec: 0.5 }, ['QB', 'RB', 'WR', 'BN']).qbType).toBe('1QB');
+    expect(format({ rec: 0.5 }, ['QB', 'SUPER_FLEX', 'RB', 'BN']).qbType).toBe('SUPERFLEX');
+    // Two plain QB slots draft like superflex even without the slot name.
+    expect(format({ rec: 0.5 }, ['QB', 'QB', 'RB', 'BN']).qbType).toBe('SUPERFLEX');
+  });
+
+  /** Sleeper's league type: 0 redraft, 1 keeper, 2 dynasty. */
+  it('treats keeper leagues as redraft and dynasty as dynasty', () => {
+    expect(format({ rec: 0.5 }, ['QB', 'BN'], { type: 0 }).draftType).toBe('REDRAFT');
+    expect(format({ rec: 0.5 }, ['QB', 'BN'], { type: 1 }).draftType).toBe('REDRAFT');
+    expect(format({ rec: 0.5 }, ['QB', 'BN'], { type: 2 }).draftType).toBe('DYNASTY');
   });
 });

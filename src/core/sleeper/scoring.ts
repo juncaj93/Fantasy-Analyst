@@ -51,6 +51,40 @@ export function startablePositions(shape: RosterShape): Set<string> {
   return out;
 }
 
+/**
+ * Which published ADP describes this league.
+ *
+ * ADP is not one number. The order players go in a half-PPR 1QB redraft is not
+ * the order they go in full PPR, and it is nothing like superflex, where
+ * quarterbacks leave the board early. Asking for the wrong one produces a board
+ * that is subtly wrong everywhere rather than obviously wrong somewhere.
+ *
+ * Derived from the league itself so there is nothing to keep in sync by hand.
+ */
+export interface AdpFormat {
+  scoringFormat: 'PPR' | 'HALF_PPR' | 'STANDARD';
+  draftType: 'REDRAFT' | 'DYNASTY';
+  qbType: '1QB' | 'SUPERFLEX';
+}
+
+export function adpFormatForLeague(
+  profile: ScoringProfile,
+  shape: RosterShape,
+  leagueSettings: Record<string, unknown> = {},
+): AdpFormat {
+  const scoringFormat = profile.ppr >= 0.95 ? 'PPR' : profile.ppr >= 0.4 ? 'HALF_PPR' : 'STANDARD';
+
+  // Sleeper's league `type`: 0 redraft, 1 keeper, 2 dynasty. A keeper league
+  // drafts far closer to a redraft than to a dynasty, so it maps to redraft.
+  const draftType = leagueSettings['type'] === 2 ? 'DYNASTY' : 'REDRAFT';
+
+  // Two starting quarterbacks changes the draft the same way superflex does,
+  // whether or not the slot is named SUPER_FLEX.
+  const qbType = shape.superflex || (shape.starters['QB'] ?? 1) >= 2 ? 'SUPERFLEX' : '1QB';
+
+  return { scoringFormat, draftType, qbType };
+}
+
 /** Which real positions each Sleeper roster slot accepts. */
 export const FLEX_ELIGIBILITY: Record<string, string[]> = {
   FLEX: ['RB', 'WR', 'TE'],

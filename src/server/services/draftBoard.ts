@@ -79,10 +79,9 @@ export class DraftBoardService {
     // Players already taken.
     const takenIds = new Set(picks.map((p) => p.playerId).filter((id): id is string => !!id));
 
-    // Draft order comes from Sleeper's own ranking, which the nightly player
-    // sync already carries. An imported ranking file, if one exists, still
-    // wins: a file the user chose is a deliberate statement about their draft,
-    // and Sleeper's ranking is only the default.
+    // Draft order comes from an imported ADP snapshot. A draft can be pinned to
+    // a specific one so a board opened mid-draft does not shift under the user
+    // when a fresher snapshot lands; otherwise the newest applies.
     const snapshotMeta = draft.adpSnapshotId
       ? await this.adp.get(draft.adpSnapshotId)
       : await this.adp.latest();

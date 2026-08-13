@@ -1,0 +1,127 @@
+name: Refresh draft order
+
+# Pull Sleeper's ADP for the selected league's format and import it as a frozen
+# snapshot.
+#
+# Sleeper publishes no ADP of its own — every REST path 404s and its GraphQL
+# schema has no ADP field — so the numbers come from beatadp.com, which collects
+# Sleeper's alongside other platforms'.
+#
+# This runs here rather than in the worker on purpose: the draft board must keep
+# working when beatadp is slow, changed or down, and a snapshot taken an hour
+# ago is a far better answer mid-draft than a failed fetch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Whose ADP to import'
+        required: true
+        default: 'SLEEPER'
+  schedule:
+    # Daily through the draft season, early morning US time. ADP moves on news,
+    # and a board built on last week's ADP is a board built on last week's news.
+    - cron: '0 11 * * *'
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The league decides which ADP applies: half PPR and 1QB are properties of
+      # the league, not settings to keep in step by hand here.
+      - name: Ask the app which format this league drafts in
+        id: format
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/setup/status" -o /tmp/status.json
+          node -e "
+            const fs = require('fs');
+            let s; try { s = JSON.parse(fs.readFileSync('/tmp/status.json', 'utf8')); } catch {
+              console.log('::error::the app did not return a readable status');
+              process.exit(1);
+            }
+            const f = s.league?.adpFormat;
+            if (!f) {
+              console.log('::error::no league selected, so there is no format to fetch ADP for');
+              process.exit(1);
+            }
+            console.log(\`league: \${s.league.name} — \${f.scoringFormat} / \${f.draftType} / \${f.qbType}\`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              \`scoring=\${f.scoringFormat}\ndraft=\${f.draftType}\nqb=\${f.qbType}\n\`);
+          "
+
+      - name: Fetch the ADP
+        env:
+          SCORING: ${{ steps.format.outputs.scoring }}
+          DRAFT: ${{ steps.format.outputs.draft }}
+          QB: ${{ steps.format.outputs.qb }}
+          PLATFORM: ${{ inputs.platform || 'SLEEPER' }}
+        run: |
+          node scripts/fetch-beatadp.mjs \
+            --scoring "$SCORING" --draft "$DRAFT" --qb "$QB" \
+            --platform "$PLATFORM" --out /tmp/adp.json
+
+      - name: Import it
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+          PLATFORM: ${{ inputs.platform || 'SLEEPER' }}
+          SCORING: ${{ steps.format.outputs.scoring }}
+          QB: ${{ steps.format.outputs.qb }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt)
+          if [ "$login" != "200" ]; then
+            echo "::error::Could not unlock the app (HTTP $login)."
+            exit 1
+          fi
+
+          # The label says what these numbers describe, so a snapshot list read
+          # months from now still explains itself.
+          node -e "
+            const fs = require('fs');
+            const today = new Date().toISOString().slice(0, 10);
+            process.stdout.write(JSON.stringify({
+              content: fs.readFileSync('/tmp/adp.json', 'utf8'),
+              source: 'beatadp:' + process.env.PLATFORM.toLowerCase(),
+              label: \`\${process.env.PLATFORM} ADP — \${process.env.SCORING.replace('_', ' ')} \${process.env.QB} (\${today})\`,
+            }));
+          " > /tmp/payload.json
+
+          code=$(curl -s -o /tmp/result.json -w '%{http_code}' -X POST "$URL/api/adp/import" \
+            -H 'content-type: application/json' -b /tmp/cookies.txt \
+            --data-binary @/tmp/payload.json --max-time 120)
+          echo "import: $code"
+
+          node -e "
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/result.json', 'utf8');
+            let r; try { r = JSON.parse(body); } catch { console.log(body.slice(0, 500)); process.exit(1); }
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+
+            console.log('snapshot:  ', r.snapshot?.label, r.created ? '(new)' : '(unchanged — same file as last time)');
+            console.log('matched:   ', r.matched);
+            console.log('ambiguous: ', r.ambiguous);
+            console.log('unmatched: ', r.unmatched);
+
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+              '## Draft order', '',
+              '| | |', '|---|---|',
+              ['| snapshot |', r.snapshot?.label ?? '?', '|'].join(' '),
+              ['| new |', r.created ? 'yes' : 'no — identical to the last one', '|'].join(' '),
+              ['| matched to a player |', r.matched, '|'].join(' '),
+              ['| ambiguous |', r.ambiguous, '|'].join(' '),
+              ['| unmatched |', r.unmatched, '|'].join(' '),
+              '',
+            ].join('\n'));
+          "
+          [ "$code" = "200" ] || exit 1

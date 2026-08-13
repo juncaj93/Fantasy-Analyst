@@ -7,7 +7,13 @@
  */
 
 import type { VegasProvider } from '../../core/vegas/types.ts';
-import { buildScoringProfile, leagueFitNotes, buildRosterShape } from '../../core/sleeper/scoring.ts';
+import {
+  adpFormatForLeague,
+  buildScoringProfile,
+  buildRosterShape,
+  leagueFitNotes,
+  type AdpFormat,
+} from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -79,6 +85,8 @@ export interface SetupStatus {
     notes: string[];
     draftId: string | null;
     rosterFound: boolean;
+    /** Which published ADP describes this league. Null until one is chosen. */
+    adpFormat: AdpFormat | null;
   };
   adp: {
     /** How many players Sleeper ranks — the default draft order. */
@@ -232,6 +240,7 @@ export class SetupService {
         notes: profile && shape ? leagueFitNotes(profile, shape) : [],
         draftId: league?.draftId ?? null,
         rosterFound,
+        adpFormat: profile && shape ? adpFormatForLeague(profile, shape, league?.leagueSettings ?? {}) : null,
       },
       adp: {
         rankedPlayers,
