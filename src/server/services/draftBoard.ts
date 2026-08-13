@@ -8,7 +8,7 @@
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
-import { nextPickForSlot, slotForRoster } from '../../core/sleeper/transform.ts';
+import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -73,13 +73,17 @@ export class DraftBoardService {
     const picksMade = picks.filter((p) => p.playerId).length;
     const currentPick = picksMade + 1;
 
-    const mySlot = slotForRoster(draft.slotToRosterId, myRosterRecord?.rosterId ?? null);
+    const mySlot =
+      slotForRoster(draft.slotToRosterId, myRosterRecord?.rosterId ?? null) ??
+      slotFromPicks(picks, myRosterRecord?.rosterId ?? null, myRosterRecord?.ownerId ?? null);
     const next = mySlot == null ? null : nextPickForSlot(mySlot, teams, rounds, draft.type, currentPick);
     // Without a slot there is no "your next pick", so survival and scarcity are
     // both computed against an unknown horizon. Say so rather than let the board
     // look confident about numbers it could not work out.
     if (myRosterRecord && mySlot == null) {
-      warnings.push('Sleeper has not published your draft slot yet, so "who lasts until your next pick" is guesswork');
+      warnings.push(
+        'your draft slot is unknown — Sleeper has not published one and you have not picked yet, so "who lasts until your next pick" is guesswork',
+      );
     }
 
     // Players already taken.

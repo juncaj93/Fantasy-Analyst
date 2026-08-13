@@ -11,6 +11,7 @@ import { computeNeed, computeScarcity } from '../src/core/draft/need.ts';
 import { adpSpread, estimateSurvival } from '../src/core/draft/survival.ts';
 import { emptySignal } from '../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../src/core/evidence/types.ts';
+import { slotForRoster, slotFromPicks } from '../src/core/sleeper/transform.ts';
 import {
   adpFormatForLeague,
   buildRosterShape,
@@ -357,6 +358,32 @@ describe('Sleeper draft rank', () => {
  * Which published ADP applies. Getting this wrong is not a small error: full-PPR
  * ADP in a half-PPR league is wrong everywhere at once, and quietly.
  */
+describe('finding your draft slot', () => {
+  const picks = [
+    { draftSlot: 3, rosterId: 7, pickedBy: 'u7' },
+    { draftSlot: 4, rosterId: 2, pickedBy: 'u2' },
+  ];
+
+  it('reads the slot from the published map when there is one', () => {
+    expect(slotForRoster({ '1': 5, '2': 7 }, 7)).toBe(2);
+  });
+
+  /** Best-ball and mock drafts often publish no slot map at all. */
+  it('falls back to the slot that made your picks', () => {
+    expect(slotForRoster({}, 7)).toBeNull();
+    expect(slotFromPicks(picks, 7)).toBe(3);
+  });
+
+  it('matches on the Sleeper user when picks carry no roster id', () => {
+    const anonymous = [{ draftSlot: 9, rosterId: null, pickedBy: 'u7' }];
+    expect(slotFromPicks(anonymous, 7, 'u7')).toBe(9);
+  });
+
+  it('stays unknown rather than guessing before you have picked', () => {
+    expect(slotFromPicks([], 7, 'u7')).toBeNull();
+  });
+});
+
 describe('the ADP format a league drafts in', () => {
   const format = (scoring: Record<string, number>, positions: string[], settings = {}) =>
     adpFormatForLeague(buildScoringProfile(scoring, positions), buildRosterShape(positions), settings);

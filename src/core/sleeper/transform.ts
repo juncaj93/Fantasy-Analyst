@@ -249,3 +249,28 @@ export function slotForRoster(
   }
   return null;
 }
+
+/**
+ * Work out a draft slot from the picks already made.
+ *
+ * Sleeper does not always publish `slot_to_roster_id` — best-ball and mock
+ * drafts often leave it empty — and without a slot there is no "your next
+ * pick", which is what survival and scarcity are measured against. Every pick
+ * carries the slot that made it, so once you have picked once, your slot is a
+ * fact rather than a lookup.
+ *
+ * Matches on roster id, falling back to the Sleeper user id for drafts that
+ * record only who picked.
+ */
+export function slotFromPicks(
+  picks: { draftSlot: number; rosterId: number | null; pickedBy: string | null }[],
+  rosterId: number | null,
+  ownerId: string | null = null,
+): number | null {
+  for (const pick of picks) {
+    if (!pick.draftSlot) continue;
+    if (rosterId != null && pick.rosterId === rosterId) return pick.draftSlot;
+    if (ownerId && pick.pickedBy === ownerId) return pick.draftSlot;
+  }
+  return null;
+}
