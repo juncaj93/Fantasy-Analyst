@@ -2,3 +2,14 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+*.local
+.env
+.env.*
+!.env.example
+local-data/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+.DS_Store
+*.tsbuildinfo

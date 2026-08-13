@@ -1,0 +1,41 @@
+{
+  "name": "fantasy-analyst",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "npm run build:server && FA_SEED=1 FA_INSECURE_COOKIES=1 node scripts/dev-server.mjs",
+    "dev:web": "vite",
+    "build": "tsc -b tsconfig.build.json && vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "typecheck": "tsc -b tsconfig.build.json --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360",
+    "e2e:chromium": "playwright test --project=chromium-iphone-390 --project=chromium-iphone-375 --project=chromium-small-360",
+    "verify": "npm run typecheck && npm run test && npm run e2e",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "d1:migrate:remote": "wrangler d1 migrations apply fantasy_analyst --remote",
+    "d1:migrate:local": "wrangler d1 migrations apply fantasy_analyst --local"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260813.1",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.122.0"
+  }
+}

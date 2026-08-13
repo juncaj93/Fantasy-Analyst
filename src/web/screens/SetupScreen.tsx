@@ -1,0 +1,700 @@
+/**
+ * Setup — the whole configuration experience in plain language.
+ *
+ * Deliberately free of developer vocabulary: no endpoints, no JSON, no
+ * bindings. Anything that genuinely needs a terminal lives in the docs, not
+ * here; this screen only shows what the user can do from their phone.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  api,
+  type LeagueSummary,
+  type NewsletterMessage,
+  type NewsletterStatus,
+  type SetupStatus,
+} from '../api.ts';
+import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
+
+type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | null;
+
+const STATE_ICON: Record<string, string> = { ok: '✅', warn: '⚠️', todo: '○', off: '○' };
+
+export function SetupScreen({
+  leagues,
+  onChanged,
+}: {
+  leagues: LeagueSummary[];
+  onChanged: () => void;
+}) {
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [open, setOpen] = useState<Panel>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api.get<SetupStatus>('/api/setup/status'));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const refreshAll = () => {
+    void load();
+    onChanged();
+  };
+
+  if (!status) return error ? <Notice tone="error">{error}</Notice> : <Loading what="your setup" />;
+
+  return (
+    <>
+      <div className="card card-tight">
+        <strong>Fantasy Analyst Setup</strong>
+        <div className="faint">
+          {status.readyForDraft
+            ? 'Everything needed for draft day is ready.'
+            : 'Work through anything marked below. Tap a row to open it.'}
+        </div>
+      </div>
+
+      {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {status.steps.map((step) => (
+        <button
+          key={step.id}
+          className="player-row"
+          data-testid={`setup-step-${step.id}`}
+          data-state={step.state}
+          aria-expanded={open === step.id}
+          onClick={() => setOpen(open === step.id ? null : (step.id as Panel))}
+        >
+          <div className="player-row-top">
+            <span className="rank" aria-hidden="true">
+              {STATE_ICON[step.state] ?? '○'}
+            </span>
+            <span className="player-name">{step.title}</span>
+            <span className="pos-team">{open === step.id ? 'Close' : 'Open'}</span>
+          </div>
+          <div className="player-row-metrics">
+            <span className="metric">{step.summary}</span>
+          </div>
+          {step.action ? <div className="faint">{step.action}</div> : null}
+        </button>
+      ))}
+
+      {open === 'sleeper' ? <SleeperPanel status={status} onDone={refreshAll} /> : null}
+      {open === 'league' ? <LeaguePanel leagues={leagues} onDone={refreshAll} /> : null}
+      {open === 'adp' ? <AdpPanel status={status} onDone={refreshAll} /> : null}
+      {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
+      {open === 'vegas' ? <VegasPanel status={status} /> : null}
+    </>
+  );
+}
+
+/** Shared busy/message handling for the panels. */
+function usePanelAction() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  const run = async (key: string, fn: () => Promise<string>) => {
+    setBusy(key);
+    setMessage(null);
+    try {
+      setMessage({ tone: 'ok', text: await fn() });
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const banner = message ? (
+    <Notice tone={message.tone === 'ok' ? 'ok' : 'error'}>{message.text}</Notice>
+  ) : null;
+
+  return { busy, run, banner };
+}
+
+function SleeperPanel({ status, onDone }: { status: SetupStatus; onDone: () => void }) {
+  const { busy, run, banner } = usePanelAction();
+  const [username, setUsername] = useState(status.sleeper.username ?? '');
+  const [season, setSeason] = useState(String(new Date().getFullYear()));
+
+  return (
+    <div className="card" data-testid="panel-sleeper">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Connect Sleeper
+      </div>
+      <div className="faint" style={{ marginBottom: 8 }}>
+        Fantasy Analyst reads your league from Sleeper. It never makes picks or changes your lineup.
+      </div>
+      {banner}
+
+      <div className="field">
+        <label htmlFor="setup-username">Your Sleeper username</label>
+        <input
+          id="setup-username"
+          value={username}
+          autoCapitalize="none"
+          autoCorrect="off"
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="e.g. alexfootball"
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="setup-season">Season</label>
+        <input id="setup-season" value={season} inputMode="numeric" onChange={(e) => setSeason(e.target.value)} />
+      </div>
+
+      <div className="btn-row">
+        <button
+          className="btn btn-primary"
+          disabled={!username || busy != null}
+          onClick={() =>
+            run('connect', async () => {
+              const res = await api.post<{ leaguesImported: number }>('/api/sleeper/connect', { username, season });
+              onDone();
+              return res.leaguesImported > 0
+                ? `Connected. Found ${res.leaguesImported} league${res.leaguesImported === 1 ? '' : 's'} for ${season}.`
+                : `Connected, but no leagues were found for ${season}. Try a different season.`;
+            })
+          }
+        >
+          {status.sleeper.connected ? 'Reconnect' : 'Connect'}
+        </button>
+        <button
+          className="btn"
+          disabled={busy != null}
+          onClick={() =>
+            run('players', async () => {
+              const res = await api.post<{ total: number }>('/api/sleeper/sync-players');
+              onDone();
+              return `Player list updated — ${res.total} players available.`;
+            })
+          }
+        >
+          {busy === 'players' ? 'Updating…' : 'Update player list'}
+        </button>
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        The player list is how Fantasy Analyst recognises names in your newsletter. Update it once
+        before your draft, and occasionally during the season.
+        {status.sleeper.playersSynced > 0 ? ` Currently ${status.sleeper.playersSynced} players.` : ''}
+      </div>
+    </div>
+  );
+}
+
+function LeaguePanel({ leagues, onDone }: { leagues: LeagueSummary[]; onDone: () => void }) {
+  const { busy, run, banner } = usePanelAction();
+
+  return (
+    <div className="card" data-testid="panel-league">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Choose your league
+      </div>
+      {banner}
+      {leagues.length === 0 ? (
+        <Empty>Connect Sleeper first, then your leagues appear here.</Empty>
+      ) : (
+        leagues.map((l) => (
+          <div className="card card-tight" key={l.id} data-testid="setup-league-card">
+            <div className="header-row">
+              <div>
+                <strong>{l.name}</strong>
+                <div className="faint">
+                  {l.season} · {l.teams} teams · {l.scoringLabel}
+                </div>
+              </div>
+              <button
+                className={l.isSelected ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
+                disabled={l.isSelected || busy != null}
+                onClick={() =>
+                  run(`select-${l.id}`, async () => {
+                    await api.post(`/api/leagues/${l.id}/select`);
+                    onDone();
+                    return `Using ${l.name}.`;
+                  })
+                }
+              >
+                {l.isSelected ? '✓ In use' : 'Use this'}
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void }) {
+  const { busy, run, banner } = usePanelAction();
+  const [content, setContent] = useState('');
+  const [label, setLabel] = useState('');
+  const [result, setResult] = useState<{
+    created: boolean;
+    matched: number;
+    ambiguous: number;
+    unmatched: number;
+    skipped: { rowNumber: number; reason: string }[];
+  } | null>(null);
+
+  const importNow = () =>
+    run('adp', async () => {
+      const res = await api.post<{
+        created: boolean;
+        matched: number;
+        ambiguous: number;
+        unmatched: number;
+        skipped: { rowNumber: number; reason: string }[];
+      }>('/api/adp/import', { content, label: label || undefined });
+      setResult(res);
+      setContent('');
+      onDone();
+      return res.created
+        ? `Imported ${res.matched} players.`
+        : 'That exact file was already imported, so nothing changed.';
+    });
+
+  return (
+    <div className="card" data-testid="panel-adp">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Draft rankings (Underdog ADP)
+      </div>
+      <div className="faint" style={{ marginBottom: 8 }}>
+        Download today's ADP as a CSV, then choose the file or paste it below. You can import a fresh
+        one any time before your draft — the newest import is the one used.
+      </div>
+      {banner}
+
+      {status.adp.imported ? (
+        <div className="card card-tight">
+          <strong>In use: {status.adp.label}</strong>
+          <div className="faint">
+            Captured {formatDate(status.adp.capturedAt)} · {status.adp.matched} of {status.adp.totalRows} players
+            matched
+            {status.adp.unresolved > 0 ? ` · ${status.adp.unresolved} not recognised` : ''}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="field">
+        <label htmlFor="adp-file">Choose a file</label>
+        <input
+          id="adp-file"
+          type="file"
+          accept=".csv,.json,text/csv,application/json,text/plain"
+          data-testid="adp-file"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setContent(await file.text());
+            if (!label) setLabel(file.name.replace(/\.[a-z]+$/i, ''));
+          }}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="adp-label">Name this snapshot (optional)</label>
+        <input id="adp-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Underdog ADP — today" />
+      </div>
+
+      <div className="field">
+        <label htmlFor="adp-content">…or paste the file contents</label>
+        <textarea
+          id="adp-content"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder={"name,position,team,adp\nJa'Marr Chase,WR,CIN,1.4"}
+        />
+      </div>
+
+      <button className="btn btn-primary" disabled={!content || busy != null} onClick={importNow}>
+        {busy === 'adp' ? 'Importing…' : status.adp.imported ? 'Replace rankings' : 'Import rankings'}
+      </button>
+
+      {result ? (
+        <div className="card card-tight" data-testid="adp-result" style={{ marginTop: 8 }}>
+          <table className="compact">
+            <tbody>
+              <tr>
+                <td>Matched to a player</td>
+                <td>{result.matched}</td>
+              </tr>
+              <tr>
+                <td>Needs a decision (more than one match)</td>
+                <td>{result.ambiguous}</td>
+              </tr>
+              <tr>
+                <td>Not recognised</td>
+                <td>{result.unmatched}</td>
+              </tr>
+              <tr>
+                <td>Rows skipped</td>
+                <td>{result.skipped.length}</td>
+              </tr>
+            </tbody>
+          </table>
+          {result.skipped.length > 0 ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              Skipped rows: {result.skipped.slice(0, 5).map((s) => `row ${s.rowNumber} (${s.reason})`).join(', ')}
+              {result.skipped.length > 5 ? '…' : ''}
+            </div>
+          ) : null}
+          <div className="faint" style={{ marginTop: 6 }}>
+            Unrecognised players are kept, not thrown away — they simply have no ranking until you
+            match them.
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function NewsletterPanel({ onDone }: { onDone: () => void }) {
+  const { busy, run, banner } = usePanelAction();
+  const [status, setStatus] = useState<NewsletterStatus | null>(null);
+  const [sender, setSender] = useState('');
+  const [subject, setSubject] = useState('');
+  const [address, setAddress] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    const next = await api.get<NewsletterStatus>('/api/setup/newsletter');
+    setStatus(next);
+    setSender(next.expectedSenders.find((s) => !s.includes('example')) ?? '');
+    setSubject(next.subjectFilters[0] ?? '');
+    setAddress(next.address ?? '');
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!status) return <Loading what="newsletter status" />;
+
+  const copy = async () => {
+    if (!status.address) return;
+    try {
+      await navigator.clipboard.writeText(status.address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="card" data-testid="panel-newsletter">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Newsletter intelligence
+      </div>
+      {banner}
+
+      {/* --- the address ------------------------------------------------ */}
+      {status.addressConfigured ? (
+        <div className="card card-tight">
+          <div className="faint">Your Fantasy Analyst email address</div>
+          <div style={{ fontSize: '1rem', fontWeight: 650, wordBreak: 'break-all' }} data-testid="newsletter-address">
+            {status.address}
+          </div>
+          <div className="btn-row" style={{ marginTop: 6 }}>
+            <button className="btn btn-sm" onClick={() => void copy()}>
+              {copied ? '✓ Copied' : 'Copy address'}
+            </button>
+          </div>
+          <div className="faint" style={{ marginTop: 6 }}>
+            Subscribe your FF Newsletter to this address. Every future issue is read automatically —
+            you never need to forward anything.
+          </div>
+        </div>
+      ) : (
+        <Notice>
+          <strong>Email address not ready yet.</strong>
+          <div style={{ marginTop: 4 }}>
+            This needs a one-time email setup on your domain (about 10 minutes, done once). The
+            written steps are in the project's SETUP guide under “Turn on the newsletter address”.
+            Once it is done, the address appears here.
+          </div>
+        </Notice>
+      )}
+
+      {/* --- which sender to trust -------------------------------------- */}
+      <div className="section-title">Which newsletter to accept</div>
+      <div className="faint" style={{ marginBottom: 6 }}>
+        Only mail from this sender is read. Anything else that arrives is ignored and never affects
+        your players.
+      </div>
+      <div className="field">
+        <label htmlFor="nl-sender">Newsletter sender address or domain</label>
+        <input
+          id="nl-sender"
+          value={sender}
+          autoCapitalize="none"
+          autoCorrect="off"
+          inputMode="email"
+          onChange={(e) => setSender(e.target.value)}
+          placeholder="e.g. newsletter@theirsite.com"
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="nl-subject">Only if the subject contains (optional)</label>
+        <input id="nl-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="leave blank to accept every issue" />
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!sender || busy != null}
+        onClick={() =>
+          run('sender', async () => {
+            const next = await api.post<NewsletterStatus>('/api/setup/newsletter', {
+              senderEmail: sender,
+              subjectContains: subject,
+            });
+            setStatus(next);
+            onDone();
+            return 'Saved. Mail from that sender will now be read.';
+          })
+        }
+      >
+        Save sender
+      </button>
+
+      {/* --- manual address override ------------------------------------ */}
+      <details style={{ marginTop: 10 }}>
+        <summary className="muted">Set the address manually</summary>
+        <div className="faint" style={{ margin: '6px 0' }}>
+          Only needed if you finished the email setup with a different address than the one shown.
+        </div>
+        <div className="field">
+          <label htmlFor="nl-address">Fantasy Analyst email address</label>
+          <input
+            id="nl-address"
+            value={address}
+            autoCapitalize="none"
+            autoCorrect="off"
+            inputMode="email"
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="fantasy-news@yourdomain.com"
+          />
+        </div>
+        <button
+          className="btn btn-sm"
+          disabled={busy != null}
+          onClick={() =>
+            run('address', async () => {
+              const next = await api.post<NewsletterStatus>('/api/setup/newsletter', { inboundAddress: address });
+              setStatus(next);
+              onDone();
+              return address ? `Address set to ${address}.` : 'Address cleared.';
+            })
+          }
+        >
+          Save address
+        </button>
+      </details>
+
+      {/* --- activity ---------------------------------------------------- */}
+      <div className="section-title">Activity</div>
+      <table className="compact" data-testid="newsletter-activity">
+        <tbody>
+          <tr>
+            <td>Last email received</td>
+            <td>
+              {status.lastReceivedAt ? (
+                <>
+                  {formatAge(status.lastReceivedAt)}
+                  <div className="faint">
+                    {status.lastReceivedFrom} · {status.lastReceivedStatus}
+                  </div>
+                </>
+              ) : (
+                'nothing yet'
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td>Last newsletter read</td>
+            <td>{status.lastProcessedAt ? formatAge(status.lastProcessedAt) : 'none yet'}</td>
+          </tr>
+          <tr>
+            <td>News items found</td>
+            <td>{status.totals.evidenceItems}</td>
+          </tr>
+          <tr>
+            <td>Good news applied</td>
+            <td>{status.totals.autoAppliedPositive}</td>
+          </tr>
+          <tr>
+            <td>Bad news applied</td>
+            <td>{status.totals.autoAppliedNegative}</td>
+          </tr>
+          <tr>
+            <td>Waiting for your review</td>
+            <td>{status.totals.needsReview}</td>
+          </tr>
+          <tr>
+            <td>Ignored (unexpected sender)</td>
+            <td>{status.totals.quarantined}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {status.lastProcessedDetail ? (
+        <div className="faint" style={{ marginTop: 6 }}>
+          Last issue: {status.lastProcessedDetail}
+        </div>
+      ) : null}
+      {status.lastError ? (
+        <Notice tone="error">Last problem: {status.lastError}</Notice>
+      ) : null}
+
+      <NewsletterHistory />
+    </div>
+  );
+}
+
+/**
+ * Recent emails plus how much of each one the parser understood.
+ *
+ * Unread sentences are not failures — they are usually ordinary prose. Showing
+ * them is how the rule list gets better over time.
+ */
+function NewsletterHistory() {
+  const [messages, setMessages] = useState<NewsletterMessage[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await api.get<{ messages: NewsletterMessage[] }>('/api/newsletter/messages');
+      setMessages(res.messages);
+    })();
+  }, []);
+
+  if (!messages) return null;
+
+  return (
+    <>
+      <div className="section-title">Recent emails</div>
+      {messages.length === 0 ? (
+        <div className="faint">Nothing has arrived at this address yet.</div>
+      ) : (
+        messages.map((m) => {
+          const c = m.coverage ?? {};
+          const understood = c.classifiedSentences ?? 0;
+          const missed = c.unclassifiedSentences ?? 0;
+          return (
+            <button
+              key={m.messageId}
+              className="player-row"
+              data-testid="newsletter-message"
+              aria-expanded={open === m.messageId}
+              onClick={() => setOpen(open === m.messageId ? null : m.messageId)}
+            >
+              <div className="player-row-top">
+                <span className="player-name">{m.subject || '(no subject)'}</span>
+                <span className="pos-team">{formatDate(m.receivedAt)}</span>
+              </div>
+              <div className="player-row-metrics">
+                <Badge tone={m.status === 'processed' ? 'pos' : m.status === 'quarantined' ? 'warn' : 'neg'}>
+                  {m.status === 'processed' ? 'read' : m.status === 'quarantined' ? 'ignored' : m.status}
+                </Badge>
+                <span className="metric">{m.evidenceCount} news item(s)</span>
+                {m.pendingCount > 0 ? <span className="metric">{m.pendingCount} to review</span> : null}
+              </div>
+              {open === m.messageId ? (
+                <div className="explain">
+                  {m.detail ? <div className="muted">{m.detail}</div> : null}
+                  {m.rejectReason ? <div className="muted">{m.rejectReason}</div> : null}
+                  {m.status === 'processed' ? (
+                    <>
+                      <table className="compact" style={{ marginTop: 6 }}>
+                        <tbody>
+                          <tr>
+                            <td>Sentences about your players</td>
+                            <td>{c.sentencesWithPlayers ?? 0}</td>
+                          </tr>
+                          <tr>
+                            <td>Turned into a signal</td>
+                            <td>{understood}</td>
+                          </tr>
+                          <tr>
+                            <td>Read but no rule matched</td>
+                            <td>{missed}</td>
+                          </tr>
+                          <tr>
+                            <td>Unclear which player</td>
+                            <td>{c.ambiguousIdentitySentences ?? 0}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      {(c.samples ?? []).length > 0 ? (
+                        <>
+                          <div className="section-title">Sentences no rule matched</div>
+                          <ul style={{ paddingLeft: 16, margin: 0 }}>
+                            {(c.samples ?? []).map((sample, i) => (
+                              <li key={i} className="faint" style={{ marginBottom: 4 }}>
+                                “{sample.excerpt}” — {sample.players.join(', ')}
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="faint" style={{ marginTop: 4 }}>
+                            These are usually ordinary sentences with no news in them. If you spot real
+                            news here, it means a rule is missing.
+                          </div>
+                        </>
+                      ) : null}
+                      {(c.unknownNames ?? []).length > 0 ? (
+                        <>
+                          <div className="section-title">Names not in the player list</div>
+                          <div className="faint">{(c.unknownNames ?? []).join(', ')}</div>
+                          <div className="faint" style={{ marginTop: 4 }}>
+                            Mostly coaches and reporters. If a real player is listed here, update the
+                            player list on the Sleeper step.
+                          </div>
+                        </>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </button>
+          );
+        })
+      )}
+    </>
+  );
+}
+
+function VegasPanel({ status }: { status: SetupStatus }) {
+  return (
+    <div className="card" data-testid="panel-vegas">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Vegas lines
+      </div>
+      <div className="badge-row">
+        <Badge tone={status.vegas.live ? 'pos' : 'warn'}>
+          {status.vegas.live ? 'Live lines connected' : 'Not connected yet'}
+        </Badge>
+        <Badge>source: {status.vegas.provider}</Badge>
+      </div>
+      <div className="faint" style={{ marginTop: 8 }}>
+        {status.vegas.note}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Nothing to do here yet. Real betting lines are switched on later, once a free source has been
+        confirmed. Until then, start/sit advice uses your news signal and clearly says when a line is
+        missing rather than guessing.
+      </div>
+      {status.vegas.lastRefreshedAt ? (
+        <div className="faint" style={{ marginTop: 6 }}>
+          Practice data last updated {formatAge(status.vegas.lastRefreshedAt)} across {status.vegas.events} game(s).
+        </div>
+      ) : null}
+    </div>
+  );
+}
