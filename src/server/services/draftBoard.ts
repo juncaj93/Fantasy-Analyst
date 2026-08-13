@@ -111,8 +111,13 @@ export class DraftBoardService {
     }
     const byId = new Map(allPlayers.map((p) => [p.id, p]));
 
-    // My roster composition drives need.
-    const myPickRecords = picks.filter((p) => p.rosterId != null && p.rosterId === myRosterRecord?.rosterId && p.playerId);
+    // My roster composition drives need. Match on the Sleeper user as well as
+    // the roster id: drafts that record only `picked_by` would otherwise look
+    // like an empty roster, which reports every position as an unfilled need.
+    const isMine = (p: { rosterId: number | null; pickedBy: string | null }): boolean =>
+      (p.rosterId != null && p.rosterId === myRosterRecord?.rosterId) ||
+      (!!myRosterRecord?.ownerId && p.pickedBy === myRosterRecord.ownerId);
+    const myPickRecords = picks.filter((p) => p.playerId && isMine(p));
     const rosterCounts: Record<string, number> = {};
     const myRoster = myPickRecords.map((p) => {
       const player = byId.get(p.playerId!);

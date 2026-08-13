@@ -307,7 +307,9 @@ jobs:
                 let r; try { r = JSON.parse(s); } catch { console.log('unreadable:', s.slice(0,300)); return; }
                 if (r.error) { console.log('error:', r.error); return; }
                 console.log('status:', r.status, '| pick', r.currentPick, 'of', r.teams * r.rounds,
-                            '| my next:', r.myNextPick ?? '(unknown)');
+                            '| my slot:', r.mySlot ?? '(unknown)', '| my next:', r.myNextPick ?? '(unknown)');
+                console.log('my roster:', JSON.stringify(r.rosterCounts),
+                            '|', (r.myRoster ?? []).length, 'picks');
                 for (const w of r.warnings ?? []) console.log('  warning:', w);
                 for (const rec of r.recommendations ?? []) {
                   console.log(' ', String(rec.adp ?? '-').padStart(6), rec.position, rec.name,
