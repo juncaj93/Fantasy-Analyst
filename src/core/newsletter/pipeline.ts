@@ -24,6 +24,13 @@ export interface EmailMessage {
   subject: string;
   /** ISO-8601 date the newsletter was sent. */
   receivedAt: string;
+  /**
+   * The SMTP envelope sender, when it differs from `from`.
+   *
+   * Bulk senders use a per-message bounce address here, so it is recorded but
+   * never the primary thing a subscription is matched against.
+   */
+  envelopeFrom?: string | null;
   html?: string | null;
   text?: string | null;
   /** Optional provider-specific labels/headers used for qualification. */
@@ -139,11 +146,18 @@ export function qualifies(
   message: EmailMessage,
   sources: NewsletterSourceConfig[],
 ): NewsletterSourceConfig | null {
-  const from = (message.from ?? '').toLowerCase();
+  // Either address may carry the subscription: the visible From: is the stable
+  // one, but a user who copied the envelope sender out of the log should not be
+  // punished for it.
+  const candidates = [message.from, message.envelopeFrom]
+    .map((a) => (a ?? '').toLowerCase())
+    .filter(Boolean);
   const subject = message.subject ?? '';
   for (const source of sources) {
     if (source.enabled === false) continue;
-    const fromOk = source.fromPatterns.some((p) => from.includes(p.toLowerCase()));
+    const fromOk = source.fromPatterns.some((p) =>
+      candidates.some((from) => from.includes(p.toLowerCase())),
+    );
     if (!fromOk) continue;
     const patterns = source.subjectPatterns ?? [];
     if (patterns.length === 0) return source;

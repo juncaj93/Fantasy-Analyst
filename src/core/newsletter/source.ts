@@ -112,6 +112,7 @@ export const DEFAULT_NEWSLETTER_SOURCES: NewsletterSourceConfig[] = [
 export function toEmailMessage(input: {
   messageId?: string | null;
   from?: string | null;
+  envelopeFrom?: string | null;
   subject?: string | null;
   date?: string | null;
   html?: string | null;
@@ -121,13 +122,50 @@ export function toEmailMessage(input: {
   const receivedAt = input.date && !Number.isNaN(Date.parse(input.date))
     ? new Date(input.date).toISOString()
     : new Date().toISOString();
+  const envelopeFrom = extractAddress(input.envelopeFrom) || null;
+  const from = extractAddress(input.from) || envelopeFrom || '';
   return {
     messageId: (input.messageId ?? '').trim() || `synthetic-${receivedAt}`,
-    from: (input.from ?? '').trim(),
+    from,
+    envelopeFrom: envelopeFrom && envelopeFrom !== from ? envelopeFrom : null,
     subject: (input.subject ?? '').trim(),
     receivedAt,
     html: input.html ?? null,
     text: input.text ?? null,
     headers: input.headers ?? {},
   };
+}
+
+/**
+ * Pull the bare address out of a `From:` header value.
+ *
+ * Headers arrive as `Display Name <a@b.com>` as often as bare addresses, and a
+ * display name must never be matched against — "Fantasy Football Weekly" is not
+ * a sender.
+ */
+export function extractAddress(value: string | null | undefined): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  const angled = raw.match(/<([^>]+)>/);
+  return (angled ? angled[1]! : raw).trim().replace(/^mailto:/i, '');
+}
+
+/**
+ * Does this look like a per-message bounce (VERP) address?
+ *
+ * Bulk senders set an envelope sender that encodes the recipient and a token
+ * unique to each send — Substack's `bounce+93e88f.63af5d-you=your.domain@...`
+ * is the shape. Matching a subscription against one of those works exactly
+ * once and then silently stops, which looks identical to the newsletter having
+ * stopped arriving. Recognising the shape is how that is avoided.
+ */
+export function looksLikeBounceAddress(address: string | null | undefined): boolean {
+  const a = (address ?? '').toLowerCase();
+  if (!a.includes('@')) return false;
+  const local = a.slice(0, a.lastIndexOf('@'));
+  return (
+    /^(bounce|bounces|bounce-|msprvs|prvs|srs\d)/.test(local) ||
+    /^(return|reply|verp)[-+.]/.test(local) ||
+    (local.includes('+') && local.includes('='))
+  );
 }

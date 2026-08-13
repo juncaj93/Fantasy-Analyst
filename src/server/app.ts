@@ -14,7 +14,7 @@ import { importAdpSnapshot } from '../core/adp/import.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
-import { toEmailMessage } from '../core/newsletter/source.ts';
+import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../core/sleeper/scoring.ts';
 import { getPropsWithCache } from '../core/vegas/cache.ts';
@@ -195,6 +195,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       // Accept either a full address or a bare domain.
       if (!/^@?[^@\s]+(\.[^@\s]+)+$/.test(sender) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sender)) {
         return errorResponse('That does not look like an email address or domain.', 400);
+      }
+      // A bounce address carries a token unique to one send. Saving it would
+      // match a single issue and then silently stop, which is indistinguishable
+      // from the newsletter having stopped arriving.
+      if (looksLikeBounceAddress(sender)) {
+        return errorResponse(
+          'That is a bounce address — it changes with every issue, so it would only ever match one. ' +
+            'Use the domain instead (for example @substack.com), or wait for the next issue: it will be ' +
+            'listed as ignored and you can accept the real sender in one tap.',
+          400,
+        );
       }
       const subject = (body.subjectContains ?? '').trim();
       await new NewsletterService(ctx.env.db).setSources([

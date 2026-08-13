@@ -105,9 +105,16 @@ export default {
     try {
       const raw = await new Response(message.raw).text();
       const parsed = parseRawEmail(raw);
+      // `message.from` is the SMTP envelope sender. Bulk senders put a
+      // per-message bounce address there (Substack sends
+      // `bounce+<token>-you=your.domain@mg-dN.substack.com`), so a subscription
+      // matched against it would work once and then silently stop. The visible
+      // `From:` header is the stable identity; the envelope is kept alongside
+      // it for the record.
       const email = toEmailMessage({
         messageId: message.headers.get('message-id') ?? parsed.messageId,
-        from: message.from,
+        from: message.headers.get('from') ?? parsed.from ?? message.from,
+        envelopeFrom: message.from,
         subject: message.headers.get('subject') ?? parsed.subject,
         date: message.headers.get('date'),
         html: parsed.html,
@@ -130,6 +137,7 @@ export default {
 export function parseRawEmail(raw: string): {
   messageId: string | null;
   subject: string | null;
+  from: string | null;
   html: string | null;
   text: string | null;
 } {
@@ -165,7 +173,13 @@ export function parseRawEmail(raw: string): {
     text = body;
   }
 
-  return { messageId: header('message-id'), subject: header('subject'), html, text };
+  return {
+    messageId: header('message-id'),
+    subject: header('subject'),
+    from: header('from'),
+    html,
+    text,
+  };
 }
 
 function decodeBody(body: string, headers: string): string {

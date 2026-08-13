@@ -216,6 +216,31 @@ escaped through the reason string. Redaction runs by pattern over the free-text
 fields as well, which also covers wording added later. A test asserts no public
 payload carries the raw address.
 
+## Milestone 8 — the sender a bulk mailer actually uses (done)
+
+The first real subscription exposed a bug that would have looked like the
+newsletter simply never arriving. The app matched subscriptions against the
+**SMTP envelope sender**, and bulk senders put a per-message bounce address
+there:
+
+```
+bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com
+         ^^^^^^^^^^^^^ unique to one send
+```
+
+Saving that would have matched exactly one issue and then silently stopped —
+indistinguishable from the subscription breaking.
+
+- The worker now identifies a newsletter by its visible `From:` header, which
+  is stable, and records the envelope address alongside it.
+- A subscription matches against **either** address, so someone who copied the
+  bounce address out of the log is not silently left with nothing.
+- Saving an address that looks like a bounce (`bounce+`, `msprvs`, `prvs`, or a
+  `+`/`=` encoded local part) is refused with an explanation and a workable
+  alternative, rather than accepted and quietly useless.
+- `From:` values arrive as `Display Name <a@b.com>`; the display name is never
+  matched against.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and
@@ -231,6 +256,10 @@ payload carries the raw address.
 5. **Survival probability is a heuristic**, labelled as an estimate.
 6. **Rate limiting is per-isolate**, not distributed — fine for one user.
 7. **Draft polling is client-driven** via the Live toggle.
+8. **The browser suite shares one dev server across all three viewports.** Run
+   repeatedly against a reused server, accumulated review-queue state can make
+   `can reassign an item to the right player` fail; it passes on a fresh server,
+   which is what CI uses. Worth isolating per project if it ever fails in CI.
 
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed

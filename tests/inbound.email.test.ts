@@ -185,6 +185,64 @@ describe('inbound newsletter service', () => {
     expect(outcome.detail).toContain('no player news');
   });
 
+  /**
+   * Substack (and every other bulk sender) sets a per-message bounce address as
+   * the SMTP envelope sender. Matching a subscription against it works for
+   * exactly one issue and then silently stops.
+   */
+  it('identifies a newsletter by its visible From header, not the bounce envelope', async () => {
+    await service.setSources([
+      { id: 'ff', label: 'FF', fromPatterns: ['@substack.com'], subjectPatterns: [], enabled: true },
+    ]);
+
+    const issue = (token: string, id: string) =>
+      toEmailMessage({
+        messageId: id,
+        from: 'Fantasy Football Weekly <ffweekly@substack.com>',
+        envelopeFrom: `bounce+${token}-fantasy-news=juncaj.net@mg-d0.substack.com`,
+        subject: 'Week 1 Notes',
+        date: '2026-08-13T12:00:00.000Z',
+        html: CLEAN_NEWSLETTER,
+      });
+
+    // Two issues with different bounce tokens must both be accepted.
+    expect((await service.ingest(issue('93e88f.63af5d', 'issue-1'))).status).toBe('processed');
+    const second = await service.ingest(
+      toEmailMessage({
+        messageId: 'issue-2',
+        from: 'Fantasy Football Weekly <ffweekly@substack.com>',
+        envelopeFrom: 'bounce+ffffff.111111-fantasy-news=juncaj.net@mg-d1.substack.com',
+        subject: 'Week 2 Notes',
+        date: '2026-08-20T12:00:00.000Z',
+        html: CLEAN_NEWSLETTER.replace('Training Camp Notes', 'Week 2 Notes'),
+      }),
+    );
+    expect(second.status).not.toBe('quarantined');
+
+    // The address recorded is the stable one, so accepting it stays valid.
+    const logged = await messages.seen('issue-1');
+    expect(logged?.fromAddress).toBe('ffweekly@substack.com');
+  });
+
+  it('still accepts a subscription matched against the envelope address', async () => {
+    // A user who copied the bounce address out of the log should not silently
+    // get nothing.
+    await service.setSources([
+      { id: 'ff', label: 'FF', fromPatterns: ['@mg-d0.substack.com'], subjectPatterns: [], enabled: true },
+    ]);
+    const outcome = await service.ingest(
+      toEmailMessage({
+        messageId: 'envelope-match',
+        from: 'Fantasy Football Weekly <ffweekly@example-news.com>',
+        envelopeFrom: 'bounce+abc.def-fantasy-news=juncaj.net@mg-d0.substack.com',
+        subject: 'Week 1 Notes',
+        date: '2026-08-13T12:00:00.000Z',
+        html: CLEAN_NEWSLETTER,
+      }),
+    );
+    expect(outcome.status).toBe('processed');
+  });
+
   it('reports the sender as configured only once the user saves one', async () => {
     const fresh = new NewsletterService(await createTestDb());
     expect(await fresh.isSenderConfigured()).toBe(false);

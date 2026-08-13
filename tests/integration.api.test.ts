@@ -223,6 +223,21 @@ describe('API with seeded data', () => {
     }
   });
 
+  it('refuses a bounce address as the expected sender, and says why', async () => {
+    const res = await app(
+      post(
+        '/api/setup/newsletter',
+        { senderEmail: 'bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com' },
+        cookie,
+      ),
+      env,
+    );
+    expect(res.status).toBe(400);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain('changes with every issue');
+    expect(error).toContain('@substack.com');
+  });
+
   it('masks sender addresses for the public and shows them once unlocked', async () => {
     await json(
       post(

@@ -238,6 +238,14 @@ Tap **Newsletter**.
    If you would rather type it yourself, the sender box takes a full address
    like `newsletter@theirsite.com` or just a domain like `@theirsite.com`.
 
+   **Do not use a bounce address.** Substack and similar services send from an
+   address like
+   `bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com`, where the
+   middle part changes with every issue — it would match once and then never
+   again. The app refuses those and tells you what to use instead. A domain
+   like `@substack.com` works, and the one-tap button above always offers the
+   right address.
+
 That is it. Every future issue is read automatically. You never forward
 anything, and the app never touches your personal inbox.
 
