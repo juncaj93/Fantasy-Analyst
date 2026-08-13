@@ -15,6 +15,7 @@ import {
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
+import { UnlockCard } from '../App.tsx';
 
 type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | null;
 
@@ -23,9 +24,15 @@ const STATE_ICON: Record<string, string> = { ok: '✅', warn: '⚠️', todo: '�
 export function SetupScreen({
   leagues,
   onChanged,
+  unlocked,
+  canUnlock,
+  onUnlocked,
 }: {
   leagues: LeagueSummary[];
   onChanged: () => void;
+  unlocked: boolean;
+  canUnlock: boolean;
+  onUnlocked: () => void;
 }) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [open, setOpen] = useState<Panel>(null);
@@ -63,6 +70,14 @@ export function SetupScreen({
       </div>
 
       {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {unlocked ? null : canUnlock ? (
+        <UnlockCard onUnlocked={onUnlocked} />
+      ) : (
+        <Notice>
+          This site is view-only: no passphrase has been set up, so settings cannot be changed here.
+        </Notice>
+      )}
 
       {status.steps.map((step) => (
         <button

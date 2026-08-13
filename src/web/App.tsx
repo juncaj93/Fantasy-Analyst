@@ -1,8 +1,13 @@
-/** App shell: auth gate, bottom tab navigation, shared overview state. */
+/**
+ * App shell: bottom tab navigation and shared overview state.
+ *
+ * There is no login wall — reading is public. Only changing settings needs the
+ * passphrase, and that prompt lives inside Setup.
+ */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, api, type LeagueSummary, type Overview } from './api.ts';
-import { Loading, Notice, formatAge } from './components/common.tsx';
+import { api, type LeagueSummary, type Overview } from './api.ts';
+import { Loading, Notice } from './components/common.tsx';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
@@ -20,7 +25,10 @@ const TABS: { id: Tab; label: string; glyph: string }[] = [
 ];
 
 export function App() {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  /** Whether changes are allowed. Reading never requires this. */
+  const [unlocked, setUnlocked] = useState(false);
+  const [canUnlock, setCanUnlock] = useState(true);
+  const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<Tab>('draft');
   /** First load only: land on Setup when there is nothing to show yet. */
   const [, setLanded] = useState(false);
@@ -42,28 +50,28 @@ export function App() {
         return true;
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) setAuthenticated(false);
-      else setError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const checkLock = useCallback(async () => {
+    try {
+      const status = await api.get<{ unlocked: boolean; canUnlock: boolean }>('/api/auth/status');
+      setUnlocked(status.unlocked);
+      setCanUnlock(status.canUnlock);
+    } catch {
+      setUnlocked(false);
+    } finally {
+      setReady(true);
     }
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const status = await api.get<{ authenticated: boolean }>('/api/auth/status');
-        setAuthenticated(status.authenticated);
-      } catch {
-        setAuthenticated(false);
-      }
-    })();
-  }, []);
+    void checkLock();
+    void refresh();
+  }, [checkLock, refresh]);
 
-  useEffect(() => {
-    if (authenticated) void refresh();
-  }, [authenticated, refresh]);
-
-  if (authenticated === null) return <Loading what="session" />;
-  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+  if (!ready) return <Loading what="Fantasy Analyst" />;
 
   return (
     <div className="app">
@@ -72,7 +80,7 @@ export function App() {
           <h1>Fantasy Analyst</h1>
           <span className="header-meta">
             {overview?.selectedLeague?.name ?? 'no league'}
-            {overview?.vegas ? ` · vegas ${formatAge(overview.vegas.fetchedAt)}` : ''}
+            {unlocked ? '' : ' · view only'}
           </span>
         </div>
       </header>
@@ -83,7 +91,18 @@ export function App() {
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'players' ? <PlayersScreen /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
-        {tab === 'setup' ? <SetupScreen leagues={leagues} onChanged={() => void refresh()} /> : null}
+        {tab === 'setup' ? (
+          <SetupScreen
+            leagues={leagues}
+            onChanged={() => void refresh()}
+            unlocked={unlocked}
+            canUnlock={canUnlock}
+            onUnlocked={() => {
+              setUnlocked(true);
+              void refresh();
+            }}
+          />
+        ) : null}
       </main>
 
       <nav className="tabbar" aria-label="Main navigation">
@@ -112,7 +131,8 @@ export function App() {
   );
 }
 
-function Login({ onSuccess }: { onSuccess: () => void }) {
+/** Inline unlock, shown in Setup. Nothing is hidden behind it — only changes. */
+export function UnlockCard({ onUnlocked }: { onUnlocked: () => void }) {
   const [passphrase, setPassphrase] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -123,7 +143,8 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
     setError(null);
     try {
       await api.post('/api/auth/login', { passphrase });
-      onSuccess();
+      setPassphrase('');
+      onUnlocked();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -132,8 +153,14 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="login-wrap">
-      <h1 style={{ fontSize: '1.1rem', marginBottom: 12 }}>Fantasy Analyst</h1>
+    <div className="card" data-testid="unlock-card">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Unlock to make changes
+      </div>
+      <div className="faint" style={{ marginBottom: 8 }}>
+        Anyone can look at this page. Changing settings needs your passphrase — that stops a
+        stranger from editing your data. You only need to do this once on this phone.
+      </div>
       <form onSubmit={submit}>
         <div className="field">
           <label htmlFor="passphrase">Passphrase</label>

@@ -1,14 +1,34 @@
 # Setting up Fantasy Analyst
 
-There are two parts, and they are very different in feel:
+**Deployment is automated.** Pushing to `main` builds, tests, migrates the
+database and deploys to Cloudflare via GitHub Actions
+(`.github/workflows/deploy.yml`). Nobody needs to run commands by hand.
 
-- **Part A — one-time technical setup.** Done once, on a computer, mostly by
-  copy-pasting commands. About 30–45 minutes including the email address.
-- **Part B — normal setup, inside the app.** Done on your iPhone, no commands,
-  no jargon. This is where you connect Sleeper, pick your league, import
-  rankings and point your newsletter at the app.
+Two repository secrets make that work (GitHub → Settings → Secrets and
+variables → Actions):
 
-If someone else does Part A for you, you only ever need Part B.
+| Secret | What it is |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | lets the deploy talk to your Cloudflare account |
+| `APP_PASSPHRASE` | the passphrase for making changes in the app |
+
+Optionally `CLOUDFLARE_ACCOUNT_ID`, only if your token can see more than one
+Cloudflare account.
+
+## Who can see what
+
+The site is public: anyone with the address can look at your rosters, rankings,
+tallies and recommendations. That is deliberate — it keeps setup simple and
+none of it is sensitive.
+
+Changing anything is not public. Every action that writes — connecting Sleeper,
+importing rankings, reviewing news, editing settings — needs the passphrase.
+Without it, a stranger who found the address could poison your player tallies or
+wipe your rankings, which is a security problem rather than a privacy one.
+
+The rest of this page covers the manual parts: Part A is the one-time technical
+setup (only needed if you ever deploy by hand instead of via GitHub), and Part B
+is the normal in-app setup on your phone.
 
 ---
 

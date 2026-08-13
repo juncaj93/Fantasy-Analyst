@@ -1,12 +1,17 @@
 /**
- * Passphrase auth for a single-user private tool.
+ * Auth for a personal tool whose DATA is public but whose CONTROLS are not.
  *
- * - The passphrase and signing secret are worker secrets; neither reaches the
- *   browser.
- * - The session cookie is an HMAC-signed expiry stamp (no server-side session
- *   store needed on D1).
+ * The distinction that matters here is privacy vs security. Fantasy data —
+ * rosters, rankings, tallies, recommendations — is fine to read publicly, so
+ * reads need no login at all and the app opens instantly on a phone.
+ *
+ * Anything that CHANGES state still needs the passphrase, not for privacy but
+ * because an open write endpoint would let a stranger poison the evidence
+ * ledger, wipe your rankings, or trigger repeated multi-megabyte syncs.
+ *
+ * - The passphrase is a worker secret and never reaches the browser.
+ * - The session cookie is an HMAC-signed expiry stamp (no session store).
  * - Comparisons are constant-time.
- * - Every /api route except login/health requires a valid session.
  */
 
 const COOKIE_NAME = 'fa_session';
@@ -24,6 +29,20 @@ export interface AuthEnv {
 }
 
 const encoder = new TextEncoder();
+
+/**
+ * The key used to sign session cookies.
+ *
+ * `SESSION_SECRET` is used when present. Otherwise one is derived from the
+ * passphrase, so a deployment needs exactly one secret instead of two, and
+ * sessions still survive redeploys (a randomly generated key would not).
+ * The derived value is never the passphrase itself.
+ */
+export async function resolveSessionSecret(env: AuthEnv): Promise<string | null> {
+  if (env.SESSION_SECRET) return env.SESSION_SECRET;
+  if (!env.APP_PASSPHRASE) return null;
+  return hmac(env.APP_PASSPHRASE, 'fantasy-analyst/session-key/v1');
+}
 
 async function hmac(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -51,8 +70,8 @@ export function timingSafeEqual(a: string, b: string): boolean {
 }
 
 export async function createSessionCookie(env: AuthEnv, now = Date.now()): Promise<string> {
-  const secret = env.SESSION_SECRET;
-  if (!secret) throw new Error('SESSION_SECRET is not configured');
+  const secret = await resolveSessionSecret(env);
+  if (!secret) throw new Error('no passphrase configured');
   const expiry = Math.floor(now / 1000) + SESSION_TTL_SECONDS;
   const payload = String(expiry);
   const signature = await hmac(secret, payload);
@@ -66,7 +85,7 @@ export function clearSessionCookie(): string {
 }
 
 export async function verifySession(request: Request, env: AuthEnv, now = Date.now()): Promise<boolean> {
-  const secret = env.SESSION_SECRET;
+  const secret = await resolveSessionSecret(env);
   if (!secret) return false;
   const cookie = request.headers.get('cookie') ?? '';
   const match = cookie.split(/;\s*/).find((c) => c.startsWith(`${COOKIE_NAME}=`));
@@ -87,8 +106,17 @@ export function checkPassphrase(env: AuthEnv, submitted: string): boolean {
   return timingSafeEqual(expected, submitted ?? '');
 }
 
-/** Routes that do not require a session. */
-export const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status']);
+/** Routes that never require a session, whatever the method. */
+export const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/logout']);
+
+/**
+ * Does this request change anything?
+ *
+ * Reads are public. Everything else needs an unlocked session.
+ */
+export function isWrite(method: string): boolean {
+  return method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD';
+}
 
 /**
  * Simple in-memory rate limiter for login attempts and manual refreshes.

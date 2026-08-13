@@ -8,6 +8,14 @@ and start/sit recommendations.
 No paid AI is used at runtime. Every recommendation is a sum of separate,
 inspectable components — never one opaque score.
 
+## Deployment
+
+Push to `main` → GitHub Actions tests, migrates and deploys to Cloudflare
+Workers, then verifies the live site. See `.github/workflows/deploy.yml`.
+
+Reads are public; every write requires the passphrase. See
+[docs/SETUP.md](docs/SETUP.md).
+
 ## Quick start
 
 ```bash

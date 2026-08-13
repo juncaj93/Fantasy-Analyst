@@ -3,6 +3,10 @@ main = "src/worker/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Publish to https://fantasy-analyst.<your-subdomain>.workers.dev.
+# No custom domain needed; one can be added later without changing anything else.
+workers_dev = true
+
 # Static SPA build output. `npm run build` produces dist/web.
 [assets]
 directory = "./dist/web"

@@ -26,6 +26,7 @@ import {
   checkPassphrase,
   clearSessionCookie,
   createSessionCookie,
+  isWrite,
   verifySession,
   type AuthEnv,
 } from './http/auth.ts';
@@ -62,20 +63,42 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   const loginLimiter = new RateLimiter(8, 5 * 60_000);
   const refreshLimiter = new RateLimiter(4, 15 * 60_000);
 
+  /**
+   * Reads are public; writes need an unlocked session.
+   *
+   * A deployment with no passphrase configured is read-only rather than wide
+   * open — failing closed here is what stops an unconfigured public URL from
+   * being editable by anyone who finds it.
+   */
   router.use(async (ctx) => {
     if (ctx.env.disableAuth) return null;
     if (!ctx.url.pathname.startsWith('/api/')) return null;
     if (PUBLIC_PATHS.has(ctx.url.pathname)) return null;
+    if (!isWrite(ctx.request.method)) return null;
+
+    if (!ctx.env.APP_PASSPHRASE && !ctx.env.SESSION_SECRET) {
+      return errorResponse(
+        'This site is read-only: no passphrase has been set up for making changes.',
+        503,
+      );
+    }
     const ok = await verifySession(ctx.request, ctx.env);
-    return ok ? null : errorResponse('unauthorized', 401);
+    return ok ? null : errorResponse('Unlock in Setup to make changes.', 401);
   });
 
   // ------------------------------------------------------------- health/auth
   router.get('/api/health', () => jsonResponse({ ok: true, service: 'fantasy-analyst' }));
 
   router.get('/api/auth/status', async (ctx) => {
-    const authenticated = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
-    return jsonResponse({ authenticated, authDisabled: !!ctx.env.disableAuth });
+    const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
+    const canUnlock = !!ctx.env.APP_PASSPHRASE || !!ctx.env.SESSION_SECRET;
+    return jsonResponse({
+      // Reads never need a session; this only says whether changes are allowed.
+      unlocked,
+      canUnlock,
+      readOnly: !unlocked,
+      authDisabled: !!ctx.env.disableAuth,
+    });
   });
 
   router.post('/api/auth/login', async (ctx) => {
@@ -84,9 +107,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!limit.allowed) return errorResponse(`too many attempts; retry in ${limit.retryAfterSeconds}s`, 429);
 
     const body = await ctx.json<{ passphrase?: string }>();
-    if (!body?.passphrase) return errorResponse('passphrase required', 400);
-    if (!ctx.env.APP_PASSPHRASE) return errorResponse('server auth is not configured', 500);
-    if (!checkPassphrase(ctx.env, body.passphrase)) return errorResponse('invalid passphrase', 401);
+    if (!body?.passphrase) return errorResponse('Enter your passphrase.', 400);
+    if (!ctx.env.APP_PASSPHRASE) {
+      return errorResponse('No passphrase has been set up for this site.', 503);
+    }
+    if (!checkPassphrase(ctx.env, body.passphrase)) return errorResponse('That passphrase is not right.', 401);
     const cookie = await createSessionCookie(ctx.env);
     return jsonResponse({ ok: true }, 200, { 'set-cookie': cookie });
   });

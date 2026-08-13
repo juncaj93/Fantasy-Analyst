@@ -187,8 +187,20 @@ describe('setup API', () => {
     cookie = res.headers.get('set-cookie')!.split(';')[0]!;
   });
 
-  it('requires a session', async () => {
+  it('lets anyone read the setup status', async () => {
     const res = await app(new Request('https://app.test/api/setup/status'), env);
+    expect(res.status).toBe(200);
+  });
+
+  it('requires an unlocked session to change configuration', async () => {
+    const res = await app(
+      new Request('https://app.test/api/setup/newsletter', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ senderEmail: 'news@theirsite.com' }),
+      }),
+      env,
+    );
     expect(res.status).toBe(401);
   });
 

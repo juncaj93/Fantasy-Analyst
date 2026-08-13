@@ -1,0 +1,188 @@
+name: Deploy
+
+# Deploys Fantasy Analyst to Cloudflare Workers.
+#
+# This exists because deployment should not require anyone to open a terminal.
+# It does the whole job: creates the D1 database on first run, applies
+# migrations, stores the passphrase as a Worker secret, deploys, and prints the
+# live URL in the run summary.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN  - lets this workflow talk to your Cloudflare account
+#   APP_PASSPHRASE        - the passphrase for making changes in the app
+#
+# Re-running is safe: every step is idempotent.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Only needed if the token can see more than one Cloudflare account.
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Check the required secrets exist
+        run: |
+          missing=0
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          if [ -z "${{ secrets.APP_PASSPHRASE }}" ]; then
+            echo "::error::APP_PASSPHRASE is not set. Add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          exit $missing
+
+      - run: npm ci
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Find or create the database
+        id: d1
+        run: |
+          set -euo pipefail
+          # `d1 list` needs no confirmation and is safe to run repeatedly.
+          # Tolerate wrangler printing a banner before the JSON.
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then
+            echo "No database called $DATABASE_NAME yet — creating it."
+            npx wrangler d1 create "$DATABASE_NAME" > /tmp/created.txt 2>&1 || {
+              cat /tmp/created.txt; exit 1;
+            }
+            id=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/created.txt | head -1)
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::Could not determine the database id."
+            exit 1
+          fi
+          echo "database_id=$id" >> "$GITHUB_OUTPUT"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      - name: Point the config at that database
+        run: |
+          set -euo pipefail
+          # The id is account-specific, not a secret, but it is injected at build
+          # time so the repository stays deployable by anyone.
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            const id = process.argv[1];
+            const next = fs.readFileSync(file, 'utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + id + '\"');
+            fs.writeFileSync(file, next);
+          " "${{ steps.d1.outputs.database_id }}"
+          grep 'database_id' wrangler.toml
+
+      - name: Create the database tables
+        run: npx wrangler d1 migrations apply "$DATABASE_NAME" --remote
+
+      - name: Build the site
+        run: npm run build
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -uo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            if grep -qi 'subdomain' /tmp/deploy.log; then
+              echo "::error::This Cloudflare account has no workers.dev subdomain yet. Register one at Cloudflare dashboard -> Workers & Pages -> Subdomain, then re-run this workflow."
+            fi
+            exit "$status"
+          fi
+          url=$(grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Store the passphrase used for making changes
+        run: |
+          # Piped in, never echoed. Overwrites cleanly on every run.
+          printf '%s' "${{ secrets.APP_PASSPHRASE }}" | npx wrangler secret put APP_PASSPHRASE
+
+      - name: Check the deployed site actually works
+        id: verify
+        run: |
+          set -euo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "::warning::Could not read the site address from the deploy output; skipping checks."
+            exit 0
+          fi
+          echo "Checking $url"
+
+          # A fresh deployment takes a few seconds to become reachable, and the
+          # passphrase secret propagates as its own version right after.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' "$url/api/health" || true)
+            [ "$code" = "200" ] && break
+            echo "  waiting for the site to come up (attempt $attempt, got $code)"
+            sleep 10
+          done
+
+          fail=0
+          echo "health: $code $(cat /tmp/health.json 2>/dev/null)"
+          [ "$code" = "200" ] || fail=1
+
+          code=$(curl -s -o /tmp/overview.json -w '%{http_code}' "$url/api/overview")
+          echo "overview (database read): $code"
+          [ "$code" = "200" ] || fail=1
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$url/")
+          echo "home page: $code"
+          [ "$code" = "200" ] || fail=1
+
+          # A write with no session must be refused, or the site would be
+          # editable by anyone who found the address. 503 means the passphrase
+          # has not propagated yet, which is still closed, so retry briefly.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/sleeper/sync-players")
+            [ "$code" = "401" ] && break
+            echo "  waiting for the passphrase to take effect (attempt $attempt, got $code)"
+            sleep 10
+          done
+          echo "unauthenticated write: $code (expected 401 = refused)"
+          [ "$code" = "401" ] || fail=1
+
+          exit $fail
+
+      - name: Write the summary
+        if: always()
+        run: |
+          {
+            echo "## Fantasy Analyst"
+            echo
+            if [ -n "${{ steps.deploy.outputs.url }}" ]; then
+              echo "**Live at:** ${{ steps.deploy.outputs.url }}"
+            else
+              echo "Deployment did not produce a URL — check the Deploy step above."
+            fi
+            echo
+            echo "Database: \`${{ env.DATABASE_NAME }}\` (\`${{ steps.d1.outputs.database_id }}\`)"
+          } >> "$GITHUB_STEP_SUMMARY"

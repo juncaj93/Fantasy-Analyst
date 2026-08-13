@@ -55,9 +55,25 @@ describe('auth', () => {
     expect((await app(get('/api/health'), env)).status).toBe(200);
   });
 
-  it('rejects protected routes without a session', async () => {
-    const res = await app(get('/api/overview'), env);
-    expect(res.status).toBe(401);
+  it('allows reads without a session — fantasy data is public', async () => {
+    expect((await app(get('/api/overview'), env)).status).toBe(200);
+    expect((await app(get('/api/players'), env)).status).toBe(200);
+    expect((await app(get('/api/review/queue'), env)).status).toBe(200);
+  });
+
+  it('rejects writes without a session', async () => {
+    for (const path of ['/api/sleeper/sync-players', '/api/adp/import', '/api/newsletter/ingest']) {
+      const res = await app(post(path, {}), env);
+      expect(res.status, path).toBe(401);
+      expect(((await res.json()) as { error: string }).error).toContain('Unlock in Setup');
+    }
+  });
+
+  it('accepts writes once unlocked', async () => {
+    const cookie = await login(env, app);
+    // 400 (bad input) proves it got past the lock; 401 would mean it did not.
+    const res = await app(post('/api/adp/import', {}, cookie), env);
+    expect(res.status).toBe(400);
   });
 
   it('rejects a wrong passphrase', async () => {
@@ -79,15 +95,36 @@ describe('auth', () => {
     expect((await app(get('/api/overview', cookie), env)).status).toBe(200);
   });
 
-  it('rejects a tampered session cookie', async () => {
+  it('rejects a tampered session cookie on writes', async () => {
     const cookie = await login(env, app);
     const tampered = `${cookie.split('.')[0]}.deadbeef`;
-    expect((await app(get('/api/overview', tampered), env)).status).toBe(401);
+    expect((await app(post('/api/sleeper/sync-players', {}, tampered), env)).status).toBe(401);
   });
 
-  it('fails closed when the server has no passphrase configured', async () => {
-    const res = await app(post('/api/auth/login', { passphrase: 'x' }), makeEnv(db, { APP_PASSPHRASE: undefined }));
-    expect(res.status).toBe(500);
+  it('is read-only, not wide open, when no passphrase is configured', async () => {
+    const open = makeEnv(db, { APP_PASSPHRASE: undefined, SESSION_SECRET: undefined });
+    // Reads still work...
+    expect((await app(get('/api/overview'), open)).status).toBe(200);
+    // ...but nothing can be changed by a stranger who finds the URL.
+    const write = await app(post('/api/sleeper/sync-players', {}), open);
+    expect(write.status).toBe(503);
+    expect(((await write.json()) as { error: string }).error).toContain('read-only');
+    expect((await app(post('/api/auth/login', { passphrase: 'x' }), open)).status).toBe(503);
+  });
+
+  it('derives a session key from the passphrase when none is supplied', async () => {
+    const derived = makeEnv(db, { SESSION_SECRET: undefined });
+    const cookie = await login(derived, app);
+    expect((await app(post('/api/adp/import', {}, cookie), derived)).status).toBe(400);
+  });
+
+  it('reports lock state without requiring a session', async () => {
+    const body = (await (await app(get('/api/auth/status'), env)).json()) as {
+      unlocked: boolean;
+      canUnlock: boolean;
+    };
+    expect(body.unlocked).toBe(false);
+    expect(body.canUnlock).toBe(true);
   });
 
   it('never exposes secrets in a response body', async () => {
