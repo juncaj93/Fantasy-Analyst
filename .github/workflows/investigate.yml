@@ -140,6 +140,34 @@ jobs:
               }
             })"
 
+      - name: Underdog — is there a fetchable ADP source?
+        run: |
+          set -uo pipefail
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+
+          probe() {
+            code=$(curl -s -o /tmp/probe.body -w '%{http_code}' -H "user-agent: $UA" -H 'accept: application/json' --max-time 20 "$1" || echo 000)
+            size=$(wc -c < /tmp/probe.body 2>/dev/null || echo 0)
+            echo "  $code  ${size}b  $1"
+            if [ "$code" = "200" ] && [ "$size" -gt 2 ]; then
+              echo "    head: $(head -c 300 /tmp/probe.body | tr '\n' ' ')"
+            fi
+          }
+
+          echo "=== candidate Underdog endpoints ==="
+          probe "https://api.underdogfantasy.com/v1/rankings"
+          probe "https://api.underdogfantasy.com/beta/v3/rankings"
+          probe "https://api.underdogfantasy.com/v2/adp"
+          probe "https://api.underdogfantasy.com/v1/slates"
+          probe "https://underdogfantasy.com/api/rankings"
+          probe "https://underdogfantasy.com/adp/nfl"
+
+          echo
+          echo "=== open ADP mirrors (used only if Underdog has no direct feed) ==="
+          probe "https://api.sleeper.app/v1/players/nfl/trending/add?limit=5"
+          probe "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_fpecr_latest.csv"
+          probe "https://api.fantasypros.com/v2/json/nfl/2026/consensus-rankings"
+
       - name: The Odds API — free tier and NFL player prop markets
         run: |
           set -uo pipefail
