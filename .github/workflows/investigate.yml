@@ -200,17 +200,6 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
-      - name: Sleeper GraphQL — what can it actually be asked?
-        run: |
-          set -uo pipefail
-          # Probe against the real draft: an endpoint that needs a draft id
-          # returns 404 for a made-up one and teaches you nothing.
-          draft=$(curl -s https://fantasy-analyst.juncaj93.workers.dev/api/setup/status | node -e "
-            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-              try { console.log(JSON.parse(s).league?.draftId ?? ''); } catch { console.log(''); }
-            })")
-          DRAFT_ID="$draft" node scripts/probe-sleeper-graphql.mjs
-
       - name: beatadp.com — can we ask for this league's format, and is the tail sane?
         run: node scripts/probe-beatadp.mjs
 

@@ -1,0 +1,44 @@
+name: Probe
+
+# Run a single probe script and print nothing else.
+#
+# The Investigate workflow answers many questions at once, which makes its log
+# long and awkward to read when only one answer is wanted. This runs exactly one
+# script, so the log is the answer.
+#
+# Read-only, like every probe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: 'Script in scripts/ to run'
+        required: true
+        default: 'probe-sleeper-graphql.mjs'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run it
+        env:
+          SCRIPT: ${{ inputs.script }}
+        run: |
+          set -uo pipefail
+          case "$SCRIPT" in
+            probe-*.mjs) ;;
+            *) echo "::error::only probe-*.mjs scripts may be run here"; exit 1 ;;
+          esac
+          # Probes that need to know which draft to ask about get it from the
+          # live app rather than a hardcoded id.
+          DRAFT_ID=$(curl -s https://fantasy-analyst.juncaj93.workers.dev/api/setup/status | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              try { console.log(JSON.parse(s).league?.draftId ?? ''); } catch { console.log(''); }
+            })")
+          export DRAFT_ID
+          node "scripts/$SCRIPT"
