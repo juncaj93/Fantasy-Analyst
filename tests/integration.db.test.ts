@@ -233,6 +233,44 @@ describe('AdpRepo', () => {
     expect(await repo.list()).toHaveLength(1);
   });
 
+  /**
+   * Re-importing the same file is a no-op for the data but not for the
+   * matching: between imports the matcher may have learned a name. "Cameron
+   * Ward" against Sleeper's "Cam Ward" is the case that prompted this.
+   */
+  it('re-resolves rows that found nothing once the matcher can place them', async () => {
+    const players = new PlayerRepo(db);
+    const repo = new AdpRepo(db);
+    const file = `${CSV}Ghost Player Two,WR,SEA,101\n`;
+
+    const { snapshot } = await repo.save(importAdpSnapshot(file, await players.buildIndex()));
+    expect(await repo.unresolvedRows(snapshot.id)).toHaveLength(2);
+
+    // Teach the index one of the two names.
+    await players.upsertMany([
+      player({ id: 'ghost', fullName: 'Ghost Player', team: 'SEA', position: 'WR' }),
+    ]);
+    const again = importAdpSnapshot(file, await players.buildIndex());
+    const second = await repo.save(again);
+    expect(second.created).toBe(false);
+    expect(await repo.reconcile(second.snapshot.id, again)).toBe(1);
+
+    const left = await repo.unresolvedRows(snapshot.id);
+    expect(left.map((r) => r.sourcePlayerName)).toEqual(['Ghost Player Two']);
+    expect((await repo.valuesByPlayer(snapshot.id)).get('ghost')?.adp).toBe(99);
+  });
+
+  it('never overwrites a row the user resolved by hand', async () => {
+    const players = new PlayerRepo(db);
+    const repo = new AdpRepo(db);
+    const result = importAdpSnapshot(CSV, await players.buildIndex());
+    const { snapshot } = await repo.save(result);
+    const [row] = await repo.unresolvedRows(snapshot.id);
+    await repo.resolveRow(row!.id, '11');
+    expect(await repo.reconcile(snapshot.id, result)).toBe(0);
+    expect((await repo.valuesByPlayer(snapshot.id)).get('11')?.adp).toBe(99);
+  });
+
   it('creates a separate snapshot for different content', async () => {
     const index = await new PlayerRepo(db).buildIndex();
     const repo = new AdpRepo(db);

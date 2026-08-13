@@ -153,6 +153,65 @@ export class AdpRepo {
     }));
   }
 
+  /**
+   * Re-resolve the rows of an existing snapshot that never found a player.
+   *
+   * Importing the same file twice is otherwise a no-op, which is right for the
+   * data but wrong for the matching: between the two imports the matcher may
+   * have learned something — a new alias, a name form it now understands — and
+   * a row that found nothing should get the benefit of it without waiting for
+   * the source file to change.
+   *
+   * Only rows still holding no player are touched, so a resolution the user
+   * made by hand is never overwritten.
+   */
+  async reconcile(snapshotId: number, result: AdpImportResult): Promise<number> {
+    const pending = await this.db
+      .prepare('SELECT id, source_player_name FROM adp_rows WHERE snapshot_id = ? AND player_id IS NULL')
+      .bind(snapshotId)
+      .all<Record<string, unknown>>();
+    if (pending.results.length === 0) return 0;
+
+    const nowMatched = new Map<string, { playerId: string; method: string | null; reason: string }>();
+    for (const row of result.rows) {
+      if (row.playerId) {
+        nowMatched.set(row.sourceName, {
+          playerId: row.playerId,
+          method: row.match.method,
+          reason: row.match.reason,
+        });
+      }
+    }
+
+    const updates = pending.results
+      .map((r) => ({ id: Number(r['id']), hit: nowMatched.get(String(r['source_player_name'] ?? '')) }))
+      .filter((u): u is { id: number; hit: { playerId: string; method: string | null; reason: string } } => !!u.hit);
+    if (updates.length === 0) return 0;
+
+    for (const batch of chunk(updates, 100)) {
+      await this.db.batch(
+        batch.map((u) =>
+          this.db
+            .prepare(
+              "UPDATE adp_rows SET player_id = ?, match_status = 'matched', match_method = ?, match_reason = ? WHERE id = ?",
+            )
+            .bind(u.hit.playerId, u.hit.method, u.hit.reason, u.id),
+        ),
+      );
+    }
+
+    await this.db
+      .prepare(
+        `UPDATE adp_snapshots
+            SET matched_count = matched_count + ?, unmatched_count = MAX(0, unmatched_count - ?)
+          WHERE id = ?`,
+      )
+      .bind(updates.length, updates.length, snapshotId)
+      .run();
+
+    return updates.length;
+  }
+
   /** Attach a canonical player to a previously unresolved row (user action). */
   async resolveRow(rowId: number, playerId: string): Promise<void> {
     await this.db

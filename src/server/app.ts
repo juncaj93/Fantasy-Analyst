@@ -416,10 +416,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (result.rows.length === 0) {
       return errorResponse('no usable rows found — expected columns for player name and ADP or rank', 400);
     }
-    const { snapshot, created } = await new AdpRepo(ctx.env.db).save(result);
+    const repo = new AdpRepo(ctx.env.db);
+    const { snapshot, created } = await repo.save(result);
+    // The same file imported twice is normally a no-op, but the matcher may
+    // have learned a name since — so give the rows that found nothing another
+    // go rather than make the user wait for the source file to change.
+    const reconciled = created ? 0 : await repo.reconcile(snapshot.id, result);
     return jsonResponse({
       snapshot,
       created,
+      reconciled,
       matched: result.matchedCount,
       ambiguous: result.ambiguousCount,
       unmatched: result.unmatchedCount,
