@@ -110,6 +110,28 @@ export class EvidenceRepo {
     return { inserted, skipped: items.length - inserted };
   }
 
+  /**
+   * Look up stored evidence by dedupe key.
+   *
+   * Used to work out what a reprocess would actually change before it changes
+   * anything. Keys absent from the result are items that do not exist yet.
+   */
+  async listByDedupeKeys(keys: string[]): Promise<Map<string, EvidenceItem>> {
+    const unique = [...new Set(keys)].filter(Boolean);
+    if (unique.length === 0) return new Map();
+    const found = new Map<string, EvidenceItem>();
+    // Chunked so a large newsletter cannot exceed the bound-parameter limit.
+    for (const batch of chunk(unique, 100)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(`SELECT * FROM evidence_items WHERE dedupe_key IN (${placeholders})`)
+        .bind(...batch)
+        .all<EvidenceRow>();
+      for (const row of rows.results) found.set(row.dedupe_key, toItem(row));
+    }
+    return found;
+  }
+
   async countAll(): Promise<number> {
     const row = await this.db.prepare('SELECT COUNT(*) AS n FROM evidence_items').first<{ n: number }>();
     return Number(row?.n ?? 0);

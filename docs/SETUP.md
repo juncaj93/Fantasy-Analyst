@@ -243,6 +243,10 @@ Below that you can see:
 - how many items are waiting for you in **Review**
 - what the parser understood in each issue, and which sentences it could not
   interpret
+- **Re-read this email** — after the rules improve, this shows exactly what
+  would change before anything does: how many new items would be added and how
+  each player's tally would move. Nothing changes until you tap the button. Any
+  item you corrected yourself is never overwritten.
 
 ## B5. Vegas
 

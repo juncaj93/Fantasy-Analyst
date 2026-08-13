@@ -24,6 +24,13 @@ export interface MessageRecord {
   /** Plain-language outcome shown in Settings. */
   detail: string | null;
   coverage: Record<string, unknown> | null;
+  /**
+   * The email itself, kept only for processed messages so improved rules can be
+   * re-run against issues already in the ledger. Never retained for
+   * quarantined mail.
+   */
+  bodyHtml?: string | null;
+  bodyText?: string | null;
 }
 
 export interface IdentityReviewRecord {
@@ -63,8 +70,9 @@ export class NewsletterRepo {
         `INSERT INTO newsletter_messages (
            message_id, source_id, from_address, subject, received_at, fingerprint,
            evidence_count, pending_count, auto_applied_count, identity_review_count,
-           coverage_json, reject_reason, detail, processed_at, status
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           coverage_json, reject_reason, detail, processed_at, status,
+           body_html, body_text
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(message_id) DO UPDATE SET
            evidence_count = excluded.evidence_count,
            pending_count = excluded.pending_count,
@@ -74,7 +82,9 @@ export class NewsletterRepo {
            reject_reason = excluded.reject_reason,
            detail = excluded.detail,
            processed_at = excluded.processed_at,
-           status = excluded.status`,
+           status = excluded.status,
+           body_html = excluded.body_html,
+           body_text = excluded.body_text`,
       )
       .bind(
         record.messageId,
@@ -92,6 +102,8 @@ export class NewsletterRepo {
         record.detail,
         record.processedAt,
         record.status,
+        record.bodyHtml ?? null,
+        record.bodyText ?? null,
       )
       .run();
   }
@@ -235,5 +247,7 @@ function toMessage(row: Record<string, unknown>): MessageRecord {
     rejectReason: (row['reject_reason'] as string | null) ?? null,
     detail: (row['detail'] as string | null) ?? null,
     coverage: parseJson<Record<string, unknown>>(row['coverage_json'], {}),
+    bodyHtml: (row['body_html'] as string | null) ?? null,
+    bodyText: (row['body_text'] as string | null) ?? null,
   };
 }

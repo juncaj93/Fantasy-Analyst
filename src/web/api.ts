@@ -195,6 +195,29 @@ export interface NewsletterMessage {
   rejectReason: string | null;
   detail: string | null;
   coverage: NewsletterCoverage | null;
+  /** True when the email itself was kept, so its rules can be re-run. */
+  bodyRetained?: boolean;
+}
+
+export interface ReprocessDisagreement {
+  playerId: string;
+  excerpt: string;
+  storedPolarity: string;
+  storedMagnitude: number;
+  newPolarity: string;
+  newMagnitude: number;
+  ruleId: string | null;
+}
+
+export interface ReprocessPreview {
+  messageId: string;
+  wouldAdd: number;
+  alreadyStored: number;
+  stale: ReprocessDisagreement[];
+  protectedByUser: ReprocessDisagreement[];
+  playersAffected: number;
+  tallyDelta: { playerId: string; net: number }[];
+  detail: string;
 }
 
 export interface SetupStatus {

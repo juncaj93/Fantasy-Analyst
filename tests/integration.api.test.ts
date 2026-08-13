@@ -212,6 +212,23 @@ describe('API with seeded data', () => {
     expect(body.bench.length).toBeGreaterThan(0);
   });
 
+  it('never republishes newsletter bodies through the public message log', async () => {
+    // Bodies are retained server-side so rules can be re-run, but reads on this
+    // site are public and the newsletter is someone else's work.
+    const body = await json<{ messages: Record<string, unknown>[] }>(get('/api/newsletter/messages'));
+    for (const message of body.messages) {
+      expect(message).not.toHaveProperty('bodyHtml');
+      expect(message).not.toHaveProperty('bodyText');
+      expect(JSON.stringify(message)).not.toContain('<p>');
+    }
+  });
+
+  it('explains, rather than crashes, when a newsletter body was not kept', async () => {
+    const res = await app(get('/api/newsletter/messages/never-seen/preview', cookie), env);
+    expect(res.status).toBe(404);
+    expect((await res.json() as { error: string }).error).toContain('not kept');
+  });
+
   it('recommends a whole lineup against the league roster shape', async () => {
     const body = await json<{
       found: boolean;

@@ -18,6 +18,7 @@ import {
   type EmailMessage,
   type NewsletterProcessResult,
   type NewsletterSourceConfig,
+  type ProposedEvidence,
 } from '../../core/newsletter/pipeline.ts';
 import { DEFAULT_NEWSLETTER_SOURCES, type EmailSource } from '../../core/newsletter/source.ts';
 import { nowIso, type Database } from '../db.ts';
@@ -45,6 +46,46 @@ export interface IngestOutcome {
   detail: string;
   coverage?: CoverageReport;
   result?: NewsletterProcessResult;
+}
+
+/** A stored item the current rules would classify differently. */
+export interface ReprocessDisagreement {
+  playerId: string;
+  excerpt: string;
+  storedPolarity: string;
+  storedMagnitude: number;
+  newPolarity: string;
+  newMagnitude: number;
+  ruleId: string | null;
+}
+
+export interface ReprocessPreview {
+  messageId: string;
+  /** Items the current rules find that are not stored yet. */
+  wouldAdd: number;
+  alreadyStored: number;
+  /** Stored items the rules now disagree with. Reprocessing will NOT change these. */
+  stale: ReprocessDisagreement[];
+  /** Disagreements on items a user has corrected. These are never touched. */
+  protectedByUser: ReprocessDisagreement[];
+  playersAffected: number;
+  tallyDelta: { playerId: string; net: number }[];
+  coverage: CoverageReport;
+  detail: string;
+}
+
+function describePreview(added: number, stale: number, protectedCount: number): string {
+  const parts: string[] = [];
+  parts.push(added === 0 ? 'Nothing new would be added.' : `${added} new item(s) would be added.`);
+  if (stale > 0) {
+    parts.push(
+      `${stale} stored item(s) are now read differently by the rules, but reprocessing leaves them as they are.`,
+    );
+  }
+  if (protectedCount > 0) {
+    parts.push(`${protectedCount} item(s) you corrected are protected and stay as you set them.`);
+  }
+  return parts.join(' ');
 }
 
 /** Bodies larger than this are rejected rather than parsed. */
@@ -257,6 +298,12 @@ export class NewsletterService {
       rejectReason: fields.rejectReason ?? null,
       detail: fields.detail ?? null,
       coverage: fields.coverage ?? null,
+      // Keep the body only for mail we actually accepted and parsed, so
+      // improved rules can be re-run over it later. Quarantined mail came from
+      // a sender the user never named; recording that it arrived is useful,
+      // storing its contents is not.
+      bodyHtml: fields.status === 'processed' ? message.html ?? null : null,
+      bodyText: fields.status === 'processed' ? message.text ?? null : null,
     });
   }
 
@@ -270,6 +317,102 @@ export class NewsletterService {
       outcomes.push(await this.ingest(message));
     }
     return outcomes;
+  }
+
+  /**
+   * Rebuild the original email from the message log.
+   *
+   * Returns null when the body was not retained — messages stored before
+   * bodies were kept, and anything that was quarantined rather than processed.
+   */
+  async storedMessage(messageId: string): Promise<EmailMessage | null> {
+    const record = await this.messages.seen(messageId);
+    if (!record) return null;
+    if (!record.bodyHtml && !record.bodyText) return null;
+    return {
+      messageId: record.messageId,
+      from: record.fromAddress,
+      subject: record.subject,
+      receivedAt: record.receivedAt,
+      html: record.bodyHtml ?? null,
+      text: record.bodyText ?? null,
+    };
+  }
+
+  /**
+   * Work out what reprocessing a stored message would do, without doing it.
+   *
+   * This exists because reprocessing is insert-only: it adds evidence the rules
+   * now find and never touches what is already stored. That is the right
+   * behaviour — a user's correction must survive a rule change — but it means
+   * an improved rule can silently disagree with a stored row and leave it
+   * alone. Tuning rules blind to that is guesswork, so the preview reports it
+   * explicitly as `stale` rather than hiding it among the skips.
+   *
+   * Writes nothing.
+   */
+  async previewReprocess(message: EmailMessage): Promise<ReprocessPreview> {
+    const index = await this.players.buildIndex();
+    const result = processNewsletter(message, index);
+    const existing = await this.evidence.listByDedupeKeys(result.evidence.map((e) => e.dedupeKey));
+
+    const added: ProposedEvidence[] = [];
+    const unchanged: ProposedEvidence[] = [];
+    const stale: ReprocessDisagreement[] = [];
+    const protectedByUser: ReprocessDisagreement[] = [];
+
+    for (const proposed of result.evidence) {
+      const stored = existing.get(proposed.dedupeKey);
+      if (!stored) {
+        added.push(proposed);
+        continue;
+      }
+      const differs =
+        stored.polarity !== proposed.polarity ||
+        stored.magnitude !== proposed.magnitude ||
+        stored.category !== proposed.category;
+      if (!differs) {
+        unchanged.push(proposed);
+        continue;
+      }
+      const disagreement: ReprocessDisagreement = {
+        playerId: proposed.playerId,
+        excerpt: proposed.excerpt,
+        storedPolarity: stored.polarity,
+        storedMagnitude: stored.magnitude,
+        newPolarity: proposed.polarity,
+        newMagnitude: proposed.magnitude,
+        ruleId: proposed.ruleId,
+      };
+      // A user decision outranks any rule, so this one is not even a candidate
+      // for change — it is reported so the disagreement stays visible.
+      if (stored.userOverride) protectedByUser.push(disagreement);
+      else stale.push(disagreement);
+    }
+
+    // Only genuinely new items would move a tally, so that is all the delta
+    // counts. Promising more than reprocessing delivers would be a lie.
+    const tallyDelta = new Map<string, number>();
+    for (const e of added) {
+      if (e.reviewStatus !== 'auto_applied') continue;
+      const signed = e.polarity === 'positive' ? e.magnitude : e.polarity === 'negative' ? -e.magnitude : 0;
+      tallyDelta.set(e.playerId, (tallyDelta.get(e.playerId) ?? 0) + signed);
+    }
+
+    return {
+      messageId: message.messageId,
+      wouldAdd: added.length,
+      alreadyStored: unchanged.length,
+      stale,
+      protectedByUser,
+      playersAffected: new Set(added.map((e) => e.playerId)).size,
+      tallyDelta: [...tallyDelta.entries()]
+        .filter(([, net]) => net !== 0)
+        .map(([playerId, net]) => ({ playerId, net }))
+        .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)),
+      coverage: result.coverage,
+      detail: describePreview(added.length, stale.length, protectedByUser.length),
+    };
   }
 
   /**

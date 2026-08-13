@@ -471,9 +471,44 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await service.ingest(message, { force: body.force ?? false }));
   });
 
-  router.get('/api/newsletter/messages', async (ctx) =>
-    jsonResponse({ messages: await new NewsletterRepo(ctx.env.db).listMessages(15) }),
-  );
+  router.get('/api/newsletter/messages', async (ctx) => {
+    const messages = await new NewsletterRepo(ctx.env.db).listMessages(15);
+    // Bodies are retained so rules can be re-run over them, but reads on this
+    // site are public and the newsletter is someone else's work. The log says
+    // what arrived and what came of it; it does not republish the issue.
+    return jsonResponse({
+      messages: messages.map(({ bodyHtml: _html, bodyText: _text, ...rest }) => ({
+        ...rest,
+        bodyRetained: !!(bodyOf(_html) || bodyOf(_text)),
+      })),
+    });
+  });
+
+  /**
+   * What would re-running the current rules over a stored newsletter do?
+   * A read: it computes a difference and writes nothing.
+   */
+  router.get('/api/newsletter/messages/:id/preview', async (ctx) => {
+    const service = new NewsletterService(ctx.env.db);
+    const message = await service.storedMessage(ctx.params['id']!);
+    if (!message) {
+      return errorResponse(
+        'That email was not kept, so its rules cannot be re-run. Only newsletters processed since body retention was added can be reprocessed.',
+        404,
+      );
+    }
+    return jsonResponse(await service.previewReprocess(message));
+  });
+
+  /** Apply what the preview described. Existing corrections are untouched. */
+  router.post('/api/newsletter/messages/:id/reprocess', async (ctx) => {
+    const service = new NewsletterService(ctx.env.db);
+    const message = await service.storedMessage(ctx.params['id']!);
+    if (!message) {
+      return errorResponse('That email was not kept, so its rules cannot be re-run.', 404);
+    }
+    return jsonResponse(await service.reprocess(message));
+  });
 
   router.get('/api/newsletter/sources', async (ctx) =>
     jsonResponse({ sources: await new NewsletterService(ctx.env.db).getSources() }),
@@ -626,6 +661,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
  * Fetch and cache Vegas props for every upcoming game.
  * Used by both the manual refresh endpoint and the scheduled worker.
  */
+/** Non-empty body text, or null. Used only to report whether one was kept. */
+function bodyOf(value: string | null | undefined): string | null {
+  return value && value.trim() ? value : null;
+}
+
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -12,6 +12,7 @@ import {
   type LeagueSummary,
   type NewsletterMessage,
   type NewsletterStatus,
+  type ReprocessPreview,
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
@@ -603,24 +604,27 @@ function NewsletterHistory() {
           const understood = c.classifiedSentences ?? 0;
           const missed = c.unclassifiedSentences ?? 0;
           return (
-            <button
-              key={m.messageId}
-              className="player-row"
-              data-testid="newsletter-message"
-              aria-expanded={open === m.messageId}
-              onClick={() => setOpen(open === m.messageId ? null : m.messageId)}
-            >
-              <div className="player-row-top">
-                <span className="player-name">{m.subject || '(no subject)'}</span>
-                <span className="pos-team">{formatDate(m.receivedAt)}</span>
-              </div>
-              <div className="player-row-metrics">
-                <Badge tone={m.status === 'processed' ? 'pos' : m.status === 'quarantined' ? 'warn' : 'neg'}>
-                  {m.status === 'processed' ? 'read' : m.status === 'quarantined' ? 'ignored' : m.status}
-                </Badge>
-                <span className="metric">{m.evidenceCount} news item(s)</span>
-                {m.pendingCount > 0 ? <span className="metric">{m.pendingCount} to review</span> : null}
-              </div>
+            // The row header is the button; the detail is a sibling, because a
+            // button may not contain the buttons the reprocess panel needs.
+            <div key={m.messageId} data-testid="newsletter-message">
+              <button
+                className="player-row"
+                data-testid="newsletter-message-toggle"
+                aria-expanded={open === m.messageId}
+                onClick={() => setOpen(open === m.messageId ? null : m.messageId)}
+              >
+                <div className="player-row-top">
+                  <span className="player-name">{m.subject || '(no subject)'}</span>
+                  <span className="pos-team">{formatDate(m.receivedAt)}</span>
+                </div>
+                <div className="player-row-metrics">
+                  <Badge tone={m.status === 'processed' ? 'pos' : m.status === 'quarantined' ? 'warn' : 'neg'}>
+                    {m.status === 'processed' ? 'read' : m.status === 'quarantined' ? 'ignored' : m.status}
+                  </Badge>
+                  <span className="metric">{m.evidenceCount} news item(s)</span>
+                  {m.pendingCount > 0 ? <span className="metric">{m.pendingCount} to review</span> : null}
+                </div>
+              </button>
               {open === m.messageId ? (
                 <div className="explain">
                   {m.detail ? <div className="muted">{m.detail}</div> : null}
@@ -673,15 +677,138 @@ function NewsletterHistory() {
                           </div>
                         </>
                       ) : null}
+                      {m.bodyRetained ? <ReprocessPanel messageId={m.messageId} /> : null}
                     </>
                   ) : null}
                 </div>
               ) : null}
-            </button>
+            </div>
           );
         })
       )}
     </>
+  );
+}
+
+/**
+ * Re-run the current rules over one stored newsletter.
+ *
+ * Always previewed first. The preview is careful about one thing in
+ * particular: reprocessing only ever *adds* what the rules now find, so a
+ * stored item the rules would now read differently stays exactly as it is.
+ * Saying that plainly matters more than making the button look powerful.
+ */
+function ReprocessPanel({ messageId }: { messageId: string }) {
+  const [preview, setPreview] = useState<ReprocessPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setPreview(await api.get<ReprocessPreview>(`/api/newsletter/messages/${encodeURIComponent(messageId)}/preview`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.post<{ evidenceInserted: number }>(
+        `/api/newsletter/messages/${encodeURIComponent(messageId)}/reprocess`,
+      );
+      setDone(`Added ${result.evidenceInserted} new item(s). Your corrections were left as they are.`);
+      setPreview(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }} data-testid="reprocess-panel">
+      <div className="section-title">Re-read this email</div>
+      {done ? <Notice tone="ok">{done}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {!preview ? (
+        <>
+          <button className="btn btn-sm" onClick={load} disabled={busy} data-testid="reprocess-preview">
+            {busy ? 'Checking…' : 'Check what would change'}
+          </button>
+          <div className="faint" style={{ marginTop: 4 }}>
+            Nothing changes until you say so.
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="muted">{preview.detail}</div>
+
+          {preview.tallyDelta.length > 0 ? (
+            <table className="compact" style={{ marginTop: 6 }}>
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Tally change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.tallyDelta.map((d) => (
+                  <tr key={d.playerId}>
+                    <td>{d.playerId}</td>
+                    <td>{d.net > 0 ? `+${d.net}` : d.net}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+
+          {preview.stale.length > 0 ? (
+            <>
+              <div className="section-title">Read differently now, but left alone</div>
+              <ul style={{ paddingLeft: 16, margin: 0 }}>
+                {preview.stale.map((s, i) => (
+                  <li key={i} className="faint" style={{ marginBottom: 4 }}>
+                    “{s.excerpt}” — stored as {s.storedPolarity} {s.storedMagnitude}, now read as {s.newPolarity}{' '}
+                    {s.newMagnitude}
+                  </li>
+                ))}
+              </ul>
+              <div className="faint" style={{ marginTop: 4 }}>
+                Re-reading only adds news it did not have before. To change one of these, edit it in Review.
+              </div>
+            </>
+          ) : null}
+
+          {preview.protectedByUser.length > 0 ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              {preview.protectedByUser.length} item(s) you corrected stay exactly as you set them.
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={apply}
+              disabled={busy || preview.wouldAdd === 0}
+              data-testid="reprocess-apply"
+            >
+              {preview.wouldAdd === 0 ? 'Nothing to add' : `Add ${preview.wouldAdd} item(s)`}
+            </button>
+            <button className="btn btn-sm" onClick={() => setPreview(null)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

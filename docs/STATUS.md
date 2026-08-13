@@ -128,6 +128,32 @@ The market set was deliberately left unchanged. `player_rush_tds` and
 but each added market costs credits against a 500/month allowance, so that is a
 decision to make with a real key in hand rather than a free accuracy win.
 
+## Milestone 5 — reprocessing, and the defect it exposed (done)
+
+**Reprocessing could not actually run.** `reprocess()` existed, was tested, and
+had no caller — because the message log recorded that an email arrived and what
+came of it, but never the email. Improving a rule could therefore only ever
+affect newsletters that had not arrived yet, which is exactly backwards.
+Migration `0003` retains bodies for processed messages so rules can be re-run
+over the issues already in the ledger.
+
+Quarantined mail is still logged but deliberately not retained: it came from a
+sender the user never named, and keeping it would mean storing whatever a
+stranger chose to send.
+
+**Bodies are never republished.** Reads on this site are public and the
+newsletter is someone else's work, so `/api/newsletter/messages` strips bodies
+and reports only whether one was kept. A test asserts no message payload
+carries body content.
+
+**Preview before applying.** Setup can now show what re-running the rules over
+one stored newsletter would do: how many items would be added, the resulting
+tally change per player, and — the honest part — which stored items the rules
+now read *differently* but will be left alone anyway, because reprocessing is
+insert-only so a user's correction always survives. That distinction is
+reported as `stale` rather than buried in a skip count; tuning rules without
+seeing it is guesswork.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and
@@ -157,10 +183,9 @@ on the real Safari engine, not only on Chromium locally.
    tally quality.
 2. **Verify and enable a live Vegas provider**, then confirm the cache keeps a
    full NFL Sunday inside the free tier.
-3. **Reprocess-with-preview** — re-run updated rules over stored newsletters and
-   show a diff before committing. The reprocess path already preserves
-   overrides; it needs the preview UI.
-4. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
+3. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
    adjustable without a deploy.
-5. **Tier visualisation on the draft board** — the scarcity component already
+4. **Tier visualisation on the draft board** — the scarcity component already
    computes tier gaps.
+5. **Re-reading everything at once**, rather than one newsletter at a time.
+   Worth doing only once real issues have accumulated.

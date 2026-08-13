@@ -80,9 +80,28 @@ test.describe('newsletter setup', () => {
   test('shows what the parser understood in each email', async ({ page }) => {
     const message = page.getByTestId('newsletter-message').first();
     await expect(message).toBeVisible();
-    await message.click();
+    await message.getByTestId('newsletter-message-toggle').click();
     await expect(message).toContainText('Sentences about your players');
     await expect(message).toContainText('Read but no rule matched');
+  });
+
+  test('previews a re-read before changing anything, and is honest about what it will not change', async ({
+    page,
+  }) => {
+    const message = page.getByTestId('newsletter-message').first();
+    await message.getByTestId('newsletter-message-toggle').click();
+
+    const panel = message.getByTestId('reprocess-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Nothing changes until you say so');
+
+    await panel.getByTestId('reprocess-preview').click();
+
+    // The same newsletter, unchanged rules: there is genuinely nothing to add,
+    // and the button must say so rather than inviting a pointless write.
+    await expect(panel).toContainText('Nothing new would be added');
+    await expect(panel.getByTestId('reprocess-apply')).toBeDisabled();
+    await expect(panel.getByTestId('reprocess-apply')).toContainText('Nothing to add');
   });
 });
 
