@@ -446,15 +446,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const position = ctx.url.searchParams.get('position');
     const repo = new PlayerRepo(ctx.env.db);
 
-    // Ranking needs the tally, and the tally lives per player, so the pool is
-    // narrowed before signals are fetched rather than after.
+    // Draft order comes from an imported ranking. Sleeper's search_rank is NOT
+    // one — it ranks by who gets looked up — so when no ranking is imported the
+    // list says so and falls back to the tally rather than inventing an order.
+    const snapshot = await new AdpRepo(ctx.env.db).latest();
+    const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
+
     const pool = q ? await repo.search(q, 200) : (await repo.listAll()).filter((p) => p.active);
     const filtered = position ? pool.filter((p) => p.position === position.toUpperCase()) : pool;
 
-    // Sleeper ranks ~2,500 players. Order by rank first so the tally only has
-    // to be fetched for the ones that can plausibly appear.
     const shortlist = [...filtered]
-      .sort((a, b) => (a.draftRank ?? Infinity) - (b.draftRank ?? Infinity))
+      .sort(
+        (a, b) =>
+          (ranks.get(a.id)?.adp ?? Infinity) - (ranks.get(b.id)?.adp ?? Infinity) ||
+          (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity),
+      )
       .slice(0, Math.max(limit * 3, 120));
 
     const signals = await new EvidenceRepo(ctx.env.db).getSignals(shortlist.map((p) => p.id));
@@ -462,7 +468,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       shortlist.map((p) => ({
         id: p.id,
         name: p.fullName,
-        draftRank: p.draftRank ?? null,
+        draftRank: ranks.get(p.id)?.adp ?? null,
         net: signals.get(p.id)?.raw.net ?? 0,
         player: p,
       })),
@@ -470,6 +476,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     return jsonResponse({
       tallyWeight: TALLY_WEIGHT,
+      rankingSource: snapshot ? snapshot.label : null,
       players: ordered.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
         id: row.player.id,
         name: row.player.fullName,

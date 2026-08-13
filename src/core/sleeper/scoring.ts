@@ -37,6 +37,20 @@ export interface RosterShape {
   superflex: boolean;
 }
 
+/**
+ * Every position this league can actually start.
+ *
+ * The draft board and player list are filtered by this rather than by a fixed
+ * list, because "which positions matter" is a property of the league, not of
+ * football. A league with no kicker slot should never be offered a kicker, and
+ * one that starts a defence should see defences.
+ */
+export function startablePositions(shape: RosterShape): Set<string> {
+  const out = new Set<string>(Object.keys(shape.starters));
+  for (const flex of shape.flex) for (const p of flex.positions) out.add(p);
+  return out;
+}
+
 /** Which real positions each Sleeper roster slot accepts. */
 export const FLEX_ELIGIBILITY: Record<string, string[]> = {
   FLEX: ['RB', 'WR', 'TE'],

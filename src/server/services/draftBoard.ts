@@ -7,7 +7,7 @@
 
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
-import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../../core/sleeper/scoring.ts';
+import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { nextPickForSlot, slotForRoster } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
@@ -89,12 +89,15 @@ export class DraftBoardService {
     const importedValues = snapshotMeta ? await this.adp.valuesByPlayer(snapshotMeta.id) : new Map();
 
     const allPlayers = await this.players.listAll();
+    // Only a real ranking counts. Sleeper's search_rank measures who gets
+    // looked up rather than who gets picked — using it here put Drake Maye near
+    // the top of the board and retired players on it at all.
     const rankOf = (player: CanonicalPlayer): number | null =>
-      importedValues.get(player.id)?.adp ?? player.draftRank ?? null;
+      importedValues.get(player.id)?.adp ?? null;
     const rankedCount = allPlayers.filter((p) => p.active && rankOf(p) != null).length;
     if (rankedCount === 0) {
       warnings.push(
-        'no draft order available — update the player list on the Sleeper step, or import a ranking file',
+        'no draft order imported — players are ranked by news and roster need only. Sleeper does not publish ADP, so import a ranking file on the Draft order step.',
       );
     }
     const byId = new Map(allPlayers.map((p) => [p.id, p]));
@@ -119,9 +122,13 @@ export class DraftBoardService {
     // are included only when nothing is ranked at all, so the board degrades to
     // "everyone" rather than to nothing.
     const positionFilter = opts.position ? opts.position.toUpperCase() : null;
+    // Only positions this league starts. A league with no kicker slot should
+    // never be shown a kicker, however Sleeper ranks them.
+    const startable = startablePositions(buildRosterShape(league.rosterPositions));
     const eligible = (player: CanonicalPlayer): boolean =>
       player.active &&
       !takenIds.has(player.id) &&
+      (startable.size === 0 || startable.has(player.position)) &&
       (!positionFilter || player.position === positionFilter);
 
     const pool: CanonicalPlayer[] = allPlayers.filter(
@@ -148,7 +155,7 @@ export class DraftBoardService {
       candidates.map((player) => ({
         player,
         adp: rankOf(player),
-        adpRank: importedValues.get(player.id)?.rank ?? player.draftRank ?? null,
+        adpRank: importedValues.get(player.id)?.rank ?? null,
         signal: signals.get(player.id) ?? null,
       })),
       {

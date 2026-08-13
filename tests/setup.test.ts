@@ -116,23 +116,17 @@ describe('setup status — configured deployment', () => {
   });
 
   /**
-   * Draft order comes from Sleeper's player list, so it is ready as soon as
-   * players are synced — there is no file to import and nothing to go stale.
+   * Draft order needs an imported ranking. Sleeper's search_rank is not one —
+   * it ranks by who gets looked up — so it must never be reported as a source.
    */
-  it('reports draft order as ready once Sleeper has ranked players', async () => {
+  it('reports draft order from the imported ranking, with match counts', async () => {
     const status = await service(db).status();
     const adp = step(status, 'adp');
     expect(adp.title).toBe('Draft order');
     expect(adp.state).toBe('ok');
-    expect(adp.summary).toMatch(/ranked by Sleeper/);
-    expect(status.adp.rankedPlayers).toBeGreaterThan(0);
-  });
-
-  it('says plainly when an imported file is overriding Sleeper', async () => {
-    const status = await service(db).status();
-    // The demo data imports a ranking file, which is allowed to win.
+    expect(adp.summary).toMatch(/\d+ of \d+ players matched/);
     expect(status.adp.source).toBe('imported file');
-    expect(step(status, 'adp').summary).toContain('overridden by');
+    expect(adp.summary).not.toMatch(/Sleeper/);
   });
 
   it('counts newsletter activity', async () => {

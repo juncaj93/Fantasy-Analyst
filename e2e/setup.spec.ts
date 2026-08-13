@@ -145,18 +145,17 @@ test.describe('newsletter setup', () => {
 });
 
 test.describe('rankings import', () => {
-  test('shows Sleeper as the draft-order source, with no file needed', async ({ page }) => {
+  test('says plainly that Sleeper publishes no ADP', async ({ page }) => {
     await openSetup(page);
     await page.getByTestId('setup-step-adp').click();
-    await expect(page.getByTestId('adp-source')).toContainText('ranked by Sleeper');
-    await expect(page.getByTestId('adp-source')).toContainText('Nothing to download');
+    await expect(page.getByTestId('adp-source')).toContainText('does not publish average draft position');
   });
 
   test('imports a pasted file and reports what happened', async ({ page }, testInfo) => {
     await openSetup(page);
     await page.getByTestId('setup-step-adp').click();
     await expect(page.getByTestId('panel-adp')).toBeVisible();
-    await page.getByText('Use my own rankings instead').click();
+    await page.getByText('Import rankings', { exact: true }).click();
 
     // Snapshots dedupe on content, and the server is shared across projects.
     const unique = `Ghost ${testInfo.project.name}`;
@@ -175,7 +174,7 @@ test.describe('rankings import', () => {
   test('offers a file picker as well as pasting', async ({ page }) => {
     await openSetup(page);
     await page.getByTestId('setup-step-adp').click();
-    await page.getByText('Use my own rankings instead').click();
+    await page.getByText('Import rankings', { exact: true }).click();
     await expect(page.getByTestId('adp-file')).toBeVisible();
   });
 });

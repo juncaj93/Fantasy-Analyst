@@ -283,24 +283,21 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
         Draft order
       </div>
       <div className="card card-tight" data-testid="adp-source">
-        <strong>
-          {status.adp.rankedPlayers.toLocaleString()} players ranked by Sleeper
-        </strong>
+        <strong>{status.adp.imported ? `Using ${status.adp.label}` : 'No rankings imported yet'}</strong>
         <div className="faint">
-          This is Sleeper&rsquo;s own ranking of who goes around which pick, and it updates with the
-          player list every morning. Nothing to download, nothing to keep in step.
+          Sleeper does not publish average draft position, so the draft order has to come from a
+          rankings file you import here.
         </div>
         <div className="faint" style={{ marginTop: 4 }}>
-          It is a ranking, not a measured average of real drafts — close enough to answer
-          &ldquo;will they still be there at my next pick?&rdquo;, and labelled honestly so you know
-          what it is.
+          Without one, the draft board still ranks by news and roster need — it just cannot tell you
+          whether a player is likely to last until your next pick.
         </div>
       </div>
       {banner}
 
       {status.adp.imported ? (
         <div className="card card-tight">
-          <strong>Overriding Sleeper: {status.adp.label}</strong>
+          <strong>In use: {status.adp.label}</strong>
           <div className="faint">
             Captured {formatDate(status.adp.capturedAt)} · {status.adp.matched} of {status.adp.totalRows} players
             matched
@@ -309,11 +306,10 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
         </div>
       ) : null}
 
-      <details style={{ marginTop: 10 }}>
-        <summary className="muted">Use my own rankings instead</summary>
+      <details style={{ marginTop: 10 }} open={!status.adp.imported}>
+        <summary className="muted">Import rankings</summary>
         <div className="faint" style={{ margin: '6px 0' }}>
-          Optional. Import a CSV or paste one, and it replaces Sleeper&rsquo;s order until you
-          import a newer one.
+          A CSV with player names and a rank or ADP column. The newest import is the one used.
         </div>
 
       <div className="field">

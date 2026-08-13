@@ -301,8 +301,8 @@ describe('Sleeper draft rank', () => {
   it('carries the rank through from the player dump', () => {
     const players = toCanonicalPlayers(dump);
     const byName = new Map(players.map((p) => [p.fullName, p]));
-    expect(byName.get('Top Back')!.draftRank).toBe(1);
-    expect(byName.get('Mid Receiver')!.draftRank).toBe(48);
+    expect(byName.get('Top Back')!.searchRank).toBe(1);
+    expect(byName.get('Mid Receiver')!.searchRank).toBe(48);
   });
 
   it('treats the unranked sentinel as unranked, not as a very late pick', () => {
@@ -310,7 +310,7 @@ describe('Sleeper draft rank', () => {
     const byName = new Map(players.map((p) => [p.fullName, p]));
     // 9,999,999 is Sleeper's "not ranked", and reading it literally would make
     // the player look merely undrafted-late rather than unknown.
-    expect(byName.get('Deep Bench')!.draftRank).toBeNull();
-    expect(byName.get('No Rank')!.draftRank).toBeNull();
+    expect(byName.get('Deep Bench')!.searchRank).toBeNull();
+    expect(byName.get('No Rank')!.searchRank).toBeNull();
   });
 });

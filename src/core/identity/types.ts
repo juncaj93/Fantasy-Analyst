@@ -27,14 +27,14 @@ export interface CanonicalPlayer {
   /** Non-Sleeper external ids, keyed by source (e.g. `gsis`, `odds:the-odds-api`). */
   externalIds?: Record<string, string>;
   /**
-   * Sleeper's draft-order ranking — roughly "around which pick this player
-   * goes". Null when Sleeper does not rank the player.
+   * Sleeper's `search_rank`: how prominently it surfaces a player in search.
    *
-   * Deliberately not called ADP: it is one source's ranking, not an average of
-   * observed drafts, and the difference matters when it drives a
-   * recommendation.
+   * NOT a draft position, and it must never be used as one. It puts Drake Maye
+   * around 7 and ranks long-retired players highly, because it measures who
+   * people look up rather than who gets picked. Kept only as a weak tie-break
+   * for search results.
    */
-  draftRank?: number | null;
+  searchRank?: number | null;
 }
 
 export interface PlayerAlias {

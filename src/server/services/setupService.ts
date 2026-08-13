@@ -187,17 +187,12 @@ export class SetupService {
       {
         id: 'adp',
         title: 'Draft order',
-        // Sleeper ranks players in its own player list, which the app already
-        // syncs, so there is nothing to import and nothing to keep in step.
-        state: rankedPlayers > 0 ? 'ok' : 'warn',
-        summary:
-          rankedPlayers > 0
-            ? `${rankedPlayers.toLocaleString()} players ranked by Sleeper${snapshot ? `, overridden by ${snapshot.label}` : ''}`
-            : 'No draft order yet',
-        action:
-          rankedPlayers > 0
-            ? null
-            : 'Tap Update player list on the Sleeper step to pull the draft order.',
+        // Sleeper publishes no ADP, so a ranking has to be imported.
+        state: snapshot ? 'ok' : 'warn',
+        summary: snapshot
+          ? `${snapshot.label} — ${snapshot.matchedCount} of ${snapshot.rowCount} players matched`
+          : 'No rankings imported yet',
+        action: snapshot ? null : 'Import a ranking file before your draft.',
       },
       {
         id: 'newsletter',
@@ -240,7 +235,7 @@ export class SetupService {
       },
       adp: {
         rankedPlayers,
-        source: snapshot ? 'imported file' : 'Sleeper',
+        source: snapshot ? 'imported file' : 'none',
         imported: !!snapshot,
         label: snapshot?.label ?? null,
         capturedAt: snapshot?.capturedAt ?? null,

@@ -360,6 +360,33 @@ players sort after everyone ranked rather than being treated as pick zero, and
 the list shows Sleeper's raw rank next to the movement so the order is never
 mysterious.
 
+## Milestone 12 — search_rank was never a draft order (done)
+
+Taking draft order from Sleeper's `search_rank` was wrong, and the app shipped
+it. `search_rank` measures how prominently Sleeper surfaces a player **in
+search** — who people look up, not who gets picked. On a real board it put
+Drake Maye around 7, floated long-retired players into the top 300, and pushed
+quarterbacks to the top of an "all" view in a 1QB league.
+
+The top dozen it returned looked exactly like consensus ADP, which is why it
+was believed. Checking the happy path and generalising from it is the whole
+mistake: the tail is where a ranking is falsified, and the tail was never read.
+
+- `search_rank` is renamed `searchRank` and is no longer a draft position
+  anywhere. It survives only as a weak tie-break for search results, with a
+  comment saying why it must not be used as an order.
+- Draft order comes from an imported ranking again. With none, the board ranks
+  by news and roster need and says so, rather than ordering by a number that
+  means something else.
+- **The board only offers positions the league starts.** Taken from the
+  league's own roster slots, so a league with no kicker slot is never shown a
+  kicker — and a league that starts a defence sees defences, which the
+  ranked-players-only filter had been silently excluding.
+
+Sleeper does not publish ADP: its REST paths 404 and its GraphQL schema has no
+ADP field (`get_adp`, `adp`, `adp_data` all rejected, with unrelated
+suggestions).
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and

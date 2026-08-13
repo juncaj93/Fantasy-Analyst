@@ -34,7 +34,7 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     normalizedName: row.normalized_name,
     aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
     externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
-    draftRank: row.draft_rank ?? null,
+    searchRank: row.draft_rank ?? null,
   };
 }
 
@@ -144,7 +144,7 @@ export class PlayerRepo {
             p.normalizedName,
             toJson(p.aliases),
             toJson(p.externalIds ?? {}),
-            p.draftRank ?? null,
+            p.searchRank ?? null,
             now,
             now,
           ),
