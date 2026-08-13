@@ -508,6 +508,8 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
   const { busy, run, banner } = usePanelAction();
   const [status, setStatus] = useState<NewsletterStatus | null>(null);
   const [sender, setSender] = useState('');
+  /** True when the saved rule is the wildcard rather than a specific sender. */
+  const acceptsAll = (status?.expectedSenders ?? []).includes('*');
   const [subject, setSubject] = useState('');
   const [address, setAddress] = useState('');
   const [copied, setCopied] = useState(false);
@@ -515,7 +517,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
   const load = useCallback(async () => {
     const next = await api.get<NewsletterStatus>('/api/setup/newsletter');
     setStatus(next);
-    setSender(next.expectedSenders.find((s) => !s.includes('example')) ?? '');
+    setSender(next.expectedSenders.find((s) => s !== '*' && !s.includes('example')) ?? '');
     setSubject(next.subjectFilters[0] ?? '');
     setAddress(next.address ?? '');
   }, []);
@@ -612,8 +614,34 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
         </div>
       ) : null}
 
+      {/*
+        Offered first, and recommended: this address is dedicated and
+        unpublished, so taking whatever arrives is both true and safer than a
+        filter that can drop a week of evidence without saying anything.
+      */}
+      <div className="faint" style={{ marginBottom: 6 }}>
+        Nothing else uses this address, so anything arriving here is your newsletter. A sender filter can miss
+        issues silently — Substack sends from a different address for every subscriber.
+      </div>
+      <button
+        className="btn btn-primary"
+        style={{ marginBottom: 12 }}
+        disabled={busy != null || acceptsAll}
+        data-testid="accept-any-sender"
+        onClick={() =>
+          run('sender', async () => {
+            const next = await api.post<NewsletterStatus>('/api/setup/newsletter', { senderEmail: '*' });
+            setStatus(next);
+            onDone();
+            return 'Every email sent to this address will now be read.';
+          })
+        }
+      >
+        {acceptsAll ? 'Accepting every sender' : 'Accept every email sent here'}
+      </button>
+
       <div className="field">
-        <label htmlFor="nl-sender">Newsletter sender address or domain</label>
+        <label htmlFor="nl-sender">Or only accept one sender (address or domain)</label>
         <input
           id="nl-sender"
           value={sender}

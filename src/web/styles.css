@@ -238,6 +238,14 @@ body {
 }
 
 /* ------------------------------------------------------------ player rows */
+/* The header is sticky, so anything scrolled to the top of the viewport lands
+   underneath it and cannot be tapped. Reserve its height when scrolling. */
+.player-row,
+.card,
+[data-testid='newsletter-message'] {
+  scroll-margin-top: 64px;
+}
+
 .player-row {
   width: 100%;
   text-align: left;

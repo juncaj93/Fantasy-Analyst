@@ -60,7 +60,7 @@ test.describe('newsletter setup', () => {
   });
 
   test('lets the user set which sender to accept', async ({ page }) => {
-    await page.getByLabel('Newsletter sender address or domain').fill('news@theirsite.com');
+    await page.getByLabel('Or only accept one sender (address or domain)').fill('news@theirsite.com');
     await page.getByRole('button', { name: 'Save sender' }).click();
     await expect(page.locator('.notice')).toContainText('Mail from that sender will now be read');
   });
@@ -101,8 +101,19 @@ test.describe('newsletter setup', () => {
     await expect(page.getByTestId('offer-sender')).toHaveCount(0);
   });
 
+  /**
+   * Presence only. Clicking it would switch the sender rule for the whole
+   * shared dev server, and the tests after this one depend on that state — the
+   * behaviour itself is covered in newsletter.pipeline.test.ts against the real
+   * bounce envelope Substack delivered from.
+   */
+  test('offers to accept every sender at this address', async ({ page }) => {
+    await expect(page.getByTestId('accept-any-sender')).toBeVisible();
+    await expect(page.getByTestId('panel-newsletter')).toContainText('Nothing else uses this address');
+  });
+
   test('rejects an obviously wrong sender in plain words', async ({ page }) => {
-    await page.getByLabel('Newsletter sender address or domain').fill('not an address');
+    await page.getByLabel('Or only accept one sender (address or domain)').fill('not an address');
     await page.getByRole('button', { name: 'Save sender' }).click();
     // Scoped to this panel: Setup can carry other notices (Help my scores), and
     // a bare `.notice` would match several.
@@ -120,7 +131,11 @@ test.describe('newsletter setup', () => {
     // other tests add ignored mail to this shared server.
     const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
     await expect(message).toBeVisible();
-    await message.getByTestId('newsletter-message-toggle').click();
+    // The list grows as earlier tests add mail, so the row can sit below the
+    // fold; scroll it in before clicking rather than relying on auto-scroll.
+    const toggle = message.getByTestId('newsletter-message-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.click();
     await expect(message).toContainText('Sentences about your players');
     await expect(message).toContainText('Read but no rule matched');
   });
@@ -130,7 +145,9 @@ test.describe('newsletter setup', () => {
   }) => {
     // Only processed mail has a body kept, so only it can be re-read.
     const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
-    await message.getByTestId('newsletter-message-toggle').click();
+    const toggle = message.getByTestId('newsletter-message-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.click();
 
     const panel = message.getByTestId('reprocess-panel');
     await expect(panel).toBeVisible();

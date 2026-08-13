@@ -156,7 +156,22 @@ export interface NewsletterSourceConfig {
  *
  * The dot is required: `@substack.com` must not match `@notsubstack.com`.
  */
+/**
+ * `*` accepts any sender.
+ *
+ * The inbound address is dedicated to one newsletter and is never published, so
+ * "whatever arrives here is the newsletter" is both true and the safest rule.
+ * Sender matching is fragile in ways that lose mail silently: Substack sends
+ * from per-subscriber VERP envelopes like
+ * `bounce+93e88f...=juncaj.net@mg-d0.substack.com`, and the visible From: is
+ * often a writer's own domain rather than the platform's. Missing a newsletter
+ * costs a week of evidence; accepting a stray email costs nothing, because a
+ * message with no player news simply produces none.
+ */
+export const ACCEPT_ANY_SENDER = '*';
+
 export function senderMatches(from: string, pattern: string): boolean {
+  if (pattern === ACCEPT_ANY_SENDER) return true;
   if (!from || !pattern) return false;
   if (!pattern.startsWith('@')) return from.includes(pattern);
 
@@ -178,9 +193,11 @@ export function qualifies(
   const subject = message.subject ?? '';
   for (const source of sources) {
     if (source.enabled === false) continue;
-    const fromOk = source.fromPatterns.some((p) =>
-      candidates.some((from) => senderMatches(from, p.toLowerCase())),
-    );
+    // The wildcard does not need a sender to compare against, so it is checked
+    // before the candidate list — mail with no readable From: still qualifies.
+    const fromOk =
+      source.fromPatterns.includes(ACCEPT_ANY_SENDER) ||
+      source.fromPatterns.some((p) => candidates.some((from) => senderMatches(from, p.toLowerCase())));
     if (!fromOk) continue;
     const patterns = source.subjectPatterns ?? [];
     if (patterns.length === 0) return source;

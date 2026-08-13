@@ -17,6 +17,7 @@ import { recommendLineup } from '../core/startsit/lineup.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { normalizeName } from '../core/identity/normalize.ts';
+import { ACCEPT_ANY_SENDER } from '../core/newsletter/pipeline.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../core/sleeper/scoring.ts';
@@ -197,14 +198,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (body.senderEmail !== undefined) {
       const sender = body.senderEmail.trim().toLowerCase();
       if (!sender) return errorResponse('Enter the address your newsletter comes from.', 400);
+      // The wildcard skips every check below: there is no address to validate,
+      // and a bounce-shaped sender is exactly what it is there to accept.
+      const wildcard = sender === ACCEPT_ANY_SENDER;
       // Accept either a full address or a bare domain.
-      if (!/^@?[^@\s]+(\.[^@\s]+)+$/.test(sender) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sender)) {
+      if (!wildcard && !/^@?[^@\s]+(\.[^@\s]+)+$/.test(sender) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sender)) {
         return errorResponse('That does not look like an email address or domain.', 400);
       }
       // A bounce address carries a token unique to one send. Saving it would
       // match a single issue and then silently stop, which is indistinguishable
       // from the newsletter having stopped arriving.
-      if (looksLikeBounceAddress(sender)) {
+      if (!wildcard && looksLikeBounceAddress(sender)) {
         return errorResponse(
           'That is a bounce address — it changes with every issue, so it would only ever match one. ' +
             'Use the domain instead (for example @substack.com), or wait for the next issue: it will be ' +
