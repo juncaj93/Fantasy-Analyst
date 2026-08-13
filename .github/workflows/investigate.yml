@@ -286,6 +286,27 @@ jobs:
           "
 
           echo
+          echo '=== ADP rows that matched no player ==='
+          curl -s "$url/api/adp/snapshots" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              const latest = (r.snapshots ?? [])[0];
+              require('fs').writeFileSync('/tmp/snapshot-id.txt', latest ? String(latest.id) : '');
+            })"
+          snap=$(cat /tmp/snapshot-id.txt)
+          if [ -n "$snap" ]; then
+            curl -s "$url/api/adp/snapshots/$snap/unresolved" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r = JSON.parse(s);
+                if (!(r.rows ?? []).length) { console.log('  (none — every row found a player)'); return; }
+                for (const row of r.rows) {
+                  console.log(' ', row.adp, row.sourcePosition, row.sourcePlayerName,
+                              '(' + (row.sourceTeam || 'no team') + ')', '|', row.matchStatus, '|', row.reason);
+                }
+              })"
+          fi
+
+          echo
           echo '=== players tab, as ordered by rank plus tally ==='
           curl -s "$url/api/players?limit=20" | node -e "
             let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
