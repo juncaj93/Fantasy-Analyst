@@ -45,7 +45,8 @@ NEWSLETTER_ADDRESS = ""
 [triggers]
 # Saturday 23:00 UTC and Sunday 15:00 UTC -> Vegas refresh.
 # Daily 09:00 UTC -> Sleeper player dictionary sync.
-crons = ["0 23 * * 6", "0 15 * * 0", "0 9 * * *"]
+# Day-of-week must be named or 1-7 here: Cloudflare rejects "0" for Sunday.
+crons = ["0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
 
 [observability]
 enabled = true
