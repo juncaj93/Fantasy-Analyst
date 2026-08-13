@@ -612,3 +612,106 @@ table.compact th {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* ------------------------------------------------------- decision quality */
+/*
+ * Tags that change a pick. Every one carries a word and a glyph as well as a
+ * colour, so none of them depends on colour vision to be read.
+ */
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tag-avoid {
+  border-color: var(--neg);
+  color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 12%, transparent);
+}
+
+.tag-urgent {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.tag-warn {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  color: var(--text-dim);
+}
+
+.tag-calm {
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+
+.tag-star {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * The star control. Sized to the standard tap target so it can be hit with a
+ * thumb during a draft without hitting the row underneath it.
+ */
+.star-btn {
+  flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: 0.85rem;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.star-btn-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.star-btn:disabled {
+  opacity: 0.5;
+}
+
+.roster-alert {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+.roster-alert:last-child {
+  border-bottom: none;
+}
+
+.roster-alert-urgent strong {
+  color: var(--warn);
+}
+
+.decision-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}

@@ -12,6 +12,17 @@ import type { PlayerSignal } from '../evidence/types.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import { leagueFitMultipliers } from '../sleeper/scoring.ts';
+import {
+  assessAvoid,
+  assessTierCliff,
+  assessWait,
+  myGuy,
+  type AvoidTag,
+  type MyGuyFlag,
+  type MyGuyLevel,
+  type TierCliff,
+  type WaitGuidance,
+} from './decisions.ts';
 import { computeNeed, computeScarcity, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
 
@@ -27,6 +38,12 @@ export interface DraftComponentWeights {
   /** The last 7 days: acceleration on top of the trend. */
   news7: number;
   survivalUrgency: number;
+  /** How far the user's own ★ flag can move a player. */
+  myGuy: number;
+  /** Extra caution on a player the accumulated research is against. */
+  avoid: number;
+  /** Acting sooner because the position is about to fall off a tier. */
+  tierCliff: number;
 }
 
 /**
@@ -54,6 +71,15 @@ export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   news30: 0.2,
   news7: 0.12,
   survivalUrgency: 0.22,
+  // At full strength (★★★) this contributes 0.5 — about ten picks of ADP, the
+  // "modest reach" the brief asks for and no more.
+  myGuy: 0.5,
+  // Stacks on top of the negative the news components already produce, so a
+  // heavily negative player is pushed down twice without being removed.
+  avoid: 0.3,
+  // Enough to reorder players the market rates similarly; never enough to beat
+  // a genuine bargain.
+  tierCliff: 0.25,
 };
 
 /**
@@ -79,6 +105,8 @@ export interface AvailablePlayerInput {
   /** ADP rank within the snapshot, when present. */
   adpRank: number | null;
   signal: PlayerSignal | null;
+  /** The user's own ★ flag, 0 when they have not marked this player. */
+  myGuyLevel?: MyGuyLevel;
 }
 
 export interface DraftContext {
@@ -131,6 +159,14 @@ export interface DraftRecommendation {
   counterpoints: string[];
   /** True when a key input (ADP) was missing. */
   degraded: boolean;
+  /** Whether the position is about to fall off a tier. */
+  tierCliff: TierCliff;
+  /** The automatic caution from accumulated research. */
+  avoid: AvoidTag;
+  /** The user's own preference, separate from the news tally. */
+  myGuy: MyGuyFlag;
+  /** Take Now / Can Probably Wait / ... */
+  wait: WaitGuidance;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -335,6 +371,61 @@ export function rankAvailablePlayers(
       unknown: survival.probability == null,
     });
 
+    // --- decision quality ---------------------------------------------------
+    // These are judgements rather than measurements, so each one is attached to
+    // the result in full: the tag the UI shows and the contribution that moved
+    // the ranking come from the same object, and cannot drift apart.
+    const positionAdps = adpsByPosition.get(player.position) ?? [];
+    const needScore = need?.score ?? 0.1;
+
+    const cliff = assessTierCliff({
+      position: player.position,
+      playerAdp: adp,
+      availableAdps: positionAdps,
+      picksUntilNext,
+      needScore,
+    });
+    components.push({
+      key: 'tier_cliff',
+      label: 'Tier cliff',
+      display: cliff.message ?? 'no cliff at this position yet',
+      score: round3(cliff.score),
+      weight: weights.tierCliff,
+      contribution: round3(cliff.score * weights.tierCliff),
+      unknown: adp == null,
+    });
+
+    const avoid = assessAvoid(lifetimeNet, net30);
+    components.push({
+      key: 'avoid',
+      label: 'Research caution',
+      display: avoid.active ? avoid.message : 'nothing in the ledger warns against him',
+      score: round3(avoid.score),
+      weight: weights.avoid,
+      contribution: round3(avoid.score * weights.avoid),
+      unknown: false,
+    });
+
+    const flag = myGuy(entry.myGuyLevel ?? 0);
+    components.push({
+      key: 'my_guy',
+      label: 'Personal preference',
+      display: flag.level > 0 ? `${flag.stars} ${flag.label}` : 'not flagged',
+      score: round3(flag.score),
+      weight: weights.myGuy,
+      contribution: round3(flag.score * weights.myGuy),
+      unknown: false,
+    });
+
+    const wait = assessWait({
+      survivalProbability: survival.probability,
+      cliff,
+      needScore,
+      expectedRemaining: scarcity.expectedRemaining,
+      position: player.position,
+      nextPick: ctx.nextPick,
+    });
+
     const total = round3(components.reduce((a, c) => a + c.contribution, 0));
     const { reasons, counterpoints } = explain(entry, components, {
       need,
@@ -343,6 +434,10 @@ export function rankAvailablePlayers(
       profile: ctx.profile,
       shape: ctx.shape,
       newsConflicted: conflicted,
+      cliff,
+      avoid,
+      myGuyFlag: flag,
+      wait,
     });
 
     return {
@@ -362,6 +457,10 @@ export function rankAvailablePlayers(
       reasons,
       counterpoints,
       degraded: adp == null,
+      tierCliff: cliff,
+      avoid,
+      myGuy: flag,
+      wait,
     } satisfies DraftRecommendation;
   });
 
@@ -394,6 +493,10 @@ function explain(
     profile: ScoringProfile;
     shape: RosterShape;
     newsConflicted: boolean;
+    cliff: TierCliff;
+    avoid: AvoidTag;
+    myGuyFlag: MyGuyFlag;
+    wait: WaitGuidance;
   },
 ): { reasons: string[]; counterpoints: string[] } {
   const reasons: string[] = [];
@@ -471,10 +574,46 @@ function explain(
     counterpoints.push(`${entry.signal.pendingCount} news item(s) awaiting your review`);
   }
 
+  // --- decision quality, each said in this draft's own terms ----------------
+  // A label with no context is the thing the brief specifically rules out, so
+  // every one of these carries the number or the sentence it came from.
+  const cliffComponent = by('tier_cliff');
+  if (extra.cliff.message && cliffComponent) {
+    reasons.push(`${extra.cliff.message}${picksMoved(cliffComponent.contribution)}`);
+  }
+
+  if (extra.avoid.active) {
+    const avoidComponent = by('avoid');
+    counterpoints.push(
+      `${extra.avoid.message}${avoidComponent ? picksMoved(avoidComponent.contribution) : ''}`,
+    );
+    // The improvement is shown beside the tag, never instead of it: the
+    // lifetime record is what earned the caution and it has not changed.
+    if (extra.avoid.trendNote) counterpoints.push(extra.avoid.trendNote);
+  }
+
+  if (extra.myGuyFlag.level > 0) {
+    const myGuyComponent = by('my_guy');
+    reasons.push(
+      `personal preference boost: you marked him ${extra.myGuyFlag.stars} ${extra.myGuyFlag.label}` +
+        `${myGuyComponent ? picksMoved(myGuyComponent.contribution) : ''}`,
+    );
+  }
+
+  if (extra.wait.state === 'can_probably_wait' || extra.wait.state === 'likely_available_later') {
+    counterpoints.push(`${extra.wait.label.toLowerCase()}: ${lowerFirst(extra.wait.detail)}`);
+  } else if (extra.wait.state === 'take_now' || extra.wait.state === 'risky_to_wait') {
+    reasons.push(`${extra.wait.label.toLowerCase()}: ${lowerFirst(extra.wait.detail)}`);
+  }
+
   if (reasons.length === 0) reasons.push('ranked on market value with no standout component');
   return { reasons, counterpoints };
 }
 
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
+}
+
+function lowerFirst(sentence: string): string {
+  return sentence.charAt(0).toLowerCase() + sentence.slice(1);
 }

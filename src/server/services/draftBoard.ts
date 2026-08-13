@@ -5,7 +5,9 @@
  * This service NEVER makes a pick. It only reads Sleeper and returns rankings.
  */
 
+import { rosterAlerts, type RosterAlert } from '../../core/draft/decisions.ts';
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
+import { computeNeed } from '../../core/draft/need.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
@@ -15,6 +17,7 @@ import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { PlayerFlagsRepo } from '../repos/playerFlags.ts';
 import { PlayerRepo } from '../repos/players.ts';
 
 export interface DraftBoardState {
@@ -36,6 +39,10 @@ export interface DraftBoardState {
   openStarters: { slot: string; count: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
+  /** What the shape of the live roster is saying, given how late it is. */
+  rosterAlerts: RosterAlert[];
+  /** 1-based round currently on the clock. */
+  round: number;
   warnings: string[];
 }
 
@@ -76,6 +83,9 @@ export class DraftBoardService {
     const rounds = draft.rounds || 15;
     const picksMade = picks.filter((p) => p.playerId).length;
     const currentPick = picksMade + 1;
+    // Round drives how loudly an unfilled starting slot is said: no tight end in
+    // round three is a plan, and no tight end in round twelve is a problem.
+    const round = Math.max(1, Math.ceil(currentPick / teams));
 
     const mySlot =
       slotForRoster(draft.slotToRosterId, myRosterRecord?.rosterId ?? null) ??
@@ -176,6 +186,10 @@ export class DraftBoardService {
     }
 
     const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
+    // The user's own shortlist. Fetched for the scored pool only: it is a
+    // handful of players, and a flag on somebody who is already drafted or out
+    // of the pool has nothing to move.
+    const flags = await new PlayerFlagsRepo(this.db).forPlayers(candidates.map((c) => c.id));
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
@@ -185,6 +199,7 @@ export class DraftBoardService {
         adp: rankOf(player),
         adpRank: importedValues.get(player.id)?.rank ?? null,
         signal: signals.get(player.id) ?? null,
+        myGuyLevel: flags.get(player.id) ?? 0,
       })),
       {
         currentPick,
@@ -226,6 +241,14 @@ export class DraftBoardService {
           }
         : null,
       recommendations,
+      rosterAlerts: rosterAlerts({
+        shape,
+        counts: rosterCounts,
+        needs: computeNeed(shape, rosterCounts),
+        round,
+        totalRounds: rounds,
+      }),
+      round,
       warnings,
     };
   }

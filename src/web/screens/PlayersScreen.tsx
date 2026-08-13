@@ -4,8 +4,12 @@
  */
 
 import { useEffect, useState } from 'react';
-import { api, type EvidenceItem, type PlayerSignal } from '../api.ts';
+import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import { Badge, Empty, Loading, Signal, Unknown, formatDate } from '../components/common.tsx';
+import { MyGuyControl } from '../components/decisions.tsx';
+
+/** An unflagged player, so the control renders the same shape either way. */
+const EMPTY_MY_GUY: MyGuyFlag = { level: 0, label: '', stars: '', score: 0 };
 
 interface PlayerListItem {
   id: string;
@@ -20,6 +24,8 @@ interface PlayerListItem {
   /** Picks the tally moved them. Positive means earlier. */
   movement: number;
   signal: PlayerSignal | null;
+  /** The user's own flag. Absent on responses from an older deployment. */
+  myGuy?: MyGuyFlag;
 }
 
 interface PlayerDetail {
@@ -27,6 +33,7 @@ interface PlayerDetail {
   signal: PlayerSignal;
   evidence: EvidenceItem[];
   props: { market: string; line: number | null; bookCount: number; impliedProbability: number | null }[];
+  myGuy?: MyGuyFlag;
 }
 
 export function PlayersScreen() {
@@ -34,6 +41,7 @@ export function PlayersScreen() {
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
   const [detail, setDetail] = useState<PlayerDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [flagging, setFlagging] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +62,23 @@ export function PlayersScreen() {
 
   const open = async (id: string) => {
     setDetail(await api.get<PlayerDetail>(`/api/players/${id}`));
+  };
+
+  /**
+   * Star a player from the list.
+   *
+   * Updated in place rather than by refetching: this list is not ranked by the
+   * flag, so nothing about it moves, and a full reload mid-search would throw
+   * away what the user typed.
+   */
+  const setMyGuy = async (playerId: string, level: 0 | 1 | 2 | 3) => {
+    setFlagging(playerId);
+    try {
+      const res = await api.post<{ myGuy: MyGuyFlag }>(`/api/players/${playerId}/my-guy`, { level });
+      setPlayers((current) => current.map((p) => (p.id === playerId ? { ...p, myGuy: res.myGuy } : p)));
+    } finally {
+      setFlagging(null);
+    }
   };
 
   if (detail) {
@@ -89,6 +114,11 @@ export function PlayersScreen() {
               <span className="rank" aria-hidden="true">
                 {p.adjustedRank == null ? '—' : Math.round(p.adjustedRank)}
               </span>
+              <MyGuyControl
+                myGuy={p.myGuy ?? EMPTY_MY_GUY}
+                busy={flagging === p.id}
+                onChange={(level) => void setMyGuy(p.id, level)}
+              />
               <span className="player-name">{p.name}</span>
               <span className="pos-team">
                 {p.position} · {p.team || 'FA'}

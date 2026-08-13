@@ -189,6 +189,75 @@ describe('API with seeded data', () => {
     }
   });
 
+  it('carries the decision-quality judgements on every recommendation', async () => {
+    const board = await json<{
+      round: number;
+      rosterAlerts: { key: string; severity: string; message: string; detail: string }[];
+      recommendations: {
+        tierCliff: { severity: string };
+        avoid: { active: boolean };
+        myGuy: { level: number };
+        wait: { state: string; detail: string };
+      }[];
+    }>(get('/api/drafts/demo-draft/board', cookie));
+
+    expect(board.round).toBeGreaterThanOrEqual(1);
+    expect(board.rosterAlerts.length).toBeGreaterThan(0);
+    for (const alert of board.rosterAlerts) {
+      expect(alert.message.length).toBeGreaterThan(0);
+      // The brief rules out bare labels: every alert says why it is being said.
+      expect(alert.detail.length).toBeGreaterThan(0);
+    }
+    for (const rec of board.recommendations) {
+      expect(rec.tierCliff.severity).toBeTruthy();
+      expect(typeof rec.avoid.active).toBe('boolean');
+      expect(rec.myGuy.level).toBe(0);
+      expect(rec.wait.detail.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('stores a My Guy flag, reflects it on the board, and clears it again', async () => {
+    const board = await json<{ recommendations: { playerId: string; name: string }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    const target = board.recommendations[0]!;
+
+    const set = await json<{ myGuy: { level: number; stars: string; label: string } }>(
+      post(`/api/players/${target.playerId}/my-guy`, { level: 2 }, cookie),
+    );
+    expect(set.myGuy.level).toBe(2);
+    expect(set.myGuy.stars).toBe('★★');
+
+    const after = await json<{ recommendations: { playerId: string; myGuy: { level: number }; reasons: string[] }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    const flagged = after.recommendations.find((r) => r.playerId === target.playerId)!;
+    expect(flagged.myGuy.level).toBe(2);
+    expect(flagged.reasons.join(' ')).toContain('Strong My Guy');
+
+    // Survives a re-read, which is the whole point of persisting it.
+    const detail = await json<{ myGuy: { level: number } }>(get(`/api/players/${target.playerId}`, cookie));
+    expect(detail.myGuy.level).toBe(2);
+
+    const cleared = await json<{ myGuy: { level: number } }>(
+      post(`/api/players/${target.playerId}/my-guy`, { level: 0 }, cookie),
+    );
+    expect(cleared.myGuy.level).toBe(0);
+  });
+
+  it('refuses a My Guy level outside 0-3, and an unknown player', async () => {
+    const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
+    const id = board.recommendations[0]!.playerId;
+    expect((await app(post(`/api/players/${id}/my-guy`, { level: 7 }, cookie), env)).status).toBe(400);
+    expect((await app(post('/api/players/nobody/my-guy', { level: 1 }, cookie), env)).status).toBe(404);
+  });
+
+  it('will not let a read-only visitor star a player', async () => {
+    const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
+    const id = board.recommendations[0]!.playerId;
+    expect((await app(post(`/api/players/${id}/my-guy`, { level: 3 }), env)).status).toBe(401);
+  });
+
   it('excludes already-drafted players from the board', async () => {
     const board = await json<{ recommendations: { name: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
     const names = board.recommendations.map((r) => r.name);

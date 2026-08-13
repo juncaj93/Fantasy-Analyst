@@ -9,8 +9,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type DraftBoard, type DraftRecommendation, type LeagueSummary } from '../api.ts';
+import {
+  api,
+  type DraftBoard,
+  type DraftRecommendation,
+  type LeagueSummary,
+  type MyGuyFlag,
+  type RosterAlert,
+} from '../api.ts';
 import { Badge, Empty, Loading, Notice, Signal, Stat, Unknown, formatDate } from '../components/common.tsx';
+import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/decisions.tsx';
 
 const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 
@@ -24,6 +32,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const [position, setPosition] = useState('ALL');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [autoPoll, setAutoPoll] = useState(false);
+  const [flagging, setFlagging] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
 
   const load = useCallback(
@@ -46,6 +55,28 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   useEffect(() => {
     void load(position);
   }, [load, position]);
+
+  /**
+   * Star a player, then reload the board.
+   *
+   * The flag changes the ranking, so the honest thing is to show the board it
+   * produces rather than leave the old order on screen with a new star on it.
+   */
+  const setMyGuy = useCallback(
+    async (playerId: string, level: 0 | 1 | 2 | 3) => {
+      setFlagging(playerId);
+      try {
+        await api.post<{ myGuy: MyGuyFlag }>(`/api/players/${playerId}/my-guy`, { level });
+        await load(position);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setFlagging(null);
+      }
+    },
+    [load, position],
+  );
 
   // Poll Sleeper for new picks while the draft is live. Interval comes from the
   // server so an inactive draft stops burning requests.
@@ -136,6 +167,8 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
         ))}
       </div>
 
+      <RosterAlerts alerts={board.rosterAlerts ?? []} />
+
       <div className="section-title" data-testid="recommended-heading">
         Recommended ({board.recommendations.length})
       </div>
@@ -149,10 +182,36 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
             rec={rec}
             expanded={expanded === rec.playerId}
             onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
+            onMyGuy={setMyGuy}
+            busy={flagging === rec.playerId}
           />
         ))
       )}
     </>
+  );
+}
+
+/**
+ * The alerts the shape of the roster is producing.
+ *
+ * Capped at three. The screen is a phone during a draft, and a list of eight
+ * things to worry about is the same as no advice at all — the loudest ones are
+ * the ones worth the space.
+ */
+function RosterAlerts({ alerts }: { alerts: RosterAlert[] }) {
+  const order = { urgent: 0, warn: 1, info: 2 } as const;
+  const shown = [...alerts].sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 3);
+  if (shown.length === 0) return null;
+  return (
+    <div className="card card-tight" data-testid="roster-alerts">
+      <div className="section-title">Your roster</div>
+      {shown.map((alert) => (
+        <div key={alert.key} className={`roster-alert roster-alert-${alert.severity}`} data-testid="roster-alert">
+          <strong>{alert.message}</strong>
+          <div className="faint">{alert.detail}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -161,11 +220,15 @@ function RecommendationRow({
   rec,
   expanded,
   onToggle,
+  onMyGuy,
+  busy,
 }: {
   rank: number;
   rec: DraftRecommendation;
   expanded: boolean;
   onToggle: () => void;
+  onMyGuy: (playerId: string, level: 0 | 1 | 2 | 3) => void;
+  busy: boolean;
 }) {
   return (
     <button
@@ -177,11 +240,20 @@ function RecommendationRow({
     >
       <div className="player-row-top">
         <span className="rank">{rank}</span>
+        <MyGuyControl myGuy={rec.myGuy} busy={busy} onChange={(level) => onMyGuy(rec.playerId, level)} />
         <span className="player-name">{rec.name}</span>
         <span className="pos-team">
           {rec.position} · {rec.team || 'FA'}
         </span>
       </div>
+
+      {/*
+        At most two tags on the row itself, in the order that decides a pick:
+        a caution outranks urgency, and urgency outranks everything else. The
+        rest of the reasoning is one tap away rather than crowding the list.
+      */}
+      <DecisionTags rec={rec} />
+
       <div className="player-row-metrics">
         <span className="metric">
           ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
@@ -204,6 +276,19 @@ function RecommendationRow({
 
       {expanded ? (
         <div className="explain">
+          {/* The full decision picture, only once the user asked for it. */}
+          {rec.tierCliff.message || rec.avoid.trendNote || rec.wait.state !== 'unknown' ? (
+            <div className="decision-detail">
+              {rec.avoid.active ? <div className="sig-neg">{rec.avoid.message}</div> : null}
+              {rec.avoid.trendNote ? <div className="muted">{rec.avoid.trendNote}</div> : null}
+              {rec.tierCliff.message ? <div>{rec.tierCliff.message}</div> : null}
+              {rec.wait.state !== 'unknown' ? (
+                <div>
+                  <strong>{rec.wait.label}</strong> — {rec.wait.detail}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <strong style={{ fontSize: '0.8rem' }}>Why</strong>
           <ul>
             {rec.reasons.map((r) => (
@@ -250,5 +335,28 @@ function RecommendationRow({
         </div>
       ) : null}
     </button>
+  );
+}
+
+/**
+ * The one or two tags that change what the user does with this row.
+ *
+ * Priority order is the order a person reads them in: a reason not to take him
+ * at all, then a reason to take him now, then the fact that he can wait. Stars
+ * are not counted against the budget — they sit beside the name, are the user's
+ * own mark, and are how they find the player they were looking for.
+ */
+function DecisionTags({ rec }: { rec: DraftRecommendation }) {
+  const tags: JSX.Element[] = [];
+  if (rec.avoid.active) tags.push(<AvoidBadge key="avoid" avoid={rec.avoid} />);
+  if (rec.tierCliff.severity !== 'none' && tags.length < 2) {
+    tags.push(<TierCliffTag key="cliff" cliff={rec.tierCliff} />);
+  }
+  if (tags.length < 2 && rec.wait.state !== 'unknown') tags.push(<WaitTag key="wait" wait={rec.wait} />);
+  if (tags.length === 0) return null;
+  return (
+    <div className="tag-row" data-testid="decision-tags">
+      {tags}
+    </div>
   );
 }

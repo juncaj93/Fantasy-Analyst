@@ -89,6 +89,63 @@ test.describe('draft room', () => {
     }
   });
 
+  test('says what the shape of the roster means, not just what is missing', async ({ page }) => {
+    const alerts = page.getByTestId('roster-alert');
+    expect(await alerts.count()).toBeGreaterThan(0);
+    // A bare label is what the brief rules out: each alert carries its reason.
+    const first = alerts.first();
+    expect((await first.innerText()).split('\n').filter(Boolean).length).toBeGreaterThan(1);
+  });
+
+  test('shows at most two decision tags on a row', async ({ page }) => {
+    const rows = page.getByTestId('recommendation-row');
+    const count = await rows.count();
+    for (let i = 0; i < Math.min(count, 10); i++) {
+      const tags = rows.nth(i).getByTestId('decision-tags').locator('.tag');
+      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
+    }
+  });
+
+  test('stars a player, keeps it across a reload, and explains the boost', async ({ page }) => {
+    const row = page.getByTestId('recommendation-row').first();
+    const playerId = await row.getAttribute('data-player-id');
+    const star = row.getByTestId('my-guy-control');
+    await expect(star).toHaveAttribute('data-level', '0');
+
+    await star.click();
+    const flagged = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '1');
+
+    // Tapping cycles rather than opening a menu — one thumb, one clock.
+    await flagged.getByTestId('my-guy-control').click();
+    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+
+    await page.reload();
+    const afterReload = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(afterReload.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+
+    await afterReload.click();
+    await expect(afterReload.locator('.explain')).toContainText('Strong My Guy');
+
+    // Leave the board as it was found, so the shared dev server stays clean.
+    await afterReload.getByTestId('my-guy-control').click();
+    await afterReload.getByTestId('my-guy-control').click();
+    await expect(
+      page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`).getByTestId('my-guy-control'),
+    ).toHaveAttribute('data-level', '0');
+  });
+
+  test('starring does not also expand the row', async ({ page }) => {
+    const row = page.getByTestId('recommendation-row').first();
+    const playerId = await row.getAttribute('data-player-id');
+    await row.getByTestId('my-guy-control').click();
+    const after = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(after.locator('.explain')).toHaveCount(0);
+    await after.getByTestId('my-guy-control').click();
+    await after.getByTestId('my-guy-control').click();
+    await after.getByTestId('my-guy-control').click();
+  });
+
   test('offers no control that could make a pick', async ({ page }) => {
     const joined = (await page.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     expect(joined).not.toContain('draft this');
