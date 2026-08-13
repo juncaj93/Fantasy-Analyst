@@ -68,6 +68,24 @@ export class PlayerRepo {
   }
 
   /**
+   * Fetch a known set of players in one query.
+   *
+   * A whole roster is 15-20 ids. Looking them up one at a time is 15-20 round
+   * trips, and loading the full 3,300-row table to pick 15 out of it is worse.
+   * Ids that do not exist are simply absent from the result.
+   */
+  async listByIds(ids: string[]): Promise<Map<string, CanonicalPlayer>> {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return new Map();
+    const placeholders = unique.map(() => '?').join(',');
+    const rows = await this.db
+      .prepare(`SELECT * FROM players WHERE id IN (${placeholders})`)
+      .bind(...unique)
+      .all<PlayerRow>();
+    return new Map(rows.results.map((r) => [r.id, toPlayer(r)]));
+  }
+
+  /**
    * Upsert the Sleeper player dump.
    * Deterministic aliases are refreshed; user-supplied aliases in
    * `player_aliases` are untouched.

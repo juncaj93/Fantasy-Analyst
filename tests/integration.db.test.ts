@@ -79,6 +79,20 @@ describe('PlayerRepo', () => {
     await repo.upsertMany(TEST_PLAYERS);
     expect((await repo.search('nacua')).map((p) => p.id)).toEqual(['11']);
   });
+
+  it('fetches a set of players in one lookup', async () => {
+    const repo = new PlayerRepo(db);
+    await repo.upsertMany(TEST_PLAYERS);
+
+    const found = await repo.listByIds(['10', '11', '9']);
+    expect([...found.keys()].sort()).toEqual(['10', '11', '9']);
+    expect(found.get('10')?.fullName).toBe('Bijan Robinson');
+
+    // Duplicates collapse, unknown ids are simply absent, empty asks nothing.
+    expect((await repo.listByIds(['10', '10'])).size).toBe(1);
+    expect((await repo.listByIds(['10', 'nope'])).has('nope')).toBe(false);
+    expect((await repo.listByIds([])).size).toBe(0);
+  });
 });
 
 describe('SleeperSyncService', () => {

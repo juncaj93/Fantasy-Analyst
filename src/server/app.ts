@@ -309,7 +309,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const playerRepo = new PlayerRepo(db);
     const propsRepo = new PropsRepo(db);
-    const [propsByPlayer, signals, freshness] = await Promise.all([
+    const [players, propsByPlayer, signals, freshness] = await Promise.all([
+      playerRepo.listByIds(mine.playerIds),
       propsRepo.latestForPlayers(mine.playerIds),
       new EvidenceRepo(db).getSignals(mine.playerIds),
       propsRepo.freshness(),
@@ -317,7 +318,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const inputs = [];
     for (const id of mine.playerIds) {
-      const player = await playerRepo.getById(id);
+      const player = players.get(id);
       // A roster entry with no canonical player is a gap in the dictionary, not
       // a reason to fail the whole screen.
       if (!player) continue;
