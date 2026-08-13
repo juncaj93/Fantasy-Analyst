@@ -154,15 +154,51 @@ insert-only so a user's correction always survives. That distinction is
 reported as `stale` rather than buried in a skip count; tuning rules without
 seeing it is guesswork.
 
+## Milestone 6 — the newsletter address is live (done)
+
+`fantasy-news@juncaj.net` → Cloudflare Email Routing → the `fantasy-analyst`
+worker. Confirmed against the live account and the deployed app:
+
+```
+MX      juncaj.net -> route1/2/3.mx.cloudflare.net
+rule    fantasy-news@juncaj.net -> worker fantasy-analyst   (enabled)
+app     address: fantasy-news@juncaj.net
+        sender set: false        (nothing accepted yet, by design)
+        emails received: 0
+```
+
+Enabling Email Routing for the first time turned out to be dashboard-only — a
+scoped API token can manage routing *rules* but cannot switch the service on.
+The setup workflow now treats that step as best-effort and names the dashboard
+path instead of reporting a bare authentication error.
+
+**The setup workflow refuses to break existing mail.** Enabling Email Routing
+replaces a domain's MX records, so step one aborts if any MX record exists that
+is not Cloudflare's own. That interlock is in the workflow, not in anyone's
+head, so it still holds if the workflow is re-run against a domain that has
+since been given a mailbox.
+
+**A run is not green until mail can actually be delivered.** The first
+successful-looking run had created the routing rule with no MX records behind
+it — a configuration that looks finished and silently bounces every newsletter.
+The final step now verifies Cloudflare MX records exist.
+
+**Accepting a sender no longer requires knowing it in advance.** Nobody knows
+their newsletter's from-address offhand. The first issue arrives, is ignored
+because no sender is expected yet, and Setup offers its real address for
+acceptance in one tap.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and
    every market key are confirmed current. What remains unverified is the live
    response shape and actual NFL prop coverage, which needs an API key. Vegas
    shows as "not connected" by design and no quota has been consumed.
-2. **Email routing has not been exercised end-to-end.** The domain exists, but
-   the deploy token cannot read or change DNS, so neither the existing MX
-   records nor the routing rule could be inspected. The handler, parser,
+2. **No real email has passed through yet.** Routing, MX records and the rule
+   are verified against the live Cloudflare account, but nothing has actually
+   been delivered, so the final hop — Cloudflare invoking the worker's
+   `email()` handler — is confirmed by configuration rather than by observation.
+   Sending one email to the address closes this. The handler, parser,
    validation, quarantine and idempotency are covered by tests against
    realistic raw MIME messages.
 3. **Rule magnitudes are still conservative** (mostly 1). Expect tuning once

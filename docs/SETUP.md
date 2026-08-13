@@ -225,9 +225,14 @@ Tap **Newsletter**.
    *If it says the address is not ready yet, Part A step A5 has not been done.*
 2. Go to your FF Newsletter's website and change your subscription email to that
    address. (Or subscribe fresh with it and unsubscribe your personal address.)
-3. Back in the app, type the address the newsletter arrives **from** — for
-   example `newsletter@theirsite.com` — and tap **Save sender**.
-   You can also enter just the domain, like `@theirsite.com`.
+3. You do **not** need to look up the address your newsletter sends from. When
+   the first issue arrives it is ignored — nothing is accepted until you say so
+   — and the Newsletter step then shows the address it really came from with an
+   **Accept mail from this sender** button. One tap and every future issue is
+   read.
+
+   If you would rather type it yourself, the sender box takes a full address
+   like `newsletter@theirsite.com` or just a domain like `@theirsite.com`.
 
 That is it. Every future issue is read automatically. You never forward
 anything, and the app never touches your personal inbox.
