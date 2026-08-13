@@ -160,6 +160,39 @@ jobs:
               }
             })"
 
+      - name: Sleeper — is ADP fetchable?
+        run: |
+          set -uo pipefail
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+
+          echo "=== REST candidates ==="
+          for u in \
+            "https://api.sleeper.app/v1/adp/nfl/2026" \
+            "https://api.sleeper.app/v1/players/nfl/adp" \
+            "https://api.sleeper.app/adp/nfl/2026/redraft" ; do
+            code=$(curl -s -o /tmp/s.body -w '%{http_code}' -H "user-agent: $UA" --max-time 20 "$u" || echo 000)
+            echo "  $code  $(wc -c < /tmp/s.body)b  $u"
+            [ "$code" = "200" ] && echo "    head: $(head -c 200 /tmp/s.body | tr '\n' ' ')"
+          done
+
+          # Sleeper's own app reads ADP over GraphQL, which is the only place it
+          # is actually published.
+          echo
+          echo "=== GraphQL: adp_dynasty_ppr / redraft ==="
+          for season in 2026 2025; do
+            body=$(node -e "
+              process.stdout.write(JSON.stringify({
+                operationName: 'adp',
+                query: 'query adp {adp_data(sport: \"nfl\", season: \"'+process.argv[1]+'\", season_type: \"regular\", adp_type: \"redraft_ppr\"){adp adp_std adp_ppr player_id}}',
+              }));
+            " "$season")
+            code=$(curl -s -o /tmp/gql.json -w '%{http_code}' -X POST "https://sleeper.app/graphql" \
+              -H 'content-type: application/json' -H "user-agent: $UA" \
+              --data-binary "$body" --max-time 20 || echo 000)
+            echo "  season $season -> $code  $(wc -c < /tmp/gql.json)b"
+            head -c 400 /tmp/gql.json | tr '\n' ' '; echo
+          done
+
       - name: Underdog — is there a fetchable ADP source?
         run: |
           set -uo pipefail
