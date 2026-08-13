@@ -194,18 +194,7 @@ export class NewsletterRepo {
       .prepare("SELECT * FROM identity_reviews WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?")
       .bind(limit)
       .all<Record<string, unknown>>();
-    return rows.results.map((r) => ({
-      id: Number(r['id']),
-      sourceMessageId: String(r['source_message_id']),
-      sourceDate: String(r['source_date']),
-      excerpt: String(r['excerpt']),
-      matchedText: String(r['matched_text']),
-      reason: String(r['reason']),
-      candidates: parseJson(r['candidates_json'], []),
-      proposedPolarity: (r['proposed_polarity'] as string | null) ?? null,
-      proposedCategory: (r['proposed_category'] as string | null) ?? null,
-      status: String(r['status']),
-    }));
+    return rows.results.map(toIdentityReview);
   }
 
   async pendingIdentityCount(): Promise<number> {
@@ -213,6 +202,28 @@ export class NewsletterRepo {
       .prepare("SELECT COUNT(*) AS n FROM identity_reviews WHERE status = 'pending'")
       .first<{ n: number }>();
     return Number(row?.n ?? 0);
+  }
+
+  /**
+   * Names that were resolved to a player, for checking the evidence landed.
+   *
+   * Resolving used to record the decision alone — status and player id — and
+   * create no evidence, so the player's tally never moved. Anything resolved
+   * before that was fixed is still missing, and nothing in the app says so.
+   */
+  async listResolvedIdentityReviews(limit = 500): Promise<(IdentityReviewRecord & { resolvedPlayerId: string })[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM identity_reviews
+          WHERE status = 'resolved' AND resolved_player_id IS NOT NULL
+          ORDER BY id ASC LIMIT ?`,
+      )
+      .bind(limit)
+      .all<Record<string, unknown>>();
+    return rows.results.map((r) => ({
+      ...toIdentityReview(r),
+      resolvedPlayerId: String(r['resolved_player_id']),
+    }));
   }
 
   async resolveIdentityReview(id: number, playerId: string | null, status: 'resolved' | 'dismissed'): Promise<void> {
@@ -228,6 +239,21 @@ export class NewsletterRepo {
       .bind(id, status, toJson({ status: 'pending' }), toJson({ status, playerId }), nowIso())
       .run();
   }
+}
+
+function toIdentityReview(r: Record<string, unknown>): IdentityReviewRecord {
+  return {
+    id: Number(r['id']),
+    sourceMessageId: String(r['source_message_id']),
+    sourceDate: String(r['source_date']),
+    excerpt: String(r['excerpt']),
+    matchedText: String(r['matched_text']),
+    reason: String(r['reason']),
+    candidates: parseJson(r['candidates_json'], []),
+    proposedPolarity: (r['proposed_polarity'] as string | null) ?? null,
+    proposedCategory: (r['proposed_category'] as string | null) ?? null,
+    status: String(r['status']),
+  };
 }
 
 function toMessage(row: Record<string, unknown>): MessageRecord {

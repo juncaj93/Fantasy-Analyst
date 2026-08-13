@@ -173,6 +173,42 @@ describe('confirming a name', () => {
     await expect(service.assign('JSN', 'nobody', { now: NOW })).rejects.toThrow(/not found/);
   });
 
+  /**
+   * The live bug: six names were confirmed under the old code, which recorded
+   * the decision and created nothing. The queue emptied, the tallies stayed at
+   * zero, and nothing anywhere said so.
+   */
+  describe('recovering names resolved before resolving created evidence', () => {
+    it('finds the stranded evidence and moves the tally', async () => {
+      // Resolve the old way: decision recorded, no evidence written.
+      for (const review of await new NewsletterRepo(db).listIdentityReviews(10)) {
+        await new NewsletterRepo(db).resolveIdentityReview(review.id, 'jsn', 'resolved');
+      }
+      expect((await new EvidenceRepo(db).getSignals(['jsn'])).get('jsn')?.raw.net ?? 0).toBe(0);
+      expect((await service.status(NOW)).groups).toEqual([]);
+
+      const result = await service.backfillResolved({ now: NOW });
+      expect(result).toMatchObject({ checked: 3, created: 3 });
+      expect(result.players[0]).toMatchObject({ name: 'Jaxon Smith-Njigba', net: 3, recovered: 3 });
+      expect((await new EvidenceRepo(db).getSignals(['jsn'])).get('jsn')?.raw.net).toBe(3);
+    });
+
+    it('is safe to run twice', async () => {
+      for (const review of await new NewsletterRepo(db).listIdentityReviews(10)) {
+        await new NewsletterRepo(db).resolveIdentityReview(review.id, 'jsn', 'resolved');
+      }
+      await service.backfillResolved({ now: NOW });
+      const second = await service.backfillResolved({ now: NOW });
+      expect(second.created).toBe(0);
+      expect((await new EvidenceRepo(db).getSignals(['jsn'])).get('jsn')?.raw.net).toBe(3);
+    });
+
+    it('leaves nothing to do when every resolution already has its evidence', async () => {
+      await service.assign('JSN', 'jsn', { now: NOW });
+      expect((await service.backfillResolved({ now: NOW })).created).toBe(0);
+    });
+  });
+
   it('reports the unassigned tally before it is fixed', async () => {
     const status = await service.status(NOW);
     expect(status.summary).toMatchObject({ names: 1, items: 3, net: 3 });

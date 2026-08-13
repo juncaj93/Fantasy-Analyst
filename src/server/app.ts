@@ -759,6 +759,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // Names the matcher would not guess at, and the tally they are costing.
   router.get('/api/repair', async (ctx) => jsonResponse(await new RepairService(ctx.env.db).status()));
 
+  // Recovers evidence for names resolved before resolving created any.
+  router.post('/api/repair/backfill', async (ctx) =>
+    jsonResponse(await new RepairService(ctx.env.db).backfillResolved()),
+  );
+
   router.post('/api/repair/assign', async (ctx) => {
     const body = await ctx.json<{ alias?: string; playerId?: string; remember?: boolean }>();
     if (!body?.alias || !body?.playerId) return errorResponse('alias and playerId are required', 400);

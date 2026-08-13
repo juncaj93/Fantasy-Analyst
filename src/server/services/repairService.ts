@@ -106,31 +106,7 @@ export class RepairService {
     // `auto_applied`. Neutral items are still created: they contribute nothing
     // to the tally, but throwing them away would lose the record of what the
     // newsletter actually said.
-    const created = await this.evidence.insertProposed(
-      mine.map((review) => ({
-        // Keyed on the review's own dedupe key so re-confirming is a no-op
-        // rather than a second copy of the same sentence.
-        dedupeKey: `identity:${review.id}`,
-        playerId,
-        playerName: player.fullName,
-        sourceType: 'newsletter' as const,
-        sourceName: 'newsletter',
-        sourceMessageId: review.sourceMessageId,
-        sourceDate: review.sourceDate,
-        excerpt: review.excerpt,
-        contextSummary: null,
-        category: review.proposedCategory,
-        polarity: (review.proposedPolarity ?? 'neutral') as 'positive' | 'negative' | 'neutral',
-        // One item counts once, the same rule the classifier follows.
-        magnitude: polaritySign(review.proposedPolarity) === 0 ? 0 : 1,
-        confidence: 'high' as const,
-        confidenceScore: 1,
-        ruleId: 'user_identity_repair',
-        reviewStatus: 'accepted' as const,
-        notes: [`assigned by the user from "${alias.trim()}"`],
-        blockIndex: 0,
-      })),
-    );
+    const created = await this.evidence.insertProposed(mine.map((review) => this.evidenceFor(review, player, alias)));
 
     for (const review of mine) {
       await this.newsletter.resolveIdentityReview(review.id, playerId, 'resolved');
@@ -144,5 +120,83 @@ export class RepairService {
       created: created.inserted,
       net: signal.raw.net,
     };
+  }
+
+  /**
+   * Evidence for one confirmed name.
+   *
+   * The user confirmed who this is, not what the news said about them, so the
+   * classifier's polarity stands and the item is `accepted` rather than
+   * `auto_applied`. Neutral items are still created: they contribute nothing to
+   * the tally, but discarding them would lose the record of what was said.
+   *
+   * Keyed on the review id so re-running is a no-op rather than a duplicate.
+   */
+  private evidenceFor(
+    review: { id: number; sourceMessageId: string; sourceDate: string; excerpt: string; proposedPolarity: string | null; proposedCategory: string | null },
+    player: { id: string; fullName: string },
+    alias: string,
+  ) {
+    return {
+      dedupeKey: `identity:${review.id}`,
+      playerId: player.id,
+      playerName: player.fullName,
+      sourceType: 'newsletter' as const,
+      sourceName: 'newsletter',
+      sourceMessageId: review.sourceMessageId,
+      sourceDate: review.sourceDate,
+      excerpt: review.excerpt,
+      contextSummary: null,
+      category: review.proposedCategory,
+      polarity: (review.proposedPolarity ?? 'neutral') as 'positive' | 'negative' | 'neutral',
+      magnitude: polaritySign(review.proposedPolarity) === 0 ? 0 : 1,
+      confidence: 'high' as const,
+      confidenceScore: 1,
+      ruleId: 'user_identity_repair',
+      reviewStatus: 'accepted' as const,
+      notes: [`assigned by the user from "${alias.trim()}"`],
+      blockIndex: 0,
+    };
+  }
+
+  /**
+   * Recover evidence for names that were resolved before resolving created any.
+   *
+   * The old path recorded the decision and stopped, so a confirmed name left the
+   * queue and the player's tally stayed where it was — visible nowhere. Every
+   * resolved review is checked against the ledger and the missing ones are
+   * written, keyed on the review id so this is safe to run repeatedly.
+   */
+  async backfillResolved(opts: { now?: string } = {}): Promise<{
+    checked: number;
+    created: number;
+    players: { playerId: string; name: string; net: number; recovered: number }[];
+  }> {
+    const resolved = await this.newsletter.listResolvedIdentityReviews();
+    const byPlayer = new Map<string, typeof resolved>();
+    for (const review of resolved) {
+      const list = byPlayer.get(review.resolvedPlayerId) ?? [];
+      list.push(review);
+      byPlayer.set(review.resolvedPlayerId, list);
+    }
+
+    let created = 0;
+    const players: { playerId: string; name: string; net: number; recovered: number }[] = [];
+
+    for (const [playerId, reviews] of byPlayer) {
+      const player = await this.players.getById(playerId);
+      if (!player) continue;
+
+      const result = await this.evidence.insertProposed(
+        reviews.map((review) => this.evidenceFor(review, player, review.matchedText)),
+      );
+      if (result.inserted === 0) continue;
+
+      created += result.inserted;
+      const signal = await this.evidence.refreshSignal(playerId, { now: opts.now });
+      players.push({ playerId, name: player.fullName, net: signal.raw.net, recovered: result.inserted });
+    }
+
+    return { checked: resolved.length, created, players };
   }
 }
