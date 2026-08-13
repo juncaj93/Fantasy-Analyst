@@ -158,6 +158,17 @@ jobs:
           echo "home page: $code"
           [ "$code" = "200" ] || fail=1
 
+          # Prove the lineup route is actually registered. An unknown league
+          # must be refused by the handler ("league not found"), not by the
+          # router ("not found") — the latter would mean the route is missing
+          # and the Team screen would silently show nothing.
+          body=$(curl -s "$url/api/leagues/does-not-exist/lineup")
+          echo "lineup route: $body"
+          case "$body" in
+            *"league not found"*) ;;
+            *) echo "::error::The lineup route did not respond as expected."; fail=1 ;;
+          esac
+
           # A write with no session must be refused, or the site would be
           # editable by anyone who found the address. 503 means the passphrase
           # has not propagated yet, which is still closed, so retry briefly.
