@@ -8,6 +8,8 @@
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
+import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
+import { RepairService } from './repairService.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
@@ -30,6 +32,8 @@ export interface DraftBoardState {
   league: { id: string; name: string; scoringLabel: string; notes: string[] };
   rosterCounts: Record<string, number>;
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
+  /** Starting slots with nobody to fill them yet. */
+  openStarters: { slot: string; count: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
   warnings: string[];
@@ -49,7 +53,7 @@ export class DraftBoardService {
   private readonly adp: AdpRepo;
   private readonly evidence: EvidenceRepo;
 
-  constructor(db: Database) {
+  constructor(private readonly db: Database) {
     this.leagues = new LeagueRepo(db);
     this.players = new PlayerRepo(db);
     this.adp = new AdpRepo(db);
@@ -111,26 +115,26 @@ export class DraftBoardService {
     }
     const byId = new Map(allPlayers.map((p) => [p.id, p]));
 
-    // My roster composition drives need. Match on the Sleeper user as well as
-    // the roster id: drafts that record only `picked_by` would otherwise look
-    // like an empty roster, which reports every position as an unfilled need.
-    const isMine = (p: { rosterId: number | null; pickedBy: string | null }): boolean =>
-      (p.rosterId != null && p.rosterId === myRosterRecord?.rosterId) ||
-      (!!myRosterRecord?.ownerId && p.pickedBy === myRosterRecord.ownerId);
-    const myPickRecords = picks.filter((p) => p.playerId && isMine(p));
-    const rosterCounts: Record<string, number> = {};
-    const myRoster = myPickRecords.map((p) => {
-      const player = byId.get(p.playerId!);
-      const position = player?.position ?? '';
-      if (position) rosterCounts[position] = (rosterCounts[position] ?? 0) + 1;
-      return {
-        playerId: p.playerId!,
-        name: player?.fullName ?? p.playerId!,
-        position,
-        team: player?.team ?? '',
-        pickNo: p.pickNo,
-      };
+    // Roster need comes from the same reconstruction the Team page shows, so the
+    // two can never disagree about what has been drafted.
+    const shapeForRoster = buildRosterShape(league.rosterPositions);
+    const live = buildLiveRoster({
+      picks,
+      rosterId: myRosterRecord?.rosterId ?? null,
+      ownerId: myRosterRecord?.ownerId ?? null,
+      sleeperPlayerIds: myRosterRecord?.playerIds ?? [],
+      byId,
+      shape: shapeForRoster,
+      draftStatus: draft.status,
     });
+    const rosterCounts = live.counts;
+    const myRoster = live.players.map((p) => ({
+      playerId: p.playerId,
+      name: p.name,
+      position: p.position,
+      team: p.team,
+      pickNo: p.pickNo ?? 0,
+    }));
 
     // Candidate pool: ranked players who are still available. Unranked players
     // are included only when nothing is ranked at all, so the board degrades to
@@ -158,6 +162,16 @@ export class DraftBoardService {
     if (pool.length > candidates.length) {
       warnings.push(
         `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
+      );
+    }
+
+    // Non-blocking draft-day readiness: unresolved names are research the user
+    // did that is not reaching the board. Say so here rather than only in Setup,
+    // because this is the screen they are looking at when it matters.
+    const repair = await new RepairService(this.db).status();
+    if (repair.summary.names > 0 && Math.abs(repair.summary.net) >= 2) {
+      warnings.push(
+        `${repair.summary.headline} — fix it under Help my scores in Setup; the board is usable meanwhile`,
       );
     }
 
@@ -202,6 +216,7 @@ export class DraftBoardService {
       },
       rosterCounts,
       myRoster,
+      openStarters: live.openStarters,
       adpSnapshot: snapshotMeta
         ? {
             id: snapshotMeta.id,

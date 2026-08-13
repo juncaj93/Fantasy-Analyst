@@ -1,8 +1,9 @@
 /**
- * Underdog ADP snapshot import.
+ * ADP snapshot import.
  *
- * Deliberately NOT a live scraper. The user exports/downloads a same-day ADP
- * snapshot (CSV or JSON), imports it, and the snapshot is frozen for the draft.
+ * Deliberately NOT a live scraper. A same-day ADP snapshot (CSV or JSON) is
+ * imported and then frozen for the draft, so the board cannot shift under the
+ * user mid-draft and cannot break when a third-party site does.
  *
  * Original source values are always preserved alongside the resolved canonical
  * player id; rows that cannot be resolved unambiguously are surfaced for review
@@ -268,7 +269,7 @@ export function importAdpSnapshot(
   });
 
   return {
-    source: opts.source ?? 'underdog',
+    source: opts.source ?? 'import',
     label: opts.label ?? `ADP ${now.slice(0, 10)}`,
     capturedAt: opts.capturedAt ?? now,
     fileHash: fileHash(text),

@@ -19,7 +19,14 @@ import type {
 /** Review states whose evidence counts toward tallies. */
 const COUNTED_STATUSES = new Set(['auto_applied', 'accepted', 'corrected']);
 
-export const RECENCY_WINDOWS = { last7: 7, last21: 21 } as const;
+/**
+ * Recent-evidence windows, in days.
+ *
+ * Seven days is momentum; thirty is the trend. Thirty rather than the previous
+ * twenty-one because that is the window trade decisions are actually made on,
+ * and one window shared by every mode beats two that nearly agree.
+ */
+export const RECENCY_WINDOWS = { last7: 7, last30: 30 } as const;
 
 /** Apply the user override (if any) and decide whether the item counts. */
 export function effectiveEvidence(item: EvidenceItem): EffectiveEvidence {
@@ -71,7 +78,7 @@ export function aggregatePlayerSignal(
 
   const raw = emptyWindow();
   const last7 = emptyWindow();
-  const last21 = emptyWindow();
+  const last30 = emptyWindow();
   const seasonToDate = emptyWindow();
   const categoryBreakdown: PlayerSignal['categoryBreakdown'] = {};
 
@@ -97,7 +104,7 @@ export function aggregatePlayerSignal(
 
     const ageDays = Number.isFinite(ts) ? (nowMs - ts) / 86_400_000 : Number.POSITIVE_INFINITY;
     if (ageDays <= RECENCY_WINDOWS.last7) add(last7, e);
-    if (ageDays <= RECENCY_WINDOWS.last21) add(last21, e);
+    if (ageDays <= RECENCY_WINDOWS.last30) add(last30, e);
     if (seasonStartMs == null || (Number.isFinite(ts) && ts >= seasonStartMs)) add(seasonToDate, e);
 
     const cat = e.category ?? 'other';
@@ -111,7 +118,7 @@ export function aggregatePlayerSignal(
     playerId,
     raw,
     last7,
-    last21,
+    last30,
     seasonToDate,
     categoryBreakdown,
     pendingCount,
@@ -144,7 +151,7 @@ export function emptySignal(playerId: string, now = new Date().toISOString()): P
     playerId,
     raw: emptyWindow(),
     last7: emptyWindow(),
-    last21: emptyWindow(),
+    last30: emptyWindow(),
     seasonToDate: emptyWindow(),
     categoryBreakdown: {},
     pendingCount: 0,

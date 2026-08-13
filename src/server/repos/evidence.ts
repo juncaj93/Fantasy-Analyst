@@ -277,7 +277,7 @@ export class EvidenceRepo {
       .prepare(
         `INSERT INTO player_signal_cache (
            player_id, raw_positive, raw_negative, raw_net, raw_items,
-           recent7_net, recent21_net, recent21_items, season_net,
+           recent7_net, recent30_net, recent30_items, season_net,
            pending_count, mixed_count, category_breakdown_json, last_evidence_at, updated_at
          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(player_id) DO UPDATE SET
@@ -286,8 +286,8 @@ export class EvidenceRepo {
            raw_net = excluded.raw_net,
            raw_items = excluded.raw_items,
            recent7_net = excluded.recent7_net,
-           recent21_net = excluded.recent21_net,
-           recent21_items = excluded.recent21_items,
+           recent30_net = excluded.recent30_net,
+           recent30_items = excluded.recent30_items,
            season_net = excluded.season_net,
            pending_count = excluded.pending_count,
            mixed_count = excluded.mixed_count,
@@ -302,8 +302,8 @@ export class EvidenceRepo {
         signal.raw.net,
         signal.raw.items,
         signal.last7.net,
-        signal.last21.net,
-        signal.last21.items,
+        signal.last30.net,
+        signal.last30.items,
         signal.seasonToDate.net,
         signal.pendingCount,
         signal.mixedCount,
@@ -344,11 +344,11 @@ export class EvidenceRepo {
             items: Number(r['raw_items'] ?? 0),
           },
           last7: { positive: 0, negative: 0, net: Number(r['recent7_net'] ?? 0), items: 0 },
-          last21: {
+          last30: {
             positive: 0,
             negative: 0,
-            net: Number(r['recent21_net'] ?? 0),
-            items: Number(r['recent21_items'] ?? 0),
+            net: Number(r['recent30_net'] ?? 0),
+            items: Number(r['recent30_items'] ?? 0),
           },
           seasonToDate: { positive: 0, negative: 0, net: Number(r['season_net'] ?? 0), items: 0 },
           categoryBreakdown: parseJson(r['category_breakdown_json'], {}),

@@ -33,7 +33,7 @@ function prop(market: PlayerProp['market'], line: number | null, extra: Partial<
 function signal(net: number, items = 3): PlayerSignal {
   const s = emptySignal('x');
   s.raw = { positive: Math.max(0, net), negative: Math.max(0, -net), net, items };
-  s.last21 = { ...s.raw };
+  s.last30 = { ...s.raw };
   return s;
 }
 

@@ -20,27 +20,58 @@ export interface DraftComponentWeights {
   need: number;
   scarcity: number;
   leagueFit: number;
-  newsRecent: number;
-  newsRaw: number;
+  /** Everything ever accepted about this player. Never decays. */
+  newsLifetime: number;
+  /** The last 30 days: the trend. */
+  news30: number;
+  /** The last 7 days: acceleration on top of the trend. */
+  news7: number;
   survivalUrgency: number;
 }
 
 /**
  * Default weights.
  *
- * Market value dominates by design: the news tally is a tiebreaker for close
- * calls, never an override of a large ADP gap (see docs/03_DRAFT_ENGINE.md).
- * The news components are additionally hard-capped in `newsComponent`.
+ * The news tally is a strong *secondary* input, not a tiebreaker and not a
+ * trump card. Calibrated deliberately:
+ *
+ * In the reach regime a point of ADP is worth about 0.05 of contribution, so
+ * the news components together (up to ~0.67) can move a player roughly ten
+ * places when the market is close — visibly reordering the board, which is the
+ * point of keeping the tally at all. Against a large ADP gap they cannot win:
+ * a player who fell 30 picks scores a full 1.0 on market value alone.
+ *
+ * Lifetime carries the most weight of the three. A player who was favoured all
+ * offseason should still be favoured on draft day; recency modifies that
+ * judgement rather than replacing it.
  */
 export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   marketValue: 1,
   need: 0.35,
   scarcity: 0.3,
   leagueFit: 0.25,
-  newsRecent: 0.12,
-  newsRaw: 0.06,
+  newsLifetime: 0.35,
+  news30: 0.2,
+  news7: 0.12,
   survivalUrgency: 0.22,
 };
+
+/**
+ * Net tally at which each window is considered maxed out.
+ *
+ * Shorter windows saturate sooner because they hold fewer items: +3 in a week
+ * is as emphatic as a week gets, while +10 over a career is merely strong.
+ */
+export const NEWS_SATURATION = { lifetime: 10, last30: 5, last7: 3 } as const;
+
+/**
+ * How much the recent windows are damped when they contradict lifetime.
+ *
+ * Disagreement between "all offseason" and "the last month" is real
+ * information, but it is ambiguous information — the honest response is to
+ * trust it less, not to pick a side.
+ */
+export const NEWS_CONFLICT_DAMPING = 0.5;
 
 export interface AvailablePlayerInput {
   player: CanonicalPlayer;
@@ -87,8 +118,12 @@ export interface DraftRecommendation {
   adp: number | null;
   adpValue: number | null;
   survivalProbability: number | null;
-  newsRawNet: number;
-  newsRecentNet: number;
+  /** Net tally per window, so the UI never has to re-derive them. */
+  newsLifetimeNet: number;
+  news30Net: number;
+  news7Net: number;
+  /** True when the recent trend contradicts the lifetime record. */
+  newsConflicted: boolean;
   components: ComponentScore[];
   /** Sum of contributions. Comparable within one board state only. */
   total: number;
@@ -145,31 +180,52 @@ export function marketValueComponent(adp: number | null, currentPick: number, te
   };
 }
 
+export type NewsWindowKey = 'news_lifetime' | 'news_30d' | 'news_7d';
+
+const NEWS_META: Record<NewsWindowKey, { label: string; saturation: number; weightKey: keyof DraftComponentWeights }> = {
+  news_lifetime: { label: 'Lifetime news', saturation: NEWS_SATURATION.lifetime, weightKey: 'newsLifetime' },
+  news_30d: { label: 'Last 30 days', saturation: NEWS_SATURATION.last30, weightKey: 'news30' },
+  news_7d: { label: 'Last 7 days', saturation: NEWS_SATURATION.last7, weightKey: 'news7' },
+};
+
 /**
- * News components. Hard-capped so a large tally cannot outweigh a big ADP gap:
- * even a perfect news score contributes less than ~2 picks of ADP value.
+ * One news window as a scored component.
+ *
+ * `damping` is applied to the recent windows when they contradict lifetime; it
+ * is always 1 for the lifetime window itself.
  */
 export function newsComponent(
-  key: 'news_recent' | 'news_raw',
+  key: NewsWindowKey,
   net: number,
   items: number,
+  weights: DraftComponentWeights = DEFAULT_WEIGHTS,
+  damping = 1,
 ): ComponentScore {
-  const weight = key === 'news_recent' ? DEFAULT_WEIGHTS.newsRecent : DEFAULT_WEIGHTS.newsRaw;
-  const label = key === 'news_recent' ? 'Recent news' : 'Lifetime news';
+  const meta = NEWS_META[key];
+  const weight = weights[meta.weightKey];
   if (items === 0) {
-    return { key, label, display: 'no evidence', score: 0, weight, contribution: 0, unknown: true };
+    return { key, label: meta.label, display: 'no evidence', score: 0, weight, contribution: 0, unknown: true };
   }
-  // Saturating: +/-6 net is effectively the ceiling.
-  const score = clamp(net / 6, -1, 1);
+  const score = clamp(net / meta.saturation, -1, 1) * damping;
   return {
     key,
-    label,
-    display: `${net > 0 ? '+' : ''}${net} net (${items} item${items === 1 ? '' : 's'})`,
+    label: meta.label,
+    display: `${net > 0 ? '+' : ''}${net} net (${items} item${items === 1 ? '' : 's'})${damping < 1 ? ', damped' : ''}`,
     score: round3(score),
     weight,
     contribution: round3(score * weight),
     unknown: false,
   };
+}
+
+/**
+ * True when the recent trend points the opposite way to the lifetime record.
+ *
+ * Only counts when both are actually saying something: a zero is not a
+ * disagreement, it is an absence.
+ */
+export function newsConflicts(lifetimeNet: number, recentNet: number): boolean {
+  return lifetimeNet !== 0 && recentNet !== 0 && Math.sign(lifetimeNet) !== Math.sign(recentNet);
 }
 
 /** Rank the available pool. Pure and deterministic. */
@@ -245,14 +301,19 @@ export function rankAvailablePlayers(
       unknown: false,
     });
 
-    // --- news --------------------------------------------------------------
-    const recent = newsComponent('news_recent', signal?.last21.net ?? 0, signal?.last21.items ?? 0);
-    recent.weight = weights.newsRecent;
-    recent.contribution = round3(recent.score * weights.newsRecent);
-    const raw = newsComponent('news_raw', signal?.raw.net ?? 0, signal?.raw.items ?? 0);
-    raw.weight = weights.newsRaw;
-    raw.contribution = round3(raw.score * weights.newsRaw);
-    components.push(recent, raw);
+    // --- news ---------------------------------------------------------------
+    // Three windows, kept separate so the reasoning stays legible: lifetime is
+    // the base and never decays, 30 days is the trend, 7 days is acceleration.
+    const lifetimeNet = signal?.raw.net ?? 0;
+    const net30 = signal?.last30.net ?? 0;
+    const net7 = signal?.last7.net ?? 0;
+    const conflicted = newsConflicts(lifetimeNet, net30);
+    const damping = conflicted ? NEWS_CONFLICT_DAMPING : 1;
+
+    const lifetimeNews = newsComponent('news_lifetime', lifetimeNet, signal?.raw.items ?? 0, weights);
+    const news30 = newsComponent('news_30d', net30, signal?.last30.items ?? 0, weights, damping);
+    const news7 = newsComponent('news_7d', net7, signal?.last7.items ?? 0, weights, damping);
+    components.push(lifetimeNews, news30, news7);
 
     // --- survival urgency --------------------------------------------------
     const survival = estimateSurvival({
@@ -281,6 +342,7 @@ export function rankAvailablePlayers(
       survival: survival.probability,
       profile: ctx.profile,
       shape: ctx.shape,
+      newsConflicted: conflicted,
     });
 
     return {
@@ -291,8 +353,10 @@ export function rankAvailablePlayers(
       adp,
       adpValue: adp == null ? null : round1(ctx.currentPick - adp),
       survivalProbability: survival.probability,
-      newsRawNet: signal?.raw.net ?? 0,
-      newsRecentNet: signal?.last21.net ?? 0,
+      newsLifetimeNet: lifetimeNet,
+      news30Net: net30,
+      news7Net: net7,
+      newsConflicted: conflicted,
       components,
       total,
       reasons,
@@ -329,6 +393,7 @@ function explain(
     survival: number | null;
     profile: ScoringProfile;
     shape: RosterShape;
+    newsConflicted: boolean;
   },
 ): { reasons: string[]; counterpoints: string[] } {
   const reasons: string[] = [];
@@ -362,10 +427,40 @@ function explain(
     reasons.push('position is nearly exhausted before your next pick');
   }
 
-  const recent = by('news_recent');
-  if (recent && !recent.unknown) {
-    if (recent.score > 0.1) reasons.push(`positive recent news signal (${recent.display})`);
-    else if (recent.score < -0.1) counterpoints.push(`negative recent news signal (${recent.display})`);
+  // News, said plainly and with the size of the effect attached. A player whose
+  // ranking moved because of the user's own research should be able to see that
+  // it did, and by roughly how much.
+  const picksMoved = (contribution: number) => {
+    // In the reach regime a point of ADP is worth about 0.05 of contribution.
+    const picks = Math.round(Math.abs(contribution) / 0.05);
+    return picks >= 1 ? ` (about ${picks} ${picks === 1 ? 'spot' : 'spots'})` : '';
+  };
+
+  const lifetimeNews = by('news_lifetime');
+  if (lifetimeNews && !lifetimeNews.unknown) {
+    if (lifetimeNews.score > 0.25) {
+      reasons.push(`boosted by strong lifetime signal: ${lifetimeNews.display}${picksMoved(lifetimeNews.contribution)}`);
+    } else if (lifetimeNews.score < -0.25) {
+      counterpoints.push(
+        `downgraded by negative lifetime signal: ${lifetimeNews.display}${picksMoved(lifetimeNews.contribution)}`,
+      );
+    }
+  }
+
+  const news30 = by('news_30d');
+  if (news30 && !news30.unknown) {
+    if (news30.score > 0.2) reasons.push(`boosted by recent positive trend: ${news30.display}`);
+    else if (news30.score < -0.2) counterpoints.push(`downgraded by recent deterioration: ${news30.display}`);
+  }
+
+  const news7 = by('news_7d');
+  if (news7 && !news7.unknown) {
+    if (news7.score > 0.3) reasons.push(`accelerating this week: ${news7.display}`);
+    else if (news7.score < -0.3) counterpoints.push(`deteriorating this week: ${news7.display}`);
+  }
+
+  if (extra.newsConflicted) {
+    counterpoints.push('recent news contradicts the lifetime record, so both are trusted less');
   }
 
   const fit = by('league_fit');

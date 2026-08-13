@@ -2,8 +2,8 @@
  * beatadp.com — where Sleeper's ADP is actually readable.
  *
  * Sleeper does not publish ADP: every REST path 404s and the GraphQL schema has
- * no ADP field. beatadp.com collects it (alongside ESPN, Yahoo, Underdog and
- * FantasyPros) and renders it for a chosen scoring format, draft type and QB
+ * no ADP field. beatadp.com collects it (alongside several other
+ * platforms) and renders it for a chosen scoring format, draft type and QB
  * count — exactly the three things that decide whether a number applies to this
  * league.
  *

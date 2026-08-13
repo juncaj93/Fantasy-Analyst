@@ -198,7 +198,8 @@ function RecommendationRow({
             {rec.survivalProbability == null ? <Unknown what="survival" /> : `${Math.round(rec.survivalProbability * 100)}%`}
           </strong>
         </span>
-        <Signal net={rec.newsRecentNet} label="recent news (21d)" />
+        <Signal net={rec.newsLifetimeNet} label="lifetime news" />
+        <Signal net={rec.news30Net} label="news, last 30 days" />
       </div>
 
       {expanded ? (

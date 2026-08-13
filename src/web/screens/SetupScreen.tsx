@@ -12,10 +12,12 @@ import {
   type LeagueSummary,
   type NewsletterMessage,
   type NewsletterStatus,
+  type RepairStatus,
   type ReprocessPreview,
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
+import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 
 type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | null;
@@ -108,6 +110,122 @@ export function SetupScreen({
       {open === 'adp' ? <AdpPanel status={status} onDone={refreshAll} /> : null}
       {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
       {open === 'vegas' ? <VegasPanel status={status} /> : null}
+
+      <HelpMyScores onChanged={refreshAll} />
+    </>
+  );
+}
+
+/**
+ * Help My Scores.
+ *
+ * Names the matcher would not guess at, and what they are costing. Deliberately
+ * placed at the bottom of Setup and self-hiding when there is nothing to fix:
+ * it should be impossible to miss when it matters and invisible when it does
+ * not.
+ */
+function HelpMyScores({ onChanged }: { onChanged: () => void }) {
+  const [status, setStatus] = useState<RepairStatus | null>(null);
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api.get<RepairStatus>('/api/repair'));
+    } catch {
+      // Nothing to show is the same as nothing to fix, as far as this card goes.
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const assign = async (alias: string, playerId: string) => {
+    const result = await api.post<{ alias: string; resolved: number; net: number }>('/api/repair/assign', {
+      alias,
+      playerId,
+    });
+    setMessage(
+      `${result.alias} matched — ${result.resolved} ${result.resolved === 1 ? 'item' : 'items'} now count, ` +
+        `lifetime tally ${result.net > 0 ? '+' : ''}${result.net}.`,
+    );
+    await load();
+    onChanged();
+  };
+
+  if (!status || status.summary.names === 0) return null;
+
+  return (
+    <>
+      <button
+        className="player-row"
+        data-testid="help-my-scores"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <div className="player-row-top">
+          <span className="rank" aria-hidden="true">
+            !
+          </span>
+          <span className="player-name">Help my scores</span>
+          <span className="pos-team">{open ? 'Close' : 'Fix'}</span>
+        </div>
+        <div className="player-row-metrics">
+          <span className="metric">{status.summary.headline}</span>
+        </div>
+      </button>
+
+      {open ? (
+        <div className="card">
+          {message ? <Notice tone="ok">{message}</Notice> : null}
+          <div className="faint" style={{ marginBottom: 8 }}>
+            These names appeared in your newsletters but could not be matched to a Sleeper player, so their
+            news is not counting for anyone. Pick who each one is.
+          </div>
+
+          {status.groups.map((group) => (
+            <div key={group.normalizedAlias} className="card card-tight" data-testid={`repair-${group.normalizedAlias}`}>
+              <div className="header-row">
+                <strong>{group.alias}</strong>
+                <span className="faint">
+                  {group.items} {group.items === 1 ? 'item' : 'items'} ·{' '}
+                  {group.net > 0 ? '+' : ''}
+                  {group.net} net
+                  {group.net30 !== 0 ? ` (${group.net30 > 0 ? '+' : ''}${group.net30} in 30d)` : ''}
+                </span>
+              </div>
+              <div className="faint" style={{ margin: '4px 0 8px' }}>
+                “{group.example}”
+              </div>
+
+              {status.suspicions.some((sus) => sus.alias === group.alias) ? (
+                <Notice>
+                  Likely {status.suspicions.find((sus) => sus.alias === group.alias)!.candidate.name}, who currently
+                  has no tally at all.
+                </Notice>
+              ) : null}
+
+              {group.candidates.slice(0, 3).map((candidate) => (
+                <button
+                  key={candidate.playerId}
+                  className="btn"
+                  style={{ marginRight: 6, marginBottom: 6 }}
+                  onClick={() => void assign(group.alias, candidate.playerId)}
+                >
+                  {candidate.name} · {candidate.position} {candidate.team}
+                </button>
+              ))}
+
+              <PlayerPicker
+                fieldId={`repair-${group.normalizedAlias}`}
+                label="Or search for the right player"
+                onPick={(playerId) => assign(group.alias, playerId)}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

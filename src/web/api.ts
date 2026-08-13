@@ -60,8 +60,10 @@ export interface DraftRecommendation {
   adp: number | null;
   adpValue: number | null;
   survivalProbability: number | null;
-  newsRawNet: number;
-  newsRecentNet: number;
+  newsLifetimeNet: number;
+  news30Net: number;
+  news7Net: number;
+  newsConflicted: boolean;
   components: ComponentScore[];
   total: number;
   reasons: string[];
@@ -100,7 +102,7 @@ export interface PlayerSignal {
   playerId: string;
   raw: SignalWindow;
   last7: SignalWindow;
-  last21: SignalWindow;
+  last30: SignalWindow;
   seasonToDate: SignalWindow;
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
   pendingCount: number;
@@ -336,4 +338,20 @@ export interface LineupRecommendation {
   confidence: string;
   warnings: string[];
   notes: string[];
+}
+
+
+/** Help My Scores: unresolved names and what they are costing. */
+export interface RepairStatus {
+  groups: {
+    alias: string;
+    normalizedAlias: string;
+    items: number;
+    net: number;
+    net30: number;
+    example: string;
+    candidates: { playerId: string; name: string; team: string; position: string; detail: string }[];
+  }[];
+  suspicions: { alias: string; net: number; items: number; candidate: { playerId: string; name: string } }[];
+  summary: { names: number; items: number; net: number; headline: string };
 }

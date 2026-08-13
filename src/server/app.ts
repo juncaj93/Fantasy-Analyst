@@ -11,6 +11,7 @@
  */
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
+import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
@@ -42,6 +43,7 @@ import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
+import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
@@ -297,18 +299,47 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           team: p?.team ?? '',
           status: p?.status ?? null,
           newsNet: signal?.raw.net ?? 0,
-          recentNet: signal?.last21.net ?? 0,
+          recentNet: signal?.last30.net ?? 0,
           pending: signal?.pendingCount ?? 0,
         };
       });
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
+
+    // During a draft Sleeper's roster is still empty, so the pick stream is the
+    // only current answer. Reconstruct from it and merge; after the draft the
+    // two agree and the merge is a no-op.
+    const draft = league.draftId ? await leagueRepo.getDraft(league.draftId) : null;
+    const picks = draft ? await leagueRepo.listPicks(draft.id) : [];
+    const liveRoster = buildLiveRoster({
+      picks,
+      rosterId: mine?.rosterId ?? null,
+      ownerId: mine?.ownerId ?? null,
+      sleeperPlayerIds: mine?.playerIds ?? [],
+      byId,
+      shape,
+      draftStatus: draft?.status ?? 'complete',
+    });
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label, notes: leagueFitNotes(profile, shape) },
       rosterShape: shape,
       starters: hydrate(mine?.starterIds ?? []),
       bench: hydrate((mine?.playerIds ?? []).filter((id) => !(mine?.starterIds ?? []).includes(id))),
+      // Mid-draft there is no lineup to show, only players held and slots still
+      // open. Presenting a starters/bench split would invent decisions the user
+      // has not made.
+      live: liveRoster.live,
+      drafted: hydrate(liveRoster.players.map((p) => p.playerId)).map((p, i) => ({
+        ...p,
+        pickNo: liveRoster.players[i]!.pickNo,
+      })),
+      counts: liveRoster.counts,
+      filled: liveRoster.filled,
+      remaining: liveRoster.remaining,
+      openStarters: liveRoster.openStarters,
+      picksMade: liveRoster.picksMade,
       found: !!mine,
     });
   });
@@ -711,6 +742,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     await repo.resolveIdentityReview(id, body.playerId, 'resolved');
     return jsonResponse({ ok: true, status: 'resolved', remembered });
+  });
+
+  // ------------------------------------------------------- help my scores ---
+  // Names the matcher would not guess at, and the tally they are costing.
+  router.get('/api/repair', async (ctx) => jsonResponse(await new RepairService(ctx.env.db).status()));
+
+  router.post('/api/repair/assign', async (ctx) => {
+    const body = await ctx.json<{ alias?: string; playerId?: string; remember?: boolean }>();
+    if (!body?.alias || !body?.playerId) return errorResponse('alias and playerId are required', 400);
+    try {
+      const result = await new RepairService(ctx.env.db).assign(body.alias, body.playerId, {
+        remember: body.remember,
+      });
+      return jsonResponse(result);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err.message : String(err), 400);
+    }
   });
 
   // --------------------------------------------------------------- nicknames

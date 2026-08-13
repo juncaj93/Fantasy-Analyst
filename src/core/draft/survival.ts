@@ -11,7 +11,7 @@
  */
 
 export interface SurvivalInput {
-  /** Underdog ADP (overall pick number). Null when unknown. */
+  /** ADP as an overall pick number. Null when unknown. */
   adp: number | null;
   /** The overall pick number currently on the clock. */
   currentPick: number;
