@@ -65,6 +65,42 @@ test.describe('newsletter setup', () => {
     await expect(page.locator('.notice')).toContainText('Mail from that sender will now be read');
   });
 
+  test('offers to accept a sender whose mail arrived and was ignored', async ({ page }, testInfo) => {
+    // Nobody should have to look up their newsletter's from-address. Subscribe,
+    // let the first issue be ignored, then accept the address it actually came
+    // from — which is exactly what happens here.
+    //
+    // The sender is unique per project because all projects share one dev
+    // server: accepting a sender is a real state change, so a fixed address
+    // would only be un-accepted on the first project to run.
+    const slug = testInfo.project.name.replace(/[^a-z0-9]/gi, '');
+    const unexpected = `weekly@${slug}.newsletter.example`;
+
+    const res = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId: `unexpected-sender-${slug}`,
+        from: unexpected,
+        subject: 'Week 1 Notes',
+        date: new Date().toISOString(),
+        html: '<p>Bijan Robinson was named the starter.</p>',
+      },
+    });
+    expect(res.ok()).toBeTruthy();
+
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+
+    const offer = page.getByTestId('offer-sender');
+    await expect(offer).toBeVisible();
+    await expect(offer).toContainText(unexpected);
+
+    await offer.getByTestId('accept-sender').click();
+    await expect(page.locator('.notice')).toContainText(`Mail from ${unexpected} will be read`);
+
+    // Once accepted it is no longer an open question.
+    await expect(page.getByTestId('offer-sender')).toHaveCount(0);
+  });
+
   test('rejects an obviously wrong sender in plain words', async ({ page }) => {
     await page.getByLabel('Newsletter sender address or domain').fill('not an address');
     await page.getByRole('button', { name: 'Save sender' }).click();
@@ -78,7 +114,9 @@ test.describe('newsletter setup', () => {
   });
 
   test('shows what the parser understood in each email', async ({ page }) => {
-    const message = page.getByTestId('newsletter-message').first();
+    // Explicitly a processed message: ignored mail has no coverage to show, and
+    // other tests add ignored mail to this shared server.
+    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
     await expect(message).toBeVisible();
     await message.getByTestId('newsletter-message-toggle').click();
     await expect(message).toContainText('Sentences about your players');
@@ -88,7 +126,8 @@ test.describe('newsletter setup', () => {
   test('previews a re-read before changing anything, and is honest about what it will not change', async ({
     page,
   }) => {
-    const message = page.getByTestId('newsletter-message').first();
+    // Only processed mail has a body kept, so only it can be re-read.
+    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
     await message.getByTestId('newsletter-message-toggle').click();
 
     const panel = message.getByTestId('reprocess-panel');

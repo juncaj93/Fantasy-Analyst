@@ -446,6 +446,40 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
         Only mail from this sender is read. Anything else that arrives is ignored and never affects
         your players.
       </div>
+      {/* Subscribing is easier than looking up a sender address: the first
+          issue arrives, is ignored because no sender is expected yet, and its
+          real address is right there to accept in one tap. */}
+      {ignoredSender(status) ? (
+        <div className="card card-tight" data-testid="offer-sender">
+          <div>
+            Mail arrived from <strong>{ignoredSender(status)}</strong> and was ignored, because you have
+            not said it is expected.
+          </div>
+          <button
+            className="btn btn-primary btn-sm"
+            style={{ marginTop: 6 }}
+            disabled={busy != null}
+            data-testid="accept-sender"
+            onClick={() =>
+              run('accept-sender', async () => {
+                const from = ignoredSender(status)!;
+                const next = await api.post<NewsletterStatus>('/api/setup/newsletter', { senderEmail: from });
+                setStatus(next);
+                setSender(from);
+                onDone();
+                return `Saved. Mail from ${from} will be read from now on.`;
+              })
+            }
+          >
+            Accept mail from this sender
+          </button>
+          <div className="faint" style={{ marginTop: 4 }}>
+            Only do this if you recognise it as your newsletter. The issue that was ignored is not
+            read retrospectively; the next one will be.
+          </div>
+        </div>
+      ) : null}
+
       <div className="field">
         <label htmlFor="nl-sender">Newsletter sender address or domain</label>
         <input
@@ -606,7 +640,7 @@ function NewsletterHistory() {
           return (
             // The row header is the button; the detail is a sibling, because a
             // button may not contain the buttons the reprocess panel needs.
-            <div key={m.messageId} data-testid="newsletter-message">
+            <div key={m.messageId} data-testid="newsletter-message" data-status={m.status}>
               <button
                 className="player-row"
                 data-testid="newsletter-message-toggle"
@@ -810,6 +844,29 @@ function ReprocessPanel({ messageId }: { messageId: string }) {
       )}
     </div>
   );
+}
+
+/**
+ * The address of mail that arrived and was ignored, when it is worth offering
+ * to accept.
+ *
+ * Only offered when the sender is genuinely not covered yet. `senderConfigured`
+ * is the authority on whether the expected-sender list is the user's or still
+ * the placeholder the app ships with — guessing that from the text of an
+ * address would misjudge any domain that happened to contain the wrong word.
+ */
+function ignoredSender(status: NewsletterStatus): string | null {
+  const from = status.lastReceivedFrom?.trim();
+  if (!from) return null;
+  if (status.lastReceivedStatus !== 'quarantined') return null;
+  if (!status.senderConfigured) return from;
+
+  const covered = status.expectedSenders.some((pattern) => {
+    const p = pattern.trim().toLowerCase();
+    const f = from.toLowerCase();
+    return p.startsWith('@') ? f.endsWith(p) : f === p;
+  });
+  return covered ? null : from;
 }
 
 function VegasPanel({ status }: { status: SetupStatus }) {

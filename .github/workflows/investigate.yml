@@ -111,6 +111,35 @@ jobs:
               })"
           done
 
+      - name: What the live app reports about its own setup
+        run: |
+          set -uo pipefail
+          url=https://fantasy-analyst.juncaj93.workers.dev
+
+          echo "=== newsletter setup as the deployed app sees it ==="
+          curl -s "$url/api/setup/newsletter" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              let r; try { r = JSON.parse(s); } catch { console.log('  unreadable:', s.slice(0,200)); return; }
+              console.log('  address:        ', r.address ?? '(none)');
+              console.log('  sender set:     ', r.senderConfigured);
+              console.log('  expected from:  ', (r.expectedSenders||[]).join(', ') || '(none)');
+              console.log('  emails received:', r.totals?.emailsReceived ?? 0);
+              console.log('  last received:  ', r.lastReceivedAt ?? '(nothing yet)',
+                          r.lastReceivedFrom ? 'from ' + r.lastReceivedFrom : '',
+                          r.lastReceivedStatus ? '(' + r.lastReceivedStatus + ')' : '');
+            })"
+
+          echo "=== recent inbound mail ==="
+          curl -s "$url/api/newsletter/messages" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              let r; try { r = JSON.parse(s); } catch { console.log('  unreadable'); return; }
+              const list = r.messages || [];
+              if (!list.length) { console.log('  (nothing has arrived yet)'); return; }
+              for (const m of list) {
+                console.log(' ', m.receivedAt, '|', m.fromAddress, '|', m.status, '|', m.detail ?? m.rejectReason ?? '');
+              }
+            })"
+
       - name: The Odds API — free tier and NFL player prop markets
         run: |
           set -uo pipefail
