@@ -198,6 +198,31 @@ jobs:
             process.exit(1);
           "
 
+      # A routing rule with no MX records behind it looks configured and quietly
+      # bounces every newsletter. The run must not report success until mail can
+      # actually be delivered.
+      - name: Confirm mail can actually be delivered
+        run: |
+          set -uo pipefail
+          zone_id="${{ steps.safety.outputs.zone_id }}"
+          curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=MX&per_page=20" > /tmp/after.json
+          node -e "
+            const fs=require('fs');
+            const r=JSON.parse(fs.readFileSync('/tmp/after.json','utf8'));
+            const mx=(r.result||[]).filter(d=>String(d.content).toLowerCase().includes('mx.cloudflare.net'));
+            if (mx.length) {
+              console.log('Cloudflare MX records present — mail will reach the worker:');
+              for (const d of mx) console.log('  ', d.name, '->', d.content, 'priority', d.priority);
+              process.exit(0);
+            }
+            console.log('::error::The routing rule exists, but ' + process.env.DOMAIN +
+              ' has no Cloudflare MX records, so mail sent there would bounce.' +
+              ' Turn Email Routing on once in the Cloudflare dashboard' +
+              ' (Email -> Email Routing -> Get started), then re-run this workflow.');
+            process.exit(1);
+          "
+
       - name: Report the final state
         if: always()
         run: |
