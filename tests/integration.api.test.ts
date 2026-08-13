@@ -223,6 +223,53 @@ describe('API with seeded data', () => {
     }
   });
 
+  it('masks sender addresses for the public and shows them once unlocked', async () => {
+    await json(
+      post(
+        '/api/newsletter/ingest',
+        {
+          messageId: 'privacy-check-1',
+          from: 'alexjuncaj@gmail.com',
+          subject: 'test',
+          date: new Date().toISOString(),
+          html: '<p>hello</p>',
+        },
+        cookie,
+      ),
+    );
+
+    // Anyone who finds the address can read the fantasy data, but a personal
+    // email address is not fantasy data.
+    const publicView = await json<{ messages: { fromAddress: string }[] }>(
+      get('/api/newsletter/messages'),
+    );
+    const publicSerialised = JSON.stringify(publicView);
+    expect(publicSerialised).not.toContain('alexjuncaj@gmail.com');
+    expect(publicView.messages.some((m) => m.fromAddress === 'a***@gmail.com')).toBe(true);
+
+    // The explanation quotes the sender too, so masking one field is not enough.
+    expect(publicView.messages.some((m) => (m as { rejectReason?: string }).rejectReason?.includes('a***@gmail.com'))).toBe(
+      true,
+    );
+
+    const publicStatus = await json<{ lastReceivedFrom: string | null }>(
+      get('/api/setup/newsletter'),
+    );
+    expect(publicStatus.lastReceivedFrom).toBe('a***@gmail.com');
+    expect(JSON.stringify(publicStatus)).not.toContain('alexjuncaj@gmail.com');
+
+    // Unlocked, the full address is available — it is needed to accept a sender.
+    const ownerView = await json<{ messages: { fromAddress: string }[] }>(
+      get('/api/newsletter/messages', cookie),
+    );
+    expect(ownerView.messages.some((m) => m.fromAddress === 'alexjuncaj@gmail.com')).toBe(true);
+
+    const ownerStatus = await json<{ lastReceivedFrom: string | null }>(
+      get('/api/setup/newsletter', cookie),
+    );
+    expect(ownerStatus.lastReceivedFrom).toBe('alexjuncaj@gmail.com');
+  });
+
   it('explains, rather than crashes, when a newsletter body was not kept', async () => {
     const res = await app(get('/api/newsletter/messages/never-seen/preview', cookie), env);
     expect(res.status).toBe(404);

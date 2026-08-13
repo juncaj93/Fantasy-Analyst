@@ -21,6 +21,10 @@ The site is public: anyone with the address can look at your rosters, rankings,
 tallies and recommendations. That is deliberate — it keeps setup simple and
 none of it is sensitive.
 
+Email addresses are the exception. The list of mail that arrived at your
+Fantasy Analyst address shows senders as `a***@gmail.com` to the public, and in
+full only once you have unlocked. Your personal address is not fantasy data.
+
 Changing anything is not public. Every action that writes — connecting Sleeper,
 importing rankings, reviewing news, editing settings — needs the passphrase.
 Without it, a stranger who found the address could poison your player tallies or

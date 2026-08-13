@@ -148,9 +148,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
   router.get('/api/setup/status', async (ctx) => jsonResponse(await setupService(ctx).status()));
 
-  router.get('/api/setup/newsletter', async (ctx) =>
-    jsonResponse(await setupService(ctx).newsletterStatus()),
-  );
+  router.get('/api/setup/newsletter', async (ctx) => {
+    const status = await setupService(ctx).newsletterStatus();
+    const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
+    // The sender of the last email is a personal address. Masked in public,
+    // shown in full once unlocked — which is also the only state in which the
+    // "accept this sender" action is available.
+    return jsonResponse(
+      unlocked
+        ? status
+        : {
+            ...status,
+            lastReceivedFrom: maskAddress(status.lastReceivedFrom),
+            lastProcessedDetail: maskAddressesIn(status.lastProcessedDetail),
+            lastError: maskAddressesIn(status.lastError),
+          },
+    );
+  });
 
   /**
    * Plain-language newsletter configuration, so the user never has to hand-write
@@ -473,12 +487,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
   router.get('/api/newsletter/messages', async (ctx) => {
     const messages = await new NewsletterRepo(ctx.env.db).listMessages(15);
+    const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
     // Bodies are retained so rules can be re-run over them, but reads on this
     // site are public and the newsletter is someone else's work. The log says
     // what arrived and what came of it; it does not republish the issue.
+    // Sender addresses are masked for the public too — they are personal
+    // addresses, not fantasy data.
     return jsonResponse({
       messages: messages.map(({ bodyHtml: _html, bodyText: _text, ...rest }) => ({
         ...rest,
+        fromAddress: unlocked ? rest.fromAddress : maskAddress(rest.fromAddress),
+        rejectReason: unlocked ? rest.rejectReason : maskAddressesIn(rest.rejectReason),
+        detail: unlocked ? rest.detail : maskAddressesIn(rest.detail),
         bodyRetained: !!(bodyOf(_html) || bodyOf(_text)),
       })),
     });
@@ -664,6 +684,37 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 /** Non-empty body text, or null. Used only to report whether one was kept. */
 function bodyOf(value: string | null | undefined): string | null {
   return value && value.trim() ? value : null;
+}
+
+/**
+ * Hide most of an email address: `alex@gmail.com` -> `a***@gmail.com`.
+ *
+ * The site's reads are public because fantasy data is not sensitive. The
+ * address of whoever mailed the inbound address is a different matter — it is
+ * ordinarily the owner's own personal address, and anything else that arrives
+ * belongs to a stranger. Enough is left to recognise a sender you expect;
+ * not enough to harvest one.
+ */
+export function maskAddress(value: string | null | undefined): string | null {
+  const address = value?.trim();
+  if (!address) return null;
+  const at = address.lastIndexOf('@');
+  if (at <= 0) return '***';
+  const local = address.slice(0, at);
+  return `${local[0]}***${address.slice(at)}`;
+}
+
+/**
+ * Mask every address inside a free-text field.
+ *
+ * Masking the structured `fromAddress` alone is not enough: plain-language
+ * messages quote the sender too ("Unexpected sender ..."), so the address
+ * escapes through the explanation. Redacting by pattern rather than by the one
+ * address we happen to know also covers wording added later.
+ */
+export function maskAddressesIn(text: string | null | undefined): string | null {
+  if (!text) return text ?? null;
+  return text.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, (match) => maskAddress(match) ?? '***');
 }
 
 function escapeRegex(input: string): string {

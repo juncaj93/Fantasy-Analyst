@@ -188,19 +188,43 @@ their newsletter's from-address offhand. The first issue arrives, is ignored
 because no sender is expected yet, and Setup offers its real address for
 acceptance in one tap.
 
+## Milestone 7 — proven with real mail, and a privacy leak it exposed (done)
+
+A real email was delivered to `fantasy-news@juncaj.net` and the whole chain
+worked first time:
+
+```
+emails received: 1
+last received:   from <owner's personal address> (quarantined)
+detail:          "Ignored: this address only accepts your configured
+                  newsletter sender."
+```
+
+Cloudflare accepted the mail, invoked the worker's `email()` handler, the
+service logged it and refused to parse it because no sender has been accepted
+yet. That is the designed behaviour, and it is now observed rather than assumed.
+
+**The leak it exposed.** Reads on this site are public because fantasy data is
+not sensitive. A sender's email address is not fantasy data — it is ordinarily
+the owner's own personal address — and the inbound log published it. Addresses
+are now masked (`a***@gmail.com`) for anyone without a session and shown in full
+once unlocked, which is also the only state in which the sender can be accepted.
+
+Masking the structured `fromAddress` alone was not enough: the plain-language
+explanation quotes the sender too ("Unexpected sender ..."), so the address
+escaped through the reason string. Redaction runs by pattern over the free-text
+fields as well, which also covers wording added later. A test asserts no public
+payload carries the raw address.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and
    every market key are confirmed current. What remains unverified is the live
    response shape and actual NFL prop coverage, which needs an API key. Vegas
    shows as "not connected" by design and no quota has been consumed.
-2. **No real email has passed through yet.** Routing, MX records and the rule
-   are verified against the live Cloudflare account, but nothing has actually
-   been delivered, so the final hop — Cloudflare invoking the worker's
-   `email()` handler — is confirmed by configuration rather than by observation.
-   Sending one email to the address closes this. The handler, parser,
-   validation, quarantine and idempotency are covered by tests against
-   realistic raw MIME messages.
+2. **No real newsletter has been parsed yet.** Delivery is proven end to end,
+   but only with a test email, which was correctly ignored. Rule quality
+   against a real issue is still unknown until one arrives.
 3. **Rule magnitudes are still conservative** (mostly 1). Expect tuning once
    real newsletters have run through the coverage report.
 4. **Draft weights are untuned defaults.**
