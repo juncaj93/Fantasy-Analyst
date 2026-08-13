@@ -156,9 +156,15 @@ export function TeamScreen({
             <Empty>Your roster was not found in this league. Check the connected Sleeper user.</Empty>
           ) : (
             <>
-              {roster.live ? (
-                <LiveDraftRoster roster={roster} />
-              ) : (
+              {/*
+                During a draft the live view goes first, because that is the
+                current truth. It is added to rather than swapped in: if Sleeper
+                also has a settled lineup, hiding it would take away the
+                start/sit comparison for no reason.
+              */}
+              {roster.live ? <LiveDraftRoster roster={roster} /> : null}
+
+              {roster.starters.length > 0 || roster.bench.length > 0 ? (
                 <>
                   <div className="faint" style={{ margin: '0 2px 6px' }}>
                     Tap players to compare start/sit (2–3).
@@ -182,9 +188,9 @@ export function TeamScreen({
                     />
                   ))}
                 </>
-              )}
+              ) : null}
 
-              {!roster.live && compareIds.length >= 2 ? (
+              {compareIds.length >= 2 ? (
                 <div className="card">
                   <button className="btn btn-primary" onClick={compare} disabled={busy === 'compare'}>
                     Compare {compareIds.length} players

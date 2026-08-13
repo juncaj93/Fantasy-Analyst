@@ -339,3 +339,19 @@ export interface LineupRecommendation {
   warnings: string[];
   notes: string[];
 }
+
+
+/** Help My Scores: unresolved names and what they are costing. */
+export interface RepairStatus {
+  groups: {
+    alias: string;
+    normalizedAlias: string;
+    items: number;
+    net: number;
+    net30: number;
+    example: string;
+    candidates: { playerId: string; name: string; team: string; position: string; detail: string }[];
+  }[];
+  suspicions: { alias: string; net: number; items: number; candidate: { playerId: string; name: string } }[];
+  summary: { names: number; items: number; net: number; headline: string };
+}

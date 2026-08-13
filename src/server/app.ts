@@ -43,6 +43,7 @@ import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
+import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
@@ -741,6 +742,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     await repo.resolveIdentityReview(id, body.playerId, 'resolved');
     return jsonResponse({ ok: true, status: 'resolved', remembered });
+  });
+
+  // ------------------------------------------------------- help my scores ---
+  // Names the matcher would not guess at, and the tally they are costing.
+  router.get('/api/repair', async (ctx) => jsonResponse(await new RepairService(ctx.env.db).status()));
+
+  router.post('/api/repair/assign', async (ctx) => {
+    const body = await ctx.json<{ alias?: string; playerId?: string; remember?: boolean }>();
+    if (!body?.alias || !body?.playerId) return errorResponse('alias and playerId are required', 400);
+    try {
+      const result = await new RepairService(ctx.env.db).assign(body.alias, body.playerId, {
+        remember: body.remember,
+      });
+      return jsonResponse(result);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err.message : String(err), 400);
+    }
   });
 
   // --------------------------------------------------------------- nicknames

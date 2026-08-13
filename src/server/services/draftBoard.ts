@@ -9,6 +9,7 @@ import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
+import { RepairService } from './repairService.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
@@ -52,7 +53,7 @@ export class DraftBoardService {
   private readonly adp: AdpRepo;
   private readonly evidence: EvidenceRepo;
 
-  constructor(db: Database) {
+  constructor(private readonly db: Database) {
     this.leagues = new LeagueRepo(db);
     this.players = new PlayerRepo(db);
     this.adp = new AdpRepo(db);
@@ -161,6 +162,16 @@ export class DraftBoardService {
     if (pool.length > candidates.length) {
       warnings.push(
         `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
+      );
+    }
+
+    // Non-blocking draft-day readiness: unresolved names are research the user
+    // did that is not reaching the board. Say so here rather than only in Setup,
+    // because this is the screen they are looking at when it matters.
+    const repair = await new RepairService(this.db).status();
+    if (repair.summary.names > 0 && Math.abs(repair.summary.net) >= 2) {
+      warnings.push(
+        `${repair.summary.headline} — fix it under Help my scores in Setup; the board is usable meanwhile`,
       );
     }
 

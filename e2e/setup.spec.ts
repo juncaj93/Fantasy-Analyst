@@ -210,8 +210,10 @@ test.describe('review actions added for setup', () => {
     // Earlier specs may have queued their own items, so assert on the change
     // this test causes rather than on the whole queue.
     const reyesCards = page.getByTestId('review-card').filter({ hasText: 'Julian Reyes' });
+    // A bare count() does not retry, so it can run before the queue has
+    // rendered. Wait for the card to exist, then count.
+    await expect(reyesCards.first()).toBeVisible();
     const before = await reyesCards.count();
-    expect(before).toBeGreaterThan(0);
 
     const card = reyesCards.first();
     await expect(card.getByTestId('review-reason')).toBeVisible();

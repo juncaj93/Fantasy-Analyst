@@ -53,8 +53,11 @@ export interface ProposedEvidence {
   confidence: Classification['confidence'];
   confidenceScore: number;
   ruleId: string | null;
-  /** `auto_applied` when it may bypass review, otherwise `pending`. */
-  reviewStatus: 'auto_applied' | 'pending';
+  /**
+   * `auto_applied` when it may bypass review, `pending` when it may not, and
+   * `accepted` when the user attached it themselves.
+   */
+  reviewStatus: 'auto_applied' | 'pending' | 'accepted';
   /** Machine-readable reasons the item landed in review. */
   notes: string[];
   blockIndex: number;

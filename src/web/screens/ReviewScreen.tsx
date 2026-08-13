@@ -353,7 +353,7 @@ function IdentityReviewCard({
   );
 }
 
-function PlayerPicker({
+export function PlayerPicker({
   onPick,
   fieldId = 'wrong-player',
   label = 'Which player is this really about?',
