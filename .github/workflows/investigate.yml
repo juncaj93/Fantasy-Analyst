@@ -23,6 +23,16 @@ jobs:
           set -uo pipefail
           api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "https://api.cloudflare.com/client/v4$1"; }
 
+          # What is this token actually allowed to do? An "Authentication error"
+          # below means a missing permission, not a wrong token, and knowing
+          # which one turns a vague failure into a precise instruction.
+          echo "=== API token permissions ==="
+          api "/user/tokens/verify" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              console.log('  token valid:', r.success, r.result ? '| status: ' + r.result.status : '');
+            })"
+
           echo "=== Zones (domains) on this account ==="
           zones=$(api "/zones?per_page=50")
           echo "$zones" | node -e "
@@ -69,9 +79,21 @@ jobs:
           echo "=== pricing page ==="
           curl -s -L https://the-odds-api.com/ | tr '>' '>\n' | grep -iEo '[^<]*(free|500|requests)[^<]*' | head -20 || true
           echo
-          echo "=== documented NFL player prop market keys ==="
-          curl -s -L https://the-odds-api.com/sports-odds-data/betting-markets.html \
-            | grep -oE 'player_[a-z_]+' | sort -u | head -40 || true
+          echo "=== do the market keys this app asks for still exist? ==="
+          doc=$(curl -s -L https://the-odds-api.com/sports-odds-data/betting-markets.html)
+          for key in player_pass_yds player_pass_tds player_rush_yds \
+                     player_receptions player_reception_yds player_anytime_td; do
+            if printf '%s' "$doc" | grep -q "$key"; then
+              echo "  $key      documented"
+            else
+              echo "  $key      NOT FOUND — the adapter would ask for a key that no longer exists"
+            fi
+          done
+          echo
+          echo "=== every documented NFL-shaped player key (for spotting new ones) ==="
+          printf '%s' "$doc" \
+            | grep -oE 'player_[a-z_]+' | sort -u \
+            | grep -E 'pass|rush|recep|reception|_td|kicking|sacks|tackles|interceptions|longest' || true
           echo
           echo "=== sports endpoint reachable without a key? (expect 401) ==="
           curl -s -o /dev/null -w 'status %{http_code}\n' https://api.the-odds-api.com/v4/sports || true
