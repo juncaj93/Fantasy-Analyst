@@ -35,7 +35,7 @@ VEGAS_PROVIDER = "mock"
 # address in Settings so you know where to subscribe. Leave it empty until then —
 # the app will simply say the address is not ready yet.
 # You can also set/override it inside the app under Setup -> Newsletter.
-NEWSLETTER_ADDRESS = ""
+NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool
