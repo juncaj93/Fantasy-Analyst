@@ -32,15 +32,30 @@ async function gql(query, variables) {
 const INTERESTING = /adp|rank|draft|board|trend|value|projection/i;
 
 // ------------------------------------------------------- 1. introspection ---
-console.log('=== can the schema describe itself? ===');
-const schema = await gql('{__schema{queryType{name fields{name description args{name type{name kind ofType{name}}}}}}}');
-console.log('  status:', schema.status);
+// Sleeper's schema is snake_cased, including the introspection types
+// themselves: it is `__Schema.query_type`, not the spec's `queryType`. Both
+// spellings are tried so this keeps working whichever convention is in force.
+const INTROSPECTION = [
+  '{__schema{query_type{name fields{name description args{name type{name kind of_type{name}}}}}}}',
+  '{__schema{queryType{name fields{name description args{name type{name kind ofType{name}}}}}}}',
+  '{__type(name:"RootQueryType"){fields{name description args{name}}}}',
+];
 
-let fields = schema.body?.data?.__schema?.queryType?.fields ?? null;
+console.log('=== can the schema describe itself? ===');
+let fields = null;
+for (const query of INTROSPECTION) {
+  const res = await gql(query);
+  const found = res.body?.data?.__schema?.query_type?.fields ?? res.body?.data?.__schema?.queryType?.fields ?? res.body?.data?.__type?.fields ?? null;
+  console.log(`  ${res.status}  ${found ? `${found.length} fields` : (res.body?.errors?.[0]?.message ?? '?').slice(0, 120)}`);
+  if (found) {
+    fields = found;
+    break;
+  }
+}
+
 if (!fields) {
-  console.log('  introspection unavailable:', JSON.stringify(schema.body?.errors?.[0]?.message ?? schema.text ?? '?').slice(0, 200));
+  console.log('  introspection unavailable in any spelling');
 } else {
-  console.log(`  ${fields.length} query fields`);
   const hits = fields.filter((f) => INTERESTING.test(f.name));
   console.log(`\n=== fields that could carry a draft order (${hits.length}) ===`);
   for (const f of hits) {
