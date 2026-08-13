@@ -18,10 +18,19 @@ jobs:
     steps:
       - name: Cloudflare domains and email routing
         env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # The deploy token is scoped to Workers and D1 and cannot read DNS.
+          # A separate, narrower token covers the mail side; fall back to the
+          # deploy token so this job still reports something useful without it.
+          TOKEN: ${{ secrets.CLOUDFLARE_EMAIL_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -uo pipefail
           api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "https://api.cloudflare.com/client/v4$1"; }
+
+          if [ -n "${{ secrets.CLOUDFLARE_EMAIL_TOKEN }}" ]; then
+            echo "Using the dedicated email/DNS token."
+          else
+            echo "CLOUDFLARE_EMAIL_TOKEN is not set — falling back to the deploy token, which cannot read DNS."
+          fi
 
           # What is this token actually allowed to do? An "Authentication error"
           # below means a missing permission, not a wrong token, and knowing
@@ -63,13 +72,42 @@ jobs:
                 console.log('  enabled:', r.result.enabled, '| status:', r.result.status, '| name:', r.result.name);
               })"
 
+            echo "=== $name: existing routing rules ==="
+            api "/zones/$id/email/routing/rules?per_page=20" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s);
+                if (!r.success) { console.log('  not available:', JSON.stringify(r.errors)); return; }
+                if (!r.result.length) { console.log('  (none)'); return; }
+                for (const rule of r.result) {
+                  const to = (rule.actions ?? []).map(a => a.type + ':' + (a.value ?? []).join(',')).join(' ');
+                  const from = (rule.matchers ?? []).map(m => m.value ?? m.type).join(',');
+                  console.log('  ', rule.name, '|', from, '->', to, '| enabled:', rule.enabled);
+                }
+              })"
+
             echo "=== $name: existing MX records (does real email already use this domain?) ==="
             api "/zones/$id/dns_records?type=MX&per_page=20" | node -e "
               let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
                 const r=JSON.parse(s);
                 if (!r.success) { console.log('  could not read DNS:', JSON.stringify(r.errors)); return; }
+                // Whose mail is this? Cloudflare's own MX records are safe to
+                // replace; anyone else's means real mail is being delivered
+                // somewhere and enabling routing would break it.
+                const who = (host) => {
+                  const h = String(host).toLowerCase();
+                  if (h.includes('mx.cloudflare.net')) return 'Cloudflare Email Routing';
+                  if (h.includes('google') || h.includes('googlemail')) return 'Google Workspace / Gmail';
+                  if (h.includes('outlook') || h.includes('protection.outlook')) return 'Microsoft 365';
+                  if (h.includes('zoho')) return 'Zoho Mail';
+                  if (h.includes('protonmail') || h.includes('proton.me')) return 'Proton Mail';
+                  if (h.includes('improvmx')) return 'ImprovMX';
+                  if (h.includes('fastmail') || h.includes('messagingengine')) return 'Fastmail';
+                  return 'UNRECOGNISED — treat as real mail in use';
+                };
                 if (!r.result.length) { console.log('  (none — no mail currently delivered to this domain)'); return; }
-                for (const d of r.result) console.log('  ', d.name, '->', d.content, 'priority', d.priority);
+                for (const d of r.result) {
+                  console.log('  ', d.name, '->', d.content, 'priority', d.priority, '|', who(d.content));
+                }
               })"
           done
 
