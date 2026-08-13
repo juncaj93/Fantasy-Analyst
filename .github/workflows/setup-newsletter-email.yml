@@ -103,8 +103,13 @@ jobs:
               : 'No MX records — no mail is delivered to this domain, safe to continue.');
           "
 
+      # Best-effort. Turning Email Routing on for the first time is not covered
+      # by the Email Routing Rules permission — a scoped token can manage rules
+      # but not switch the service on, which is a one-time dashboard action.
+      # The rule step below is the real test, so a refusal here is not fatal.
       - name: Turn on Email Routing
         id: enable
+        continue-on-error: true
         run: |
           set -uo pipefail
           zone_id="${{ steps.safety.outputs.zone_id }}"
@@ -134,9 +139,8 @@ jobs:
             const fs=require('fs');
             const r=JSON.parse(fs.readFileSync('/tmp/enable.json','utf8'));
             if (r.success) { console.log('Email Routing enabled.'); process.exit(0); }
-            const codes = (r.errors||[]).map(e=>e.code).join(',');
-            console.log('::error::Could not enable Email Routing: ' + JSON.stringify(r.errors) +
-              (codes.includes('10000') ? ' — the token is missing the Email Routing permission for this zone.' : ''));
+            console.log('::warning::Could not switch Email Routing on from here: ' + JSON.stringify(r.errors) +
+              ' — turn it on once in the Cloudflare dashboard (Email -> Email Routing -> Get started), then re-run this workflow.');
             process.exit(1);
           "
 
@@ -188,7 +192,9 @@ jobs:
             const fs=require('fs');
             const r=JSON.parse(fs.readFileSync('/tmp/rule.json','utf8'));
             if (r.success) { console.log('Routing rule in place.'); process.exit(0); }
-            console.log('::error::Could not set the routing rule: ' + JSON.stringify(r.errors));
+            console.log('::error::Could not set the routing rule: ' + JSON.stringify(r.errors) +
+              ' — if Email Routing is not switched on for this domain yet, turn it on once in the' +
+              ' Cloudflare dashboard (Email -> Email Routing -> Get started) and re-run this workflow.');
             process.exit(1);
           "
 
