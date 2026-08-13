@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   api,
   type LeagueSummary,
+  type LineupRecommendation,
   type RosterPlayer,
   type StartSitComparison,
 } from '../api.ts';
@@ -35,6 +36,7 @@ export function TeamScreen({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [comparison, setComparison] = useState<StartSitComparison | null>(null);
+  const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
 
   const loadRoster = useCallback(async () => {
     if (!selected) return;
@@ -45,9 +47,19 @@ export function TeamScreen({
     }
   }, [selected]);
 
+  const loadLineup = useCallback(async () => {
+    if (!selected) return;
+    try {
+      setLineup(await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup`));
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
+    }
+  }, [selected]);
+
   useEffect(() => {
     void loadRoster();
-  }, [loadRoster]);
+    void loadLineup();
+  }, [loadRoster, loadLineup]);
 
   const run = async (key: string, fn: () => Promise<string>) => {
     setBusy(key);
@@ -101,6 +113,7 @@ export function TeamScreen({
                   await api.post(`/api/leagues/${selected.id}/sync`);
                   onLeaguesChanged();
                   await loadRoster();
+                  await loadLineup();
                   return 'Roster refreshed from Sleeper.';
                 })
               }
@@ -117,6 +130,8 @@ export function TeamScreen({
       ) : (
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       )}
+
+      {selected && lineup?.found ? <LineupCard lineup={lineup} /> : null}
 
       {selected ? (
         <>
@@ -153,6 +168,104 @@ export function TeamScreen({
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Whole-roster start/sit.
+ *
+ * The changes come first, because that is the only part that asks anything of
+ * the reader. The full recommended lineup sits below it for context. Nothing
+ * here can alter a lineup — Sleeper is still where a change is made.
+ */
+function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
+  const gain =
+    lineup.currentPoints == null ? null : Math.round((lineup.recommendedPoints - lineup.currentPoints) * 10) / 10;
+
+  return (
+    <div className="card" data-testid="lineup-card">
+      <div className="header-row">
+        <strong>This week&rsquo;s lineup</strong>
+        <Badge tone={lineup.confidence === 'high' ? 'pos' : lineup.confidence === 'low' ? 'neg' : 'warn'}>
+          {lineup.confidence} confidence
+        </Badge>
+      </div>
+
+      {lineup.swaps.length === 0 ? (
+        <div className="faint" data-testid="lineup-verdict">
+          {lineup.currentPoints == null
+            ? 'No changes to suggest from what is known so far.'
+            : 'Your lineup already matches the recommendation.'}
+        </div>
+      ) : (
+        <>
+          <div className="faint" data-testid="lineup-verdict">
+            {lineup.swaps.length} change{lineup.swaps.length === 1 ? '' : 's'} to consider
+            {gain != null && gain > 0 ? ` · worth about ${gain} pts` : ''}
+          </div>
+          {lineup.swaps.map((s) => (
+            <div className="card card-tight" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap">
+              <div>
+                <strong>Start {s.inName}</strong> over {s.outName}{' '}
+                <span className="faint">({s.slot})</span>
+              </div>
+              <div className="faint">
+                +{s.gain} pts · {s.reason}
+              </div>
+            </div>
+          ))}
+          <div className="faint" style={{ margin: '4px 2px' }}>
+            Make changes in Sleeper — this app never edits a lineup.
+          </div>
+        </>
+      )}
+
+      {lineup.warnings.map((w) => (
+        <Notice key={w} tone="warn">
+          {w}
+        </Notice>
+      ))}
+
+      <details style={{ marginTop: 6 }}>
+        <summary className="muted">Recommended lineup in full</summary>
+        <table className="compact">
+          <thead>
+            <tr>
+              <th>Slot</th>
+              <th>Player</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lineup.slots.map((s, i) => (
+              <tr key={`${s.slot}-${i}`}>
+                <td>{s.slot}</td>
+                <td>
+                  {s.name ?? <Unknown what="nobody eligible" />}
+                  {s.name && !s.alreadyStarting ? ' ←' : ''}
+                </td>
+                <td>{s.score == null ? <Unknown what="score" /> : s.score.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {lineup.bench.length > 0 ? (
+          <div className="faint" style={{ marginTop: 6 }}>
+            Bench: {lineup.bench.map((e) => `${e.name} (${e.score?.toFixed(1) ?? '—'})`).join(', ')}
+          </div>
+        ) : null}
+        {lineup.undecidable.length > 0 ? (
+          <div className="faint" style={{ marginTop: 6 }}>
+            Not enough data to rank: {lineup.undecidable.map((e) => e.name).join(', ')}
+          </div>
+        ) : null}
+        {lineup.notes.map((n) => (
+          <div className="faint" key={n}>
+            {n}
+          </div>
+        ))}
+      </details>
+    </div>
   );
 }
 

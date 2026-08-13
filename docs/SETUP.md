@@ -258,7 +258,9 @@ without it and says clearly when a betting line is missing rather than guessing.
   newsletter is read again.
 - **Draft** — your draft board on draft day, with the reasoning behind every
   recommendation.
-- **Team** — your roster, and start/sit comparisons.
+- **Team** — your roster, plus this week's lineup: the best line-up for your
+  league's slots, which changes are worth making, and what each one is worth in
+  points. You make the change in Sleeper; the app only advises.
 - **Players** — search any player and read every piece of news the app has
   recorded about them.
 

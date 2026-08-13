@@ -87,24 +87,68 @@ Deploy-time issue found and fixed: Cloudflare rejects `0` as a cron day-of-week
 (`invalid cron string: 0 15 * * 0`), which failed the trigger update after the
 Worker had already uploaded. Day names are used now.
 
+## Milestone 4 — season mode and verified facts (done)
+
+**Whole-roster lineup.** Team now opens with the best legal lineup for the
+league's actual slots, the changes needed to reach it, and the points each
+change is worth. It is recommendation-only: there is no control anywhere that
+edits a lineup, and an e2e test asserts that.
+
+The assignment is exactly optimal, not a greedy slot-fill. Players are admitted
+best-first and each admission is tested by an augmenting path; sets of
+simultaneously-startable players form a transversal matroid, so greedy
+selection is provably the highest-scoring legal lineup. This matters in leagues
+that mix `FLEX` (RB/WR/TE) with `REC_FLEX` (WR/TE), where filling slots in order
+strands a back on the bench. A test covers exactly that case.
+
+Unknown still means unknown. A player who cannot be scored is listed separately
+as undecidable — never silently benched — and no swap is proposed against a
+current starter whose score is unknown. The current-lineup total is withheld
+entirely when any current starter is unscorable, rather than treating the gap
+as zero. Swaps below 0.75 pts are not suggested at all.
+
+**CI fixed.** The `wrangler deploy --dry-run` step ran without `dist/web`
+existing, so every run on `main` was red. It builds first now.
+
+**Facts checked instead of guessed.** `.github/workflows/investigate.yml` is a
+read-only manual job that answers questions the dev sandbox has no network path
+to reach. What it established:
+
+- `juncaj.net` is an active zone on the Cloudflare account, so the newsletter
+  address is possible.
+- The deploy token is scoped to Workers/D1 and zone listing only. Reading DNS
+  or Email Routing returns `Authentication error` (code 10000).
+- The Odds API free tier is 500 credits/month, and all six market keys the
+  adapter asks for (`player_pass_yds`, `player_pass_tds`, `player_rush_yds`,
+  `player_receptions`, `player_reception_yds`, `player_anytime_td`) are current
+  in the provider's documentation.
+
+The market set was deliberately left unchanged. `player_rush_tds` and
+`player_pass_interceptions` exist and would model rushing quarterbacks better,
+but each added market costs credits against a 500/month allowance, so that is a
+decision to make with a real key in hand rather than a free accuracy win.
+
 ## Known limitations
 
-1. **WebKit has still never been executed here.** The sandbox blocks
-   Playwright's browser CDN. The WebKit projects are configured and CI runs
-   them; locally the identical specs run on Chromium at the three iPhone
-   widths. Close this with `npx playwright install webkit && npm run e2e`.
-2. **The Odds API adapter remains unverified and disabled.** Free-tier terms,
-   NFL prop coverage and market keys could not be checked from here. Vegas shows
-   as "not connected" by design and no quota can be consumed.
-3. **Email routing has not been exercised end-to-end**, because it needs a real
-   domain in Cloudflare. The handler, parser, validation, quarantine and
-   idempotency are covered by tests against realistic raw MIME messages.
-4. **Rule magnitudes are still conservative** (mostly 1). Expect tuning once
+1. **The Odds API adapter is verified but still disabled.** The free tier and
+   every market key are confirmed current. What remains unverified is the live
+   response shape and actual NFL prop coverage, which needs an API key. Vegas
+   shows as "not connected" by design and no quota has been consumed.
+2. **Email routing has not been exercised end-to-end.** The domain exists, but
+   the deploy token cannot read or change DNS, so neither the existing MX
+   records nor the routing rule could be inspected. The handler, parser,
+   validation, quarantine and idempotency are covered by tests against
+   realistic raw MIME messages.
+3. **Rule magnitudes are still conservative** (mostly 1). Expect tuning once
    real newsletters have run through the coverage report.
-5. **Draft weights are untuned defaults.**
-6. **Survival probability is a heuristic**, labelled as an estimate.
-7. **Rate limiting is per-isolate**, not distributed — fine for one user.
-8. **Draft polling is client-driven** via the Live toggle.
+4. **Draft weights are untuned defaults.**
+5. **Survival probability is a heuristic**, labelled as an estimate.
+6. **Rate limiting is per-isolate**, not distributed — fine for one user.
+7. **Draft polling is client-driven** via the Live toggle.
+
+Closed since the last report: **WebKit now runs and passes in CI.** The
+"iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
+on the real Safari engine, not only on Chromium locally.
 
 ## Recommended next work
 
@@ -113,12 +157,10 @@ Worker had already uploaded. Day names are used now.
    tally quality.
 2. **Verify and enable a live Vegas provider**, then confirm the cache keeps a
    full NFL Sunday inside the free tier.
-3. **Season-mode lineup view** — slot-aware start/sit across the whole roster at
-   once, still recommendation-only.
-4. **Reprocess-with-preview** — re-run updated rules over stored newsletters and
+3. **Reprocess-with-preview** — re-run updated rules over stored newsletters and
    show a diff before committing. The reprocess path already preserves
    overrides; it needs the preview UI.
-5. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
+4. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
    adjustable without a deploy.
-6. **Tier visualisation on the draft board** — the scarcity component already
+5. **Tier visualisation on the draft board** — the scarcity component already
    computes tier gaps.

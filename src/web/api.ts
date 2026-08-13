@@ -276,3 +276,39 @@ export interface StartSitComparison {
   reasons: string[];
   warnings: string[];
 }
+
+export interface LineupSlot {
+  slot: string;
+  accepts: string[];
+  playerId: string | null;
+  name: string | null;
+  position: string | null;
+  score: number | null;
+  alreadyStarting: boolean;
+}
+
+export interface LineupSwap {
+  slot: string;
+  inPlayerId: string;
+  inName: string;
+  outPlayerId: string;
+  outName: string;
+  gain: number;
+  reason: string;
+}
+
+export interface LineupRecommendation {
+  league: { id: string; name: string; scoringLabel: string };
+  found: boolean;
+  error?: string;
+  dataFreshness: { fetchedAt: string | null; provider: string | null; events: number };
+  slots: LineupSlot[];
+  bench: StartSitEvaluation[];
+  undecidable: StartSitEvaluation[];
+  swaps: LineupSwap[];
+  recommendedPoints: number;
+  currentPoints: number | null;
+  confidence: string;
+  warnings: string[];
+  notes: string[];
+}

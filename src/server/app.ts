@@ -12,6 +12,7 @@
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
+import { recommendLineup } from '../core/startsit/lineup.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
@@ -282,6 +283,68 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       starters: hydrate(mine?.starterIds ?? []),
       bench: hydrate((mine?.playerIds ?? []).filter((id) => !(mine?.starterIds ?? []).includes(id))),
       found: !!mine,
+    });
+  });
+
+  /**
+   * Whole-roster start/sit: the best legal lineup, and how it differs from the
+   * one currently set in Sleeper. Read-only in every sense — it reports a
+   * difference, it does not act on it.
+   */
+  router.get('/api/leagues/:id/lineup', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    if (!mine) {
+      return jsonResponse({
+        league: { id: league.id, name: league.name },
+        found: false,
+        error: 'Your team was not found in this league.',
+      });
+    }
+
+    const playerRepo = new PlayerRepo(db);
+    const propsRepo = new PropsRepo(db);
+    const [propsByPlayer, signals, freshness] = await Promise.all([
+      propsRepo.latestForPlayers(mine.playerIds),
+      new EvidenceRepo(db).getSignals(mine.playerIds),
+      propsRepo.freshness(),
+    ]);
+
+    const inputs = [];
+    for (const id of mine.playerIds) {
+      const player = await playerRepo.getById(id);
+      // A roster entry with no canonical player is a gap in the dictionary, not
+      // a reason to fail the whole screen.
+      if (!player) continue;
+      inputs.push({
+        player,
+        props: propsByPlayer.get(id) ?? [],
+        signal: signals.get(id) ?? null,
+        injuryStatus: player.status,
+        propsStale: false,
+      });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    const recommendation = recommendLineup(inputs, shape, profile, {
+      currentStarterIds: mine.starterIds,
+    });
+
+    const unknownPlayers = mine.playerIds.length - inputs.length;
+    return jsonResponse({
+      league: { id: league.id, name: league.name, scoringLabel: profile.label },
+      found: true,
+      dataFreshness: freshness,
+      ...recommendation,
+      notes: unknownPlayers > 0
+        ? [...recommendation.notes, `${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`]
+        : recommendation.notes,
     });
   });
 

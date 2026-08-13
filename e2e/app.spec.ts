@@ -131,6 +131,21 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(comparison.getByRole('columnheader', { name: 'Coverage' })).toBeVisible();
   });
 
+  test('recommends a whole lineup and never offers to apply it', async ({ page }) => {
+    const card = page.getByTestId('lineup-card');
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId('lineup-verdict')).toBeVisible();
+
+    await card.getByRole('group').getByText('Recommended lineup in full').click();
+    await expect(card.getByRole('columnheader', { name: 'Slot' })).toBeVisible();
+
+    // Recommendation only: there is no control here that changes a lineup.
+    const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    expect(buttons).not.toContain('apply');
+    expect(buttons).not.toContain('set lineup');
+    expect(buttons).not.toContain('save lineup');
+  });
+
   test('shows a degraded, honest state when Vegas data is missing', async ({ page }) => {
     // Cal Whitfield (1011) is rostered but has no props in the mock game.
     await page.locator('[data-testid="roster-row"][data-player-id="1001"]').click();

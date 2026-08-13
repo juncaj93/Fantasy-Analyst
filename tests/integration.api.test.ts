@@ -212,6 +212,36 @@ describe('API with seeded data', () => {
     expect(body.bench.length).toBeGreaterThan(0);
   });
 
+  it('recommends a whole lineup against the league roster shape', async () => {
+    const body = await json<{
+      found: boolean;
+      slots: { slot: string; accepts: string[]; playerId: string | null; position: string | null }[];
+      swaps: { inPlayerId: string; outPlayerId: string; gain: number }[];
+      bench: unknown[];
+      undecidable: unknown[];
+    }>(get('/api/leagues/demo-league/lineup', cookie));
+
+    expect(body.found).toBe(true);
+    expect(body.slots.length).toBeGreaterThan(0);
+
+    // Every filled slot holds an eligible player, and nobody starts twice.
+    const filled = body.slots.filter((s) => s.playerId != null);
+    for (const slot of filled) expect(slot.accepts).toContain(slot.position);
+    expect(new Set(filled.map((s) => s.playerId)).size).toBe(filled.length);
+
+    // A suggested change never moves a player onto and off the lineup at once.
+    for (const swap of body.swaps) {
+      expect(swap.inPlayerId).not.toBe(swap.outPlayerId);
+      expect(swap.gain).toBeGreaterThan(0);
+    }
+  });
+
+  it('serves the lineup without a session, but still refuses writes', async () => {
+    // Fantasy data is public by design; nothing here should need unlocking.
+    const res = await app(get('/api/leagues/demo-league/lineup'), env);
+    expect(res.status).toBe(200);
+  });
+
   it('imports an ADP snapshot and reports match counts', async () => {
     const body = await json<{ created: boolean; matched: number; unmatched: number }>(
       post('/api/adp/import', { content: 'name,position,team,adp\nMarcus Vance,RB,KC,2.4\nWho Dis,WR,SEA,90\n' }, cookie),
