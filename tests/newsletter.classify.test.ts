@@ -55,13 +55,32 @@ describe('negative rules', () => {
     });
   }
 
-  it('assigns magnitude 3 to season-altering news', () => {
-    expect(classifySentence('He suffered a season-ending torn ACL.').magnitude).toBe(3);
-    expect(classifySentence('He was suspended for six games.').magnitude).toBe(3);
+  /**
+   * One piece of news counts once. Severity is still reported, so a torn ACL
+   * stays distinguishable from a missed practice without outweighing it three
+   * to one in the tally.
+   */
+  it('counts every piece of bad news as exactly one', () => {
+    expect(classifySentence('He suffered a season-ending torn ACL.').magnitude).toBe(1);
+    expect(classifySentence('He was suspended for six games.').magnitude).toBe(1);
+    expect(classifySentence('He was limited in practice again.').magnitude).toBe(1);
   });
 
-  it('keeps routine practice news at magnitude 1', () => {
-    expect(classifySentence('He was limited in practice again.').magnitude).toBe(1);
+  it('still reports how serious the news is, separately from the count', () => {
+    expect(classifySentence('He suffered a season-ending torn ACL.').severity).toBe(3);
+    expect(classifySentence('He was limited in practice again.').severity).toBe(1);
+  });
+
+  it('counts good news as exactly one too', () => {
+    expect(classifySentence('He was named the starter.').magnitude).toBe(1);
+    expect(classifySentence('He was limited in practice again.').polarity).toBe('negative');
+  });
+
+  it('does not count news that is neutral or points both ways', () => {
+    expect(classifySentence('The team held a walkthrough.').magnitude).toBe(0);
+    const mixed = classifySentence('He returned to practice but is expected to split work in a committee.');
+    expect(mixed.polarity).toBe('mixed');
+    expect(mixed.magnitude).toBe(0);
   });
 });
 

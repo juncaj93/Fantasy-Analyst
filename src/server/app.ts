@@ -14,6 +14,7 @@ import { importAdpSnapshot } from '../core/adp/import.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
+import { normalizeName } from '../core/identity/normalize.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../core/sleeper/scoring.ts';
@@ -645,15 +646,79 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   router.post('/api/review/identity/:id', async (ctx) => {
-    const body = await ctx.json<{ playerId?: string; dismiss?: boolean }>();
+    const body = await ctx.json<{ playerId?: string; dismiss?: boolean; remember?: boolean }>();
     const repo = new NewsletterRepo(ctx.env.db);
+    const id = Number(ctx.params['id']);
+
     if (body?.dismiss) {
-      await repo.resolveIdentityReview(Number(ctx.params['id']), null, 'dismissed');
+      await repo.resolveIdentityReview(id, null, 'dismissed');
       return jsonResponse({ ok: true, status: 'dismissed' });
     }
     if (!body?.playerId) return errorResponse('playerId or dismiss required', 400);
-    await repo.resolveIdentityReview(Number(ctx.params['id']), body.playerId, 'resolved');
-    return jsonResponse({ ok: true, status: 'resolved' });
+
+    // Teaching the app the name is the point: without it, "JSN" comes back as a
+    // question every single week.
+    let remembered: string | null = null;
+    if (body.remember !== false) {
+      const item = (await repo.listIdentityReviews(200)).find((r) => r.id === id) ?? null;
+      const text = item?.matchedText?.trim();
+      if (text) {
+        await new PlayerRepo(ctx.env.db).addAlias(body.playerId, text, normalizeName(text), 'user');
+        remembered = text;
+      }
+    }
+
+    await repo.resolveIdentityReview(id, body.playerId, 'resolved');
+    return jsonResponse({ ok: true, status: 'resolved', remembered });
+  });
+
+  // --------------------------------------------------------------- nicknames
+  router.get('/api/players/:id/aliases', async (ctx) => {
+    const repo = new PlayerRepo(ctx.env.db);
+    const player = await repo.getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+    return jsonResponse({ playerId: player.id, name: player.fullName, aliases: player.aliases });
+  });
+
+  /**
+   * Teach the app another name for a player.
+   *
+   * Refused when the name already belongs to someone else: an alias that points
+   * two ways is worse than no alias, because it turns a clean match into an
+   * ambiguous one for both players.
+   */
+  router.post('/api/players/:id/aliases', async (ctx) => {
+    const body = await ctx.json<{ alias?: string; remove?: boolean }>();
+    const alias = body?.alias?.trim();
+    if (!alias) return errorResponse('Enter the nickname or short name to remember.', 400);
+
+    const repo = new PlayerRepo(ctx.env.db);
+    const player = await repo.getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+
+    const key = normalizeName(alias);
+    if (!key) return errorResponse('That does not look like a name.', 400);
+
+    if (body?.remove) {
+      await repo.removeAlias(player.id, key);
+      return jsonResponse({ ok: true, removed: alias });
+    }
+
+    const index = await repo.buildIndex();
+    const clash = index
+      .byNormalizedName(key)
+      .concat(index.byAliasKey(key))
+      .find((p) => p.id !== player.id);
+    if (clash) {
+      return errorResponse(
+        `"${alias}" already means ${clash.fullName} (${clash.position} ${clash.team}). Pick a nickname that is not already taken.`,
+        409,
+      );
+    }
+
+    await repo.addAlias(player.id, alias, key, 'user');
+    const updated = await repo.getById(player.id);
+    return jsonResponse({ ok: true, playerId: player.id, name: player.fullName, aliases: updated?.aliases ?? [] });
   });
 
   // ------------------------------------------------------------------- vegas

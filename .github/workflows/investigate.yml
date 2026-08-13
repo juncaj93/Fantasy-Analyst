@@ -193,6 +193,45 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
+      - name: Sleeper — introspect GraphQL for ADP, and check search_rank
+        run: |
+          set -uo pipefail
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+
+          echo "=== GraphQL root fields mentioning adp/rank/draft ==="
+          q='{"query":"{__schema{queryType{fields{name description}}}}"}'
+          curl -s -X POST https://sleeper.app/graphql -H 'content-type: application/json' \
+            -H "user-agent: $UA" --data-binary "$q" --max-time 25 > /tmp/schema.json || true
+          echo "  bytes: $(wc -c < /tmp/schema.json)"
+          node -e "
+            const fs=require('fs');
+            let r; try { r=JSON.parse(fs.readFileSync('/tmp/schema.json','utf8')); } catch { console.log('  unreadable:', fs.readFileSync('/tmp/schema.json','utf8').slice(0,300)); process.exit(0); }
+            const fields = r?.data?.__schema?.queryType?.fields;
+            if (!fields) { console.log('  introspection unavailable:', JSON.stringify(r).slice(0,300)); process.exit(0); }
+            const hits = fields.filter(f => /adp|rank|draft|projection/i.test(f.name));
+            console.log('  total root fields:', fields.length);
+            for (const f of hits) console.log('   *', f.name, '-', (f.description||'').slice(0,80));
+          "
+
+          echo
+          echo "=== does the public player dump carry a draft-order rank? ==="
+          curl -s -H "user-agent: $UA" --max-time 60 https://api.sleeper.app/v1/players/nfl > /tmp/players.json || true
+          echo "  bytes: $(wc -c < /tmp/players.json)"
+          node -e "
+            const fs=require('fs');
+            let all; try { all=JSON.parse(fs.readFileSync('/tmp/players.json','utf8')); } catch { console.log('  unreadable'); process.exit(0); }
+            const ids = Object.keys(all);
+            console.log('  players:', ids.length);
+            const sample = all[ids[0]] || {};
+            console.log('  rank-ish keys present:', Object.keys(sample).filter(k => /rank|adp|depth/i.test(k)).join(', ') || '(none)');
+            const ranked = ids.map(i => all[i]).filter(p => typeof p.search_rank === 'number' && p.search_rank < 9999999);
+            console.log('  with usable search_rank:', ranked.length);
+            ranked.sort((a,b) => a.search_rank - b.search_rank);
+            for (const p of ranked.slice(0, 12)) {
+              console.log('   ', String(p.search_rank).padStart(4), p.full_name, '|', p.position, p.team ?? 'FA');
+            }
+          "
+
       - name: Underdog — is there a fetchable ADP source?
         run: |
           set -uo pipefail

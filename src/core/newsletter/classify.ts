@@ -40,8 +40,17 @@ export interface RuleMatch {
 
 export interface Classification {
   polarity: Polarity;
-  /** 0 for neutral/mixed/uncertain; otherwise the dominant rule magnitude. */
-  magnitude: 0 | 1 | 2 | 3;
+  /**
+   * What this item contributes to the tally: 1 for good or bad news, 0 for
+   * neutral, mixed or uncertain. One piece of news counts once.
+   */
+  magnitude: 0 | 1;
+  /**
+   * How serious the matched rule considers it (1-3), reported but not counted.
+   * Keeps "season-ending injury" distinguishable from "limited in practice"
+   * without letting one sentence outweigh three.
+   */
+  severity: 0 | 1 | 2 | 3;
   confidence: Confidence;
   /** Numeric confidence in [0,1], exposed for sorting the review queue. */
   confidenceScore: number;
@@ -132,6 +141,7 @@ export function classifySentence(sentence: string, opts: ClassifyOptions = {}): 
     return {
       polarity: 'neutral',
       magnitude: 0,
+      severity: 0,
       confidence: 'high',
       confidenceScore: 0.9,
       category: null,
@@ -162,9 +172,19 @@ export function classifySentence(sentence: string, opts: ClassifyOptions = {}): 
     dominant = negatives;
   }
 
-  const magnitude = (polarity === 'mixed'
+  /**
+   * One piece of news counts once.
+   *
+   * Good news is +1, bad news is -1, and news that is neutral or points both
+   * ways does not count at all. The rules still grade severity — a season-ending
+   * injury is not a missed practice — but that grade is reported as `severity`
+   * for the reader rather than folded into the tally, because a tally where one
+   * sentence can outweigh three is hard to reason about and harder to trust.
+   */
+  const severity = (polarity === 'mixed'
     ? 0
     : Math.max(...dominant.map((m) => m.magnitude))) as 0 | 1 | 2 | 3;
+  const magnitude: 0 | 1 = polarity === 'positive' || polarity === 'negative' ? 1 : 0;
 
   // ---- confidence ---------------------------------------------------------
   let confidence: Confidence = 'high';
@@ -201,6 +221,7 @@ export function classifySentence(sentence: string, opts: ClassifyOptions = {}): 
   return {
     polarity,
     magnitude,
+    severity,
     confidence,
     confidenceScore,
     category,

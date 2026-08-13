@@ -68,10 +68,13 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
     for (const item of targets) await act(item.id, 'accept');
   };
 
-  const resolveIdentity = async (id: number, playerId: string | null) => {
+  const resolveIdentity = async (id: number, playerId: string | null, remember = true) => {
     setIdentity((prev) => prev.filter((i) => i.id !== id));
     try {
-      await api.post(`/api/review/identity/${id}`, playerId ? { playerId } : { dismiss: true });
+      await api.post(
+        `/api/review/identity/${id}`,
+        playerId ? { playerId, remember } : { dismiss: true },
+      );
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -114,6 +117,7 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
           <Empty>Nothing to review. Ambiguous newsletter items land here.</Empty>
         ) : (
           <>
+            <ScoringKey />
             <div className="card card-tight">
               <button className="btn btn-sm" onClick={() => void acceptAllHighConfidence()}>
                 Accept all non-mixed ≥0.6 confidence
@@ -125,29 +129,17 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
           </>
         )
       ) : identity.length === 0 ? (
-        <Empty>No ambiguous player mentions.</Empty>
+        <Empty>No unrecognised names.</Empty>
       ) : (
-        identity.map((item) => (
-          <div className="card" key={item.id} data-testid="identity-card">
-            <div className="header-row">
-              <strong>“{item.matchedText}”</strong>
-              <Badge tone="warn">{item.proposedPolarity ?? 'unknown'}</Badge>
-            </div>
-            <div className="faint">{item.reason}</div>
-            <div className="evidence-excerpt">“{item.excerpt}”</div>
-            <div className="faint">{formatDate(item.sourceDate)}</div>
-            <div className="btn-row" style={{ marginTop: 6 }}>
-              {item.candidates.map((c) => (
-                <button key={c.playerId} className="btn btn-sm" onClick={() => void resolveIdentity(item.id, c.playerId)}>
-                  {c.name} ({c.position} {c.team || 'FA'})
-                </button>
-              ))}
-              <button className="btn btn-sm" onClick={() => void resolveIdentity(item.id, null)}>
-                Dismiss
-              </button>
-            </div>
+        <>
+          <div className="faint" style={{ margin: '0 2px 6px' }}>
+            These names could not be matched to exactly one player, so nothing was counted for them.
+            Pick the right player and the app remembers the name for next time.
           </div>
-        ))
+          {identity.map((item) => (
+            <IdentityReviewCard key={item.id} item={item} onResolve={resolveIdentity} />
+          ))}
+        </>
       )}
     </>
   );
@@ -252,7 +244,125 @@ function EvidenceReviewCard({
 }
 
 /** Type-ahead used by the "Wrong player" action. */
-function PlayerPicker({ onPick }: { onPick: (playerId: string) => Promise<void> }) {
+/**
+ * How scoring works, stated where the decisions are actually made.
+ *
+ * The rule is deliberately simple: one piece of news counts once. Anything more
+ * elaborate is hard to hold in your head while clicking through a queue, and a
+ * tally you cannot predict is a tally you cannot trust.
+ */
+function ScoringKey() {
+  return (
+    <details className="card card-tight" data-testid="scoring-key">
+      <summary className="muted">How the score works</summary>
+      <table className="compact" style={{ marginTop: 6 }}>
+        <tbody>
+          <tr>
+            <td>Good news</td>
+            <td>+1</td>
+          </tr>
+          <tr>
+            <td>Bad news</td>
+            <td>−1</td>
+          </tr>
+          <tr>
+            <td>Neutral, or good and bad in the same breath</td>
+            <td>does not count</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Every item counts once, however dramatic it is. A torn ACL and a missed practice are both
+        one bad item — the app still shows you which is which, it just does not let one sentence
+        outweigh three.
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        <strong>Accept</strong> counts it. <strong>Reject</strong> throws it out.{' '}
+        <strong>Change</strong> lets you set it yourself. <strong>Wrong player</strong> moves it to
+        someone else. Your decision always wins, and it survives the same newsletter being read
+        again.
+      </div>
+    </details>
+  );
+}
+
+/**
+ * One unrecognised name.
+ *
+ * A search box is always offered, not just the candidate list: a name like
+ * "JSN" produces no candidates at all, and without a search the only available
+ * action would be to give up on it.
+ */
+function IdentityReviewCard({
+  item,
+  onResolve,
+}: {
+  item: IdentityReview;
+  onResolve: (id: number, playerId: string | null, remember: boolean) => Promise<void>;
+}) {
+  const [remember, setRemember] = useState(true);
+
+  return (
+    <div className="card" data-testid="identity-card">
+      <div className="header-row">
+        <strong>“{item.matchedText}”</strong>
+        <Badge tone="warn">{item.proposedPolarity ?? 'unknown'}</Badge>
+      </div>
+      <div className="faint">{item.reason}</div>
+      <div className="evidence-excerpt">“{item.excerpt}”</div>
+      <div className="faint">{formatDate(item.sourceDate)}</div>
+
+      <label className="check-row" style={{ marginTop: 8, display: 'block' }}>
+        <input
+          type="checkbox"
+          checked={remember}
+          data-testid="remember-name"
+          onChange={(e) => setRemember(e.target.checked)}
+        />{' '}
+        Remember “{item.matchedText}” for this player
+      </label>
+
+      {item.candidates.length > 0 ? (
+        <div className="btn-row" style={{ marginTop: 6 }}>
+          {item.candidates.map((c) => (
+            <button
+              key={c.playerId}
+              className="btn btn-sm"
+              onClick={() => void onResolve(item.id, c.playerId, remember)}
+            >
+              {c.name} ({c.position} {c.team || 'FA'})
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <PlayerPicker
+        fieldId={`identity-pick-${item.id}`}
+        label={
+          item.candidates.length > 0 ? 'Or search for someone else' : 'Search for the right player'
+        }
+        onPick={(playerId) => onResolve(item.id, playerId, remember)}
+      />
+
+      <div className="btn-row" style={{ marginTop: 6 }}>
+        <button className="btn btn-sm" onClick={() => void onResolve(item.id, null, false)}>
+          Not a player — ignore
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlayerPicker({
+  onPick,
+  fieldId = 'wrong-player',
+  label = 'Which player is this really about?',
+}: {
+  onPick: (playerId: string) => Promise<void>;
+  /** Ids must be unique when several pickers are on screen at once. */
+  fieldId?: string;
+  label?: string;
+}) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<{ id: string; name: string; position: string; team: string }[]>([]);
 
@@ -277,9 +387,9 @@ function PlayerPicker({ onPick }: { onPick: (playerId: string) => Promise<void> 
   return (
     <div className="explain" data-testid="player-picker">
       <div className="field" style={{ marginBottom: 6 }}>
-        <label htmlFor="wrong-player">Which player is this really about?</label>
+        <label htmlFor={fieldId}>{label}</label>
         <input
-          id="wrong-player"
+          id={fieldId}
           value={query}
           autoCapitalize="none"
           autoCorrect="off"

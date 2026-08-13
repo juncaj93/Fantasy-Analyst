@@ -151,6 +151,19 @@ export class PlayerRepo {
       .run();
   }
 
+  /**
+   * Forget a nickname.
+   *
+   * Scoped to one player so removing a nickname cannot disturb another player
+   * who legitimately uses the same normalized key.
+   */
+  async removeAlias(playerId: string, normalizedAlias: string): Promise<void> {
+    await this.db
+      .prepare('DELETE FROM player_aliases WHERE player_id = ? AND normalized_alias = ?')
+      .bind(playerId, normalizedAlias)
+      .run();
+  }
+
   /** Search by name fragment for the Players screen. */
   async search(query: string, limit = 40): Promise<CanonicalPlayer[]> {
     const like = `%${query.toLowerCase()}%`;
