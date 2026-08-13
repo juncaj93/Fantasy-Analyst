@@ -16,10 +16,24 @@ import {
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, Signal, Unknown, formatAge } from '../components/common.tsx';
 
+interface OpenSlot {
+  slot: string;
+  count: number;
+  accepts: string[];
+}
+
 interface RosterResponse {
   league: { id: string; name: string; scoringLabel: string; notes: string[] };
   starters: RosterPlayer[];
   bench: RosterPlayer[];
+  /** True while the draft is running: `drafted` is the current truth, not `starters`. */
+  live: boolean;
+  drafted: (RosterPlayer & { pickNo: number | null })[];
+  counts: Record<string, number>;
+  filled: number;
+  remaining: number;
+  openStarters: OpenSlot[];
+  picksMade: number;
   found: boolean;
 }
 
@@ -142,19 +156,35 @@ export function TeamScreen({
             <Empty>Your roster was not found in this league. Check the connected Sleeper user.</Empty>
           ) : (
             <>
-              <div className="faint" style={{ margin: '0 2px 6px' }}>
-                Tap players to compare start/sit (2–3).
-              </div>
-              <div className="section-title">Starters</div>
-              {roster.starters.map((p) => (
-                <RosterRow key={p.playerId} player={p} selected={compareIds.includes(p.playerId)} onToggle={toggleCompare} />
-              ))}
-              <div className="section-title">Bench</div>
-              {roster.bench.map((p) => (
-                <RosterRow key={p.playerId} player={p} selected={compareIds.includes(p.playerId)} onToggle={toggleCompare} />
-              ))}
+              {roster.live ? (
+                <LiveDraftRoster roster={roster} />
+              ) : (
+                <>
+                  <div className="faint" style={{ margin: '0 2px 6px' }}>
+                    Tap players to compare start/sit (2–3).
+                  </div>
+                  <div className="section-title">Starters</div>
+                  {roster.starters.map((p) => (
+                    <RosterRow
+                      key={p.playerId}
+                      player={p}
+                      selected={compareIds.includes(p.playerId)}
+                      onToggle={toggleCompare}
+                    />
+                  ))}
+                  <div className="section-title">Bench</div>
+                  {roster.bench.map((p) => (
+                    <RosterRow
+                      key={p.playerId}
+                      player={p}
+                      selected={compareIds.includes(p.playerId)}
+                      onToggle={toggleCompare}
+                    />
+                  ))}
+                </>
+              )}
 
-              {compareIds.length >= 2 ? (
+              {!roster.live && compareIds.length >= 2 ? (
                 <div className="card">
                   <button className="btn btn-primary" onClick={compare} disabled={busy === 'compare'}>
                     Compare {compareIds.length} players
@@ -393,5 +423,76 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
         </details>
       ))}
     </div>
+  );
+}
+
+
+/**
+ * The roster during an active draft.
+ *
+ * Deliberately not a starters/bench split: mid-draft nobody has decided who
+ * starts, and showing a lineup would invent that decision. Players held,
+ * grouped by position, plus the requirements still open.
+ */
+function LiveDraftRoster({
+  roster,
+}: {
+  roster: {
+    drafted: (RosterPlayer & { pickNo: number | null })[];
+    counts: Record<string, number>;
+    filled: number;
+    remaining: number;
+    openStarters: OpenSlot[];
+    picksMade: number;
+  };
+}) {
+  const positions = Object.keys(roster.counts).sort();
+  return (
+    <>
+      <div className="card">
+        <div className="header-row">
+          <Badge tone="pos">Live draft</Badge>
+          <span className="faint">
+            {roster.picksMade} {roster.picksMade === 1 ? 'pick' : 'picks'} · {roster.filled} filled ·{' '}
+            {roster.remaining} left
+          </span>
+        </div>
+        {roster.openStarters.length > 0 ? (
+          <div className="faint" style={{ marginTop: 6 }}>
+            Still need:{' '}
+            {roster.openStarters.map((o) => `${o.count > 1 ? `${o.count} ` : ''}${o.slot}`).join(', ')}
+          </div>
+        ) : (
+          <div className="faint" style={{ marginTop: 6 }}>
+            Every starting slot is covered.
+          </div>
+        )}
+      </div>
+
+      {roster.drafted.length === 0 ? (
+        <Empty>Nothing drafted yet. Your picks appear here as you make them.</Empty>
+      ) : (
+        positions.map((position) => (
+          <div key={position}>
+            <div className="section-title">
+              {position} ({roster.counts[position]})
+            </div>
+            {roster.drafted
+              .filter((p) => (p.position || 'UNKNOWN') === position)
+              .map((p) => (
+                <div key={p.playerId} className="card">
+                  <div className="header-row">
+                    <strong>{p.name}</strong>
+                    <span className="faint">{p.pickNo ? `pick ${p.pickNo}` : 'on roster'}</span>
+                  </div>
+                  <div className="faint">
+                    {p.position} · {p.team || 'FA'}
+                  </div>
+                </div>
+              ))}
+          </div>
+        ))
+      )}
+    </>
   );
 }

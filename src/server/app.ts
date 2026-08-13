@@ -11,6 +11,7 @@
  */
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
+import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
@@ -304,11 +305,40 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
+
+    // During a draft Sleeper's roster is still empty, so the pick stream is the
+    // only current answer. Reconstruct from it and merge; after the draft the
+    // two agree and the merge is a no-op.
+    const draft = league.draftId ? await leagueRepo.getDraft(league.draftId) : null;
+    const picks = draft ? await leagueRepo.listPicks(draft.id) : [];
+    const liveRoster = buildLiveRoster({
+      picks,
+      rosterId: mine?.rosterId ?? null,
+      ownerId: mine?.ownerId ?? null,
+      sleeperPlayerIds: mine?.playerIds ?? [],
+      byId,
+      shape,
+      draftStatus: draft?.status ?? 'complete',
+    });
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label, notes: leagueFitNotes(profile, shape) },
       rosterShape: shape,
       starters: hydrate(mine?.starterIds ?? []),
       bench: hydrate((mine?.playerIds ?? []).filter((id) => !(mine?.starterIds ?? []).includes(id))),
+      // Mid-draft there is no lineup to show, only players held and slots still
+      // open. Presenting a starters/bench split would invent decisions the user
+      // has not made.
+      live: liveRoster.live,
+      drafted: hydrate(liveRoster.players.map((p) => p.playerId)).map((p, i) => ({
+        ...p,
+        pickNo: liveRoster.players[i]!.pickNo,
+      })),
+      counts: liveRoster.counts,
+      filled: liveRoster.filled,
+      remaining: liveRoster.remaining,
+      openStarters: liveRoster.openStarters,
+      picksMade: liveRoster.picksMade,
       found: !!mine,
     });
   });

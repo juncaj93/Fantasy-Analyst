@@ -212,6 +212,59 @@ describe('API with seeded data', () => {
     expect(body.bench.length).toBeGreaterThan(0);
   });
 
+  /**
+   * The demo league's draft is in progress, so the Team page must be able to
+   * show what has been drafted rather than waiting for Sleeper's roster to fill
+   * in — which does not happen until the draft ends.
+   */
+  describe('during an active draft', () => {
+    it('reports the roster as live and lists the picks the user made', async () => {
+      const body = await json<{
+        live: boolean;
+        drafted: { playerId: string; pickNo: number | null }[];
+        picksMade: number;
+      }>(get('/api/leagues/demo-league/roster', cookie));
+      expect(body.live).toBe(true);
+      expect(body.picksMade).toBeGreaterThan(0);
+      expect(body.drafted.some((p) => p.playerId === '1001')).toBe(true);
+      expect(body.drafted.find((p) => p.playerId === '1001')?.pickNo).toBe(1);
+    });
+
+    it('leaves the other team’s pick off the user’s roster', async () => {
+      const body = await json<{ drafted: { playerId: string }[] }>(
+        get('/api/leagues/demo-league/roster', cookie),
+      );
+      expect(body.drafted.some((p) => p.playerId === '1002')).toBe(false);
+    });
+
+    it('names the starting slots still open', async () => {
+      const body = await json<{ openStarters: { slot: string; count: number }[] }>(
+        get('/api/leagues/demo-league/roster', cookie),
+      );
+      expect(body.openStarters.length).toBeGreaterThan(0);
+      expect(body.openStarters.every((o) => o.count > 0)).toBe(true);
+    });
+
+    /** Team and Draft must not disagree about what has been drafted. */
+    it('gives the draft board the same roster it gives the Team page', async () => {
+      const roster = await json<{ drafted: { playerId: string }[]; openStarters: unknown[] }>(
+        get('/api/leagues/demo-league/roster', cookie),
+      );
+      const board = await json<{ myRoster: { playerId: string }[]; openStarters: unknown[] }>(
+        get('/api/drafts/demo-draft/board', cookie),
+      );
+      expect(board.myRoster.map((p) => p.playerId)).toEqual(roster.drafted.map((p) => p.playerId));
+      expect(board.openStarters).toEqual(roster.openStarters);
+    });
+
+    it('does not offer an already-drafted player on the board', async () => {
+      const board = await json<{ recommendations: { playerId: string }[] }>(
+        get('/api/drafts/demo-draft/board', cookie),
+      );
+      expect(board.recommendations.some((r) => r.playerId === '1001')).toBe(false);
+    });
+  });
+
   it('never republishes newsletter bodies through the public message log', async () => {
     // Bodies are retained server-side so rules can be re-run, but reads on this
     // site are public and the newsletter is someone else's work.
