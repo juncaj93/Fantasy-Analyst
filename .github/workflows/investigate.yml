@@ -183,6 +183,19 @@ jobs:
           probe "https://underdogfantasy.com/adp/nfl"
 
           echo
+          echo "=== following redirects: is the ADP page itself readable? ==="
+          for u in "https://underdogfantasy.com/adp/nfl" "https://underdogfantasy.com/rankings" "https://underdogfantasy.com/p/nfl-adp"; do
+            code=$(curl -sL -o /tmp/page.html -w '%{http_code}' -H "user-agent: $UA" --max-time 25 "$u" || echo 000)
+            echo "  $code  $(wc -c < /tmp/page.html)b  $u"
+            if [ "$code" = "200" ]; then
+              # A Next.js/Nuxt page ships its data inline; that is the thing
+              # worth finding, not the rendered HTML.
+              grep -o '__NEXT_DATA__\|__NUXT__\|application/json' /tmp/page.html | sort -u | sed 's/^/    embeds: /' || true
+              grep -oiE '(adp|average draft position)' /tmp/page.html | sort -u | head -3 | sed 's/^/    mentions: /' || true
+            fi
+          done
+
+          echo
           echo "=== open ADP mirrors (used only if Underdog has no direct feed) ==="
           probe "https://api.sleeper.app/v1/players/nfl/trending/add?limit=5"
           probe "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_fpecr_latest.csv"
