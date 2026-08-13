@@ -1,0 +1,35 @@
+name: Backfill stranded tallies
+
+# Recovers evidence for names that were confirmed before confirming created any.
+# Idempotent: keyed on the review id, so re-running changes nothing.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - name: Backfill
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/c.txt)
+          [ "$login" = "200" ] || { echo "::error::could not unlock ($login)"; exit 1; }
+
+          curl -s -X POST "$URL/api/repair/backfill" -b /tmp/c.txt -o /tmp/r.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/r.json','utf8'));
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+            console.log('resolved names checked:', r.checked);
+            console.log('evidence recovered:    ', r.created);
+            for (const p of r.players ?? []) {
+              console.log(\`  \${p.name}: +\${p.recovered} item(s), lifetime tally now \${p.net}\`);
+            }
+          "
