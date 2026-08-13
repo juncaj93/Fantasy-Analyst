@@ -70,6 +70,23 @@ npx wrangler deploy --dry-run bundles; DB, ASSETS and vars all resolve
 Secrets scan: no keys, tokens, database files or `.dev.vars` are committed.
 `wrangler.toml` contains placeholders and comments only.
 
+## Milestone 3 — deployed (done)
+
+Live at **https://fantasy-analyst.juncaj93.workers.dev**, deployed by GitHub
+Actions rather than by hand.
+
+- Pushing to `main` runs the tests, finds or creates the D1 database, applies
+  migrations, deploys, stores the passphrase, and verifies the live site.
+- On first deploy it also loads the NFL player list (3,303 players) so the app
+  is usable immediately. That step is skipped once the list exists.
+- Verified against the running site: home page 200, database read 200,
+  unauthenticated write correctly refused with 401, login 200, player sync 200.
+- Reads are public. Writes require the passphrase.
+
+Deploy-time issue found and fixed: Cloudflare rejects `0` as a cron day-of-week
+(`invalid cron string: 0 15 * * 0`), which failed the trigger update after the
+Worker had already uploaded. Day names are used now.
+
 ## Known limitations
 
 1. **WebKit has still never been executed here.** The sandbox blocks

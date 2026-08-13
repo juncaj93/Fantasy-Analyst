@@ -8,6 +8,12 @@ and start/sit recommendations.
 No paid AI is used at runtime. Every recommendation is a sum of separate,
 inspectable components — never one opaque score.
 
+## Live
+
+**https://fantasy-analyst.juncaj93.workers.dev**
+
+Anyone can read it; changes require the passphrase.
+
 ## Deployment
 
 Push to `main` → GitHub Actions tests, migrates and deploys to Cloudflare
