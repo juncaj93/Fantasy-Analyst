@@ -1,0 +1,227 @@
+name: Set up the newsletter email address
+
+# Turns on Cloudflare Email Routing for a domain and points one address at the
+# Fantasy Analyst worker, so newsletters arrive and are parsed automatically.
+#
+# This is the ONE workflow here that changes something outside the repository,
+# so it is deliberately hard to fire by accident: manual only, and it refuses to
+# run unless `confirm` is typed as `yes`.
+#
+# SAFETY INTERLOCK
+# Enabling Email Routing replaces a domain's MX records. If that domain already
+# receives real mail, doing so silently breaks it. Step 1 therefore aborts if
+# any MX record exists that is not Cloudflare's own — the dangerous case cannot
+# happen even if this is run months from now against a domain that has since
+# been given a mailbox.
+#
+# Everything here is idempotent: re-running enables nothing twice and updates
+# the rule in place rather than stacking duplicates.
+#
+# Requires the CLOUDFLARE_EMAIL_TOKEN secret (Zone:Read, DNS:Edit,
+# Email Routing Rules:Edit, scoped to the domain).
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Domain to receive newsletters at (e.g. juncaj.net)'
+        required: true
+        default: 'juncaj.net'
+      local_part:
+        description: 'The part before the @ (e.g. fantasy-news)'
+        required: true
+        default: 'fantasy-news'
+      worker:
+        description: 'Worker that should receive the mail'
+        required: true
+        default: 'fantasy-analyst'
+      confirm:
+        description: 'Type yes to allow DNS changes on this domain'
+        required: true
+        default: 'no'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.CLOUDFLARE_EMAIL_TOKEN }}
+      DOMAIN: ${{ inputs.domain }}
+      LOCAL_PART: ${{ inputs.local_part }}
+      WORKER: ${{ inputs.worker }}
+
+    steps:
+      - name: Refuse to run without explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "yes" ]; then
+            echo "::error::This workflow changes DNS. Re-run it with confirm set to yes."
+            exit 1
+          fi
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CLOUDFLARE_EMAIL_TOKEN is not set."
+            exit 1
+          fi
+
+      - name: Check that enabling routing would not break existing mail
+        id: safety
+        run: |
+          set -uo pipefail
+          api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "https://api.cloudflare.com/client/v4$1"; }
+
+          zone_id=$(api "/zones?name=$DOMAIN" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r=JSON.parse(s);
+              process.stdout.write(r.success && r.result[0] ? r.result[0].id : '');
+            })")
+          if [ -z "$zone_id" ]; then
+            echo "::error::No Cloudflare zone found for $DOMAIN."
+            exit 1
+          fi
+          echo "zone_id=$zone_id" >> "$GITHUB_OUTPUT"
+          echo "Zone for $DOMAIN: $zone_id"
+
+          # The interlock. Any MX record that is not Cloudflare's own means mail
+          # is being delivered somewhere real, and enabling routing would take
+          # it away. That is not a decision a workflow gets to make.
+          api "/zones/$zone_id/dns_records?type=MX&per_page=50" > /tmp/mx.json
+          node -e "
+            const fs=require('fs');
+            const r=JSON.parse(fs.readFileSync('/tmp/mx.json','utf8'));
+            if (!r.success) {
+              console.log('::error::Could not read DNS records: ' + JSON.stringify(r.errors));
+              process.exit(1);
+            }
+            const foreign = r.result.filter(d => !String(d.content).toLowerCase().includes('mx.cloudflare.net'));
+            for (const d of r.result) console.log('  MX', d.name, '->', d.content, 'priority', d.priority);
+            if (foreign.length) {
+              console.log('::error::' + process.env.DOMAIN + ' already receives mail via ' +
+                foreign.map(d=>d.content).join(', ') +
+                '. Enabling Email Routing would replace those records and break it. Stopping.');
+              process.exit(1);
+            }
+            console.log(r.result.length
+              ? 'Only Cloudflare MX records present — safe to continue.'
+              : 'No MX records — no mail is delivered to this domain, safe to continue.');
+          "
+
+      - name: Turn on Email Routing
+        id: enable
+        run: |
+          set -uo pipefail
+          zone_id="${{ steps.safety.outputs.zone_id }}"
+          api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "https://api.cloudflare.com/client/v4$1"; }
+
+          echo "Current state:"
+          api "/zones/$zone_id/email/routing" | tee /tmp/state.json | head -c 400; echo
+
+          enabled=$(node -e "
+            const fs=require('fs');
+            try {
+              const r=JSON.parse(fs.readFileSync('/tmp/state.json','utf8'));
+              process.stdout.write(r.success && r.result && r.result.enabled ? 'yes' : 'no');
+            } catch { process.stdout.write('no'); }
+          ")
+          if [ "$enabled" = "yes" ]; then
+            echo "Email Routing is already on; nothing to enable."
+            exit 0
+          fi
+
+          echo "Enabling Email Routing (this adds Cloudflare's MX records)..."
+          curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            "https://api.cloudflare.com/client/v4/zones/$zone_id/email/routing/enable" \
+            --data '{}' | tee /tmp/enable.json | head -c 600; echo
+
+          node -e "
+            const fs=require('fs');
+            const r=JSON.parse(fs.readFileSync('/tmp/enable.json','utf8'));
+            if (r.success) { console.log('Email Routing enabled.'); process.exit(0); }
+            const codes = (r.errors||[]).map(e=>e.code).join(',');
+            console.log('::error::Could not enable Email Routing: ' + JSON.stringify(r.errors) +
+              (codes.includes('10000') ? ' — the token is missing the Email Routing permission for this zone.' : ''));
+            process.exit(1);
+          "
+
+      - name: Point the address at the worker
+        id: rule
+        run: |
+          set -uo pipefail
+          zone_id="${{ steps.safety.outputs.zone_id }}"
+          address="$LOCAL_PART@$DOMAIN"
+          echo "Routing $address to the $WORKER worker."
+
+          curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://api.cloudflare.com/client/v4/zones/$zone_id/email/routing/rules?per_page=50" > /tmp/rules.json
+
+          # Re-running must update the existing rule, not add a second one that
+          # silently competes with it.
+          existing=$(ADDRESS="$address" node -e "
+            const fs=require('fs');
+            const r=JSON.parse(fs.readFileSync('/tmp/rules.json','utf8'));
+            if (!r.success) process.exit(0);
+            const hit=(r.result||[]).find(rule =>
+              (rule.matchers||[]).some(m => String(m.value||'').toLowerCase() === process.env.ADDRESS.toLowerCase()));
+            process.stdout.write(hit ? hit.tag : '');
+          ")
+
+          body=$(ADDRESS="$address" WORKER="$WORKER" node -e "
+            process.stdout.write(JSON.stringify({
+              name: 'Fantasy Analyst newsletter',
+              enabled: true,
+              priority: 0,
+              matchers: [{ type: 'literal', field: 'to', value: process.env.ADDRESS }],
+              actions: [{ type: 'worker', value: [process.env.WORKER] }],
+            }));
+          ")
+
+          if [ -n "$existing" ]; then
+            echo "Updating the existing rule ($existing)."
+            method=PUT; path="/rules/$existing"
+          else
+            echo "Creating a new rule."
+            method=POST; path="/rules"
+          fi
+
+          curl -s -X "$method" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            "https://api.cloudflare.com/client/v4/zones/$zone_id/email/routing$path" \
+            --data "$body" | tee /tmp/rule.json | head -c 600; echo
+
+          node -e "
+            const fs=require('fs');
+            const r=JSON.parse(fs.readFileSync('/tmp/rule.json','utf8'));
+            if (r.success) { console.log('Routing rule in place.'); process.exit(0); }
+            console.log('::error::Could not set the routing rule: ' + JSON.stringify(r.errors));
+            process.exit(1);
+          "
+
+      - name: Report the final state
+        if: always()
+        run: |
+          set -uo pipefail
+          zone_id="${{ steps.safety.outputs.zone_id }}"
+          [ -z "$zone_id" ] && exit 0
+          api() { curl -s -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4$1"; }
+
+          {
+            echo "## Newsletter address"
+            echo
+            echo "Address: \`$LOCAL_PART@$DOMAIN\` -> worker \`$WORKER\`"
+            echo
+            echo "### MX records now on $DOMAIN"
+            echo '```'
+            api "/zones/$zone_id/dns_records?type=MX&per_page=20" | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s);
+                if (!r.success) { console.log('could not read'); return; }
+                if (!r.result.length) { console.log('(none)'); return; }
+                for (const d of r.result) console.log(d.name, '->', d.content, 'priority', d.priority);
+              })"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "MX records now on $DOMAIN:"
+          api "/zones/$zone_id/dns_records?type=MX&per_page=20" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r=JSON.parse(s);
+              if (!r.success) { console.log('  could not read'); return; }
+              if (!r.result.length) { console.log('  (none)'); return; }
+              for (const d of r.result) console.log('  ', d.name, '->', d.content, 'priority', d.priority);
+            })"
