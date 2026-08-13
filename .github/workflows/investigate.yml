@@ -193,39 +193,43 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
-      - name: Sleeper — find the real ADP field
+      - name: beatadp.com — how does it serve Sleeper ADP?
         run: |
           set -uo pipefail
           UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
-          gql() {
-            curl -s -X POST https://sleeper.app/graphql -H 'content-type: application/json' \
-              -H "user-agent: $UA" --data-binary "$1" --max-time 25
-          }
 
-          # The schema uses snake_case (query_type, not queryType) — the earlier
-          # probe asked for the wrong field and learned nothing.
-          echo "=== root fields mentioning adp / rank / draft ==="
-          gql '{"query":"{__schema{query_type{fields{name description args{name}}}}}"}' > /tmp/schema.json
-          echo "  bytes: $(wc -c < /tmp/schema.json)"
-          node -e "
-            const fs=require('fs');
-            let r; try { r=JSON.parse(fs.readFileSync('/tmp/schema.json','utf8')); } catch { console.log('  unreadable'); process.exit(0); }
-            const f = r?.data?.__schema?.query_type?.fields;
-            if (!f) { console.log('  no schema:', JSON.stringify(r).slice(0,400)); process.exit(0); }
-            console.log('  total root fields:', f.length);
-            for (const x of f.filter(x => /adp|rank|draft|player/i.test(x.name))) {
-              console.log('   *', x.name, '(', (x.args||[]).map(a=>a.name).join(', '), ')');
-            }
-          "
+          echo "=== the page itself ==="
+          code=$(curl -sL -o /tmp/adp.html -w '%{http_code}' -H "user-agent: $UA" --max-time 30 \
+            https://www.beatadp.com/platform-adp || echo 000)
+          echo "  $code  $(wc -c < /tmp/adp.html)b"
 
           echo
-          echo "=== sample the most likely ADP query ==="
-          for q in \
-            '{"query":"{adp_full_ppr(sport:\"nfl\",season:\"2026\"){player_id adp}}"}' \
-            '{"query":"{get_adp(sport:\"nfl\",season:\"2026\",season_type:\"regular\"){player_id adp}}"}' \
-            '{"query":"{adp(sport:\"nfl\",season:\"2026\"){player_id adp}}"}' ; do
-            echo "  --> $q"
-            gql "$q" | head -c 300; echo
+          echo "=== does it ship its data inline? ==="
+          for marker in __NEXT_DATA__ __NUXT__ self.__next_f window.__remixContext; do
+            n=$(grep -c "$marker" /tmp/adp.html || true)
+            echo "  $marker: $n"
+          done
+          # If the data is inline, player names will be in the HTML already.
+          echo "  looks like player rows: $(grep -oiE '(sleeper|half.?ppr|redraft|superflex)' /tmp/adp.html | sort -u | tr '\n' ' ')"
+
+          echo
+          echo "=== script bundles it loads ==="
+          grep -oE 'src="[^"]*\.js[^"]*"' /tmp/adp.html | sed 's/src="//;s/"//' | head -20
+
+          echo
+          echo "=== any API paths referenced in the page ==="
+          grep -oE '"/api/[a-zA-Z0-9/_.-]+"' /tmp/adp.html | sort -u | head -20
+          grep -oE 'https://[a-zA-Z0-9.-]+/(api|v1|v2)/[a-zA-Z0-9/_.-]*' /tmp/adp.html | sort -u | head -20
+
+          echo
+          echo "=== obvious API guesses ==="
+          for u in \
+            "https://www.beatadp.com/api/platform-adp" \
+            "https://www.beatadp.com/api/adp" \
+            "https://www.beatadp.com/api/adp?platform=sleeper&format=half_ppr&teams=12" ; do
+            c=$(curl -s -o /tmp/g.json -w '%{http_code}' -H "user-agent: $UA" -H 'accept: application/json' --max-time 20 "$u" || echo 000)
+            echo "  $c  $(wc -c < /tmp/g.json)b  $u"
+            [ "$c" = "200" ] && head -c 300 /tmp/g.json | tr '\n' ' ' && echo
           done
 
       - name: Underdog — is there a fetchable ADP source?
