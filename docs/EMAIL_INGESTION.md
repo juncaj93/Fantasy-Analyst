@@ -1,117 +1,100 @@
-# Automatic newsletter ingestion
+# Newsletter ingestion
 
-The pipeline is built for automatic delivery, not copy/paste. What is missing is
-only the transport — the parser, classifier, persistence, idempotency and review
-workflow are complete and tested.
+## The design
 
-## What already works
+The FF Newsletter is subscribed **directly to an address owned by Fantasy
+Analyst**. Nothing reads a personal inbox, and there is no forwarding step.
 
 ```
-EmailMessage ──► qualifies() ──► processNewsletter() ──► evidence + review queue
+FF Newsletter
+  -> fantasy-news@<your-domain>          (Cloudflare Email Routing)
+  -> Worker email() handler              (src/worker/index.ts)
+  -> sender validation + idempotency     (NewsletterService.ingest)
+  -> sanitize, de-boilerplate, segment   (core/newsletter/html.ts)
+  -> player detection                    (core/newsletter/mentions.ts)
+  -> deterministic classification        (core/newsletter/classify.ts + rules.ts)
+  -> evidence ledger                     (evidence_items)
+  -> derived player tallies              (player_signal_cache)
+  -> review queue when uncertain
 ```
 
-- `EmailSource` (`src/core/newsletter/source.ts`) is the transport interface.
-  `FixtureEmailSource` (pull) and `ManualEmailSource` (push) implement it today.
-- `toEmailMessage()` normalises any provider payload into the shared shape.
-- `parseRawEmail()` (`src/worker/index.ts`) extracts the HTML or plain-text part
-  from a raw MIME message, handling quoted-printable and base64 bodies.
-- `NewsletterService.ingest()` qualifies the sender, skips duplicates by message
-  id *and* by content fingerprint, stores evidence, refreshes the signal cache
-  and routes ambiguity to review.
-- `POST /api/newsletter/ingest` accepts a message over HTTP.
+Why a dedicated address rather than Gmail access:
 
-## Step 1 (required): configure your newsletter sender
+- the app never sees personal mail;
+- only intended newsletters reach the parser;
+- no OAuth, no tokens, no consent screens;
+- filtering is trivial because the mailbox has exactly one purpose;
+- the Worker `email()` handler receives it directly, with no polling.
 
-Qualification is deliberately strict — unrelated mail is never processed. The
-default config points at a placeholder domain, so **nothing qualifies until you
-change it**.
+**Gmail/personal-inbox integration is deliberately not implemented.** It is
+unnecessary for this workflow.
 
-```bash
-curl -X POST https://<your-worker>/api/newsletter/sources \
-  -H 'content-type: application/json' \
-  -b 'fa_session=<your session cookie>' \
-  -d '{"sources":[{
-        "id":"ff-newsletter",
-        "label":"FF Newsletter",
-        "fromPatterns":["newsletter@yourprovider.com"],
-        "subjectPatterns":["week \\d+","waiver","start.?sit"],
-        "enabled":true
-      }]}'
-```
+## What happens to each email
 
-`fromPatterns` are case-insensitive substrings of the From header (a bare domain
-such as `@yourprovider.com` works). `subjectPatterns` are regex sources; an
-empty list means "any subject from this sender qualifies".
+1. **Logged.** Every message is recorded — sender, subject, time, outcome — so
+   Settings can always answer "did anything arrive?".
+2. **Deduplicated.** The same message id is never handled twice. Identical
+   content is skipped only if it was previously *processed*, so a spoofed
+   lookalike cannot block the real newsletter.
+3. **Validated.** Mail from an unconfigured sender is **quarantined**: recorded,
+   visible in the app, never parsed, never counted. Unexpected mail is not
+   rejected at the SMTP level, because rejecting bounces the message back and
+   looks like a broken subscription.
+4. **Size-checked.** Bodies over 2 MB are rejected rather than parsed.
+5. **Processed** through the deterministic pipeline.
+6. **Never fatal.** A parse failure is stored with a plain-language message and
+   changes nothing. `email()` never throws, so mail is never bounced or retried
+   in a loop.
 
-## Step 2: pick a delivery transport
+## Configuration
 
-### Option A — Cloudflare Email Routing (recommended; push, no polling)
+Two settings, both editable in the app under **Setup → Newsletter**:
 
-The worker already exports an `email()` handler.
+| Setting | Meaning | Where it comes from |
+|---|---|---|
+| Inbound address | The address to subscribe the newsletter to | `NEWSLETTER_ADDRESS` in `wrangler.toml`, or an in-app override |
+| Expected sender | Which sender is allowed to produce evidence | Saved in the app; stored in `settings` |
 
-1. Add your domain to Cloudflare and enable **Email Routing**.
-2. Create an address, e.g. `ff@yourdomain.com`.
-3. Route it to this Worker (Email Routing → Routes → *Send to a Worker*).
-4. Add to `wrangler.toml`:
+An optional subject filter can narrow it further. Subject text typed in the app
+is escaped and matched literally, so `Week (1)` means those characters, not a
+regular expression.
 
-   ```toml
-   [[send_email]]
-   name = "FF_INBOX"
-   ```
+Until an expected sender is saved, **nothing qualifies** — that is intentional.
 
-   (only needed if you later want the worker to *send* mail; receiving needs no
-   binding — just the route.)
-5. Forward your newsletter to `ff@yourdomain.com` with a filter in your existing
-   mailbox, or subscribe with that address directly.
-6. Redeploy: `npx wrangler deploy`.
+## Cloudflare Email Routing setup
 
-Unqualified mail is ignored silently rather than rejected, so a bad filter never
-bounces mail back to the sender.
+Step-by-step, dashboard-level instructions live in `docs/SETUP.md`, step A5. In
+short: enable Email Routing on the domain, create a custom address, and route it
+to the `fantasy-analyst` Worker.
 
-### Option B — Gmail API poller (pull)
-
-Nothing in the app blocks this; it needs a `GmailEmailSource implements
-EmailSource` and OAuth credentials.
-
-1. Create a Google Cloud project, enable the Gmail API, create an OAuth client.
-2. Obtain a refresh token for your account with the
-   `https://www.googleapis.com/auth/gmail.readonly` scope.
-3. Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN` as
-   worker secrets.
-4. Implement `fetchNew({ since, limit })` to exchange the refresh token for an
-   access token, call `users.messages.list` with a query such as
-   `from:newsletter@yourprovider.com after:<since>`, fetch each message and map
-   it through `toEmailMessage()`.
-5. Call it from `scheduled()`:
-
-   ```ts
-   await new NewsletterService(env.DB).ingestFromSource(new GmailEmailSource(env));
-   ```
-6. Add a cron trigger (e.g. `0 */6 * * *`).
-
-The service already tracks the last processed timestamp
-(`NewsletterRepo.lastProcessedAt`) and passes it as `since`, so a poller only
-fetches new mail.
-
-### Option C — inbound webhook (SendGrid / Postmark / Mailgun)
-
-Point the provider's inbound-parse webhook at `POST /api/newsletter/ingest` with
-`{ messageId, from, subject, date, html, text }`. Add a shared-secret header
-check to the route before exposing it publicly — it currently requires the
-normal session cookie.
+No `send_email` binding is required — the app only receives.
 
 ## Idempotency guarantees
 
-Reprocessing is always safe:
+- A message id already seen (in any outcome) returns `duplicate`.
+- Content already processed returns `duplicate`.
+- Evidence rows are inserted `ON CONFLICT DO NOTHING` on a dedupe key derived
+  from (message id, player, normalised excerpt, rule id).
+- Rows carrying a user override are never modified by reprocessing.
 
-- a message already recorded by `message_id` **or** by content fingerprint is
-  skipped entirely;
-- evidence inserts are `ON CONFLICT DO NOTHING` on a dedupe key derived from
-  (message id, player, normalized excerpt, rule id);
-- rows carrying a `user_override` are never modified by reprocessing.
+`NewsletterService.reprocess()` re-runs an updated rule set over a stored
+message: it inserts only genuinely new items and leaves corrections intact.
 
-`NewsletterService.reprocess()` exists to re-run an updated rule set over an old
-message: it inserts only genuinely new items and leaves your corrections intact.
+## Coverage reporting
+
+Every processed newsletter stores a small report, shown in the app under
+**Setup → Newsletter → Recent emails**:
+
+- sentences that mentioned one of your players
+- how many produced a signal
+- how many matched no rule
+- how many had an unclear player
+- examples of the sentences no rule matched
+- name-like words that are not in the player dictionary
+
+Unmatched content is **not an error** — most sentences in a newsletter carry no
+news. The report exists so the rule dictionary can be improved deliberately,
+without an LLM.
 
 ## Tuning the rules
 
@@ -123,5 +106,12 @@ the historical `rule_id` on stored evidence.
 Set `selfNegating: true` when a pattern already encodes its own negation
 ("did not practice"), otherwise the negation scanner would flip it twice.
 
-After changing rules, re-run `npm test` — the classification suite covers
-positive, negative, negation, mixed and confidence behaviour.
+After changing rules, run `npm test` — the classification suite covers positive,
+negative, negation, mixed and confidence behaviour.
+
+## Other delivery routes (not needed, kept working)
+
+- `POST /api/newsletter/ingest` accepts a message directly. Used by tests and
+  available as an escape hatch; requires a session.
+- `EmailSource` (`core/newsletter/source.ts`) remains the interface for any
+  pull-based source, should one ever be wanted.

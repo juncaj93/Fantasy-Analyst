@@ -12,10 +12,11 @@
  *   FA_DISABLE_AUTH=1   skip the passphrase gate (e2e only)
  *   FA_SEED=1           load demo fixtures into a fresh database
  *   FA_DB=path.sqlite   persist to disk instead of memory
+ *   NEWSLETTER_ADDRESS  dedicated inbound address shown in Settings
  */
 
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +43,10 @@ const { NodeSqliteDatabase, createApp, SleeperClient, MockVegasProvider, seedDem
   await import(bundlePath);
 
 const db = new NodeSqliteDatabase(dbPath);
-await db.exec(await readFile(join(root, 'migrations/0001_init.sql'), 'utf8'));
+// Apply every migration in order, exactly like `wrangler d1 migrations apply`.
+for (const file of (await readdir(join(root, 'migrations'))).filter((f) => f.endsWith('.sql')).sort()) {
+  await db.exec(await readFile(join(root, 'migrations', file), 'utf8'));
+}
 
 if (seed) {
   const summary = await seedDemoData(db);
@@ -54,6 +58,7 @@ const env = {
   db,
   sleeper: new SleeperClient(),
   vegas: new MockVegasProvider(MOCK_GAMES),
+  inboundAddress: process.env.NEWSLETTER_ADDRESS ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,

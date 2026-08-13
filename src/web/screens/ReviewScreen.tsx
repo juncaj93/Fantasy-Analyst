@@ -15,19 +15,31 @@ import { Badge, Empty, Loading, Notice, formatDate } from '../components/common.
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
+/** Plain-language explanation of why an item is here, from the rule that fired. */
+function reasonFor(item: EvidenceItem): string {
+  if (item.contextSummary) return item.contextSummary;
+  if (item.polarity === 'mixed') return 'This says both a good and a bad thing.';
+  return 'Matched a news rule but was not clear enough to apply on its own.';
+}
+
 export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [identity, setIdentity] = useState<IdentityReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'evidence' | 'identity'>('evidence');
+  const [tab, setTab] = useState<'evidence' | 'identity' | 'applied'>('evidence');
+  const [applied, setApplied] = useState<EvidenceItem[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<{ evidence: EvidenceItem[]; identity: IdentityReview[] }>('/api/review/queue');
+      const [res, appliedRes] = await Promise.all([
+        api.get<{ evidence: EvidenceItem[]; identity: IdentityReview[] }>('/api/review/queue'),
+        api.get<{ evidence: EvidenceItem[] }>('/api/review/applied'),
+      ]);
       setEvidence(res.evidence);
       setIdentity(res.identity);
+      setApplied(appliedRes.evidence);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -77,11 +89,27 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
           Evidence ({evidence.length})
         </button>
         <button className="chip" aria-pressed={tab === 'identity'} onClick={() => setTab('identity')}>
-          Player identity ({identity.length})
+          Wrong player? ({identity.length})
+        </button>
+        <button className="chip" aria-pressed={tab === 'applied'} onClick={() => setTab('applied')}>
+          Already applied ({applied.length})
         </button>
       </div>
 
-      {tab === 'evidence' ? (
+      {tab === 'applied' ? (
+        applied.length === 0 ? (
+          <Empty>Nothing has been applied yet.</Empty>
+        ) : (
+          <>
+            <div className="faint" style={{ margin: '0 2px 6px' }}>
+              These were clear enough to apply automatically. You can still change any of them.
+            </div>
+            {applied.map((item) => (
+              <EvidenceReviewCard key={item.id} item={item} onAction={act} applied />
+            ))}
+          </>
+        )
+      ) : tab === 'evidence' ? (
         evidence.length === 0 ? (
           <Empty>Nothing to review. Ambiguous newsletter items land here.</Empty>
         ) : (
@@ -128,13 +156,16 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
 function EvidenceReviewCard({
   item,
   onAction,
+  applied = false,
 }: {
   item: EvidenceItem;
   onAction: (id: string, action: string, extra?: Record<string, unknown>) => Promise<void>;
+  applied?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [wrongPlayer, setWrongPlayer] = useState(false);
   return (
-    <div className="card" data-testid="review-card">
+    <div className="card" data-testid={applied ? 'applied-card' : 'review-card'}>
       <div className="header-row">
         <div>
           <strong>{item.playerName ?? item.playerId}</strong>
@@ -149,34 +180,48 @@ function EvidenceReviewCard({
       </div>
 
       <div className="evidence-excerpt">“{item.excerpt}”</div>
+      <div className="muted" data-testid="review-reason">
+        Why: {reasonFor(item)}
+      </div>
       <div className="evidence-meta">
-        <span>{item.sourceName}</span>
         <span>{formatDate(item.sourceDate)}</span>
-        <span>{item.category ?? 'uncategorised'}</span>
-        <span>mag {item.magnitude}</span>
-        <span>conf {item.confidence}</span>
-        {item.ruleId ? <span>rule {item.ruleId}</span> : null}
+        <span>{item.category ?? 'general'}</span>
+        <span>
+          confidence: {item.confidence}
+          {applied ? ` · ${item.reviewStatus.replace('_', ' ')}` : ''}
+        </span>
       </div>
 
       <div className="btn-row" style={{ marginTop: 8 }}>
-        <button className="btn btn-sm btn-primary" onClick={() => void onAction(item.id, 'accept')}>
-          ✓ Accept
-        </button>
+        {applied ? null : (
+          <button className="btn btn-sm btn-primary" onClick={() => void onAction(item.id, 'accept')}>
+            ✓ Accept
+          </button>
+        )}
         <button className="btn btn-sm" onClick={() => setExpanded((v) => !v)}>
           ✎ Change
         </button>
-        <button className="btn btn-sm" onClick={() => void onAction(item.id, 'reject')}>
-          ✕ Reject
+        <button className="btn btn-sm" onClick={() => setWrongPlayer((v) => !v)}>
+          ⇄ Wrong player
         </button>
         <button className="btn btn-sm" onClick={() => void onAction(item.id, 'ignore')}>
           ⊘ Ignore
         </button>
       </div>
 
+      {wrongPlayer ? (
+        <PlayerPicker
+          onPick={async (playerId) => {
+            setWrongPlayer(false);
+            await onAction(item.id, 'correct', { playerId, polarity: item.polarity, magnitude: item.magnitude });
+          }}
+        />
+      ) : null}
+
       {expanded ? (
         <div className="explain">
           <div className="faint" style={{ marginBottom: 4 }}>
-            Your correction overrides the rule engine permanently.
+            Your correction wins from now on, even if this newsletter is read again.
           </div>
           <div className="btn-row">
             {POLARITIES.map((p) => (
@@ -202,6 +247,53 @@ function EvidenceReviewCard({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Type-ahead used by the "Wrong player" action. */
+function PlayerPicker({ onPick }: { onPick: (playerId: string) => Promise<void> }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<{ id: string; name: string; position: string; team: string }[]>([]);
+
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      const res = await api.get<{ players: { id: string; name: string; position: string; team: string }[] }>(
+        `/api/players?q=${encodeURIComponent(query)}`,
+      );
+      if (!cancelled) setResults(res.players.slice(0, 6));
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [query]);
+
+  return (
+    <div className="explain" data-testid="player-picker">
+      <div className="field" style={{ marginBottom: 6 }}>
+        <label htmlFor="wrong-player">Which player is this really about?</label>
+        <input
+          id="wrong-player"
+          value={query}
+          autoCapitalize="none"
+          autoCorrect="off"
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Start typing a name"
+        />
+      </div>
+      <div className="btn-row">
+        {results.map((p) => (
+          <button key={p.id} className="btn btn-sm" onClick={() => void onPick(p.id)}>
+            {p.name} ({p.position} {p.team || 'FA'})
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

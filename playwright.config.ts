@@ -88,7 +88,7 @@ export default defineConfig({
     })),
   ],
   webServer: {
-    command: `npm run build && node scripts/build-server.mjs && FA_SEED=1 FA_INSECURE_COOKIES=1 APP_PASSPHRASE=e2e-passphrase SESSION_SECRET=e2e-session-secret-value-32-chars node scripts/dev-server.mjs --port ${PORT}`,
+    command: `npm run build && node scripts/build-server.mjs && FA_SEED=1 FA_INSECURE_COOKIES=1 NEWSLETTER_ADDRESS=fantasy-news@demo.example APP_PASSPHRASE=e2e-passphrase SESSION_SECRET=e2e-session-secret-value-32-chars node scripts/dev-server.mjs --port ${PORT}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

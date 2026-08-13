@@ -84,45 +84,39 @@ export function TeamScreen({
     <>
       {message ? <Notice tone={message.tone === 'ok' ? 'ok' : message.tone === 'error' ? 'error' : 'warn'}>{message.text}</Notice> : null}
 
-      <ConnectCard onDone={onLeaguesChanged} busy={busy} run={run} />
-
-      <div className="section-title">Leagues</div>
-      {leagues.length === 0 ? (
-        <Empty>No leagues imported yet. Connect your Sleeper username above.</Empty>
-      ) : (
-        leagues.map((l) => (
-          <div className="card card-tight" key={l.id} data-testid="league-card">
-            <div className="header-row">
-              <div>
-                <strong>{l.name}</strong>
-                <div className="faint">
-                  {l.season} · {l.teams} teams · {l.scoringLabel}
-                </div>
+      {selected ? (
+        <div className="card card-tight" data-testid="league-card">
+          <div className="header-row">
+            <div>
+              <strong>{selected.name}</strong>
+              <div className="faint">
+                {selected.season} · {selected.teams} teams · {selected.scoringLabel}
               </div>
-              <button
-                className={l.isSelected ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
-                disabled={l.isSelected || busy != null}
-                onClick={() =>
-                  run(`select-${l.id}`, async () => {
-                    await api.post(`/api/leagues/${l.id}/select`);
-                    onLeaguesChanged();
-                    return `${l.name} selected and synced`;
-                  })
-                }
-              >
-                {l.isSelected ? '✓ Selected' : 'Select'}
-              </button>
             </div>
-            <div className="badge-row">
-              {l.notes.map((n) => (
-                <Badge key={n}>{n}</Badge>
-              ))}
-            </div>
+            <button
+              className="btn btn-sm"
+              disabled={busy != null}
+              onClick={() =>
+                run('sync', async () => {
+                  await api.post(`/api/leagues/${selected.id}/sync`);
+                  onLeaguesChanged();
+                  await loadRoster();
+                  return 'Roster refreshed from Sleeper.';
+                })
+              }
+            >
+              {busy === 'sync' ? 'Refreshing…' : 'Refresh'}
+            </button>
           </div>
-        ))
+          <div className="badge-row">
+            {selected.notes.map((n) => (
+              <Badge key={n}>{n}</Badge>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       )}
-
-      <AdpCard busy={busy} run={run} />
 
       {selected ? (
         <>
@@ -285,128 +279,6 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
           ))}
         </details>
       ))}
-    </div>
-  );
-}
-
-function ConnectCard({
-  onDone,
-  busy,
-  run,
-}: {
-  onDone: () => void;
-  busy: string | null;
-  run: (key: string, fn: () => Promise<string>) => Promise<void>;
-}) {
-  const [username, setUsername] = useState('');
-  const [season, setSeason] = useState(String(new Date().getFullYear()));
-
-  return (
-    <div className="card">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Sleeper connection
-      </div>
-      <div className="field">
-        <label htmlFor="sleeper-username">Sleeper username</label>
-        <input
-          id="sleeper-username"
-          value={username}
-          autoCapitalize="none"
-          autoCorrect="off"
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="your sleeper handle"
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="sleeper-season">Season</label>
-        <input id="sleeper-season" value={season} inputMode="numeric" onChange={(e) => setSeason(e.target.value)} />
-      </div>
-      <div className="btn-row">
-        <button
-          className="btn btn-primary"
-          disabled={!username || busy != null}
-          onClick={() =>
-            run('connect', async () => {
-              const res = await api.post<{ leaguesImported: number }>('/api/sleeper/connect', { username, season });
-              onDone();
-              return `Imported ${res.leaguesImported} league(s) for ${season}`;
-            })
-          }
-        >
-          Connect
-        </button>
-        <button
-          className="btn"
-          disabled={busy != null}
-          onClick={() =>
-            run('players', async () => {
-              const res = await api.post<{ written: number; total: number }>('/api/sleeper/sync-players');
-              return `Synced ${res.written} players (${res.total} stored)`;
-            })
-          }
-        >
-          Sync players
-        </button>
-      </div>
-      <div className="faint" style={{ marginTop: 6 }}>
-        Player sync downloads the full Sleeper dictionary (~5MB). Run it once per day at most.
-      </div>
-    </div>
-  );
-}
-
-function AdpCard({
-  busy,
-  run,
-}: {
-  busy: string | null;
-  run: (key: string, fn: () => Promise<string>) => Promise<void>;
-}) {
-  const [content, setContent] = useState('');
-  const [label, setLabel] = useState('');
-
-  return (
-    <div className="card">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Underdog ADP snapshot
-      </div>
-      <div className="faint" style={{ marginBottom: 6 }}>
-        Paste a same-day CSV or JSON export. The snapshot is frozen once imported; original source
-        values are preserved.
-      </div>
-      <div className="field">
-        <label htmlFor="adp-label">Label</label>
-        <input id="adp-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Underdog ADP (today)" />
-      </div>
-      <div className="field">
-        <label htmlFor="adp-content">CSV or JSON</label>
-        <textarea
-          id="adp-content"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="name,position,team,adp&#10;Ja'Marr Chase,WR,CIN,1.4"
-        />
-      </div>
-      <button
-        className="btn btn-primary"
-        disabled={!content || busy != null}
-        onClick={() =>
-          run('adp', async () => {
-            const res = await api.post<{
-              created: boolean;
-              matched: number;
-              ambiguous: number;
-              unmatched: number;
-            }>('/api/adp/import', { content, label: label || undefined });
-            setContent('');
-            return res.created
-              ? `Imported: ${res.matched} matched, ${res.ambiguous} ambiguous, ${res.unmatched} unmatched`
-              : 'Identical snapshot already imported (no duplicate created)';
-          })
-        }
-      >
-        Import ADP
-      </button>
     </div>
   );
 }

@@ -252,11 +252,12 @@ describe('API with seeded data', () => {
     expect(body.evidenceInserted).toBe(1);
   });
 
-  it('ignores a newsletter from an unqualified sender', async () => {
-    const body = await json<{ status: string }>(
+  it('quarantines a newsletter from an unqualified sender', async () => {
+    const body = await json<{ status: string; detail: string }>(
       post('/api/newsletter/ingest', { messageId: 'spam-1', from: 'spam@evil.example', subject: 'hi', html: '<p>x</p>' }, cookie),
     );
-    expect(body.status).toBe('not_qualified');
+    expect(body.status).toBe('quarantined');
+    expect(body.detail).toContain('ignored');
   });
 
   it('compares start/sit with explicit component breakdowns', async () => {

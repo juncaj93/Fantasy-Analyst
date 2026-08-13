@@ -104,23 +104,12 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(page.getByTestId('league-card').first()).toBeVisible();
   });
 
-  test('shows the selected league with its scoring profile', async ({ page }) => {
+  test('shows the league in use with its scoring profile', async ({ page }) => {
     const card = page.getByTestId('league-card').first();
     await expect(card).toContainText('Demo Dynasty');
     await expect(card).toContainText('Half PPR');
-    await expect(card.getByRole('button', { name: '✓ Selected' })).toBeVisible();
-  });
-
-  test('imports an ADP snapshot and reports match counts', async ({ page }, testInfo) => {
-    // Snapshots are deduped by content hash, and the dev server is shared
-    // across projects, so each project imports a distinguishable file.
-    const uniqueName = `Ghost ${testInfo.project.name}`;
-    await page
-      .getByLabel('CSV or JSON')
-      .fill(`name,position,team,adp\nMarcus Vance,RB,KC,2.4\n${uniqueName},WR,SEA,140\n`);
-    await page.getByRole('button', { name: 'Import ADP' }).click();
-    await expect(page.locator('.notice')).toContainText('1 matched');
-    await expect(page.locator('.notice')).toContainText('1 unmatched');
+    // Choosing a league lives in Setup; Team only refreshes it.
+    await expect(card.getByRole('button', { name: 'Refresh' })).toBeVisible();
   });
 
   test('lists the roster split into starters and bench', async ({ page }) => {
@@ -193,7 +182,11 @@ test.describe('review queue', () => {
         from: 'editor@demo.newsletter',
         subject: 'Camp Report',
         date: new Date().toISOString(),
-        html: '<p>Julian Reyes returned to practice but is expected to split work in a committee.</p>',
+        // The marker keeps each issue's content unique: identical content is
+        // deduped by design, which would starve later tests of review items.
+        html:
+          `<p>Issue ${testInfo.project.name} / ${testInfo.title}.</p>` +
+          '<p>Julian Reyes returned to practice but is expected to split work in a committee.</p>',
         force: true,
       },
     });
@@ -204,11 +197,11 @@ test.describe('review queue', () => {
     await expect(page.getByTestId('review-card').first()).toBeVisible();
   });
 
-  test('lists ambiguous evidence with its matched rule and excerpt', async ({ page }) => {
+  test('lists ambiguous evidence with a reason, excerpt and confidence', async ({ page }) => {
     const card = page.getByTestId('review-card').first();
-    await expect(card).toContainText('rule');
-    await expect(card).toContainText('conf');
     await expect(card.locator('.evidence-excerpt')).toBeVisible();
+    await expect(card.getByTestId('review-reason')).toContainText('Why:');
+    await expect(card).toContainText('confidence:');
   });
 
   test('accepting an item removes it from the queue and updates the badge', async ({ page }) => {
@@ -222,6 +215,6 @@ test.describe('review queue', () => {
     await card.getByRole('button', { name: '✎ Change' }).click();
     await expect(card.getByRole('button', { name: 'positive', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'mixed', exact: true })).toBeVisible();
-    await expect(card.getByText(/overrides the rule engine permanently/)).toBeVisible();
+    await expect(card.getByText(/Your correction wins from now on/)).toBeVisible();
   });
 });

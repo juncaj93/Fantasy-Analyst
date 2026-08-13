@@ -241,11 +241,49 @@ describe('NewsletterService', () => {
     expect(await new EvidenceRepo(db).countAll()).toBe(outcome.evidenceInserted);
   });
 
-  it('rejects a non-qualifying sender without storing anything', async () => {
+  it('quarantines a non-qualifying sender without creating evidence', async () => {
     const message = toEmailMessage({ messageId: 'x', from: 'spam@elsewhere.example', subject: 'Buy now', html: CLEAN_NEWSLETTER });
     const outcome = await service.ingest(message);
-    expect(outcome.status).toBe('not_qualified');
+    expect(outcome.status).toBe('quarantined');
     expect(await new EvidenceRepo(db).countAll()).toBe(0);
+  });
+
+  it('still logs a quarantined email so the user can see something arrived', async () => {
+    await service.ingest(
+      toEmailMessage({ messageId: 'x', from: 'spam@elsewhere.example', subject: 'Buy now', html: CLEAN_NEWSLETTER }),
+    );
+    const repo = new NewsletterRepo(db);
+    const last = await repo.lastReceived();
+    expect(last?.status).toBe('quarantined');
+    expect(last?.fromAddress).toBe('spam@elsewhere.example');
+    expect(last?.rejectReason).toContain('Unexpected sender');
+    expect(await repo.lastProcessed()).toBeNull();
+  });
+
+  it('does not reprocess a quarantined message id', async () => {
+    const message = toEmailMessage({ messageId: 'x', from: 'spam@elsewhere.example', subject: 'Buy now', html: CLEAN_NEWSLETTER });
+    await service.ingest(message);
+    expect((await service.ingest(message)).status).toBe('duplicate');
+  });
+
+  it('rejects an oversized email rather than parsing it', async () => {
+    const huge = `<p>${'x'.repeat(2_000_050)}</p>`;
+    const outcome = await service.ingest(
+      toEmailMessage({ messageId: 'big', from: 'editor@ffnewsletter.example', subject: 'Camp', html: huge }),
+    );
+    expect(outcome.status).toBe('rejected');
+    expect(await new EvidenceRepo(db).countAll()).toBe(0);
+    expect((await new NewsletterRepo(db).lastReceived())?.status).toBe('rejected');
+  });
+
+  it('records a plain-language outcome and coverage for a processed newsletter', async () => {
+    await service.ingest(newsletterMessage());
+    const last = await new NewsletterRepo(db).lastProcessed();
+    expect(last?.status).toBe('processed');
+    expect(last?.detail).toMatch(/Found news on \d+ player/);
+    expect(last?.autoAppliedCount).toBeGreaterThanOrEqual(0);
+    expect(last?.coverage).toBeTruthy();
+    expect(Number((last?.coverage as Record<string, number>)['sentencesWithPlayers'])).toBeGreaterThan(0);
   });
 
   it('processes a non-qualifying message when explicitly forced', async () => {
@@ -265,7 +303,7 @@ describe('NewsletterService', () => {
     await service.ingest(newsletterMessage());
     const second = await service.ingest(newsletterMessage(CLEAN_NEWSLETTER, 'msg-2'));
     expect(second.status).toBe('duplicate');
-    expect(second.detail).toContain('identical content');
+    expect(second.detail).toContain('already read');
   });
 
   it('does not duplicate evidence when reprocessing', async () => {

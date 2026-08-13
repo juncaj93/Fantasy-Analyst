@@ -43,7 +43,22 @@ availability and an uncertainty penalty. It never changes a lineup.
 timeline. Every original excerpt is preserved.
 
 **Review** — anything the classifier was not confident about, plus ambiguous
-player identities. Your corrections are authoritative and survive reprocessing.
+player identities and the items already applied. Accept, change, reassign to the
+right player, or ignore. Your corrections are authoritative and survive
+reprocessing.
+
+**Setup** — the whole configuration experience in plain language: connect
+Sleeper, choose a league, import ADP, see the dedicated newsletter address and
+tell the app which sender to trust. No commands, no jargon.
+
+## Newsletter, automatically
+
+The FF Newsletter is subscribed directly to an address owned by the app
+(`fantasy-news@<your-domain>`), delivered by Cloudflare Email Routing straight
+into the Worker. No personal inbox is ever accessed and nothing is forwarded by
+hand. Mail from any other sender is quarantined, never parsed.
+
+See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ## Principles enforced in code
 
@@ -70,8 +85,8 @@ player identities. Your corrections are authoritative and survive reprocessing.
 
 ```bash
 npm run typecheck
-npm test               # 335 unit + integration tests
-npm run e2e            # WebKit at 390x844, 375x812, 360x800
+npm test               # 384 unit + integration tests
+npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
 npm run e2e:chromium   # same specs, fallback engine
 ```
 

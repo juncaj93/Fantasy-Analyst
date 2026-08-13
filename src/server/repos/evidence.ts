@@ -136,6 +136,46 @@ export class EvidenceRepo {
     return rows.results.map(toItem);
   }
 
+  /** Headline counts for the Settings screen. */
+  async summary(): Promise<{
+    total: number;
+    pending: number;
+    autoAppliedPositive: number;
+    autoAppliedNegative: number;
+  }> {
+    const rows = await this.db
+      .prepare('SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, polarity')
+      .all<{ review_status: string; polarity: string; n: number }>();
+    let total = 0;
+    let pending = 0;
+    let autoAppliedPositive = 0;
+    let autoAppliedNegative = 0;
+    for (const row of rows.results) {
+      const n = Number(row.n ?? 0);
+      total += n;
+      if (row.review_status === 'pending') pending += n;
+      if (row.review_status === 'auto_applied') {
+        if (row.polarity === 'positive') autoAppliedPositive += n;
+        if (row.polarity === 'negative') autoAppliedNegative += n;
+      }
+    }
+    return { total, pending, autoAppliedPositive, autoAppliedNegative };
+  }
+
+  /** Recently auto-applied items, so the user can inspect and undo them. */
+  async listApplied(limit = 30): Promise<EvidenceItem[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM evidence_items
+          WHERE review_status IN ('auto_applied','accepted','corrected')
+          ORDER BY source_date DESC, id DESC
+          LIMIT ?`,
+      )
+      .bind(limit)
+      .all<EvidenceRow>();
+    return rows.results.map(toItem);
+  }
+
   async pendingCount(): Promise<number> {
     const row = await this.db
       .prepare("SELECT COUNT(*) AS n FROM evidence_items WHERE review_status = 'pending'")

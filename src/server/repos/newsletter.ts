@@ -4,6 +4,7 @@ import type { IdentityReviewItem } from '../../core/newsletter/pipeline.ts';
 import { stableHash } from '../../core/newsletter/fingerprint.ts';
 import { nowIso, parseJson, toJson, type Database } from '../db.ts';
 
+/** Every email the dedicated address receives, processed or not. */
 export interface MessageRecord {
   messageId: string;
   sourceId: string;
@@ -13,8 +14,16 @@ export interface MessageRecord {
   fingerprint: string;
   evidenceCount: number;
   pendingCount: number;
+  autoAppliedCount: number;
+  identityReviewCount: number;
   processedAt: string;
+  /** processed | quarantined | rejected | error | ignored */
   status: string;
+  /** Why a message was not processed. */
+  rejectReason: string | null;
+  /** Plain-language outcome shown in Settings. */
+  detail: string | null;
+  coverage: Record<string, unknown> | null;
 }
 
 export interface IdentityReviewRecord {
@@ -33,11 +42,17 @@ export interface IdentityReviewRecord {
 export class NewsletterRepo {
   constructor(private readonly db: Database) {}
 
-  /** Has this message (or identical content) already been processed? */
-  async findProcessed(messageId: string, fingerprint: string): Promise<MessageRecord | null> {
+  /**
+   * Has this exact content already been PROCESSED?
+   *
+   * Deliberately scoped to processed messages: a quarantined or failed message
+   * must never fingerprint-block a later legitimate delivery of the same
+   * newsletter (otherwise one spoofed email could silence the real one).
+   */
+  async findProcessedByFingerprint(fingerprint: string): Promise<MessageRecord | null> {
     const row = await this.db
-      .prepare('SELECT * FROM newsletter_messages WHERE message_id = ? OR fingerprint = ? LIMIT 1')
-      .bind(messageId, fingerprint)
+      .prepare("SELECT * FROM newsletter_messages WHERE fingerprint = ? AND status = 'processed' LIMIT 1")
+      .bind(fingerprint)
       .first<Record<string, unknown>>();
     return row ? toMessage(row) : null;
   }
@@ -47,11 +62,17 @@ export class NewsletterRepo {
       .prepare(
         `INSERT INTO newsletter_messages (
            message_id, source_id, from_address, subject, received_at, fingerprint,
-           evidence_count, pending_count, processed_at, status
-         ) VALUES (?,?,?,?,?,?,?,?,?,?)
+           evidence_count, pending_count, auto_applied_count, identity_review_count,
+           coverage_json, reject_reason, detail, processed_at, status
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(message_id) DO UPDATE SET
            evidence_count = excluded.evidence_count,
            pending_count = excluded.pending_count,
+           auto_applied_count = excluded.auto_applied_count,
+           identity_review_count = excluded.identity_review_count,
+           coverage_json = excluded.coverage_json,
+           reject_reason = excluded.reject_reason,
+           detail = excluded.detail,
            processed_at = excluded.processed_at,
            status = excluded.status`,
       )
@@ -64,10 +85,39 @@ export class NewsletterRepo {
         record.fingerprint,
         record.evidenceCount,
         record.pendingCount,
+        record.autoAppliedCount,
+        record.identityReviewCount,
+        toJson(record.coverage ?? {}),
+        record.rejectReason,
+        record.detail,
         record.processedAt,
         record.status,
       )
       .run();
+  }
+
+  /** Most recent inbound email of any status. */
+  async lastReceived(): Promise<MessageRecord | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM newsletter_messages ORDER BY received_at DESC, rowid DESC LIMIT 1')
+      .first<Record<string, unknown>>();
+    return row ? toMessage(row) : null;
+  }
+
+  /** Most recent successfully processed newsletter. */
+  async lastProcessed(): Promise<MessageRecord | null> {
+    const row = await this.db
+      .prepare("SELECT * FROM newsletter_messages WHERE status = 'processed' ORDER BY received_at DESC, rowid DESC LIMIT 1")
+      .first<Record<string, unknown>>();
+    return row ? toMessage(row) : null;
+  }
+
+  /** Most recent failure, so Settings can surface it in plain language. */
+  async lastFailure(): Promise<MessageRecord | null> {
+    const row = await this.db
+      .prepare("SELECT * FROM newsletter_messages WHERE status IN ('error','rejected') ORDER BY received_at DESC, rowid DESC LIMIT 1")
+      .first<Record<string, unknown>>();
+    return row ? toMessage(row) : null;
   }
 
   async listMessages(limit = 25): Promise<MessageRecord[]> {
@@ -83,6 +133,15 @@ export class NewsletterRepo {
       .prepare('SELECT MAX(received_at) AS latest FROM newsletter_messages')
       .first<{ latest: string | null }>();
     return row?.latest ?? null;
+  }
+
+  /** Has this message id already been seen, in any status? */
+  async seen(messageId: string): Promise<MessageRecord | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM newsletter_messages WHERE message_id = ?')
+      .bind(messageId)
+      .first<Record<string, unknown>>();
+    return row ? toMessage(row) : null;
   }
 
   /** Insert identity-ambiguity items, deduped on content. */
@@ -169,7 +228,12 @@ function toMessage(row: Record<string, unknown>): MessageRecord {
     fingerprint: String(row['fingerprint']),
     evidenceCount: Number(row['evidence_count'] ?? 0),
     pendingCount: Number(row['pending_count'] ?? 0),
+    autoAppliedCount: Number(row['auto_applied_count'] ?? 0),
+    identityReviewCount: Number(row['identity_review_count'] ?? 0),
     processedAt: String(row['processed_at']),
     status: String(row['status']),
+    rejectReason: (row['reject_reason'] as string | null) ?? null,
+    detail: (row['detail'] as string | null) ?? null,
+    coverage: parseJson<Record<string, unknown>>(row['coverage_json'], {}),
   };
 }

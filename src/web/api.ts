@@ -140,6 +140,90 @@ export interface IdentityReview {
   proposedCategory: string | null;
 }
 
+export interface SetupStep {
+  id: 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas';
+  title: string;
+  state: 'ok' | 'warn' | 'todo' | 'off';
+  summary: string;
+  action: string | null;
+}
+
+export interface NewsletterStatus {
+  address: string | null;
+  addressConfigured: boolean;
+  senderConfigured: boolean;
+  expectedSenders: string[];
+  subjectFilters: string[];
+  enabled: boolean;
+  lastReceivedAt: string | null;
+  lastReceivedFrom: string | null;
+  lastReceivedSubject: string | null;
+  lastReceivedStatus: string | null;
+  lastProcessedAt: string | null;
+  lastProcessedDetail: string | null;
+  lastError: string | null;
+  totals: {
+    emailsReceived: number;
+    newslettersProcessed: number;
+    quarantined: number;
+    evidenceItems: number;
+    autoAppliedPositive: number;
+    autoAppliedNegative: number;
+    needsReview: number;
+  };
+}
+
+export interface NewsletterCoverage {
+  sentencesWithPlayers?: number;
+  classifiedSentences?: number;
+  unclassifiedSentences?: number;
+  ambiguousIdentitySentences?: number;
+  samples?: { excerpt: string; players: string[] }[];
+  unknownNames?: string[];
+}
+
+export interface NewsletterMessage {
+  messageId: string;
+  fromAddress: string;
+  subject: string;
+  receivedAt: string;
+  status: string;
+  evidenceCount: number;
+  pendingCount: number;
+  autoAppliedCount: number;
+  identityReviewCount: number;
+  rejectReason: string | null;
+  detail: string | null;
+  coverage: NewsletterCoverage | null;
+}
+
+export interface SetupStatus {
+  steps: SetupStep[];
+  readyForDraft: boolean;
+  sleeper: { connected: boolean; username: string | null; displayName: string | null; playersSynced: number };
+  league: {
+    selected: boolean;
+    id: string | null;
+    name: string | null;
+    season: string | null;
+    teams: number;
+    scoringLabel: string | null;
+    notes: string[];
+    draftId: string | null;
+    rosterFound: boolean;
+  };
+  adp: {
+    imported: boolean;
+    label: string | null;
+    capturedAt: string | null;
+    totalRows: number;
+    matched: number;
+    unresolved: number;
+  };
+  newsletter: NewsletterStatus;
+  vegas: { provider: string; live: boolean; lastRefreshedAt: string | null; events: number; note: string };
+}
+
 export interface LeagueSummary {
   id: string;
   name: string;

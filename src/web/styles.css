@@ -116,7 +116,7 @@ body {
   right: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
@@ -124,6 +124,7 @@ body {
 }
 
 .tabbar button {
+  position: relative;
   min-height: var(--tap);
   padding: 8px 2px;
   background: none;
@@ -149,7 +150,9 @@ body {
 
 .tab-badge {
   position: absolute;
-  transform: translate(16px, -4px);
+  top: 4px;
+  left: 50%;
+  transform: translateX(6px);
   background: var(--warn);
   color: #10161d;
   border-radius: 999px;

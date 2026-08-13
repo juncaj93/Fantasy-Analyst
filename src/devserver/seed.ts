@@ -18,6 +18,7 @@ import { AdpRepo } from '../server/repos/adp.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { PlayerRepo } from '../server/repos/players.ts';
 import { PropsRepo } from '../server/repos/props.ts';
+import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
@@ -99,6 +100,13 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
   const playerRepo = new PlayerRepo(db);
   await playerRepo.upsertMany(players);
 
+  // Demo data represents a fully connected deployment.
+  await new SettingsRepo(db).set(SETTING_KEYS.sleeperUser, {
+    userId: 'demo-user',
+    username: 'demo',
+    displayName: 'Demo Manager',
+  });
+
   // --- league + roster ---
   const leagueRepo = new LeagueRepo(db);
   await leagueRepo.upsertLeague({
@@ -165,6 +173,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
 
   // --- newsletter ingestion ---
   const newsletter = new NewsletterService(db);
+  await new SettingsRepo(db).set(SETTING_KEYS.inboundAddress, 'fantasy-news@demo.example');
   await newsletter.setSources([
     {
       id: 'demo',

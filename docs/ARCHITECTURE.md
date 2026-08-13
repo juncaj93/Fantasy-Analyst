@@ -37,8 +37,8 @@ The API is built as `createApp(): (Request, AppEnv) => Promise<Response>` over a
 - **Production**: the worker passes `env.DB` (D1) straight through.
 - **Local dev and e2e**: `NodeSqliteDatabase` implements the same interface on
   top of `node:sqlite`, and `scripts/dev-server.mjs` serves the same routes.
-- **Tests**: the same adapter runs the real `migrations/0001_init.sql`, so
-  repository tests exercise real SQL rather than a mock.
+- **Tests**: the same adapter applies every file in `migrations/` in order, so
+  repository tests exercise real SQL and a malformed migration fails the suite.
 
 One consequence worth stating: you can run and browser-test the whole app
 without Wrangler or workerd.
@@ -90,6 +90,27 @@ can be rebuilt at any time from the ledger.
 - Recency windows (7d / 21d / season-to-date) are computed from `source_date`;
   old evidence is never deleted.
 
+## Newsletter ingestion
+
+The production path is a dedicated inbound address (Cloudflare Email Routing ->
+the Worker `email()` handler). No personal mailbox is ever accessed.
+
+`NewsletterService.ingest` is the single gate between "mail arrived" and
+"evidence exists":
+
+- every message is logged with its outcome, so the app can always show what
+  arrived;
+- an unexpected sender is **quarantined** — recorded and visible, never parsed;
+- the same message id is never handled twice, and identical content is skipped
+  only when it was previously *processed*, so a spoofed lookalike cannot
+  fingerprint-block the genuine newsletter;
+- oversized bodies are rejected;
+- failures are recorded in plain language and change nothing.
+
+Each processed newsletter also stores a coverage report (classified vs
+unmatched player sentences, plus name-like words missing from the dictionary).
+Unmatched content is a quality signal, not an error.
+
 ## Newsletter classification
 
 Deterministic and rule-driven — no LLM anywhere in the runtime path.
@@ -122,6 +143,19 @@ surname-only mention.
 
 **Context summaries** are composed only from rule templates. When no template
 matches, a truncated excerpt is stored instead of invented prose.
+
+## Setup surface
+
+`SetupService` renders the state of the five areas (Sleeper, League, ADP,
+Newsletter, Vegas) as plain-language strings — the UI shows them nearly
+verbatim. Anything that genuinely requires a terminal lives in `docs/SETUP.md`,
+never in the app.
+
+Configuration a non-developer can reach from their phone: Sleeper connection and
+league choice, player-list refresh, ADP import (file or paste, with a full
+matched/ambiguous/unmatched/skipped breakdown), the newsletter address and
+expected sender, and the review queue. A test asserts the setup copy contains no
+developer vocabulary.
 
 ## Recommendations
 

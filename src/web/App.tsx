@@ -6,20 +6,24 @@ import { Loading, Notice, formatAge } from './components/common.tsx';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
+import { SetupScreen } from './screens/SetupScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 
-type Tab = 'draft' | 'team' | 'players' | 'review';
+type Tab = 'draft' | 'team' | 'players' | 'review' | 'setup';
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
   { id: 'draft', label: 'Draft', glyph: '◈' },
   { id: 'team', label: 'Team', glyph: '▤' },
   { id: 'players', label: 'Players', glyph: '⌕' },
   { id: 'review', label: 'Review', glyph: '✓' },
+  { id: 'setup', label: 'Setup', glyph: '⚙' },
 ];
 
 export function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [tab, setTab] = useState<Tab>('draft');
+  /** First load only: land on Setup when there is nothing to show yet. */
+  const [, setLanded] = useState(false);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +37,10 @@ export function App() {
       setOverview(ov);
       setLeagues(lg.leagues);
       setError(null);
+      setLanded((already) => {
+        if (!already && !ov.selectedLeague) setTab('setup');
+        return true;
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setAuthenticated(false);
       else setError(err instanceof Error ? err.message : String(err));
@@ -75,6 +83,7 @@ export function App() {
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'players' ? <PlayersScreen /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
+        {tab === 'setup' ? <SetupScreen leagues={leagues} onChanged={() => void refresh()} /> : null}
       </main>
 
       <nav className="tabbar" aria-label="Main navigation">

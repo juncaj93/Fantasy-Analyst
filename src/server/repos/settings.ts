@@ -56,6 +56,8 @@ export class SettingsRepo {
 export const SETTING_KEYS = {
   sleeperUser: 'sleeper.user',
   newsletterSources: 'newsletter.sources',
+  /** In-app override for the dedicated inbound email address. */
+  inboundAddress: 'newsletter.inboundAddress',
   seasonStart: 'season.start',
   vegasProvider: 'vegas.provider',
   lastVegasRefresh: 'vegas.lastRefresh',

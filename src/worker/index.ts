@@ -28,6 +28,12 @@ export interface WorkerEnv {
   ODDS_API_KEY?: string;
   /** 'mock' (default) or 'the-odds-api'. */
   VEGAS_PROVIDER?: string;
+  /**
+   * The dedicated address the FF Newsletter is subscribed to, e.g.
+   * "fantasy-news@example.com". Shown in Settings so the user knows where to
+   * subscribe. Can also be set in-app, which overrides this value.
+   */
+  NEWSLETTER_ADDRESS?: string;
 }
 
 const app = createApp();
@@ -47,6 +53,7 @@ function toAppEnv(env: WorkerEnv): AppEnv {
     vegas: buildVegasProvider(env),
     APP_PASSPHRASE: env.APP_PASSPHRASE,
     SESSION_SECRET: env.SESSION_SECRET,
+    inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
   };
 }
 
@@ -75,9 +82,15 @@ export default {
   },
 
   /**
-   * Inbound email (Cloudflare Email Routing -> Email Worker).
-   * The message is qualified and processed through the same pipeline as every
-   * other source; unqualified mail is ignored without being stored.
+   * Inbound email — the production newsletter path.
+   *
+   * Cloudflare Email Routing delivers to the dedicated Fantasy Analyst address,
+   * which routes here. Every message is logged so Settings can show "last
+   * received"; only mail from the configured sender is parsed into evidence.
+   *
+   * Mail is never rejected at the SMTP level: rejecting bounces the message back
+   * to the sender, which would look like a broken subscription. Unexpected mail
+   * is quarantined instead — recorded, visible, and never turned into evidence.
    */
   async email(
     message: {
@@ -89,20 +102,22 @@ export default {
     },
     env: WorkerEnv,
   ): Promise<void> {
-    const raw = await new Response(message.raw).text();
-    const parsed = parseRawEmail(raw);
-    const email = toEmailMessage({
-      messageId: message.headers.get('message-id') ?? parsed.messageId,
-      from: message.from,
-      subject: message.headers.get('subject') ?? parsed.subject,
-      date: message.headers.get('date'),
-      html: parsed.html,
-      text: parsed.text,
-    });
-    const outcome = await new NewsletterService(env.DB).ingest(email);
-    if (outcome.status === 'not_qualified') {
-      // Do not reject: rejecting bounces mail. Just ignore it.
-      return;
+    try {
+      const raw = await new Response(message.raw).text();
+      const parsed = parseRawEmail(raw);
+      const email = toEmailMessage({
+        messageId: message.headers.get('message-id') ?? parsed.messageId,
+        from: message.from,
+        subject: message.headers.get('subject') ?? parsed.subject,
+        date: message.headers.get('date'),
+        html: parsed.html,
+        text: parsed.text,
+      });
+      await new NewsletterService(env.DB).ingest(email);
+    } catch (err) {
+      // Never throw out of email(): an exception would retry or bounce the
+      // message. The failure is recorded by the service where it can be.
+      console.error('inbound email failed', err);
     }
   },
 };

@@ -8,6 +8,11 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./dist/web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# Without this, the static-asset router answers BEFORE the Worker and the
+# single-page-application fallback would return index.html for /api/* — the API
+# would never run. Worker-first on /api/* keeps the API live while static files
+# are still served directly by the asset router.
+run_worker_first = ["/api/*"]
 
 # D1 — create with:  wrangler d1 create fantasy_analyst
 # then paste the returned database_id below.
@@ -20,6 +25,13 @@ migrations_dir = "migrations"
 [vars]
 # "mock" (default, no network, no quota) or "the-odds-api".
 VEGAS_PROVIDER = "mock"
+
+# The dedicated address your FF Newsletter is subscribed to. Fill this in AFTER
+# you set up Cloudflare Email Routing (docs/SETUP.md, step 5). The app shows this
+# address in Settings so you know where to subscribe. Leave it empty until then —
+# the app will simply say the address is not ready yet.
+# You can also set/override it inside the app under Setup -> Newsletter.
+NEWSLETTER_ADDRESS = ""
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

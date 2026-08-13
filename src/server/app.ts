@@ -38,6 +38,7 @@ import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
+import { SetupService } from './services/setupService.ts';
 import { NewsletterService } from './services/newsletterService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 
@@ -45,6 +46,11 @@ export interface AppEnv extends AuthEnv {
   db: Database;
   sleeper: SleeperClient;
   vegas: VegasProvider;
+  /**
+   * Dedicated newsletter address from the deployment config, e.g.
+   * "fantasy-news@example.com". Null until the one-time email setup is done.
+   */
+  inboundAddress?: string | null;
   /** Set true to skip auth entirely (local dev / e2e only). */
   disableAuth?: boolean;
 }
@@ -108,6 +114,60 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       vegas: { ...props, provider: ctx.env.vegas.name, configured: ctx.env.vegas.isConfigured() },
       adpSnapshot: adp,
     });
+  });
+
+  // ------------------------------------------------------------------- setup
+  const setupService = (ctx: { env: AppEnv }) =>
+    new SetupService(ctx.env.db, ctx.env.vegas, ctx.env.inboundAddress ?? null);
+
+  router.get('/api/setup/status', async (ctx) => jsonResponse(await setupService(ctx).status()));
+
+  router.get('/api/setup/newsletter', async (ctx) =>
+    jsonResponse(await setupService(ctx).newsletterStatus()),
+  );
+
+  /**
+   * Plain-language newsletter configuration, so the user never has to hand-write
+   * a source object: they type the sender their newsletter comes from.
+   */
+  router.post('/api/setup/newsletter', async (ctx) => {
+    const body = await ctx.json<{
+      senderEmail?: string;
+      subjectContains?: string;
+      label?: string;
+      enabled?: boolean;
+      inboundAddress?: string;
+    }>();
+    if (!body) return errorResponse('nothing to save', 400);
+
+    const settings = new SettingsRepo(ctx.env.db);
+    if (body.inboundAddress !== undefined) {
+      const address = body.inboundAddress.trim();
+      if (address && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(address)) {
+        return errorResponse('That does not look like an email address.', 400);
+      }
+      await settings.set(SETTING_KEYS.inboundAddress, address || null);
+    }
+
+    if (body.senderEmail !== undefined) {
+      const sender = body.senderEmail.trim().toLowerCase();
+      if (!sender) return errorResponse('Enter the address your newsletter comes from.', 400);
+      // Accept either a full address or a bare domain.
+      if (!/^@?[^@\s]+(\.[^@\s]+)+$/.test(sender) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sender)) {
+        return errorResponse('That does not look like an email address or domain.', 400);
+      }
+      const subject = (body.subjectContains ?? '').trim();
+      await new NewsletterService(ctx.env.db).setSources([
+        {
+          id: 'ff-newsletter',
+          label: body.label?.trim() || 'FF Newsletter',
+          fromPatterns: [sender],
+          subjectPatterns: subject ? [escapeRegex(subject)] : [],
+          enabled: body.enabled ?? true,
+        },
+      ]);
+    }
+    return jsonResponse(await setupService(ctx).newsletterStatus());
   });
 
   // ----------------------------------------------------------------- sleeper
@@ -323,7 +383,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   router.get('/api/newsletter/messages', async (ctx) =>
-    jsonResponse({ messages: await new NewsletterRepo(ctx.env.db).listMessages() }),
+    jsonResponse({ messages: await new NewsletterRepo(ctx.env.db).listMessages(15) }),
   );
 
   router.get('/api/newsletter/sources', async (ctx) =>
@@ -379,6 +439,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const seasonStart = await new SettingsRepo(ctx.env.db).get<string | null>(SETTING_KEYS.seasonStart, null);
     const signal = await repo.refreshSignal(updated.playerId, { seasonStart });
     return jsonResponse({ item: updated, signal });
+  });
+
+  /** Recently applied items, so auto-applied evidence stays inspectable. */
+  router.get('/api/review/applied', async (ctx) => {
+    const db = ctx.env.db;
+    const items = await new EvidenceRepo(db).listApplied(Number(ctx.url.searchParams.get('limit') ?? 30));
+    const players = await new PlayerRepo(db).listAll();
+    const byId = new Map(players.map((p) => [p.id, p]));
+    return jsonResponse({
+      evidence: items.map((e) => ({
+        ...e,
+        playerName: byId.get(e.playerId)?.fullName ?? e.playerId,
+        playerPosition: byId.get(e.playerId)?.position ?? '',
+        playerTeam: byId.get(e.playerId)?.team ?? '',
+      })),
+    });
   });
 
   router.post('/api/review/identity/:id', async (ctx) => {
@@ -461,6 +537,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
  * Fetch and cache Vegas props for every upcoming game.
  * Used by both the manual refresh endpoint and the scheduled worker.
  */
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function refreshVegas(
   env: AppEnv,
   opts: { manual?: boolean } = {},

@@ -177,6 +177,59 @@ export function detectMentions(
   return mentions.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * Words that routinely start a sentence and would otherwise look like the first
+ * token of a name. Used only by the coverage report, never by matching.
+ */
+const SENTENCE_STARTERS = new Set([
+  'the', 'this', 'that', 'these', 'those', 'his', 'her', 'their', 'he', 'she',
+  'they', 'it', 'we', 'you', 'i', 'a', 'an', 'and', 'but', 'if', 'after',
+  'before', 'while', 'when', 'with', 'without', 'both', 'head', 'coach',
+  'offensive', 'defensive', 'no', 'not', 'per', 'via', 'in', 'on', 'at', 'for',
+  'meanwhile', 'however', 'elsewhere', 'week', 'sunday', 'monday', 'tuesday',
+  'wednesday', 'thursday', 'friday', 'saturday',
+]);
+
+/**
+ * Capitalised two-to-three token spans that look like a person's name but did
+ * not resolve to any canonical player.
+ *
+ * COVERAGE REPORTING ONLY — this never feeds matching or evidence. It exists so
+ * gaps in the player dictionary and the rule set are visible without an LLM.
+ * Spans overlapping an already-resolved mention are excluded.
+ */
+export function collectUnresolvedNames(
+  text: string,
+  index: PlayerIndex,
+  resolved: PlayerMention[] = [],
+): string[] {
+  const tokens = tokenize(text);
+  const taken = resolved.map((m) => [m.start, m.end] as const);
+  const overlaps = (start: number, end: number) =>
+    taken.some(([s, e]) => start < e && end > s);
+
+  const out = new Set<string>();
+  for (let i = 0; i < tokens.length; i++) {
+    const first = tokens[i]!;
+    if (!NAME_TOKEN.test(first.text)) continue;
+    if (SENTENCE_STARTERS.has(first.text.toLowerCase())) continue;
+
+    for (let len = 3; len >= 2; len--) {
+      const span = tokens.slice(i, i + len);
+      if (span.length < len) continue;
+      if (span.some((t) => !isNameToken(t.text))) continue;
+      const start = span[0]!.start;
+      const end = span[span.length - 1]!.end;
+      if (overlaps(start, end)) break;
+      const raw = text.slice(start, end);
+      if (resolvePlayer({ name: raw }, index).status !== 'unmatched') break;
+      out.add(raw);
+      break;
+    }
+  }
+  return [...out];
+}
+
 function toMention(
   matchedText: string,
   start: number,

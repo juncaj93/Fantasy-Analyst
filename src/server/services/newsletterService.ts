@@ -1,8 +1,12 @@
 /**
- * Newsletter ingestion orchestration: qualify -> process -> persist -> refresh
+ * Newsletter ingestion orchestration: validate -> process -> persist -> refresh
  * signal cache -> route ambiguity to review.
  *
- * Idempotent by construction: a message already recorded (by id or by content
+ * The dedicated inbound address is the production path, so this service is the
+ * single gate between "an email arrived" and "evidence exists". Mail from an
+ * unexpected sender is recorded and quarantined, never parsed into evidence.
+ *
+ * Idempotent by construction: a message already seen (by id or by content
  * fingerprint) is skipped, and evidence inserts are deduped independently.
  */
 
@@ -10,6 +14,7 @@ import { contentFingerprint } from '../../core/newsletter/fingerprint.ts';
 import {
   processNewsletter,
   qualifies,
+  type CoverageReport,
   type EmailMessage,
   type NewsletterProcessResult,
   type NewsletterSourceConfig,
@@ -17,19 +22,44 @@ import {
 import { DEFAULT_NEWSLETTER_SOURCES, type EmailSource } from '../../core/newsletter/source.ts';
 import { nowIso, type Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
-import { NewsletterRepo } from '../repos/newsletter.ts';
+import { NewsletterRepo, type MessageRecord } from '../repos/newsletter.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 
+export type IngestStatus =
+  | 'processed'
+  | 'duplicate'
+  | 'quarantined'
+  | 'rejected'
+  | 'no_players'
+  | 'error';
+
 export interface IngestOutcome {
   messageId: string;
-  status: 'processed' | 'duplicate' | 'not_qualified' | 'no_players';
+  status: IngestStatus;
   evidenceInserted: number;
   evidencePending: number;
   identityReviews: number;
   playersTouched: number;
+  /** One plain-language sentence, safe to show in the UI as-is. */
   detail: string;
+  coverage?: CoverageReport;
   result?: NewsletterProcessResult;
+}
+
+/** Bodies larger than this are rejected rather than parsed. */
+export const MAX_BODY_BYTES = 2_000_000;
+
+function duplicate(messageId: string, detail: string): IngestOutcome {
+  return {
+    messageId,
+    status: 'duplicate',
+    evidenceInserted: 0,
+    evidencePending: 0,
+    identityReviews: 0,
+    playersTouched: 0,
+    detail,
+  };
 }
 
 export class NewsletterService {
@@ -57,82 +87,180 @@ export class NewsletterService {
   }
 
   /**
+   * True once the user has saved a sender of their own.
+   *
+   * Checked by the absence of a stored value rather than by inspecting the
+   * strings, so a real sender that happens to look like the shipped placeholder
+   * still counts as configured.
+   */
+  async isSenderConfigured(): Promise<boolean> {
+    const stored = await this.settings.get<NewsletterSourceConfig[] | null>(
+      SETTING_KEYS.newsletterSources,
+      null,
+    );
+    if (!stored || stored.length === 0) return false;
+    return stored.some((s) => s.enabled !== false && (s.fromPatterns?.length ?? 0) > 0);
+  }
+
+  /**
    * Ingest one message.
    *
-   * @param opts.force  bypass the qualification check (operator upload)
+   * Every inbound email is logged whatever happens, so Settings can always
+   * answer "did anything arrive?" — but only qualifying mail reaches the parser.
+   *
+   * @param opts.force  bypass the sender check (operator upload from Settings)
    */
   async ingest(message: EmailMessage, opts: { force?: boolean } = {}): Promise<IngestOutcome> {
+    const body = message.html ?? message.text ?? '';
+    const fingerprint = contentFingerprint(body);
+
+    // --- already seen? -------------------------------------------------------
+    // Same delivery (any outcome) is never handled twice...
+    const sameMessage = await this.messages.seen(message.messageId);
+    if (sameMessage) {
+      return duplicate(message.messageId, 'This email was already handled — nothing was duplicated.');
+    }
+    // ...and identical content is skipped only if it was actually processed, so
+    // a quarantined lookalike cannot block the real newsletter.
+    const sameContent = await this.messages.findProcessedByFingerprint(fingerprint);
+    if (sameContent) {
+      return duplicate(
+        message.messageId,
+        `The same newsletter was already read on ${sameContent.receivedAt.slice(0, 10)} — nothing was duplicated.`,
+      );
+    }
+
+    // --- sender validation ---------------------------------------------------
     const sources = await this.getSources();
     const source = qualifies(message, sources);
     if (!source && !opts.force) {
+      const reason = `Unexpected sender "${message.from || 'unknown'}"`;
+      await this.log(message, fingerprint, {
+        status: 'quarantined',
+        sourceId: 'unknown',
+        rejectReason: reason,
+        detail: 'Ignored: this address only accepts your configured newsletter sender.',
+      });
       return {
         messageId: message.messageId,
-        status: 'not_qualified',
+        status: 'quarantined',
         evidenceInserted: 0,
         evidencePending: 0,
         identityReviews: 0,
         playersTouched: 0,
-        detail: `sender "${message.from}" does not match a configured newsletter source`,
+        detail: `${reason} — ignored, and nothing was added to your player tallies.`,
       };
     }
 
-    const fingerprint = contentFingerprint(message.html ?? message.text ?? '');
-    const existing = await this.messages.findProcessed(message.messageId, fingerprint);
-    if (existing) {
+    // --- size guard ----------------------------------------------------------
+    if (body.length > MAX_BODY_BYTES) {
+      await this.log(message, fingerprint, {
+        status: 'rejected',
+        sourceId: source?.id ?? 'manual',
+        rejectReason: `Body of ${body.length} bytes exceeds the ${MAX_BODY_BYTES} byte limit`,
+        detail: 'Ignored: the email was unusually large.',
+      });
       return {
         messageId: message.messageId,
-        status: 'duplicate',
+        status: 'rejected',
         evidenceInserted: 0,
         evidencePending: 0,
         identityReviews: 0,
         playersTouched: 0,
-        detail:
-          existing.messageId === message.messageId
-            ? 'message already processed'
-            : `identical content already processed as ${existing.messageId}`,
+        detail: 'That email was too large to process safely, so it was ignored.',
       };
     }
 
-    const index = await this.players.buildIndex();
-    const result = processNewsletter(message, index, {
-      sourceName: source?.label ?? message.from,
-    });
+    // --- process -------------------------------------------------------------
+    try {
+      const index = await this.players.buildIndex();
+      const result = processNewsletter(message, index, {
+        sourceName: source?.label ?? message.from,
+      });
 
-    const { inserted } = await this.evidence.insertProposed(result.evidence);
-    const identityReviews = await this.messages.insertIdentityReviews(result.identityReview);
+      const { inserted } = await this.evidence.insertProposed(result.evidence);
+      const identityReviews = await this.messages.insertIdentityReviews(result.identityReview);
 
-    const touched = [...new Set(result.evidence.map((e) => e.playerId))];
-    const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
-    for (const playerId of touched) {
-      await this.evidence.refreshSignal(playerId, { seasonStart });
+      const touched = [...new Set(result.evidence.map((e) => e.playerId))];
+      const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
+      for (const playerId of touched) {
+        await this.evidence.refreshSignal(playerId, { seasonStart });
+      }
+
+      const autoApplied = result.evidence.filter((e) => e.reviewStatus === 'auto_applied').length;
+      const detail =
+        result.evidence.length === 0
+          ? 'Processed, but no player news was found in this issue.'
+          : `Found news on ${touched.length} player${touched.length === 1 ? '' : 's'}: ` +
+            `${autoApplied} applied automatically, ${result.stats.pendingReview} waiting for your review.`;
+
+      await this.log(message, fingerprint, {
+        status: 'processed',
+        sourceId: source?.id ?? 'manual',
+        evidenceCount: result.evidence.length,
+        pendingCount: result.stats.pendingReview,
+        autoAppliedCount: autoApplied,
+        identityReviewCount: identityReviews,
+        coverage: result.coverage as unknown as Record<string, unknown>,
+        detail,
+      });
+
+      return {
+        messageId: message.messageId,
+        status: result.evidence.length === 0 ? 'no_players' : 'processed',
+        evidenceInserted: inserted,
+        evidencePending: result.stats.pendingReview,
+        identityReviews,
+        playersTouched: touched.length,
+        detail,
+        coverage: result.coverage,
+        result,
+      };
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : String(err);
+      await this.log(message, fingerprint, {
+        status: 'error',
+        sourceId: source?.id ?? 'manual',
+        rejectReason: messageText,
+        detail: 'This newsletter could not be read. Nothing was changed.',
+      });
+      return {
+        messageId: message.messageId,
+        status: 'error',
+        evidenceInserted: 0,
+        evidencePending: 0,
+        identityReviews: 0,
+        playersTouched: 0,
+        detail: `This newsletter could not be read (${messageText}). Nothing was changed.`,
+      };
     }
-
-    await this.messages.recordMessage({
-      messageId: message.messageId,
-      sourceId: source?.id ?? 'manual',
-      fromAddress: message.from,
-      subject: message.subject,
-      receivedAt: message.receivedAt,
-      fingerprint,
-      evidenceCount: result.evidence.length,
-      pendingCount: result.stats.pendingReview,
-      processedAt: nowIso(),
-      status: 'processed',
-    });
-
-    return {
-      messageId: message.messageId,
-      status: result.evidence.length === 0 ? 'no_players' : 'processed',
-      evidenceInserted: inserted,
-      evidencePending: result.stats.pendingReview,
-      identityReviews,
-      playersTouched: touched.length,
-      detail: `${result.stats.resolved} resolved mention(s) across ${result.blocks} block(s)`,
-      result,
-    };
   }
 
-  /** Drive a pull-based source (fixtures today, Gmail later). */
+  private async log(
+    message: EmailMessage,
+    fingerprint: string,
+    fields: Partial<MessageRecord> & { status: string; sourceId: string },
+  ): Promise<void> {
+    await this.messages.recordMessage({
+      messageId: message.messageId,
+      sourceId: fields.sourceId,
+      fromAddress: message.from ?? '',
+      subject: message.subject ?? '',
+      receivedAt: message.receivedAt,
+      fingerprint,
+      evidenceCount: fields.evidenceCount ?? 0,
+      pendingCount: fields.pendingCount ?? 0,
+      autoAppliedCount: fields.autoAppliedCount ?? 0,
+      identityReviewCount: fields.identityReviewCount ?? 0,
+      processedAt: nowIso(),
+      status: fields.status,
+      rejectReason: fields.rejectReason ?? null,
+      detail: fields.detail ?? null,
+      coverage: fields.coverage ?? null,
+    });
+  }
+
+  /** Drive a pull-based source. The inbound address is push, so this is unused in production. */
   async ingestFromSource(source: EmailSource, opts: { limit?: number } = {}): Promise<IngestOutcome[]> {
     if (!source.isConfigured()) return [];
     const since = await this.messages.lastProcessedAt();
@@ -164,7 +292,8 @@ export class NewsletterService {
       evidencePending: result.stats.pendingReview,
       identityReviews: 0,
       playersTouched: new Set(result.evidence.map((e) => e.playerId)).size,
-      detail: `reprocessed; ${inserted} new item(s), existing items and overrides untouched`,
+      detail: `Reprocessed: ${inserted} new item(s). Your existing corrections were left untouched.`,
+      coverage: result.coverage,
       result,
     };
   }
