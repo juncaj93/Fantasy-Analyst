@@ -21,6 +21,7 @@ import {
   type ProposedEvidence,
 } from '../../core/newsletter/pipeline.ts';
 import { DEFAULT_NEWSLETTER_SOURCES, type EmailSource } from '../../core/newsletter/source.ts';
+import { importTally, type TallyImportResult } from '../../core/newsletter/tally.ts';
 import { nowIso, type Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { NewsletterRepo, type MessageRecord } from '../repos/newsletter.ts';
@@ -86,6 +87,19 @@ function describePreview(added: number, stale: number, protectedCount: number): 
     parts.push(`${protectedCount} item(s) you corrected are protected and stay as you set them.`);
   }
   return parts.join(' ');
+}
+
+export interface TallyImportOutcome {
+  rowsParsed: number;
+  matched: number;
+  inserted: number;
+  alreadyPresent: number;
+  /** Unresolved names queued for a human decision. */
+  identityReviews: number;
+  ambiguous: TallyImportResult['ambiguous'];
+  unmatched: TallyImportResult['unmatched'];
+  conflicts: string[];
+  detail: string;
 }
 
 /** Bodies larger than this are rejected rather than parsed. */
@@ -317,6 +331,44 @@ export class NewsletterService {
       outcomes.push(await this.ingest(message));
     }
     return outcomes;
+  }
+
+  /**
+   * Import a hand-maintained tally as backfilled evidence.
+   *
+   * Used once, for issues that were read before the app existed. Everything
+   * goes through the same ledger and the same review queue as parsed mail, so
+   * a backfilled item can be corrected or rejected exactly like any other.
+   */
+  async importTallyDocument(
+    markdown: string,
+    opts: { sourceName?: string; sourceDate?: string; sourceMessageId?: string } = {},
+  ): Promise<TallyImportOutcome> {
+    const index = await this.players.buildIndex();
+    const result = importTally(markdown, index, opts);
+    const { inserted, skipped } = await this.evidence.insertProposed(result.evidence);
+    // Rows that did not resolve stay actionable in the app rather than existing
+    // only in this response.
+    const identityReviews = await this.messages.insertIdentityReviews(result.identityReviews);
+
+    const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
+    for (const playerId of [...new Set(result.evidence.map((e) => e.playerId))]) {
+      await this.evidence.refreshSignal(playerId, { seasonStart });
+    }
+
+    return {
+      rowsParsed: result.rowsParsed,
+      matched: result.matched,
+      inserted,
+      alreadyPresent: skipped,
+      identityReviews,
+      ambiguous: result.ambiguous,
+      unmatched: result.unmatched,
+      conflicts: result.conflicts,
+      detail:
+        `${result.detail} ${inserted} new item(s) stored${skipped ? `, ${skipped} already present` : ''}.` +
+        (identityReviews ? ` ${identityReviews} name(s) are waiting in Review.` : ''),
+    };
   }
 
   /**

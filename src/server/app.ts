@@ -41,7 +41,7 @@ import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
 import { SetupService } from './services/setupService.ts';
-import { NewsletterService } from './services/newsletterService.ts';
+import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 
 export interface AppEnv extends AuthEnv {
@@ -539,6 +539,38 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       return errorResponse('That email was not kept, so its rules cannot be re-run.', 404);
     }
     return jsonResponse(await service.reprocess(message));
+  });
+
+  /**
+   * Backfill a hand-maintained tally.
+   *
+   * A one-off for issues read before the app existed. It shares the ledger and
+   * the review queue with parsed mail, so nothing here is privileged: an
+   * imported row can be corrected or rejected like any other item.
+   */
+  router.post('/api/newsletter/tally-import', async (ctx) => {
+    const body = await ctx.json<{
+      content?: string;
+      sourceName?: string;
+      sourceDate?: string;
+      sourceMessageId?: string;
+    }>();
+    if (!body?.content?.trim()) return errorResponse('content required (the tally document)', 400);
+    if (body.content.length > MAX_BODY_BYTES) {
+      return errorResponse('That document is too large to import.', 400);
+    }
+    const result = await new NewsletterService(ctx.env.db).importTallyDocument(body.content, {
+      sourceName: body.sourceName,
+      sourceDate: body.sourceDate,
+      sourceMessageId: body.sourceMessageId,
+    });
+    if (result.rowsParsed === 0) {
+      return errorResponse(
+        'No tally rows were found. Expected a table with Player and Score columns.',
+        400,
+      );
+    }
+    return jsonResponse(result);
   });
 
   router.get('/api/newsletter/sources', async (ctx) =>

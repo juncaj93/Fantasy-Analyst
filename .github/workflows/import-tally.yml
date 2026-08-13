@@ -1,0 +1,121 @@
+name: Import a tally backfill
+
+# One-off backfill of a hand-maintained tally into the live app.
+#
+# Used for newsletter issues that were read before the app existed, whose
+# original text is gone but whose conclusions were kept as a summary table.
+#
+# Manual only. The import is idempotent — every row is keyed on the document and
+# its score, so re-running changes nothing unless the file itself changed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Tally file in the repository'
+        required: true
+        default: 'data/imports/2026-08-13-tally-r1-r4.md'
+      source_name:
+        description: 'How this shows up as a source in the app'
+        required: true
+        default: 'FF Newsletter tally (issues 1-4)'
+      source_date:
+        description: 'ISO date to record for these items'
+        required: true
+        default: '2026-08-13T00:00:00.000Z'
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          file="${{ inputs.file }}"
+          if [ ! -f "$file" ]; then
+            echo "::error::No such file: $file"
+            exit 1
+          fi
+
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt)
+          if [ "$login" != "200" ]; then
+            echo "::error::Could not unlock the app (HTTP $login)."
+            exit 1
+          fi
+
+          # Built with a JSON encoder rather than string interpolation: the
+          # document is full of quotes, apostrophes and newlines.
+          FILE="$file" \
+          SOURCE_NAME="${{ inputs.source_name }}" \
+          SOURCE_DATE="${{ inputs.source_date }}" \
+          node -e "
+            const fs = require('fs');
+            process.stdout.write(JSON.stringify({
+              content: fs.readFileSync(process.env.FILE, 'utf8'),
+              sourceName: process.env.SOURCE_NAME,
+              sourceDate: process.env.SOURCE_DATE,
+              sourceMessageId: 'tally:' + process.env.FILE,
+            }));
+          " > /tmp/payload.json
+
+          code=$(curl -s -o /tmp/result.json -w '%{http_code}' -X POST "$URL/api/newsletter/tally-import" \
+            -H 'content-type: application/json' -b /tmp/cookies.txt \
+            --data-binary @/tmp/payload.json --max-time 120)
+          echo "import: $code"
+
+          node -e "
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/result.json', 'utf8');
+            let r; try { r = JSON.parse(body); } catch { console.log(body.slice(0, 500)); process.exit(1); }
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+
+            console.log('rows read:      ', r.rowsParsed);
+            console.log('matched:        ', r.matched);
+            console.log('stored (new):   ', r.inserted);
+            console.log('already present:', r.alreadyPresent);
+            console.log('sent to review: ', r.identityReviews);
+
+            const lines = [
+              '## Tally import',
+              '',
+              '| | |',
+              '|---|---|',
+              ['| rows read |', r.rowsParsed, '|'].join(' '),
+              ['| matched to a player |', r.matched, '|'].join(' '),
+              ['| stored (new) |', r.inserted, '|'].join(' '),
+              ['| already present |', r.alreadyPresent, '|'].join(' '),
+              ['| names sent to review |', r.identityReviews, '|'].join(' '),
+              '',
+            ];
+            if (r.conflicts?.length) {
+              lines.push('### Contradictions in the document', '');
+              for (const c of r.conflicts) lines.push('- ' + c);
+              lines.push('');
+            }
+            if (r.ambiguous?.length) {
+              lines.push('### Names matching more than one player', '');
+              for (const a of r.ambiguous) lines.push('- ' + a.name + ' -> ' + a.candidates.join('; '));
+              lines.push('');
+            }
+            if (r.unmatched?.length) {
+              lines.push('### Names not in the player list', '');
+              for (const u of r.unmatched) lines.push('- ' + u.name);
+              lines.push('');
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+
+            // Print them too, so the log alone is enough to act on.
+            for (const c of r.conflicts ?? []) console.log('conflict: ' + c);
+            for (const a of r.ambiguous ?? []) console.log('ambiguous: ' + a.name + ' -> ' + a.candidates.join('; '));
+            for (const u of r.unmatched ?? []) console.log('unmatched: ' + u.name);
+          "
+          [ "$code" = "200" ] || exit 1
