@@ -193,44 +193,40 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
-      - name: Sleeper — introspect GraphQL for ADP, and check search_rank
+      - name: Sleeper — find the real ADP field
         run: |
           set -uo pipefail
           UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+          gql() {
+            curl -s -X POST https://sleeper.app/graphql -H 'content-type: application/json' \
+              -H "user-agent: $UA" --data-binary "$1" --max-time 25
+          }
 
-          echo "=== GraphQL root fields mentioning adp/rank/draft ==="
-          q='{"query":"{__schema{queryType{fields{name description}}}}"}'
-          curl -s -X POST https://sleeper.app/graphql -H 'content-type: application/json' \
-            -H "user-agent: $UA" --data-binary "$q" --max-time 25 > /tmp/schema.json || true
+          # The schema uses snake_case (query_type, not queryType) — the earlier
+          # probe asked for the wrong field and learned nothing.
+          echo "=== root fields mentioning adp / rank / draft ==="
+          gql '{"query":"{__schema{query_type{fields{name description args{name}}}}}"}' > /tmp/schema.json
           echo "  bytes: $(wc -c < /tmp/schema.json)"
           node -e "
             const fs=require('fs');
-            let r; try { r=JSON.parse(fs.readFileSync('/tmp/schema.json','utf8')); } catch { console.log('  unreadable:', fs.readFileSync('/tmp/schema.json','utf8').slice(0,300)); process.exit(0); }
-            const fields = r?.data?.__schema?.queryType?.fields;
-            if (!fields) { console.log('  introspection unavailable:', JSON.stringify(r).slice(0,300)); process.exit(0); }
-            const hits = fields.filter(f => /adp|rank|draft|projection/i.test(f.name));
-            console.log('  total root fields:', fields.length);
-            for (const f of hits) console.log('   *', f.name, '-', (f.description||'').slice(0,80));
+            let r; try { r=JSON.parse(fs.readFileSync('/tmp/schema.json','utf8')); } catch { console.log('  unreadable'); process.exit(0); }
+            const f = r?.data?.__schema?.query_type?.fields;
+            if (!f) { console.log('  no schema:', JSON.stringify(r).slice(0,400)); process.exit(0); }
+            console.log('  total root fields:', f.length);
+            for (const x of f.filter(x => /adp|rank|draft|player/i.test(x.name))) {
+              console.log('   *', x.name, '(', (x.args||[]).map(a=>a.name).join(', '), ')');
+            }
           "
 
           echo
-          echo "=== does the public player dump carry a draft-order rank? ==="
-          curl -s -H "user-agent: $UA" --max-time 60 https://api.sleeper.app/v1/players/nfl > /tmp/players.json || true
-          echo "  bytes: $(wc -c < /tmp/players.json)"
-          node -e "
-            const fs=require('fs');
-            let all; try { all=JSON.parse(fs.readFileSync('/tmp/players.json','utf8')); } catch { console.log('  unreadable'); process.exit(0); }
-            const ids = Object.keys(all);
-            console.log('  players:', ids.length);
-            const sample = all[ids[0]] || {};
-            console.log('  rank-ish keys present:', Object.keys(sample).filter(k => /rank|adp|depth/i.test(k)).join(', ') || '(none)');
-            const ranked = ids.map(i => all[i]).filter(p => typeof p.search_rank === 'number' && p.search_rank < 9999999);
-            console.log('  with usable search_rank:', ranked.length);
-            ranked.sort((a,b) => a.search_rank - b.search_rank);
-            for (const p of ranked.slice(0, 12)) {
-              console.log('   ', String(p.search_rank).padStart(4), p.full_name, '|', p.position, p.team ?? 'FA');
-            }
-          "
+          echo "=== sample the most likely ADP query ==="
+          for q in \
+            '{"query":"{adp_full_ppr(sport:\"nfl\",season:\"2026\"){player_id adp}}"}' \
+            '{"query":"{get_adp(sport:\"nfl\",season:\"2026\",season_type:\"regular\"){player_id adp}}"}' \
+            '{"query":"{adp(sport:\"nfl\",season:\"2026\"){player_id adp}}"}' ; do
+            echo "  --> $q"
+            gql "$q" | head -c 300; echo
+          done
 
       - name: Underdog — is there a fetchable ADP source?
         run: |
