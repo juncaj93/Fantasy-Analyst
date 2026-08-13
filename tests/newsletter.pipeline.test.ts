@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { extractBlocks, htmlToText, isBoilerplate, splitSentences } from '../src/core/newsletter/html.ts';
 import { detectMentions } from '../src/core/newsletter/mentions.ts';
 import { contentFingerprint, evidenceKey, stableHash } from '../src/core/newsletter/fingerprint.ts';
-import { processNewsletter, qualifies, type EmailMessage } from '../src/core/newsletter/pipeline.ts';
+import {
+  ACCEPT_ANY_SENDER,
+  processNewsletter,
+  qualifies,
+  senderMatches,
+  type EmailMessage,
+} from '../src/core/newsletter/pipeline.ts';
+import { toEmailMessage } from '../src/core/newsletter/source.ts';
 import { TEST_INDEX } from './helpers/players.ts';
 import {
   CLEAN_NEWSLETTER,
@@ -279,5 +286,50 @@ describe('fingerprints', () => {
     expect(evidenceKey(base)).toBe(evidenceKey({ ...base }));
     expect(evidenceKey(base)).not.toBe(evidenceKey({ ...base, playerId: 'p2' }));
     expect(evidenceKey(base)).not.toBe(evidenceKey({ ...base, ruleId: 'r2' }));
+  });
+});
+
+
+/**
+ * Accepting whatever arrives at the dedicated address.
+ *
+ * Sender matching loses mail in ways that are invisible until a week of
+ * evidence is gone. Substack sends from a per-subscriber VERP envelope, and the
+ * visible From: is often a writer's own domain rather than the platform's — so
+ * the address that actually delivered this user's first newsletter was
+ * `bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com`, which is
+ * both bounce-shaped and on a subdomain.
+ */
+describe('accepting every sender', () => {
+  const REAL_SUBSTACK_ENVELOPE = 'bounce+93e88f.63af5d-fantasy-news=juncaj.net@mg-d0.substack.com';
+  const anySource = [{ id: 'ff', label: 'FF', fromPatterns: [ACCEPT_ANY_SENDER], enabled: true }];
+  const message = (from: string, envelopeFrom?: string) =>
+    toEmailMessage({
+      messageId: 'm1',
+      from,
+      envelopeFrom,
+      subject: 'Week 1',
+      date: '2026-08-13T00:00:00.000Z',
+      html: '<p>hello</p>',
+    });
+
+  it('takes the wildcard for any sender at all', () => {
+    expect(senderMatches('anyone@anywhere.test', ACCEPT_ANY_SENDER)).toBe(true);
+    expect(senderMatches('', ACCEPT_ANY_SENDER)).toBe(true);
+  });
+
+  it('accepts the bounce-shaped envelope that delivered the real newsletter', () => {
+    expect(qualifies(message('editor@substack.com', REAL_SUBSTACK_ENVELOPE), anySource)).toBeTruthy();
+  });
+
+  it('accepts a writer on their own domain, which a platform filter would miss', () => {
+    expect(qualifies(message('news@somewriter.com'), anySource)).toBeTruthy();
+  });
+
+  /** The narrow filter still works for anyone who wants one. */
+  it('still lets a specific domain be required instead', () => {
+    const narrow = [{ id: 'ff', label: 'FF', fromPatterns: ['@substack.com'], enabled: true }];
+    expect(qualifies(message('editor@mg-d0.substack.com'), narrow)).toBeTruthy();
+    expect(qualifies(message('news@somewriter.com'), narrow)).toBeNull();
   });
 });
