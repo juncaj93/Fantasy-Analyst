@@ -193,44 +193,46 @@ jobs:
             head -c 400 /tmp/gql.json | tr '\n' ' '; echo
           done
 
-      - name: beatadp.com — how does it serve Sleeper ADP?
+      - name: beatadp.com — extract the inline ADP rows
         run: |
           set -uo pipefail
           UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
 
-          echo "=== the page itself ==="
-          code=$(curl -sL -o /tmp/adp.html -w '%{http_code}' -H "user-agent: $UA" --max-time 30 \
-            https://www.beatadp.com/platform-adp || echo 000)
-          echo "  $code  $(wc -c < /tmp/adp.html)b"
+          curl -sL -o /tmp/adp.html -H "user-agent: $UA" --max-time 30 https://www.beatadp.com/platform-adp || true
+          echo "page bytes: $(wc -c < /tmp/adp.html)"
 
-          echo
-          echo "=== does it ship its data inline? ==="
-          for marker in __NEXT_DATA__ __NUXT__ self.__next_f window.__remixContext; do
-            n=$(grep -c "$marker" /tmp/adp.html || true)
-            echo "  $marker: $n"
-          done
-          # If the data is inline, player names will be in the HTML already.
-          echo "  looks like player rows: $(grep -oiE '(sleeper|half.?ppr|redraft|superflex)' /tmp/adp.html | sort -u | tr '\n' ' ')"
+          # The page is a Next.js App Router render: its data arrives as RSC
+          # "flight" chunks pushed into self.__next_f, so the rows are already
+          # in the HTML and no API call is needed.
+          node -e "
+            const fs = require('fs');
+            const html = fs.readFileSync('/tmp/adp.html', 'utf8');
 
-          echo
-          echo "=== script bundles it loads ==="
-          grep -oE 'src="[^"]*\.js[^"]*"' /tmp/adp.html | sed 's/src="//;s/"//' | head -20
+            // Every chunk is a JS string literal; decoding them rebuilds the payload.
+            const chunks = [...html.matchAll(/self\.__next_f\.push\(\[1,\s*\"((?:[^\"\\\\]|\\\\.)*)\"\]\)/g)];
+            console.log('flight chunks:', chunks.length);
+            let flight = '';
+            for (const m of chunks) {
+              try { flight += JSON.parse('\"' + m[1] + '\"'); } catch {}
+            }
+            console.log('flight bytes:', flight.length);
+            fs.writeFileSync('/tmp/flight.txt', flight);
 
-          echo
-          echo "=== any API paths referenced in the page ==="
-          grep -oE '"/api/[a-zA-Z0-9/_.-]+"' /tmp/adp.html | sort -u | head -20
-          grep -oE 'https://[a-zA-Z0-9.-]+/(api|v1|v2)/[a-zA-Z0-9/_.-]*' /tmp/adp.html | sort -u | head -20
+            for (const probe of ['Ja\'Marr Chase', 'Gibbs', 'Bijan', 'adp', 'sleeper']) {
+              console.log('  contains', JSON.stringify(probe), ':', flight.includes(probe));
+            }
 
-          echo
-          echo "=== obvious API guesses ==="
-          for u in \
-            "https://www.beatadp.com/api/platform-adp" \
-            "https://www.beatadp.com/api/adp" \
-            "https://www.beatadp.com/api/adp?platform=sleeper&format=half_ppr&teams=12" ; do
-            c=$(curl -s -o /tmp/g.json -w '%{http_code}' -H "user-agent: $UA" -H 'accept: application/json' --max-time 20 "$u" || echo 000)
-            echo "  $c  $(wc -c < /tmp/g.json)b  $u"
-            [ "$c" = "200" ] && head -c 300 /tmp/g.json | tr '\n' ' ' && echo
-          done
+            // Show the shape around the first player-looking object.
+            const i = flight.search(/Bijan|Ja'Marr|Gibbs/);
+            if (i > 0) {
+              console.log('--- context ---');
+              console.log(flight.slice(Math.max(0, i - 700), i + 700));
+            } else {
+              console.log('no player names in the flight payload');
+              console.log('--- sample ---');
+              console.log(flight.slice(0, 600));
+            }
+          "
 
       - name: Underdog — is there a fetchable ADP source?
         run: |
