@@ -13,6 +13,12 @@ interface PlayerListItem {
   position: string;
   team: string;
   status: string | null;
+  /** Sleeper's own draft-order ranking, or null if it does not rank them. */
+  draftRank: number | null;
+  /** Draft rank after the tally nudge; null when unranked. */
+  adjustedRank: number | null;
+  /** Picks the tally moved them. Positive means earlier. */
+  movement: number;
   signal: PlayerSignal | null;
 }
 
@@ -80,6 +86,9 @@ export function PlayersScreen() {
             data-player-id={p.id}
           >
             <div className="player-row-top">
+              <span className="rank" aria-hidden="true">
+                {p.adjustedRank == null ? '—' : Math.round(p.adjustedRank)}
+              </span>
               <span className="player-name">{p.name}</span>
               <span className="pos-team">
                 {p.position} · {p.team || 'FA'}
@@ -90,6 +99,19 @@ export function PlayersScreen() {
               <span className="metric">
                 21d <strong>{p.signal?.last21.net ?? 0}</strong>
               </span>
+              {/* Say where the order came from, and what the news changed. */}
+              {p.draftRank != null ? (
+                <span className="metric">
+                  Sleeper <strong>{p.draftRank}</strong>
+                </span>
+              ) : (
+                <span className="metric faint">unranked</span>
+              )}
+              {p.movement ? (
+                <Badge tone={p.movement > 0 ? 'pos' : 'neg'}>
+                  {p.movement > 0 ? `▲ ${p.movement}` : `▼ ${Math.abs(p.movement)}`}
+                </Badge>
+              ) : null}
               {p.status ? <Badge tone="warn">{p.status}</Badge> : null}
               {(p.signal?.pendingCount ?? 0) > 0 ? <Badge tone="warn">{p.signal!.pendingCount} to review</Badge> : null}
             </div>

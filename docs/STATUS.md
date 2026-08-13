@@ -332,6 +332,34 @@ undrafted-late rather than unknown, so it is treated as unranked. An imported
 file still wins if one exists — a file the user chose is a deliberate statement
 about their draft.
 
+## Milestone 11 — the bound-parameter ceiling, and tally-aware ordering (done)
+
+**A live crash, caused by the previous milestone.** Opening a real drafting
+league returned `D1_ERROR: too many SQL variables`. D1 caps a statement at 100
+bound parameters; `getSignals` batched at 200 and had simply never been handed
+a list that large. Switching draft order to Sleeper grew the candidate pool
+from a handful of imported rows to every ranked player (~2,500), and the latent
+bug became a hard failure.
+
+Fixed in two places, because either alone leaves a trap:
+
+- `MAX_BOUND_PARAMS = 90` is now shared, and every `IN (?, ?, ...)` built from a
+  caller's list batches against it — including `listByIds`, which had no
+  batching at all and was only safe because callers happened to pass short
+  lists.
+- The draft board scores the top 300 available rather than all 2,500. That is
+  far more than any draft reaches, the cap is applied *after* the position
+  filter so filtering by QB still sees the best quarterbacks, and the board says
+  out loud how many were left unscored.
+
+**Players are ordered by rank plus news.** `adjusted = draftRank - 0.5 x net`,
+so a point of tally moves a player half a pick and a positive tally moves them
+up. Enough to lift a riser past a neighbour; not enough for a good run of press
+to leapfrog a genuinely better player — a test pins exactly that. Unranked
+players sort after everyone ranked rather than being treated as pick zero, and
+the list shows Sleeper's raw rank next to the movement so the order is never
+mysterious.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and

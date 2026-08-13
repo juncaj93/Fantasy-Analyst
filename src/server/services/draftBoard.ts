@@ -35,6 +35,14 @@ export interface DraftBoardState {
   warnings: string[];
 }
 
+/**
+ * How many available players the board scores.
+ *
+ * Comfortably more than any draft reaches (a 12-team, 16-round draft is 192
+ * picks), while keeping the request small enough to answer quickly.
+ */
+const MAX_CANDIDATES = 300;
+
 export class DraftBoardService {
   private readonly leagues: LeagueRepo;
   private readonly players: PlayerRepo;
@@ -116,10 +124,21 @@ export class DraftBoardService {
       !takenIds.has(player.id) &&
       (!positionFilter || player.position === positionFilter);
 
-    const candidates: CanonicalPlayer[] = allPlayers.filter(
+    const pool: CanonicalPlayer[] = allPlayers.filter(
       (p) => eligible(p) && (rankedCount === 0 || rankOf(p) != null),
     );
-    candidates.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+    pool.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+
+    // Sleeper ranks ~2,500 players; scoring all of them on every request is
+    // work nobody reads, and it is far more than any draft will reach. The cap
+    // is applied after the position filter, so filtering by QB still considers
+    // the best quarterbacks rather than whoever survived a global cut.
+    const candidates = pool.slice(0, MAX_CANDIDATES);
+    if (pool.length > candidates.length) {
+      warnings.push(
+        `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
+      );
+    }
 
     const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);

@@ -10,7 +10,7 @@
 import { aggregatePlayerSignal } from '../../core/evidence/aggregate.ts';
 import type { EvidenceItem, EvidenceOverride, PlayerSignal, ReviewStatus } from '../../core/evidence/types.ts';
 import type { ProposedEvidence } from '../../core/newsletter/pipeline.ts';
-import { chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 
 interface EvidenceRow {
   id: number;
@@ -121,7 +121,7 @@ export class EvidenceRepo {
     if (unique.length === 0) return new Map();
     const found = new Map<string, EvidenceItem>();
     // Chunked so a large newsletter cannot exceed the bound-parameter limit.
-    for (const batch of chunk(unique, 100)) {
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(`SELECT * FROM evidence_items WHERE dedupe_key IN (${placeholders})`)
@@ -328,7 +328,7 @@ export class EvidenceRepo {
   async getSignals(playerIds: string[]): Promise<Map<string, PlayerSignal>> {
     const out = new Map<string, PlayerSignal>();
     if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, 200)) {
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(`SELECT * FROM player_signal_cache WHERE player_id IN (${placeholders})`)

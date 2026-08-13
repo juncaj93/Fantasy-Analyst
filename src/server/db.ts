@@ -51,6 +51,17 @@ export function nowIso(): string {
 }
 
 /** Chunk large insert batches — D1 caps statements per batch. */
+/**
+ * How many bound parameters one D1 statement may carry.
+ *
+ * D1 caps this at 100 and fails the whole query with
+ * `too many SQL variables` when exceeded — so any `IN (?, ?, ...)` built from a
+ * caller-supplied list has to be batched, however small that list usually is.
+ * Set below the limit to leave room for other bound values in the same
+ * statement.
+ */
+export const MAX_BOUND_PARAMS = 90;
+
 export function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

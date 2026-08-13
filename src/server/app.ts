@@ -13,6 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
+import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { normalizeName } from '../core/identity/normalize.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
@@ -441,17 +442,44 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ----------------------------------------------------------------- players
   router.get('/api/players', async (ctx) => {
     const q = ctx.url.searchParams.get('q') ?? '';
+    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
+    const position = ctx.url.searchParams.get('position');
     const repo = new PlayerRepo(ctx.env.db);
-    const players = q ? await repo.search(q) : (await repo.listAll()).slice(0, 40);
-    const signals = await new EvidenceRepo(ctx.env.db).getSignals(players.map((p) => p.id));
-    return jsonResponse({
-      players: players.map((p) => ({
+
+    // Ranking needs the tally, and the tally lives per player, so the pool is
+    // narrowed before signals are fetched rather than after.
+    const pool = q ? await repo.search(q, 200) : (await repo.listAll()).filter((p) => p.active);
+    const filtered = position ? pool.filter((p) => p.position === position.toUpperCase()) : pool;
+
+    // Sleeper ranks ~2,500 players. Order by rank first so the tally only has
+    // to be fetched for the ones that can plausibly appear.
+    const shortlist = [...filtered]
+      .sort((a, b) => (a.draftRank ?? Infinity) - (b.draftRank ?? Infinity))
+      .slice(0, Math.max(limit * 3, 120));
+
+    const signals = await new EvidenceRepo(ctx.env.db).getSignals(shortlist.map((p) => p.id));
+    const ordered = orderPlayers(
+      shortlist.map((p) => ({
         id: p.id,
         name: p.fullName,
-        position: p.position,
-        team: p.team,
-        status: p.status,
-        signal: signals.get(p.id) ?? null,
+        draftRank: p.draftRank ?? null,
+        net: signals.get(p.id)?.raw.net ?? 0,
+        player: p,
+      })),
+    ).slice(0, limit);
+
+    return jsonResponse({
+      tallyWeight: TALLY_WEIGHT,
+      players: ordered.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
+        id: row.player.id,
+        name: row.player.fullName,
+        position: row.player.position,
+        team: row.player.team,
+        status: row.player.status,
+        draftRank,
+        adjustedRank: adjusted,
+        movement,
+        signal: signals.get(row.player.id) ?? null,
       })),
     });
   });

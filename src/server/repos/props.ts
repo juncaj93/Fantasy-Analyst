@@ -2,7 +2,7 @@
 
 import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
 import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
-import { chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 
 export class PropsRepo implements SnapshotStore {
   constructor(private readonly db: Database) {}
@@ -85,7 +85,7 @@ export class PropsRepo implements SnapshotStore {
   async latestForPlayers(playerIds: string[]): Promise<Map<string, PlayerProp[]>> {
     const out = new Map<string, PlayerProp[]>();
     if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, 100)) {
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(

@@ -18,7 +18,7 @@ import { PlayerRepo } from '../src/server/repos/players.ts';
 import { NewsletterService } from '../src/server/services/newsletterService.ts';
 import { SleeperSyncService } from '../src/server/services/sleeperSync.ts';
 import { createTestDb } from './helpers/db.ts';
-import { TEST_PLAYERS } from './helpers/players.ts';
+import { TEST_PLAYERS, player } from './helpers/players.ts';
 import { CLEAN_NEWSLETTER, SURNAME_COLLISION } from './fixtures/newsletters.ts';
 
 const SOURCES = [
@@ -78,6 +78,23 @@ describe('PlayerRepo', () => {
     const repo = new PlayerRepo(db);
     await repo.upsertMany(TEST_PLAYERS);
     expect((await repo.search('nacua')).map((p) => p.id)).toEqual(['11']);
+  });
+
+  /**
+   * D1 rejects a statement carrying more than 100 bound parameters with
+   * "too many SQL variables". Every `IN (?, ?, ...)` built from a caller's list
+   * has to batch, and the lists only got large once the draft board started
+   * ranking every player Sleeper knows.
+   */
+  it('looks up far more players than D1 allows bound parameters for', async () => {
+    const repo = new PlayerRepo(db);
+    const many = Array.from({ length: 500 }, (_, i) =>
+      player({ id: `bulk-${i}`, fullName: `Bulk Player ${i}`, team: 'KC', position: 'WR' }),
+    );
+    await repo.upsertMany(many);
+
+    const found = await repo.listByIds(many.map((p) => p.id));
+    expect(found.size).toBe(500);
   });
 
   it('fetches a set of players in one lookup', async () => {

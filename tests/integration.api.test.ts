@@ -227,6 +227,31 @@ describe('API with seeded data', () => {
    * The point of teaching the app a nickname is that it stops being a question.
    * "JSN" that has to be answered every week is not resolved, it is deferred.
    */
+  it('orders the players list by Sleeper rank nudged by the tally', async () => {
+    const body = await json<{
+      tallyWeight: number;
+      players: { name: string; draftRank: number | null; adjustedRank: number | null; movement: number }[];
+    }>(get('/api/players'));
+
+    expect(body.tallyWeight).toBe(0.5);
+    expect(body.players.length).toBeGreaterThan(0);
+
+    // Ranked players lead, in adjusted order, and unranked ones follow.
+    const ranks = body.players.map((p) => p.adjustedRank);
+    const rankedPart = ranks.filter((r): r is number => r != null);
+    expect([...rankedPart].sort((a, b) => a - b)).toEqual(rankedPart);
+    expect(ranks.indexOf(null)).toBe(ranks.some((r) => r == null) ? rankedPart.length : -1);
+
+    // Movement is reported, and is exactly the half-pick-per-point rule.
+    for (const p of body.players) {
+      if (p.draftRank == null || p.adjustedRank == null) {
+        expect(p.movement).toBe(0);
+      } else {
+        expect(p.movement).toBeCloseTo(p.draftRank - p.adjustedRank, 5);
+      }
+    }
+  });
+
   it('remembers a nickname so the same name matches next time', async () => {
     const found = await json<{ players: { id: string; name: string }[] }>(
       get('/api/players?q=Vance', cookie),

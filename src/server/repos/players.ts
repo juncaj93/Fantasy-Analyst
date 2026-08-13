@@ -2,7 +2,7 @@
 
 import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
-import { chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 
 interface PlayerRow {
   id: string;
@@ -87,12 +87,16 @@ export class PlayerRepo {
   async listByIds(ids: string[]): Promise<Map<string, CanonicalPlayer>> {
     const unique = [...new Set(ids)].filter(Boolean);
     if (unique.length === 0) return new Map();
-    const placeholders = unique.map(() => '?').join(',');
-    const rows = await this.db
-      .prepare(`SELECT * FROM players WHERE id IN (${placeholders})`)
-      .bind(...unique)
-      .all<PlayerRow>();
-    return new Map(rows.results.map((r) => [r.id, toPlayer(r)]));
+    const found = new Map<string, CanonicalPlayer>();
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(`SELECT * FROM players WHERE id IN (${placeholders})`)
+        .bind(...batch)
+        .all<PlayerRow>();
+      for (const r of rows.results) found.set(r.id, toPlayer(r));
+    }
+    return found;
   }
 
   /**
