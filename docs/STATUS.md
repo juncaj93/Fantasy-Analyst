@@ -246,6 +246,63 @@ indistinguishable from the subscription breaking.
   accept. The dot is required, so `@substack.com` still does not match
   `@notsubstack.com`.
 
+## Milestone 9 — backfilling four issues that predate the app (done)
+
+Four newsletter issues were read before the app existed. Their text is gone,
+but their conclusions survived as a scored summary table, and importing that
+beats starting the season from zero.
+
+The importer is deliberately *not* a second classification path: it parses no
+prose and runs no rules. Each row is a score somebody already decided, carried
+across as one item, labelled as a backfill, and fully reversible in Review.
+
+Against the real document — 141 rows, 106 good / 25 bad / 10 neutral:
+
+```
+rows read       141
+matched         135
+stored (new)    135
+sent to review    6
+```
+
+and confirmed end to end on the live site: `Puka Nacua | net 13 from 1 item`,
+so the derived signal cache picked it up rather than just the ledger.
+
+What honesty cost here, concretely:
+
+- A row's net score covers several issues, so it becomes **one** item of that
+  magnitude. Splitting +13 into thirteen items the app never saw would have
+  looked richer and been fiction.
+- **Mike Evans is listed twice** in the source — -1 in the bad list and again
+  as net-zero under neutral. Both rows went to review rather than the importer
+  picking a side.
+- Net-zero rows are never auto-applied, because applying zero applies nothing.
+- Confidence is never `high`. This is a summary of material the app never read,
+  and it must not outrank a rule that saw the actual sentence.
+- Six names went to the identity queue rather than being guessed: `JSN`,
+  `AD Mitchell`, and four punctuation variants (`R.J. Harvey`, `JJ McCarthy`,
+  `JK Dobbins`, `Kenneth Gainwell` vs `Kenny Gainwell`). Each is one tap to
+  resolve, and none of them was resolved by the machine.
+
+### Underdog ADP cannot be fetched
+
+Checked directly rather than assumed:
+
+```
+api.underdogfantasy.com/v1/rankings      404
+api.underdogfantasy.com/beta/v3/rankings 404
+api.underdogfantasy.com/v2/adp           404
+api.underdogfantasy.com/v1/slates        404
+underdogfantasy.com/adp/nfl              404 (after redirects)
+underdogfantasy.com/rankings             403
+```
+
+There is no public feed, so an ADP snapshot has to be exported by hand and
+imported through Setup. Open ADP-ish mirrors do exist — FantasyPros ECR is
+reachable — but substituting a different source under the name "Underdog ADP"
+would quietly change what the draft board's market value means, so it is not
+done. Underdog stays the ADP source of truth or there is no ADP.
+
 ## Known limitations
 
 1. **The Odds API adapter is verified but still disabled.** The free tier and
