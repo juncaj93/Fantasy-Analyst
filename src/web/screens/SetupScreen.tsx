@@ -1341,6 +1341,32 @@ function InjurySourceHealth({
         {injury.sourceModifiedAt ? formatAge(injury.sourceModifiedAt) : 'unknown'}
         {injury.ingestedAt ? ` · last stored ${formatAge(injury.ingestedAt)}` : ''}.
       </div>
+      {/*
+        Last season, kept visibly apart from everything above it.
+
+        It answers a question the rest of this panel cannot while the current
+        season is still a 404: whether the published-file path works at all.
+        A finished season that has been read in full, and whose stored validator
+        now earns a 304, is that proof.
+      */}
+      <div className="faint" style={{ marginTop: 6 }} data-testid="injury-history-health">
+        {injury.history.phase === 'done' ? (
+          <>
+            {injury.history.season} history: read in full ({injury.history.rowsSeen} rows across{' '}
+            {injury.history.lastWeek ?? '?'} weeks), {injury.history.significantPlayers} players with an injury worth
+            noting. The file&rsquo;s validator is stored, so it is now checked without downloading it.
+          </>
+        ) : injury.history.phase ? (
+          <>
+            {injury.history.season} history: reading it in the background — {injury.history.phase === 'weeks'
+              ? `week ${injury.history.weeksDone} of ${injury.history.lastWeek ?? '?'}`
+              : `${injury.history.playersSummarized} players summarized`}
+            . It is used as context on a card and never as a current status.
+          </>
+        ) : (
+          <>{injury.history.season} history: not read yet.</>
+        )}
+      </div>
       <div className="faint" style={{ marginTop: 6 }}>
         It is checked <strong>every five minutes, all day</strong>, because a player is ruled out ninety minutes before
         kickoff and kickoff is 9:30am for a London game, Thursday night, or Friday on a holiday. The check is a

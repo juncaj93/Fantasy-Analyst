@@ -22,6 +22,7 @@ import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
 import { majorInjuryHistory } from '../../core/draft/injury.ts';
 import { DESIGNATION_LABEL, injuryLine, provenanceLine } from '../../core/injury/model.ts';
 import { InjuryService } from './injuryService.ts';
+import { InjuryHistoryRepo, type StoredPlayerHistory } from '../repos/injuryHistory.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -115,13 +116,20 @@ export interface PlayerDetailView {
    */
   outlookNote: string | null;
   /**
-   * `Major injury history: ACL` — one line, or nothing.
+   * `2025: missed 5 games with a hamstring injury` — one line, or nothing.
    *
-   * Deliberately a label rather than a sentence. The outlook above it already
-   * explains the injury in the words of somebody who knows; repeating that in
-   * the app's own paraphrase would be both duplication and invention. This says
-   * only which named injury is in the text, so a reader scanning the card sees
-   * it without reading the paragraph.
+   * Last season, never this one. Two sources can produce it and only one is
+   * ever shown:
+   *
+   *   - the published season report, counted — how many games an injury cost
+   *     and what the source called it. Preferred, because it carries a number;
+   *   - failing that, a diagnosis named in the season outlook, as a label
+   *     (`Major injury history: ACL`). Kept for the injuries the report's
+   *     vocabulary cannot express — it lists body parts, so a torn ACL appears
+   *     there only as "Knee".
+   *
+   * Never both. Showing a counted line and a label about the same injury is the
+   * app saying one thing twice in two voices.
    */
   injuryContext: string | null;
   /**
@@ -216,6 +224,15 @@ export class PlayerDetailService {
     const history = majorInjuryHistory(outlook?.fullText ?? null);
 
     /*
+     * And what last season's published report actually recorded.
+     *
+     * This is the stronger of the two when it exists: the outlook names an
+     * injury, and this counts the games it cost. It is history in both cases --
+     * neither line may ever change what the app says about today.
+     */
+    const measured = await this.historyFor(playerId, season).catch(() => null);
+
+    /*
      * Current availability, from the shared layer.
      *
      * Read after the outlook and never blocking it: an injury store that
@@ -224,7 +241,18 @@ export class PlayerDetailService {
      */
     const injury = await this.injuryFor(playerId, name).catch(() => null);
 
-    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext: history?.line ?? null, injury };
+    /*
+     * One line, never two.
+     *
+     * The measured note wins when there is one, because "missed 5 games with a
+     * hamstring injury" is everything "Major injury history: Hamstring" says
+     * plus the number that makes it useful. Showing both would be the app
+     * saying the same thing twice in two voices, which is the duplication this
+     * card was already trying to avoid.
+     */
+    const injuryContext = measured?.note ?? history?.line ?? null;
+
+    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext, injury };
   }
 
   /**
@@ -233,6 +261,20 @@ export class PlayerDetailService {
    * `null` when nobody has said anything, so the card renders no section at all
    * rather than a heading over the word "unknown".
    */
+  /**
+   * Last season's injuries, as the published report recorded them.
+   *
+   * Deliberately asks for the season *before* the one the card is about. The
+   * store is keyed by season, so this cannot return a current-season row even
+   * if one exists, and nothing it returns is allowed to reach `injuryFor`.
+   */
+  private async historyFor(playerId: string, season: string): Promise<StoredPlayerHistory | null> {
+    const previous = String(Number(season) - 1);
+    if (!Number.isFinite(Number(season))) return null;
+    const rows = await new InjuryHistoryRepo(this.db).forPlayers([playerId], previous);
+    return rows.get(playerId) ?? null;
+  }
+
   private async injuryFor(playerId: string, name: string | null): Promise<PlayerDetailView['injury']> {
     void name;
     const player = await this.players.getById(playerId);

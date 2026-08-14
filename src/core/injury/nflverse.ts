@@ -175,10 +175,19 @@ function fieldAt(line: string, index: number): string {
  * an already-underway season sees a shortened history, and this app starts
  * watching in the preseason, so in practice it accumulates every week live.
  *
- * Omit `recentWeeks` to parse the whole file, which is what a test or a one-off
- * backfill wants.
+ * `weeks` bounds it the other way, to an explicit range, which is what a
+ * backfill of a finished season needs: the whole file is far too much for one
+ * invocation (a full 22-week parse of the real 2025 file measures ~10.6ms, at
+ * the ceiling before a single row is written), so it is walked a couple of
+ * weeks at a time across successive ticks. The cheap week scan runs either way,
+ * so a narrow range costs little more than the scan itself.
+ *
+ * Omit both to parse the whole file, which is what a test wants.
  */
-export function parseInjuryReport(text: string, opts: { recentWeeks?: number } = {}): ParsedInjuryReport {
+export function parseInjuryReport(
+  text: string,
+  opts: { recentWeeks?: number; weeks?: { from: number; to: number } } = {},
+): ParsedInjuryReport {
   const lines = text.split('\n');
   const header = splitRow((lines[0] ?? '').replace(/\r$/, '')).map((h) => h.trim().toLowerCase());
   const at = new Map(COLUMNS.map((c) => [c, header.indexOf(c)]));
@@ -203,6 +212,15 @@ export function parseInjuryReport(text: string, opts: { recentWeeks?: number } =
       ? Number.NEGATIVE_INFINITY
       : latestWeek - opts.recentWeeks + 1;
 
+  /*
+   * An explicit range wins over the recent-weeks window. They answer different
+   * questions -- "what has changed lately" and "walk me through the season" --
+   * and a caller that passed both would otherwise get the intersection, which
+   * is neither.
+   */
+  const from = opts.weeks ? opts.weeks.from : Number.NEGATIVE_INFINITY;
+  const to = opts.weeks ? opts.weeks.to : Number.POSITIVE_INFINITY;
+
   const rows: InjuryReportRow[] = [];
   let skipped = 0;
   let season = '';
@@ -210,7 +228,7 @@ export function parseInjuryReport(text: string, opts: { recentWeeks?: number } =
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]!;
     if (line.length === 0) continue;
-    if (weekOf[i]! < cutoff) continue;
+    if (opts.weeks ? weekOf[i]! < from || weekOf[i]! > to : weekOf[i]! < cutoff) continue;
 
     const cells = splitRow(line.replace(/\r$/, ''));
     const cell = (column: (typeof COLUMNS)[number]): string => {
@@ -374,7 +392,12 @@ export interface InjuryReportFetch {
  */
 export async function fetchInjuryReport(
   season: string,
-  opts: { fetch?: FetchLike; fingerprint?: SourceFingerprint | null; recentWeeks?: number } = {},
+  opts: {
+    fetch?: FetchLike;
+    fingerprint?: SourceFingerprint | null;
+    recentWeeks?: number;
+    weeks?: { from: number; to: number };
+  } = {},
 ): Promise<InjuryReportFetch> {
   const doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
   const known = opts.fingerprint;
@@ -445,8 +468,19 @@ export async function fetchInjuryReport(
     etag: res.headers.get('etag'),
     lastModified: res.headers.get('last-modified'),
   };
-  const report = parseInjuryReport(await res.text(), { recentWeeks: opts.recentWeeks });
-  if (report.rows.length === 0) {
+  const report = parseInjuryReport(await res.text(), { recentWeeks: opts.recentWeeks, weeks: opts.weeks });
+  /*
+   * An empty *range* is not an empty file.
+   *
+   * A backfill asking for week 1 of a season where nobody was hurt in week 1
+   * gets no rows, and that is the correct answer rather than a fault. The
+   * emptiness that matters is a file with no rows in it at all, which
+   * `latestWeek` reports as 0 because the week scan never saw a number — so
+   * that, not the size of the slice, is what the guard tests when a range was
+   * asked for.
+   */
+  const emptyFile = opts.weeks ? report.latestWeek === 0 : report.rows.length === 0;
+  if (emptyFile) {
     /*
      * An empty file is a failure, not an update.
      *

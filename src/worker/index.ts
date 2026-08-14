@@ -21,7 +21,8 @@ import type { Database } from '../server/db.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
 import { PlayerDetailService } from '../server/services/playerDetailService.ts';
-import { InjuryService } from '../server/services/injuryService.ts';
+import { InjuryService, previousSeason } from '../server/services/injuryService.ts';
+import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 
 export interface WorkerEnv {
@@ -78,6 +79,8 @@ export default {
   /**
    * Cron cadence (see wrangler.toml):
    *   Every 5 minutes  -> injury check (conditional; usually a 304 and no work)
+   *                       plus, until it finishes, one step of last season's
+   *                       history backfill
    *   Sat 23:00 UTC    -> Vegas refresh
    *   Sun 15:00 UTC    -> Vegas refresh
    *   Daily 09:00 UTC  -> Sleeper player dictionary + last season's statistics
@@ -104,6 +107,27 @@ export default {
         await recomputeForChangedPlayers(env, run.changedPlayerIds ?? []);
       } catch (err) {
         console.error('injury check failed', err);
+      }
+
+      /*
+       * And, while there is anything left of it, one step of last season's
+       * backfill.
+       *
+       * It rides this tick rather than getting a cron of its own for two
+       * reasons. The account has five cron triggers and this needs none of
+       * them; and the work is finite — 2025 is a finished season, so the walk
+       * converges in a couple of hours and then `isComplete` is one indexed
+       * read that answers "nothing to do" forever after.
+       *
+       * Separately caught. The backfill is history, and history failing must
+       * never take down the check that decides whether somebody plays today.
+       */
+      try {
+        const history = new InjuryHistoryService(env.DB);
+        const season = previousSeason();
+        if (!(await history.isComplete(season))) await history.step(season);
+      } catch (err) {
+        console.error('injury history backfill failed', err);
       }
       return;
     }

@@ -23,6 +23,7 @@
 
 import type { Database } from '../db.ts';
 import { InjuryRepo, InjurySourceRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
+import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import {
   NO_INJURY_INFORMATION,
@@ -72,6 +73,18 @@ export function injurySeason(now = new Date()): string {
   return String(now.getUTCMonth() >= 2 ? year : year - 1);
 }
 
+/**
+ * The season before the current one — the finished one, and the only one whose
+ * file is guaranteed to be complete and to never change again.
+ *
+ * Derived from `injurySeason` rather than from the calendar directly, so the
+ * two cannot drift apart across the February boundary where "this season" and
+ * "this year" stop agreeing.
+ */
+export function previousSeason(now = new Date()): string {
+  return String(Number(injurySeason(now)) - 1);
+}
+
 export interface InjuryHealth {
   /** Sleeper — the authority on designation, and never not present. */
   statusSource: string;
@@ -113,6 +126,32 @@ export interface InjuryHealth {
    */
   etag: string | null;
   lastModified: string | null;
+  /**
+   * Last season, which is a different question from this one.
+   *
+   * Present so the panel can distinguish two states that both look like "no
+   * injury data": the current season's file has not been published, and the
+   * previous season's has been read in full. The second is what proves the
+   * published-file path works at all while the first is still a 404.
+   */
+  history: {
+    season: string;
+    /** 'weeks' | 'players' | 'done', or null before the walk starts. */
+    phase: string | null;
+    weeksDone: number;
+    lastWeek: number | null;
+    rowsSeen: number;
+    playersSummarized: number;
+    /** Players whose season cleared the thresholds and carries a note. */
+    significantPlayers: number;
+    /** The validator stored for the finished season, which makes a 304 possible. */
+    etag: string | null;
+    lastModified: string | null;
+    ingestedAt: string | null;
+    lastOutcome: string | null;
+    completedAt: string | null;
+    note: string | null;
+  };
   /** Rows this pipeline has written today, against its own ceiling. */
   writesToday: number;
   writeCeiling: number;
@@ -133,7 +172,7 @@ export class InjuryService {
   private readonly players: PlayerRepo;
 
   constructor(
-    db: Database,
+    private readonly db: Database,
     private readonly deps: { fetch?: FetchLike; now?: () => Date; log?: (line: string) => void } = {},
   ) {
     this.repo = new InjuryRepo(db);
@@ -545,12 +584,17 @@ export class InjuryService {
 
   async health(season = injurySeason(this.now())): Promise<InjuryHealth> {
     const day = this.now().toISOString().slice(0, 10);
-    const [lastRun, coverage, state, writes, events] = await Promise.all([
+    const previous = previousSeason(this.now());
+    const historyRepo = new InjuryHistoryRepo(this.db);
+    const [lastRun, coverage, state, writes, events, progress, counts, historyState] = await Promise.all([
       this.repo.latestRun(),
       this.repo.coverage(season),
       this.source.get(INJURY_SOURCE, season).catch(() => null),
       this.source.writesToday(day).catch(() => 0),
       this.source.recentEvents(6).catch(() => []),
+      historyRepo.progress(INJURY_SOURCE, previous).catch(() => null),
+      historyRepo.countBySignificance(previous).catch(() => ({ strong: 0, moderate: 0 })),
+      this.source.get(INJURY_SOURCE, previous).catch(() => null),
     ]);
     return {
       statusSource: STATUS_SOURCE,
@@ -567,6 +611,22 @@ export class InjuryService {
       lastNote: state?.lastNote ?? null,
       etag: state?.etag ?? null,
       lastModified: state?.lastModified ?? null,
+      history: {
+        season: previous,
+        phase: progress?.phase ?? null,
+        // The cursor is the next week to read, so the count done is one behind.
+        weeksDone: progress ? Math.max(0, progress.nextWeek - 1) : 0,
+        lastWeek: progress?.lastWeek ?? null,
+        rowsSeen: progress?.rowsSeen ?? 0,
+        playersSummarized: progress?.playersWritten ?? 0,
+        significantPlayers: counts.strong + counts.moderate,
+        etag: historyState?.etag ?? null,
+        lastModified: historyState?.lastModified ?? null,
+        ingestedAt: historyState?.ingestedAt ?? null,
+        lastOutcome: historyState?.lastOutcome ?? null,
+        completedAt: progress?.completedAt ?? null,
+        note: progress?.note ?? null,
+      },
       writesToday: writes,
       writeCeiling: DAILY_WRITE_CEILING,
       recentEvents: events.map((e) => ({
