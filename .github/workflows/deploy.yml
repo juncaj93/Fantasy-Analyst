@@ -227,6 +227,54 @@ jobs:
         env:
           PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
 
+      # Last season's line, which the expanded player card reads.
+      #
+      # Normally the nightly Sleeper cron fills this in, right after the player
+      # dictionary it is matched against. This covers the gap that leaves on the
+      # deployment which first ships the feature: without it the cards would say
+      # nothing about last season until the next 09:00 UTC, which reads as a
+      # broken feature rather than as a pending one.
+      #
+      # Skipped the moment there is any coverage, so ordinary deployments do no
+      # work here, and never fatal — the cron is still the real path.
+      - name: Load last season's statistics if they are missing
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          covered=$(curl -s "$url/api/setup/status" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              try { process.stdout.write(String(JSON.parse(s).playerDetail?.stats?.players ?? 0)); }
+              catch { process.stdout.write('0'); }
+            })")
+          echo "players with last-season statistics: $covered"
+          if [ "$covered" != "0" ]; then
+            echo "Already loaded; the nightly sync keeps it current."
+            exit 0
+          fi
+
+          login=$(curl -s -o /tmp/login2.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies2.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to load last season's statistics (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/stats.json -w '%{http_code}' -X POST "$url/api/players/season-stats/refresh" \
+            -b /tmp/cookies2.txt --max-time 180)
+          echo "season stats refresh: $code"
+          head -c 500 /tmp/stats.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::Last season's statistics could not be loaded (HTTP $code). The nightly sync will retry, and Setup can trigger it."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
       - name: Write the summary
         if: always()
         run: |

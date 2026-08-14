@@ -122,7 +122,7 @@ export function SetupScreen({
       {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
       {open === 'vegas' ? <VegasPanel status={status} /> : null}
 
-      <PlayerDetailPanel status={status} />
+      <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
       <HelpMyScores onChanged={refreshAll} />
     </>
   );
@@ -1101,8 +1101,43 @@ function ignoredSender(status: NewsletterStatus): string | null {
  * The last line answers a question the user asked directly, and answers it with
  * a no.
  */
-function PlayerDetailPanel({ status }: { status: SetupStatus }) {
+function PlayerDetailPanel({
+  status,
+  unlocked,
+  onDone,
+}: {
+  status: SetupStatus;
+  unlocked: boolean;
+  onDone: () => void;
+}) {
   const detail = status.playerDetail;
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  /*
+   * A way out of a bad night.
+   *
+   * The nightly sync is the real path and this is not a second one — it calls
+   * the same code. It exists because a count of zero on this panel would
+   * otherwise be a dead end: the user could see that last season had not
+   * loaded and had nothing to do about it until 09:00 UTC.
+   */
+  const reload = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await api.post<{ season: string; matched: number; unmatched: number }>(
+        '/api/players/season-stats/refresh',
+      );
+      setNote(`${result.season}: ${result.matched} players loaded, ${result.unmatched} rows were not players.`);
+      onDone();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <details className="card card-tight disclosure" data-testid="panel-player-detail">
       <summary>Player card data</summary>
@@ -1132,6 +1167,25 @@ function PlayerDetailPanel({ status }: { status: SetupStatus }) {
           ? ` ${detail.stats.rankDisagreements} players sit differently in Sleeper's own ordering, which counts everybody on its books.`
           : ''}
       </div>
+      {unlocked ? (
+        <>
+          <button
+            className="btn"
+            type="button"
+            data-testid="reload-season-stats"
+            disabled={busy}
+            onClick={() => void reload()}
+            style={{ marginTop: 8 }}
+          >
+            {busy ? 'Loading…' : 'Load them again'}
+          </button>
+          {note ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              {note}
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <div className="section-title" style={{ marginTop: 10 }}>
         {detail.outlook.season} season outlook
