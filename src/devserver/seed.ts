@@ -32,12 +32,12 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
   '1003': { player_id: '1003', search_rank: 3, first_name: 'Trey', last_name: 'Halloran', full_name: 'Trey Halloran', team: 'SF', position: 'QB', active: true, injury_status: null },
   '1004': { player_id: '1004', search_rank: 4, first_name: 'Andre', last_name: 'Sotelo', full_name: 'Andre Sotelo', team: 'DAL', position: 'TE', active: true, injury_status: 'Questionable' },
   '1005': { player_id: '1005', search_rank: 5, first_name: 'Kai', last_name: 'Brennan', full_name: 'Kai Brennan', team: 'BUF', position: 'WR', active: true, injury_status: null },
-  '1006': { player_id: '1006', search_rank: 6, first_name: 'Julian', last_name: 'Reyes', full_name: 'Julian Reyes', team: 'MIA', position: 'RB', active: true, injury_status: null },
+  '1006': { player_id: '1006', search_rank: 6, first_name: 'Julian', last_name: 'Reyes', full_name: 'Julian Reyes', team: 'MIA', position: 'RB', active: true, injury_status: 'Out' },
   '1007': { player_id: '1007', search_rank: 7, first_name: 'Owen', last_name: 'Fitzgerald', full_name: 'Owen Fitzgerald', team: 'PHI', position: 'WR', active: true, injury_status: null },
   '1008': { player_id: '1008', search_rank: 8, first_name: 'Silas', last_name: 'Mbeki', full_name: 'Silas Mbeki', team: 'GB', position: 'RB', active: true, injury_status: null },
-  '1009': { player_id: '1009', search_rank: 9, first_name: 'Nate', last_name: 'Kowalski', full_name: 'Nate Kowalski', team: 'DET', position: 'TE', active: true, injury_status: null },
+  '1009': { player_id: '1009', search_rank: 9, first_name: 'Nate', last_name: 'Kowalski', full_name: 'Nate Kowalski', team: 'DET', position: 'TE', active: true, injury_status: 'IR' },
   '1010': { player_id: '1010', search_rank: 10, first_name: 'Rhys', last_name: 'Donnelly', full_name: 'Rhys Donnelly', team: 'LAR', position: 'QB', active: true, injury_status: null },
-  '1011': { player_id: '1011', search_rank: 11, first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: null },
+  '1011': { player_id: '1011', search_rank: 11, first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: 'Doubtful' },
   '1012': { player_id: '1012', search_rank: 12, first_name: 'Bo', last_name: 'Ashworth', full_name: 'Bo Ashworth', team: 'SEA', position: 'RB', active: true, injury_status: null },
   /*
    * Depth at quarterback and tight end, so the board has a *shape*.
@@ -336,8 +336,21 @@ async function seedPlayerDetail(db: Database): Promise<void> {
     note: 'synthetic demo data',
   });
 
-  /** Two written outlooks; everyone else is honestly recorded as having none. */
+  /**
+   * Three written outlooks; everyone else is honestly recorded as having none.
+   *
+   * They are chosen to cover the injury-context cases as well as the ordinary
+   * one: Reyes names a specific injury and should produce a context line;
+   * Brennan mentions an ankle that cost him games and Sotelo a hamstring, and
+   * neither should — "missed time" is not a major injury history, and inventing
+   * one from it is the failure this is written to avoid.
+   */
   const written: Record<string, string> = {
+    '1006':
+      'Reyes tore his ACL in Week 11 and spent the rest of the season on injured reserve. He was cleared in ' +
+      'June and has taken part in every camp practice so far, but Miami have been open about managing his ' +
+      'workload through the first month. The backfield behind him is unproven, so the touches are there if ' +
+      'the knee holds up.',
     '1005':
       'Brennan enters his third year as the clear number one in Buffalo after a target share that climbed every ' +
       'month of last season. The arrival of a second inside receiver should cost him volume on early downs but not ' +

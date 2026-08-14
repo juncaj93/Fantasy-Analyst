@@ -95,6 +95,76 @@ later pick for anyone to last until.
 pick 22 of a 12-team snake and fails if any of this regresses; three of its five
 cases fail against the old code.
 
+### The card lost its rationale, and the bottom bar had two real bugs
+
+A later brief cut the expansion again, and this cut changed what it is for.
+`WHY THIS RANK`, its bullets, the counterpoint and the `Advanced breakdown` are
+**gone from the quick expansion** — all three justified a position the reader
+can already see, on a screen where the question is "who is this". They are not
+gone from the system: the engine still computes every reason, counterpoint,
+component, weight and contribution, and `/api/drafts/:id/board` still returns
+them. Only the rendering stopped.
+
+What is there now: one tier-context line, the outlook, `15 GP · WR50 half-PPR`,
+and injury context when there is any.
+
+**The tier line** (`src/core/draft/tierContext.ts`) is `WR board thinning · 5
+left in this tier · 4 teams ahead still need WR`. Shown for the player's whole
+tier, absent for the last tier at a position (nothing follows it, so there is no
+drop to be ahead of). The demand clause comes from `demandAhead.ts`, which reads
+the real snake order and the real pick stream: TE/QB/K/DEF count as covered with
+one rostered, RB/WR only when the league's **starting** slots are filled. It
+stays quiet in the ordinary middle, and — the part worth keeping — quiet in
+round one, where "all eleven teams ahead need one" is true of every position and
+describes only how early it is.
+
+**The outlook is shown whole now.** Cutting to three sentences dropped the
+depth-chart and workload half, because these paragraphs open with last season
+and work forwards. Compressing it here instead would mean paraphrasing somebody
+else's analysis under their name.
+
+**Injury context is a label** — `Major injury history: ACL` — read out of the
+outlook text against a closed list of named diagnoses. "Missed time" and
+"limited" are deliberately not on that list. The outlook above already explains
+it properly, so this exists only so a reader scanning the card sees it.
+
+**Collapsed cards carry the current designation** (`Q`, `D`, `OUT`, `IR`, `PUP`,
+`SUS`) with the word in the accessible name. `status` is read by nothing in the
+engine, so this cannot move the ranking, and a test asserts the board is
+byte-identical with and without it.
+
+#### Two bottom-bar bugs, and both were in the measurement
+
+The tab bar's height has always been measured at runtime so the page can
+reserve it exactly. It was not being measured at all.
+
+1. **The hook never attached.** `useTabbarHeight(ref)` was `useEffect(...,
+   [ref])`. On the first render the app is showing its loading state, so there
+   is no bar, `ref.current` is null, the effect bailed — and its dependency
+   never changed, so it never ran again. `--tabbar-height` sat at its 50px
+   fallback for a bar that is 45px flat and 62px with an indicator. It is a
+   **callback ref** now, which fires when the node arrives.
+2. **The observer watched the wrong box.** `ResizeObserver` observes the
+   *content* box by default, and everything that changes this bar's height
+   changes its `padding-bottom`. The content box — a row of 44px buttons —
+   never moves. So the observer correctly reported nothing through exactly the
+   event it exists to catch: Safari's chrome collapsing, the inset going 0 → 34,
+   the bar growing, and the page under-reserving by 17px so the last row went
+   under the bar. It is `observe(node, { box: 'border-box' })` now.
+
+Also: `.app` restated `min-height: 100dvh` inside a `#root` that already had it,
+and `--nav-inset` was `inset − 14px`, a magic number. The height claim is
+`#root`'s alone, and the clearance is now derived from
+`--home-indicator-reach: 13px` — the pill is 5px tall sitting 8px off the edge —
+capped by the inset and floored at zero.
+
+Measured at 390×844 with a 34px inset simulated: bar 79px → 62px, list height
+629px → 675px, 7 → 8 collapsed cards.
+
+**`env()` is still read in exactly one place** (`--safe-bottom`) and consumed in
+exactly one rule (the bar's own padding). The shell comment in `styles.css`
+names the three owners; keep it true.
+
 ### The expanded card, and what Sleeper actually publishes
 
 It opened with a grid of ADP, value, survival and the tally — all four printed
@@ -320,8 +390,8 @@ that prints a provider payload must do the same.
 
 ```bash
 npm run typecheck          # tsc
-npx vitest run             # 851 tests, 36 files
-CI=1 npm run e2e:chromium  # 226 tests at 390/375/360
+npx vitest run             # 882 tests, 39 files
+CI=1 npm run e2e:chromium  # 253 tests at 390/375/360
 npm run build
 npx wrangler deploy --dry-run
 ```

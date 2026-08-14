@@ -14,7 +14,7 @@ import {
   formatPositionRank,
   type RawSeasonStatLine,
 } from '../src/core/sleeper/seasonStats.ts';
-import { fetchPlayerOutlook, summariseOutlook } from '../src/core/sleeper/outlook.ts';
+import { fetchPlayerOutlook } from '../src/core/sleeper/outlook.ts';
 
 const POSITIONS: Record<string, string> = {
   wr1: 'WR',
@@ -160,40 +160,4 @@ describe('the season outlook', () => {
     await expect(fetchPlayerOutlook('1', '2026', { fetch: respond({}, false) })).rejects.toThrow('500');
   });
 
-  describe('shortening it', () => {
-    it('keeps three sentences and stops on a sentence', () => {
-      const summary = summariseOutlook('One here. Two here. Three here. Four here.');
-      expect(summary).toBe('One here. Two here. Three here.');
-    });
-
-    it('never cuts mid-clause', () => {
-      const long = `${'A'.repeat(300)} words end here. And this second sentence would overflow the budget.`;
-      const summary = summariseOutlook(long);
-      expect(summary.endsWith('here.')).toBe(true);
-      expect(summary).not.toContain('overflow');
-    });
-
-    it('shows one long sentence rather than nothing', () => {
-      const single = `${'B'.repeat(500)} and it never ends.`;
-      expect(summariseOutlook(single).length).toBeGreaterThan(100);
-    });
-
-    /**
-     * These writers use `No. 1 receiver` and `Sept. 14` constantly. Splitting
-     * on those produces a card showing four words and stopping.
-     */
-    it('does not mistake an abbreviation for the end of a sentence', () => {
-      const summary = summariseOutlook('He is the No. 1 option in that offence. He returned Sept. 14 last year.');
-      expect(summary).toContain('No. 1 option in that offence.');
-      expect(summary).toContain('Sept. 14');
-    });
-
-    it('collapses the whitespace a paragraph arrives with', () => {
-      expect(summariseOutlook('One\n\n  here.   Two here.')).toBe('One here. Two here.');
-    });
-
-    it('has nothing to say about nothing', () => {
-      expect(summariseOutlook('   ')).toBe('');
-    });
-  });
 });
