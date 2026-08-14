@@ -20,6 +20,28 @@ export function Signal({ net, items, label }: { net: number; items?: number; lab
   );
 }
 
+/**
+ * A player's position, colour-coded so a long list can be scanned at a glance.
+ *
+ * The letters stay: colour is an accelerator, never the carrier of the meaning,
+ * so this reads identically to somebody who cannot separate the hues. The
+ * palette is deliberately restrained — a small pill rather than a coloured row,
+ * because forty of these on one screen is what the draft board actually looks
+ * like and saturated blocks at that density stop being information.
+ */
+export function PositionBadge({ position, team }: { position: string | null; team?: string | null }) {
+  const pos = (position ?? '').toUpperCase();
+  const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
+  return (
+    <span className="pos-team">
+      <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
+        {pos || '—'}
+      </span>
+      {team !== undefined ? <span className="team-code">{team || 'FA'}</span> : null}
+    </span>
+  );
+}
+
 export function Badge({
   children,
   tone = 'neutral',

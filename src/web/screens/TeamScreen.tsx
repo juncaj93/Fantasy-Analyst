@@ -14,7 +14,7 @@ import {
   type RosterPlayer,
   type StartSitComparison,
 } from '../api.ts';
-import { Badge, Empty, Loading, Notice, Signal, Unknown, formatAge } from '../components/common.tsx';
+import { Badge, Empty, formatAge, Loading, Notice, PositionBadge, Signal, Unknown } from '../components/common.tsx';
 
 interface OpenSlot {
   slot: string;
@@ -327,9 +327,7 @@ function RosterRow({
       <div className="player-row-top">
         <span className="rank">{selected ? '✓' : ''}</span>
         <span className="player-name">{player.name}</span>
-        <span className="pos-team">
-          {player.position} · {player.team || 'FA'}
-        </span>
+        <PositionBadge position={player.position} team={player.team} />
       </div>
       <div className="player-row-metrics">
         <Signal net={player.recentNet} label="recent news (21d)" />
@@ -531,7 +529,7 @@ function LiveDraftRoster({
                     <span className="faint">{p.pickNo ? `pick ${p.pickNo}` : 'on roster'}</span>
                   </div>
                   <div className="faint">
-                    {p.position} · {p.team || 'FA'}
+                    <PositionBadge position={p.position} team={p.team} />
                   </div>
                 </div>
               ))}

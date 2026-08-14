@@ -17,7 +17,7 @@ import {
   type MyGuyFlag,
   type RosterAlert,
 } from '../api.ts';
-import { Badge, Empty, Loading, Notice, Signal, Stat, Unknown, formatDate } from '../components/common.tsx';
+import { Badge, Empty, Loading, Notice, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
 import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/decisions.tsx';
 
 const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
@@ -115,49 +115,38 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
 
   return (
     <>
-      <div className="statusbar">
-        <Stat label="Pick" value={`#${board.currentPick}`} hint="current overall pick" />
-        <Stat
-          label="Until you"
-          value={board.picksUntilMyTurn == null ? '—' : board.onTheClock ? 'NOW' : board.picksUntilMyTurn}
-          hint="picks until your next selection"
-        />
-        <Stat label="Round" value={board.teams > 0 ? Math.ceil(board.currentPick / board.teams) : '—'} />
-        <Stat label="Roster" value={board.myRoster.length} hint="players you have drafted" />
-        <Stat label="Status" value={board.status.replace('_', ' ')} />
+      {/*
+        One line of chrome, not a banner.
+
+        The pick number, the round, the roster count and the draft status used
+        to occupy a row of stat cards above everything else, which pushed the
+        only thing the user is actually reading — the players — most of a screen
+        down. Every number is still here, and still comes from the same board
+        state; it is just said in a sentence instead of five boxes. Everything
+        beyond the league name (scoring format, roster shape, snapshot label)
+        moved into the details below, where it is available without costing the
+        list any height.
+      */}
+      <div className="draft-bar">
+        <strong data-testid="board-league-name" className="draft-league">
+          {board.league.name}
+        </strong>
+        <span className="draft-status" data-testid="draft-status">
+          <span className="draft-pick">#{board.currentPick}</span>
+          <span className="faint">R{board.round}</span>
+          <span className={board.onTheClock ? 'draft-turn draft-turn-now' : 'draft-turn'}>
+            {board.picksUntilMyTurn == null ? '—' : board.onTheClock ? 'YOUR PICK' : `${board.picksUntilMyTurn} to go`}
+          </span>
+        </span>
+        <button className="btn btn-sm" onClick={() => setAutoPoll((v) => !v)}>
+          {autoPoll ? '⏸' : '▶ Live'}
+        </button>
       </div>
 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {board.warnings.map((w) => (
         <Notice key={w}>{w}</Notice>
       ))}
-
-      <div className="card card-tight">
-        <div className="header-row">
-          <div>
-            <strong data-testid="board-league-name">{board.league.name}</strong>
-            <div className="faint">{board.league.notes.join(' · ')}</div>
-          </div>
-          <button className="btn btn-sm" onClick={() => setAutoPoll((v) => !v)}>
-            {autoPoll ? '⏸ Stop' : '▶ Live'}
-          </button>
-        </div>
-        <div className="badge-row">
-          {/* Where the draft order came from, named honestly. */}
-          {board.adpSnapshot ? (
-            <Badge>
-              Draft order: {board.adpSnapshot.label} · {formatDate(board.adpSnapshot.capturedAt)}
-            </Badge>
-          ) : (
-            <Badge>Draft order: Sleeper</Badge>
-          )}
-          {Object.entries(board.rosterCounts).map(([pos, n]) => (
-            <Badge key={pos}>
-              {pos} {n}
-            </Badge>
-          ))}
-        </div>
-      </div>
 
       <div className="filter-row" role="group" aria-label="Filter by position">
         {POSITIONS.map((p) => (
@@ -168,6 +157,38 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
       </div>
 
       <RosterAlerts alerts={board.rosterAlerts ?? []} />
+
+      {/*
+        The league's settings and the draft-order provenance still matter — they
+        drive every number on the screen — but they are reference, not the thing
+        being read, so they fold away rather than sit above the list.
+      */}
+      <details className="draft-details">
+        <summary className="muted">League and draft order</summary>
+        <div className="badge-row">
+          {board.adpSnapshot ? (
+            <Badge>
+              Draft order: {board.adpSnapshot.label} · {formatDate(board.adpSnapshot.capturedAt)}
+            </Badge>
+          ) : (
+            <Badge>Draft order: Sleeper</Badge>
+          )}
+          <Badge>{board.league.scoringLabel}</Badge>
+          <Badge>
+            Round {board.round} of {board.rounds}
+          </Badge>
+          <Badge>{board.status.replace('_', ' ')}</Badge>
+          <Badge>Roster {board.myRoster.length}</Badge>
+          {Object.entries(board.rosterCounts).map(([pos, n]) => (
+            <Badge key={pos}>
+              {pos} {n}
+            </Badge>
+          ))}
+        </div>
+        <div className="faint" style={{ marginTop: 4 }}>
+          {board.league.notes.join(' · ')}
+        </div>
+      </details>
 
       <div className="section-title" data-testid="recommended-heading">
         Recommended ({board.recommendations.length})
@@ -242,9 +263,7 @@ function RecommendationRow({
         <span className="rank">{rank}</span>
         <MyGuyControl myGuy={rec.myGuy} busy={busy} onChange={(level) => onMyGuy(rec.playerId, level)} />
         <span className="player-name">{rec.name}</span>
-        <span className="pos-team">
-          {rec.position} · {rec.team || 'FA'}
-        </span>
+        <PositionBadge position={rec.position} team={rec.team} />
       </div>
 
       {/*
@@ -270,8 +289,24 @@ function RecommendationRow({
             {rec.survivalProbability == null ? <Unknown what="survival" /> : `${Math.round(rec.survivalProbability * 100)}%`}
           </strong>
         </span>
-        <Signal net={rec.newsLifetimeNet} label="lifetime news" />
-        <Signal net={rec.news30Net} label="news, last 30 days" />
+        {/*
+          One signal, not two.
+
+          Lifetime and 30-day were printed side by side on every row, so a
+          player nobody has written about read "– 0 flat – 0 flat" — two
+          columns of nothing on forty rows. The lifetime tally is the one that
+          drives AVOID and the ranking, so it is the one that stays; the recent
+          window appears only when it has something of its own to say, and both
+          are always in the breakdown behind the tap.
+        */}
+        {rec.newsLifetimeNet !== 0 || rec.news30Net !== 0 ? (
+          <Signal net={rec.newsLifetimeNet} label="lifetime news" />
+        ) : null}
+        {rec.news30Net !== 0 && rec.news30Net !== rec.newsLifetimeNet ? (
+          <span className="metric">
+            30d <Signal net={rec.news30Net} label="news, last 30 days" />
+          </span>
+        ) : null}
       </div>
 
       {expanded ? (

@@ -242,16 +242,31 @@ describe('can this player wait', () => {
 
 describe('roster construction alerts', () => {
   it('is relaxed about a missing starter early', () => {
-    const alerts = rosterAlerts({
-      shape: SHAPE,
-      counts: { RB: 1, WR: 1 },
-      needs: needsFor({ RB: 1, WR: 1 }),
-      round: 3,
-      totalRounds: 15,
-    });
+    const counts = { QB: 1, RB: 2, WR: 2 };
+    const alerts = rosterAlerts({ shape: SHAPE, counts, needs: needsFor(counts), round: 3, totalRounds: 15 });
     const te = alerts.find((a) => a.key === 'starter:TE')!;
     expect(te.severity).toBe('info');
     expect(te.detail).toContain('still early');
+  });
+
+  /**
+   * In round one nearly every slot is unfilled. Saying so once per position is
+   * three notes that all end "no need to force it" — the scoreboard, not advice.
+   */
+  it('says the early state once rather than once per position', () => {
+    const counts = { RB: 1 };
+    const alerts = rosterAlerts({ shape: SHAPE, counts, needs: needsFor(counts), round: 1, totalRounds: 15 });
+    expect(alerts.filter((a) => a.key.startsWith('starter:'))).toHaveLength(0);
+    const early = alerts.find((a) => a.key === 'starters:early')!;
+    expect(early.message).toMatch(/starting slots still open/);
+    expect(early.detail).toContain('best players available');
+  });
+
+  it('goes back to naming positions once one of them is urgent', () => {
+    const counts = { RB: 1 };
+    const alerts = rosterAlerts({ shape: SHAPE, counts, needs: needsFor(counts), round: 11, totalRounds: 15 });
+    expect(alerts.some((a) => a.key === 'starters:early')).toBe(false);
+    expect(alerts.filter((a) => a.key.startsWith('starter:')).length).toBeGreaterThan(1);
   });
 
   it('gets louder about the same gap late, and counts the picks left', () => {

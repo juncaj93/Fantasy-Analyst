@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
-import { Badge, Empty, Loading, Signal, Unknown, formatDate } from '../components/common.tsx';
+import { Badge, Empty, Loading, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -120,9 +120,7 @@ export function PlayersScreen() {
                 onChange={(level) => void setMyGuy(p.id, level)}
               />
               <span className="player-name">{p.name}</span>
-              <span className="pos-team">
-                {p.position} · {p.team || 'FA'}
-              </span>
+              <PositionBadge position={p.position} team={p.team} />
             </div>
             <div className="player-row-metrics">
               <Signal net={p.signal?.raw.net ?? 0} items={p.signal?.raw.items ?? 0} label="lifetime" />
@@ -165,7 +163,7 @@ function PlayerDetailView({ detail, onBack }: { detail: PlayerDetail; onBack: ()
           <div>
             <strong style={{ fontSize: '1.05rem' }}>{player.name}</strong>
             <div className="faint">
-              {player.position} · {player.team || 'FA'}
+              <PositionBadge position={player.position} team={player.team} />
               {player.status ? ` · ${player.status}` : ''}
             </div>
           </div>

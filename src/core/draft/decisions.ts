@@ -446,7 +446,7 @@ export interface RosterAlertInput {
  * already knows what is missing, and this is what turns that into advice.
  */
 export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
-  const { startersUrgentFromRound, startersCriticalFromRound, lopsidedGap } = DECISION_THRESHOLDS.rosterAlerts;
+  const { startersUrgentFromRound, startersCriticalFromRound } = DECISION_THRESHOLDS.rosterAlerts;
   const alerts: RosterAlert[] = [];
   const roundsLeft = Math.max(0, input.totalRounds - input.round + 1);
 
@@ -454,9 +454,31 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
     .filter((n) => n.startersUnfilled > 0)
     .sort((a, b) => b.startersUnfilled - a.startersUnfilled || a.position.localeCompare(b.position));
 
+  const severityFor = (): AlertSeverity =>
+    input.round >= startersCriticalFromRound ? 'urgent' : input.round >= startersUrgentFromRound ? 'warn' : 'info';
+
+  /*
+   * Early on, almost every slot is unfilled, and saying so once per position
+   * fills the screen with three identical notes that all end "no need to force
+   * it". That is not advice, it is the scoreboard — so while it is still early
+   * and nothing is urgent, the same fact is said once.
+   */
+  if (severityFor() === 'info' && unfilled.length > 2) {
+    const open = unfilled.reduce((a, n) => a + n.startersUnfilled, 0);
+    return [
+      {
+        key: 'starters:early',
+        severity: 'info',
+        message: `${open} starting slots still open`,
+        detail: `Round ${input.round} — take the best players available; there is time to fill ${unfilled.map((n) => n.position).join(', ')}.`,
+        positions: unfilled.map((n) => n.position),
+      },
+      ...lopsidedAlerts(input),
+    ];
+  }
+
   for (const need of unfilled) {
-    const severity: AlertSeverity =
-      input.round >= startersCriticalFromRound ? 'urgent' : input.round >= startersUrgentFromRound ? 'warn' : 'info';
+    const severity = severityFor();
     const superflex = input.shape.superflex && need.position === 'QB';
     alerts.push({
       key: `starter:${need.position}`,
@@ -484,12 +506,22 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
     });
   }
 
-  // Lopsided depth, measured against what the league actually starts rather
-  // than against raw counts. Five wide receivers is not lopsided in a league
-  // that starts three of them, and one running back is not fine in a league
-  // that starts two — so the comparison is on the surplus over each position's
-  // own requirement, which is the only version of "too many" that means
-  // anything across league shapes.
+  alerts.push(...lopsidedAlerts(input));
+
+  return alerts;
+}
+
+/**
+ * Lopsided depth, measured against what the league actually starts.
+ *
+ * Five wide receivers is not lopsided in a league that starts three of them,
+ * and one running back is not fine in a league that starts two — so the
+ * comparison is on the surplus over each position's own requirement, which is
+ * the only version of "too many" that means anything across league shapes.
+ */
+function lopsidedAlerts(input: RosterAlertInput): RosterAlert[] {
+  const { startersUrgentFromRound, lopsidedGap } = DECISION_THRESHOLDS.rosterAlerts;
+  const alerts: RosterAlert[] = [];
   const startable = Object.keys(input.shape.starters).filter((p) => (input.shape.starters[p] ?? 0) > 0);
   const surpluses = startable
     .map((position) => ({
