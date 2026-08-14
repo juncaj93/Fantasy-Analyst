@@ -16,7 +16,6 @@ import {
   type DraftBoard,
   type DraftRecommendation,
   type LeagueSummary,
-  type MyGuyFlag,
   type SlotProgress,
 } from '../api.ts';
 import {
@@ -31,9 +30,19 @@ import {
   Unknown,
   formatShortAge,
 } from '../components/common.tsx';
+/*
+ * The chance he is still there at your next pick — as a number, in colour.
+ *
+ * This is the whole urgency interface. Red is "he will not last", amber is "it
+ * is a coin flip", green is "there is time"; the percentage is always printed,
+ * so the colour is an accelerator and never the thing carrying the meaning.
+ * The bands come from the model itself, so the colour and the number can never
+ * be computed from two different rules.
+ */
+import { survivalBand } from '../../core/draft/survival.ts';
 import {
   AvoidBadge,
-  MyGuyControl,
+  QueueControl,
   ReasonList,
   Verdict,
   draftVerdict,
@@ -111,17 +120,33 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   }, []);
 
   /**
-   * Star a player, then reload the board.
+   * Queue a player, and leave the board exactly where it is.
    *
-   * The flag changes the ranking, so the honest thing is to show the board it
-   * produces rather than leave the old order on screen with a new star on it.
+   * The star is a bookmark. It does not change the ranking, so re-fetching the
+   * board would be forty rows of work to redraw the same forty rows — and on a
+   * phone mid-draft it would also throw away the user's scroll position for a
+   * tap that meant "remind me later". Only the one star flips.
+   *
+   * The ★ filter is the exception: there the queue *is* the query, so removing
+   * a player has to remove his row, and that needs the server.
    */
-  const setMyGuy = useCallback(
-    async (playerId: string, level: 0 | 1 | 2 | 3) => {
+  const setQueued = useCallback(
+    async (playerId: string, queued: boolean) => {
       setFlagging(playerId);
       try {
-        await api.post<{ myGuy: MyGuyFlag }>(`/api/players/${playerId}/my-guy`, { level });
-        await load(position);
+        await api.post<{ queued: boolean }>(`/api/players/${playerId}/queue`, { queued });
+        if (position === QUEUE_FILTER) await load(position);
+        else
+          setBoard((current) =>
+            current
+              ? {
+                  ...current,
+                  recommendations: current.recommendations.map((rec) =>
+                    rec.playerId === playerId ? { ...rec, queued } : rec,
+                  ),
+                }
+              : current,
+          );
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -342,7 +367,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
               rec={rec}
               expanded={expanded === rec.playerId}
               onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
-              onMyGuy={setMyGuy}
+              onQueue={setQueued}
               busy={flagging === rec.playerId}
             />
           ))}
@@ -393,14 +418,14 @@ function RecommendationRow({
   rec,
   expanded,
   onToggle,
-  onMyGuy,
+  onQueue,
   busy,
 }: {
   rank: number;
   rec: DraftRecommendation;
   expanded: boolean;
   onToggle: () => void;
-  onMyGuy: (playerId: string, level: 0 | 1 | 2 | 3) => void;
+  onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
 }) {
   const pos = (rec.position ?? '').toUpperCase();
@@ -415,7 +440,7 @@ function RecommendationRow({
       <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
         <div className="player-row-top">
           <span className="rank">{rank}</span>
-          <MyGuyControl myGuy={rec.myGuy} busy={busy} onChange={(level) => onMyGuy(rec.playerId, level)} />
+          <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
           <PositionBadge position={rec.position} team={rec.team} />
         </div>
@@ -509,6 +534,7 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
     rec.news30Net !== 0 ||
     rec.news7Net !== 0 ||
     rec.myGuy.level > 0 ||
+    rec.queued ||
     rec.marketBaseline?.points != null;
 
   return (
@@ -590,9 +616,20 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
                 scoring — {rec.marketBaseline.note}.
               </div>
             ) : null}
+            {/*
+              Two separate marks, said separately, because they do separate
+              things. The heart moved him up this board; the star did not and
+              is not claiming to.
+            */}
             {rec.myGuy.level > 0 ? (
-              <div className="muted">
-                {rec.myGuy.stars} {rec.myGuy.label} — your own flag, separate from the news tally.
+              <div className="muted" data-testid="detail-my-guy">
+                {rec.myGuy.stars} {rec.myGuy.label} — your own rating from the players list, separate from the news
+                tally. It moves him up this board.
+              </div>
+            ) : null}
+            {rec.queued ? (
+              <div className="muted" data-testid="detail-queued">
+                ★ In your queue — a bookmark for the ★ filter. It does not change his ranking.
               </div>
             ) : null}
           </div>
@@ -634,22 +671,6 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
       </details>
     </div>
   );
-}
-
-/**
- * The chance he is still there at your next pick — as a number, in colour.
- *
- * This is the whole urgency interface now. Red is "he will not last", amber is
- * "it is a coin flip", green is "there is time"; the percentage is always
- * printed, so the colour is an accelerator and never the thing carrying the
- * meaning. The thresholds are deliberately round numbers — a third and two
- * thirds — because a reader has to hold them in their head between picks.
- */
-export function survivalBand(probability: number | null): 'unknown' | 'gone' | 'coinflip' | 'safe' {
-  if (probability == null) return 'unknown';
-  if (probability <= 0.3) return 'gone';
-  if (probability < 0.66) return 'coinflip';
-  return 'safe';
 }
 
 function SurvivalMetric({ probability }: { probability: number | null }) {

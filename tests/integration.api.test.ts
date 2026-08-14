@@ -265,24 +265,72 @@ describe('API with seeded data', () => {
     );
     const first = board.recommendations[0]!.playerId;
     const second = board.recommendations[1]!.playerId;
-    await app(post(`/api/players/${first}/my-guy`, { level: 1 }, cookie), env);
-    await app(post(`/api/players/${second}/my-guy`, { level: 3 }, cookie), env);
+    await app(post(`/api/players/${first}/queue`, { queued: true }, cookie), env);
+    await app(post(`/api/players/${second}/queue`, { queued: true }, cookie), env);
 
-    const queued = await json<{ recommendations: { playerId: string; myGuy: { level: number } }[] }>(
+    const queued = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),
     );
     expect(queued.recommendations.map((r) => r.playerId).sort()).toEqual([first, second].sort());
-    for (const rec of queued.recommendations) expect(rec.myGuy.level).toBeGreaterThan(0);
+    // Queued, and still nobody's My Guy — the star does not rate a player.
+    for (const rec of queued.recommendations) {
+      expect(rec.queued).toBe(true);
+      expect(rec.myGuy.level).toBe(0);
+    }
+  });
+
+  /*
+   * The bug this pair guards: one tap of the ★ used to both queue a player and
+   * boost his ranking. They are separate columns now, so each control must be
+   * shown to move its own and leave the other alone.
+   */
+  it('queues a player without making him a My Guy, and vice versa', async () => {
+    const board = await json<{ recommendations: { playerId: string }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    const starred = board.recommendations[0]!.playerId;
+    const hearted = board.recommendations[1]!.playerId;
+    await app(post(`/api/players/${starred}/queue`, { queued: true }, cookie), env);
+    await app(post(`/api/players/${hearted}/my-guy`, { level: 3 }, cookie), env);
+
+    const after = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    const byId = new Map(after.recommendations.map((r) => [r.playerId, r]));
+    expect(byId.get(starred)).toMatchObject({ queued: true, myGuy: { level: 0 } });
+    expect(byId.get(hearted)).toMatchObject({ queued: false, myGuy: { level: 3 } });
+  });
+
+  it('leaves the ranking untouched when a player is queued', async () => {
+    const order = async () => {
+      const board = await json<{ recommendations: { playerId: string; total: number }[] }>(
+        get('/api/drafts/demo-draft/board', cookie),
+      );
+      return board.recommendations.map((r) => `${r.playerId}:${r.total}`);
+    };
+    const before = await order();
+    // Somebody halfway down the board, where a boost would be visible.
+    const target = before[5]!.split(':')[0]!;
+    await app(post(`/api/players/${target}/queue`, { queued: true }, cookie), env);
+    expect(await order()).toEqual(before);
+  });
+
+  it('refuses a queue value that is not a boolean, and an unknown player', async () => {
+    const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
+    const id = board.recommendations[0]!.playerId;
+    expect((await app(post(`/api/players/${id}/queue`, { queued: 'yes' }, cookie), env)).status).toBe(400);
+    expect((await app(post('/api/players/nobody/queue', { queued: true }, cookie), env)).status).toBe(404);
+    expect((await app(post(`/api/players/${id}/queue`, { queued: true }), env)).status).toBe(401);
   });
 
   it('drops a queued player from the queue once he is taken', async () => {
     const board = await json<{ recommendations: { playerId: string }[] }>(
       get('/api/drafts/demo-draft/board', cookie),
     );
-    await app(post(`/api/players/${board.recommendations[0]!.playerId}/my-guy`, { level: 2 }, cookie), env);
+    await app(post(`/api/players/${board.recommendations[0]!.playerId}/queue`, { queued: true }, cookie), env);
 
     // Marcus Vance is pick 1 in the seed, so he is already off the board.
-    await app(post('/api/players/1001/my-guy', { level: 3 }, cookie), env);
+    await app(post('/api/players/1001/queue', { queued: true }, cookie), env);
     const queued = await json<{ recommendations: { playerId: string }[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),
     );
@@ -296,7 +344,7 @@ describe('API with seeded data', () => {
     expect((await app(post('/api/players/nobody/my-guy', { level: 1 }, cookie), env)).status).toBe(404);
   });
 
-  it('will not let a read-only visitor star a player', async () => {
+  it('will not let a read-only visitor rate a player', async () => {
     const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
     const id = board.recommendations[0]!.playerId;
     expect((await app(post(`/api/players/${id}/my-guy`, { level: 3 }), env)).status).toBe(401);

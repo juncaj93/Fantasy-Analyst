@@ -171,59 +171,92 @@ export function ReasonList({ items, muted = false }: { items: ReactNode[]; muted
 }
 
 /**
- * Tap to cycle ☆ → ★ → ★★ → ★★★ → ☆.
+ * ♡ → ♥ → ♥♥ → ♥♥♥ → ♡, on the players list.
  *
- * One control rather than four: on a phone, during a draft, the user has one
- * thumb and a clock. Cycling costs at most three taps to reach any level and
- * needs no menu, no long-press and no second screen.
+ * One control rather than four: on a phone the user has one thumb, and cycling
+ * costs at most three taps to reach any level with no menu, no long-press and
+ * no second screen.
  *
- * The same flag wears two faces. On the draft board it is a star, and starring
- * a player puts them in your queue — which is also what the ★ filter shows.
- * On the players list, where nobody is drafting and the question is simply who
- * you rate, it is a heart. One stored value either way: heart a player at home
- * and he is queued when the draft opens.
+ * This is an opinion, and it moves the ranking by a bounded amount. It is not
+ * the draft queue — see `QueueControl` — because "I rate him" and "remind me
+ * about him" are different things and only one of them should change a board.
  */
 export function MyGuyControl({
   myGuy,
   onChange,
   busy,
-  icon = 'star',
 }: {
   myGuy: MyGuyFlag;
   onChange: (level: 0 | 1 | 2 | 3) => void;
   busy?: boolean;
-  icon?: 'star' | 'heart';
 }) {
   const next = ((myGuy.level + 1) % 4) as 0 | 1 | 2 | 3;
-  // Named for what the control does where it is, not for the column it writes.
-  const labels: Record<number, string> =
-    icon === 'heart'
-      ? { 0: 'Not one of your guys', 1: 'My Guy', 2: 'Strong My Guy', 3: 'Must-Have' }
-      : { 0: 'Not queued', 1: 'Queued', 2: 'Queued — high priority', 3: 'Queued — must have' };
-
-  const glyph = icon === 'heart' ? '♥' : '★';
-  const empty = icon === 'heart' ? '♡' : '☆';
-  const filled = glyph.repeat(myGuy.level);
+  const labels: Record<number, string> = {
+    0: 'Not one of your guys',
+    1: 'My Guy',
+    2: 'Strong My Guy',
+    3: 'Must-Have',
+  };
 
   return (
     <button
       type="button"
-      className={
-        `${icon === 'heart' ? 'heart-btn' : 'star-btn'}${myGuy.level > 0 ? ` ${icon === 'heart' ? 'heart-btn-on' : 'star-btn-on'}` : ''}`
-      }
+      className={`heart-btn${myGuy.level > 0 ? ' heart-btn-on' : ''}`}
       disabled={busy}
       aria-label={`${labels[myGuy.level]}. Tap to set: ${labels[next]}.`}
-      title={labels[myGuy.level]}
+      title={`${labels[myGuy.level]} — moves him up your board`}
       data-testid="my-guy-control"
       data-level={myGuy.level}
-      data-icon={icon}
+      data-icon="heart"
       onClick={(event) => {
-        // The row itself is a button that expands; queueing must not also open it.
+        // The row itself is a button that expands; rating must not also open it.
         event.stopPropagation();
         onChange(next);
       }}
     >
-      {myGuy.level > 0 ? filled : empty}
+      {myGuy.level > 0 ? '♥'.repeat(myGuy.level) : '♡'}
+    </button>
+  );
+}
+
+/**
+ * ☆ → ★, on the draft board. A bookmark, and nothing else.
+ *
+ * During a draft the star is how you find the man you meant to take: tap it,
+ * then tap the ★ filter and there he is. It has exactly two states because a
+ * bookmark has two states, and it deliberately does **not** touch the ranking —
+ * the board comes back in the same order whether the star is lit or not.
+ *
+ * That is the whole difference from the heart. Rating a player is an opinion
+ * the engine is allowed to hear; queueing him is a note to yourself.
+ */
+export function QueueControl({
+  queued,
+  onChange,
+  busy,
+}: {
+  queued: boolean;
+  onChange: (queued: boolean) => void;
+  busy?: boolean;
+}) {
+  const label = queued ? 'Queued' : 'Not queued';
+  return (
+    <button
+      type="button"
+      className={`star-btn${queued ? ' star-btn-on' : ''}`}
+      disabled={busy}
+      aria-label={`${label}. Tap to ${queued ? 'remove from' : 'add to'} your queue.`}
+      aria-pressed={queued}
+      title={`${label} — a bookmark; it does not change the ranking`}
+      data-testid="queue-control"
+      data-queued={queued ? '1' : '0'}
+      onClick={(event) => {
+        // The row itself is a button that expands; queueing must not also open it.
+        event.stopPropagation();
+        onChange(!queued);
+      }}
+    >
+      {queued ? '★' : '☆'}
     </button>
   );
 }

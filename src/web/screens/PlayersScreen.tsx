@@ -125,12 +125,11 @@ export function PlayersScreen() {
                 {p.adjustedRank == null ? '—' : Math.round(p.adjustedRank)}
               </span>
               {/*
-                A heart here, a star on the draft board — one stored value.
-                Nobody is drafting on this screen, so the question is simply who
-                you rate; heart a player now and he is queued when it opens.
+                A heart here, a star on the draft board — two different marks.
+                This one is an opinion and moves the player up your board; the
+                star over there is a bookmark and changes nothing.
               */}
               <MyGuyControl
-                icon="heart"
                 myGuy={p.myGuy ?? EMPTY_MY_GUY}
                 busy={flagging === p.id}
                 onChange={(level) => void setMyGuy(p.id, level)}
@@ -192,7 +191,6 @@ function PlayerDetailView({
       <div className="card">
         <div className="player-row-top">
           <MyGuyControl
-            icon="heart"
             myGuy={detail.myGuy ?? EMPTY_MY_GUY}
             busy={busy}
             onChange={(level) => onMyGuy(level)}

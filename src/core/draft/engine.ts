@@ -14,15 +14,14 @@ import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import { leagueFitMultipliers } from '../sleeper/scoring.ts';
 import {
   assessAvoid,
-  assessTierCliff,
   assessWait,
   myGuy,
   type AvoidTag,
   type MyGuyFlag,
   type MyGuyLevel,
-  type TierCliff,
   type WaitGuidance,
 } from './decisions.ts';
+import { NO_CLIFF, buildPositionTierMap, type PositionTierMap, type TierCliff } from './tiers.ts';
 import { computeNeed, computeScarcity, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
 import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
@@ -340,6 +339,20 @@ export function rankAvailablePlayers(
   }
 
   const picksUntilNext = ctx.nextPick == null ? 0 : Math.max(0, ctx.nextPick - ctx.currentPick);
+
+  /*
+   * Tier ladders, one per position, built once for the whole board.
+   *
+   * Every player at a position is classified from the same sorted array of
+   * still-available ADPs, so a card cannot disagree with the card above it, and
+   * a forty-row board costs one pass per position rather than one ladder per
+   * row. Recomputed on every call, which is every poll and every refresh — a
+   * cluster that empties during the draft becomes a real edge immediately.
+   */
+  const tierMaps = new Map<string, PositionTierMap>();
+  for (const [position, adps] of adpsByPosition) {
+    tierMaps.set(position, buildPositionTierMap(position, adps, { picksUntilNext }));
+  }
   const teamCount = estimateTeamCount(ctx);
   const needRamp = needUrgency(ctx.currentPick, ctx.totalPicks);
   const needWeight = round3(weights.need * needRamp);
@@ -479,20 +492,21 @@ export function rankAvailablePlayers(
     // These are judgements rather than measurements, so each one is attached to
     // the result in full: the tag the UI shows and the contribution that moved
     // the ranking come from the same object, and cannot drift apart.
-    const positionAdps = adpsByPosition.get(player.position) ?? [];
     const needScore = need?.score ?? 0.1;
 
-    const cliff = assessTierCliff({
-      position: player.position,
-      playerAdp: adp,
-      availableAdps: positionAdps,
-      picksUntilNext,
-      needScore,
-    });
+    /*
+     * Market landscape only. Roster need used to scale this, which meant the
+     * same board reported a different tier structure to two different rosters —
+     * "is there a hole in the board" is not a question about your team. Need
+     * still moves the ranking; it moves it through its own component.
+     */
+    const cliff = tierMaps.get(player.position)?.at(adp) ?? NO_CLIFF;
     components.push({
       key: 'tier_cliff',
       label: 'Tier cliff',
-      display: cliff.message ?? 'no cliff at this position yet',
+      // When the answer is "no", say what was measured. A silent "no cliff" is
+      // the one line of the breakdown that cannot be checked against the board.
+      display: cliff.message ?? describeQuietTier(player.position, cliff),
       score: round3(cliff.score),
       weight: weights.tierCliff,
       contribution: round3(cliff.score * weights.tierCliff),
@@ -579,6 +593,20 @@ export function rankAvailablePlayers(
       (a.adp ?? Number.MAX_SAFE_INTEGER) - (b.adp ?? Number.MAX_SAFE_INTEGER) ||
       a.name.localeCompare(b.name),
   );
+}
+
+/**
+ * What the tier model looked at, when it decided there was nothing to say.
+ *
+ * The spacing and the ratio are exactly the numbers the classifier used, so the
+ * breakdown can be checked against the board rather than taken on trust.
+ */
+function describeQuietTier(position: string, cliff: TierCliff): string {
+  if (cliff.gapToNext == null) return `no ${position} available after him to measure a gap against`;
+  const spacing = cliff.localMedianGap ?? cliff.positionMedianGap;
+  return `next ${position} is ~${Math.round(cliff.gapToNext)} picks later${
+    spacing == null ? '' : `, against ~${spacing} typical here`
+  }${cliff.gapRatio == null ? '' : ` (${cliff.gapRatio}x)`}`;
 }
 
 function estimateTeamCount(ctx: DraftContext): number {

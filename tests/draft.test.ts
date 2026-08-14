@@ -8,7 +8,7 @@ import {
   type AvailablePlayerInput,
 } from '../src/core/draft/engine.ts';
 import { computeNeed, computeScarcity } from '../src/core/draft/need.ts';
-import { adpSpread, estimateSurvival } from '../src/core/draft/survival.ts';
+import { SURVIVAL_BANDS, adpSpread, estimateSurvival, survivalBand } from '../src/core/draft/survival.ts';
 import { emptySignal } from '../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../src/core/evidence/types.ts';
 import { slotForRoster, slotFromPicks } from '../src/core/sleeper/transform.ts';
@@ -52,7 +52,12 @@ describe('survival estimate', () => {
   });
 
   it('is near a coin flip when ADP equals your next pick', () => {
-    expect(estimateSurvival({ adp: 22, currentPick: 10, nextPick: 22 }).probability).toBeCloseTo(0.5, 2);
+    // A shade over half, not exactly half: he was already 93% to reach the
+    // current pick, and the estimate is conditioned on his having done it.
+    const est = estimateSurvival({ adp: 22, currentPick: 10, nextPick: 22 });
+    expect(est.probability!).toBeGreaterThan(0.5);
+    expect(est.probability!).toBeLessThan(0.6);
+    expect(est.unconditional).toBeCloseTo(0.5, 2);
   });
 
   it('widens the spread for later ADPs', () => {
@@ -63,6 +68,70 @@ describe('survival estimate', () => {
     const a = estimateSurvival({ adp: 20, currentPick: 10, nextPick: 25 }).probability!;
     const b = estimateSurvival({ adp: 40, currentPick: 10, nextPick: 25 }).probability!;
     expect(b).toBeGreaterThan(a);
+  });
+});
+
+/**
+ * The four cases the brief names, plus the property that makes them coherent.
+ *
+ * The one that matters is C. A player whose ADP was fifteen picks ago and who
+ * is somehow still on the board is not 5% to last another eight picks — the
+ * board has just shown you that the room does not want him. Answering that
+ * question from the unconditional distribution is answering a question about a
+ * pick that has already happened.
+ */
+describe('survival, conditioned on the player still being there', () => {
+  it('A: a player at ADP 44 with your next pick at 48 is a real risk, not a lock', () => {
+    const est = estimateSurvival({ adp: 44, currentPick: 40, nextPick: 48 });
+    expect(est.probability!).toBeGreaterThan(0.35);
+    expect(est.probability!).toBeLessThan(0.7);
+    expect(survivalBand(est.probability)).toBe('coinflip');
+  });
+
+  it('B: the same wait for a player at ADP 78 is comfortable', () => {
+    const est = estimateSurvival({ adp: 78, currentPick: 40, nextPick: 48 });
+    expect(est.probability!).toBeGreaterThan(0.85);
+    expect(survivalBand(est.probability)).toBe('safe');
+  });
+
+  it('C: a faller still on the board is judged from now, not from his ADP', () => {
+    const est = estimateSurvival({ adp: 45, currentPick: 60, nextPick: 68 });
+    // The unconditional model has all but written him off; the board has not.
+    expect(est.unconditional!).toBeLessThan(0.1);
+    expect(est.probability!).toBeGreaterThan(0.25);
+    expect(est.note).toContain('still available at pick 60');
+  });
+
+  it('D: a nearer next pick is always likelier than a farther one', () => {
+    const near = estimateSurvival({ adp: 45, currentPick: 60, nextPick: 64 }).probability!;
+    const far = estimateSurvival({ adp: 45, currentPick: 60, nextPick: 72 }).probability!;
+    expect(near).toBeGreaterThan(far);
+  });
+
+  it('falls monotonically as the wait grows, for every player', () => {
+    for (const adp of [12, 45, 90, 150]) {
+      let last = 1;
+      for (const nextPick of [61, 64, 68, 74, 84, 100]) {
+        const p = estimateSurvival({ adp, currentPick: 60, nextPick }).probability!;
+        expect(p).toBeLessThanOrEqual(last);
+        last = p;
+      }
+    }
+  });
+
+  it('never returns a probability outside 0..1, however deep the faller', () => {
+    const est = estimateSurvival({ adp: 5, currentPick: 200, nextPick: 212 });
+    expect(est.probability!).toBeGreaterThanOrEqual(0);
+    expect(est.probability!).toBeLessThanOrEqual(1);
+    expect(Number.isNaN(est.probability!)).toBe(false);
+  });
+
+  it('colours the number from one set of bands, in one place', () => {
+    expect(survivalBand(null)).toBe('unknown');
+    expect(survivalBand(SURVIVAL_BANDS.gone)).toBe('gone');
+    expect(survivalBand(SURVIVAL_BANDS.gone + 0.01)).toBe('coinflip');
+    expect(survivalBand(SURVIVAL_BANDS.safe - 0.01)).toBe('coinflip');
+    expect(survivalBand(SURVIVAL_BANDS.safe)).toBe('safe');
   });
 });
 

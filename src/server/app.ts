@@ -542,7 +542,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         adjustedRank: adjusted,
         movement,
         signal: signals.get(row.player.id) ?? null,
-        myGuy: myGuy(flags.get(row.player.id) ?? 0),
+        myGuy: myGuy(flags.get(row.player.id)?.level ?? 0),
+        queued: flags.get(row.player.id)?.queued ?? false,
       })),
     });
   });
@@ -556,7 +557,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const seasonStart = await new SettingsRepo(db).get<string | null>(SETTING_KEYS.seasonStart, null);
     const signal = aggregatePlayerSignal(player.id, items, { seasonStart });
     const props = await new PropsRepo(db).latestForPlayers([player.id]);
-    const level = await new PlayerFlagsRepo(db).get(player.id);
+    const flag = await new PlayerFlagsRepo(db).get(player.id);
     return jsonResponse({
       player: {
         id: player.id,
@@ -570,15 +571,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       evidence: items,
       props: props.get(player.id) ?? [],
       // The user's own opinion, alongside the ledger and never mixed into it.
-      myGuy: myGuy(level),
+      myGuy: myGuy(flag.level),
+      queued: flag.queued,
     });
   });
 
   /**
-   * Mark a player as one the user personally wants — ★, ★★ or ★★★.
+   * Mark a player as one the user personally rates — ♥, ♥♥ or ♥♥♥.
    *
    * Separate from the evidence ledger by design: this is preference, not news,
-   * and the two are weighed separately by the draft engine. Level 0 clears it.
+   * and the two are weighed separately by the draft engine. It is also separate
+   * from the draft queue, which is a bookmark and moves nothing. Level 0 clears
+   * it.
    */
   router.post('/api/players/:id/my-guy', async (ctx) => {
     const body = await ctx.json<{ level?: number }>();
@@ -588,8 +592,34 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!Number.isInteger(raw) || raw < 0 || raw > 3) {
       return errorResponse('level must be 0, 1, 2 or 3', 400);
     }
-    const stored = await new PlayerFlagsRepo(ctx.env.db).set(player.id, toMyGuyLevel(raw));
-    return jsonResponse({ playerId: player.id, name: player.fullName, myGuy: myGuy(stored) });
+    const stored = await new PlayerFlagsRepo(ctx.env.db).setLevel(player.id, toMyGuyLevel(raw));
+    return jsonResponse({
+      playerId: player.id,
+      name: player.fullName,
+      myGuy: myGuy(stored.level),
+      queued: stored.queued,
+    });
+  });
+
+  /**
+   * Put a player in the draft queue, or take him out.
+   *
+   * A bookmark, nothing more: it is how the ★ filter finds the player you meant
+   * to take, and it deliberately has no effect on the ranking. Rating a player
+   * is what the heart on the players list is for.
+   */
+  router.post('/api/players/:id/queue', async (ctx) => {
+    const body = await ctx.json<{ queued?: boolean }>();
+    const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+    if (typeof body?.queued !== 'boolean') return errorResponse('queued must be true or false', 400);
+    const stored = await new PlayerFlagsRepo(ctx.env.db).setQueued(player.id, body.queued);
+    return jsonResponse({
+      playerId: player.id,
+      name: player.fullName,
+      queued: stored.queued,
+      myGuy: myGuy(stored.level),
+    });
   });
 
   // -------------------------------------------------------------- newsletter

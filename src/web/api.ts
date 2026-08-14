@@ -75,7 +75,10 @@ export interface DraftRecommendation {
   marketHeadline: string | null;
   tierCliff: TierCliff;
   avoid: AvoidTag;
+  /** Your rating from the players list. This one moves the ranking. */
   myGuy: MyGuyFlag;
+  /** Bookmarked with the ★ on this board. Deliberately no effect on ranking. */
+  queued: boolean;
   wait: WaitGuidance;
 }
 
@@ -93,6 +96,12 @@ export interface TierCliff {
   remainingInTier: number;
   gapToNextTier: number | null;
   survivingTierMates: number;
+  /** Picks to the next available player at the position. */
+  gapToNext: number | null;
+  /** That gap over the spacing around it — how anomalous the hole is. */
+  gapRatio: number | null;
+  localMedianGap: number | null;
+  positionMedianGap: number | null;
   score: number;
   message: string | null;
 }

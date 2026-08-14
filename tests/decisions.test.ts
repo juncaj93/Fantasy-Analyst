@@ -12,107 +12,17 @@ import { describe, expect, it } from 'vitest';
 import {
   DECISION_THRESHOLDS,
   assessAvoid,
-  assessTierCliff,
   assessWait,
-  buildPositionTiers,
   myGuy,
   rosterAlerts,
-  tierBreakGap,
   toMyGuyLevel,
 } from '../src/core/draft/decisions.ts';
+import { assessTierCliff } from '../src/core/draft/tiers.ts';
 import { computeNeed } from '../src/core/draft/need.ts';
 import { buildRosterShape } from '../src/core/sleeper/scoring.ts';
 
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'BN', 'BN']);
 const needsFor = (counts: Record<string, number>) => computeNeed(SHAPE, counts);
-
-describe('tiers', () => {
-  it('scales the gap that separates tiers with draft position', () => {
-    // Eight picks is a chasm at the top of the board and noise at the bottom.
-    expect(tierBreakGap(10)).toBe(DECISION_THRESHOLDS.tiers.minGap);
-    expect(tierBreakGap(200)).toBeGreaterThan(DECISION_THRESHOLDS.tiers.minGap);
-  });
-
-  it('groups players with no meaningful gap between them', () => {
-    const tiers = buildPositionTiers([10, 12, 14, 45, 47, 90]);
-    expect(tiers).toHaveLength(3);
-    expect(tiers[0]!.adps).toEqual([10, 12, 14]);
-    expect(tiers[1]!.adps).toEqual([45, 47]);
-    expect(tiers[2]!.adps).toEqual([90]);
-    expect(tiers[0]!.gapToNext).toBe(31);
-    expect(tiers[2]!.gapToNext).toBeNull();
-  });
-
-  it('treats an unbroken run as one tier', () => {
-    expect(buildPositionTiers([20, 22, 24, 26, 28])).toHaveLength(1);
-  });
-
-  it('says nothing without an ADP', () => {
-    const cliff = assessTierCliff({
-      position: 'TE',
-      playerAdp: null,
-      availableAdps: [10, 40],
-      picksUntilNext: 20,
-      needScore: 1,
-    });
-    expect(cliff.severity).toBe('none');
-    expect(cliff.message).toBeNull();
-  });
-});
-
-describe('tier cliffs', () => {
-  /** The brief's own example: the last TE before a long gap, at a position you need. */
-  it('flags the last player in a tier when the next group is far away', () => {
-    const cliff = assessTierCliff({
-      position: 'TE',
-      playerAdp: 40,
-      availableAdps: [40, 62, 66, 70],
-      picksUntilNext: 18,
-      needScore: 1,
-    });
-    expect(cliff.severity).toBe('last_in_tier');
-    expect(cliff.message).toContain('Last TE in this tier');
-    expect(cliff.message).toContain('22 picks later');
-    expect(cliff.score).toBeGreaterThan(0.5);
-  });
-
-  it('stays quiet when the position runs deep past your next pick', () => {
-    const cliff = assessTierCliff({
-      position: 'WR',
-      playerAdp: 30,
-      availableAdps: [30, 33, 36, 39, 42, 45, 48, 51, 54],
-      picksUntilNext: 10,
-      needScore: 1,
-    });
-    expect(cliff.severity).toBe('none');
-    expect(cliff.message).toBeNull();
-  });
-
-  it('stays quiet when your next pick is imminent', () => {
-    // Nothing can fall off a cliff in two picks.
-    const cliff = assessTierCliff({
-      position: 'TE',
-      playerAdp: 40,
-      availableAdps: [40, 62, 66],
-      picksUntilNext: 2,
-      needScore: 1,
-    });
-    expect(cliff.severity).toBe('none');
-  });
-
-  it('matters less at a position that is already covered', () => {
-    const input = {
-      position: 'TE' as const,
-      playerAdp: 40,
-      availableAdps: [40, 62, 66, 70],
-      picksUntilNext: 18,
-    };
-    const needed = assessTierCliff({ ...input, needScore: 1 });
-    const covered = assessTierCliff({ ...input, needScore: 0.1 });
-    expect(covered.severity).toBe('last_in_tier');
-    expect(covered.score).toBeLessThan(needed.score);
-  });
-});
 
 describe('the automatic AVOID tag', () => {
   it('fires at the configured lifetime threshold and not one point above it', () => {
@@ -173,7 +83,6 @@ describe('can this player wait', () => {
     playerAdp: 30,
     availableAdps: [30, 33, 36, 39, 42, 45, 48],
     picksUntilNext: 8,
-    needScore: 0.5,
   });
 
   const base = { cliff: quiet, needScore: 0.5, expectedRemaining: 5, position: 'WR', nextPick: 40 };
@@ -204,10 +113,10 @@ describe('can this player wait', () => {
     const cliff = assessTierCliff({
       position: 'TE',
       playerAdp: 40,
-      availableAdps: [40, 70, 74],
+      availableAdps: [40, 70, 74, 78, 82, 86],
       picksUntilNext: 18,
-      needScore: 1,
     });
+    expect(cliff.severity).toBe('last_in_tier');
     const guidance = assessWait({
       survivalProbability: 0.7,
       cliff,
@@ -224,9 +133,8 @@ describe('can this player wait', () => {
     const cliff = assessTierCliff({
       position: 'TE',
       playerAdp: 40,
-      availableAdps: [40, 70, 74],
+      availableAdps: [40, 70, 74, 78, 82, 86],
       picksUntilNext: 18,
-      needScore: 0.1,
     });
     expect(assessWait({ survivalProbability: 0.7, cliff, needScore: 0.1, expectedRemaining: 2, position: 'TE', nextPick: 58 }).state).toBe(
       'can_probably_wait',
