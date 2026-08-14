@@ -620,9 +620,27 @@ export function rankAvailablePlayers(
 
   applySeparation(recommendations);
 
-  // Deterministic ordering: total desc, then ADP asc, then name.
+  /*
+   * Priced players first, then by total, then by ADP, then by name.
+   *
+   * The first key is a policy rather than arithmetic, and it is there because
+   * the arithmetic alone gets this badly wrong. Market value is measured
+   * against the pick on the clock, so at pick 1 a player with an ADP of 245
+   * scores heavily negative — he is a huge reach right now — while a player
+   * with no ADP at all scores exactly zero, because an unknown contributes
+   * nothing. Sorting on the total alone therefore floats every anonymous player
+   * above every genuinely-ranked one who happens to be going later, and the
+   * board opens with names nobody has heard of. Measured on a 305-player pool,
+   * the first unpriced player came second.
+   *
+   * The honest reading of a missing ADP is "we cannot price him", and the
+   * conservative thing to do with a player we cannot price is to rank him after
+   * the players we can. He keeps his real score, shows `ADP —`, and is marked
+   * degraded; what he does not get is a place he earned only by being unknown.
+   */
   return recommendations.sort(
     (a, b) =>
+      Number(a.adp == null) - Number(b.adp == null) ||
       b.total - a.total ||
       (a.adp ?? Number.MAX_SAFE_INTEGER) - (b.adp ?? Number.MAX_SAFE_INTEGER) ||
       a.name.localeCompare(b.name),

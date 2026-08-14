@@ -68,20 +68,24 @@ const QUEUE_FILTER = '★';
 const ALL_FILTER = 'ALL';
 
 /**
- * How many rows the board is, and how many it fetches to search through.
+ * How many ranked rows the board asks for.
  *
- * The board itself is the top forty — that is what a drafter reads. A search
- * asks for a deeper slice because the man being looked for may be ranked 130th,
- * and the ranking is computed over the whole pool either way, so the limit only
- * decides how many come back.
+ * All of them, now. This used to be forty, widening to 250 only while a search
+ * was open, on the theory that nobody reads past the fortieth player. That was
+ * wrong in the way that matters: by the middle of a draft the fortieth
+ * *available* player is around ADP 78, so the board stopped there — and it
+ * stopped silently, looking exactly like the end of the player universe rather
+ * than the end of a page. A draft assistant that cannot show you the eleventh
+ * round is no use in the eleventh round.
  *
- * The collapsed board is capped at `BOARD_ROWS` whichever response happens to
- * be in hand. Without that, clearing the field showed all 250 for the moment
- * before the shallow refetch landed — a list flashing to six times its length
- * and back is the kind of thing a phone notices and a test catches.
+ * The server ranks every available player either way; this number only ever
+ * decided how many of the scored rows came back. So it now asks for the whole
+ * scored set and lets the one cap that exists for a reason — `MAX_CANDIDATES`
+ * on the server, which bounds how many players are scored at all — be the only
+ * cap. It is deliberately a little above that, so the client is never the thing
+ * doing the truncating.
  */
-const BOARD_ROWS = 40;
-const SEARCH_ROWS = 250;
+const BOARD_ROWS = 400;
 
 export function DraftScreen({
   leagues,
@@ -134,22 +138,12 @@ export function DraftScreen({
   const inFlight = useRef(false);
 
   const load = useCallback(
-    async (pos: string, deep: boolean) => {
+    async (pos: string) => {
       if (!draftId) return;
       setLoading(true);
       try {
         const filter = pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
-        /*
-         * A search asks about the whole pool, not the top forty.
-         *
-         * The ranking is computed over every available player either way — the
-         * limit only decides how many of them are sent — so asking for a deeper
-         * slice while a query is active costs the server nothing and is what
-         * makes it possible to find the man ranked 130th. It goes back to forty
-         * the moment the field is cleared.
-         */
-        const limit = deep ? SEARCH_ROWS : BOARD_ROWS;
-        setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${limit}${filter}`));
+        setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`));
         setUpdatedAt(Date.now());
         setError(null);
       } catch (err) {
@@ -162,13 +156,15 @@ export function DraftScreen({
   );
 
   /*
-   * Refetched when the filter changes, and once when a search begins or ends —
-   * not on every keystroke. What the user types filters rows that are already
-   * here; only the depth of the slice needs the server.
+   * Refetched when the filter changes, and only then.
+   *
+   * Typing no longer touches the server at all. It used to, because the board
+   * was fetched forty rows deep and a search had to go back for more; now the
+   * whole scored board is already here and the query filters what is drawn.
    */
   useEffect(() => {
-    void load(position, searching);
-  }, [load, position, searching]);
+    void load(position);
+  }, [load, position]);
 
   /* Tapping Draft while already on Draft clears the search and nothing else. */
   useEffect(() => {
@@ -198,7 +194,7 @@ export function DraftScreen({
       setFlagging(playerId);
       try {
         await api.post<{ queued: boolean }>(`/api/players/${playerId}/queue`, { queued });
-        if (position === QUEUE_FILTER) await load(position, searching);
+        if (position === QUEUE_FILTER) await load(position);
         else
           setBoard((current) =>
             current
@@ -244,7 +240,7 @@ export function DraftScreen({
         // server nominates; a finished one stops asking.
         setPollSeconds(res.pollIntervalSeconds > 0 ? res.pollIntervalSeconds : 0);
       }
-      await load(position, searching);
+      await load(position);
       setNow(Date.now());
       setError(null);
     } catch (err) {
@@ -273,7 +269,7 @@ export function DraftScreen({
       try {
         const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
         if (cancelled) return;
-        await load(position, searching);
+        await load(position);
         if (cancelled) return;
         setNow(Date.now());
         if (res.pollIntervalSeconds <= 0) setPollSeconds(0);
@@ -324,10 +320,17 @@ export function DraftScreen({
    * between two rows that are not adjacent on the board would be claiming a
    * boundary that is not there.
    */
-  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching)
-    .filter((item) => matchesQuery(item.rec.name, query))
-    // Capped unless a search is asking for the depth: see BOARD_ROWS.
-    .slice(0, searching ? SEARCH_ROWS : BOARD_ROWS);
+  /*
+   * Everything the server sent, in order. No slice.
+   *
+   * There used to be a second cap here, forty rows deep, which meant that even
+   * a response carrying the whole board was cut back down before it was drawn.
+   * Removing only the request limit would have left this one quietly doing the
+   * same damage.
+   */
+  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
+    matchesQuery(item.rec.name, query),
+  );
 
   return (
     <>

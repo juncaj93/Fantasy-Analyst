@@ -238,6 +238,23 @@ export interface DraftBoard {
   rosterProgress: SlotProgress[];
   round: number;
   startablePositions: string[];
+  /**
+   * How many players survived each stage that can lose one.
+   *
+   * Not drawn on the board — it is read by the production probe, which is what
+   * makes a silently truncated pool visible instead of plausible.
+   */
+  poolHealth: {
+    activeEligible: number;
+    drafted: number;
+    scored: number;
+    returned: number;
+    withAdp: number;
+    withoutAdp: number;
+    deepestAdp: number | null;
+    byPosition: Record<string, number>;
+    cap: number;
+  };
   warnings: string[];
 }
 
