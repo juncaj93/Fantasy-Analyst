@@ -17,6 +17,7 @@ import {
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
+import { InstallPanel } from '../components/install.tsx';
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import {
@@ -92,6 +93,7 @@ export function SetupScreen({
       )}
 
       <AppearanceCard />
+      <InstallPanel />
 
       {status.steps.map((step) => (
         <button

@@ -75,6 +75,10 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.map': 'application/json',
   '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  // iOS will parse a manifest served as text/plain, but a wrong type here
+  // would hide a wrong type in production, and the e2e suite checks it.
+  '.webmanifest': 'application/manifest+json',
 };
 
 const distDir = join(root, 'dist/web');

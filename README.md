@@ -102,6 +102,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, identity ladder, engines |
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
+| [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
 
 ## Tests

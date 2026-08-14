@@ -183,6 +183,20 @@ jobs:
 
           exit $fail
 
+      # Whether the deployed site can be added to an iPhone Home Screen as a
+      # standalone app. iOS decides this silently — a missing icon or a manifest
+      # served with the wrong content type produces a bookmark that opens in a
+      # Safari tab, with no error anywhere — so it is checked here rather than
+      # discovered on a phone. See docs/IOS_WEB_APP.md.
+      - name: Check it can be installed to the Home Screen
+        run: |
+          url="${{ steps.deploy.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "::warning::No site address; skipping the install checks."
+            exit 0
+          fi
+          node scripts/probe-pwa.mjs "$url"
+
       - name: Load the NFL player list on first run
         id: bootstrap
         continue-on-error: true

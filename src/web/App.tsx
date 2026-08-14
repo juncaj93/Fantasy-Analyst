@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
+import { InstallPrompt } from './components/install.tsx';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
@@ -95,6 +96,8 @@ export function App() {
     <div className="app">
       <main className="app-main">
         {error ? <Notice tone="error">{error}</Notice> : null}
+        {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
+        <InstallPrompt />
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
