@@ -11,10 +11,13 @@ import type {
   MarketKey,
   RawPropQuote,
   RawPropSet,
+  SeasonMarketKey,
+  SeasonMarketQuote,
+  SeasonMarketSet,
   VegasGame,
   VegasProvider,
 } from './types.ts';
-import { MARKET_KEYS } from './types.ts';
+import { MARKET_KEYS, SEASON_MARKET_KEYS } from './types.ts';
 
 export interface MockRoster {
   eventId: string;
@@ -42,6 +45,28 @@ const BASE_LINE: Record<MarketKey, number> = {
   receptions: 4.5,
   receiving_yards: 55,
   anytime_td: 0,
+};
+
+/**
+ * Season-long equivalents, so the draft-side pipeline has something to run on
+ * in development. Same hash, same determinism, and the same `mock` provider
+ * name everywhere so nothing can mistake these for real market expectations.
+ */
+const SEASON_MARKETS_BY_POSITION: Record<string, SeasonMarketKey[]> = {
+  QB: ['season_pass_yards', 'season_pass_tds', 'season_rush_yards'],
+  RB: ['season_rush_yards', 'season_rush_tds', 'season_receptions', 'season_receiving_yards'],
+  WR: ['season_receiving_yards', 'season_receptions', 'season_receiving_tds'],
+  TE: ['season_receiving_yards', 'season_receptions', 'season_receiving_tds'],
+};
+
+const SEASON_BASE_LINE: Record<SeasonMarketKey, number> = {
+  season_pass_yards: 3950,
+  season_pass_tds: 26.5,
+  season_rush_yards: 780,
+  season_rush_tds: 7.5,
+  season_receptions: 68.5,
+  season_receiving_yards: 880,
+  season_receiving_tds: 6.5,
 };
 
 function jitter(seed: string, spread: number): number {
@@ -115,6 +140,50 @@ export class MockVegasProvider implements VegasProvider {
       fetchedAt: new Date().toISOString(),
       quotes,
       raw: { mock: true, eventId, playerCount: game?.players.length ?? 0 },
+    };
+  }
+
+  /**
+   * Season-long totals for every player in the mock slate.
+   *
+   * Rounded the way a book rounds them — whole yards, half touchdowns — so the
+   * formatting the draft card has to do is the formatting it would really do.
+   */
+  async getSeasonPlayerMarkets(
+    season: string,
+    markets: SeasonMarketKey[] = SEASON_MARKET_KEYS,
+  ): Promise<SeasonMarketSet> {
+    const wanted = new Set(markets);
+    const quotes: SeasonMarketQuote[] = [];
+    const seen = new Set<string>();
+
+    for (const game of this.games) {
+      for (const player of game.players) {
+        if (seen.has(player.name)) continue;
+        seen.add(player.name);
+        for (const market of SEASON_MARKETS_BY_POSITION[player.position] ?? []) {
+          if (!wanted.has(market)) continue;
+          const seed = `${season}|${player.name}|${market}`;
+          const raw = SEASON_BASE_LINE[market] * (1 + jitter(seed, 0.3));
+          quotes.push({
+            playerName: player.name,
+            market,
+            line: raw >= 100 ? Math.round(raw) : roundToHalf(raw),
+            overPrice: -110 + Math.round(jitter(seed, 8)),
+            underPrice: -110 - Math.round(jitter(seed, 8)),
+            book: this.name,
+          });
+        }
+      }
+    }
+
+    return {
+      provider: this.name,
+      season,
+      fetchedAt: new Date().toISOString(),
+      quotes,
+      note: quotes.length === 0 ? 'no mock players configured' : null,
+      raw: { mock: true, season, playerCount: seen.size },
     };
   }
 

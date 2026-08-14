@@ -7,6 +7,7 @@
  */
 
 import type { VegasProvider } from '../../core/vegas/types.ts';
+import { SeasonMarketService } from './seasonMarketService.ts';
 import {
   adpFormatForLeague,
   buildScoringProfile,
@@ -107,6 +108,16 @@ export interface SetupStatus {
     lastRefreshedAt: string | null;
     events: number;
     note: string;
+    /** Season-long market coverage, for the draft. */
+    season: {
+      season: string;
+      players: number;
+      quotes: number;
+      unresolved: number;
+      fetchedAt: string | null;
+      stale: boolean;
+      reason: string;
+    };
   };
 }
 
@@ -119,6 +130,7 @@ export class SetupService {
   private readonly props: PropsRepo;
   private readonly settings: SettingsRepo;
   private readonly newsletter: NewsletterService;
+  private readonly seasonMarkets: SeasonMarketService;
 
   constructor(
     private readonly db: Database,
@@ -126,6 +138,7 @@ export class SetupService {
     /** Inbound address from the deployment config, if any. */
     private readonly configuredInboundAddress: string | null,
   ) {
+    this.seasonMarkets = new SeasonMarketService(db, vegas);
     this.players = new PlayerRepo(db);
     this.leagues = new LeagueRepo(db);
     this.adp = new AdpRepo(db);
@@ -143,6 +156,7 @@ export class SetupService {
   }
 
   async status(): Promise<SetupStatus> {
+    const seasonStatus = await this.seasonMarkets.status();
     const [playerCount, rankedPlayers, league, snapshot, newsletter, vegasFreshness] = await Promise.all([
       this.players.count(),
       this.players.countRanked(),
@@ -264,6 +278,15 @@ export class SetupService {
           this.vegas.name === 'mock'
             ? 'Practice data only. Start/sit advice will say when a real line is missing rather than guessing.'
             : 'Live betting lines are connected.',
+        season: {
+          season: seasonStatus.season,
+          players: seasonStatus.players,
+          quotes: seasonStatus.quotes,
+          unresolved: seasonStatus.unresolved,
+          fetchedAt: seasonStatus.fetchedAt,
+          stale: seasonStatus.stale,
+          reason: seasonStatus.reason,
+        },
       },
     };
   }

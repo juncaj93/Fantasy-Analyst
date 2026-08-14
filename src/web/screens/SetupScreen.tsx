@@ -1112,6 +1112,33 @@ function VegasPanel({ status }: { status: SetupStatus }) {
           Practice data last updated {formatAge(status.vegas.lastRefreshedAt)} across {status.vegas.events} game(s).
         </div>
       ) : null}
+
+      {/*
+        Season-long markets are what the draft would use. They are reported
+        separately from the weekly game lines because they are a different
+        question with a different answer — and today, for this provider, the
+        answer is that it does not publish them.
+      */}
+      <div className="section-title">Season outlook ({status.vegas.season.season})</div>
+      <div className="faint" data-testid="season-market-health">
+        {status.vegas.season.quotes > 0 ? (
+          <>
+            {status.vegas.season.quotes} market line{status.vegas.season.quotes === 1 ? '' : 's'} across{' '}
+            {status.vegas.season.players} player{status.vegas.season.players === 1 ? '' : 's'}
+            {status.vegas.season.unresolved > 0
+              ? `, ${status.vegas.season.unresolved} on names that could not be matched to a player`
+              : ''}
+            . Updated {formatAge(status.vegas.season.fetchedAt)}
+            {status.vegas.season.stale ? ' — out of date, so the draft is not using it' : ''}.
+          </>
+        ) : (
+          <>Nothing stored. {status.vegas.season.reason}</>
+        )}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        When a season line exists for a player, the draft shows it on his card and lets it nudge the ranking
+        a little. When it does not, the card says nothing rather than guessing.
+      </div>
     </div>
   );
 }

@@ -69,10 +69,22 @@ export interface DraftRecommendation {
   reasons: string[];
   counterpoints: string[];
   degraded: boolean;
+  /** What the season-long market expects, in this league's points. */
+  marketBaseline: MarketBaseline | null;
+  /** The one-line form of it, e.g. "1,085 rec yds · 84 rec". */
+  marketHeadline: string | null;
   tierCliff: TierCliff;
   avoid: AvoidTag;
   myGuy: MyGuyFlag;
   wait: WaitGuidance;
+}
+
+export interface MarketBaseline {
+  points: number | null;
+  coverage: number;
+  contributions: { market: string; line: number; points: number; detail: string }[];
+  missing: string[];
+  note: string;
 }
 
 export interface TierCliff {
@@ -304,7 +316,22 @@ export interface SetupStatus {
     unresolved: number;
   };
   newsletter: NewsletterStatus;
-  vegas: { provider: string; live: boolean; lastRefreshedAt: string | null; events: number; note: string };
+  vegas: {
+    provider: string;
+    live: boolean;
+    lastRefreshedAt: string | null;
+    events: number;
+    note: string;
+    season: {
+      season: string;
+      players: number;
+      quotes: number;
+      unresolved: number;
+      fetchedAt: string | null;
+      stale: boolean;
+      reason: string;
+    };
+  };
 }
 
 export interface LeagueSummary {

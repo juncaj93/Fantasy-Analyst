@@ -460,6 +460,19 @@ function RecommendationRow({
             </span>
           ) : null}
         </div>
+
+        {/*
+          What the market expects of him this season, in the market's own units.
+          One line, no prices, no book names, no over/under language — this is
+          information about expected production, not an invitation to bet. It
+          appears only when a real line exists; an empty placeholder would cost
+          the same space and say nothing.
+        */}
+        {rec.marketHeadline ? (
+          <div className="market-line" data-testid="market-line">
+            <span className="market-label">Market</span> {rec.marketHeadline}
+          </div>
+        ) : null}
       </button>
 
       {expanded ? <DraftPlayerDetail rec={rec} /> : null}
@@ -491,7 +504,12 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
   const topReasons = reasons.slice(0, REASONS_SHOWN);
   const moreReasons = reasons.slice(REASONS_SHOWN);
   const cliffNote = saidAlready(rec.tierCliff.message, said) ? null : rec.tierCliff.message;
-  const hasContext = !!cliffNote || rec.news30Net !== 0 || rec.news7Net !== 0 || rec.myGuy.level > 0;
+  const hasContext =
+    !!cliffNote ||
+    rec.news30Net !== 0 ||
+    rec.news7Net !== 0 ||
+    rec.myGuy.level > 0 ||
+    rec.marketBaseline?.points != null;
 
   return (
     <div className="explain" data-testid="player-detail">
@@ -564,6 +582,12 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
                 <span className="metric">
                   7d <Signal net={rec.news7Net} label="news, last 7 days" />
                 </span>
+              </div>
+            ) : null}
+            {rec.marketBaseline?.points != null ? (
+              <div className="muted" data-testid="market-baseline">
+                Season market implies <strong>{rec.marketBaseline.points}</strong> points in this league&rsquo;s
+                scoring — {rec.marketBaseline.note}.
               </div>
             ) : null}
             {rec.myGuy.level > 0 ? (

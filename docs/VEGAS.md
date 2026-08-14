@@ -44,6 +44,49 @@ no receptions or touchdown markets; those identifiers follow the same naming
 scheme and are mapped, and a market that never appears simply produces no
 quotes rather than an error.
 
+## Season-long markets: the provider does not have them
+
+The draft wants season totals — "1,085 receiving yards, 84 receptions" — rather
+than Sunday's line. SportsGameOdds does not publish any. Established by probe,
+not by assumption, on 14 August 2026:
+
+- **`type` accepts only `match`, `prop` and `tournament`.** Anything else is a
+  400 with that message.
+- **`prop` and `tournament` are both empty for the NFL**, over the whole year,
+  with and without `oddsAvailable`.
+- **Every NFL event is a single game**, including everything dated past the end
+  of the regular season.
+- **The market catalogue settles it.** `/v2/markets?leagueID=NFL` returns 148
+  active markets across periods `game`, `1h`, `2h`, `1q`–`4q` and `reg`. Not one
+  season period, and nothing season-shaped in any market name.
+
+So the app asks, stores what comes back, and shows nothing when nothing does.
+`SportsGameOddsProvider.getSeasonPlayerMarkets` returns an empty set carrying
+that reason — which is a different fact from a failed request, and is reported
+as such in Setup under "Season outlook". `INBOUND_SEASON_MARKETS` and
+`SEASON_PERIODS` in the adapter are where a season market would land if one ever
+appeared; nothing else would have to change.
+
+`reg` is deliberately **not** treated as a season period: it is regulation time
+within a game, and reading it as a season would turn a 28.5-yard line into a
+season total.
+
+### What a regular-season game does carry
+
+Worth recording, because this is what the weekly Start/Sit layer will live on.
+From a live 10 September fixture:
+
+`passing_yards`, `passing_touchdowns`, `passing_interceptions`, `rushing_yards`,
+`receiving_yards`, `receiving_receptions`, `touchdowns` (both `ou` and `yn`),
+`firstTouchdown`, `defense_interceptions` — all on named players, all at
+`periodID = game`.
+
+The catalogue also offers **`fantasyScore`** ("Player Fantasy Score
+Over/Under", active on 172 events), which is a market on a player's fantasy
+points directly. It is not wired up: the book's scoring is not this league's
+scoring, so it would need treating as its own signal rather than as a
+projection. It is the most promising thing to add to the weekly layer.
+
 ## Enabling SportsGameOdds
 
 The repository secret `SPORTSGAMEODDS_API_KEY` already exists and is valid —
@@ -55,11 +98,22 @@ the probe authenticated with it. To turn the provider on:
    ```
 2. Set `VEGAS_PROVIDER = "sportsgameodds"` in `wrangler.toml` and redeploy.
 
-Still worth checking on the first live Sunday, because the sampled event was
-preseason: that regular-season games carry `receptions` and anytime-touchdown
-markets under the identifiers in `INBOUND_MARKETS`, and that a full slate stays
-inside the free plan's 2,500 objects a month. The cache layer, not the adapter,
-decides when a fetch is allowed, so the lever for that is the refresh cadence.
+The first of those checks is now done: regular-season games do carry
+`receiving_receptions` and `touchdowns` under the identifiers in
+`INBOUND_MARKETS`.
+
+**The quota one is not, and it is the reason the provider is still off.** A
+regular-season event carries on the order of 200 odds objects, and a full
+Sunday slate is sixteen of them — roughly 3,200 objects for one refresh,
+against a free plan of 2,500 a month. Two scheduled refreshes a week would
+spend the month's allowance in the first weekend. Before flipping
+`VEGAS_PROVIDER`, the refresh has to stop fetching the whole slate: fetch only
+the events the user's own players are in, on demand, and let the cache serve
+everything else. The cache layer, not the adapter, decides when a fetch is
+allowed, so that is where the change goes.
+
+Season-long markets cost nothing to leave on: there are none to fetch, the
+result is cached for a day, and the two requests it makes are small.
 
 ## Verify before enabling a live provider
 

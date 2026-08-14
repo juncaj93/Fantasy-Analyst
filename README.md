@@ -42,9 +42,12 @@ adopted rather than migrated.
 
 ## What it does
 
-**Draft Room** — ranks available players from live Sleeper draft state, showing
-ADP, ADP value, survival-to-your-next-pick, news signal, roster need,
-positional scarcity and league fit. Tap any player for the conclusion, the four
+**Draft Room** — ranks available players from live Sleeper draft state on a
+best-player-available basis: market value leads, the news tally and your own
+★ flags matter, and roster need is a light contextual tiebreaker rather than a
+reason to reach. Each card carries ADP, ADP value, the colour-coded chance he
+is still there at your next pick, the news signal, and the season market
+expectation where one exists. Tap any player for the conclusion, the four
 numbers behind it, the strongest reasons and the best counterpoint; every
 component score, its weight and its contribution stay one disclosure further in
 under **Advanced breakdown**. The header's ↻ force-syncs the latest picks from

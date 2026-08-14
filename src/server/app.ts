@@ -50,6 +50,7 @@ import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
+import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 
 export interface AppEnv extends AuthEnv {
@@ -884,6 +885,25 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       fetchedAt: freshness.fetchedAt,
       events: freshness.events,
     });
+  });
+
+  /**
+   * Season-long market refresh, for the draft.
+   *
+   * Rate limited alongside the weekly refresh and gated by its own daily TTL,
+   * because season totals move over weeks and every fetch is quota the live
+   * Sunday will want back. `force=1` skips the TTL, never the cooldown.
+   */
+  router.post('/api/vegas/season/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('vegas-season');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
+    const service = new SeasonMarketService(ctx.env.db, ctx.env.vegas);
+    return jsonResponse(await service.refresh({ force: ctx.url.searchParams.get('force') === '1' }));
+  });
+
+  router.get('/api/vegas/season', async (ctx) => {
+    const service = new SeasonMarketService(ctx.env.db, ctx.env.vegas);
+    return jsonResponse(await service.status());
   });
 
   router.post('/api/vegas/refresh', async (ctx) => {

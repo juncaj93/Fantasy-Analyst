@@ -1619,6 +1619,32 @@ table.compact tr:last-child td {
 }
 
 /*
+ * What the market expects of him this season.
+ *
+ * Neutral by construction: a quiet label, the numbers in the market's own
+ * units, and nothing that looks like a price or a bet. It is one line under the
+ * metadata, and it is absent rather than empty when nobody has quoted him.
+ */
+.market-line {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text-faint);
+  margin-right: 3px;
+}
+
+/*
  * The chance he lasts, as the urgency interface.
  *
  * Red is "he will not be there", amber is a coin flip, green is "there is

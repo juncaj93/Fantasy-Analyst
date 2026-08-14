@@ -77,9 +77,11 @@ test.describe('draft room', () => {
     expect(body).not.toContain('league and draft order');
     expect(body, 'the roster block became one line').not.toContain('starting slots still open');
 
-    // …and it is still reachable where configuration lives.
+    // …and it is still reachable where configuration lives. (The label depends
+    // on which rankings are loaded; what matters is that the step reports the
+    // draft order it is using.)
     await page.getByTestId('tab-setup').click();
-    await expect(page.getByTestId('setup-step-adp')).toContainText('Demo Sleeper ADP');
+    await expect(page.getByTestId('setup-step-adp')).toContainText('players matched');
   });
 
   test('says how much of a starting lineup you have, in one line', async ({ page }) => {
@@ -147,6 +149,34 @@ test.describe('draft room', () => {
       ...new Set(nodes.map((n) => getComputedStyle(n).color)),
     ]);
     expect(colours.length).toBeGreaterThan(1);
+  });
+
+  /**
+   * Market context, where it exists.
+   *
+   * The seeded slate prices a few players and not others, which is exactly the
+   * real state of affairs: a card carries the line when there is one and says
+   * nothing when there is not, rather than holding space for an absent number.
+   */
+  test('shows the season market on the cards that have one, and nothing on the ones that do not', async ({
+    page,
+  }) => {
+    const rows = page.getByTestId('recommendation-row');
+    const withMarket = rows.filter({ has: page.getByTestId('market-line') });
+    expect(await withMarket.count(), 'the demo slate prices some players').toBeGreaterThan(0);
+    expect(await withMarket.count(), 'and not all of them').toBeLessThan(await rows.count());
+
+    const line = await withMarket.first().getByTestId('market-line').innerText();
+    // Units, not odds: no prices, no book names, no betting language.
+    expect(line.toLowerCase()).toMatch(/rec|yds|tds?|catches|pass|rush/);
+    expect(line).not.toMatch(/[+-]\d{3}/);
+    for (const word of ['odds', 'over/under', 'bet', 'wager', 'book']) {
+      expect(line.toLowerCase()).not.toContain(word);
+    }
+
+    // Expanded, the same market says what it is worth in this league's points.
+    await withMarket.first().locator('.row-button').click();
+    await expect(withMarket.first().getByTestId('market-baseline')).toContainText('points in this league');
   });
 
   test('colour-codes positions without losing the letters', async ({ page }) => {

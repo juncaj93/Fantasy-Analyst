@@ -25,6 +25,8 @@ import {
 } from './decisions.ts';
 import { computeNeed, computeScarcity, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
+import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
+import type { SeasonMarketKey } from '../vegas/types.ts';
 
 export interface DraftComponentWeights {
   marketValue: number;
@@ -38,6 +40,8 @@ export interface DraftComponentWeights {
   /** The last 7 days: acceleration on top of the trend. */
   news7: number;
   survivalUrgency: number;
+  /** What the season-long betting market expects of him, in this league's points. */
+  marketExpectation: number;
   /** How far the user's own ★ flag can move a player. */
   myGuy: number;
   /** Extra caution on a player the accumulated research is against. */
@@ -83,6 +87,13 @@ export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   news30: 0.2,
   news7: 0.12,
   survivalUrgency: 0.22,
+  // A second opinion on how good the player is, from people with money on it —
+  // and deliberately a smaller voice than the draft market itself. At full
+  // strength this is about four picks of ADP: enough to separate two players
+  // the board rates the same, never enough to reorder the board on its own.
+  // It is also scaled by coverage, so a baseline built from one market out of
+  // three moves a player less than a complete one.
+  marketExpectation: 0.2,
   // At full strength (★★★) this contributes 0.5 — about ten picks of ADP, the
   // "modest reach" the brief asks for and no more.
   myGuy: 0.5,
@@ -138,6 +149,13 @@ export interface AvailablePlayerInput {
   signal: PlayerSignal | null;
   /** The user's own ★ flag, 0 when they have not marked this player. */
   myGuyLevel?: MyGuyLevel;
+  /**
+   * Season-long market lines for this player, already resolved to him.
+   *
+   * Absent means the market has not priced him — which is not the same as
+   * pricing him at zero, and is scored as unknown.
+   */
+  seasonMarkets?: { market: SeasonMarketKey; line: number | null }[];
 }
 
 export interface DraftContext {
@@ -190,6 +208,12 @@ export interface DraftRecommendation {
   counterpoints: string[];
   /** True when a key input (ADP) was missing. */
   degraded: boolean;
+  /**
+   * What the season-long market expects of him, in this league's points, and
+   * the one-line form of it a card shows. Null when nothing is priced.
+   */
+  marketBaseline: MarketBaseline | null;
+  marketHeadline: string | null;
   /** Whether the position is about to fall off a tier. */
   tierCliff: TierCliff;
   /** The automatic caution from accumulated research. */
@@ -320,6 +344,27 @@ export function rankAvailablePlayers(
   const needRamp = needUrgency(ctx.currentPick, ctx.totalPicks);
   const needWeight = round3(weights.need * needRamp);
 
+  /*
+   * Market baselines, computed once for the whole pool.
+   *
+   * A player's season expectation only means something next to the other
+   * players at his position — a thousand receiving yards is ordinary for a
+   * receiver and exceptional for a tight end — so the comparison pool is built
+   * here rather than per player.
+   */
+  const baselines = new Map<string, MarketBaseline>();
+  const poolByPosition = new Map<string, number[]>();
+  for (const entry of available) {
+    if (!entry.seasonMarkets || entry.seasonMarkets.length === 0) continue;
+    const baseline = seasonBaseline(entry.player.position, entry.seasonMarkets, ctx.profile);
+    baselines.set(entry.player.id, baseline);
+    if (baseline.points != null) {
+      const list = poolByPosition.get(entry.player.position);
+      if (list) list.push(baseline.points);
+      else poolByPosition.set(entry.player.position, [baseline.points]);
+    }
+  }
+
   const recommendations = available.map((entry) => {
     const { player, adp, signal } = entry;
     const components: ComponentScore[] = [];
@@ -408,6 +453,28 @@ export function rankAvailablePlayers(
       unknown: survival.probability == null,
     });
 
+    // --- season market expectation -----------------------------------------
+    // Market context, not a bet: the line is converted into this league's own
+    // points and compared with the rest of the position. Unpriced players score
+    // nothing rather than zero, because "nobody has quoted him" is not "the
+    // market expects nothing of him".
+    const baseline = baselines.get(player.id) ?? null;
+    const marketScore = baseline
+      ? marketExpectationScore(baseline.points, baseline.coverage, poolByPosition.get(player.position) ?? [])
+      : null;
+    components.push({
+      key: 'market_expectation',
+      label: 'Season market',
+      display:
+        baseline?.points == null
+          ? 'no season market for this player'
+          : `${baseline.points} pts implied · ${baseline.note}`,
+      score: marketScore ?? 0,
+      weight: weights.marketExpectation,
+      contribution: round3((marketScore ?? 0) * weights.marketExpectation),
+      unknown: marketScore == null,
+    });
+
     // --- decision quality ---------------------------------------------------
     // These are judgements rather than measurements, so each one is attached to
     // the result in full: the tag the UI shows and the contribution that moved
@@ -494,6 +561,10 @@ export function rankAvailablePlayers(
       reasons,
       counterpoints,
       degraded: adp == null,
+      marketBaseline: baseline,
+      marketHeadline: entry.seasonMarkets?.length
+        ? seasonHeadline(player.position, entry.seasonMarkets)
+        : null,
       tierCliff: cliff,
       avoid,
       myGuy: flag,
