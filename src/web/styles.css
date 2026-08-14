@@ -1485,6 +1485,48 @@ table.compact tr:last-child td {
   color: var(--warn);
 }
 
+/*
+ * Where the position drops, on a board filtered to one position.
+ *
+ * A rule and two words, sitting between cards rather than on one, because it is
+ * a statement about the gap and not about either player either side of it. It
+ * stays neutral on purpose: the cards it separates are already carrying the
+ * position's colour, and a tinted line between two tinted cards is one stripe
+ * too many.
+ */
+.tier-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 2px;
+  color: var(--text-faint);
+}
+
+.tier-divider::before,
+.tier-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.tier-divider-label {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The measurement, said quietly: it explains the line, it is not the line. */
+.tier-divider-gap {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
 /* Moderate caution: outline only. */
 .tag-risky,
 .tag-warn {

@@ -94,6 +94,12 @@ export interface TierCliff {
   severity: 'none' | 'thinning' | 'last_in_tier';
   tierIndex: number | null;
   remainingInTier: number;
+  /** Every available player in his tier, not only the ones after him. */
+  tierSize: number;
+  /** Whether a real cliff closes the tier, rather than the board running out. */
+  tierEndsAtCliff: boolean;
+  /** The cliff gap that opened this tier; null for the best tier left. */
+  tierGapBefore: number | null;
   gapToNextTier: number | null;
   survivingTierMates: number;
   /** Picks to the next available player at the position. */

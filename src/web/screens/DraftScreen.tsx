@@ -10,7 +10,7 @@
  * only, and never touches Sleeper.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   type DraftBoard,
@@ -41,6 +41,12 @@ import {
  * be computed from two different rules.
  */
 import { survivalBand } from '../../core/draft/survival.ts';
+/*
+ * The two tier decisions the board draws: where a line goes, and who is worth
+ * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
+ * both live in core so they can be checked without a browser.
+ */
+import { tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import {
   AvoidBadge,
   QueueControl,
@@ -79,6 +85,16 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
+  /*
+   * Which of the two tier treatments this view gets.
+   *
+   * Filtered to one position the board is a ladder, so the breaks in it can be
+   * drawn where they fall. `ALL` and the queue are mixed-position lists where
+   * consecutive rows are usually different positions, and a line across them
+   * would be claiming a boundary that does not exist — so those get the
+   * proximity tag on the players it is actually about instead.
+   */
+  const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
 
@@ -361,16 +377,20 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
         >
-          {board.recommendations.map((rec, i) => (
-            <RecommendationRow
-              key={rec.playerId}
-              rank={i + 1}
-              rec={rec}
-              expanded={expanded === rec.playerId}
-              onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
-              onQueue={setQueued}
-              busy={flagging === rec.playerId}
-            />
+          {withTierDividers(board.recommendations, isSinglePosition).map((item) => (
+            /* The divider goes above the row that opens the tier, not instead of it. */
+            <Fragment key={item.rec.playerId}>
+              {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
+              <RecommendationRow
+                rank={item.rank}
+                rec={item.rec}
+                showCliffProximity={!isSinglePosition}
+                expanded={expanded === item.rec.playerId}
+                onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
+                onQueue={setQueued}
+                busy={flagging === item.rec.playerId}
+              />
+            </Fragment>
           ))}
         </div>
       )}
@@ -439,6 +459,37 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   );
 }
 
+/** A row to draw, and whether a tier boundary falls immediately above it. */
+interface BoardItem {
+  rec: DraftRecommendation;
+  rank: number;
+  divider: boolean;
+}
+
+/** The rows, each told whether a tier boundary falls above it. */
+function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
+  const flags = enabled ? tierDividerFlags(recs.map((rec) => rec.tierCliff.tierIndex)) : [];
+  return recs.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
+}
+
+/**
+ * The break itself: a hairline and two words.
+ *
+ * It is a `listitem` rather than a decoration because it is information — a
+ * screen reader that skipped it would hear one undifferentiated run of players
+ * — and because a `list` may not contain anything else.
+ */
+function TierDivider({ gap }: { gap: number | null }) {
+  return (
+    <div className="tier-divider" role="listitem" data-testid="tier-divider">
+      <span className="tier-divider-label">
+        Tier drop
+        {gap == null ? null : <span className="tier-divider-gap"> ~{Math.round(gap)} picks</span>}
+      </span>
+    </div>
+  );
+}
+
 /**
  * One recommendation.
  *
@@ -450,6 +501,7 @@ function RecommendationRow({
   rank,
   rec,
   expanded,
+  showCliffProximity,
   onToggle,
   onQueue,
   busy,
@@ -457,6 +509,8 @@ function RecommendationRow({
   rank: number;
   rec: DraftRecommendation;
   expanded: boolean;
+  /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
+  showCliffProximity: boolean;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -486,7 +540,7 @@ function RecommendationRow({
           space. AVOID stays, because "the research is against him" is not
           something a percentage can say.
         */}
-        <DecisionTags rec={rec} />
+        <DecisionTags rec={rec} showCliffProximity={showCliffProximity} />
 
         <div className="player-row-metrics">
           <span className="metric">
@@ -741,11 +795,26 @@ function SurvivalMetric({ probability }: { probability: number | null }) {
  * name, are the user's own mark, and are how they find who they were looking
  * for.
  */
-function DecisionTags({ rec }: { rec: DraftRecommendation }) {
-  if (!rec.avoid.active) return null;
+function DecisionTags({ rec, showCliffProximity }: { rec: DraftRecommendation; showCliffProximity: boolean }) {
+  const away = showCliffProximity ? tierCliffProximity(rec.tierCliff) : null;
+  if (!rec.avoid.active && away == null) return null;
   return (
     <div className="tag-row" data-testid="decision-tags">
-      <AvoidBadge avoid={rec.avoid} />
+      {rec.avoid.active ? <AvoidBadge avoid={rec.avoid} /> : null}
+      {away == null ? null : (
+        <span
+          className="tag tag-cliff"
+          data-testid="tier-cliff-tag"
+          data-away={away}
+          title={
+            away === 1
+              ? `The last ${rec.position} left in the best group on the board`
+              : `Two ${rec.position}s left in the best group on the board`
+          }
+        >
+          Tier cliff · {away} away
+        </span>
+      )}
     </div>
   );
 }

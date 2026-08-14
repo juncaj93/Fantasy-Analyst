@@ -36,6 +36,29 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
   '1010': { player_id: '1010', search_rank: 10, first_name: 'Rhys', last_name: 'Donnelly', full_name: 'Rhys Donnelly', team: 'LAR', position: 'QB', active: true, injury_status: null },
   '1011': { player_id: '1011', search_rank: 11, first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: null },
   '1012': { player_id: '1012', search_rank: 12, first_name: 'Bo', last_name: 'Ashworth', full_name: 'Bo Ashworth', team: 'SEA', position: 'RB', active: true, injury_status: null },
+  /*
+   * Depth at quarterback and tight end, so the board has a *shape*.
+   *
+   * Two players at a position cannot have a tier structure — the model refuses
+   * to call a cliff in a pool that small, and rightly — so the demo board had
+   * nothing for the tier layer to draw and nothing for a browser test to check.
+   * These are chosen to produce exactly two structures worth seeing:
+   *
+   *   QB — four inside four picks of each other, then a 22-pick hole. One
+   *        divider, and a top tier of four: too many to be running out.
+   *   TE — two, then a 28-pick hole. The same divider, and a top tier of two,
+   *        which is what `Tier cliff · 2 away` is for.
+   *
+   * Nothing here is tuned to a threshold: the distribution decides, and the
+   * numbers below are ordinary draft spacing for the two positions.
+   */
+  '1013': { player_id: '1013', search_rank: 13, first_name: 'Emil', last_name: 'Draeger', full_name: 'Emil Draeger', team: 'MIN', position: 'QB', active: true, injury_status: null },
+  '1014': { player_id: '1014', search_rank: 14, first_name: 'Jonah', last_name: 'Priestley', full_name: 'Jonah Priestley', team: 'TB', position: 'QB', active: true, injury_status: null },
+  '1015': { player_id: '1015', search_rank: 15, first_name: 'Casey', last_name: 'Lindqvist', full_name: 'Casey Lindqvist', team: 'DEN', position: 'QB', active: true, injury_status: null },
+  '1016': { player_id: '1016', search_rank: 16, first_name: 'Ruben', last_name: 'Castellanos', full_name: 'Ruben Castellanos', team: 'PIT', position: 'QB', active: true, injury_status: null },
+  '1017': { player_id: '1017', search_rank: 17, first_name: 'Miles', last_name: 'Barrowman', full_name: 'Miles Barrowman', team: 'CLE', position: 'TE', active: true, injury_status: null },
+  '1018': { player_id: '1018', search_rank: 18, first_name: 'Teo', last_name: 'Ferreira', full_name: 'Teo Ferreira', team: 'HOU', position: 'TE', active: true, injury_status: null },
+  '1019': { player_id: '1019', search_rank: 19, first_name: 'Grant', last_name: 'Aldous', full_name: 'Grant Aldous', team: 'WAS', position: 'TE', active: true, injury_status: null },
 };
 
 export const DEMO_ADP_CSV = `name,position,team,adp,rank
@@ -46,11 +69,18 @@ Julian Reyes,RB,MIA,11.2,4
 Owen Fitzgerald,WR,PHI,14.6,5
 Silas Mbeki,RB,GB,19.3,6
 Trey Halloran,QB,SF,24.8,7
-Andre Sotelo,TE,DAL,28.1,8
-Nate Kowalski,TE,DET,33.7,9
-Cal Whitfield,WR,NYJ,41.2,10
-Rhys Donnelly,QB,LAR,52.9,11
-Bo Ashworth,RB,SEA,58.4,12
+Emil Draeger,QB,MIN,26.5,8
+Andre Sotelo,TE,DAL,28.1,9
+Jonah Priestley,QB,TB,28.9,10
+Casey Lindqvist,QB,DEN,30.2,11
+Nate Kowalski,TE,DET,33.7,12
+Cal Whitfield,WR,NYJ,41.2,13
+Rhys Donnelly,QB,LAR,52.9,14
+Ruben Castellanos,QB,PIT,55.4,15
+Bo Ashworth,RB,SEA,58.4,16
+Miles Barrowman,TE,CLE,62.0,17
+Teo Ferreira,TE,HOU,66.5,18
+Grant Aldous,TE,WAS,70.1,19
 `;
 
 /** Exercises positive, negative, negation, mixed, and ambiguity paths. */

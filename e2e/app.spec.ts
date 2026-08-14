@@ -126,7 +126,7 @@ test.describe('draft room', () => {
    */
   test('shows the chance he lasts as a coloured percentage, not a wait chip', async ({ page }) => {
     const text = (await page.locator('main').innerText()).toLowerCase();
-    for (const gone of ['take now', 'risky to wait', 'can probably wait', 'tier cliff']) {
+    for (const gone of ['take now', 'risky to wait', 'can probably wait']) {
       expect(text, `"${gone}" should no longer be on a draft row`).not.toContain(gone);
     }
 
@@ -277,13 +277,105 @@ test.describe('draft room', () => {
     }
   });
 
-  test('shows at most one decision tag on a row', async ({ page }) => {
+  /**
+   * Two tags is the ceiling, and only because they say unrelated things: the
+   * research is against him, and his group is nearly gone. The row's budget
+   * exists because it used to hold four.
+   */
+  test('shows at most two decision tags on a row', async ({ page }) => {
     const rows = page.getByTestId('recommendation-row');
     const count = await rows.count();
     for (let i = 0; i < Math.min(count, 10); i++) {
       const tags = rows.nth(i).getByTestId('decision-tags').locator('.tag');
-      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(1);
+      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
     }
+  });
+
+  /**
+   * Tier structure, drawn two different ways for two different lists.
+   *
+   * The seeded board is built to have both: six quarterbacks in a cluster of
+   * four then a 23-pick hole, and five tight ends whose best group is down to
+   * two. See `DEMO_PLAYERS`.
+   */
+  test.describe('tiers', () => {
+    test('draws a line where a filtered position genuinely breaks', async ({ page }) => {
+      await page.getByRole('button', { name: 'QB', exact: true }).click();
+      await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
+
+      const dividers = page.getByTestId('tier-divider');
+      await expect(dividers, 'the QB board breaks exactly once').toHaveCount(1);
+      await expect(dividers.first()).toContainText(/tier drop/i);
+      // It says how big the hole is, which is the whole reason it is there.
+      await expect(dividers.first()).toContainText(/~2[0-9] picks/);
+
+      // And it falls between the cluster and what follows, not inside either.
+      const order = await page
+        .getByTestId('board-list')
+        .evaluate((list) =>
+          [...list.children].map((n) =>
+            n.getAttribute('data-testid') === 'tier-divider'
+              ? '---'
+              : (n.querySelector('.player-name')?.textContent ?? '?'),
+          ),
+        );
+      expect(order.indexOf('---')).toBe(4);
+      expect(order.slice(0, 4)).not.toContain('---');
+    });
+
+    test('draws no line at all across the mixed board', async ({ page }) => {
+      await expect(page.getByTestId('tier-divider')).toHaveCount(0);
+      await page.getByRole('button', { name: 'Show only your queue' }).click();
+      await expect(page.getByTestId('tier-divider')).toHaveCount(0);
+    });
+
+    test('marks only the last players of the group in play, and says how many', async ({ page }) => {
+      await page.getByRole('button', { name: 'ALL', exact: true }).click();
+      const tags = page.getByTestId('tier-cliff-tag');
+
+      // Two tight ends left in the best group at the position; nobody else.
+      await expect(tags).toHaveCount(2);
+      for (const text of await tags.allInnerTexts()) expect(text).toMatch(/tier cliff · 2 away/i);
+
+      const tagged = await page
+        .getByTestId('recommendation-row')
+        .filter({ has: page.getByTestId('tier-cliff-tag') })
+        .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-position')));
+      expect(new Set(tagged)).toEqual(new Set(['TE']));
+
+      // The rest of the board is not carrying the same warning, which is the
+      // failure this label has already shipped once.
+      const rows = await page.getByTestId('recommendation-row').count();
+      expect(rows).toBeGreaterThan(6);
+    });
+
+    test('never marks a group that still has three in it', async ({ page }) => {
+      // The quarterbacks are four deep behind a real cliff and stay unmarked.
+      await page.getByRole('button', { name: 'ALL', exact: true }).click();
+      const qbTags = page
+        .getByTestId('recommendation-row')
+        .filter({ has: page.getByTestId('tier-cliff-tag') })
+        .filter({ hasText: 'QB' });
+      await expect(qbTags).toHaveCount(0);
+    });
+
+    test('counts down as the group is drafted', async ({ page }) => {
+      // Asked of the model through the API rather than by drafting in the UI,
+      // which this tool deliberately cannot do. Two tight ends left reads 2;
+      // with one of them gone the last one reads 1.
+      const board = await page.request.get('/api/drafts/demo-draft/board?limit=40');
+      const recs = (await board.json()).recommendations as {
+        position: string;
+        adp: number;
+        tierCliff: { tierIndex: number | null; tierSize: number; tierEndsAtCliff: boolean };
+      }[];
+      const tes = recs.filter((r) => r.position === 'TE').sort((a, b) => a.adp - b.adp);
+      expect(tes.length).toBeGreaterThanOrEqual(4);
+      expect(tes[0]!.tierCliff).toMatchObject({ tierIndex: 0, tierSize: 2, tierEndsAtCliff: true });
+      expect(tes[1]!.tierCliff).toMatchObject({ tierIndex: 0, tierSize: 2, tierEndsAtCliff: true });
+      // The group below is not the group in play and carries no warning.
+      expect(tes[2]!.tierCliff.tierIndex).toBe(1);
+    });
   });
 
   test('tints the whole card by position, and keeps the letters', async ({ page }) => {
