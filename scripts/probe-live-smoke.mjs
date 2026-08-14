@@ -276,6 +276,62 @@ if (board.json) {
   );
 }
 
+// 4d. Where availability comes from, in production.
+//
+// The interesting failure is not "the source is down" — it is the source being
+// up and mapping almost nothing, which reads as a quiet board full of healthy
+// players. So this asks for the counts, and it treats a season with no reports
+// published yet as the fact it is rather than as an alarm.
+const injury = status.json?.injury;
+check('setup reports where injury information comes from', !!injury, injury ? injury.summary : 'missing');
+if (injury) {
+  check(
+    'Sleeper owns the designation and a free report supplies the detail',
+    injury.statusSource === 'sleeper' && injury.reportSource === 'nflverse',
+    `${injury.statusSource} + ${injury.reportSource}`,
+  );
+  const run = injury.lastRun;
+  check(
+    'the report has been looked for at least once',
+    !!run,
+    run ? `${run.outcome}, ${run.fetchedAt}` : 'never run',
+  );
+  if (run?.outcome === 'ok') {
+    const mapped = run.matchedById + run.matchedByName;
+    check(
+      'most of the source maps onto players this app knows',
+      run.rowsReturned === 0 || mapped / run.rowsReturned >= 0.8,
+      `${mapped} of ${run.rowsReturned} mapped (${run.unmatched} unmatched), week ${run.latestWeek}`,
+    );
+  } else {
+    /*
+     * A preseason 404 is the honest state of an injury report before any injury
+     * reports exist, and the app is required to say so in words rather than
+     * showing a red light or, worse, an empty panel.
+     */
+    console.log(`      no report ingested: ${run?.outcome ?? 'never run'} — ${run?.note ?? injury.summary}`);
+    check(
+      'and it says why, rather than showing nothing',
+      typeof injury.summary === 'string' && injury.summary.length > 0,
+      injury.summary,
+    );
+  }
+}
+
+// The board still ranks on merit, whoever is hurt.
+if (board.json) {
+  const recs = board.json.recommendations ?? [];
+  const lines = recs.filter((r) => r.injuryLine);
+  check(
+    'the injury line is on the players it is about, not on everybody',
+    lines.length < recs.length * 0.5,
+    lines.length === 0 ? 'nobody currently carries one' : `${lines.length} of ${recs.length}: ${lines[0].injuryLine}`,
+  );
+  // Every line must be about a player who actually carries a designation.
+  const orphan = lines.filter((r) => !r.status);
+  check('and never on a player with no designation', orphan.length === 0, orphan[0]?.name ?? '');
+}
+
 // 5. The expanded card's two feeds.
 //
 // Both are caches of Sleeper data, and a card cannot tell a cache that is empty

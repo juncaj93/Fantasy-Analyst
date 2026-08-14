@@ -26,6 +26,7 @@ import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { NewsletterService } from './newsletterService.ts';
 import { PlayerDetailService } from './playerDetailService.ts';
+import { InjuryService, type InjuryHealth } from './injuryService.ts';
 import type { SleeperUserSetting } from './sleeperSync.ts';
 
 /** `ok` = done, `warn` = needs you, `todo` = not started, `off` = optional/not enabled. */
@@ -144,6 +145,15 @@ export interface SetupStatus {
    * and the only place the difference shows is a count of what landed.
    */
   playerDetail: PlayerDetailDiagnostics;
+  /**
+   * Where a player's availability comes from, and how much of it landed.
+   *
+   * Two sources with different jobs: Sleeper is the designation and is always
+   * present, the published injury report adds the body part and the practice
+   * week. The counts matter because a report that mapped a third of its rows
+   * looks exactly like one that worked, until a card is blank on a Sunday.
+   */
+  injury: InjuryHealth;
 }
 
 export type PlayerDetailDiagnostics = Awaited<ReturnType<PlayerDetailService['diagnostics']>>;
@@ -328,6 +338,7 @@ export class SetupService {
         },
       },
       playerDetail: await new PlayerDetailService(this.db).diagnostics(),
+      injury: await new InjuryService(this.db).health(),
     };
   }
 

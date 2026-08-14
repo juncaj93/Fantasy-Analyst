@@ -25,6 +25,8 @@ import {
   type RoleMetric,
 } from './decisions.ts';
 import { buildExpectation, type VegasExpectation } from './expectation.ts';
+import { availabilityPenalty, AVAILABLE } from '../injury/startsit.ts';
+import { NO_INJURY_INFORMATION, normalizeDesignation, resolveInjury, type InjuryState } from '../injury/model.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -32,6 +34,17 @@ export interface StartSitInput {
   signal: PlayerSignal | null;
   /** Sleeper injury status ('Questionable', 'Out', 'IR', ...). */
   injuryStatus?: string | null;
+  /**
+   * The normalized state, when the caller has one.
+   *
+   * Preferred over `injuryStatus`, and the reason this parameter exists: a
+   * designation on its own cannot tell a player who practised fully all week
+   * from one who has not practised at all, and those are not the same lineup
+   * decision. Callers without the injury layer may still pass the bare status,
+   * and it is normalized here into the same shape so there is exactly one
+   * interpretation of the word in the codebase.
+   */
+  injury?: InjuryState | null;
   /** How stale the props are, in minutes. Null when there are none. */
   propAgeMinutes?: number | null;
   /** True when the props came from a stale cache. */
@@ -67,6 +80,10 @@ export interface StartSitEvaluation {
   confidence: 'high' | 'medium' | 'low';
   confidenceReasons: string[];
   statusFlag: string | null;
+  /** Everything known about his availability, for the card and the reasons. */
+  injury: InjuryState;
+  /** True when he must not be recommended as a starter: Out, IR, PUP, suspended. */
+  ruledOut: boolean;
   /** Whether this player's game has already kicked off. */
   lock: LockState;
   /** How the market has moved since the previous snapshot. */
@@ -137,15 +154,27 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     unknown: rawItems === 0,
   });
 
-  const statusKey = (input.injuryStatus ?? '').toUpperCase().replace(/[^A-Z]/g, '');
-  const statusPenalty = STATUS_PENALTY[statusKey] ?? 0;
+  /*
+   * Availability, read from the normalized injury state.
+   *
+   * Out, IR, PUP and suspended are facts and cost a gate. Questionable is a
+   * question, and the week's practice report is the best free answer to it —
+   * so the same word costs a full participant about a third of what it costs
+   * somebody who has not practised. Bounded either way, and pulled back toward
+   * the plain designation when the report is stale or the sources disagree.
+   */
+  const injury = resolveInjuryState(input);
+  const availability = availabilityPenalty(injury);
+  const statusPenalty = availability.points;
   components.push({
     key: 'status',
     label: 'Availability',
-    display: statusKey ? `${input.injuryStatus}` : 'no status flag',
+    display: availability.display,
     value: statusPenalty,
-    unknown: false,
+    unknown: injury.designation === 'unknown',
   });
+  if (availability.note) confidenceReasons.push(availability.note);
+  if (injury.conflict && injury.conflictNote) confidenceReasons.push(`injury sources disagree — ${injury.conflictNote}`);
 
   // Uncertainty penalty: thin or stale market data reduces the score slightly,
   // so a well-covered player wins ties against a poorly-covered one.
@@ -222,11 +251,31 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     score,
     confidence,
     confidenceReasons,
-    statusFlag: statusKey ? input.injuryStatus ?? null : null,
+    statusFlag: availability === AVAILABLE ? null : availability.display,
+    injury,
+    ruledOut: availability.gate,
     lock: lockState(input.kickoff, input.now ?? new Date()),
     movement,
     role,
   };
+}
+
+/**
+ * The state to score against.
+ *
+ * A caller with the injury layer passes one. A caller with only Sleeper's word
+ * gets that word normalized through the same model, so `evaluatePlayer` has
+ * exactly one notion of what "Questionable" means whichever door it came in.
+ */
+function resolveInjuryState(input: StartSitInput): InjuryState {
+  if (input.injury) return input.injury;
+  const reading = normalizeDesignation(input.injuryStatus);
+  if (reading.designation === 'unknown') return NO_INJURY_INFORMATION;
+  const now = input.now == null ? new Date() : new Date(input.now);
+  return resolveInjury(
+    [{ source: 'sleeper', designation: reading.designation, raw: reading.raw, observedAt: null }],
+    now,
+  );
 }
 
 /**

@@ -24,6 +24,8 @@ import { NewsletterService } from '../server/services/newsletterService.ts';
 import { PlayerDetailRepo } from '../server/repos/playerDetail.ts';
 import { buildSeasonStatLines } from '../core/sleeper/seasonStats.ts';
 import { lastCompletedSeason, outlookSeason } from '../server/services/playerDetailService.ts';
+import { injurySeason } from '../server/services/injuryService.ts';
+import { InjuryRepo } from '../server/repos/injury.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
 export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
@@ -256,6 +258,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
   const seasonMarkets = await new SeasonMarketService(db, provider).refresh({ force: true });
 
   await seedPlayerDetail(db);
+  await seedInjuryReports(db);
 
   return {
     players: players.length,
@@ -393,4 +396,66 @@ async function seedPlayerDetail(db: Database): Promise<void> {
       await repo.recordOutlookMiss(line.id, season, at, 'no outlook published for this player');
     }
   }
+}
+
+
+/**
+ * A week's injury report, for the players whose Sleeper status already says
+ * something.
+ *
+ * Seeded rather than fetched, and for the same reason the outlooks are: these
+ * players do not exist, and a browser suite that reaches a public GitHub
+ * release on every run is a suite that fails when GitHub is slow.
+ *
+ * The spread is chosen to exercise the cases the resolver actually has to tell
+ * apart. Sotelo is Questionable in both places and practised fully — the case
+ * where the report makes the designation *less* worrying. Kowalski is on IR in
+ * both, which is a fact and not a risk. Reyes is where the two disagree:
+ * Sleeper says Out, the report says Doubtful, and the app must surface that
+ * rather than average it.
+ */
+async function seedInjuryReports(db: Database): Promise<void> {
+  const now = new Date();
+  const at = now.toISOString();
+  const season = injurySeason(now);
+  const repo = new InjuryRepo(db);
+
+  const rows: { id: string; week: number; status: string | null; injury: string; practice: string }[] = [
+    { id: '1004', week: 11, status: 'Questionable', injury: 'Hamstring', practice: 'limited' },
+    { id: '1004', week: 12, status: 'Questionable', injury: 'Hamstring', practice: 'full' },
+    { id: '1009', week: 12, status: 'Out', injury: 'Knee', practice: 'dnp' },
+    { id: '1006', week: 12, status: 'Doubtful', injury: 'Knee', practice: 'dnp' },
+  ];
+
+  await repo.saveReports(
+    rows.map((r) => ({
+      playerId: r.id,
+      season,
+      week: r.week,
+      team: null,
+      reportStatus: r.status,
+      primaryInjury: r.injury,
+      secondaryInjury: null,
+      practiceStatus: r.practice as 'dnp' | 'limited' | 'full',
+      practiceRaw: r.practice,
+      gsisId: null,
+      source: 'nflverse',
+      publishedAt: at,
+      fetchedAt: at,
+    })),
+  );
+
+  await repo.recordRun({
+    source: 'nflverse',
+    season,
+    latestWeek: 12,
+    fetchedAt: at,
+    publishedAt: at,
+    rowsReturned: rows.length,
+    matchedById: 0,
+    matchedByName: rows.length,
+    unmatched: 0,
+    outcome: 'ok',
+    note: 'synthetic demo data',
+  });
 }

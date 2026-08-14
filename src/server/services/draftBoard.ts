@@ -13,6 +13,8 @@ import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositio
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { demandBetweenPicks } from '../../core/draft/demandAhead.ts';
 import { injuryStatusTag } from '../../core/draft/injury.ts';
+import { injuryLine, type InjuryState } from '../../core/injury/model.ts';
+import { InjuryService } from './injuryService.ts';
 import { tierContextLine } from '../../core/draft/tierContext.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
@@ -57,6 +59,14 @@ export type BoardRecommendation = DraftRecommendation & {
    * depends on it; it is read by the card and by nothing else.
    */
   tierContext: string | null;
+  /**
+   * One line about his availability: `Q · hamstring · practised fully`.
+   *
+   * Resolved from the same normalized state Start/Sit and Trades read, so a
+   * player cannot be Questionable on one screen and fine on another. Null for
+   * the overwhelming majority, which is what keeps the badge meaning something.
+   */
+  injuryLine: string | null;
 };
 
 export interface DraftBoardState {
@@ -377,11 +387,23 @@ export class DraftBoardService {
       shape,
     });
 
+    /*
+     * Availability for the ranked page only.
+     *
+     * Forty rows, one query, and it never blocks the board: a failure of the
+     * injury store costs the extra line and leaves Sleeper's own designation —
+     * which is what the board showed before this existed — exactly in place.
+     */
+    const injuries = await new InjuryService(this.db)
+      .statesFor(ranked.map((rec) => ({ playerId: rec.playerId, status: byId.get(rec.playerId)?.status ?? null })))
+      .catch(() => new Map<string, InjuryState>());
+
     const recommendations = ranked.map((rec) => ({
       ...rec,
       queued: allFlags.get(rec.playerId)?.queued === true,
       status: designationOf(byId.get(rec.playerId)?.status ?? null),
       tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
+      injuryLine: injuryLineFor(injuries.get(rec.playerId)),
     }));
 
     return {
@@ -428,6 +450,19 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/**
+ * The injury line, but only when it adds to the badge already on the row.
+ *
+ * A card that says `Q` and then says `Q` again underneath is noise. This
+ * returns a line only when the report contributed something the designation
+ * alone does not carry — the body part, or how the week's practice went.
+ */
+function injuryLineFor(state: InjuryState | undefined): string | null {
+  if (!state) return null;
+  if (!state.bodyPart && !state.practice.label) return null;
+  return injuryLine(state);
 }
 
 /** The status only when it is a designation a drafter acts on. */

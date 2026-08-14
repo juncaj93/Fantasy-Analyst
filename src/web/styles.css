@@ -892,6 +892,20 @@ body,
 }
 
 /*
+ * What is wrong with him, under the row rather than in the badge.
+ *
+ * `Q` fits beside a name; `Q · hamstring · limited → full` does not, and it is
+ * the half that changes a decision. Quiet on purpose — it is context for a
+ * designation the row is already flagging in colour, not a second alarm.
+ */
+.injury-line {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
  * The compact tally, beside the name.
  *
  * Small enough that the name stays the loudest thing in the row, and never

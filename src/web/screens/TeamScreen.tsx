@@ -411,6 +411,21 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
           ))}
       </div>
 
+      {/*
+        Availability, per player, in the terms a lineup decision is made in.
+        `Q · hamstring · limited → full` is the whole difference between two
+        players who are both "Questionable", and it is where the injury report
+        earns its place. Nothing shows for anybody healthy.
+      */}
+      {comparison.evaluations
+        .filter((e) => e.statusFlag)
+        .map((e) => (
+          <div className="injury-line" key={`inj-${e.playerId}`} data-testid="startsit-injury">
+            {e.name}: {e.statusFlag}
+            {e.injury?.conflictNote ? <span className="faint"> — sources disagree ({e.injury.conflictNote})</span> : null}
+          </div>
+        ))}
+
       {comparison.warnings.map((w) => (
         <div className="hint hint-caution" key={w}>
           {w}

@@ -1207,7 +1207,98 @@ function PlayerDetailPanel({
       <div className="faint" data-testid="roster-percent-health">
         {detail.rosterPercent.note}
       </div>
+
+      <InjurySourceHealth status={status} unlocked={unlocked} onDone={onDone} />
     </details>
+  );
+}
+
+/**
+ * Where a player's availability comes from, and how much of it arrived.
+ *
+ * Two sources doing two jobs, and the panel says which is which: Sleeper owns
+ * the designation and is always there, the published report adds the body part
+ * and the practice week and is sometimes not. The counts are the point — a
+ * report that mapped a third of its rows looks identical to one that worked
+ * until a card is blank on a Sunday morning.
+ */
+function InjurySourceHealth({
+  status,
+  unlocked,
+  onDone,
+}: {
+  status: SetupStatus;
+  unlocked: boolean;
+  onDone: () => void;
+}) {
+  const injury = status.injury;
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const run = injury.lastRun;
+
+  const refresh = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await api.post<SetupStatus['injury']['lastRun']>('/api/injuries/refresh');
+      setNote(
+        result?.outcome === 'ok'
+          ? `Week ${result.latestWeek}: ${result.matchedById + result.matchedByName} players mapped, ${result.unmatched} not recognised.`
+          : (result?.note ?? 'Nothing came back.'),
+      );
+      onDone();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="section-title" style={{ marginTop: 10 }}>
+        Injury information
+      </div>
+      <div className="faint" data-testid="injury-health">
+        {injury.summary}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Designation comes from <strong>{injury.statusSource}</strong>, which is the league host and the authority on
+        whether a player is Questionable. The body part and the practice week come from{' '}
+        <strong>{injury.reportSource}</strong>&rsquo;s published injury report — a free public file, no account and no
+        key. Where they disagree the card says so rather than picking one quietly.
+        {run?.outcome === 'ok' ? (
+          <>
+            {' '}Last read {formatAge(run.fetchedAt)}
+            {run.publishedAt ? `, from a file published ${formatAge(run.publishedAt)}` : ''}: {run.rowsReturned} players
+            in the file, {run.matchedById} matched on identifier and {run.matchedByName} on name.
+          </>
+        ) : null}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        The report carries one practice status per <em>week</em>, not one per practice day, so the app compares weeks
+        and does not claim a Wednesday-to-Friday sequence it cannot see.
+      </div>
+      {unlocked ? (
+        <>
+          <button
+            className="btn"
+            type="button"
+            data-testid="reload-injuries"
+            disabled={busy}
+            onClick={() => void refresh()}
+            style={{ marginTop: 8 }}
+          >
+            {busy ? 'Reading…' : 'Read the report again'}
+          </button>
+          {note ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              {note}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </>
   );
 }
 

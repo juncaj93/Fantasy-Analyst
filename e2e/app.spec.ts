@@ -625,6 +625,60 @@ test.describe('draft room', () => {
   });
 
   /**
+   * One player's availability, said the same way everywhere.
+   *
+   * The badge on the row is the designation. The line under it is what the
+   * designation cannot fit — the body part, and how the week's practice went —
+   * and it appears only where the injury report added something, which is why
+   * most rows still carry nothing at all.
+   */
+  test('carries the body part and the practice week, and only where they exist', async ({ page }) => {
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    const withLine = board.recommendations.filter((r: { injuryLine: string | null }) => r.injuryLine);
+    expect(withLine.length, 'the demo report covers some players').toBeGreaterThan(0);
+    expect(withLine.length, 'and nowhere near all of them').toBeLessThan(board.recommendations.length / 2);
+
+    // Sotelo is Questionable in both sources and practised fully by week 12 —
+    // the case where the report makes the designation *less* worrying.
+    const sotelo = page.locator('[data-testid="recommendation-row"]', { hasText: 'Andre Sotelo' }).first();
+    await sotelo.scrollIntoViewIfNeeded();
+    await expect(sotelo.getByTestId('injury-line')).toContainText(/hamstring/i);
+    await expect(sotelo.getByTestId('injury-line')).toContainText(/limited → full|practised fully/i);
+    // The badge is still the badge; the line is not a second copy of it.
+    await expect(sotelo.locator('.injury-tag')).toBeVisible();
+
+    // A healthy player gets neither.
+    const healthy = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
+    await expect(healthy.getByTestId('injury-line')).toHaveCount(0);
+  });
+
+  /**
+   * Sources that disagree are shown disagreeing.
+   *
+   * Reyes is Out in Sleeper and Doubtful on the report. Averaging those into
+   * something in between would be inventing a third opinion nobody holds — so
+   * the app takes the league host's word for the designation and prints the
+   * disagreement rather than hiding it.
+   */
+  test('surfaces a disagreement between sources instead of averaging it', async ({ page }) => {
+    const detail = await (await page.request.get('/api/players/1006/detail')).json();
+    expect(detail.injury).not.toBeNull();
+    expect(detail.injury.designation, 'the league host owns the designation').toBe('out');
+    expect(detail.injury.conflict).toContain('sleeper');
+    expect(detail.injury.conflict).toContain('nflverse');
+    expect(detail.injury.confidence, 'and a disagreement costs confidence').toBe('low');
+
+    const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+    await expect(row.getByTestId('injury-conflict')).toContainText(/disagree/i);
+    await expect(row.getByTestId('injury-current')).toContainText(/knee/i);
+    // And it says where it came from, so the freshness can be judged.
+    await expect(row.getByTestId('injury-current')).toContainText(/sleeper status/i);
+    await row.locator('.row-button').click();
+  });
+
+  /**
    * Injury context is a label, not a retelling: the outlook above already
    * explains it in the words of somebody who knows, and the app repeating that
    * in its own words would be duplication at best and paraphrase at worst.
@@ -687,6 +741,20 @@ test.describe('draft room', () => {
     // …and the two feeds that do exist report what landed.
     await expect(panel.getByTestId('stats-health')).toContainText(/player/);
     await expect(panel.getByTestId('outlook-health')).toContainText(/stored/);
+
+    /*
+     * Where availability comes from, in the same panel.
+     *
+     * A pipeline that mapped a third of its rows looks identical to one that
+     * worked, until a card is blank on a Sunday morning — so the counts and the
+     * week are printed rather than a green light.
+     */
+    await expect(panel.getByTestId('injury-health')).toContainText(/week \d+|Sleeper designations only/i);
+    const status = await (await page.request.get('/api/setup/status')).json();
+    expect(status.injury.statusSource).toBe('sleeper');
+    expect(status.injury.reportSource).toBe('nflverse');
+    expect(status.injury.lastRun.outcome).toBe('ok');
+    expect(status.injury.players).toBeGreaterThan(0);
   });
 
   test('the expanded player fits on the screen without opening Advanced', async ({ page }) => {
@@ -1051,6 +1119,59 @@ test.describe('team, ADP import and start/sit', () => {
     expect(buttons).not.toContain('apply');
     expect(buttons).not.toContain('set lineup');
     expect(buttons).not.toContain('save lineup');
+  });
+
+  /**
+   * A player who is out does not go in a starting slot.
+   *
+   * The availability penalty already made him last by a mile, which is enough
+   * when there is anybody else and is not enough in the case that matters — a
+   * thin bench, where the arithmetic still puts him somewhere. Nate Kowalski is
+   * on IR and is one of two tight ends on this roster, which is exactly that
+   * case.
+   */
+  test('keeps a player who is out of the recommended lineup, and says so', async ({ page }) => {
+    const lineup = await (await page.request.get('/api/leagues/demo-league/lineup')).json();
+    const started = (lineup.slots as { playerId: string | null }[]).map((s) => s.playerId);
+    expect(started, 'Kowalski is on IR').not.toContain('1009');
+
+    const warnings = (lineup.warnings as string[]).join(' | ').toLowerCase();
+    expect(warnings, 'and the reason is stated rather than left to be inferred').toContain('not a playable starter');
+    expect(warnings).toContain('kowalski');
+  });
+
+  /**
+   * A comparison names the injury rather than leaving "Questionable" to speak
+   * for itself.
+   *
+   * Sotelo is Questionable in both sources with a hamstring, and practised
+   * fully by the latest week — which is the whole difference between two
+   * players who carry the same word, and the reason the practice report is
+   * worth ingesting at all.
+   */
+  test('names the injury and the practice week in a start/sit comparison', async ({ page }) => {
+    await page.locator('[data-testid="roster-row"][data-player-id="1001"]').click();
+    await page.locator('[data-testid="roster-row"][data-player-id="1004"]').click();
+    await page.getByRole('button', { name: /Compare 2 players/ }).click();
+
+    const line = page.getByTestId('startsit-injury');
+    await expect(line).toContainText(/hamstring/i);
+    await expect(line).toContainText(/full|limited/i);
+
+    /*
+     * And the penalty it produced is contextual rather than the flat 1.5 the
+     * word used to cost: a full participant keeps most of his score.
+     */
+    const comparison = await (
+      await page.request.post('/api/startsit/compare', { data: { playerIds: ['1001', '1004'] } })
+    ).json();
+    const sotelo = (comparison.evaluations as { playerId: string; ruledOut: boolean; components: { key: string; value: number }[] }[]).find(
+      (e) => e.playerId === '1004',
+    )!;
+    const availability = sotelo.components.find((c) => c.key === 'status')!;
+    expect(availability.value).toBeLessThan(0);
+    expect(availability.value, 'a full participant keeps most of his score').toBeGreaterThan(-1.5);
+    expect(sotelo.ruledOut, 'Questionable is a question, not a gate').toBe(false);
   });
 
   test('shows a degraded, honest state when Vegas data is missing', async ({ page }) => {

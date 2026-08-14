@@ -57,6 +57,11 @@ export interface DraftRecommendationExtras {
   status: string | null;
   /** One line of market context, or null when the board has nothing to say. */
   tierContext: string | null;
+  /**
+   * `Q · hamstring · practised fully` — but only when the injury report added
+   * something the badge does not already say. Null for almost everybody.
+   */
+  injuryLine: string | null;
 }
 
 export interface DraftRecommendation extends DraftRecommendationExtras {
@@ -187,6 +192,18 @@ export interface PlayerDetail {
   outlookNote: string | null;
   /** `Major injury history: ACL` — a label, not a retelling. Null when none. */
   injuryContext: string | null;
+  /** Current availability: designation, body part, practice week, provenance. */
+  injury: {
+    designation: string;
+    label: string;
+    line: string | null;
+    bodyPart: string | null;
+    practice: string | null;
+    provenance: string | null;
+    freshness: string;
+    confidence: string;
+    conflict: string | null;
+  } | null;
 }
 
 export interface RosterAlert {
@@ -430,6 +447,28 @@ export interface SetupStatus {
     /** Sleeper publishes none. The note says so in words. */
     rosterPercent: { available: false; note: string };
   };
+  /** Where a player's availability comes from, and how much of it landed. */
+  injury: {
+    statusSource: string;
+    reportSource: string;
+    season: string;
+    players: number;
+    latestWeek: number | null;
+    summary: string;
+    lastRun: {
+      source: string;
+      season: string;
+      latestWeek: number | null;
+      fetchedAt: string;
+      publishedAt: string | null;
+      rowsReturned: number;
+      matchedById: number;
+      matchedByName: number;
+      unmatched: number;
+      outcome: 'ok' | 'not_published' | 'failed';
+      note: string | null;
+    } | null;
+  };
 }
 
 export interface LeagueSummary {
@@ -471,7 +510,19 @@ export interface StartSitEvaluation {
   score: number | null;
   confidence: string;
   confidenceReasons: string[];
+  /** `Questionable · hamstring · practised fully`, or null when healthy. */
   statusFlag: string | null;
+  /** True when he must not be recommended as a starter: Out, IR, PUP, suspended. */
+  ruledOut: boolean;
+  injury: {
+    designation: string;
+    bodyPart: string | null;
+    freshness: string;
+    confidence: string;
+    conflict: boolean;
+    conflictNote: string | null;
+    practice: { trend: string; label: string | null; latest: string };
+  };
   lock: { locked: boolean; kickoff: string | null; reason: string };
   movement: {
     significant: { market: string; direction: string; from: number; to: number; display: string }[];
@@ -569,6 +620,16 @@ export interface TradeSuggestion {
     last7: number;
     items30: number;
     itemsLifetime: number;
+  };
+  /**
+   * Availability, classified by how long it lasts rather than how bad it is —
+   * a one-week Questionable is not a sell signal.
+   */
+  injury: {
+    category: 'healthy' | 'temporary' | 'multi_week' | 'major_recovery';
+    urgencyDelta: number;
+    line: string | null;
+    note: string | null;
   };
   urgency: number;
   confidence: 'high' | 'medium' | 'low';

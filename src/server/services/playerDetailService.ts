@@ -20,6 +20,8 @@ import { SleeperClient } from '../../core/sleeper/client.ts';
 import { fetchPlayerOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
 import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
 import { majorInjuryHistory } from '../../core/draft/injury.ts';
+import { DESIGNATION_LABEL, injuryLine, provenanceLine } from '../../core/injury/model.ts';
+import { InjuryService } from './injuryService.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -122,6 +124,24 @@ export interface PlayerDetailView {
    * it without reading the paragraph.
    */
   injuryContext: string | null;
+  /**
+   * What is known about his availability right now, and where it came from.
+   *
+   * Separate from `injuryContext` above, which is history named in the season
+   * outlook. This is the current designation, the body part, the practice week
+   * and the provenance — three sources' worth of fact, resolved once.
+   */
+  injury: {
+    designation: string;
+    label: string;
+    line: string | null;
+    bodyPart: string | null;
+    practice: string | null;
+    provenance: string | null;
+    freshness: string;
+    confidence: string;
+    conflict: string | null;
+  } | null;
 }
 
 export class PlayerDetailService {
@@ -129,7 +149,7 @@ export class PlayerDetailService {
   private readonly players: PlayerRepo;
 
   constructor(
-    db: Database,
+    private readonly db: Database,
     private readonly deps: { sleeper?: SleeperClient; fetch?: FetchLike; now?: () => Date } = {},
   ) {
     this.repo = new PlayerDetailRepo(db);
@@ -194,7 +214,42 @@ export class PlayerDetailService {
     // Read from the whole outlook, never from the shortened one: a diagnosis
     // named in a sentence the summary did not choose is still in the source.
     const history = majorInjuryHistory(outlook?.fullText ?? null);
-    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext: history?.line ?? null };
+
+    /*
+     * Current availability, from the shared layer.
+     *
+     * Read after the outlook and never blocking it: an injury store that
+     * cannot answer costs this section and leaves the rest of the card intact,
+     * which is the same rule every other feed on this screen follows.
+     */
+    const injury = await this.injuryFor(playerId, name).catch(() => null);
+
+    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext: history?.line ?? null, injury };
+  }
+
+  /**
+   * The current injury state, flattened for the wire.
+   *
+   * `null` when nobody has said anything, so the card renders no section at all
+   * rather than a heading over the word "unknown".
+   */
+  private async injuryFor(playerId: string, name: string | null): Promise<PlayerDetailView['injury']> {
+    void name;
+    const player = await this.players.getById(playerId);
+    const state = await new InjuryService(this.db).stateFor(playerId, player?.status ?? null);
+    if (state.designation === 'unknown') return null;
+    if (state.designation === 'healthy' && !state.bodyPart && !state.practice.label) return null;
+    return {
+      designation: state.designation,
+      label: DESIGNATION_LABEL[state.designation],
+      line: injuryLine(state),
+      bodyPart: state.bodyPart,
+      practice: state.practice.label,
+      provenance: provenanceLine(state),
+      freshness: state.freshness,
+      confidence: state.confidence,
+      conflict: state.conflictNote,
+    };
   }
 
   private async outlookFor(

@@ -11,6 +11,9 @@ import type { Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
+import { PlayerDetailRepo } from '../repos/playerDetail.ts';
+import { InjuryService } from './injuryService.ts';
+import { outlookSeason } from './playerDetailService.ts';
 
 export interface TradeBoard {
   league: { id: string; name: string } | null;
@@ -26,11 +29,13 @@ export class TradeService {
   private readonly leagues: LeagueRepo;
   private readonly players: PlayerRepo;
   private readonly evidence: EvidenceRepo;
+  private readonly detail: PlayerDetailRepo;
 
-  constructor(db: Database) {
+  constructor(private readonly db: Database) {
     this.leagues = new LeagueRepo(db);
     this.players = new PlayerRepo(db);
     this.evidence = new EvidenceRepo(db);
+    this.detail = new PlayerDetailRepo(db);
   }
 
   async build(opts: { limit?: number } = {}): Promise<TradeBoard> {
@@ -58,7 +63,7 @@ export class TradeService {
     const all = await this.players.listAll();
     const byId = new Map(all.map((p) => [p.id, p]));
 
-    const candidates = withEvidence
+    const shortlist = withEvidence
       .map((id) => {
         const player = byId.get(id);
         if (!player || !player.active) return null;
@@ -66,6 +71,28 @@ export class TradeService {
         return { player, signal: signals.get(id) ?? null, ownership };
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
+
+    /*
+     * Availability, and the outlook that is the only place a major recovery is
+     * ever named.
+     *
+     * Both are looked up once for the shortlist rather than per card. The
+     * outlook is read from the cache only — a trade board must not turn into
+     * sixty requests to a third party, and a player with no cached outlook
+     * simply has no named history, which is the honest answer.
+     */
+    const [injuries, outlooks] = await Promise.all([
+      new InjuryService(this.db)
+        .statesFor(shortlist.map((c) => ({ playerId: c.player.id, status: c.player.status })))
+        .catch(() => new Map()),
+      this.detail.cachedOutlooks(shortlist.map((c) => c.player.id), outlookSeason()).catch(() => new Map<string, string>()),
+    ]);
+
+    const candidates = shortlist.map((c) => ({
+      ...c,
+      injury: injuries.get(c.player.id) ?? null,
+      outlook: outlooks.get(c.player.id) ?? null,
+    }));
 
     const ranked = rankTrades(candidates).slice(0, opts.limit ?? 60);
     return {
