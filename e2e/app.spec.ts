@@ -134,6 +134,15 @@ test.describe('draft room', () => {
     expect(await survivals.count()).toBeGreaterThan(3);
     await expect(survivals.first()).toContainText('%');
 
+    // And it names the pick it is talking about, so "next pick" cannot be read
+    // as the one on the clock — which is what it used to be measured against.
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=1')).json();
+    expect(board.waitHorizonPick).toBeGreaterThan(board.currentPick);
+    await expect(survivals.first().locator('strong')).toHaveAttribute(
+      'title',
+      new RegExp(`at pick ${board.waitHorizonPick}, your next one after this`),
+    );
+
     // Kai Brennan is 0% to last, Bo Ashworth is 98%: the ends of the scale.
     const bands = await page.locator('.survival[data-band]').evaluateAll((nodes) =>
       nodes.map((n) => ({ band: n.getAttribute('data-band'), pct: Number((n.textContent ?? '').replace('%', '')) })),

@@ -391,6 +391,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
                 rank={item.rank}
                 rec={item.rec}
                 showCliffProximity={!isSinglePosition}
+                horizonPick={board.waitHorizonPick}
                 expanded={expanded === item.rec.playerId}
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
@@ -508,6 +509,7 @@ function RecommendationRow({
   rec,
   expanded,
   showCliffProximity,
+  horizonPick,
   onToggle,
   onQueue,
   busy,
@@ -517,6 +519,8 @@ function RecommendationRow({
   expanded: boolean;
   /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
   showCliffProximity: boolean;
+  /** The pick survival is measured against — your next one after this. */
+  horizonPick: number | null;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -558,7 +562,7 @@ function RecommendationRow({
               {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
             </strong>
           </span>
-          <SurvivalMetric probability={rec.survivalProbability} />
+          <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
           {/*
             One signal, not two.
 
@@ -883,7 +887,15 @@ function LastSeasonLine({
   );
 }
 
-function SurvivalMetric({ probability }: { probability: number | null }) {
+/**
+ * The chance he is still there when you pick again.
+ *
+ * `horizonPick` is your next selection *after* the one on the clock, which is
+ * the only reading of "next pick" that means anything while you are choosing:
+ * asking whether a player available now is available now is true of everybody.
+ * It is named in the tooltip so nobody has to work out which pick was meant.
+ */
+function SurvivalMetric({ probability, horizonPick }: { probability: number | null; horizonPick: number | null }) {
   const band = survivalBand(probability);
   if (probability == null) {
     return (
@@ -899,7 +911,11 @@ function SurvivalMetric({ probability }: { probability: number | null }) {
       <strong
         className={`survival survival-${band}`}
         data-band={band}
-        title={`${pct}% chance he is still available at your next pick`}
+        title={
+          horizonPick == null
+            ? `${pct}% chance he is still available at your next pick`
+            : `${pct}% chance he is still available at pick ${horizonPick}, your next one after this`
+        }
       >
         {pct}%
       </strong>

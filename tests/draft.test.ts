@@ -37,8 +37,23 @@ describe('survival estimate', () => {
     expect(est.note).toContain('unknown');
   });
 
-  it('is certain when you are on the clock', () => {
+  /**
+   * S(x)/S(x). Kept because it is true, but the board no longer reaches it:
+   * the horizon it passes is always a pick later than the one on the clock.
+   */
+  it('is certain when the horizon is the pick itself', () => {
     expect(estimateSurvival({ adp: 30, currentPick: 10, nextPick: 10 }).probability).toBe(1);
+  });
+
+  /**
+   * No later pick is not the same fact as "certain to last", and reporting the
+   * second is worse than reporting nothing: on your final selection there is
+   * nothing for a player to survive to.
+   */
+  it('is unknown when there is no pick after this one', () => {
+    const est = estimateSurvival({ adp: 30, currentPick: 190, nextPick: null });
+    expect(est.probability).toBeNull();
+    expect(est.note).toContain('nothing for him to last until');
   });
 
   it('gives a low probability to a player whose ADP is well before your next pick', () => {

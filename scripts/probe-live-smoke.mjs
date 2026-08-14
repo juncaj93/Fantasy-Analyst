@@ -83,6 +83,33 @@ if (draftId) {
     );
     check('roster need is a light contributor', Math.abs(componentOf(rec, 'need')) <= 0.2, `need ${componentOf(rec, 'need')}`);
   }
+  /*
+   * Which pick "will he last" is measured against.
+   *
+   * It must be a pick later than the one on the clock, always. When it was your
+   * own selection — which is what it was whenever you were on the clock — the
+   * question became "is a player available now available now", and the whole
+   * board answered 100% at the one moment the number is used to choose.
+   */
+  const horizon = board.json?.waitHorizonPick ?? null;
+  const onTheClock = board.json?.onTheClock === true;
+  check(
+    'survival is measured against a pick later than this one',
+    horizon == null || horizon > (board.json?.currentPick ?? 0),
+    `pick ${board.json?.currentPick} on the clock, horizon ${horizon ?? 'none left'}` +
+      (onTheClock ? ' (your turn — the case this used to get wrong)' : ''),
+  );
+  const survivals = (board.json?.recommendations ?? [])
+    .map((r) => r.survivalProbability)
+    .filter((p) => p != null);
+  if (survivals.length > 3) {
+    check(
+      'the board is not reporting everybody as certain to last',
+      horizon == null || !survivals.every((p) => p === 1),
+      `${new Set(survivals).size} distinct values across ${survivals.length} players`,
+    );
+  }
+
   console.log(
     `      alerts still computed: ${(board.json?.rosterAlerts ?? []).length}, ` +
       `startable positions: ${(board.json?.startablePositions ?? []).join(', ')}`,

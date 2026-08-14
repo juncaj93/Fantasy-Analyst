@@ -159,6 +159,18 @@ export interface AvailablePlayerInput {
 
 export interface DraftContext {
   currentPick: number;
+  /**
+   * The pick a player would have to survive to if you passed on him now — the
+   * user's next selection *after* the one on the clock, never the one on it.
+   *
+   * Everything in this engine that asks "what happens if I wait" measures
+   * against this: survival, positional scarcity, and how urgent a tier cliff
+   * is. Setting it to the pick on the clock makes all three answer "nothing
+   * happens if you wait", which is exactly wrong at the moment they are read.
+   *
+   * `null` on the final selection of the draft, and it stays null: there is no
+   * later pick, and every one of those three is then honestly unknown.
+   */
   nextPick: number | null;
   shape: RosterShape;
   profile: ScoringProfile;
@@ -450,7 +462,9 @@ export function rankAvailablePlayers(
     const survival = estimateSurvival({
       adp,
       currentPick: ctx.currentPick,
-      nextPick: ctx.nextPick ?? ctx.currentPick,
+      // Passed through, null and all. Substituting the current pick here turned
+      // "there is no later pick" into "certain to last", which is its opposite.
+      nextPick: ctx.nextPick,
     });
     const urgencyScore = survival.probability == null ? 0 : clamp(1 - survival.probability * 2, -1, 1);
     components.push({
@@ -458,8 +472,8 @@ export function rankAvailablePlayers(
       label: 'Survival to next pick',
       display:
         survival.probability == null
-          ? 'unknown (no ADP)'
-          : `${Math.round(survival.probability * 100)}% chance to last to pick ${ctx.nextPick ?? ctx.currentPick}`,
+          ? survival.note
+          : `${Math.round(survival.probability * 100)}% chance to last to pick ${ctx.nextPick}`,
       score: round3(urgencyScore),
       weight: weights.survivalUrgency,
       contribution: round3(urgencyScore * weights.survivalUrgency),
