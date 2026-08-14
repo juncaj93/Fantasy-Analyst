@@ -67,6 +67,22 @@ import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 const QUEUE_FILTER = '★';
 const ALL_FILTER = 'ALL';
 
+/**
+ * How many rows the board is, and how many it fetches to search through.
+ *
+ * The board itself is the top forty — that is what a drafter reads. A search
+ * asks for a deeper slice because the man being looked for may be ranked 130th,
+ * and the ranking is computed over the whole pool either way, so the limit only
+ * decides how many come back.
+ *
+ * The collapsed board is capped at `BOARD_ROWS` whichever response happens to
+ * be in hand. Without that, clearing the field showed all 250 for the moment
+ * before the shallow refetch landed — a list flashing to six times its length
+ * and back is the kind of thing a phone notices and a test catches.
+ */
+const BOARD_ROWS = 40;
+const SEARCH_ROWS = 250;
+
 export function DraftScreen({
   leagues,
   unlocked,
@@ -132,7 +148,7 @@ export function DraftScreen({
          * makes it possible to find the man ranked 130th. It goes back to forty
          * the moment the field is cleared.
          */
-        const limit = deep ? 250 : 40;
+        const limit = deep ? SEARCH_ROWS : BOARD_ROWS;
         setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${limit}${filter}`));
         setUpdatedAt(Date.now());
         setError(null);
@@ -308,9 +324,10 @@ export function DraftScreen({
    * between two rows that are not adjacent on the board would be claiming a
    * boundary that is not there.
    */
-  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
-    matchesQuery(item.rec.name, query),
-  );
+  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching)
+    .filter((item) => matchesQuery(item.rec.name, query))
+    // Capped unless a search is asking for the depth: see BOARD_ROWS.
+    .slice(0, searching ? SEARCH_ROWS : BOARD_ROWS);
 
   return (
     <>

@@ -27,6 +27,33 @@ async function open(page: Page, tab: (typeof TABS)[number]) {
   await page.waitForTimeout(400);
 }
 
+/**
+ * Wait for a list to answer before deciding it is empty.
+ *
+ * These tests skip themselves when a deployment has no league connected, which
+ * is honest — but a fixed pause plus a bare `count()` cannot tell "nothing to
+ * show" from "not back yet", and production is a real database behind a cold
+ * worker. On one run that difference silently skipped four of the assertions
+ * that matter most, and a skipped test reads exactly like a passing one.
+ *
+ * So the wait is for an outcome rather than for a duration: rows, or the empty
+ * state that means there genuinely are none.
+ */
+async function settled(page: Page, rowTestId: string): Promise<number> {
+  const rows = page.getByTestId(rowTestId);
+  await Promise.race([
+    rows.first().waitFor({ state: 'visible', timeout: 20_000 }),
+    page.locator('.empty, .spinner').first().waitFor({ state: 'visible', timeout: 20_000 }),
+  ]).catch(() => {
+    /* Neither arrived; the count below reports what is actually there. */
+  });
+  // A skeleton is still "not back yet", so give the fetch behind it a moment.
+  if ((await rows.count()) === 0 && (await page.getByTestId('draft-skeleton').count()) > 0) {
+    await rows.first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+  }
+  return rows.count();
+}
+
 test.describe('the deployed app', () => {
   test('loads, and lands on a tab bar with all six destinations', async ({ page }) => {
     await page.goto('/');
@@ -78,10 +105,9 @@ test.describe('the deployed app', () => {
     await open(page, 'draft');
 
     const rows = page.getByTestId('recommendation-row');
-    const count = await rows.count();
     // A deployment with no league connected has an honest empty state instead,
-    // and that is not a failure of this pass.
-    test.skip(count === 0, 'no draft board on this deployment');
+    // and that is not a failure of this pass — but "not back yet" is not that.
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const metrics = await rows.first().locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
@@ -101,7 +127,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
-    const count = await rows.count();
+    const count = await settled(page, 'recommendation-row');
     test.skip(count === 0, 'no draft board on this deployment');
 
     const viewport = page.viewportSize()!;
@@ -120,7 +146,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
-    test.skip((await rows.count()) === 0, 'no draft board on this deployment');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const first = rows.first();
     await first.click();
@@ -173,7 +199,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
-    test.skip((await rows.count()) === 0, 'no player list on this deployment');
+    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
 
     const first = rows.first();
     await first.click();
@@ -204,19 +230,21 @@ test.describe('the deployed app', () => {
     await expect(search).toBeVisible();
 
     const rows = page.getByTestId('recommendation-row');
-    test.skip((await rows.count()) === 0, 'no draft board on this deployment');
-    const before = await rows.count();
+    const before = await settled(page, 'recommendation-row');
+    test.skip(before === 0, 'no draft board on this deployment');
     const name = (await rows.first().locator('.player-name').innerText()).split(' ').pop()!;
 
     await search.fill(name);
-    await page.waitForTimeout(500);
-    const narrowed = await rows.count();
-    expect(narrowed).toBeGreaterThan(0);
-    expect(narrowed).toBeLessThanOrEqual(before);
+    // Narrowing is what the search is for; the board never grows because of it.
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThan(before);
+    expect(await rows.count()).toBeGreaterThan(0);
 
+    // Clearing puts the board back to its own length, and keeps it there: the
+    // deeper slice the search fetched must never be what the board shows.
     await page.getByTestId('search-clear').click();
-    await page.waitForTimeout(700);
-    expect(await rows.count()).toBe(before);
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBe(before);
+    await page.waitForTimeout(1200);
+    expect(await rows.count(), 'the board settles at its own length').toBe(before);
   });
 
   test('is installable, and still refuses a write from a stranger', async ({ page, request }) => {
