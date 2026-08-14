@@ -26,9 +26,14 @@ import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/d
  * `★` is not a position — it is the user's own queue, and it sits first
  * because during a draft "who did I want again" is asked more often than any
  * single position.
+ *
+ * The positions come from the league rather than from a list here. A chip that
+ * can only ever return nothing is worse than no chip: the board already hides
+ * positions the league does not start, so a DEF chip in a league with no
+ * defence slot looked exactly like a bug in the board.
  */
 const QUEUE_FILTER = '★';
-const POSITIONS = [QUEUE_FILTER, 'ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+const ALL_FILTER = 'ALL';
 
 export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
@@ -37,7 +42,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const [board, setBoard] = useState<DraftBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [position, setPosition] = useState('ALL');
+  const [position, setPosition] = useState(ALL_FILTER);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [autoPoll, setAutoPoll] = useState(false);
   const [flagging, setFlagging] = useState<string | null>(null);
@@ -49,7 +54,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
       setLoading(true);
       try {
         const query =
-          pos === QUEUE_FILTER ? '&queued=1' : pos === 'ALL' ? '' : `&position=${pos}`;
+          pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
         setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=40${query}`));
         setError(null);
       } catch (err) {
@@ -163,7 +168,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
         accessible name with a worse one.
       */}
       <div className="filter-row" role="group" aria-label="Filter by position">
-        {POSITIONS.map((p) => (
+        {[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => (
           <button
             key={p}
             className={p === QUEUE_FILTER ? 'chip chip-queue' : 'chip'}

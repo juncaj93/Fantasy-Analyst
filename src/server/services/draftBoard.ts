@@ -43,6 +43,15 @@ export interface DraftBoardState {
   rosterAlerts: RosterAlert[];
   /** 1-based round currently on the clock. */
   round: number;
+  /**
+   * Positions this league actually starts, in a sensible reading order.
+   *
+   * The board already hides positions the league does not use; sending the
+   * list means the filter row can stop offering chips that are guaranteed to
+   * return nothing — which is what a DEF chip does in a league with no defence
+   * slot, and what a K chip did everywhere.
+   */
+  startablePositions: string[];
   warnings: string[];
 }
 
@@ -266,7 +275,17 @@ export class DraftBoardService {
         totalRounds: rounds,
       }),
       round,
+      startablePositions: orderPositions(startable),
       warnings,
     };
   }
+}
+
+/** Conventional reading order, with anything unexpected kept and put last. */
+const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'DEF'];
+
+function orderPositions(positions: Set<string>): string[] {
+  const known = POSITION_ORDER.filter((p) => positions.has(p));
+  const rest = [...positions].filter((p) => !POSITION_ORDER.includes(p)).sort();
+  return [...known, ...rest];
 }

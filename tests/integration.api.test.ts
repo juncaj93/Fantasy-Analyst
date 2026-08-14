@@ -245,6 +245,14 @@ describe('API with seeded data', () => {
     expect(cleared.myGuy.level).toBe(0);
   });
 
+  it('offers filters only for positions the league actually starts', async () => {
+    const board = await json<{ startablePositions: string[] }>(get('/api/drafts/demo-draft/board', cookie));
+    // The demo league starts QB/RB/RB/WR/WR/TE/FLEX — no defence, no kicker.
+    expect(board.startablePositions).toEqual(['QB', 'RB', 'WR', 'TE']);
+    expect(board.startablePositions).not.toContain('DEF');
+    expect(board.startablePositions).not.toContain('K');
+  });
+
   it('narrows the board to the queue, and says so when it is empty', async () => {
     const empty = await json<{ recommendations: unknown[]; warnings: string[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),

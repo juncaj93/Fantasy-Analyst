@@ -95,7 +95,14 @@ export const FLEX_ELIGIBILITY: Record<string, string[]> = {
   IDP_FLEX: ['DL', 'LB', 'DB'],
 };
 
-const NON_PLAYING_SLOTS = new Set(['BN', 'IR', 'TAXI']);
+/**
+ * Slots that never get a recommendation.
+ *
+ * `K` sits here for the same reason kickers are not synced: the app has no
+ * opinion about them, so treating a kicker slot as a starting slot would
+ * produce a lineup row it could never fill and a warning it could never clear.
+ */
+const NON_PLAYING_SLOTS = new Set(['BN', 'IR', 'TAXI', 'K']);
 
 function num(settings: Record<string, number>, key: string, fallback = 0): number {
   const v = settings[key];

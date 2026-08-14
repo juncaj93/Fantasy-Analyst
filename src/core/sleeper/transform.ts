@@ -19,8 +19,29 @@ import type {
   SleeperUser,
 } from './types.ts';
 
-/** Positions we keep from the Sleeper player dump. Everything else is dropped. */
-export const FANTASY_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
+/**
+ * Positions we keep from the Sleeper player dump. Everything else is dropped.
+ *
+ * Kickers are deliberately absent. They are not modelled anywhere in this app —
+ * no news rules read them, no Vegas market covers them, and no published ADP
+ * this project uses ranks them — so keeping three hundred of them in the
+ * dictionary only ever produced empty screens and a filter chip that returned
+ * nothing. A league that starts one still starts one; the app simply does not
+ * pretend to have an opinion about who it should be.
+ */
+export const FANTASY_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'DEF']);
+
+/**
+ * Positions the app refuses to carry, whatever a league or a feed says.
+ *
+ * Applied at read time as well as at sync time, so kickers already stored by an
+ * earlier sync disappear immediately rather than lingering until the next one.
+ */
+export const EXCLUDED_POSITIONS = new Set(['K']);
+
+export function isExcludedPosition(position: string | null | undefined): boolean {
+  return EXCLUDED_POSITIONS.has(String(position ?? '').toUpperCase());
+}
 
 /**
  * Convert the Sleeper player dump into canonical players.

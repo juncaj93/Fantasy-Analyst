@@ -134,6 +134,7 @@ export interface DraftBoard {
   recommendations: DraftRecommendation[];
   rosterAlerts: RosterAlert[];
   round: number;
+  startablePositions: string[];
   warnings: string[];
 }
 

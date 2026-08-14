@@ -31,7 +31,7 @@ export function Signal({ net, items, label }: { net: number; items?: number; lab
  */
 export function PositionBadge({ position, team }: { position: string | null; team?: string | null }) {
   const pos = (position ?? '').toUpperCase();
-  const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
+  const known = ['QB', 'RB', 'WR', 'TE', 'DEF'].includes(pos);
   return (
     <span className="pos-team">
       <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>

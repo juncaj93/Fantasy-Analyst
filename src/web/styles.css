@@ -367,10 +367,6 @@ body {
   --pos-color: #c084fc;
 }
 
-.pos-K {
-  --pos-color: #94a3b8;
-}
-
 .pos-DEF {
   --pos-color: #f472b6;
 }
@@ -397,10 +393,6 @@ body {
 
   .pos-TE {
     --pos-color: #7e22ce;
-  }
-
-  .pos-K {
-    --pos-color: #475569;
   }
 
   .pos-DEF {
