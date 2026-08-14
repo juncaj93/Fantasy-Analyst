@@ -45,17 +45,23 @@ CREATE TABLE IF NOT EXISTS injury_source_state (
   last_outcome TEXT,
   last_note TEXT,
 
-  /*
-   * The ingest lease.
-   *
-   * D1 has no advisory locks, so this is a compare-and-swap: the UPDATE that
-   * claims the lease carries `WHERE lock_expires_at IS NULL OR lock_expires_at
-   * < ?`, and SQLite reports how many rows it changed. One row changed means
-   * you own it; zero means somebody else does.
-   *
-   * It expires rather than releasing, so a Worker that dies mid-ingest cannot
-   * deadlock the pipeline — the next tick after the lease runs out takes over.
-   */
+  -- The ingest lease.
+  --
+  -- D1 has no advisory locks, so this is a compare-and-swap: the UPDATE that
+  -- claims the lease only matches a row whose lock has expired, and SQLite
+  -- reports how many rows it changed. One row changed means you own it, zero
+  -- means somebody else does.
+  --
+  -- It expires rather than releasing, so a Worker that dies mid-ingest cannot
+  -- deadlock the pipeline — the next tick after the lease runs out takes over.
+  --
+  -- Written with line comments on purpose. `wrangler d1 migrations apply
+  -- --remote` sends the file to D1 unsplit and lets the server parse it, which
+  -- is not the parser `--local` uses: this file applied locally and failed the
+  -- deploy with "incomplete input" while it still carried a block comment. Line
+  -- comments are what every already-applied migration uses, so they are the
+  -- form the remote parser is known to accept. `tests/migrations.test.ts` keeps
+  -- the next migration inside that set.
   lock_owner TEXT,
   lock_expires_at TEXT,
 
