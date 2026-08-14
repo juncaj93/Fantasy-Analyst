@@ -152,10 +152,24 @@ function useTabbarHeight(ref: React.MutableRefObject<HTMLElement | null>) {
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
+
+    /*
+     * Written only when it actually changes.
+     *
+     * A custom property on the root element is inherited by everything, so
+     * setting it invalidates the whole document's style — and the property it
+     * sets changes the page's height, which is the kind of thing that makes a
+     * resize observer fire again. Writing unconditionally turns that into a
+     * loop that costs a repaint of every card for no change at all.
+     */
+    let last = -1;
     const apply = () => {
       const height = Math.round(node.getBoundingClientRect().height);
-      if (height > 0) document.documentElement.style.setProperty('--tabbar-height', `${height}px`);
+      if (height <= 0 || height === last) return;
+      last = height;
+      document.documentElement.style.setProperty('--tabbar-height', `${height}px`);
     };
+
     apply();
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', apply);
@@ -163,11 +177,7 @@ function useTabbarHeight(ref: React.MutableRefObject<HTMLElement | null>) {
     }
     const observer = new ResizeObserver(apply);
     observer.observe(node);
-    window.visualViewport?.addEventListener('resize', apply);
-    return () => {
-      observer.disconnect();
-      window.visualViewport?.removeEventListener('resize', apply);
-    };
+    return () => observer.disconnect();
   }, [ref]);
 }
 

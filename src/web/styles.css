@@ -700,25 +700,21 @@ body,
  * meaning — and because six per cent of men would see three of these hues as
  * one colour.
  */
+/*
+ * A flat wash, not a gradient.
+ *
+ * Forty gradient-painted cards sitting behind two backdrop-filtered bars is a
+ * lot of work for a compositor to redo on every scroll — enough to make a
+ * software-rendered WebKit crawl. A single mixed colour is one paint, reads the
+ * same at this opacity, and is computed once rather than per frame.
+ */
 .card-pos {
   border-left: 3px solid var(--pos-line, var(--border));
-  background: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--pos-tint-bg, transparent) 90%, transparent),
-    color-mix(in srgb, var(--pos-tint-bg, transparent) 22%, transparent) 45%,
-    transparent 78%
-  ),
-  var(--surface);
+  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface)) 45%, var(--surface));
 }
 
 .card-pos.player-row-open {
-  background: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--pos-tint-bg, transparent) 95%, transparent),
-    color-mix(in srgb, var(--pos-tint-bg, transparent) 30%, transparent) 45%,
-    transparent 78%
-  ),
-  var(--surface-raised);
+  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface-raised)) 55%, var(--surface-raised));
 }
 
 .card-pos-QB {
