@@ -22,6 +22,16 @@ import { LeagueRepo } from '../repos/league.ts';
 import { PlayerFlagsRepo } from '../repos/playerFlags.ts';
 import { PlayerRepo } from '../repos/players.ts';
 
+/**
+ * A ranked player plus whether the user bookmarked him.
+ *
+ * The queue is deliberately bolted on out here rather than passed into the
+ * engine. It is a bookmark: it says where to look, not how good the player is,
+ * and the ranking must come out identical whether or not the star is lit. The
+ * engine cannot accidentally read what it is never given.
+ */
+export type BoardRecommendation = DraftRecommendation & { queued: boolean };
+
 export interface DraftBoardState {
   draftId: string;
   status: string;
@@ -47,7 +57,7 @@ export interface DraftBoardState {
    */
   rosterProgress: { slot: string; filled: number; required: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
-  recommendations: DraftRecommendation[];
+  recommendations: BoardRecommendation[];
   /** What the shape of the live roster is saying, given how late it is. */
   rosterAlerts: RosterAlert[];
   /** 1-based round currently on the clock. */
@@ -191,7 +201,7 @@ export class DraftBoardService {
       !takenIds.has(player.id) &&
       (startable.size === 0 || startable.has(player.position)) &&
       (!positionFilter || player.position === positionFilter) &&
-      (!queuedOnly || (allFlags.get(player.id) ?? 0) > 0);
+      (!queuedOnly || allFlags.get(player.id)?.queued === true);
 
     /*
      * "Only ranked players" has to be asked per position, not once for the board.
@@ -283,7 +293,7 @@ export class DraftBoardService {
         adp: rankOf(player),
         adpRank: importedValues.get(player.id)?.rank ?? null,
         signal: signals.get(player.id) ?? null,
-        myGuyLevel: flags.get(player.id) ?? 0,
+        myGuyLevel: flags.get(player.id)?.level ?? 0,
         seasonMarkets: seasonLines.get(player.id) ?? [],
       })),
       {
@@ -294,7 +304,9 @@ export class DraftBoardService {
         rosterCounts,
         totalPicks: teams * rounds,
       },
-    ).slice(0, opts.limit ?? 50);
+    )
+      .slice(0, opts.limit ?? 50)
+      .map((rec) => ({ ...rec, queued: allFlags.get(rec.playerId)?.queued === true }));
 
     return {
       draftId,

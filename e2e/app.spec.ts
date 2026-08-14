@@ -304,39 +304,56 @@ test.describe('draft room', () => {
     for (const s of sample) expect(s.badge).toBe(s.position);
   });
 
-  test('stars a player, keeps it across a reload, and explains the boost', async ({ page }) => {
+  test('stars a player as a bookmark, keeps it across a reload, and says it changed no ranking', async ({ page }) => {
     const row = page.getByTestId('recommendation-row').first();
     const playerId = await row.getAttribute('data-player-id');
-    const star = row.getByTestId('my-guy-control');
-    await expect(star).toHaveAttribute('data-level', '0');
+    const star = row.getByTestId('queue-control');
+    await expect(star).toHaveAttribute('data-queued', '0');
 
     await star.click();
     const flagged = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
-    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '1');
+    await expect(flagged.getByTestId('queue-control')).toHaveAttribute('data-queued', '1');
 
-    // Tapping cycles rather than opening a menu — one thumb, one clock.
-    await flagged.getByTestId('my-guy-control').click();
-    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+    // Two states, not four. A bookmark is on or off.
+    await flagged.getByTestId('queue-control').click();
+    await expect(flagged.getByTestId('queue-control')).toHaveAttribute('data-queued', '0');
+    await flagged.getByTestId('queue-control').click();
 
     await page.reload();
     const afterReload = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
-    await expect(afterReload.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+    await expect(afterReload.getByTestId('queue-control')).toHaveAttribute('data-queued', '1');
 
+    // The expanded card says what the star did — and, pointedly, what it did not.
     await afterReload.click();
-    await expect(afterReload.locator('.explain')).toContainText('Strong My Guy');
+    await expect(afterReload.getByTestId('detail-queued')).toContainText('does not change his ranking');
+    // Starring is not rating: no My Guy line appears from it.
+    await expect(afterReload.getByTestId('detail-my-guy')).toHaveCount(0);
 
     // Leave the board as it was found, so the shared dev server stays clean.
-    await afterReload.getByTestId('my-guy-control').click();
-    await afterReload.getByTestId('my-guy-control').click();
+    await afterReload.getByTestId('queue-control').click();
     await expect(
-      page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`).getByTestId('my-guy-control'),
-    ).toHaveAttribute('data-level', '0');
+      page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`).getByTestId('queue-control'),
+    ).toHaveAttribute('data-queued', '0');
+  });
+
+  test('starring keeps the board in exactly the same order', async ({ page }) => {
+    const ids = () =>
+      page.getByTestId('recommendation-row').evaluateAll((rows) =>
+        rows.map((r) => r.getAttribute('data-player-id')),
+      );
+    const before = await ids();
+    // Somebody a little way down, where a ranking boost would be visible.
+    const target = page.getByTestId('recommendation-row').nth(5);
+    await target.getByTestId('queue-control').click();
+    await expect(target.getByTestId('queue-control')).toHaveAttribute('data-queued', '1');
+    expect(await ids()).toEqual(before);
+    await target.getByTestId('queue-control').click();
   });
 
   test('the star filter shows only the players you queued', async ({ page }) => {
     const row = page.getByTestId('recommendation-row').first();
     const playerId = await row.getAttribute('data-player-id');
-    await row.getByTestId('my-guy-control').click();
+    await row.getByTestId('queue-control').click();
 
     await page.getByTestId('queue-filter').click();
     const queued = page.getByTestId('recommendation-row');
@@ -345,22 +362,18 @@ test.describe('draft room', () => {
     await expect(page.getByTestId('queue-filter')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('board-list')).toHaveAttribute('aria-label', /queue/i);
 
-    // Clearing the flag empties the queue, and the screen says how to fill it.
-    await queued.first().getByTestId('my-guy-control').click();
-    await queued.first().getByTestId('my-guy-control').click();
-    await queued.first().getByTestId('my-guy-control').click();
+    // Unstarring empties the queue, and the screen says how to fill it.
+    await queued.first().getByTestId('queue-control').click();
     await expect(page.getByText(/Your queue is empty/)).toBeVisible();
   });
 
   test('starring does not also expand the row', async ({ page }) => {
     const row = page.getByTestId('recommendation-row').first();
     const playerId = await row.getAttribute('data-player-id');
-    await row.getByTestId('my-guy-control').click();
+    await row.getByTestId('queue-control').click();
     const after = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
     await expect(after.locator('.explain')).toHaveCount(0);
-    await after.getByTestId('my-guy-control').click();
-    await after.getByTestId('my-guy-control').click();
-    await after.getByTestId('my-guy-control').click();
+    await after.getByTestId('queue-control').click();
   });
 
   /**
@@ -510,8 +523,10 @@ test.describe('player intelligence', () => {
     await openTab(page, 'players');
   });
 
-  test('shows the same flag as a heart here, not a star', async ({ page }) => {
-    const control = page.getByTestId('player-search-row').first().getByTestId('my-guy-control');
+  test('rates a player with the heart, which is not the draft queue', async ({ page }) => {
+    const firstRow = page.getByTestId('player-search-row').first();
+    const playerId = await firstRow.getAttribute('data-player-id');
+    const control = firstRow.getByTestId('my-guy-control');
     await expect(control).toHaveAttribute('data-icon', 'heart');
     // Colour is not doing the work: the glyph itself changes.
     expect((await control.innerText()).trim()).toBe('♡');
@@ -520,11 +535,20 @@ test.describe('player intelligence', () => {
     await expect(control).toHaveAttribute('data-level', '1');
     expect((await control.innerText()).trim()).toBe('♥');
 
+    // The heart is an opinion, not a bookmark: the draft queue stays empty.
+    await openTab(page, 'draft');
+    await page.getByTestId('queue-filter').click();
+    await expect(page.getByText(/Your queue is empty/)).toBeVisible();
+
     // Leave the shared dev server as it was found.
-    await control.click();
-    await control.click();
-    await control.click();
-    await expect(control).toHaveAttribute('data-level', '0');
+    await openTab(page, 'players');
+    const back = page
+      .locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`)
+      .getByTestId('my-guy-control');
+    await back.click();
+    await back.click();
+    await back.click();
+    await expect(back).toHaveAttribute('data-level', '0');
   });
 
   test('searches players and opens the evidence timeline', async ({ page }) => {
