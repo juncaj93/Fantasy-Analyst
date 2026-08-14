@@ -291,10 +291,11 @@ jobs:
 
       # The injury report, on the same first-run principle.
       #
-      # The crons keep it current -- daily at 09:00 for the practice reports,
-      # and again on Sunday morning beside the Vegas refresh. Neither has fired
-      # on a brand-new deployment, so without this the app runs on Sleeper's
-      # designation alone until tomorrow morning for no reason.
+      # The five-minute cron keeps it current from here on. This read is still
+      # worth doing at deploy time: it puts a report in a brand-new database
+      # immediately instead of on the next tick, and -- unlike a cron, whose
+      # failures are only visible in the Worker's logs -- it reports what
+      # happened in this workflow's output, where a broken ingest is noticed.
       #
       # A season with nothing published yet answers `not_published` and that is
       # a success: there is no injury report in August because the NFL has not
