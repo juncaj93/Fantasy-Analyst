@@ -26,9 +26,44 @@ export function Signal({ net, items, label }: { net: number; items?: number; lab
   );
 }
 
-/** Just the number, coloured and signed. For places that already say what it is. */
+/**
+ * The tally, as small as it can be and still mean something: `+6` or `-2`.
+ *
+ * The long form above — `▲ +6 pos` — earned its glyph and its word honestly: a
+ * state must never be carried by colour alone. But it was printed on forty rows
+ * of a draft board next to the name, and three tokens where one would do is how
+ * a dense list stops being scannable. The sign is the glyph here. `+` and `-`
+ * are not decoration and not colour; they are the thing being said, and they
+ * survive greyscale, low vision and a screen reader identically.
+ *
+ * The title carries the full sentence for anyone who wants it, and the richer
+ * lifetime/30d/7d breakdown still lives on the Players and Trades screens where
+ * there is room for it.
+ */
+export function CompactTally({ net, label }: { net: number; label?: string }) {
+  if (net === 0) return null;
+  const cls = net > 0 ? 'tally tally-pos' : 'tally tally-neg';
+  return (
+    <span
+      className={cls}
+      data-testid="compact-tally"
+      title={`${label ?? 'Research tally'}: ${net > 0 ? '+' : ''}${net} net`}
+    >
+      {net > 0 ? `+${net}` : net}
+    </span>
+  );
+}
+
+/**
+ * The same number, in a place that has already labelled it — a window cell, a
+ * table row — so a zero is a real reading and is printed rather than omitted.
+ *
+ * Shares {@link CompactTally}'s classes on purpose: `+11` under "Lifetime" on
+ * Trades and `+11` beside a name on the draft board are the same fact, and they
+ * should not be two different greens. Size comes from where it sits.
+ */
 export function SignedValue({ net }: { net: number }) {
-  const cls = net > 0 ? 'sig sig-pos' : net < 0 ? 'sig sig-neg' : 'sig sig-none';
+  const cls = net > 0 ? 'tally tally-pos' : net < 0 ? 'tally tally-neg' : 'tally tally-none';
   return <span className={cls}>{net > 0 ? `+${net}` : net}</span>;
 }
 

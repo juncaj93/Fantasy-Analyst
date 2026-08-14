@@ -7,11 +7,13 @@ import { useEffect, useState } from 'react';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import {
   Badge,
+  CompactTally,
   DetailLabel,
   Empty,
   Loading,
   PositionBadge,
   Signal,
+  SignedValue,
   Unknown,
   formatDate,
   positionCardClass,
@@ -146,12 +148,22 @@ export function PlayersScreen() {
                 onChange={(level) => void setMyGuy(p.id, level)}
               />
               <span className="player-name">{p.name}</span>
+              {/* The same headline tally, in the same place, as on the draft board. */}
+              <CompactTally net={p.signal?.raw.net ?? 0} label="Lifetime research tally" />
               <PositionBadge position={p.position} team={p.team} />
             </div>
+            {/*
+              The history stays here rather than moving up with the headline —
+              this is the screen where the windows are the point, and a row that
+              says only "+11" would have lost what the draft board never had.
+            */}
             <div className="player-row-metrics">
-              <Signal net={p.signal?.raw.net ?? 0} items={p.signal?.raw.items ?? 0} label="lifetime" />
               <span className="metric">
-                21d <strong>{p.signal?.last30.net ?? 0}</strong>
+                Lifetime <SignedValue net={p.signal?.raw.net ?? 0} />
+                {(p.signal?.raw.items ?? 0) > 0 ? <span className="faint"> ({p.signal!.raw.items})</span> : null}
+              </span>
+              <span className="metric">
+                21d <SignedValue net={p.signal?.last30.net ?? 0} />
               </span>
               {/* Say where the order came from, and what the news changed. */}
               {p.draftRank != null ? (
@@ -209,12 +221,14 @@ function PlayerDetailView({
           <span className="player-name" style={{ fontSize: '1.05rem' }}>
             {player.name}
           </span>
+          <CompactTally net={signal.raw.net} label="Lifetime research tally" />
           <PositionBadge position={player.position} team={player.team} />
         </div>
-        <div className="player-row-metrics">
-          <Signal net={signal.raw.net} items={signal.raw.items} label="lifetime" />
-          {player.status ? <Badge tone="warn">{player.status}</Badge> : null}
-        </div>
+        {player.status ? (
+          <div className="player-row-metrics">
+            <Badge tone="warn">{player.status}</Badge>
+          </div>
+        ) : null}
         <DetailLabel>News by window</DetailLabel>
         <table className="compact">
           <thead>

@@ -73,6 +73,8 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   newsConflicted: boolean;
   components: ComponentScore[];
   total: number;
+  /** `total` as a whole number, 0–100, higher is better. Board order follows it. */
+  score: number;
   reasons: string[];
   counterpoints: string[];
   degraded: boolean;
@@ -168,8 +170,15 @@ export interface PlayerDetail {
   outlook: {
     season: string;
     title: string;
-    /** The whole outlook, in the words of whoever wrote it. */
+    /**
+     * What to show: a selection of the provider's own sentences, in their own
+     * order, or the whole thing when no trustworthy selection could be made.
+     */
     text: string;
+    /** True when `text` is a selection, so the card can say so and offer the rest. */
+    summarised: boolean;
+    /** The whole outlook, in the words of whoever wrote it. */
+    fullText: string;
     /** Who wrote it. Shown on the card, not merely stored. */
     source: string | null;
     fetchedAt: string;
