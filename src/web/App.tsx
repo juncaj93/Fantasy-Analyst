@@ -89,7 +89,7 @@ export function App() {
 
       <main className="app-main">
         {error ? <Notice tone="error">{error}</Notice> : null}
-        {tab === 'draft' ? <DraftScreen leagues={leagues} /> : null}
+        {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
         {tab === 'players' ? <PlayersScreen /> : null}

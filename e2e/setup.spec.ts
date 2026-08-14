@@ -46,6 +46,79 @@ test.describe('setup overview', () => {
   });
 });
 
+/**
+ * Appearance.
+ *
+ * The preference lives on the device, so these run against a fresh context's
+ * empty storage: System until somebody chooses otherwise, and the choice
+ * applied before the first paint on the next visit.
+ */
+test.describe('appearance', () => {
+  test('offers System, Light and Dark, and starts on System', async ({ page }) => {
+    await openSetup(page);
+    await expect(page.getByTestId('appearance')).toBeVisible();
+    for (const mode of ['system', 'light', 'dark']) {
+      await expect(page.getByTestId(`appearance-${mode}`)).toBeVisible();
+    }
+    await expect(page.getByTestId('appearance-system')).toHaveAttribute('aria-pressed', 'true');
+    // System means the stylesheet follows the phone; nothing is pinned.
+    expect(await page.locator('html').getAttribute('data-theme')).toBeNull();
+  });
+
+  test('applies a choice at once, keeps it across a reload, and can go back to System', async ({ page }) => {
+    await openSetup(page);
+
+    await page.getByTestId('appearance-dark').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const dark = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+    // Applied before the first paint on the next visit, not after React boots.
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+    await page.getByTestId('tab-setup').click();
+    await page.getByTestId('appearance-light').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    const light = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(light, 'the two themes must actually differ').not.toBe(dark);
+
+    // Text stays readable in both: the page and its type are never the same colour.
+    const text = await page.evaluate(() => getComputedStyle(document.body).color);
+    expect(text).not.toBe(light);
+
+    await page.getByTestId('appearance-system').click();
+    expect(await page.locator('html').getAttribute('data-theme')).toBeNull();
+  });
+
+  test('a theme choice changes nothing but the theme', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-draft').click();
+    const rows = await page.getByTestId('recommendation-row').count();
+    const first = await page.getByTestId('recommendation-row').first().innerText();
+
+    await page.getByTestId('tab-setup').click();
+    await page.getByTestId('appearance-dark').click();
+    await page.getByTestId('tab-draft').click();
+
+    await expect(page.getByTestId('recommendation-row')).toHaveCount(rows);
+    expect(await page.getByTestId('recommendation-row').first().innerText()).toBe(first);
+
+    await page.getByTestId('tab-setup').click();
+    await page.getByTestId('appearance-system').click();
+  });
+
+  test('does not scroll sideways in either theme', async ({ page }) => {
+    await openSetup(page);
+    for (const mode of ['dark', 'light', 'system']) {
+      await page.getByTestId(`appearance-${mode}`).click();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `${mode} overflows horizontally`).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 test.describe('newsletter setup', () => {
   test.beforeEach(async ({ page }) => {
     await openSetup(page);

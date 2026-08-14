@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
-import { Badge, Empty, Loading, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
+import { Badge, DetailLabel, Empty, Loading, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -76,13 +76,23 @@ export function PlayersScreen() {
     try {
       const res = await api.post<{ myGuy: MyGuyFlag }>(`/api/players/${playerId}/my-guy`, { level });
       setPlayers((current) => current.map((p) => (p.id === playerId ? { ...p, myGuy: res.myGuy } : p)));
+      setDetail((current) =>
+        current && current.player.id === playerId ? { ...current, myGuy: res.myGuy } : current,
+      );
     } finally {
       setFlagging(null);
     }
   };
 
   if (detail) {
-    return <PlayerDetailView detail={detail} onBack={() => setDetail(null)} />;
+    return (
+      <PlayerDetailView
+        detail={detail}
+        busy={flagging === detail.player.id}
+        onMyGuy={(level) => void setMyGuy(detail.player.id, level)}
+        onBack={() => setDetail(null)}
+      />
+    );
   }
 
   return (
@@ -156,7 +166,22 @@ export function PlayersScreen() {
   );
 }
 
-function PlayerDetailView({ detail, onBack }: { detail: PlayerDetail; onBack: () => void }) {
+/**
+ * One player, in the same visual language as the expanded draft player:
+ * identity first, then the numbers, then the evidence that produced them. The
+ * content differs — nobody is drafting here — but the grammar does not.
+ */
+function PlayerDetailView({
+  detail,
+  onBack,
+  onMyGuy,
+  busy,
+}: {
+  detail: PlayerDetail;
+  onBack: () => void;
+  onMyGuy: (level: 0 | 1 | 2 | 3) => void;
+  busy: boolean;
+}) {
   const { player, signal, evidence, props } = detail;
   return (
     <>
@@ -165,17 +190,24 @@ function PlayerDetailView({ detail, onBack }: { detail: PlayerDetail; onBack: ()
       </button>
 
       <div className="card">
-        <div className="header-row">
-          <div>
-            <strong style={{ fontSize: '1.05rem' }}>{player.name}</strong>
-            <div className="faint">
-              <PositionBadge position={player.position} team={player.team} />
-              {player.status ? ` · ${player.status}` : ''}
-            </div>
-          </div>
-          <Signal net={signal.raw.net} items={signal.raw.items} label="lifetime" />
+        <div className="player-row-top">
+          <MyGuyControl
+            icon="heart"
+            myGuy={detail.myGuy ?? EMPTY_MY_GUY}
+            busy={busy}
+            onChange={(level) => onMyGuy(level)}
+          />
+          <span className="player-name" style={{ fontSize: '1.05rem' }}>
+            {player.name}
+          </span>
+          <PositionBadge position={player.position} team={player.team} />
         </div>
-        <table className="compact" style={{ marginTop: 6 }}>
+        <div className="player-row-metrics">
+          <Signal net={signal.raw.net} items={signal.raw.items} label="lifetime" />
+          {player.status ? <Badge tone="warn">{player.status}</Badge> : null}
+        </div>
+        <DetailLabel>News by window</DetailLabel>
+        <table className="compact">
           <thead>
             <tr>
               <th>Window</th>
@@ -207,8 +239,9 @@ function PlayerDetailView({ detail, onBack }: { detail: PlayerDetail; onBack: ()
           </tbody>
         </table>
         {signal.pendingCount > 0 ? (
-          <div className="badge-row">
-            <Badge tone="warn">{signal.pendingCount} item(s) awaiting review — excluded from tallies</Badge>
+          <div className="hint hint-caution">
+            {signal.pendingCount} news item{signal.pendingCount === 1 ? '' : 's'} still waiting for your review, so
+            {signal.pendingCount === 1 ? ' it is' : ' they are'} not counted in these tallies yet.
           </div>
         ) : null}
       </div>

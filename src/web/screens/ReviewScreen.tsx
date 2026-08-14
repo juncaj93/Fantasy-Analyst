@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EvidenceItem, type IdentityReview } from '../api.ts';
-import { Badge, Empty, Loading, Notice, formatDate } from '../components/common.tsx';
+import { Badge, Empty, Loading, Notice, PositionBadge, formatDate } from '../components/common.tsx';
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
@@ -159,12 +159,9 @@ function EvidenceReviewCard({
   return (
     <div className="card" data-testid={applied ? 'applied-card' : 'review-card'}>
       <div className="header-row">
-        <div>
+        <div className="pos-team" style={{ gap: 6 }}>
           <strong>{item.playerName ?? item.playerId}</strong>
-          <span className="faint">
-            {' '}
-            {item.playerPosition} {item.playerTeam}
-          </span>
+          <PositionBadge position={item.playerPosition ?? null} team={item.playerTeam ?? null} />
         </div>
         <Badge tone={item.polarity === 'positive' ? 'pos' : item.polarity === 'negative' ? 'neg' : 'warn'}>
           {item.polarity === 'positive' ? '▲' : item.polarity === 'negative' ? '▼' : '◆'} {item.polarity}
