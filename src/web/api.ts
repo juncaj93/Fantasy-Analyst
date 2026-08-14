@@ -143,6 +143,33 @@ export interface SlotProgress {
   bench?: boolean;
 }
 
+/**
+ * What the expanded card adds to what the collapsed one already showed.
+ *
+ * Fetched separately, and only once a card is open: the board must never wait
+ * on a third party mid-draft.
+ */
+export interface PlayerDetail {
+  playerId: string;
+  lastSeason: {
+    season: string;
+    gamesPlayed: number | null;
+    /** `WR7`. Null when he did not score — which is not "finished last". */
+    positionRank: string | null;
+    scoring: string;
+  } | null;
+  outlook: {
+    season: string;
+    title: string;
+    summary: string;
+    /** Who wrote it. Shown on the card, not merely stored. */
+    source: string | null;
+    fetchedAt: string;
+  } | null;
+  /** Why there is no outlook, when there is none. */
+  outlookNote: string | null;
+}
+
 export interface RosterAlert {
   key: string;
   severity: 'info' | 'warn' | 'urgent';
@@ -359,6 +386,28 @@ export interface SetupStatus {
       stale: boolean;
       reason: string;
     };
+  };
+  /** Where the expanded player card's extra sections come from, and coverage. */
+  playerDetail: {
+    stats: {
+      season: string;
+      source: string;
+      players: number;
+      lastRunAt: string | null;
+      returned: number | null;
+      unmatched: number | null;
+      rankDisagreements: number | null;
+      scoring: string;
+    };
+    outlook: {
+      season: string;
+      source: string;
+      stored: number;
+      noneAvailable: number;
+      newestAt: string | null;
+    };
+    /** Sleeper publishes none. The note says so in words. */
+    rosterPercent: { available: false; note: string };
   };
 }
 

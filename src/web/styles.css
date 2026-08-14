@@ -912,6 +912,41 @@ body,
 }
 
 /*
+ * The season outlook: prose, and the only prose on the card.
+ *
+ * Given a slightly longer line height than the bullets around it because it is
+ * two or three actual sentences rather than a list, and set in the secondary
+ * text colour so it reads as context and not as a finding of the app's own.
+ */
+.outlook {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+/* Who wrote it. Quiet, and never omitted. */
+.outlook-source {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* `16 GP · WR7 half-PPR` — two facts, one line, same metrics treatment as the row. */
+.season-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.season-line strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/*
  * The conclusion, said once and said loudest. A tinted left rule carries the
  * semantic colour instead of a second bordered box inside the card.
  */

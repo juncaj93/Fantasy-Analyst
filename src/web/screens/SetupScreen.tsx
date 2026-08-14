@@ -122,6 +122,7 @@ export function SetupScreen({
       {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
       {open === 'vegas' ? <VegasPanel status={status} /> : null}
 
+      <PlayerDetailPanel status={status} />
       <HelpMyScores onChanged={refreshAll} />
     </>
   );
@@ -1085,6 +1086,73 @@ function ignoredSender(status: NewsletterStatus): string | null {
     return p.startsWith('@') ? f.endsWith(p) : f === p;
   });
   return covered ? null : from;
+}
+
+/**
+ * Where the expanded player card's two extra sections come from, and how much
+ * of each actually landed.
+ *
+ * Not a setup step — there is nothing to do here — but not hidden either. A
+ * pipeline that quietly covers a third of the league looks identical from a
+ * player card to one that covers all of it: both show numbers, and the missing
+ * two thirds simply say nothing. The counts are the only place the difference
+ * is visible, so they are stated, folded away, in plain words.
+ *
+ * The last line answers a question the user asked directly, and answers it with
+ * a no.
+ */
+function PlayerDetailPanel({ status }: { status: SetupStatus }) {
+  const detail = status.playerDetail;
+  return (
+    <details className="card card-tight disclosure" data-testid="panel-player-detail">
+      <summary>Player card data</summary>
+
+      <div className="section-title" style={{ marginTop: 8 }}>
+        {detail.stats.season} statistics
+      </div>
+      <div className="faint" data-testid="stats-health">
+        {detail.stats.players > 0 ? (
+          <>
+            {detail.stats.players} player{detail.stats.players === 1 ? '' : 's'} covered, from{' '}
+            {detail.stats.returned ?? 0} rows. Updated {formatAge(detail.stats.lastRunAt)}.
+            {detail.stats.unmatched
+              ? ` ${detail.stats.unmatched} rows were not players this app knows — team totals and the like.`
+              : ''}
+          </>
+        ) : (
+          <>Nothing stored yet. The nightly Sleeper sync fills this in; cards say nothing until it does.</>
+        )}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Source: {detail.stats.source}. The positional finish is half-PPR — {detail.stats.scoring} — and it is that
+        rather than your league&rsquo;s own scoring, which is what you asked for and is a different number in a
+        league with custom rules. It is worked out here from the points, over the players who actually scored, so
+        somebody who never played has no finish rather than a place in the twelve hundreds.
+        {detail.stats.rankDisagreements
+          ? ` ${detail.stats.rankDisagreements} players sit differently in Sleeper's own ordering, which counts everybody on its books.`
+          : ''}
+      </div>
+
+      <div className="section-title" style={{ marginTop: 10 }}>
+        {detail.outlook.season} season outlook
+      </div>
+      <div className="faint" data-testid="outlook-health">
+        {detail.outlook.stored} stored, {detail.outlook.noneAvailable} players confirmed to have none.
+        {detail.outlook.newestAt ? ` Newest fetched ${formatAge(detail.outlook.newestAt)}.` : ''}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Source: {detail.outlook.source}. Fetched one player at a time, only when you open his card, and then kept —
+        including the players who have none, so opening those cards asks nobody anything.
+      </div>
+
+      <div className="section-title" style={{ marginTop: 10 }}>
+        Roster percentage
+      </div>
+      <div className="faint" data-testid="roster-percent-health">
+        {detail.rosterPercent.note}
+      </div>
+    </details>
+  );
 }
 
 function VegasPanel({ status }: { status: SetupStatus }) {

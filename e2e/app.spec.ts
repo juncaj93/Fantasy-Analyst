@@ -212,23 +212,34 @@ test.describe('draft room', () => {
     }
   });
 
-  test('leads the expanded player with the conclusion and the key numbers', async ({ page }) => {
+  /**
+   * The rule the expansion is built on: it may not repeat the row it opened
+   * from. It used to lead with a grid of ADP, value, survival and the tally —
+   * all four printed two lines above, in the same units.
+   */
+  test('adds context to the row rather than restating it', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
     await first.click();
+    await expect(first.getByTestId('player-detail')).toBeVisible();
 
-    // At most one conclusion, and only when there is a genuine warning: the
-    // timing states that used to headline this card are now the survival
-    // percentage in the row above.
+    /*
+     * Checked structurally rather than by looking for the words.
+     *
+     * "position is nearly exhausted before your next pick" is a reason, not a
+     * restated survival tile, and a reason is allowed to use a number to make
+     * its point — "this is a reach: -4.8 picks" is the argument, not a second
+     * printing of the value. What may not come back is the grid of labelled
+     * tiles that restated all four without adding anything.
+     */
+    await expect(first.locator('.explain .metric-grid')).toHaveCount(0);
+    await expect(first.locator('.explain .stat-label')).toHaveCount(0);
+
+    // What replaced it: context the row does not have.
+    await expect(first.getByText('Why this rank')).toBeVisible();
+    await expect(first.getByText('Counterpoint', { exact: true })).toBeVisible();
+
+    // At most one conclusion, and only when there is a genuine warning.
     expect(await first.getByTestId('verdict').count()).toBeLessThanOrEqual(1);
-
-    // The four numbers a pick is actually made on, before any prose.
-    const tiles = first.locator('.metric-grid .stat-label');
-    expect((await tiles.allInnerTexts()).map((t) => t.trim().toLowerCase())).toEqual([
-      'adp',
-      'value',
-      'next pick',
-      'lifetime',
-    ]);
 
     // Reasons are capped by default; the rest are one tap away, never deleted.
     expect(await first.locator('.reason-list').first().locator('li').count()).toBeLessThanOrEqual(3);
@@ -237,6 +248,92 @@ test.describe('draft room', () => {
     const verdicts = await first.locator('.verdict-label').allInnerTexts();
     const bullets = (await first.locator('.reason-list li').allInnerTexts()).map((b) => b.trim());
     for (const label of verdicts) expect(bullets).not.toContain(label.trim());
+  });
+
+  test('answers with one counterpoint, or says there is none', async ({ page }) => {
+    const rows = page.getByTestId('recommendation-row');
+    for (let i = 0; i < Math.min(await rows.count(), 4); i++) {
+      const row = rows.nth(i);
+      await row.click();
+      await expect(row.getByText('Counterpoint', { exact: true })).toBeVisible();
+
+      const lists = row.locator('.reason-list');
+      const counterpoints = lists.nth((await lists.count()) - 1);
+      const bullets = await counterpoints.locator('li').count();
+      if (bullets === 0) {
+        // Nothing is invented to fill the space; the absence is stated.
+        await expect(row.getByTestId('no-counterpoint')).toBeVisible();
+      } else {
+        expect(bullets, 'exactly one counterpoint by default').toBe(1);
+      }
+      await row.locator('.row-button').click();
+    }
+  });
+
+  /**
+   * The outlook is written by somebody, and says so.
+   *
+   * Sleeper serves it through a public endpoint; the demo data stands in for it
+   * so the suite never reaches a third party for player ids that are not
+   * theirs. What is asserted is the shape: a heading, a short paragraph, an
+   * attribution, and an honest sentence when there is none.
+   */
+  test('shows a short attributed season outlook, and admits when there is none', async ({ page }) => {
+    const withOutlook = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
+    await withOutlook.click();
+    const outlook = withOutlook.getByTestId('outlook');
+    await expect(outlook).toBeVisible();
+    await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
+    await expect(outlook).toContainText('via Sleeper');
+
+    // Two or three sentences, not the whole paragraph.
+    const text = (await outlook.innerText()).split(' — ')[0]!;
+    expect((text.match(/[.!?](\s|$)/g) ?? []).length).toBeLessThanOrEqual(3);
+    expect(text.length).toBeLessThan(420);
+    await withOutlook.locator('.row-button').click();
+
+    const without = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();
+    await without.scrollIntoViewIfNeeded();
+    await without.click();
+    await expect(without.getByTestId('outlook-none')).toContainText(/no .* outlook published/i);
+    await without.locator('.row-button').click();
+  });
+
+  test('shows last season as games played and a half-PPR finish', async ({ page }) => {
+    const played = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
+    await played.click();
+    const line = played.getByTestId('last-season');
+    await expect(line).toContainText(/\d+ GP/);
+    await expect(line).toContainText(/(QB|RB|WR|TE)\d+ half-PPR/);
+    await played.locator('.row-button').click();
+
+    // A player with no season has no finish — Sleeper would happily report him
+    // as the twelve-hundredth of his position, which is not a result.
+    const never = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();
+    await never.scrollIntoViewIfNeeded();
+    await never.click();
+    const unknown = never.getByTestId('last-season');
+    await expect(unknown).toContainText('GP unknown');
+    await expect(unknown).not.toContainText(/RB\d/);
+  });
+
+  /**
+   * Sleeper shows a roster percentage in its own app and publishes it nowhere,
+   * so the card shows none. Setup says so in words rather than leaving the
+   * question hanging.
+   */
+  test('shows no roster percentage, and says why in Setup', async ({ page }) => {
+    const first = page.getByTestId('recommendation-row').first();
+    await first.click();
+    expect((await first.locator('.explain').innerText()).toLowerCase()).not.toContain('rostered');
+
+    await page.getByTestId('tab-setup').click();
+    const panel = page.getByTestId('panel-player-detail');
+    await panel.locator('summary').click();
+    await expect(panel.getByTestId('roster-percent-health')).toContainText(/publishes no roster percentage/i);
+    // …and the two feeds that do exist report what landed.
+    await expect(panel.getByTestId('stats-health')).toContainText(/player/);
+    await expect(panel.getByTestId('outlook-health')).toContainText(/stored/);
   });
 
   test('the expanded player fits on the screen without opening Advanced', async ({ page }) => {

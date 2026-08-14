@@ -112,4 +112,19 @@ export class SleeperClient {
   getState(): Promise<SleeperState | null> {
     return this.get<SleeperState>('/state/nfl');
   }
+
+  /**
+   * Every player's totals for one finished regular season, in one request.
+   *
+   * ~2MB and about eight thousand rows, most of which are nobody. A finished
+   * season stops changing, so this runs on the nightly clock beside the player
+   * dictionary and never on a request path.
+   */
+  async getSeasonStats(season: string): Promise<Record<string, Record<string, number | null>>> {
+    return (
+      (await this.get<Record<string, Record<string, number | null>>>(
+        `/stats/nfl/regular/${encodeURIComponent(season)}`,
+      )) ?? {}
+    );
+  }
 }
