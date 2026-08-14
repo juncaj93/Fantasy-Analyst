@@ -19,13 +19,13 @@ import {
   Confidence,
   Empty,
   formatAge,
-  Loading,
   Notice,
   PositionBadge,
   Signal,
   Unknown,
   positionCardClass,
 } from '../components/common.tsx';
+import { NavBar, SkeletonRows } from '../components/native.tsx';
 
 interface OpenSlot {
   slot: string;
@@ -119,17 +119,20 @@ export function TeamScreen({
 
   return (
     <>
-      {message ? <Notice tone={message.tone === 'ok' ? 'ok' : message.tone === 'error' ? 'error' : 'warn'}>{message.text}</Notice> : null}
+      {/*
+        The league is the page's identity, so it is the page's title.
 
+        This was a card holding the name, the format and a Refresh control,
+        sitting under nothing — which meant the screen said "Team" nowhere and
+        spent a card saying what a title says. The same three facts and the same
+        control, in the bar.
+      */}
       {selected ? (
-        <div className="card card-tight" data-testid="league-card">
-          <div className="header-row">
-            <div>
-              <strong>{selected.name}</strong>
-              <div className="faint">
-                {selected.season} · {selected.teams} teams · {selected.scoringLabel}
-              </div>
-            </div>
+        <NavBar
+          testId="league-card"
+          title={selected.name}
+          subtitle={`${selected.season} · ${selected.teams} teams · ${selected.scoringLabel}`}
+          trailing={
             <button
               className="btn btn-sm"
               disabled={busy != null}
@@ -145,13 +148,22 @@ export function TeamScreen({
             >
               {busy === 'sync' ? 'Refreshing…' : 'Refresh'}
             </button>
-          </div>
-          <div className="badge-row">
+          }
+        />
+      ) : (
+        <NavBar title="Team" />
+      )}
+
+      {message ? <Notice tone={message.tone === 'ok' ? 'ok' : message.tone === 'error' ? 'error' : 'warn'}>{message.text}</Notice> : null}
+
+      {selected ? (
+        selected.notes.length > 0 ? (
+          <div className="badge-row" style={{ margin: '0 2px 8px' }}>
             {selected.notes.map((n) => (
               <Badge key={n}>{n}</Badge>
             ))}
           </div>
-        </div>
+        ) : null
       ) : (
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       )}
@@ -160,9 +172,8 @@ export function TeamScreen({
 
       {selected ? (
         <>
-          <div className="section-title">Roster — {selected.name}</div>
           {!roster ? (
-            <Loading what="roster" />
+            <SkeletonRows rows={6} testId="roster-skeleton" />
           ) : !roster.found ? (
             <Empty>Your roster was not found in this league. Check the connected Sleeper user.</Empty>
           ) : (
@@ -202,7 +213,7 @@ export function TeamScreen({
               ) : null}
 
               {compareIds.length >= 2 ? (
-                <div className="card">
+                <div className="btn-row" style={{ margin: '8px 2px 12px' }}>
                   <button className="btn btn-primary" onClick={compare} disabled={busy === 'compare'}>
                     Compare {compareIds.length} players
                   </button>
@@ -364,14 +375,22 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
   const winner = comparison.evaluations.find((e) => e.playerId === comparison.recommendedPlayerId);
   return (
     <div className="card" data-testid="comparison">
-      <div className="header-row">
-        <strong data-testid="comparison-verdict">
+      {/*
+        The recommendation, first and loudest.
+
+        A start/sit screen is one question with one answer, and everything under
+        it is why. The answer used to be a line of bold text among six other
+        lines of bold text; it is now the only thing on the card that looks like
+        a conclusion. Nothing about how it is reached has changed.
+      */}
+      <div className={winner ? 'verdict verdict-take' : 'verdict verdict-calm'}>
+        <div className="verdict-label" data-testid="comparison-verdict">
           {winner ? `Start ${winner.name}` : 'No recommendation'}
-        </strong>
-        <Confidence level={comparison.confidence} />
-      </div>
-      <div className="faint">
-        Vegas data {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
+        </div>
+        <div className="verdict-detail">
+          <Confidence level={comparison.confidence} /> · Vegas data{' '}
+          {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
+        </div>
       </div>
 
       {/*

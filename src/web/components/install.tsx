@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { describeViewport, formatViewportReport, type ViewportReport } from '../diagnostics.ts';
+import { InstallIcon } from './icons.tsx';
 import { dismissInstall, shouldOfferInstall, watchStandalone } from '../standalone.ts';
 
 /** The three taps, written the way iOS words them. */
@@ -57,7 +58,7 @@ export function InstallPrompt() {
     <div className="card card-tight install-prompt" data-testid="install-prompt">
       <div className="install-prompt-row">
         <span className="install-mark" aria-hidden="true">
-          ◈
+          <InstallIcon />
         </span>
         {/* Two lines at 360px. The app's own name is not in it: the user is
             already looking at the app. */}
@@ -87,22 +88,24 @@ export function InstallPrompt() {
  */
 export function InstallPanel() {
   return (
-    <details className="card card-tight disclosure" data-testid="panel-install">
+    <details className="list-details" data-testid="panel-install">
       <summary>Install on iPhone</summary>
+      <div className="list-details-body">
+        <div className="faint" style={{ marginTop: 8 }}>
+          In a normal Safari tab the address field and the row of browser buttons sit below the page.
+          They belong to Safari, not to Fantasy Analyst, and no setting in this app can remove them.
+        </div>
+        <div className="faint" style={{ marginTop: 6 }}>
+          Adding the app to your Home Screen and opening it from that icon launches it as a standalone
+          app: no address field, no browser buttons, just the app and iOS&rsquo;s own status bar and home
+          indicator. The swipe-from-the-edge back gesture is enabled there too, for the same reason:
+          in a tab that edge already belongs to Safari.
+        </div>
 
-      <div className="faint" style={{ marginTop: 8 }}>
-        In a normal Safari tab the address field and the row of browser buttons sit below the page.
-        They belong to Safari, not to Fantasy Analyst, and no setting in this app can remove them.
+        <InstallSteps />
+
+        <LayoutDiagnostics />
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
-        Adding the app to your Home Screen and opening it from that icon launches it as a standalone
-        app: no address field, no browser buttons, just the app and iOS&rsquo;s own status bar and home
-        indicator.
-      </div>
-
-      <InstallSteps />
-
-      <LayoutDiagnostics />
     </details>
   );
 }

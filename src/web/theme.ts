@@ -19,8 +19,8 @@ export const STORAGE_KEY = 'fa.appearance';
 
 /** The page background of each theme, used for the Safari toolbar tint. */
 const THEME_COLOR: Record<'light' | 'dark', string> = {
-  light: '#f4f6fa',
-  dark: '#0d1116',
+  light: '#f2f3f7',
+  dark: '#0c1015',
 };
 
 function isAppearance(value: unknown): value is Appearance {

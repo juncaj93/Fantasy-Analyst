@@ -5,9 +5,10 @@
  * passphrase, and that prompt lives inside Setup.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
+import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
@@ -18,13 +19,21 @@ import { TeamScreen } from './screens/TeamScreen.tsx';
 
 type Tab = 'draft' | 'team' | 'trades' | 'players' | 'review' | 'setup';
 
-const TABS: { id: Tab; label: string; glyph: string }[] = [
-  { id: 'draft', label: 'Draft', glyph: '◈' },
-  { id: 'team', label: 'Team', glyph: '▤' },
-  { id: 'trades', label: 'Trades', glyph: '⇄' },
-  { id: 'players', label: 'Players', glyph: '⌕' },
-  { id: 'review', label: 'Review', glyph: '✓' },
-  { id: 'setup', label: 'Setup', glyph: '⚙' },
+/*
+ * The six destinations, unchanged.
+ *
+ * The glyphs are drawn rather than typed — see components/icons.tsx. Two of the
+ * six characters this used to print were being resolved to colour emoji on a
+ * phone, which put a blue gear and a green tick in a row of grey marks at a
+ * size and weight no stylesheet could reach.
+ */
+const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'draft', label: 'Draft', Icon: BoardIcon },
+  { id: 'team', label: 'Team', Icon: RosterIcon },
+  { id: 'trades', label: 'Trades', Icon: TradeIcon },
+  { id: 'players', label: 'Players', Icon: SearchIcon },
+  { id: 'review', label: 'Review', Icon: ReviewIcon },
+  { id: 'setup', label: 'Setup', Icon: GearIcon },
 ];
 
 export function App() {
@@ -135,7 +144,7 @@ export function App() {
               data-testid={`tab-${t.id}`}
             >
               <span className="tab-glyph" aria-hidden="true">
-                {t.glyph}
+                <t.Icon />
               </span>
               {t.label}
               {badge > 0 ? <span className="tab-badge">{badge}</span> : null}

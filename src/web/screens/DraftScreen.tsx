@@ -22,14 +22,15 @@ import {
 import {
   CompactTally,
   DetailLabel,
+  Disclose,
   Empty,
-  Loading,
   Notice,
   PositionBadge,
   Unknown,
   formatShortAge,
   positionCardClass,
 } from '../components/common.tsx';
+import { NavBar, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
  *
@@ -246,63 +247,76 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   if (!draftId) {
     return <Empty>This league has no draft attached in Sleeper yet.</Empty>;
   }
-  if (!board && loading) return <Loading what="draft board" />;
+  if (!board && loading) {
+    return (
+      <>
+        <NavBar title="Draft" subtitle="Loading the board…" />
+        <SkeletonRows rows={7} testId="draft-skeleton" />
+      </>
+    );
+  }
   if (error && !board) return <Notice tone="error">{error}</Notice>;
   if (!board) return <Empty>No draft data.</Empty>;
 
   return (
     <>
       {/*
-        One line of chrome, not a banner.
+        The live state, in the bar that does not scroll away.
 
         The pick number, the round, the roster count and the draft status used
         to occupy a row of stat cards above everything else, which pushed the
         only thing the user is actually reading — the players — most of a screen
-        down. Every number is still here, and still comes from the same board
-        state; it is just said in a sentence instead of five boxes. Everything
-        beyond the league name (scoring format, roster shape, snapshot label)
-        moved into the details below, where it is available without costing the
-        list any height.
+        down. Then they became one line, which scrolled off the moment the
+        reader moved down the board. They are now the navigation bar's own
+        subtitle: same numbers, same board state, no extra height, and on screen
+        at pick 40 as well as at pick 3.
       */}
-      <div className="draft-bar">
-        <strong data-testid="board-league-name" className="draft-league">
-          {board.league.name}
-        </strong>
-        <span className="draft-status" data-testid="draft-status">
-          <span className="draft-pick">#{board.currentPick}</span>
-          <span className="faint">R{board.round}</span>
-          <span className={board.onTheClock ? 'draft-turn draft-turn-now' : 'draft-turn'}>
-            {board.picksUntilMyTurn == null ? '—' : board.onTheClock ? 'YOUR PICK' : `${board.picksUntilMyTurn} to go`}
+      <NavBar
+        testId="draft-nav"
+        title={<span data-testid="board-league-name">{board.league.name}</span>}
+        subtitle={
+          <span className="draft-status" data-testid="draft-status">
+            <span className="draft-pick">#{board.currentPick}</span>
+            <span>R{board.round}</span>
+            <span className={board.onTheClock ? 'draft-turn draft-turn-now' : 'draft-turn'}>
+              {board.picksUntilMyTurn == null
+                ? '—'
+                : board.onTheClock
+                  ? 'YOUR PICK'
+                  : `${board.picksUntilMyTurn} to go`}
+            </span>
+            {updatedAt != null ? (
+              <span className="draft-updated" data-testid="draft-updated">
+                {formatShortAge(updatedAt, now)}
+              </span>
+            ) : null}
           </span>
-        </span>
-        {updatedAt != null ? (
-          <span className="draft-updated" data-testid="draft-updated">
-            {formatShortAge(updatedAt, now)}
-          </span>
-        ) : null}
-        {/*
-          A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
-          implied the user had to keep a link open; what they actually want is
-          "show me what just happened", so that is what the control says.
-        */}
-        <button
-          type="button"
-          className="icon-btn"
-          data-testid="draft-refresh"
-          aria-label={
-            unlocked
-              ? 'Refresh draft from Sleeper'
-              : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
-          }
-          aria-busy={refreshing}
-          disabled={refreshing}
-          onClick={() => void refreshNow()}
-        >
-          <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
-            ↻
-          </span>
-        </button>
-      </div>
+        }
+        trailing={
+          /*
+            A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
+            implied the user had to keep a link open; what they actually want is
+            "show me what just happened", so that is what the control says.
+          */
+          <button
+            type="button"
+            className="icon-btn"
+            data-testid="draft-refresh"
+            aria-label={
+              unlocked
+                ? 'Refresh draft from Sleeper'
+                : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
+            }
+            aria-busy={refreshing}
+            disabled={refreshing}
+            onClick={() => void refreshNow()}
+          >
+            <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
+              ↻
+            </span>
+          </button>
+        }
+      />
 
       {refreshNote ? (
         <div className="draft-refresh-note" data-testid="draft-refresh-note" role="status">
@@ -331,20 +345,18 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         does, and naming it "Filter to QB" would replace a perfectly good
         accessible name with a worse one.
       */}
-      <div className="filter-row" role="group" aria-label="Filter by position">
-        {[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => (
-          <button
-            key={p}
-            className={p === QUEUE_FILTER ? 'chip chip-queue' : 'chip'}
-            aria-pressed={position === p}
-            aria-label={p === QUEUE_FILTER ? 'Show only your queue' : undefined}
-            data-testid={p === QUEUE_FILTER ? 'queue-filter' : undefined}
-            onClick={() => setPosition(p)}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        label="Filter by position"
+        value={position}
+        onChange={setPosition}
+        segments={[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => ({
+          id: p,
+          label: p,
+          ...(p === QUEUE_FILTER
+            ? { ariaLabel: 'Show only your queue', className: 'chip-queue', testId: 'queue-filter' }
+            : {}),
+        }))}
+      />
 
       {/*
         No heading over the list.
@@ -597,7 +609,18 @@ function RecommendationRow({
         ) : null}
       </button>
 
-      {expanded ? <DraftPlayerDetail rec={rec} /> : null}
+      {/*
+        The reveal, in place and at a native speed.
+
+        The row above it does not move and the page does not jump: only this
+        card's own height changes, so whatever the reader was looking at stays
+        under their thumb. Nothing is fetched until the card is actually opened
+        — see usePlayerDetail — so animating the reveal costs one card's work
+        and never forty.
+      */}
+      <Disclose open={expanded}>
+        <DraftPlayerDetail rec={rec} />
+      </Disclose>
     </div>
   );
 }

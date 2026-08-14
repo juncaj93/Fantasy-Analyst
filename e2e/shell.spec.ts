@@ -1,0 +1,201 @@
+/**
+ * The shell, as a contract.
+ *
+ * The visual pass turned "what a screen looks like" into a small number of
+ * shared decisions — a compact navigation bar, a tab bar of a fixed height, a
+ * spacing rhythm, and a list that starts high on the page. Those are the parts
+ * that quietly regress, one component at a time, until the app is a dashboard
+ * again, so they are asserted as numbers here rather than described in a
+ * document.
+ *
+ * Nothing in this file knows anything about fantasy football: it measures the
+ * shell. What the screens *say* is covered by app.spec.ts and setup.spec.ts,
+ * and neither changed.
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
+
+async function open(page: Page, tab: (typeof TABS)[number]) {
+  await page.getByTestId(`tab-${tab}`).click();
+  await page.waitForTimeout(350);
+}
+
+test.describe('the navigation bar', () => {
+  test('every screen has one, and none of them is a banner', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of TABS) {
+      await open(page, tab);
+      const bar = page.locator('.nav-bar').first();
+      await expect(bar, `${tab} has no navigation bar`).toBeVisible();
+      const box = (await bar.boundingBox())!;
+      // A title, its qualifier and the screen's actions. Anything taller is a
+      // hero header, which is the thing this replaced.
+      expect(box.height, `${tab}'s bar is a banner at ${box.height}px`).toBeLessThanOrEqual(64);
+      expect(box.y, `${tab}'s bar does not start at the top`).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test('stays on screen while the board is scrolled', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+
+    const before = await page.getByTestId('draft-status').innerText();
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(250);
+
+    const bar = page.getByTestId('draft-nav');
+    const box = (await bar.boundingBox())!;
+    expect(box.y, 'the live draft state must not scroll away').toBeLessThanOrEqual(2);
+    // …and it is still saying the same thing, not a stale copy left behind.
+    expect(await page.getByTestId('draft-status').innerText()).toBe(before);
+  });
+
+  test('carries the live draft state that used to cost a row of cards', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    const bar = page.getByTestId('draft-nav');
+    await expect(bar).toContainText('Demo Dynasty');
+    await expect(bar.getByTestId('draft-status')).toContainText('#3');
+    await expect(bar.getByTestId('draft-status')).toContainText('R1');
+    await expect(bar.getByTestId('draft-refresh')).toBeVisible();
+  });
+});
+
+test.describe('density', () => {
+  /**
+   * How much of the first screen is the thing the user came for.
+   *
+   * Stated as a number because "denser" is otherwise an opinion that drifts.
+   * The measurement is rows fully above the tab bar on the smallest supported
+   * phone, and the list has to start in the top third of the page.
+   */
+  async function rowsOnFirstScreen(page: Page, testId: string) {
+    const viewport = page.viewportSize()!;
+    const rows = page.getByTestId(testId);
+    const count = await rows.count();
+    let visible = 0;
+    for (let i = 0; i < count; i++) {
+      const box = await rows.nth(i).boundingBox();
+      if (box && box.y + box.height <= viewport.height - 50) visible++;
+    }
+    return visible;
+  }
+
+  test('the draft board shows at least six players before a scroll', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    expect(await rowsOnFirstScreen(page, 'recommendation-row')).toBeGreaterThanOrEqual(6);
+  });
+
+  test('the players list shows at least seven', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    expect(await rowsOnFirstScreen(page, 'player-search-row')).toBeGreaterThanOrEqual(7);
+  });
+
+  test('Setup shows every step without scrolling', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    const viewport = page.viewportSize()!;
+    const last = (await page.getByTestId('setup-step-vegas').boundingBox())!;
+    expect(last.y + last.height).toBeLessThanOrEqual(viewport.height - 50);
+  });
+});
+
+test.describe('touch and reach', () => {
+  test('every tab is a full target', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of TABS) {
+      const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
+      expect(box.height, `${tab} is only ${box.height}px tall`).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('a settings row is a full target', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    for (const id of ['sleeper', 'league', 'adp', 'newsletter', 'vegas']) {
+      const box = (await page.getByTestId(`setup-step-${id}`).boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('nothing scrolls sideways, on any screen, in either theme', async ({ page }) => {
+    await page.goto('/');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      for (const tab of TABS) {
+        await open(page, tab);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow, `${tab} overflows sideways in ${theme}`).toBeLessThanOrEqual(1);
+      }
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+});
+
+test.describe('the two themes are one design', () => {
+  test('every screen keeps its text off its own background', async ({ page }) => {
+    await page.goto('/');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await open(page, 'draft');
+      const sample = await page.evaluate(() => {
+        const row = document.querySelector('[data-testid="recommendation-row"]')!;
+        const name = row.querySelector('.player-name')!;
+        const nav = document.querySelector('.nav-bar')!;
+        return {
+          rowBackground: getComputedStyle(row).backgroundColor,
+          nameColour: getComputedStyle(name).color,
+          navBackground: getComputedStyle(nav).backgroundColor,
+        };
+      });
+      expect(sample.nameColour).not.toBe(sample.rowBackground);
+      // The bars are material, not a hole in the page: a transparent one lets
+      // rows show through the blur as unreadable smear.
+      expect(sample.navBackground).not.toBe('rgba(0, 0, 0, 0)');
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+
+  test('the position tint survives in both, and stays a tint', async ({ page }) => {
+    await page.goto('/');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await open(page, 'draft');
+      const edges = await page
+        .locator('[data-testid="recommendation-row"]')
+        .evaluateAll((rows) => [...new Set(rows.map((r) => getComputedStyle(r).borderLeftColor))]);
+      expect(edges.length, `positions are indistinguishable in ${theme}`).toBeGreaterThan(1);
+      // The letters are still there, so the colour is never the only carrier.
+      const badges = await page.locator('[data-testid="recommendation-row"] .pos-pill').allInnerTexts();
+      for (const badge of badges) expect(badge.trim()).toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+});
+
+test.describe('reduced motion', () => {
+  test('expanding a player is instant, and still expands', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await open(page, 'draft');
+    const row = page.getByTestId('recommendation-row').first();
+    await row.click();
+    await expect(row.getByTestId('player-detail')).toBeVisible();
+
+    // Reported as seconds ("1e-05s" for the 0.01ms the stylesheet leaves), so
+    // it is compared as a number rather than as a string.
+    const seconds = await page.evaluate(() => {
+      const disclose = document.querySelector('.disclose');
+      return disclose ? Number.parseFloat(getComputedStyle(disclose).transitionDuration) : null;
+    });
+    expect(seconds, 'nothing should be animating under reduced motion').toBeLessThanOrEqual(0.001);
+  });
+});

@@ -11,7 +11,47 @@
  *     Light and Dark stay two settings of one design system.
  */
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+
+/**
+ * An inline disclosure that opens in place.
+ *
+ * The reveal is a grid row going from `0fr` to `1fr`, which is the only way to
+ * animate to a height nobody knows in advance without measuring it in
+ * JavaScript on every frame. Two things matter as much as the movement:
+ *
+ *  1. the children are **not** mounted while it is closed, so a card that
+ *     fetches something when it opens still fetches nothing until it does;
+ *  2. nothing above it moves, so the reader's place on a forty-row board is
+ *     exactly where they left it.
+ *
+ * Under reduced motion the stylesheet takes the transition to nothing and this
+ * becomes an ordinary conditional render, which is the correct answer there.
+ */
+export function Disclose({ open, children }: { open: boolean; children: ReactNode }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      // A frame between mounting at 0fr and growing to 1fr: without it React
+      // applies both in one commit and there is nothing to transition between.
+      const frame = requestAnimationFrame(() => setShown(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    setShown(false);
+    const handle = window.setTimeout(() => setMounted(false), 240);
+    return () => window.clearTimeout(handle);
+  }, [open]);
+
+  if (!mounted) return null;
+  return (
+    <div className={shown ? 'disclose disclose-open' : 'disclose'} data-disclosed={shown ? 'yes' : 'no'}>
+      <div>{children}</div>
+    </div>
+  );
+}
 
 export function Signal({ net, items, label }: { net: number; items?: number; label?: string }) {
   const cls = net > 0 ? 'sig sig-pos' : net < 0 ? 'sig sig-neg' : 'sig sig-none';
