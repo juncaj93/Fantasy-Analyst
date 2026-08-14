@@ -212,6 +212,11 @@ describe('wait guidance rides along with the ranking', () => {
     }
   });
 
+  /**
+   * The label is gone from the UI, so it is gone from the sentence too — but
+   * the point it was making is not. A player who will still be there has that
+   * said against taking him now, with the number that says it.
+   */
   it('says a likely survivor can wait, in the counterpoints', () => {
     // Deep pool, and the player goes ninety picks after the user's next turn:
     // nothing here is urgent.
@@ -219,7 +224,11 @@ describe('wait guidance rides along with the ranking', () => {
     const ranked = rankAvailablePlayers(pool, { ...CTX, currentPick: 15, nextPick: 30 });
     const far = ranked.find((r) => (r.adp ?? 0) === 120)!;
     expect(far.wait.state).toBe('likely_available_later');
-    expect(far.counterpoints.join(' ').toLowerCase()).toContain('likely available later');
+    const counterpoints = far.counterpoints.join(' ').toLowerCase();
+    expect(counterpoints).toContain('to reach pick 30');
+    expect(counterpoints).toMatch(/\d+%/);
+    // …and without reintroducing the chip the draft screen no longer shows.
+    expect(counterpoints).not.toContain('likely available later');
   });
 
   it('admits it does not know without an ADP', () => {

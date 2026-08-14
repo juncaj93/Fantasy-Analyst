@@ -33,6 +33,11 @@ jobs:
   e2e:
     name: iPhone WebKit smoke tests
     runs-on: ubuntu-latest
+    # A hung browser is a real failure mode, and without this it is invisible:
+    # the job sits at "in progress" for six hours and nobody learns anything.
+    # The suite takes about six minutes, so twenty is generous and still fails
+    # fast enough to be worth reading.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

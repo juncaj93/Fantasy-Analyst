@@ -25,11 +25,15 @@
 
 import {
   MARKET_KEYS,
+  SEASON_MARKET_KEYS,
   VegasProviderError,
   type MarketKey,
   type QuotaStatus,
   type RawPropQuote,
   type RawPropSet,
+  type SeasonMarketKey,
+  type SeasonMarketQuote,
+  type SeasonMarketSet,
   type VegasGame,
   type VegasProvider,
 } from './types.ts';
@@ -56,6 +60,38 @@ const INBOUND_MARKETS: Record<string, MarketKey> = {
 
 /** Entities that are a side of the game rather than a player. */
 const GAME_ENTITIES = new Set(['all', 'side1', 'side2', 'home', 'away']);
+
+/**
+ * Their season-long `statID` -> our season market key.
+ *
+ * Written from the same source as the weekly map — the live API — and none of
+ * these has ever been seen in a response. That is deliberate: the provider's
+ * own market catalogue (`/v2/markets?leagueID=NFL`) lists 148 active markets
+ * across periods `game`, `1h`, `2h`, `1q`–`4q` and `reg`, and not one season
+ * period among them, so there is currently nothing to match. The names follow
+ * the catalogue's own scheme, so if a season period ever appears this map is
+ * where it lands, and until then `getSeasonPlayerMarkets` returns an empty set
+ * with a reason rather than an error.
+ */
+const INBOUND_SEASON_MARKETS: Record<string, SeasonMarketKey> = {
+  passing_yards: 'season_pass_yards',
+  passing_touchdowns: 'season_pass_tds',
+  rushing_yards: 'season_rush_yards',
+  rushing_touchdowns: 'season_rush_tds',
+  receiving_receptions: 'season_receptions',
+  receptions: 'season_receptions',
+  receiving_yards: 'season_receiving_yards',
+  receiving_touchdowns: 'season_receiving_tds',
+};
+
+/**
+ * Periods that describe a whole season rather than a game.
+ *
+ * `reg` is the one the catalogue uses for regulation time WITHIN a game, so it
+ * is deliberately not here: reading it as a season would turn a 28.5-yard line
+ * into a season total, which is the exact failure this adapter exists to avoid.
+ */
+const SEASON_PERIODS = new Set(['season', 'full_season', 'regular_season', 'year']);
 
 export interface SportsGameOddsOptions {
   apiKey: string | null | undefined;
@@ -202,6 +238,80 @@ export class SportsGameOddsProvider implements VegasProvider {
       fetchedAt: new Date().toISOString(),
       quotes,
       raw: event,
+    };
+  }
+
+  /**
+   * Season-long player totals.
+   *
+   * Everything this provider publishes for the NFL is a single game: `type`
+   * accepts only `match`, `prop` and `tournament`, and both `prop` and
+   * `tournament` are empty for the league across the whole year. This asks the
+   * two places a season market could be — a non-match event, and any event
+   * quoting a season period — and reports emptiness as a fact with a reason,
+   * because "the provider has no such market" and "the request failed" are
+   * different things and only one of them is worth retrying.
+   *
+   * Two requests, both small. See docs/VEGAS.md for the probe that established
+   * this and what would have to change for it to start returning quotes.
+   */
+  async getSeasonPlayerMarkets(
+    season: string,
+    markets: SeasonMarketKey[] = SEASON_MARKET_KEYS,
+  ): Promise<SeasonMarketSet> {
+    const wanted = new Set(markets);
+    const fetchedAt = new Date().toISOString();
+    const quotes: SeasonMarketQuote[] = [];
+    const events: SgoEvent[] = [];
+
+    // Anything that is not a single game. Empty for the NFL today.
+    const props = await this.request<{ data?: SgoEvent[] }>(
+      `/events?leagueID=NFL&type=prop&oddsAvailable=true&limit=25`,
+    );
+    events.push(...(props.data ?? []));
+
+    // …and any event that quotes a season-length period, whatever its type.
+    const seasonal = await this.request<{ data?: SgoEvent[] }>(
+      `/events?leagueID=NFL&season=${encodeURIComponent(season)}&oddsAvailable=true&limit=25`,
+    );
+    events.push(...(seasonal.data ?? []));
+
+    for (const event of events) {
+      const players = event.players ?? {};
+      for (const odd of Object.values(event.odds ?? {})) {
+        if (odd.cancelled) continue;
+        if (odd.betTypeID !== 'ou' || odd.sideID !== 'over') continue;
+        if (!odd.periodID || !SEASON_PERIODS.has(odd.periodID)) continue;
+
+        const market = odd.statID ? INBOUND_SEASON_MARKETS[odd.statID] : undefined;
+        if (!market || !wanted.has(market)) continue;
+
+        const entity = odd.playerID ?? odd.statEntityID ?? '';
+        if (!entity || GAME_ENTITIES.has(entity)) continue;
+        const playerName = nameOf(players[entity], entity);
+        if (!playerName) continue;
+
+        quotes.push({
+          playerName,
+          market,
+          line: toNumber(odd.bookOverUnder ?? odd.fairOverUnder),
+          overPrice: toNumber(odd.bookOdds ?? odd.fairOdds),
+          underPrice: null,
+          book: this.name,
+        });
+      }
+    }
+
+    return {
+      provider: this.name,
+      season,
+      fetchedAt,
+      quotes,
+      note:
+        quotes.length > 0
+          ? null
+          : `${this.name} publishes no season-long NFL player markets: every NFL event is a single game, and its market catalogue has no season period.`,
+      raw: { events: events.length },
     };
   }
 

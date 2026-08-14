@@ -1,4 +1,11 @@
-/** Vegas snapshot persistence + the SnapshotStore implementation for the cache. */
+/**
+ * Vegas snapshot persistence + the SnapshotStore implementation for the cache.
+ *
+ * Weekly game lines only. Season-long markets live in the same two tables under
+ * `scope = 'season'` (see SeasonMarketsRepo), so every query here is scoped
+ * explicitly — a season total read as Sunday's line would be a silent, and very
+ * confident, lie.
+ */
 
 import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
 import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
@@ -10,7 +17,7 @@ export class PropsRepo implements SnapshotStore {
   /** Latest snapshot for an event, regardless of provider. */
   async get(eventId: string): Promise<CachedSnapshot | null> {
     const row = await this.db
-      .prepare('SELECT * FROM prop_snapshots WHERE event_id = ? ORDER BY fetched_at DESC LIMIT 1')
+      .prepare("SELECT * FROM prop_snapshots WHERE event_id = ? AND scope = 'week' ORDER BY fetched_at DESC LIMIT 1")
       .bind(eventId)
       .first<Record<string, unknown>>();
     if (!row) return null;
@@ -33,8 +40,8 @@ export class PropsRepo implements SnapshotStore {
   async put(snapshot: CachedSnapshot): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json)
-         VALUES (?,?,?,?,?)
+        `INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope)
+         VALUES (?,?,?,?,?,'week')
          ON CONFLICT(provider, event_id, fetched_at) DO NOTHING`,
       )
       .bind(snapshot.provider, snapshot.eventId, snapshot.gameStart, snapshot.fetchedAt, toJson(snapshot.raw))
@@ -43,7 +50,7 @@ export class PropsRepo implements SnapshotStore {
 
   async snapshotId(provider: string, eventId: string, fetchedAt: string): Promise<number | null> {
     const row = await this.db
-      .prepare('SELECT id FROM prop_snapshots WHERE provider = ? AND event_id = ? AND fetched_at = ?')
+      .prepare("SELECT id FROM prop_snapshots WHERE provider = ? AND event_id = ? AND fetched_at = ? AND scope = 'week'")
       .bind(provider, eventId, fetchedAt)
       .first<{ id: number }>();
     return row ? Number(row.id) : null;
@@ -59,8 +66,8 @@ export class PropsRepo implements SnapshotStore {
             .prepare(
               `INSERT INTO player_props (
                  snapshot_id, player_id, source_player_name, market, line, over_price, under_price,
-                 book_count, books_json, consensus_method, implied_probability, raw_json
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+                 book_count, books_json, consensus_method, implied_probability, raw_json, scope
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'week')`,
             )
             .bind(
               snapshotId,
@@ -92,9 +99,10 @@ export class PropsRepo implements SnapshotStore {
           `SELECT pp.* FROM player_props pp
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
+              AND ps.scope = 'week'
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id
+                 WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1
               )`,
         )
@@ -130,6 +138,7 @@ export class PropsRepo implements SnapshotStore {
              FROM player_props pp
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
+              AND ps.scope = 'week'
             ORDER BY ps.fetched_at ASC`,
         )
         .bind(...batch)
@@ -158,9 +167,10 @@ export class PropsRepo implements SnapshotStore {
           `SELECT pp.* FROM player_props pp
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
+              AND ps.scope = 'week'
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id
+                 WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1 OFFSET 1
               )`,
         )
@@ -179,7 +189,9 @@ export class PropsRepo implements SnapshotStore {
   /** Freshness of the newest snapshot overall, for the UI badge. */
   async freshness(): Promise<{ fetchedAt: string | null; provider: string | null; events: number }> {
     const row = await this.db
-      .prepare('SELECT provider, fetched_at, COUNT(DISTINCT event_id) AS events FROM prop_snapshots GROUP BY provider ORDER BY fetched_at DESC LIMIT 1')
+      .prepare(
+        "SELECT provider, fetched_at, COUNT(DISTINCT event_id) AS events FROM prop_snapshots WHERE scope = 'week' GROUP BY provider ORDER BY fetched_at DESC LIMIT 1",
+      )
       .first<Record<string, unknown>>();
     return {
       fetchedAt: row ? String(row['fetched_at']) : null,

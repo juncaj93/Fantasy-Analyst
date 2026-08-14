@@ -50,7 +50,7 @@ test.describe('draft room', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
     await openTab(page, 'draft');
-    await expect(page.getByTestId('recommended-heading')).toBeVisible();
+    await expect(page.getByTestId('board-list')).toBeVisible();
   });
 
   test('shows live draft state above the fold, on one line', async ({ page }) => {
@@ -62,21 +62,121 @@ test.describe('draft room', () => {
     await expect(status).toBeVisible();
     await expect(status).toContainText('#3');
     await expect(status).toContainText('R1');
-
-    // Everything else about the league is available, just folded away.
-    await expect(page.getByText(/Draft order/)).toHaveCount(1);
-    await page.getByText('League and draft order').click();
-    await expect(page.getByText(/Draft order/)).toBeVisible();
   });
 
-  test('puts the player list high on the screen', async ({ page }) => {
-    // The point of removing the banner: the first player should be visible
-    // without scrolling, on the smallest supported phone.
-    const heading = await page.getByTestId('recommended-heading').boundingBox();
+  /**
+   * Everything the draft screen stopped saying, so it can say more players.
+   *
+   * The league's settings and the draft-order provenance are still computed and
+   * still drive every number on screen — they are simply read in Setup now,
+   * which is where the rest of the configuration lives.
+   */
+  test('spends no vertical space on chrome the list already implies', async ({ page }) => {
+    const body = (await page.locator('main').innerText()).toLowerCase();
+    expect(body, 'the list being ranked is what says it is recommended').not.toContain('recommended');
+    expect(body).not.toContain('league and draft order');
+    expect(body, 'the roster block became one line').not.toContain('starting slots still open');
+
+    // …and it is still reachable where configuration lives. (The label depends
+    // on which rankings are loaded; what matters is that the step reports the
+    // draft order it is using.)
+    await page.getByTestId('tab-setup').click();
+    await expect(page.getByTestId('setup-step-adp')).toContainText('players matched');
+  });
+
+  test('says how much of a starting lineup you have, in one line', async ({ page }) => {
+    const line = page.getByTestId('roster-progress');
+    await expect(line).toBeVisible();
+    // The seeded league starts QB/RB/RB/WR/WR/TE/FLEX and has one RB drafted.
+    await expect(line.locator('[data-slot="QB"]')).toContainText('0/1');
+    await expect(line.locator('[data-slot="RB"]')).toContainText('1/2');
+    await expect(line.locator('[data-slot="FLEX"]')).toBeVisible();
+    // A league with no kicker slot never shows one.
+    await expect(line.locator('[data-slot="K"]')).toHaveCount(0);
+    // One line, not a card: it must not be taller than a couple of rows of text.
+    const box = await line.boundingBox();
+    expect(box!.height).toBeLessThan(40);
+  });
+
+  test('puts the player list high on the screen, and fits several on it', async ({ page }) => {
+    // The point of removing the banner, the heading and the roster card: the
+    // players start near the top, on the smallest supported phone.
     const firstRow = await page.getByTestId('recommendation-row').first().boundingBox();
     const viewport = page.viewportSize()!;
-    expect(heading!.y).toBeLessThan(viewport.height * 0.35);
+    expect(firstRow!.y).toBeLessThan(viewport.height * 0.3);
     expect(firstRow!.y + firstRow!.height).toBeLessThan(viewport.height);
+
+    // Density, stated as a number so it cannot quietly regress.
+    const rows = page.getByTestId('recommendation-row');
+    let visible = 0;
+    for (let i = 0; i < (await rows.count()); i++) {
+      const box = await rows.nth(i).boundingBox();
+      if (box && box.y + box.height <= viewport.height - 50) visible++;
+    }
+    expect(visible, 'the first screen should be mostly players').toBeGreaterThanOrEqual(6);
+  });
+
+  /**
+   * The urgency interface.
+   *
+   * Take Now / Risky to Wait / Can Probably Wait were on nearly every row, so
+   * they told the reader nothing. The chance he reaches your next pick says the
+   * same thing as a number, and the number is always printed — the colour is an
+   * accelerator, never the carrier.
+   */
+  test('shows the chance he lasts as a coloured percentage, not a wait chip', async ({ page }) => {
+    const text = (await page.locator('main').innerText()).toLowerCase();
+    for (const gone of ['take now', 'risky to wait', 'can probably wait', 'tier cliff']) {
+      expect(text, `"${gone}" should no longer be on a draft row`).not.toContain(gone);
+    }
+
+    const survivals = page.getByTestId('survival');
+    expect(await survivals.count()).toBeGreaterThan(3);
+    await expect(survivals.first()).toContainText('%');
+
+    // Kai Brennan is 0% to last, Bo Ashworth is 98%: the ends of the scale.
+    const bands = await page.locator('.survival[data-band]').evaluateAll((nodes) =>
+      nodes.map((n) => ({ band: n.getAttribute('data-band'), pct: Number((n.textContent ?? '').replace('%', '')) })),
+    );
+    expect(bands.length).toBeGreaterThan(3);
+    for (const { band, pct } of bands) {
+      if (pct <= 30) expect(band).toBe('gone');
+      else if (pct < 66) expect(band).toBe('coinflip');
+      else expect(band).toBe('safe');
+    }
+    // Colour actually differs between the ends, in whichever theme is active.
+    const colours = await page.locator('.survival[data-band]').evaluateAll((nodes) => [
+      ...new Set(nodes.map((n) => getComputedStyle(n).color)),
+    ]);
+    expect(colours.length).toBeGreaterThan(1);
+  });
+
+  /**
+   * Market context, where it exists.
+   *
+   * The seeded slate prices a few players and not others, which is exactly the
+   * real state of affairs: a card carries the line when there is one and says
+   * nothing when there is not, rather than holding space for an absent number.
+   */
+  test('shows the season market on the cards that have one, and nothing on the ones that do not', async ({
+    page,
+  }) => {
+    const rows = page.getByTestId('recommendation-row');
+    const withMarket = rows.filter({ has: page.getByTestId('market-line') });
+    expect(await withMarket.count(), 'the demo slate prices some players').toBeGreaterThan(0);
+    expect(await withMarket.count(), 'and not all of them').toBeLessThan(await rows.count());
+
+    const line = await withMarket.first().getByTestId('market-line').innerText();
+    // Units, not odds: no prices, no book names, no betting language.
+    expect(line.toLowerCase()).toMatch(/rec|yds|tds?|catches|pass|rush/);
+    expect(line).not.toMatch(/[+-]\d{3}/);
+    for (const word of ['odds', 'over/under', 'bet', 'wager', 'book']) {
+      expect(line.toLowerCase()).not.toContain(word);
+    }
+
+    // Expanded, the same market says what it is worth in this league's points.
+    await withMarket.first().locator('.row-button').click();
+    await expect(withMarket.first().getByTestId('market-baseline')).toContainText('points in this league');
   });
 
   test('colour-codes positions without losing the letters', async ({ page }) => {
@@ -116,28 +216,27 @@ test.describe('draft room', () => {
     const first = page.getByTestId('recommendation-row').first();
     await first.click();
 
-    // One conclusion, said once, in a semantic treatment rather than a fourth
-    // identical yellow chip.
-    const verdict = first.getByTestId('verdict');
-    await expect(verdict).toBeVisible();
-    expect(await first.getByTestId('verdict').count()).toBe(1);
+    // At most one conclusion, and only when there is a genuine warning: the
+    // timing states that used to headline this card are now the survival
+    // percentage in the row above.
+    expect(await first.getByTestId('verdict').count()).toBeLessThanOrEqual(1);
 
     // The four numbers a pick is actually made on, before any prose.
     const tiles = first.locator('.metric-grid .stat-label');
     expect((await tiles.allInnerTexts()).map((t) => t.trim().toLowerCase())).toEqual([
       'adp',
       'value',
-      'lasts',
+      'next pick',
       'lifetime',
     ]);
 
     // Reasons are capped by default; the rest are one tap away, never deleted.
     expect(await first.locator('.reason-list').first().locator('li').count()).toBeLessThanOrEqual(3);
 
-    // The conclusion is not repeated verbatim further down the card.
-    const label = (await verdict.locator('.verdict-label').innerText()).trim();
-    const bullets = await first.locator('.reason-list li').allInnerTexts();
-    expect(bullets.map((b) => b.trim())).not.toContain(label);
+    // Nothing in the reasons repeats a conclusion shown above them.
+    const verdicts = await first.locator('.verdict-label').allInnerTexts();
+    const bullets = (await first.locator('.reason-list li').allInnerTexts()).map((b) => b.trim());
+    for (const label of verdicts) expect(bullets).not.toContain(label.trim());
   });
 
   test('the expanded player fits on the screen without opening Advanced', async ({ page }) => {
@@ -156,21 +255,53 @@ test.describe('draft room', () => {
     }
   });
 
-  test('says what the shape of the roster means, not just what is missing', async ({ page }) => {
-    const alerts = page.getByTestId('roster-alert');
-    expect(await alerts.count()).toBeGreaterThan(0);
-    // A bare label is what the brief rules out: each alert carries its reason.
-    const first = alerts.first();
-    expect((await first.innerText()).split('\n').filter(Boolean).length).toBeGreaterThan(1);
+  /**
+   * Roster-construction intelligence is kept, but it stopped being a card.
+   *
+   * A block that said "3 starting slots still open" and then told the user to
+   * take the best player available was repeating what the ranked list under it
+   * was already doing. The alerts are still computed, still carry their reason,
+   * and are still available to explain a late-draft gap — they are simply not
+   * a banner at the top of a phone screen any more.
+   */
+  test('keeps roster-construction intelligence without spending a card on it', async ({ page }) => {
+    await expect(page.getByTestId('roster-alerts')).toHaveCount(0);
+
+    const board = await page.request.get('/api/drafts/demo-draft/board?limit=5');
+    const alerts = (await board.json()).rosterAlerts as { message: string; detail: string }[];
+    expect(alerts.length).toBeGreaterThan(0);
+    for (const alert of alerts) {
+      expect(alert.message.length).toBeGreaterThan(0);
+      // A bare label is what the brief rules out: each alert carries its reason.
+      expect(alert.detail.length).toBeGreaterThan(0);
+    }
   });
 
-  test('shows at most two decision tags on a row', async ({ page }) => {
+  test('shows at most one decision tag on a row', async ({ page }) => {
     const rows = page.getByTestId('recommendation-row');
     const count = await rows.count();
     for (let i = 0; i < Math.min(count, 10); i++) {
       const tags = rows.nth(i).getByTestId('decision-tags').locator('.tag');
-      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
+      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(1);
     }
+  });
+
+  test('tints the whole card by position, and keeps the letters', async ({ page }) => {
+    const rows = page.getByTestId('recommendation-row');
+    const sample = await rows.evaluateAll((nodes) =>
+      nodes.slice(0, 8).map((n) => ({
+        position: n.getAttribute('data-position'),
+        edge: getComputedStyle(n).borderLeftColor,
+        badge: (n.querySelector('.pos-pill')?.textContent ?? '').trim(),
+      })),
+    );
+    const positions = new Set(sample.map((s) => s.position));
+    expect(positions.size, 'the seeded board has several positions').toBeGreaterThan(1);
+    // Every position paints a different edge…
+    const byPosition = new Map(sample.map((s) => [s.position, s.edge]));
+    expect(new Set(byPosition.values()).size).toBe(byPosition.size);
+    // …and the position is still written on the card in words.
+    for (const s of sample) expect(s.badge).toBe(s.position);
   });
 
   test('stars a player, keeps it across a reload, and explains the boost', async ({ page }) => {
@@ -211,7 +342,8 @@ test.describe('draft room', () => {
     const queued = page.getByTestId('recommendation-row');
     await expect(queued).toHaveCount(1);
     await expect(queued.first()).toHaveAttribute('data-player-id', playerId!);
-    await expect(page.getByTestId('recommended-heading')).toContainText('Your queue');
+    await expect(page.getByTestId('queue-filter')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('board-list')).toHaveAttribute('aria-label', /queue/i);
 
     // Clearing the flag empties the queue, and the screen says how to fill it.
     await queued.first().getByTestId('my-guy-control').click();

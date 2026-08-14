@@ -46,6 +46,8 @@ export interface LiveRoster {
   remaining: number;
   /** Starting slots with nobody to put in them yet. */
   openStarters: OpenSlot[];
+  /** Every starting slot the league has, filled out of required. */
+  progress: SlotProgress[];
   picksMade: number;
 }
 
@@ -113,6 +115,53 @@ export function openStarters(shape: RosterShape, counts: Record<string, number>)
   return merged;
 }
 
+export interface SlotProgress {
+  /** `QB`, `RB`, …, or a flex slot name such as `FLEX` or `SUPER_FLEX`. */
+  slot: string;
+  filled: number;
+  required: number;
+  /** Which positions can fill it. */
+  accepts: string[];
+}
+
+/**
+ * Every starting slot the league actually has, and how many are covered.
+ *
+ * The same allocation as `openStarters` — fixed slots first, then whatever is
+ * left over offered to the flex — reported from the other end: filled out of
+ * required, in the league's own order, so the draft header can say
+ * `0/1 QB · 1/2 RB · 3/3 WR` instead of a paragraph about what to do next.
+ *
+ * Slots the league does not have simply do not appear. Bench spots are not
+ * slots to fill, so they are not here either.
+ */
+export function rosterProgress(shape: RosterShape, counts: Record<string, number>): SlotProgress[] {
+  const spare: Record<string, number> = { ...counts };
+  const rows: SlotProgress[] = [];
+
+  for (const [position, required] of Object.entries(shape.starters)) {
+    const held = spare[position] ?? 0;
+    const used = Math.min(held, required);
+    spare[position] = held - used;
+    rows.push({ slot: position, filled: used, required, accepts: [position] });
+  }
+
+  // Repeated flex slots collapse into one row: "1/2 FLEX" reads better than two.
+  for (const flex of shape.flex) {
+    const source = flex.positions.find((p) => (spare[p] ?? 0) > 0);
+    if (source) spare[source] = (spare[source] ?? 0) - 1;
+    let row = rows.find((r) => r.slot === flex.slot);
+    if (!row) {
+      row = { slot: flex.slot, filled: 0, required: 0, accepts: [...(FLEX_ELIGIBILITY[flex.slot] ?? flex.positions)] };
+      rows.push(row);
+    }
+    row.required++;
+    if (source) row.filled++;
+  }
+
+  return rows;
+}
+
 export function buildLiveRoster(input: LiveRosterInput): LiveRoster {
   const { picks, rosterId, ownerId, sleeperPlayerIds, byId, shape, draftStatus } = input;
   const live = IN_PROGRESS.has(String(draftStatus).toLowerCase());
@@ -159,6 +208,7 @@ export function buildLiveRoster(input: LiveRosterInput): LiveRoster {
     filled: players.length,
     remaining: Math.max(0, capacity - players.length),
     openStarters: openStarters(shape, counts),
+    progress: rosterProgress(shape, counts),
     picksMade: myPicks.length,
   };
 }

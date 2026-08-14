@@ -279,6 +279,23 @@ test.describe('vegas', () => {
     await expect(panel).toContainText('Not connected yet');
     await expect(panel).toContainText('Nothing to do here yet');
   });
+
+  /**
+   * Season-long markets are a different question from Sunday's lines, and get
+   * their own answer: how much is stored, how old it is, and — when there is
+   * nothing — the reason, rather than an empty section.
+   */
+  test('reports what season-long market data exists, and how fresh it is', async ({ page }) => {
+    await openSetup(page);
+    await page.getByTestId('setup-step-vegas').click();
+    const panel = page.getByTestId('panel-vegas');
+    await expect(panel).toContainText('Season outlook');
+    const health = page.getByTestId('season-market-health');
+    await expect(health).toBeVisible();
+    // The demo seeds a mock season snapshot, so it reports coverage and age.
+    await expect(health).toContainText(/market line|Nothing stored/);
+    await expect(panel).toContainText('the card says nothing rather than guessing');
+  });
 });
 
 test.describe('review actions added for setup', () => {

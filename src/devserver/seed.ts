@@ -18,6 +18,7 @@ import { AdpRepo } from '../server/repos/adp.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { PlayerRepo } from '../server/repos/players.ts';
 import { PropsRepo } from '../server/repos/props.ts';
+import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 
@@ -89,6 +90,7 @@ export interface SeedSummary {
   adpMatched: number;
   evidence: number;
   props: number;
+  seasonMarkets: number;
 }
 
 /** Populate a fresh database with the demo dataset. */
@@ -214,6 +216,12 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     }
   }
 
+  // --- season-long markets, through the same path the real provider uses ---
+  // The draft reads these; seeding them means the demo exercises the whole
+  // pipeline — provider, identity resolution, snapshot, baseline — rather than
+  // only the weekly half of it.
+  const seasonMarkets = await new SeasonMarketService(db, provider).refresh({ force: true });
+
   return {
     players: players.length,
     leagues: 1,
@@ -221,5 +229,6 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     adpMatched: adpResult.matchedCount,
     evidence: outcome.evidenceInserted,
     props: propCount,
+    seasonMarkets: seasonMarkets.quotes,
   };
 }

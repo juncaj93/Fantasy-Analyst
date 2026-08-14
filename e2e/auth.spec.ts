@@ -17,7 +17,7 @@ test('opens straight to the app with no login wall', async ({ page }) => {
   await expect(page.getByLabel('Passphrase')).toHaveCount(0);
   // Real data, not an empty shell.
   await page.getByTestId('tab-draft').click();
-  await expect(page.getByTestId('recommended-heading')).toBeVisible();
+  await expect(page.getByTestId('board-list')).toBeVisible();
 });
 
 test('shows that it is view-only until unlocked', async ({ page }) => {

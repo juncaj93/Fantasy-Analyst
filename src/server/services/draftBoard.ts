@@ -12,6 +12,8 @@ import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { RepairService } from './repairService.ts';
+import { seasonFor } from './seasonMarketService.ts';
+import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
@@ -37,6 +39,13 @@ export interface DraftBoardState {
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   /** Starting slots with nobody to fill them yet. */
   openStarters: { slot: string; count: number; accepts: string[] }[];
+  /**
+   * Every starting slot the league has, filled out of required.
+   *
+   * The draft header states this and nothing else about the roster: `0/1 QB ·
+   * 1/2 RB · 3/3 WR`. What to do about it is the ranked list's job.
+   */
+  rosterProgress: { slot: string; filled: number; required: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
   /** What the shape of the live roster is saying, given how late it is. */
@@ -68,12 +77,14 @@ export class DraftBoardService {
   private readonly players: PlayerRepo;
   private readonly adp: AdpRepo;
   private readonly evidence: EvidenceRepo;
+  private readonly seasonMarkets: SeasonMarketsRepo;
 
   constructor(private readonly db: Database) {
     this.leagues = new LeagueRepo(db);
     this.players = new PlayerRepo(db);
     this.adp = new AdpRepo(db);
     this.evidence = new EvidenceRepo(db);
+    this.seasonMarkets = new SeasonMarketsRepo(db);
   }
 
   async build(
@@ -255,7 +266,12 @@ export class DraftBoardService {
       );
     }
 
-    const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
+    const candidateIds = candidates.map((c) => c.id);
+    const signals = await this.evidence.getSignals(candidateIds);
+    // Season-long market lines, read from the newest stored snapshot. Nothing is
+    // fetched here: the draft board must never wait on a provider, and the
+    // refresh has its own slow clock.
+    const seasonLines = await this.seasonMarkets.latestForPlayers(seasonFor(), candidateIds);
     // The user's own shortlist, already read above.
     const flags = allFlags;
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
@@ -268,6 +284,7 @@ export class DraftBoardService {
         adpRank: importedValues.get(player.id)?.rank ?? null,
         signal: signals.get(player.id) ?? null,
         myGuyLevel: flags.get(player.id) ?? 0,
+        seasonMarkets: seasonLines.get(player.id) ?? [],
       })),
       {
         currentPick,
@@ -300,6 +317,7 @@ export class DraftBoardService {
       rosterCounts,
       myRoster,
       openStarters: live.openStarters,
+      rosterProgress: live.progress,
       adpSnapshot: snapshotMeta
         ? {
             id: snapshotMeta.id,

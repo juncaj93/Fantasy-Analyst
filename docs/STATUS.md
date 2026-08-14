@@ -389,6 +389,15 @@ suggestions).
 
 ## Known limitations
 
+0. **SportsGameOdds publishes no season-long NFL player markets.** Established
+   by probe against the live API and its own market catalogue: every NFL event
+   is a single game, `type=prop` and `type=tournament` are empty for the league,
+   and the catalogue has no season period. The season-market pipeline is built
+   end to end — adapter, identity resolution, append-only snapshots, freshness,
+   a league-scored baseline with honest partial coverage, a modest ranking
+   component and the card line — and lights up the day a provider publishes one.
+   Today it stores nothing and the cards say nothing, which is the honest
+   answer. See docs/VEGAS.md.
 1. **The Odds API adapter is verified but still disabled.** The free tier and
    every market key are confirmed current. What remains unverified is the live
    response shape and actual NFL prop coverage, which needs an API key. Vegas
@@ -398,7 +407,11 @@ suggestions).
    against a real issue is still unknown until one arrives.
 3. **Rule magnitudes are still conservative** (mostly 1). Expect tuning once
    real newsletters have run through the coverage report.
-4. **Draft weights are untuned defaults.**
+4. **Draft weights are calibrated for best-player-available.** Roster need is
+   0.1 and scaled down further in the early rounds (`needUrgency`), so an empty
+   starting slot is worth a pick or two in round one and three or four in the
+   last rounds — enough to break a tie, never enough to beat a better player.
+   The regression tests in `tests/draft.bpa.test.ts` fail on the old weights.
 5. **Survival probability is a heuristic**, labelled as an estimate.
 6. **Rate limiting is per-isolate**, not distributed — fine for one user.
 7. **Draft polling is client-driven.** The Draft header carries a refresh
