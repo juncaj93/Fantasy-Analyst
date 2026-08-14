@@ -117,8 +117,28 @@ test.describe('shell', () => {
       await page.goto('/');
       await expect(page.getByTestId('board-list')).toBeVisible();
       await page.addStyleTag({ content: `:root { --safe-bottom: ${INSET}px; }` });
-      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await page.waitForTimeout(300);
+
+      /*
+       * Settle, then scroll, then settle again — and scroll until it stops
+       * moving rather than once.
+       *
+       * Growing the bar grows the page's reservation, so the document gets
+       * taller *after* the style lands. A single scroll to the height measured
+       * before that reflow lands short of the true bottom, which looks
+       * identical to the bug this test is about. WebKit reflowed late enough to
+       * catch it; Chromium happened not to.
+       */
+      await page.waitForTimeout(400);
+      for (let i = 0; i < 5; i++) {
+        const moved = await page.evaluate(() => {
+          const before = window.scrollY;
+          window.scrollTo(0, document.documentElement.scrollHeight);
+          return window.scrollY !== before;
+        });
+        if (!moved) break;
+        await page.waitForTimeout(150);
+      }
+
       const clear = await page.evaluate(() => {
         const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
         const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
