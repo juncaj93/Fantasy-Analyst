@@ -21,6 +21,7 @@ import type { Database } from '../server/db.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
 import { PlayerDetailService } from '../server/services/playerDetailService.ts';
+import { InjuryService } from '../server/services/injuryService.ts';
 
 export interface WorkerEnv {
   DB: Database;
@@ -97,7 +98,41 @@ export default {
       } catch (err) {
         console.error('season stats refresh failed', err);
       }
+      /*
+       * The published injury report, on the same daily clock.
+       *
+       * The brief asks for a game-week cadence — Wednesday's first practice
+       * report, Thursday's changes, Friday's designations — and this covers all
+       * three without adding a cron for each. The source is one bulk file for
+       * the whole league that is rewritten as the reports land, so asking for it
+       * once a day sees every one of those and costs a single request; three
+       * separate triggers would see exactly the same file three times.
+       *
+       * It runs after the player sync for the same reason the statistics do:
+       * the rows are mapped onto players this app knows, and the other order
+       * reports a day's worth of new players as unmatched.
+       */
+      try {
+        await new InjuryService(env.DB).refresh();
+      } catch (err) {
+        console.error('injury report refresh failed', err);
+      }
       return;
+    }
+
+    /*
+     * Sunday 15:00 UTC is 11am Eastern: an hour before the early slate and the
+     * moment the day's decisions are actually made. The Vegas refresh already
+     * runs here, so the injury report comes with it — Friday's designations are
+     * the last word before kickoff, and reading them at 09:00 on Saturday is
+     * not the same as reading them now.
+     */
+    if (event.cron.startsWith('0 15')) {
+      try {
+        await new InjuryService(env.DB).refresh();
+      } catch (err) {
+        console.error('injury report refresh failed', err);
+      }
     }
     await refreshVegas(appEnv);
   },

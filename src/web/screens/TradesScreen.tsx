@@ -123,6 +123,20 @@ function TradeRow({
         <PositionBadge position={suggestion.position} team={suggestion.team} />
       </div>
 
+      {/*
+        Availability, in the terms a trade is decided in.
+
+        Deliberately not the Start/Sit language: "Q · hamstring — appears
+        short-term" is the whole point, because a designation that costs a
+        lineup decision six points barely touches what a player is worth for the
+        rest of the season. Absent for everybody healthy, which is most of them.
+      */}
+      {suggestion.injury.line ? (
+        <div className="injury-line" data-testid="trade-injury">
+          {suggestion.injury.line}
+        </div>
+      ) : null}
+
       <div className="window-row" data-testid="trade-windows">
         <div className="window-cell">
           <div className="window-label">Lifetime</div>

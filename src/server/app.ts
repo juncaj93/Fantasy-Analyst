@@ -46,6 +46,7 @@ import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService } from './services/draftBoard.ts';
+import { InjuryService } from './services/injuryService.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
@@ -385,6 +386,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       propsRepo.freshness(),
     ]);
 
+    /*
+     * Availability, resolved once for the whole roster.
+     *
+     * Sleeper's designation and the published injury report are combined here
+     * rather than in the engine, so every screen reads the same state — and a
+     * failure of the secondary source costs the practice detail and nothing
+     * else, because the resolver falls back to Sleeper on its own.
+     */
+    const injuries = await new InjuryService(db)
+      .statesFor([...players.values()].map((p) => ({ playerId: p.id, status: p.status })))
+      .catch(() => new Map());
+
     const inputs = [];
     for (const id of mine.playerIds) {
       const player = players.get(id);
@@ -401,6 +414,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         kickoff: kickoffs.get(id) ?? null,
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
+        injury: injuries.get(id) ?? null,
         propsStale: false,
       });
     }
@@ -603,6 +617,25 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const service = new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper });
     return jsonResponse(await service.refreshSeasonStats());
   });
+
+  /**
+   * Pull the published injury report now.
+   *
+   * The crons cover the week — daily at 09:00 for the practice reports, and
+   * again at Sunday 11am Eastern beside the Vegas refresh. This is for the
+   * moment neither covers: a designation that changed since, on a morning when
+   * a lineup is being set.
+   *
+   * Returns the counts rather than an ok, because "it ran" and "it mapped 40 of
+   * 1,400 rows" are indistinguishable from a card. A season with nothing
+   * published yet comes back `not_published`, which is a fact about the
+   * calendar and not a failure.
+   *
+   * A change, so it needs the passphrase.
+   */
+  router.post('/api/injuries/refresh', async (ctx) =>
+    jsonResponse(await new InjuryService(ctx.env.db).refresh()),
+  );
 
   router.get('/api/players/:id/detail', async (ctx) => {
     const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
@@ -1040,20 +1073,28 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       propsRepo.freshness(),
     ]);
 
-    const inputs = [];
+    const compared = [];
     for (const id of body.playerIds) {
       const player = await playerRepo.getById(id);
       if (!player) return errorResponse(`player ${id} not found`, 404);
-      inputs.push({
-        player,
-        props: propsByPlayer.get(id) ?? [],
-        previousProps: previousProps.get(id) ?? [],
-        kickoff: kickoffs.get(id) ?? null,
-        signal: signals.get(id) ?? null,
-        injuryStatus: player.status,
-        propsStale: false,
-      });
+      compared.push(player);
     }
+    // The same resolved availability the lineup screen uses, so the two cannot
+    // disagree about a player they are both looking at.
+    const injuries = await new InjuryService(db)
+      .statesFor(compared.map((p) => ({ playerId: p.id, status: p.status })))
+      .catch(() => new Map());
+
+    const inputs = compared.map((player) => ({
+      player,
+      props: propsByPlayer.get(player.id) ?? [],
+      previousProps: previousProps.get(player.id) ?? [],
+      kickoff: kickoffs.get(player.id) ?? null,
+      signal: signals.get(player.id) ?? null,
+      injuryStatus: player.status,
+      injury: injuries.get(player.id) ?? null,
+      propsStale: false,
+    }));
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const comparison = compareStartSit(inputs, profile);

@@ -172,6 +172,28 @@ export class PlayerDetailRepo {
     };
   }
 
+  /**
+   * Outlook text for many players, from the cache and only from the cache.
+   *
+   * The trade board reads this to find out whether a major injury is *named*
+   * in supported prose. It must never fetch: sixty cards is sixty requests to
+   * a third party for a screen nobody asked to refresh, and a player with no
+   * cached outlook honestly has no named history rather than an unknown one.
+   */
+  async cachedOutlooks(playerIds: string[], season: string): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (playerIds.length === 0) return out;
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 1)) {
+      const holes = batch.map(() => '?').join(', ');
+      const { results } = await this.db
+        .prepare(`SELECT player_id, body FROM player_outlooks WHERE season = ? AND player_id IN (${holes})`)
+        .bind(season, ...batch)
+        .all<Record<string, unknown>>();
+      for (const row of results ?? []) out.set(String(row['player_id']), String(row['body']));
+    }
+    return out;
+  }
+
   async saveOutlook(outlook: PlayerOutlook, now: string): Promise<void> {
     await this.db
       .prepare(

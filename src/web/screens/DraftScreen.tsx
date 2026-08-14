@@ -553,6 +553,17 @@ function RecommendationRow({
           because at 360px four labelled numbers is exactly what one line holds —
           `Value` and `Next pick` cost the fourth column its space.
         */}
+        {/*
+          What the badge cannot fit: the body part, and how the week went. Shown
+          only when the report added something `Q` alone does not say, so most
+          rows still carry nothing at all.
+        */}
+        {rec.injuryLine ? (
+          <div className="injury-line" data-testid="injury-line">
+            {rec.injuryLine}
+          </div>
+        ) : null}
+
         <div className="player-row-metrics">
           <span className="metric" data-testid="score-metric">
             Score{' '}
@@ -704,6 +715,34 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
           <div className="muted" data-testid="injury-context">
             {detail.injuryContext}
           </div>
+        </>
+      ) : null}
+
+      {/*
+        What is wrong with him now, as against what he came back from above.
+        Two different facts under two different headings, because a player
+        returning from an ACL and a player with a sore hamstring on Friday are
+        not the same situation and must not read as one.
+      */}
+      {detail?.injury ? (
+        <>
+          <DetailLabel>{detail.injury.label}</DetailLabel>
+          <div className="muted" data-testid="injury-current">
+            {detail.injury.line ?? detail.injury.label}
+            {detail.injury.provenance ? (
+              <span className="faint"> — {detail.injury.provenance}</span>
+            ) : null}
+          </div>
+          {/*
+            Disagreement is shown, never averaged away. Two sources saying
+            different things is a real state of the world and the reader is the
+            one who should decide what to do about it.
+          */}
+          {detail.injury.conflict ? (
+            <div className="muted" data-testid="injury-conflict">
+              Sources disagree — {detail.injury.conflict}
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>

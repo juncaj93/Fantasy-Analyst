@@ -17,6 +17,8 @@
 
 import type { PlayerSignal } from '../evidence/types.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
+import type { InjuryState } from '../injury/model.ts';
+import { NO_TRADE_INJURY, tradeInjuryContext, type TradeInjuryContext } from '../injury/trades.ts';
 
 /** Who holds this player right now, from Sleeper's rosters. */
 export type Ownership = 'mine' | 'other' | 'free';
@@ -62,12 +64,25 @@ export interface TradeSuggestion {
   confidence: 'high' | 'medium' | 'low';
   reasons: string[];
   counterpoints: string[];
+  /**
+   * Availability, classified by how long it lasts rather than how bad it is.
+   *
+   * A one-week Questionable is not a sell signal and this is where that is
+   * enforced: the category, a bounded urgency adjustment, and one line for the
+   * card. Never enough on its own to change the verdict, which still comes from
+   * the evidence ledger.
+   */
+  injury: TradeInjuryContext;
 }
 
 export interface TradeCandidate {
   player: CanonicalPlayer;
   signal: PlayerSignal | null;
   ownership: Ownership;
+  /** His availability, normalized. Absent means nothing is known, not healthy. */
+  injury?: InjuryState | null;
+  /** The season outlook, the one supported place a major recovery is named. */
+  outlook?: string | null;
 }
 
 export interface TradeOptions {
@@ -222,6 +237,9 @@ export function rankTrades(candidates: TradeCandidate[], opts: TradeOptions = {}
 
     const pending = candidate.signal?.pendingCount ?? 0;
     const { reasons, counterpoints } = explain(windows, verdict, candidate.ownership, pending);
+    const injury = candidate.injury
+      ? tradeInjuryContext(candidate.injury, { outlook: candidate.outlook })
+      : NO_TRADE_INJURY;
 
     out.push({
       playerId: candidate.player.id,
@@ -232,16 +250,21 @@ export function rankTrades(candidates: TradeCandidate[], opts: TradeOptions = {}
       verdict,
       label: VERDICT_LABELS[verdict],
       windows,
-      urgency: urgencyOf(windows),
+      urgency: round3(urgencyOf(windows) + injury.urgencyDelta),
       confidence: confidenceOf(windows, pending),
-      reasons,
+      reasons: injury.note ? [...reasons, injury.note] : reasons,
       counterpoints,
+      injury,
     });
   }
 
   return out.sort(
     (a, b) => b.urgency - a.urgency || b.windows.items30 - a.windows.items30 || a.name.localeCompare(b.name),
   );
+}
+
+function round3(v: number): number {
+  return Math.round(v * 1000) / 1000;
 }
 
 /** Group ranked suggestions into the sections the screen shows. */

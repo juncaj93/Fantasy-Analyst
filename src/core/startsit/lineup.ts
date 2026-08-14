@@ -108,11 +108,26 @@ export function recommendLineup(
     };
   }
 
+  /*
+   * A player who is Out does not go in a starting slot. At all.
+   *
+   * The availability penalty already made him last by a mile, which is enough
+   * when there is anybody else — and is not enough in the case that matters,
+   * where a thin bench means the arithmetic still puts him somewhere. "Start
+   * your injured-reserve tight end" is not a recommendation, it is a bug, and
+   * an empty slot with a warning is the honest version of the same situation.
+   *
+   * Doubtful is deliberately not gated here: it is a strong penalty and a real
+   * decision, and a doubtful player is sometimes genuinely the best available.
+   */
+  const ruledOut = scored.filter((e) => e.ruledOut);
+  const playable = scored.filter((e) => !e.ruledOut);
+
   // Locked starters hold their slot first; the optimiser then fills what is
   // left from the players who can still be moved.
   const reserved = reserveLockedSlots(lockedStarters, slots);
   const openSlots = slots.map((s, index) => ({ spec: s, index })).filter(({ index }) => !reserved.has(index));
-  const openAssignment = assignBest(scored, openSlots.map((o) => o.spec));
+  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec));
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
   for (const [openIndex, player] of openAssignment) {
@@ -134,6 +149,8 @@ export function recommendLineup(
   });
 
   const chosenIds = new Set([...assignment.values()].map((e) => e.playerId));
+  // The ruled-out stay on the bench list — they are still on the roster, and a
+  // player who has silently vanished from the screen is its own confusion.
   const bench = scored
     .filter((e) => !chosenIds.has(e.playerId))
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name));
@@ -183,6 +200,14 @@ export function recommendLineup(
   const confidence = worstConfidence(chosen);
   for (const e of chosen) {
     if (e.statusFlag) warnings.push(`${e.name} is listed ${e.statusFlag}`);
+  }
+  // Said once, plainly: these were held out of the lineup rather than ranked
+  // low in it, and a currently-starting one is a lineup the user should change.
+  for (const e of ruledOut) {
+    warnings.push(
+      `${e.name} is ${e.injury.designation === 'ir' ? 'on injured reserve' : e.injury.designation}` +
+        `${currentStarters.has(e.playerId) ? ' and is currently in your lineup' : ''} — not a playable starter`,
+    );
   }
 
   return {
