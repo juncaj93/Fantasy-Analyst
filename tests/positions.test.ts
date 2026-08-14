@@ -15,7 +15,11 @@ import { describe, expect, it } from 'vitest';
 import { EXCLUDED_POSITIONS, isExcludedPosition, toCanonicalPlayers } from '../src/core/sleeper/transform.ts';
 import { buildRosterShape, startablePositions } from '../src/core/sleeper/scoring.ts';
 import { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
+import { importAdpSnapshot } from '../src/core/adp/import.ts';
+import { AdpRepo } from '../src/server/repos/adp.ts';
+import { LeagueRepo } from '../src/server/repos/league.ts';
 import { PlayerRepo } from '../src/server/repos/players.ts';
+import { DraftBoardService } from '../src/server/services/draftBoard.ts';
 import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
 
@@ -103,6 +107,74 @@ describe('defences depend on the league, not on the app', () => {
   it('is startable the moment a league starts one', () => {
     const withDefence = buildRosterShape(['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN']);
     expect(startablePositions(withDefence).has('DEF')).toBe(true);
+  });
+
+  /**
+   * The case from Tony's league, end to end: a league that starts a defence,
+   * and an ADP file that ranks none of them.
+   */
+  it('still lists a startable position the ranking does not cover', async () => {
+    const db = await createTestDb();
+    const playerRepo = new PlayerRepo(db);
+    await playerRepo.upsertMany([
+      player({ id: 'qb1', fullName: 'Patrick Mahomes', position: 'QB', team: 'KC' }),
+      player({ id: 'qb2', fullName: 'Unranked Passer', position: 'QB', team: 'FA' }),
+      player({ id: 'def1', fullName: 'Kansas City Chiefs', position: 'DEF', team: 'KC' }),
+      player({ id: 'def2', fullName: 'San Francisco 49ers', position: 'DEF', team: 'SF' }),
+    ]);
+
+    const leagues = new LeagueRepo(db);
+    await leagues.upsertLeague({
+      id: 'tonys',
+      sleeperLeagueId: 'tonys',
+      name: "Tony's",
+      season: '2026',
+      totalRosters: 10,
+      scoringSettings: { rec: 0.5 },
+      rosterPositions: ['QB', 'DEF', 'BN', 'BN'],
+      leagueSettings: {},
+      draftId: 'tonys-draft',
+      lastSyncedAt: new Date().toISOString(),
+    });
+    await leagues.selectLeague('tonys');
+    await leagues.upsertDraft({
+      id: 'tonys-draft',
+      sleeperDraftId: 'tonys-draft',
+      leagueId: 'tonys',
+      status: 'pre_draft',
+      type: 'snake',
+      season: '2026',
+      rounds: 4,
+      teams: 10,
+      slotToRosterId: {},
+      settings: {},
+      lastSyncedAt: new Date().toISOString(),
+    });
+
+    // A ranking that covers quarterbacks and no defences — the shape of every
+    // ADP file this project has.
+    const index = await playerRepo.buildIndex();
+    const adpResult = importAdpSnapshot('Player,Position,Team,ADP\nPatrick Mahomes,QB,KC,12\n', index, {
+      label: 'test ranking',
+      source: 'test',
+    });
+    const { snapshot } = await new AdpRepo(db).save(adpResult);
+    await leagues.setDraftSnapshot('tonys-draft', snapshot.id);
+
+    const board = await new DraftBoardService(db).build('tonys-draft', { position: 'DEF' });
+    expect(board.startablePositions).toContain('DEF');
+    // The whole point: the position the ranking ignores is still on the board.
+    expect(board.recommendations.map((r) => r.name).sort()).toEqual([
+      'Kansas City Chiefs',
+      'San Francisco 49ers',
+    ]);
+    // ...and the app says why they look thin, rather than leaving it a mystery.
+    expect(board.warnings.join(' ')).toContain('no draft order covers DEF');
+    for (const rec of board.recommendations) expect(rec.degraded).toBe(true);
+
+    // A position the ranking DOES cover still drops its unranked players.
+    const qbs = await new DraftBoardService(db).build('tonys-draft', { position: 'QB' });
+    expect(qbs.recommendations.map((r) => r.name)).toEqual(['Patrick Mahomes']);
   });
 
   it('is still carried through the player dictionary', () => {

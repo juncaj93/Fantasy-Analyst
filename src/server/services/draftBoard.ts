@@ -182,12 +182,54 @@ export class DraftBoardService {
       (!positionFilter || player.position === positionFilter) &&
       (!queuedOnly || (allFlags.get(player.id) ?? 0) > 0);
 
+    /*
+     * "Only ranked players" has to be asked per position, not once for the board.
+     *
+     * Dropping unranked players stops 2,500 names drowning a board that has a
+     * real ranking, and that is right — as long as the position has a ranking
+     * to be dropped from. No published ADP this project uses covers defences,
+     * so a single global test silently erased the entire position from a league
+     * that starts one: the filter chip appeared, the board came back empty, and
+     * nothing said why.
+     *
+     * So a position the ranking does not cover at all keeps its players. A
+     * position the ranking does cover keeps only the ranked ones, exactly as
+     * before.
+     */
+    const rankedByPosition = new Map<string, number>();
+    for (const p of allPlayers) {
+      if (!p.active || rankOf(p) == null) continue;
+      rankedByPosition.set(p.position, (rankedByPosition.get(p.position) ?? 0) + 1);
+    }
+    const positionIsRanked = (position: string): boolean => (rankedByPosition.get(position) ?? 0) > 0;
+
     const pool: CanonicalPlayer[] = allPlayers.filter(
       // Unranked players are normally dropped, but never from your own queue:
       // you put them there, so leaving them out would be the app overruling you.
-      (p) => eligible(p) && (queuedOnly || rankedCount === 0 || rankOf(p) != null),
+      (p) => eligible(p) && (queuedOnly || !positionIsRanked(p.position) || rankOf(p) != null),
     );
-    pool.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+    /*
+     * Draft order first. Within a position nobody ranks, `search_rank` breaks
+     * the tie — it is emphatically not ADP (it measures who gets looked up) and
+     * is never allowed to set the board's order, but ordering thirty-two
+     * defences by how often they are searched beats ordering them by accident.
+     * Their market-value component is still `unknown` and they are still marked
+     * degraded, so nothing here pretends to a draft position it does not have.
+     */
+    pool.sort(
+      (a, b) =>
+        (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
+        (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+        a.fullName.localeCompare(b.fullName),
+    );
+
+    // Say it out loud, because those rows will look thin next to ranked ones.
+    const unrankedStartable = [...startable].filter((p) => !positionIsRanked(p)).sort();
+    if (unrankedStartable.length > 0 && rankedCount > 0) {
+      warnings.push(
+        `no draft order covers ${unrankedStartable.join(', ')} in this ranking, so they are listed on news and roster need alone`,
+      );
+    }
 
     // Sleeper ranks ~2,500 players; scoring all of them on every request is
     // work nobody reads, and it is far more than any draft will reach. The cap
