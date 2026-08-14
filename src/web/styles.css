@@ -1186,6 +1186,7 @@ body,
 }
 
 .disclosure > summary,
+.link-button,
 .link-summary {
   font-size: 0.75rem;
   font-weight: 650;
@@ -1202,6 +1203,14 @@ body,
 .disclosure > summary::-webkit-details-marker,
 .link-summary::-webkit-details-marker {
   display: none;
+}
+
+/* A real button that looks like the disclosures beside it. */
+.link-button {
+  background: none;
+  border: 0;
+  text-align: left;
+  font-family: inherit;
 }
 
 .disclosure > summary::after,

@@ -18,6 +18,7 @@
 
 import { SleeperClient } from '../../core/sleeper/client.ts';
 import { fetchPlayerOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
+import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
 import { majorInjuryHistory } from '../../core/draft/injury.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
@@ -72,22 +73,31 @@ export interface OutlookView {
   /** The provider's heading, e.g. `2026 Season Outlook`. */
   title: string;
   /**
-   * The outlook, whole and unedited.
+   * What the card shows: a short selection of it, or all of it.
    *
-   * It used to be cut to the first two or three sentences. That was a
-   * reasonable guess at "a card should be short" and a bad trade in practice:
-   * these paragraphs open with last season and work forwards, so the clipped
-   * version routinely dropped the depth-chart and workload sentences — the
-   * fantasy-relevant half — to save space on a card that has since lost a
-   * section of bullets, a section of counterpoints and a disclosure.
+   * It was once cut to the first two or three sentences, which was a bad trade
+   * — these paragraphs open with last season and work forwards, so a clip from
+   * the top routinely dropped the depth-chart and workload sentences, the
+   * fantasy-relevant half. It then showed the whole thing, which is honest and
+   * is twelve hundred characters on a phone mid-draft.
    *
-   * The alternative was to compress it here. Any honest compression of a
-   * thousand characters into three sentences either drops context or starts
-   * paraphrasing, and paraphrasing somebody else's analysis while attributing
-   * it to them is worse than showing more of it. So: all of it, in their words,
-   * with their name on it.
+   * Neither, now. `outlookSummary.ts` picks the two or three sentences that
+   * bear on the decision and prints them **in the provider's own words, in the
+   * order they were written**. No paraphrase, no splicing, nothing composed —
+   * attributing invented prose to a named provider is the failure mode this
+   * whole design is built to avoid. When nothing in an outlook scores as
+   * decision-relevant, or the selection would not have been much shorter, the
+   * summariser declines and this is the whole text again.
    */
   text: string;
+  /**
+   * True when `text` is a selection rather than the whole thing, so the card
+   * can say so and offer the rest. A shortened quotation that does not admit it
+   * is a misquotation.
+   */
+  summarised: boolean;
+  /** The whole thing, always — the card expands into it on request. */
+  fullText: string;
   /** Who wrote it. Shown, not merely stored. */
   source: string | null;
   fetchedAt: string;
@@ -162,7 +172,16 @@ export class PlayerDetailService {
         }
       : null;
 
-    const { outlook, note } = await this.outlookFor(playerId, season, now);
+    /*
+     * His name, for the summariser.
+     *
+     * The one thing that reliably tells a sentence about the player apart from
+     * a sentence about his offensive line is whether it mentions him. Read from
+     * the player dictionary the app already holds; absent is fine, and the
+     * summariser falls back to pronouns.
+     */
+    const name = (await this.players.getById(playerId))?.fullName ?? null;
+    const { outlook, note } = await this.outlookFor(playerId, season, now, name);
     /*
      * Read out of the outlook, and only out of the outlook.
      *
@@ -172,7 +191,9 @@ export class PlayerDetailService {
      * happened to them. A named diagnosis in supported prose is the one signal
      * here that cannot be produced by guessing.
      */
-    const history = majorInjuryHistory(outlook?.text ?? null);
+    // Read from the whole outlook, never from the shortened one: a diagnosis
+    // named in a sentence the summary did not choose is still in the source.
+    const history = majorInjuryHistory(outlook?.fullText ?? null);
     return { playerId, lastSeason, outlook, outlookNote: note, injuryContext: history?.line ?? null };
   }
 
@@ -180,10 +201,11 @@ export class PlayerDetailService {
     playerId: string,
     season: string,
     now: Date,
+    name: string | null,
   ): Promise<{ outlook: OutlookView | null; note: string | null }> {
     const cached = await this.repo.getOutlook(playerId, season);
     const fresh = cached && now.getTime() - Date.parse(cached.fetchedAt) < OUTLOOK_TTL_MS;
-    if (cached && fresh) return { outlook: toView(cached, season, cached.fetchedAt), note: null };
+    if (cached && fresh) return { outlook: toView(cached, season, cached.fetchedAt, name), note: null };
 
     const missAt = await this.repo.getOutlookMiss(playerId, season);
     if (missAt && now.getTime() - Date.parse(missAt) < OUTLOOK_MISS_TTL_MS) {
@@ -198,11 +220,11 @@ export class PlayerDetailService {
         return { outlook: null, note: `No ${season} outlook published for him.` };
       }
       await this.repo.saveOutlook(fetched, at);
-      return { outlook: toView(fetched, season, at), note: null };
+      return { outlook: toView(fetched, season, at, name), note: null };
     } catch (err) {
       // A stale outlook beats no outlook: the text is months old by design, so
       // an expired cache entry is still the right paragraph.
-      if (cached) return { outlook: toView(cached, season, cached.fetchedAt), note: null };
+      if (cached) return { outlook: toView(cached, season, cached.fetchedAt, name), note: null };
       return {
         outlook: null,
         note: `Could not reach Sleeper for the ${season} outlook (${err instanceof Error ? err.message : String(err)}).`,
@@ -316,13 +338,20 @@ function toView(
   outlook: { title: string | null; body: string; source: string | null },
   season: string,
   fetchedAt: string,
+  name?: string | null,
 ): OutlookView {
+  // Whole, and only whitespace-normalised — the stored body arrives as one
+  // paragraph but nothing guarantees it stays that way.
+  const full = outlook.body.replace(/\s+/g, ' ').trim();
+  // The name is passed in because it is the cheapest evidence that a sentence
+  // is about the player rather than about his offensive line.
+  const summary = summariseOutlook(full, { name: name ?? undefined });
   return {
     season,
     title: outlook.title ?? `${season} Season Outlook`,
-    // Whole, and only whitespace-normalised — the stored body arrives as one
-    // paragraph but nothing guarantees it stays that way.
-    text: outlook.body.replace(/\s+/g, ' ').trim(),
+    text: summary?.text ?? full,
+    summarised: summary != null,
+    fullText: full,
     source: outlook.source,
     fetchedAt,
   };

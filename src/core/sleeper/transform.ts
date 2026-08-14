@@ -80,10 +80,24 @@ export function toCanonicalPlayers(
     const active = p.active === true;
     if (!active && !opts.keepInactive) continue;
 
+    /*
+     * Trimmed, because Sleeper does not trim them.
+     *
+     * A sample of the live dictionary returns GSIS ids as `' 00-0035229'` —
+     * with a leading space — for a large share of players. Stored raw, every
+     * one of those fails an equality join against the same id from any other
+     * source that writes it normally, which is every other source. It is one
+     * character and it silently halves the identity coverage of the field.
+     */
     const externalIds: Record<string, string> = {};
-    if (p.gsis_id) externalIds['gsis'] = String(p.gsis_id);
-    if (p.espn_id) externalIds['espn'] = String(p.espn_id);
-    if (p.yahoo_id) externalIds['yahoo'] = String(p.yahoo_id);
+    for (const [key_, value] of [
+      ['gsis', p.gsis_id],
+      ['espn', p.espn_id],
+      ['yahoo', p.yahoo_id],
+    ] as const) {
+      const id = value == null ? '' : String(value).trim();
+      if (id) externalIds[key_] = id;
+    }
 
     out.push({
       id: sleeperId,

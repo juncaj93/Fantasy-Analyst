@@ -558,26 +558,62 @@ test.describe('draft room', () => {
   });
 
   /**
-   * The outlook is written by somebody, says so, and is shown whole.
+   * The outlook is written by somebody, says so, and is short by default.
    *
-   * It used to be cut to the first two or three sentences. These paragraphs
-   * open with last season and work forwards, so the clip routinely dropped the
-   * depth-chart and workload half — the fantasy-relevant part — to save space
-   * on a card that has since lost three sections. Compressing it here instead
-   * would mean paraphrasing somebody else's analysis under their name.
+   * It was once cut to the first two or three sentences, which dropped the
+   * depth-chart and workload half — these paragraphs open with last season and
+   * work forwards. It then showed the whole twelve hundred characters. Now a
+   * *selection* is shown: the provider's own sentences, in the provider's own
+   * order, and the card says it has been shortened and offers the rest.
    */
-  test('shows the whole attributed season outlook, and admits when there is none', async ({ page }) => {
+  test('shortens a long outlook to the provider’s own sentences, and offers the rest', async ({ page }) => {
+    const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Owen Fitzgerald' }).first();
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+    const outlook = row.getByTestId('outlook');
+    await expect(outlook).toBeVisible();
+    await expect(outlook).toHaveAttribute('data-summarised', 'yes');
+    await expect(outlook).toContainText('via Sleeper');
+
+    const stored = (await (await page.request.get('/api/players/1007/detail')).json()).outlook;
+    const short = (await outlook.innerText()).split(' — ')[0]!.trim();
+
+    // Materially shorter than the source…
+    expect(short.length).toBeLessThan(stored.fullText.length * 0.5);
+    // …and made only of sentences the provider actually wrote.
+    expect(short).toBe(stored.text);
+    for (const sentence of short.split(/(?<=[.!?])\s+/)) {
+      expect(stored.fullText, `invented sentence: ${sentence}`).toContain(sentence.trim());
+    }
+
+    // A cut quotation that admits it, and gives the rest back.
+    await row.getByTestId('outlook-toggle').click();
+    const whole = (await outlook.innerText()).split(' — ')[0]!.trim();
+    expect(whole).toBe(stored.fullText);
+    expect(whole.length).toBeGreaterThan(short.length);
+    // Expanding the text did not collapse the player.
+    await expect(outlook).toBeVisible();
+    await row.locator('.row-button').click();
+  });
+
+  /**
+   * And it declines rather than produce a bad summary. The three-sentence
+   * outlooks in the demo data are already short, so there is nothing to choose
+   * between and the whole thing is shown, with no control offering "the rest".
+   */
+  test('leaves a short outlook whole, and admits when there is none', async ({ page }) => {
     const withOutlook = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
     await withOutlook.click();
     const outlook = withOutlook.getByTestId('outlook');
     await expect(outlook).toBeVisible();
     await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
     await expect(outlook).toContainText('via Sleeper');
+    await expect(outlook).toHaveAttribute('data-summarised', 'no');
+    await expect(withOutlook.getByTestId('outlook-toggle')).toHaveCount(0);
 
-    // The whole of what the source holds, not a prefix of it.
     const shown = (await outlook.innerText()).split(' — ')[0]!.trim();
     const stored = await (await page.request.get('/api/players/1005/detail')).json();
-    expect(shown).toBe(stored.outlook.text);
+    expect(shown).toBe(stored.outlook.fullText);
     expect(shown.length).toBeGreaterThan(300);
     await withOutlook.locator('.row-button').click();
 

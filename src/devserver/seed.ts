@@ -337,15 +337,35 @@ async function seedPlayerDetail(db: Database): Promise<void> {
   });
 
   /**
-   * Three written outlooks; everyone else is honestly recorded as having none.
+   * Four written outlooks; everyone else is honestly recorded as having none.
    *
    * They are chosen to cover the injury-context cases as well as the ordinary
    * one: Reyes names a specific injury and should produce a context line;
    * Brennan mentions an ankle that cost him games and Sotelo a hamstring, and
    * neither should — "missed time" is not a major injury history, and inventing
    * one from it is the failure this is written to avoid.
+   *
+   * Fitzgerald covers the other axis. The first three are three sentences long,
+   * so the summariser correctly declines to shorten them and the card shows
+   * them whole; his is the length these actually arrive at — nine sentences,
+   * opening with a career retrospective and burying the depth-chart news in the
+   * middle — which is the case the shortening exists for, and the only way the
+   * browser suite can check both branches.
    */
   const written: Record<string, string> = {
+    '1007':
+      'Fitzgerald was a fourth-round pick in 2022 and spent two years as a rotational piece before anyone paid ' +
+      'much attention. He broke out in the second half of last season, going for 61-844-6 over the final nine ' +
+      'games once the coaching staff moved him into the slot full time. That role is now his: Philadelphia let ' +
+      'their veteran slot receiver walk in March and did not draft a replacement, leaving Fitzgerald as the only ' +
+      'player on the roster who has taken a meaningful snap there. He ran 88 percent of his routes from the slot ' +
+      'after the switch and was targeted on 27.4 percent of them, seventh among receivers over that stretch. ' +
+      'The offense projects to throw more this year with a new coordinator arriving from a pass-heavy system. ' +
+      'His yards per reception fell from 14.1 to 11.6 after the move, which is the shape of the role rather than ' +
+      'a decline in his play. The one concern is touchdown regression, since six scores on 61 catches is not a ' +
+      'rate anybody sustains. He turns 26 in October and is under contract through 2028. Fitzgerald should see ' +
+      'something close to 130 targets in an every-down role, which is a floor most receivers drafted around him ' +
+      'do not have.',
     '1006':
       'Reyes tore his ACL in Week 11 and spent the rest of the season on injured reserve. He was cleared in ' +
       'June and has taken part in every camp practice so far, but Miami have been open about managing his ' +

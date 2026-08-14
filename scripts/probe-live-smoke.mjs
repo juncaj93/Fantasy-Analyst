@@ -231,6 +231,51 @@ if (board.json) {
   );
 }
 
+// 4c. The visible Score, on a real board.
+//
+// Two ways it can be useless, and neither shows up in a unit test. It can be
+// flat — a calibration that squashes a live board into five points is exactly
+// what the fixed constants were chosen to avoid — or it can disagree with the
+// order it is supposed to be a transform of. Production is the only place with
+// a genuine two-hundred-player spread to check against.
+if (board.json) {
+  const recs = board.json.recommendations ?? [];
+  const scores = recs.map((r) => r.score);
+  check(
+    'every player carries a whole-number Score in range',
+    scores.length > 0 && scores.every((s) => Number.isInteger(s) && s >= 0 && s <= 100),
+    `${scores[0]} … ${scores[scores.length - 1]}`,
+  );
+  check(
+    'Score never contradicts board order',
+    scores.every((s, i) => i === 0 || scores[i - 1] >= s),
+  );
+  const top = scores.slice(0, 20);
+  check(
+    'it separates the players actually being chosen between',
+    top.length > 3 && Math.max(...top) - Math.min(...top) >= 3,
+    `top 20 span ${Math.min(...top)}–${Math.max(...top)}, whole board ${Math.min(...scores)}–${Math.max(...scores)}`,
+  );
+
+  /*
+   * The live component. It is bounded by construction, so what production is
+   * asked is the other half: does it actually vary? A component that reads the
+   * same for every player is not noticing anything.
+   */
+  const separations = recs.map((r) => r.components?.find((c) => c.key === 'separation')?.contribution ?? null);
+  const present = separations.filter((s) => s != null);
+  check(
+    'the separation component is computed for the whole board',
+    present.length === recs.length,
+    `${present.length} of ${recs.length}`,
+  );
+  check(
+    'it is bounded, and it distinguishes players',
+    present.every((s) => s >= 0 && s <= 0.25) && new Set(present).size > 3,
+    `${new Set(present).size} distinct values, max ${Math.max(...present)}`,
+  );
+}
+
 // 5. The expanded card's two feeds.
 //
 // Both are caches of Sleeper data, and a card cannot tell a cache that is empty
@@ -270,14 +315,38 @@ if (topPlayer) {
       !last?.positionRank || /^[A-Z]+([1-9]\d{0,2})$/.test(last.positionRank),
       `${last?.season ?? '—'}: ${last?.gamesPlayed ?? '—'} GP, ${last?.positionRank ?? 'no finish'}`,
     );
-    const text = one.json.outlook?.text ?? '';
+    /*
+     * The outlook, shortened by selection.
+     *
+     * The claim being checked is the one that makes shortening somebody else's
+     * writing acceptable at all: every sentence shown is a sentence they wrote.
+     * If a summary ever contains prose that is not in `fullText`, this app has
+     * started composing text and attributing it to a named provider, and that
+     * is the loudest failure available here.
+     */
+    const outlook = one.json.outlook;
+    const text = outlook?.text ?? '';
     check(
-      'any outlook is whole and attributed',
-      !one.json.outlook || (text.length > 0 && !!one.json.outlook.source),
-      one.json.outlook
-        ? `${text.length} chars from ${one.json.outlook.source}`
-        : (one.json.outlookNote ?? 'none published'),
+      'any outlook is attributed',
+      !outlook || (text.length > 0 && !!outlook.source),
+      outlook ? `${text.length} chars from ${outlook.source}` : (one.json.outlookNote ?? 'none published'),
     );
+    if (outlook) {
+      const invented = text
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && !outlook.fullText.includes(s));
+      check(
+        'every sentence shown is one the provider wrote',
+        invented.length === 0,
+        invented[0] ?? `${outlook.summarised ? 'shortened' : 'whole'}, ${text.length} of ${outlook.fullText.length} chars`,
+      );
+      check(
+        'a shortened outlook is actually shorter, and says it was shortened',
+        !outlook.summarised || text.length < outlook.fullText.length,
+        outlook.summarised ? `${Math.round((100 * text.length) / outlook.fullText.length)}% of the source` : 'not shortened',
+      );
+    }
     // A named injury, or nothing. Never a diagnosis the app made up.
     check(
       'injury context is a label rather than a retelling',

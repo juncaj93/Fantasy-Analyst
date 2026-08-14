@@ -44,6 +44,44 @@ describe('toCanonicalPlayers', () => {
     expect(players.find((p) => p.id === '4046')!.externalIds!['gsis']).toBe('00-0033873');
   });
 
+  /**
+   * Sleeper serves a large share of GSIS ids with a leading space — a live
+   * sample returns `' 00-0035229'`. Stored as received, every one of those
+   * fails an equality join against the same id written normally by anybody
+   * else, which is the only thing the field is for.
+   */
+  it('trims external ids, because the source does not', () => {
+    const [padded] = toCanonicalPlayers({
+      '9997': {
+        player_id: '9997',
+        first_name: 'Spacey',
+        last_name: 'Identifier',
+        full_name: 'Spacey Identifier',
+        team: 'BAL',
+        position: 'WR',
+        active: true,
+        gsis_id: ' 00-0035229',
+      },
+    });
+    expect(padded!.externalIds!['gsis']).toBe('00-0035229');
+  });
+
+  it('drops an external id that was only whitespace', () => {
+    const [blank] = toCanonicalPlayers({
+      '9998': {
+        player_id: '9998',
+        first_name: 'No',
+        last_name: 'Identifier',
+        full_name: 'No Identifier',
+        team: 'BAL',
+        position: 'WR',
+        active: true,
+        gsis_id: '   ',
+      },
+    });
+    expect(blank!.externalIds!['gsis']).toBeUndefined();
+  });
+
   it('normalizes team codes', () => {
     expect(players.find((p) => p.id === '7777')!.team).toBe('JAX');
   });

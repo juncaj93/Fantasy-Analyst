@@ -741,15 +741,46 @@ function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed
       </>
     );
   }
+  return <OutlookBody outlook={detail.outlook} />;
+}
+
+/**
+ * The outlook, short by default and whole on request.
+ *
+ * What is printed is always the provider's own sentences in their own order —
+ * the shortening is a selection, never a rewrite. But a quotation that has been
+ * cut and does not say so is a misquotation, so when sentences were dropped the
+ * card says how many and offers them, and the control is the only way this
+ * component differs from showing the paragraph outright.
+ */
+function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
+  const [whole, setWhole] = useState(false);
+  const attribution = outlook.source ? (
+    <span className="outlook-source"> — {outlook.source}, via Sleeper</span>
+  ) : null;
+
   return (
     <>
-      <DetailLabel>{detail.outlook.title}</DetailLabel>
-      <div className="outlook" data-testid="outlook">
-        {detail.outlook.text}
-        {detail.outlook.source ? (
-          <span className="outlook-source"> — {detail.outlook.source}, via Sleeper</span>
-        ) : null}
+      <DetailLabel>{outlook.title}</DetailLabel>
+      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
+        {whole ? outlook.fullText : outlook.text}
+        {attribution}
       </div>
+      {outlook.summarised ? (
+        <button
+          type="button"
+          className="link-button"
+          data-testid="outlook-toggle"
+          onClick={(e) => {
+            // The row underneath is a toggle; expanding the text is not
+            // "collapse this player".
+            e.stopPropagation();
+            setWhole((v) => !v);
+          }}
+        >
+          {whole ? 'Show the short version' : 'Read the full outlook'}
+        </button>
+      ) : null}
     </>
   );
 }
