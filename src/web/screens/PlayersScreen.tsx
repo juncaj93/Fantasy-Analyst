@@ -10,7 +10,6 @@ import {
   CompactTally,
   DetailLabel,
   Empty,
-  Loading,
   PositionBadge,
   Signal,
   SignedValue,
@@ -18,6 +17,7 @@ import {
   formatDate,
   positionCardClass,
 } from '../components/common.tsx';
+import { NavBar, PushScreen, SearchField, SkeletonRows } from '../components/native.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -109,18 +109,31 @@ export function PlayersScreen() {
 
   return (
     <>
-      <div className="field" style={{ marginTop: 4 }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search players"
-          aria-label="Search players"
-          autoCapitalize="none"
-          autoCorrect="off"
-        />
-      </div>
+      {/*
+        The search field is this screen's navigation bar.
+
+        A title reading "Players" over a search field, on the screen reached by
+        tapping a tab labelled Players, is a row of the phone spent saying it a
+        third time. The field carries the identity — and its own label, for
+        anyone listening rather than looking — and the list starts higher than
+        it did before any of this. A magnifier, a compact field, and a clear
+        control that appears only when there is something to clear; clearing
+        empties the field and nothing else.
+      */}
+      <NavBar
+        testId="players-nav"
+        content={
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search players"
+            label="Search players"
+            testId="player-search"
+          />
+        }
+      />
       {loading && players.length === 0 ? (
-        <Loading what="players" />
+        <SkeletonRows rows={8} testId="players-skeleton" />
       ) : players.length === 0 ? (
         <Empty>No players found. Run a Sleeper player sync from the Team screen.</Empty>
       ) : (
@@ -206,26 +219,44 @@ function PlayerDetailView({
 }) {
   const { player, signal, evidence, props } = detail;
   return (
-    <>
-      <button className="btn btn-sm" onClick={onBack} style={{ marginBottom: 8 }}>
-        ← Back
-      </button>
+    /*
+      A pushed screen, not a page swap.
 
+      It carries the same Back it always had, and in a Home Screen app it can
+      also be swiped away from the leading edge — the gesture calls this exact
+      `onBack`, so the two can never disagree about where they lead. Nothing
+      here is undone by leaving: the heart, the tallies and the evidence are
+      server state and stay as they were.
+    */
+    <PushScreen
+      title={player.name}
+      subtitle={
+        <>
+          {player.position || '—'} · {player.team || 'FA'}
+          {/* A zero here is an absence rather than a reading, so it is not printed. */}
+          {signal.raw.net === 0 ? null : (
+            <>
+              {' · '}
+              <CompactTally net={signal.raw.net} label="Lifetime research tally" /> lifetime
+            </>
+          )}
+        </>
+      }
+      backLabel="Players"
+      onBack={onBack}
+      testId="player-detail-screen"
+      trailing={
+        <MyGuyControl myGuy={detail.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={(level) => onMyGuy(level)} />
+      }
+    >
       <div className="card">
-        <div className="player-row-top">
-          <MyGuyControl
-            myGuy={detail.myGuy ?? EMPTY_MY_GUY}
-            busy={busy}
-            onChange={(level) => onMyGuy(level)}
-          />
-          <span className="player-name" style={{ fontSize: '1.05rem' }}>
-            {player.name}
-          </span>
-          <CompactTally net={signal.raw.net} label="Lifetime research tally" />
-          <PositionBadge position={player.position} team={player.team} />
-        </div>
+        {/*
+          The name is the screen's title and is not printed twice. What is left
+          here is what the title cannot carry: the headline tally, and the
+          designation when there is one.
+        */}
         {player.status ? (
-          <div className="player-row-metrics">
+          <div className="badge-row" style={{ marginTop: 0, marginBottom: 8 }}>
             <Badge tone="warn">{player.status}</Badge>
           </div>
         ) : null}
@@ -270,18 +301,18 @@ function PlayerDetailView({
       </div>
 
       {Object.keys(signal.categoryBreakdown).length > 0 ? (
-        <div className="card card-tight">
-          <div className="section-title" style={{ margin: 0 }}>
-            Categories
+        <>
+          <div className="section-title">Categories</div>
+          <div className="card card-tight">
+            <div className="badge-row" style={{ marginTop: 0 }}>
+              {Object.entries(signal.categoryBreakdown).map(([cat, v]) => (
+                <Badge key={cat} tone={v.positive > v.negative ? 'pos' : v.negative > v.positive ? 'neg' : 'neutral'}>
+                  {cat}: +{v.positive} / −{v.negative}
+                </Badge>
+              ))}
+            </div>
           </div>
-          <div className="badge-row">
-            {Object.entries(signal.categoryBreakdown).map(([cat, v]) => (
-              <Badge key={cat} tone={v.positive > v.negative ? 'pos' : v.negative > v.positive ? 'neg' : 'neutral'}>
-                {cat}: +{v.positive} / −{v.negative}
-              </Badge>
-            ))}
-          </div>
-        </div>
+        </>
       ) : null}
 
       <div className="section-title">Vegas props</div>
@@ -324,9 +355,13 @@ function PlayerDetailView({
       {evidence.length === 0 ? (
         <Empty>No evidence recorded yet.</Empty>
       ) : (
-        evidence.map((e) => <EvidenceRow key={e.id} item={e} />)
+        <div className="card">
+          {evidence.map((e) => (
+            <EvidenceRow key={e.id} item={e} />
+          ))}
+        </div>
       )}
-    </>
+    </PushScreen>
   );
 }
 

@@ -11,13 +11,14 @@ import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import {
   Confidence,
   DetailLabel,
+  Disclose,
   Empty,
-  Loading,
   Notice,
   PositionBadge,
   SignedValue,
   positionCardClass,
 } from '../components/common.tsx';
+import { NavBar, SkeletonRows } from '../components/native.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 
 export function TradesScreen() {
@@ -39,16 +40,30 @@ export function TradesScreen() {
   }, [load]);
 
   if (error) return <Notice tone="error">{error}</Notice>;
-  if (!board) return <Loading what="trade ideas" />;
+  if (!board) {
+    return (
+      <>
+        <NavBar title="Trades" subtitle="Reading your evidence…" />
+        <SkeletonRows rows={5} testId="trades-skeleton" />
+      </>
+    );
+  }
 
   return (
     <>
-      <div className="card card-tight">
-        <strong>Trades</strong>
-        <div className="faint">
-          {board.league ? `${board.league.name} — from your newsletter evidence, last 30 days leading.` : 'No league selected.'}
-        </div>
-      </div>
+      {/*
+        The card that said "Trades" and then where the ideas come from was a
+        title and a caption in a box, above a screen whose title is Trades. The
+        navigation bar says both, in the height the bar was already taking.
+      */}
+      <NavBar
+        title="Trades"
+        subtitle={
+          board.league
+            ? `${board.league.name} — newsletter evidence, last 30 days leading`
+            : 'No league selected'
+        }
+      />
 
       {board.warnings.map((w) => (
         <Notice key={w}>{w}</Notice>
@@ -163,7 +178,7 @@ function TradeRow({
         <Confidence level={suggestion.confidence} />
       </div>
 
-      {expanded ? (
+      <Disclose open={expanded}>
         <div className="explain">
           <DetailLabel>Why</DetailLabel>
           <ReasonList items={reasons} />
@@ -173,11 +188,11 @@ function TradeRow({
               <ReasonList muted items={counterpoints} />
             </>
           ) : null}
-          <div className="faint" style={{ marginTop: 6 }}>
+          <div className="faint" style={{ marginTop: 8 }}>
             {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
           </div>
         </div>
-      ) : null}
+      </Disclose>
     </button>
   );
 }

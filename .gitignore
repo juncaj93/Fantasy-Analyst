@@ -13,3 +13,6 @@ blob-report/
 coverage/
 .DS_Store
 *.tsbuildinfo
+
+# Local scratch: measurement and screenshot helpers, never part of the app.
+*.local.mjs

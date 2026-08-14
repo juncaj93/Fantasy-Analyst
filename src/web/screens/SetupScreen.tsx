@@ -17,6 +17,8 @@ import {
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
+import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
+import { ListGroup, ListRow, NavBar, PushScreen } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
@@ -30,9 +32,47 @@ import {
   type Appearance,
 } from '../theme.ts';
 
-type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | null;
+type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | null;
 
-const STATE_ICON: Record<string, string> = { ok: '✅', warn: '⚠️', todo: '○', off: '○' };
+/**
+ * The state of a step, drawn rather than typed.
+ *
+ * These were `✅` and `⚠️`, which iOS renders as full-colour emoji: two
+ * saturated stickers in a column of grey rows, at whatever size the emoji font
+ * felt like. A drawn mark takes the semantic colour the theme gives it and is
+ * the same weight as everything beside it.
+ */
+function StateMark({ state }: { state: string }) {
+  if (state === 'ok') {
+    return (
+      <span className="list-state-ok">
+        <CheckCircleIcon />
+      </span>
+    );
+  }
+  if (state === 'warn') {
+    return (
+      <span className="list-state-warn">
+        <AlertCircleIcon />
+      </span>
+    );
+  }
+  return (
+    <span className="list-state-todo">
+      <EmptyCircleIcon />
+    </span>
+  );
+}
+
+/** What each pushed panel calls itself once it is the whole screen. */
+const PANEL_TITLES: Record<Exclude<Panel, null>, string> = {
+  sleeper: 'Connect Sleeper',
+  league: 'Choose your league',
+  adp: 'Draft order',
+  newsletter: 'Newsletter',
+  vegas: 'Vegas lines',
+  repair: 'Help my scores',
+};
 
 export function SetupScreen({
   leagues,
@@ -71,16 +111,42 @@ export function SetupScreen({
 
   if (!status) return error ? <Notice tone="error">{error}</Notice> : <Loading what="your setup" />;
 
+  /*
+   * A settings row leads to a screen, and that screen is pushed.
+   *
+   * The panels used to unfold underneath their row, which meant a long one —
+   * Newsletter is a page and a half — pushed the rest of the list off the
+   * bottom of the phone and left the reader scrolling to find where they were.
+   * Pushed, each panel is the whole screen with its own title and a Back
+   * control, exactly like every settings app on the platform. Nothing about
+   * what any panel does has changed; only where it is drawn.
+   */
+  if (open === 'repair') {
+    return <HelpMyScores open onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />;
+  }
+
+  if (open) {
+    return (
+      <PushScreen title={PANEL_TITLES[open]} backLabel="Setup" onBack={() => setOpen(null)} testId={`setup-detail-${open}`}>
+        {open === 'sleeper' ? <SleeperPanel status={status} onDone={refreshAll} /> : null}
+        {open === 'league' ? <LeaguePanel leagues={leagues} onDone={refreshAll} /> : null}
+        {open === 'adp' ? <AdpPanel status={status} onDone={refreshAll} /> : null}
+        {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
+        {open === 'vegas' ? <VegasPanel status={status} /> : null}
+      </PushScreen>
+    );
+  }
+
   return (
     <>
-      <div className="card card-tight">
-        <strong>Fantasy Analyst Setup</strong>
-        <div className="faint">
-          {status.readyForDraft
-            ? 'Everything needed for draft day is ready.'
-            : 'Work through anything marked below. Tap a row to open it.'}
-        </div>
-      </div>
+      <NavBar
+        title="Setup"
+        subtitle={
+          status.readyForDraft
+            ? 'Everything needed for draft day is ready'
+            : 'Work through anything marked below'
+        }
+      />
 
       {error ? <Notice tone="error">{error}</Notice> : null}
 
@@ -93,39 +159,32 @@ export function SetupScreen({
       )}
 
       <AppearanceCard />
-      <InstallPanel />
 
-      {status.steps.map((step) => (
-        <button
-          key={step.id}
-          className="player-row"
-          data-testid={`setup-step-${step.id}`}
-          data-state={step.state}
-          aria-expanded={open === step.id}
-          onClick={() => setOpen(open === step.id ? null : (step.id as Panel))}
-        >
-          <div className="player-row-top">
-            <span className="rank" aria-hidden="true">
-              {STATE_ICON[step.state] ?? '○'}
-            </span>
-            <span className="player-name">{step.title}</span>
-            <span className="row-action">{open === step.id ? 'Close' : 'Open'}</span>
-          </div>
-          <div className="player-row-metrics">
-            <span className="metric">{step.summary}</span>
-          </div>
-          {step.action ? <div className="faint">{step.action}</div> : null}
-        </button>
-      ))}
+      <ListGroup header="Your league">
+        {status.steps.map((step) => (
+          <ListRow
+            key={step.id}
+            testId={`setup-step-${step.id}`}
+            dataState={step.state}
+            state={<StateMark state={step.state} />}
+            label={step.title}
+            detail={
+              <>
+                {step.summary}
+                {step.action ? <div>{step.action}</div> : null}
+              </>
+            }
+            chevron
+            onClick={() => setOpen(step.id as Panel)}
+          />
+        ))}
+      </ListGroup>
 
-      {open === 'sleeper' ? <SleeperPanel status={status} onDone={refreshAll} /> : null}
-      {open === 'league' ? <LeaguePanel leagues={leagues} onDone={refreshAll} /> : null}
-      {open === 'adp' ? <AdpPanel status={status} onDone={refreshAll} /> : null}
-      {open === 'newsletter' ? <NewsletterPanel onDone={refreshAll} /> : null}
-      {open === 'vegas' ? <VegasPanel status={status} /> : null}
-
-      <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
-      <HelpMyScores onChanged={refreshAll} />
+      <ListGroup header="This app">
+        <InstallPanel />
+        <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
+        <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
+      </ListGroup>
     </>
   );
 }
@@ -149,10 +208,8 @@ function AppearanceCard() {
   }, [mode]);
 
   return (
-    <div className="card card-tight" data-testid="appearance">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Appearance
-      </div>
+    <div data-testid="appearance">
+      <div className="section-title">Appearance</div>
       <div className="segmented" role="group" aria-label="Appearance">
         {APPEARANCES.map((option) => (
           <button
@@ -169,7 +226,7 @@ function AppearanceCard() {
           </button>
         ))}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint" style={{ margin: '-2px 4px 14px' }}>
         System follows your phone, and keeps following it when your phone changes at sunset. Light and
         Dark stay exactly as you set them here, on this phone.
       </div>
@@ -185,9 +242,18 @@ function AppearanceCard() {
  * it should be impossible to miss when it matters and invisible when it does
  * not.
  */
-function HelpMyScores({ onChanged }: { onChanged: () => void }) {
+function HelpMyScores({
+  open,
+  onOpen,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
   const [status, setStatus] = useState<RepairStatus | null>(null);
-  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -215,79 +281,78 @@ function HelpMyScores({ onChanged }: { onChanged: () => void }) {
     onChanged();
   };
 
-  if (!status || status.summary.names === 0) return null;
+  // Nothing to fix is the common case, and it says so by not being here at all.
+  if (!open && (!status || status.summary.names === 0)) return null;
+
+  if (!open) {
+    return (
+      <ListRow
+        testId="help-my-scores"
+        state={<StateMark state="warn" />}
+        label="Help my scores"
+        detail={status!.summary.headline}
+        chevron
+        onClick={onOpen}
+      />
+    );
+  }
 
   return (
-    <>
-      <button
-        className="player-row"
-        data-testid="help-my-scores"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
-        <div className="player-row-top">
-          <span className="rank" aria-hidden="true">
-            !
-          </span>
-          <span className="player-name">Help my scores</span>
-          <span className="row-action">{open ? 'Close' : 'Fix'}</span>
-        </div>
-        <div className="player-row-metrics">
-          <span className="metric">{status.summary.headline}</span>
-        </div>
-      </button>
+    <PushScreen title="Help my scores" backLabel="Setup" onBack={onClose} testId="setup-detail-repair">
+      {message ? <Notice tone="ok">{message}</Notice> : null}
+      <div className="faint" style={{ margin: '0 4px 10px' }}>
+        These names appeared in your newsletters but could not be matched to a Sleeper player, so their news is
+        not counting for anyone. Pick who each one is.
+      </div>
 
-      {open ? (
-        <div className="card">
-          {message ? <Notice tone="ok">{message}</Notice> : null}
-          <div className="faint" style={{ marginBottom: 8 }}>
-            These names appeared in your newsletters but could not be matched to a Sleeper player, so their
-            news is not counting for anyone. Pick who each one is.
-          </div>
+      {!status ? (
+        <Loading what="the names that need matching" />
+      ) : status.summary.names === 0 ? (
+        <Empty>Every name in your newsletters is matched to a player.</Empty>
+      ) : (
+        status.groups.map((group) => (
+          <div key={group.normalizedAlias} className="card" data-testid={`repair-${group.normalizedAlias}`}>
+            <div className="header-row">
+              <strong>{group.alias}</strong>
+              <span className="faint">
+                {group.items} {group.items === 1 ? 'item' : 'items'} ·{' '}
+                {group.net > 0 ? '+' : ''}
+                {group.net} net
+                {group.net30 !== 0 ? ` (${group.net30 > 0 ? '+' : ''}${group.net30} in 30d)` : ''}
+              </span>
+            </div>
+            <div className="faint" style={{ margin: '4px 0 8px' }}>
+              “{group.example}”
+            </div>
 
-          {status.groups.map((group) => (
-            <div key={group.normalizedAlias} className="card card-tight" data-testid={`repair-${group.normalizedAlias}`}>
-              <div className="header-row">
-                <strong>{group.alias}</strong>
-                <span className="faint">
-                  {group.items} {group.items === 1 ? 'item' : 'items'} ·{' '}
-                  {group.net > 0 ? '+' : ''}
-                  {group.net} net
-                  {group.net30 !== 0 ? ` (${group.net30 > 0 ? '+' : ''}${group.net30} in 30d)` : ''}
-                </span>
-              </div>
-              <div className="faint" style={{ margin: '4px 0 8px' }}>
-                “{group.example}”
-              </div>
+            {status.suspicions.some((sus) => sus.alias === group.alias) ? (
+              <Notice>
+                Likely {status.suspicions.find((sus) => sus.alias === group.alias)!.candidate.name}, who currently
+                has no tally at all.
+              </Notice>
+            ) : null}
 
-              {status.suspicions.some((sus) => sus.alias === group.alias) ? (
-                <Notice>
-                  Likely {status.suspicions.find((sus) => sus.alias === group.alias)!.candidate.name}, who currently
-                  has no tally at all.
-                </Notice>
-              ) : null}
-
+            <div className="btn-row">
               {group.candidates.slice(0, 3).map((candidate) => (
                 <button
                   key={candidate.playerId}
-                  className="btn"
-                  style={{ marginRight: 6, marginBottom: 6 }}
+                  className="btn btn-sm"
                   onClick={() => void assign(group.alias, candidate.playerId)}
                 >
                   {candidate.name} · {candidate.position} {candidate.team}
                 </button>
               ))}
-
-              <PlayerPicker
-                fieldId={`repair-${group.normalizedAlias}`}
-                label="Or search for the right player"
-                onPick={(playerId) => assign(group.alias, playerId)}
-              />
             </div>
-          ))}
-        </div>
-      ) : null}
-    </>
+
+            <PlayerPicker
+              fieldId={`repair-${group.normalizedAlias}`}
+              label="Or search for the right player"
+              onPick={(playerId) => assign(group.alias, playerId)}
+            />
+          </div>
+        ))
+      )}
+    </PushScreen>
   );
 }
 
@@ -322,9 +387,6 @@ function SleeperPanel({ status, onDone }: { status: SetupStatus; onDone: () => v
 
   return (
     <div className="card" data-testid="panel-sleeper">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Connect Sleeper
-      </div>
       <div className="faint" style={{ marginBottom: 8 }}>
         Fantasy Analyst reads your league from Sleeper. It never makes picks or changes your lineup.
       </div>
@@ -390,9 +452,6 @@ function LeaguePanel({ leagues, onDone }: { leagues: LeagueSummary[]; onDone: ()
 
   return (
     <div className="card" data-testid="panel-league">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Choose your league
-      </div>
       {banner}
       {leagues.length === 0 ? (
         <Empty>Connect Sleeper first, then your leagues appear here.</Empty>
@@ -458,9 +517,6 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
 
   return (
     <div className="card" data-testid="panel-adp">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Draft order
-      </div>
       <div className="card card-tight" data-testid="adp-source">
         <strong>{status.adp.imported ? `Using ${status.adp.label}` : 'No rankings imported yet'}</strong>
         <div className="faint">
@@ -602,9 +658,6 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="card" data-testid="panel-newsletter">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Newsletter intelligence
-      </div>
       {banner}
 
       {/* --- the address ------------------------------------------------ */}
@@ -1141,8 +1194,9 @@ function PlayerDetailPanel({
   };
 
   return (
-    <details className="card card-tight disclosure" data-testid="panel-player-detail">
+    <details className="list-details" data-testid="panel-player-detail">
       <summary>Player card data</summary>
+      <div className="list-details-body">
 
       <div className="section-title" style={{ marginTop: 8 }}>
         {detail.stats.season} statistics
@@ -1208,7 +1262,8 @@ function PlayerDetailPanel({
         {detail.rosterPercent.note}
       </div>
 
-      <InjurySourceHealth status={status} unlocked={unlocked} onDone={onDone} />
+        <InjurySourceHealth status={status} unlocked={unlocked} onDone={onDone} />
+      </div>
     </details>
   );
 }
@@ -1305,10 +1360,7 @@ function InjurySourceHealth({
 function VegasPanel({ status }: { status: SetupStatus }) {
   return (
     <div className="card" data-testid="panel-vegas">
-      <div className="section-title" style={{ margin: '0 0 6px' }}>
-        Vegas lines
-      </div>
-      <div className="badge-row">
+      <div className="badge-row" style={{ marginTop: 0 }}>
         <Badge tone={status.vegas.live ? 'pos' : 'warn'}>
           {status.vegas.live ? 'Live lines connected' : 'Not connected yet'}
         </Badge>

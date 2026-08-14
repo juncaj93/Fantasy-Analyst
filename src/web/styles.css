@@ -13,6 +13,12 @@
  * names a colour; it names a role — card surface, secondary text, positive —
  * so Light and Dark are two settings of one design system rather than two
  * stylesheets that have to be kept in step by hand.
+ *
+ * The visual language is iOS's, arrived at rather than copied: hierarchy comes
+ * from type and surface tone, separation from hairlines and whitespace, and a
+ * border is the last resort rather than the first. Nothing here uses an Apple
+ * asset, a system font file or a piece of Apple branding — only the principles,
+ * which are public and are what actually makes an app feel native.
  */
 
 /* ==================================================================== tokens */
@@ -21,27 +27,48 @@
   color-scheme: light;
 
   /* -- surfaces ---------------------------------------------------------- */
-  --bg: #f4f6fa;
+  /*
+   * Four tones and no more: the page, the thing on the page, the thing that is
+   * open, and a recess inside it. A screen that needs a fifth is a screen with
+   * a box inside a box inside a box, which is the look this pass is removing.
+   */
+  --bg: #f2f3f7;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-sunken: #eceff5;
-  --surface-inset: #f6f8fb;
-  --nav-surface: #ffffffec;
-  --header-surface: #f4f6faee;
+  --surface-sunken: #e9ebf1;
+  --surface-inset: #f5f6fa;
+  --nav-surface: #f2f3f7d9;
+  --tabbar-surface: #f8f9fbd9;
+  --header-surface: var(--nav-surface);
+  --scrim: rgb(17 24 39 / 32%);
 
   /* -- lines ------------------------------------------------------------- */
-  --border: #e0e5ee;
-  --border-strong: #c6cede;
+  /*
+   * A separator is a hairline between two things that are already different;
+   * a border is an outline around one thing. This design leans almost entirely
+   * on the first, which is the strongest single native cue there is.
+   */
+  --separator: #d9dde6;
+  --separator-soft: #e6e9f0;
+  --border: var(--separator);
+  --border-strong: #c3c9d6;
 
   /* -- text -------------------------------------------------------------- */
-  --text: #141a23;
-  --text-dim: #515e70;
-  --text-faint: #6d7a8c;
+  --text: #14181f;
+  --text-dim: #4d586b;
+  /*
+   * Tertiary text, and no quieter than this.
+   *
+   * It reads at 4.5:1 against both the page and a card, which is the floor for
+   * text this size. A greyer one looked calmer on a desk and disappeared on a
+   * phone in daylight — minimalism is not allowed to cost legibility.
+   */
+  --text-faint: #64707f;
 
   /* -- semantic states --------------------------------------------------- */
   --accent: #2a5fd8;
   --accent-text: #23509e;
-  --accent-tint: #e7eeff;
+  --accent-tint: #e6edff;
   --on-accent: #ffffff;
 
   --pos: #157a4c;
@@ -53,10 +80,11 @@
 
   --selected: var(--accent);
   --selected-tint: var(--accent-tint);
+  --pressed: rgb(17 24 39 / 6%);
   --live: #157a4c;
   --live-tint: var(--pos-tint);
-  --locked: #6d7a8c;
-  --confidence: #6d7a8c;
+  --locked: #64707f;
+  --confidence: #64707f;
 
   /* -- position colours -------------------------------------------------- */
   /* Four well-separated hues plus two extras; all readable for the common
@@ -86,30 +114,78 @@
    * takes are themselves darker and more saturated so "almost all" still lands
    * on a readable card.
    */
-  --pos-mix: 62%;
-  --pos-mix-open: 76%;
+  --pos-mix: 58%;
+  --pos-mix-open: 74%;
 
   /* -- elevation and focus ---------------------------------------------- */
-  --shadow-1: 0 1px 2px rgb(17 24 39 / 6%), 0 1px 1px rgb(17 24 39 / 4%);
-  --shadow-2: 0 2px 8px rgb(17 24 39 / 8%), 0 1px 2px rgb(17 24 39 / 5%);
+  /*
+   * Two shadows, both nearly invisible. Elevation on a phone is a whisper —
+   * a card that casts a real shadow reads as a web dashboard, and forty of
+   * them read as a pile of paper.
+   */
+  --shadow-1: 0 1px 1px rgb(17 24 39 / 4%);
+  --shadow-2: 0 4px 16px rgb(17 24 39 / 10%);
+  --shadow-sheet: 0 -8px 32px rgb(17 24 39 / 18%);
   --focus-ring: 0 0 0 3px rgb(42 95 216 / 32%);
 
   /* -- geometry ---------------------------------------------------------- */
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  /*
+   * Three radii and a pill, used everywhere and nowhere else. A component that
+   * wants its own number is a component that has stopped being part of a
+   * system.
+   */
+  --radius-pill: 999px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-sheet: 20px;
   --tap: 44px;
-  --space-1: 2px;
-  --space-2: 4px;
-  --space-3: 6px;
-  --space-4: 10px;
-  --space-5: 14px;
+
+  /*
+   * The spacing rhythm: 4, 8, 12, 16, 20, 24, with a 2px hairline step for the
+   * gaps inside a single line of type. Everything on screen is a multiple of
+   * one of these, which is most of what "consistent" means to an eye.
+   */
+  --sp-0: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* The legacy names, kept pointing at the scale so no component invents one. */
+  --space-1: var(--sp-0);
+  --space-2: var(--sp-1);
+  --space-3: var(--sp-2);
+  --space-4: var(--sp-3);
+  --space-5: var(--sp-4);
+
+  /** How far the page is inset from the edge of the phone. */
+  --page-x: 12px;
+
   /*
    * Replaced at runtime with the bar's measured height (including its safe-area
    * padding). This value only has to hold for the first frame.
    */
   --tabbar-height: 50px;
-  --motion: 160ms;
+
+  /*
+   * Motion, in three speeds and one curve.
+   *
+   * The curve is a decelerating one — fast to start, settling at the end —
+   * because that is what a thing being moved by a thumb does. Nothing here
+   * animates longer than a third of a second; a transition the user waits for
+   * is a transition that has stopped being feedback.
+   */
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 320ms;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion: var(--dur-fast);
+
+  /* Material: one blur, used on the two bars and the sheet, and nowhere else. */
+  --blur: saturate(180%) blur(20px);
 
   /*
    * The device insets, named once, and named because `env()` cannot be
@@ -148,13 +224,13 @@
    * padding to a device that never had the problem is how a fix for one screen
    * becomes a regression on another.
    */
-  --nav-inset: max(0px, min(var(--safe-bottom), calc(var(--home-indicator-reach) + var(--space-2))));
+  --nav-inset: max(0px, min(var(--safe-bottom), calc(var(--home-indicator-reach) + var(--sp-1))));
 }
 
 /*
  * Dark is a designed expression of the same system, not an inversion: a softer
  * page black, card surfaces that separate by tone rather than by outline, and
- * quieter borders so the screen stops reading as a stack of rectangles.
+ * quieter separators so the screen stops reading as a stack of rectangles.
  *
  * The declarations appear twice on purpose. The media query serves System, and
  * the attribute rule lets an explicit Light or Dark choice win over the phone —
@@ -164,20 +240,24 @@
   :root:not([data-theme='light']) {
     color-scheme: dark;
 
-    --bg: #0d1116;
-    --surface: #161c24;
-    --surface-raised: #1c232d;
+    --bg: #0c1015;
+    --surface: #161b22;
+    --surface-raised: #1d232c;
     --surface-sunken: #10151b;
-    --surface-inset: #1a212a;
-    --nav-surface: #161c24ee;
-    --header-surface: #0d1116e6;
+    --surface-inset: #1a2029;
+    --nav-surface: #0c1015d9;
+    --tabbar-surface: #12171ed9;
+    --header-surface: var(--nav-surface);
+    --scrim: rgb(0 0 0 / 55%);
 
-    --border: #242c37;
-    --border-strong: #384453;
+    --separator: #262e39;
+    --separator-soft: #1e252e;
+    --border: var(--separator);
+    --border-strong: #38424f;
 
     --text: #e9eef6;
     --text-dim: #a6b3c4;
-    --text-faint: #83919f;
+    --text-faint: #82909f;
 
     --accent: #6ea3f7;
     --accent-text: #8fbaff;
@@ -193,10 +273,11 @@
 
     --selected: var(--accent);
     --selected-tint: var(--accent-tint);
+    --pressed: rgb(255 255 255 / 8%);
     --live: #4fc98a;
     --live-tint: var(--pos-tint);
-    --locked: #83919f;
-    --confidence: #83919f;
+    --locked: #82909f;
+    --confidence: #82909f;
 
     /*
      * Darker, more saturated, and taken almost neat — see `--pos-mix`. The old
@@ -217,11 +298,12 @@
     --pos-DEF-line: #f492bd;
     --pos-DEF-tint: #44172c;
 
-    --pos-mix: 92%;
+    --pos-mix: 88%;
     --pos-mix-open: 100%;
 
-    --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
+    --shadow-1: none;
+    --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
+    --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
     --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
   }
 }
@@ -229,20 +311,24 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #0d1116;
-  --surface: #161c24;
-  --surface-raised: #1c232d;
+  --bg: #0c1015;
+  --surface: #161b22;
+  --surface-raised: #1d232c;
   --surface-sunken: #10151b;
-  --surface-inset: #1a212a;
-  --nav-surface: #161c24ee;
-  --header-surface: #0d1116e6;
+  --surface-inset: #1a2029;
+  --nav-surface: #0c1015d9;
+  --tabbar-surface: #12171ed9;
+  --header-surface: var(--nav-surface);
+  --scrim: rgb(0 0 0 / 55%);
 
-  --border: #242c37;
-  --border-strong: #384453;
+  --separator: #262e39;
+  --separator-soft: #1e252e;
+  --border: var(--separator);
+  --border-strong: #38424f;
 
   --text: #e9eef6;
   --text-dim: #a6b3c4;
-  --text-faint: #83919f;
+  --text-faint: #82909f;
 
   --accent: #6ea3f7;
   --accent-text: #8fbaff;
@@ -258,10 +344,11 @@
 
   --selected: var(--accent);
   --selected-tint: var(--accent-tint);
+  --pressed: rgb(255 255 255 / 8%);
   --live: #4fc98a;
   --live-tint: var(--pos-tint);
-  --locked: #83919f;
-  --confidence: #83919f;
+  --locked: #82909f;
+  --confidence: #82909f;
 
   /* Same values as the media query above, for an explicit Dark choice. */
   --pos-QB-line: #8fb8fa;
@@ -277,11 +364,12 @@
   --pos-DEF-line: #f492bd;
   --pos-DEF-tint: #44172c;
 
-  --pos-mix: 92%;
+  --pos-mix: 88%;
   --pos-mix-open: 100%;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
+  --shadow-1: none;
+  --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
+  --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
   --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
 }
 
@@ -306,24 +394,39 @@ body {
   font-size: 15px;
   line-height: 1.35;
   -webkit-text-size-adjust: 100%;
+  /* Numbers that line up down a column, everywhere, without being asked. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* A theme change should feel like a light being turned down, not a page swap. */
 body,
 .card,
+.list-group,
 .player-row,
-.tabbar {
+.tabbar,
+.nav-bar {
   transition:
-    background-color var(--motion) ease,
-    border-color var(--motion) ease,
-    color var(--motion) ease;
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
+/*
+ * Reduced motion: nothing moves, everything still says what it is.
+ *
+ * The interactive gestures keep working — a swipe still navigates and a sheet
+ * still dismisses — they simply arrive instead of travelling. State is never
+ * carried by an animation in the first place, which is what makes this a
+ * one-line rule rather than a second design.
+ */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -340,8 +443,10 @@ body,
  *   `.app-main` owns the reservation for the bar, and reserves the bar's
  *               *measured* height, which already contains that inset. It must
  *               never add the inset itself.
+ *   `.nav-bar`  owns the top inset, because it is the thing that sits under
+ *               the status bar when the page is scrolled.
  *
- * Three owners, three properties, no overlap. Anything that adds a fourth —
+ * Four owners, four properties, no overlap. Anything that adds a fifth —
  * a wrapper with bottom padding, a spacer element, a second `min-height` —
  * double-counts and shows up as blank space.
  *
@@ -385,13 +490,10 @@ body,
    * black strip. The fallback value in :root only has to be sane for the frame
    * before the measurement lands.
    *
-   * The top inset is this element's now, because the header that used to absorb
-   * it no longer exists. In Safari's normal portrait browsing it is zero — the
-   * browser's own chrome is already holding the status bar — so this costs
-   * nothing there and still keeps the first card off the notch in standalone
-   * mode and in landscape.
+   * The top inset belongs to the navigation bar, which is the element that
+   * actually meets the status bar when the page scrolls.
    */
-  padding: calc(var(--safe-top) + var(--space-3)) var(--space-4) calc(var(--tabbar-height) + var(--space-3));
+  padding: var(--safe-top) var(--page-x) calc(var(--tabbar-height) + var(--sp-2));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -403,22 +505,110 @@ body,
   border-radius: var(--radius-sm);
 }
 
-/* ------------------------------------------------------------------ header */
+/* ------------------------------------------------------------ navigation bar */
 /*
- * There is no app header.
+ * The page's identity, in as little height as it can be said in.
  *
- * The global banner is gone; the top inset it used to absorb is now the scroll
- * container's, so the first card clears the status bar without a bar of chrome
- * existing to hold it up.
+ * A compact bar rather than a banner: one line of title, the actions that
+ * belong to this screen and nothing else, a hairline underneath and the page's
+ * own material behind it so rows pass under rather than beside it. It sticks,
+ * which is the only reason it exists rather than a heading — on a forty-row
+ * draft board, "whose turn is it" has to stay on screen.
  *
- * `.header-row` survives because it was never the banner's: it is the
- * title-and-meta line inside a card, used across Setup, Team and Review.
+ * The negative margins make the material full-bleed while the content keeps the
+ * page's own inset, and the negative top margin hands it the status-bar inset
+ * that `.app-main` would otherwise be holding for it.
  */
-.header-row {
+.nav-bar > .search {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: calc(-1 * var(--safe-top)) calc(-1 * var(--page-x)) var(--sp-2);
+  padding: calc(var(--safe-top) + var(--sp-1) + 2px) var(--page-x) calc(var(--sp-1) + 2px);
+  background: var(--nav-surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--separator-soft);
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+}
+
+/* The title block: name, and whatever qualifies it, on one line each. */
+.nav-title-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.nav-title {
+  font-size: 1.06rem;
+  font-weight: 680;
+  letter-spacing: -0.021em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-subtitle {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/*
+ * Back, said the way iOS says it: a chevron and the place you came from, in
+ * the accent colour, with no box around it. It is navigation — never an undo —
+ * and it does exactly what the browser's own back would do from a pushed
+ * screen: return to the list that opened this.
+ */
+.nav-back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-height: 36px;
+  margin-left: -6px;
+  padding: 0 6px 0 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 0.94rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.nav-back:active {
+  opacity: 0.5;
+}
+
+.nav-back svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
 }
 
 /* --------------------------------------------------------------- tab bar */
@@ -434,10 +624,10 @@ body,
      covering the bottom of the page. */
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  background: var(--nav-surface);
-  backdrop-filter: saturate(180%) blur(16px);
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-top: 1px solid var(--border);
+  background: var(--tabbar-surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-top: 1px solid var(--separator);
   /*
    * Flush against the bottom edge, and no taller than it has to be.
    *
@@ -457,111 +647,323 @@ body,
 .tabbar button {
   position: relative;
   min-height: var(--tap);
-  padding: 6px 1px;
+  /*
+   * The bar is exactly one tap target tall plus its hairline, and the icon,
+   * the gap and the label have to add up to less than that — the height is
+   * asserted, because a bar that grows is a bar that starts eating the page.
+   */
+  padding: 3px 1px;
   background: none;
   border: none;
   color: var(--text-faint);
   /* Six tabs at 360px leaves 60px each; the label must not force a wrap. */
-  font-size: 0.66rem;
+  font-size: 0.625rem;
+  line-height: 1.25;
   white-space: nowrap;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  /* Tight enough that the icon and its label read as one control. */
+  gap: 2px;
   cursor: pointer;
+  transition: color var(--dur-fast) ease;
 }
 
 .tabbar button[aria-current='page'] {
   color: var(--accent-text);
-  font-weight: 700;
+}
+
+.tabbar button:active .tab-glyph {
+  opacity: 0.45;
 }
 
 .tabbar .tab-glyph {
-  font-size: 1.05rem;
-  line-height: 1;
-  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  transition: opacity var(--dur-fast) ease;
 }
 
-.tabbar button[aria-current='page'] .tab-glyph {
-  opacity: 1;
+.tabbar .tab-glyph svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* The selected tab is the one drawn with a heavier hand. */
+.tabbar button[aria-current='page'] .tab-glyph svg {
+  stroke-width: 2.15;
 }
 
 /*
  * "You are reading, not editing" — where editing is unlocked.
  *
- * This is all that survives of the banner's second line. A ring rather than a
- * count, so it cannot be mistaken for the review badge, and the button carries
- * the sentence in its accessible name so the mark is never the only carrier.
+ * A ring rather than a count, so it cannot be mistaken for the review badge,
+ * and the button carries the sentence in its accessible name so the mark is
+ * never the only carrier.
  */
 .tab-lock {
   position: absolute;
-  top: 5px;
+  top: 4px;
   left: 50%;
-  transform: translateX(7px);
+  transform: translateX(8px);
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1.5px solid var(--text-faint);
 }
 
 .tab-badge {
   position: absolute;
-  top: 3px;
+  top: 2px;
   left: 50%;
   transform: translateX(6px);
-  background: var(--warn);
-  color: var(--on-accent);
-  border-radius: 999px;
+  background: var(--neg);
+  color: #fff;
+  border-radius: var(--radius-pill);
   font-size: 0.6rem;
+  line-height: 1.5;
   padding: 0 4px;
   font-weight: 700;
-  min-width: 15px;
+  min-width: 16px;
   text-align: center;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ================================================================ surfaces */
 
+/*
+ * A card is a surface, not a box.
+ *
+ * The outline is gone and the shadow is a hairline: what separates a card from
+ * the page is that it is a different tone, which is how iOS has always done it
+ * and why an iOS screen with thirty rows on it does not look like a form.
+ */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
   box-shadow: var(--shadow-1);
-  padding: 8px 10px;
-  margin-bottom: var(--space-3);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
 }
 
 .card-tight {
-  padding: 6px 9px;
+  padding: var(--sp-2) var(--sp-3);
 }
 
 /* A card inside a card should read as a paragraph, not as a second box. */
 .card .card {
   background: var(--surface-inset);
   box-shadow: none;
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
-.section-title {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+/*
+ * A grouped list: one surface holding rows separated by hairlines, which is the
+ * single most recognisable native list idiom there is. The separator is inset
+ * from the leading edge so it reads as a division inside one thing rather than
+ * as a stack of boxes.
+ */
+.list-group {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-3);
+}
+
+/* The same grouped surface under its older name, used by the live-draft roster. */
+.list-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-2);
+}
+
+.list-group > * + *,
+.list-card > * + * {
+  border-top: 1px solid var(--separator-soft);
+}
+
+.list-group > *:last-child,
+.list-card > *:last-child {
+  border-bottom: none;
+}
+
+/*
+ * One row of a grouped list: something on the left, its value on the right, and
+ * a chevron when tapping it goes somewhere.
+ */
+.list-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--tap);
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-row:active,
+.list-row[aria-expanded='true'] {
+  background: var(--pressed);
+}
+
+.list-row-static {
+  cursor: default;
+}
+
+.list-row-static:active {
+  background: none;
+}
+
+.list-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.list-row-label {
+  display: block;
+  font-size: 0.94rem;
+  font-weight: 560;
+  letter-spacing: -0.012em;
+}
+
+.list-row-detail {
+  display: block;
+  font-size: 0.78rem;
   color: var(--text-faint);
-  margin: 10px 2px 4px;
-  font-weight: 700;
+  margin-top: 1px;
+}
+
+.list-row-value {
+  flex: 0 0 auto;
+  font-size: 0.84rem;
+  color: var(--text-faint);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * A list row that opens in place rather than leading somewhere.
+ *
+ * A native `<details>`, so it needs no state and keeps working with a keyboard
+ * and a screen reader for free; the summary is dressed as a row and the marker
+ * is replaced by the same chevron the pushed rows use, rotated when open.
+ */
+.list-details > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--tap);
+  padding: var(--sp-2) var(--sp-3);
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.94rem;
+  font-weight: 560;
+  letter-spacing: -0.012em;
+  color: inherit;
+}
+
+.list-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.list-details > summary::after {
+  content: '';
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-faint);
+  border-bottom: 2px solid var(--text-faint);
+  opacity: 0.55;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.list-details[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+.list-details > summary:active {
+  background: var(--pressed);
+}
+
+.list-details-body {
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+/* The chevron: quiet, and only where the row actually leads somewhere. */
+.list-chevron {
+  flex: 0 0 auto;
+  display: flex;
+  color: var(--text-faint);
+  opacity: 0.45;
+}
+
+.list-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* The leading mark on a settings row: a state, drawn as a state and not a word. */
+.list-state {
+  flex: 0 0 auto;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-state svg {
+  width: 17px;
+  height: 17px;
+}
+
+.list-state-ok {
+  color: var(--pos);
+}
+
+.list-state-warn {
+  color: var(--warn);
+}
+
+.list-state-todo {
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+
+/*
+ * The heading over a group. Sentence case at a small size rather than the
+ * shouted uppercase of an admin panel — it is a label for the group under it,
+ * not a section of the document.
+ */
+.section-title {
+  font-size: 0.74rem;
+  letter-spacing: -0.003em;
+  color: var(--text-faint);
+  margin: var(--sp-3) var(--sp-1) var(--sp-1);
+  font-weight: 620;
 }
 
 .muted {
   color: var(--text-dim);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
 }
 
 .faint {
   color: var(--text-faint);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
 }
 
 /* ------------------------------------------------------------ metric tiles */
@@ -572,9 +974,9 @@ body,
  */
 .statusbar {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--sp-2);
   overflow-x: auto;
-  padding: 2px 0 var(--space-3);
+  padding: 2px 0 var(--sp-2);
   scrollbar-width: none;
 }
 
@@ -585,8 +987,8 @@ body,
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0;
 }
 
 .metric-grid-3 {
@@ -596,9 +998,8 @@ body,
 .stat {
   flex: 0 0 auto;
   background: var(--surface-inset);
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px 7px;
+  padding: var(--sp-1) var(--sp-2);
   min-width: 0;
 }
 
@@ -616,7 +1017,6 @@ body,
 .stat .stat-value {
   font-size: 0.98rem;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
@@ -628,40 +1028,51 @@ body,
 }
 
 /* ============================================================= player rows */
-/* The header is sticky, so anything scrolled to the top of the viewport lands
-   underneath it and cannot be tapped. Reserve its height when scrolling. */
+/* The navigation bar is sticky, so anything scrolled to the top of the
+   viewport lands underneath it and cannot be tapped. Reserve its height. */
 .player-row,
 .card,
+.list-group,
 [data-testid='newsletter-message'] {
-  scroll-margin-top: 64px;
+  scroll-margin-top: 72px;
 }
 
 /*
  * Dense but not cramped.
  *
  * The row keeps the full 44px tap target — thumbs did not get smaller — but
- * loses the padding and the gap that were buying nothing. A quieter border and
- * a flat surface stop forty of these reading as forty outlined boxes; the
- * accent line appears only when the row is the one being read.
+ * loses the outline that made forty of them read as forty boxes. What separates
+ * one player from the next is the gap between them and the tone of the card;
+ * the position's colour does the rest.
  */
 .player-row {
   width: 100%;
   text-align: left;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-sm);
-  padding: 6px 9px;
-  margin-bottom: 3px;
+  /*
+   * Six pixels above and below, which is the difference between ten players on
+   * a phone and eleven. The tap target is untouched — `min-height` still holds
+   * the row at 44px, and the two lines of type inside it are unchanged.
+   */
+  padding: 6px var(--sp-2) 6px 10px;
+  margin-bottom: var(--sp-1);
   color: inherit;
   font: inherit;
   cursor: pointer;
   display: block;
   min-height: var(--tap);
+  box-shadow: var(--shadow-1);
+  transition:
+    background-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease);
 }
 
 .player-row:active,
 .player-row:has(> .row-button:active) {
   background: var(--surface-sunken);
+  transform: scale(0.994);
 }
 
 /*
@@ -684,7 +1095,6 @@ body,
 
 .player-row[aria-expanded='true'],
 .player-row-open {
-  border-color: var(--selected);
   box-shadow: var(--shadow-2);
   background: var(--surface-raised);
 }
@@ -692,15 +1102,14 @@ body,
 .player-row-top {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--sp-2);
 }
 
 .rank {
   font-size: 0.7rem;
   color: var(--text-faint);
-  font-weight: 700;
-  min-width: 17px;
-  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  min-width: 16px;
 }
 
 /*
@@ -708,9 +1117,9 @@ body,
  * it, so it gets the size and the weight and the rest step down.
  */
 .player-name {
-  font-weight: 650;
-  font-size: 0.98rem;
-  letter-spacing: -0.012em;
+  font-weight: 620;
+  font-size: 1rem;
+  letter-spacing: -0.021em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -725,7 +1134,7 @@ body,
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--sp-1);
 }
 
 /*
@@ -738,14 +1147,14 @@ body,
  */
 .pos-pill {
   display: inline-block;
-  min-width: 27px;
+  min-width: 26px;
   text-align: center;
   padding: 1px 4px;
   border-radius: var(--radius-sm);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 800;
   letter-spacing: 0.03em;
-  border: 1px solid var(--border);
+  border: 1px solid var(--separator);
   background: var(--surface-sunken);
   color: var(--text-dim);
 }
@@ -781,40 +1190,36 @@ body,
 }
 
 .pos-pill[class*='pos-'] {
-  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 40%, transparent);
+  border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 40%, transparent);
   background: var(--pos-tint-bg, var(--surface-sunken));
   color: var(--pos-line, var(--text-dim));
 }
 
 /* The trailing word or date on a list row: what tapping it does, said quietly. */
 .row-action {
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   color: var(--text-faint);
-  font-weight: 600;
+  font-weight: 550;
   white-space: nowrap;
 }
 
 /*
  * The whole card carries the position, not just the pill.
  *
- * A faint wash of the position's hue plus a coloured left edge: at a glance the
- * board separates into runs of receivers and running backs without anybody
- * reading a letter, and at rest it is still a quiet list of white (or near
- * black) cards rather than a rainbow. The letters stay on the badge, because
- * the tint is an accelerator and is not allowed to be the only carrier of the
- * meaning — and because six per cent of men would see three of these hues as
- * one colour.
- */
-/*
- * A flat wash, not a gradient.
+ * A faint wash of the position's hue plus a coloured leading edge: at a glance
+ * the board separates into runs of receivers and running backs without anybody
+ * reading a letter, and at rest it is still a quiet list of cards rather than a
+ * rainbow. The letters stay on the badge, because the tint is an accelerator
+ * and is not allowed to be the only carrier of the meaning — and because six
+ * per cent of men would see three of these hues as one colour.
  *
- * Forty gradient-painted cards sitting behind two backdrop-filtered bars is a
- * lot of work for a compositor to redo on every scroll — enough to make a
- * software-rendered WebKit crawl. A single mixed colour is one paint, reads the
- * same at this opacity, and is computed once rather than per frame.
+ * A flat wash, not a gradient: forty gradient-painted cards sitting behind two
+ * blurred bars is a lot of work for a compositor to redo on every scroll. A
+ * single mixed colour is one paint, reads the same at this opacity, and is
+ * computed once rather than per frame.
  */
 .card-pos {
-  border-left: 4px solid var(--pos-line, var(--border));
+  border-left: 3px solid var(--pos-line, var(--separator));
   background: color-mix(in srgb, var(--pos-tint-bg, var(--surface)) var(--pos-mix), var(--surface));
 }
 
@@ -860,13 +1265,12 @@ body,
  */
 .card-pos .pos-pill[class*='pos-'] {
   background: transparent;
-  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 55%, transparent);
+  border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 55%, transparent);
   color: var(--pos-line, var(--text-dim));
 }
 
 .team-code {
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
 
@@ -879,16 +1283,15 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 3px 9px;
+  gap: 2px var(--sp-2);
   margin-top: 3px;
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 .metric strong {
   color: var(--text-dim);
-  font-weight: 650;
+  font-weight: 620;
 }
 
 /*
@@ -900,9 +1303,8 @@ body,
  */
 .injury-line {
   margin-top: 2px;
-  font-size: 0.72rem;
+  font-size: 0.73rem;
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -916,19 +1318,16 @@ body,
  */
 .tally {
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 /*
  * Beside a name it is a footnote, so it is sized here rather than on the
  * primitive — the same component labelled "Lifetime" in a Trades window cell is
- * the headline of that cell and takes its size from there. `flex: none` is what
- * stops the browser settling an argument between a long name, an injury tag and
- * this by squashing the number.
+ * the headline of that cell and takes its size from there.
  */
 .player-row-top .tally {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   letter-spacing: -0.01em;
   flex: none;
 }
@@ -956,12 +1355,12 @@ body,
  */
 .score-value {
   color: var(--text);
-  font-weight: 750;
+  font-weight: 720;
 }
 
 /* Positive/negative always pair colour with a glyph + word. */
 .sig {
-  font-weight: 650;
+  font-weight: 620;
   white-space: nowrap;
 }
 
@@ -989,35 +1388,57 @@ body,
 /*
  * The expanded player.
  *
- * Answers, in order: what is this app telling me, on what numbers, for what
- * reasons, and what argues against it. The model's own arithmetic is real and
- * still reachable, but it is reference material during a live draft, so it sits
- * behind a disclosure rather than at the end of every card.
+ * A disclosure inside the row rather than a panel bolted under it: a hairline,
+ * then the content, at the same inset as the row above it. Nothing here gets a
+ * border of its own — the row is already one thing.
  */
 .explain {
-  margin-top: var(--space-3);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-3);
+  margin-top: var(--sp-2);
+  border-top: 1px solid var(--separator-soft);
+  padding-top: var(--sp-2);
 }
 
 .explain ul {
-  margin: var(--space-2) 0 0;
-  padding-left: 15px;
+  margin: var(--sp-1) 0 0;
+  padding-left: 16px;
 }
 
 .explain li {
   margin-bottom: 3px;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: var(--text-dim);
 }
 
+/*
+ * The reveal itself.
+ *
+ * A grid whose single row goes from zero to its content height, which is the
+ * only way to animate to an unknown height without measuring it in JavaScript
+ * on every frame. Height and opacity are cheap; the row above does not move, so
+ * the reader's place on the page is kept.
+ */
+.disclose {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur) var(--ease);
+}
+
+.disclose > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.disclose-open {
+  grid-template-rows: 1fr;
+}
+
 .detail-label {
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: var(--text-faint);
   font-weight: 700;
-  margin: var(--space-4) 0 var(--space-2);
+  margin: var(--sp-3) 0 var(--sp-1);
 }
 
 .detail-label:first-child {
@@ -1027,21 +1448,17 @@ body,
 /*
  * Where his position is breaking, in one line.
  *
- * The whole of what used to be a section of bullets, a section of
- * counterpoints and a disclosure of arithmetic. Set as a quiet inset strip
- * rather than a heading plus body, because a heading over a single line is two
- * lines to say one thing.
+ * A quiet inset strip rather than a heading plus body, because a heading over a
+ * single line is two lines to say one thing.
  */
 .tier-context {
-  font-size: 0.74rem;
-  font-weight: 600;
+  font-size: 0.76rem;
+  font-weight: 560;
   color: var(--text-dim);
   background: var(--surface-inset);
-  border-left: 2px solid var(--border-strong);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding: 4px 8px;
-  margin-bottom: var(--space-4);
-  letter-spacing: 0.005em;
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-3);
 }
 
 /*
@@ -1055,9 +1472,9 @@ body,
   flex: 0 0 auto;
   font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 3px 5px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   white-space: nowrap;
@@ -1090,7 +1507,7 @@ body,
  * text colour so it reads as context and not as a finding of the app's own.
  */
 .outlook {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   line-height: 1.45;
   color: var(--text-dim);
 }
@@ -1098,54 +1515,51 @@ body,
 /* Who wrote it. Quiet, and never omitted. */
 .outlook-source {
   color: var(--text-faint);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   white-space: nowrap;
 }
 
-/* `16 GP · WR7 half-PPR` — two facts, one line, same metrics treatment as the row. */
+/* `16 GP · WR7 half-PPR` — two facts, one line, same treatment as the row. */
 .season-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 12px;
-  font-size: 0.78rem;
+  gap: 3px var(--sp-3);
+  font-size: 0.8rem;
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 .season-line strong {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 680;
 }
 
 /*
- * The conclusion, said once and said loudest. A tinted left rule carries the
+ * The conclusion, said once and said loudest. A tinted surface carries the
  * semantic colour instead of a second bordered box inside the card.
  */
 .verdict {
-  border-left: 3px solid var(--border-strong);
   background: var(--surface-inset);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding: 6px 9px;
-  margin-bottom: var(--space-3);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .verdict-label {
-  font-size: 0.86rem;
-  font-weight: 750;
-  letter-spacing: -0.01em;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.014em;
   display: flex;
   align-items: center;
   gap: 5px;
 }
 
 .verdict-detail {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-dim);
   margin-top: 2px;
 }
 
 .verdict-take {
-  border-left-color: var(--pos);
   background: var(--pos-tint);
 }
 
@@ -1154,7 +1568,6 @@ body,
 }
 
 .verdict-avoid {
-  border-left-color: var(--neg);
   background: var(--neg-tint);
 }
 
@@ -1163,16 +1576,11 @@ body,
 }
 
 .verdict-risky {
-  border-left-color: var(--warn);
   background: var(--warn-tint);
 }
 
 .verdict-risky .verdict-label {
   color: var(--warn);
-}
-
-.verdict-calm {
-  border-left-color: var(--border-strong);
 }
 
 .verdict-calm .verdict-label {
@@ -1181,11 +1589,11 @@ body,
 
 .reason-list {
   margin: 0;
-  padding-left: 15px;
+  padding-left: 16px;
 }
 
 .reason-list li {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   margin-bottom: 2px;
   color: var(--text-dim);
 }
@@ -1200,24 +1608,24 @@ body,
 
 /* A disclosure that reads as a control, not as another card. */
 .disclosure {
-  margin-top: var(--space-4);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-2);
+  margin-top: var(--sp-3);
+  border-top: 1px solid var(--separator-soft);
+  padding-top: var(--sp-1);
 }
 
 .disclosure > summary,
 .link-button,
 .link-summary {
-  font-size: 0.75rem;
-  font-weight: 650;
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--accent-text);
   cursor: pointer;
-  padding: 5px 0;
+  padding: var(--sp-1) 0;
   list-style: none;
-  min-height: 30px;
+  min-height: 32px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .disclosure > summary::-webkit-details-marker,
@@ -1233,19 +1641,29 @@ body,
   font-family: inherit;
 }
 
+.link-button:active,
+.disclosure > summary:active {
+  opacity: 0.5;
+}
+
 .disclosure > summary::after,
 .link-summary::after {
-  content: '▸';
-  font-size: 0.7rem;
-  opacity: 0.7;
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.8px solid currentcolor;
+  border-bottom: 1.8px solid currentcolor;
+  transform: rotate(-45deg) translate(-1px, 1px);
+  opacity: 0.6;
+  transition: transform var(--dur-fast) var(--ease);
 }
 
 .disclosure[open] > summary::after {
-  content: '▾';
+  transform: rotate(45deg) translate(-1px, -1px);
 }
 
 .components {
-  margin-top: var(--space-3);
+  margin-top: var(--sp-2);
   display: grid;
   gap: 3px;
 }
@@ -1253,10 +1671,10 @@ body,
 .component {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: var(--space-3);
-  font-size: 0.75rem;
+  gap: var(--sp-2);
+  font-size: 0.78rem;
   padding: 3px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-bottom: 1px solid var(--separator-soft);
 }
 
 .component-label {
@@ -1264,92 +1682,107 @@ body,
 }
 
 .component-value {
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 620;
 }
 
 .component-detail {
   grid-column: 1 / -1;
   color: var(--text-faint);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
 }
 
 /* ================================================================ controls */
 
+/*
+ * Buttons, in a hierarchy of three.
+ *
+ * Primary is filled and there is at most one of it in view; secondary is a
+ * tinted surface with no outline; destructive exists and is used only where
+ * something is actually destroyed. None of them is full-width unless the thing
+ * it does is the only thing on the screen.
+ */
 button.btn,
 a.btn {
-  min-height: var(--tap);
-  padding: 8px 14px;
+  min-height: 36px;
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+  border: 0;
+  background: var(--surface-sunken);
+  color: var(--accent-text);
   font: inherit;
-  font-weight: 650;
+  font-size: 0.86rem;
+  font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  box-shadow: var(--shadow-1);
+  gap: var(--sp-1);
+  transition:
+    opacity var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
 }
 
-button.btn:active {
-  background: var(--surface-sunken);
+button.btn:active,
+a.btn:active {
+  opacity: 0.55;
 }
 
 button.btn-primary {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--on-accent);
 }
 
+button.btn-danger {
+  background: var(--neg-tint);
+  color: var(--neg);
+}
+
 button.btn-sm {
-  min-height: 36px;
-  padding: 6px 10px;
-  font-size: 0.78rem;
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: 0.8rem;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .btn-row {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
 /*
- * A compact icon control. Square, quiet, and a full tap target — used where a
- * labelled pill would cost more room than the action is worth.
+ * A compact icon control. Quiet, and a full tap target — used where a labelled
+ * pill would cost more room than the action is worth.
  */
 .icon-btn {
   flex: 0 0 auto;
   width: var(--tap);
-  height: 34px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--sp-1);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-dim);
+  border: 0;
+  background: transparent;
+  color: var(--accent-text);
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
+  transition: opacity var(--dur-fast) ease;
 }
 
 .icon-btn:active {
-  background: var(--surface-sunken);
+  opacity: 0.4;
 }
 
 .icon-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: progress;
 }
 
@@ -1364,54 +1797,104 @@ button:disabled {
   }
 }
 
-/* Segmented control — Appearance, and anything else with 2–4 exclusive modes. */
-.segmented {
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+/*
+ * Segmented control.
+ *
+ * A sunken track with one raised segment on it: the selected state is carried
+ * by elevation and tone rather than by a saturated fill, which is what keeps a
+ * row of seven from shouting. It scrolls sideways when a league has more
+ * positions than fit, and the track scrolls with it rather than clipping it.
+ */
+.segmented,
+.filter-row {
+  display: flex;
   gap: 2px;
-  width: 100%;
-  padding: 2px;
+  padding: 3px;
   border-radius: var(--radius);
   background: var(--surface-sunken);
-  border: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-bottom: var(--sp-2);
+  -webkit-overflow-scrolling: touch;
 }
 
-.segmented button {
-  min-height: 38px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+.segmented::-webkit-scrollbar,
+.filter-row::-webkit-scrollbar {
+  display: none;
+}
+
+.segmented {
+  width: 100%;
+}
+
+.segmented > button,
+.filter-row > .chip {
+  flex: 1 0 auto;
+  min-width: 44px;
+  /* Visibly an iOS segment, and still a real target with the track's padding. */
+  min-height: 36px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: 10px;
   background: none;
   color: var(--text-dim);
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 650;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--motion) ease,
-    color var(--motion) ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease);
 }
 
-.segmented button[aria-pressed='true'] {
+.segmented > button:active,
+.filter-row > .chip:active {
+  transform: scale(0.96);
+}
+
+.segmented > button[aria-pressed='true'],
+.filter-row > .chip[aria-pressed='true'] {
   background: var(--surface);
-  border-color: var(--border);
   color: var(--text);
   box-shadow: var(--shadow-1);
+  font-weight: 650;
 }
 
+/* The queue filter is the user's own list, so it reads as theirs. */
+.chip-queue {
+  color: var(--accent-text);
+  flex-grow: 0;
+}
+
+.chip-queue[aria-pressed='true'] {
+  color: var(--accent-text);
+}
+
+/*
+ * Text fields: a recessed rounded surface, no outline, and 16px type because
+ * anything smaller makes iOS Safari zoom the page on focus.
+ */
 input,
 select,
 textarea {
   width: 100%;
-  min-height: var(--tap);
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 0;
+  background: var(--surface-sunken);
   color: var(--text);
   font: inherit;
-  /* 16px avoids iOS Safari zoom-on-focus */
   font-size: 16px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
 }
 
 input[type='checkbox'] {
@@ -1420,22 +1903,78 @@ input[type='checkbox'] {
   accent-color: var(--accent);
 }
 
+input[type='file'] {
+  padding: var(--sp-2);
+  font-size: 0.86rem;
+}
+
 textarea {
-  min-height: 120px;
+  min-height: 110px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
 
 label {
   display: block;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   color: var(--text-dim);
-  font-weight: 600;
-  margin-bottom: var(--space-2);
+  font-weight: 550;
+  margin-bottom: var(--sp-1);
 }
 
 .field {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--sp-3);
+}
+
+/*
+ * Search: the one field that gets a glyph.
+ *
+ * A magnifier on the left, a clear control on the right that appears only when
+ * there is something to clear, and a compact height — the shape iOS uses for
+ * every list it lets you search.
+ */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--sp-2);
+}
+
+.search svg {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.search input {
+  padding-left: 32px;
+  padding-right: 36px;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 2px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+}
+
+.search-clear:active {
+  opacity: 0.4;
 }
 
 /* ================================================================== badges */
@@ -1444,39 +1983,36 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.67rem;
-  font-weight: 650;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 0;
   background: var(--surface-sunken);
   color: var(--text-dim);
   white-space: nowrap;
 }
 
 .badge-warn {
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
   background: var(--warn-tint);
   color: var(--warn);
 }
 
 .badge-pos {
-  border-color: color-mix(in srgb, var(--pos) 40%, transparent);
   background: var(--pos-tint);
   color: var(--pos);
 }
 
 .badge-neg {
-  border-color: color-mix(in srgb, var(--neg) 40%, transparent);
   background: var(--neg-tint);
   color: var(--neg);
 }
 
 .badge-row {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--sp-1);
   flex-wrap: wrap;
-  margin-top: var(--space-2);
+  margin-top: var(--sp-1);
 }
 
 /*
@@ -1484,11 +2020,10 @@ label {
  * and only tinted when it is low enough to change what the reader does.
  */
 .badge-confidence {
-  border-color: transparent;
   background: transparent;
   color: var(--confidence);
-  font-weight: 600;
-  font-size: 0.66rem;
+  font-weight: 550;
+  font-size: 0.68rem;
   padding-left: 0;
   padding-right: 0;
   white-space: nowrap;
@@ -1500,25 +2035,25 @@ label {
 
 /* ================================================================= notices */
 
+/*
+ * Something worth saying, said calmly: a tinted surface and one line of type.
+ * No icon, no border, no dismiss control — it is a sentence, not an incident.
+ */
 .notice {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--warn);
-  background: var(--surface);
+  background: var(--warn-tint);
   border-radius: var(--radius-sm);
-  padding: 7px 9px;
-  font-size: 0.78rem;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 0.82rem;
   color: var(--text-dim);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--sp-2);
 }
 
 .notice-error {
-  border-left-color: var(--neg);
   background: var(--neg-tint);
   color: var(--neg);
 }
 
 .notice-ok {
-  border-left-color: var(--pos);
   background: var(--pos-tint);
   color: var(--text-dim);
 }
@@ -1526,9 +2061,9 @@ label {
 /* ================================================================ evidence */
 
 .evidence {
-  border-left: 3px solid var(--border);
-  padding: 6px 0 6px 9px;
-  margin-bottom: var(--space-3);
+  border-left: 2px solid var(--separator);
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .evidence.pos {
@@ -1544,80 +2079,81 @@ label {
 }
 
 .evidence-excerpt {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: var(--text);
   margin: 3px 0;
 }
 
 .evidence-meta {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   color: var(--text-faint);
   display: flex;
-  gap: var(--space-3);
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
-/* ================================================================== chips */
-
-.filter-row {
-  display: flex;
-  gap: var(--space-2);
-  overflow-x: auto;
-  padding-bottom: var(--space-3);
-  scrollbar-width: none;
-}
-
-.filter-row::-webkit-scrollbar {
-  display: none;
-}
+/* ============================================================ empty states */
 
 /*
- * Filter pills: shorter, tighter and unmistakably selected without a saturated
- * fill. The selected state is a tinted surface with a real border and darker
- * text — legible in sunlight, and calm in a row of seven.
+ * Nothing here, said in one sentence and no more. No illustration, no card, no
+ * suggestion the app is broken — an empty list is usually the correct answer.
  */
-.chip {
-  flex: 0 0 auto;
-  min-height: 32px;
-  padding: 4px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-dim);
-  font-size: 0.78rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  transition:
-    background-color var(--motion) ease,
-    border-color var(--motion) ease,
-    color var(--motion) ease;
-}
-
-.chip[aria-pressed='true'] {
-  background: var(--selected-tint);
-  border-color: color-mix(in srgb, var(--selected) 45%, transparent);
-  color: var(--accent-text);
-}
-
-/* The queue filter is the user's own list, so it reads as theirs, not as a position. */
-.chip-queue {
-  color: var(--accent-text);
-  font-weight: 800;
-}
-
 .empty {
   text-align: center;
-  padding: 26px 12px;
+  padding: var(--sp-6) var(--sp-4);
   color: var(--text-faint);
-  font-size: 0.85rem;
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 .spinner {
   text-align: center;
-  padding: 20px;
+  padding: var(--sp-5);
   color: var(--text-faint);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+}
+
+/*
+ * Loading, at the shape of the thing that is coming.
+ *
+ * A skeleton keeps the page the same height before and after, which is the
+ * whole difference between "it is arriving" and a screen that jumps once it
+ * does. The shimmer is a background position, so it costs the compositor
+ * nothing, and it stops entirely under reduced motion.
+ */
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-sunken) 25%,
+    color-mix(in srgb, var(--surface-sunken) 55%, var(--surface)) 37%,
+    var(--surface-sunken) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+.skeleton-row {
+  height: 58px;
+  margin-bottom: var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--surface-sunken);
+  }
 }
 
 /* ================================================================= tables */
@@ -1625,20 +2161,19 @@ label {
 table.compact {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 
 table.compact th,
 table.compact td {
   text-align: left;
-  padding: 5px 4px;
-  border-bottom: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
+  padding: var(--sp-1) var(--sp-1);
+  border-bottom: 1px solid var(--separator-soft);
 }
 
 table.compact th {
   color: var(--text-faint);
-  font-size: 0.67rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -1659,35 +2194,33 @@ table.compact tr:last-child td {
 .tag-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
 }
 
 .tag {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  font-size: 0.66rem;
+  font-weight: 650;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 0;
   background: var(--surface-sunken);
   color: var(--text-dim);
   white-space: nowrap;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
 }
 
 /* Strongest action: a filled, unmissable chip. */
 .tag-take {
-  border-color: transparent;
   background: var(--pos);
   color: var(--on-accent);
 }
 
 /* Strongest warning. */
 .tag-avoid {
-  border-color: transparent;
   background: var(--neg);
   color: var(--on-accent);
 }
@@ -1695,7 +2228,6 @@ table.compact tr:last-child td {
 /* Positional urgency: tinted, loud enough to see, quieter than an action. */
 .tag-cliff,
 .tag-urgent {
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
   background: var(--warn-tint);
   color: var(--warn);
 }
@@ -1712,8 +2244,8 @@ table.compact tr:last-child td {
 .tier-divider {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-4) 2px;
+  gap: var(--sp-2);
+  margin: var(--sp-3) var(--sp-1);
   color: var(--text-faint);
 }
 
@@ -1722,44 +2254,41 @@ table.compact tr:last-child td {
   content: '';
   flex: 1 1 auto;
   height: 1px;
-  background: var(--border-strong);
+  background: var(--separator);
 }
 
 .tier-divider-label {
   flex: 0 0 auto;
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 /* The measurement, said quietly: it explains the line, it is not the line. */
 .tier-divider-gap {
-  font-weight: 600;
+  font-weight: 550;
   letter-spacing: 0.01em;
   text-transform: none;
-  font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
 
 /* Moderate caution: outline only. */
 .tag-risky,
 .tag-warn {
-  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
   background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 40%, transparent);
   color: var(--text-dim);
 }
 
 /* Calm guidance: barely there, on purpose. */
 .tag-calm {
-  border-color: transparent;
   background: var(--surface-sunken);
   color: var(--text-faint);
-  font-weight: 600;
+  font-weight: 550;
 }
 
 .tag-star {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: var(--accent-tint);
   color: var(--accent-text);
 }
@@ -1767,10 +2296,10 @@ table.compact tr:last-child td {
 /*
  * The My Guy control.
  *
- * A glyph, not a box: the old bordered square read as a button competing with
- * the player's name. The tap target is unchanged — 28px inside a 44px row —
- * and the selected state is carried by the filled glyph and the accent colour
- * rather than by an outline.
+ * A glyph, not a box: a bordered square read as a button competing with the
+ * player's name. The tap target is unchanged — 28px inside a 44px row — and the
+ * selected state is carried by the filled glyph and the accent colour rather
+ * than by an outline.
  */
 .star-btn,
 .heart-btn {
@@ -1780,14 +2309,20 @@ table.compact tr:last-child td {
   padding: 0 3px;
   font-size: 0.95rem;
   line-height: 1;
-  border-radius: 999px;
-  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  border: 0;
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
   transition:
-    color var(--motion) ease,
-    background-color var(--motion) ease;
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) ease;
+}
+
+.star-btn:active,
+.heart-btn:active {
+  transform: scale(0.85);
 }
 
 .star-btn-on {
@@ -1807,48 +2342,29 @@ table.compact tr:last-child td {
 
 /* =========================================================== draft screen */
 /*
- * One compact line where five stat cards used to be.
+ * The live state, in the navigation bar rather than under it.
  *
- * Everything that row carried is still on screen or one tap away; the point is
- * that the player list starts near the top of the viewport instead of below a
- * block of chrome the user has already read.
+ * The pick number, the round and the wait are the one thing on this screen that
+ * must not scroll away, so they live in the bar that does not scroll. Nothing
+ * was dropped to fit: the league name is the title and the three numbers are
+ * its subtitle.
  */
-.draft-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 2px 2px var(--space-3);
-  min-height: 34px;
-}
-
-.draft-league {
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: -0.012em;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .draft-status {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.71rem;
-  font-variant-numeric: tabular-nums;
+  gap: var(--sp-1);
+  font-size: 0.72rem;
   color: var(--text-faint);
   white-space: nowrap;
 }
 
 .draft-pick {
-  font-weight: 700;
+  font-weight: 650;
   color: var(--text-dim);
 }
 
 .draft-turn {
-  font-weight: 700;
+  font-weight: 650;
   color: var(--text-dim);
 }
 
@@ -1858,32 +2374,18 @@ table.compact tr:last-child td {
 
 /* Freshness, said in as few characters as it can be said in. */
 .draft-updated {
-  font-size: 0.67rem;
+  font-size: 0.68rem;
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .draft-refresh-note {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   color: var(--text-faint);
-  padding: 0 2px var(--space-3);
-  margin-top: -4px;
-}
-
-.draft-details {
-  margin: 0 0 var(--space-3);
-}
-
-.draft-details summary {
-  font-size: 0.72rem;
-  padding: 4px 0;
-  cursor: pointer;
-  color: var(--text-dim);
-}
-
-.draft-details .badge-row {
-  margin-top: var(--space-2);
+  background: var(--warn-tint);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 /*
@@ -1895,14 +2397,13 @@ table.compact tr:last-child td {
  */
 .roster-progress {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--sp-2);
   align-items: center;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 0 2px var(--space-3);
-  font-size: 0.76rem;
+  padding: 0 var(--sp-1) var(--sp-2);
+  font-size: 0.78rem;
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -1918,12 +2419,12 @@ table.compact tr:last-child td {
 .roster-progress .slot + .slot::before {
   content: '·';
   color: var(--text-faint);
-  margin-right: var(--space-3);
+  margin-right: var(--sp-2);
 }
 
 .roster-progress .slot strong {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .roster-progress .slot-done {
@@ -1947,7 +2448,7 @@ table.compact tr:last-child td {
   height: 0.72em;
   background: var(--border-strong);
   vertical-align: -0.05em;
-  margin-right: var(--space-3);
+  margin-right: var(--sp-2);
 }
 
 /*
@@ -1959,9 +2460,8 @@ table.compact tr:last-child td {
  */
 .market-line {
   margin-top: 2px;
-  font-size: 0.72rem;
+  font-size: 0.73rem;
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1970,7 +2470,7 @@ table.compact tr:last-child td {
 .market-label {
   font-size: 0.6rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   font-weight: 700;
   color: var(--text-faint);
   margin-right: 3px;
@@ -1984,8 +2484,7 @@ table.compact tr:last-child td {
  */
 /* Doubled class on purpose: `.metric strong` would otherwise out-specify these. */
 .survival {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-weight: 680;
 }
 
 .survival.survival-gone {
@@ -2001,13 +2500,13 @@ table.compact tr:last-child td {
 }
 
 .roster-alert {
-  padding: 4px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  font-size: 0.78rem;
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--separator-soft);
+  font-size: 0.8rem;
 }
 
 .roster-alert strong {
-  font-weight: 650;
+  font-weight: 620;
   color: var(--text);
 }
 
@@ -2023,10 +2522,10 @@ table.compact tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 0.78rem;
-  padding-bottom: var(--space-3);
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--separator-soft);
 }
 
 /* ================================================================= trades */
@@ -2034,25 +2533,27 @@ table.compact tr:last-child td {
  * Three windows of the same tally, labelled.
  *
  * They used to sit side by side as three identical signals, which read as one
- * number printed three times. Naming each window is the whole fix: the data is
- * unchanged and none of it is hidden.
+ * number printed three times. Naming each window is the whole fix — and the
+ * boxes around the names have gone, because three boxes inside a card is the
+ * nesting this pass exists to remove. The data is unchanged and none of it is
+ * hidden.
  */
 .window-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--sp-4);
+  margin-top: var(--sp-2);
+  font-size: 0.78rem;
 }
 
 .window-cell {
-  background: var(--surface-inset);
-  border-radius: var(--radius-sm);
-  padding: 3px 6px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
   min-width: 0;
 }
 
 .window-label {
-  font-size: 0.6rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
@@ -2062,16 +2563,15 @@ table.compact tr:last-child td {
 .window-value {
   font-size: 0.86rem;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
 .trade-trend {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  font-size: 0.76rem;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  font-size: 0.78rem;
   color: var(--text-dim);
 }
 
@@ -2088,14 +2588,14 @@ table.compact tr:last-child td {
  *
  * Missing data and late kickoffs are ordinary conditions, not incidents, so
  * they get an accent rule and readable secondary text instead of a bordered box
- * nested inside the card that already has a border.
+ * nested inside the card that already has one.
  */
 .hint {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-dim);
-  margin-top: var(--space-3);
-  padding-left: 9px;
-  border-left: 2px solid var(--border);
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--separator);
 }
 
 .hint-caution {
@@ -2103,25 +2603,23 @@ table.compact tr:last-child td {
 }
 
 .swap {
-  padding: 5px 0 5px 9px;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-2);
   border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  margin-top: var(--space-3);
-  font-size: 0.82rem;
+  margin-top: var(--sp-2);
+  font-size: 0.84rem;
 }
 
 .roster-line {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 5px 9px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
   min-height: 38px;
 }
 
 .pick-no {
-  font-size: 0.67rem;
+  font-size: 0.7rem;
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -2129,8 +2627,8 @@ table.compact tr:last-child td {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 680;
   color: var(--live);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2140,28 +2638,182 @@ table.compact tr:last-child td {
   content: '';
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--live);
 }
 
-/* A grouped list: one card holding rows, instead of a card per row. */
-.list-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-1);
-  overflow: hidden;
-  margin-bottom: var(--space-3);
-}
-
-.list-card > *:last-child {
-  border-bottom: none;
+.header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
 }
 
 /* Wide content must scroll inside itself rather than widen the page. */
 .scroll-x {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================================ push layers */
+/*
+ * A detail screen, and the gesture that leaves it.
+ *
+ * The layer is a plain element that happens to be translatable, so the same
+ * markup works whether or not the gesture is available: nothing is positioned
+ * absolutely, nothing is taken out of flow, and with the gesture disabled this
+ * is an ordinary screen with a Back button.
+ *
+ * `touch-action: pan-y` is the whole conflict-avoidance strategy. It tells the
+ * browser that vertical panning is the page's and horizontal panning is not a
+ * scroll — so a vertical drag scrolls and cancels the gesture, and a horizontal
+ * one arrives as pointer events without anybody calling preventDefault on a
+ * broad region. See docs/IOS_WEB_APP.md.
+ */
+.push-layer {
+  position: relative;
+  /* Above the dim sheet below it, which is what makes the dim read as depth. */
+  z-index: 2;
+  background: var(--bg);
+  touch-action: pan-y;
+  will-change: transform;
+  /*
+   * Full-bleed, and that is a requirement rather than a preference: the
+   * activation strip is measured from the edge of the *screen*, so a layer
+   * inset by the page gutter would never see the touch that starts the
+   * gesture. It gives the gutter back as padding, so nothing inside it moves.
+   */
+  margin-inline: calc(-1 * var(--page-x));
+  padding-inline: var(--page-x);
+}
+
+.push-layer-dragging {
+  /* Following a thumb must not be smoothed: the transform is the finger. */
+  transition: none;
+}
+
+.push-layer-settling {
+  transition: transform var(--dur) var(--ease);
+}
+
+/*
+ * The screen underneath, dimmed by however far the top one has travelled. It is
+ * a fixed sheet of colour rather than a filter over the page, because filtering
+ * a scrolling list is the expensive way to do this.
+ */
+.push-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: #000;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .push-layer-settling {
+    transition: none;
+  }
+}
+
+/* ================================================================= sheets */
+/*
+ * A modal sheet: rounded top corners, a grab handle that says it can be
+ * dragged, a dimmed backdrop, and the bottom inset so the last control clears
+ * the home indicator.
+ */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--scrim);
+  animation: fade-in var(--dur) var(--ease);
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  max-height: 88dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  box-shadow: var(--shadow-sheet);
+  padding-bottom: var(--safe-bottom);
+  animation: sheet-rise var(--dur-slow) var(--ease);
+  touch-action: pan-y;
+}
+
+.sheet-dragging {
+  animation: none;
+  transition: none;
+}
+
+.sheet-settling {
+  animation: none;
+  transition: transform var(--dur) var(--ease);
+}
+
+.sheet-grip {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-2) 0 var(--sp-1);
+  cursor: grab;
+}
+
+.sheet-grip::before {
+  content: '';
+  width: 36px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  opacity: 0.7;
+}
+
+.sheet-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-2);
+}
+
+.sheet-title {
+  flex: 1;
+  font-size: 1rem;
+  font-weight: 660;
+  letter-spacing: -0.018em;
+}
+
+.sheet-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* ====================================================== add to home screen */
@@ -2174,43 +2826,46 @@ table.compact tr:last-child td {
  * same words for good.
  */
 .install-prompt {
-  border-color: var(--accent);
   background: var(--accent-tint);
 }
 
 .install-prompt-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--sp-2);
 }
 
 .install-mark {
   flex: 0 0 auto;
   color: var(--accent-text);
-  font-size: 1rem;
-  line-height: 1;
+  display: flex;
+}
+
+.install-mark svg {
+  width: 18px;
+  height: 18px;
 }
 
 .install-line {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 550;
   color: var(--text);
 }
 
 .install-prompt .icon-btn {
-  width: 34px;
+  width: 32px;
   color: var(--text-dim);
 }
 
 .install-steps {
-  margin: var(--space-4) 0 0;
+  margin: var(--sp-3) 0 0;
   padding-left: 18px;
   color: var(--text-dim);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 
 .install-steps li {
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--sp-2);
 }

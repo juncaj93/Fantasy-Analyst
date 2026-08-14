@@ -11,7 +11,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EvidenceItem, type IdentityReview } from '../api.ts';
-import { Badge, Empty, Loading, Notice, PositionBadge, formatDate } from '../components/common.tsx';
+import { Badge, Disclose, Empty, Notice, PositionBadge, formatDate } from '../components/common.tsx';
+import { NavBar, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
@@ -29,6 +30,8 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'evidence' | 'identity' | 'applied'>('evidence');
   const [applied, setApplied] = useState<EvidenceItem[]>([]);
+  /** The scoring key, which is reference rather than part of the queue. */
+  const [keyOpen, setKeyOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,22 +85,61 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
     }
   };
 
-  if (loading) return <Loading what="review queue" />;
+  if (loading) {
+    return (
+      <>
+        <NavBar title="Review" subtitle="Loading the queue…" />
+        <SkeletonRows rows={5} testId="review-skeleton" />
+      </>
+    );
+  }
 
   return (
     <>
+      <NavBar
+        title="Review"
+        subtitle={
+          evidence.length + identity.length === 0
+            ? 'Nothing waiting for you'
+            : `${evidence.length + identity.length} waiting for you`
+        }
+        trailing={
+          <button type="button" className="btn btn-sm" onClick={() => setKeyOpen(true)} data-testid="scoring-key-open">
+            How it works
+          </button>
+        }
+      />
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <div className="filter-row" role="group" aria-label="Review queues">
-        <button className="chip" aria-pressed={tab === 'evidence'} onClick={() => setTab('evidence')}>
-          Evidence ({evidence.length})
-        </button>
-        <button className="chip" aria-pressed={tab === 'identity'} onClick={() => setTab('identity')}>
-          Wrong player? ({identity.length})
-        </button>
-        <button className="chip" aria-pressed={tab === 'applied'} onClick={() => setTab('applied')}>
-          Already applied ({applied.length})
-        </button>
-      </div>
+      <SegmentedControl
+        label="Review queues"
+        value={tab}
+        onChange={setTab}
+        segments={[
+          { id: 'evidence', label: `Evidence (${evidence.length})` },
+          { id: 'identity', label: `Wrong player? (${identity.length})` },
+          // Shorter on the track, and still called what it is called to a
+          // screen reader: three long labels do not fit one phone width.
+          {
+            id: 'applied',
+            label: `Applied (${applied.length})`,
+            ariaLabel: `Already applied (${applied.length})`,
+          },
+        ]}
+      />
+
+      {/*
+        Reference material, in a sheet.
+
+        How the score works is read once and then never again, which is exactly
+        what a sheet is for: it costs nothing while it is closed, it can be
+        flicked away with a thumb, and nothing behind it changed while it was
+        open. Nothing destructive is ever put in one of these.
+      */}
+      {keyOpen ? (
+        <Sheet title="How the score works" onClose={() => setKeyOpen(false)} testId="scoring-key">
+          <ScoringKey />
+        </Sheet>
+      ) : null}
 
       {tab === 'applied' ? (
         applied.length === 0 ? (
@@ -117,8 +159,7 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
           <Empty>Nothing to review. Ambiguous newsletter items land here.</Empty>
         ) : (
           <>
-            <ScoringKey />
-            <div className="card card-tight">
+            <div className="btn-row" style={{ margin: '0 2px 10px' }}>
               <button className="btn btn-sm" onClick={() => void acceptAllHighConfidence()}>
                 Accept all non-mixed ≥0.6 confidence
               </button>
@@ -207,7 +248,7 @@ function EvidenceReviewCard({
         />
       ) : null}
 
-      {expanded ? (
+      <Disclose open={expanded}>
         <div className="explain">
           <div className="faint" style={{ marginBottom: 4 }}>
             Your correction wins from now on, even if this newsletter is read again.
@@ -235,7 +276,7 @@ function EvidenceReviewCard({
             ))}
           </div>
         </div>
-      ) : null}
+      </Disclose>
     </div>
   );
 }
@@ -250,8 +291,7 @@ function EvidenceReviewCard({
  */
 function ScoringKey() {
   return (
-    <details className="card card-tight" data-testid="scoring-key">
-      <summary className="muted">How the score works</summary>
+    <div data-testid="scoring-key-body">
       <table className="compact" style={{ marginTop: 6 }}>
         <tbody>
           <tr>
@@ -279,7 +319,7 @@ function ScoringKey() {
         someone else. Your decision always wins, and it survives the same newsletter being read
         again.
       </div>
-    </details>
+    </div>
   );
 }
 

@@ -62,8 +62,8 @@ describe('the web app manifest', () => {
    * at night.
    */
   it('launches on the dark page colour', () => {
-    expect(manifest.background_color).toBe('#0d1116');
-    expect(manifest.theme_color).toBe('#0d1116');
+    expect(manifest.background_color).toBe('#0c1015');
+    expect(manifest.theme_color).toBe('#0c1015');
   });
 
   it('ships icons that exist, at the sizes it claims', () => {

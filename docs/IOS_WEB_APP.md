@@ -143,10 +143,55 @@ is Apple's original flag that older devices still answer with. Believing a
 stale "no" would mean showing install instructions to somebody who has already
 installed.
 
-Standalone state is used **only** for the install prompt's visibility. There is
-no second layout and no second UI: the safe-area rules above are written against
+Standalone state is used for exactly two things: whether to offer the install
+prompt, and whether to offer the interactive back gesture (§9). There is no
+second layout and no second UI: the safe-area rules above are written against
 the device's insets, which is what actually differs between the two modes, so
 they are correct in both without asking which one is running.
+
+## 9. The edge-swipe back gesture, and why only in standalone
+
+A pushed screen — a player's detail, one of Setup's areas — can be dragged away
+from the leading edge to go back, and it follows the finger while you do it.
+This is enabled **only when the app is running from the Home Screen**, and that
+is a correctness decision rather than a taste one:
+
+> In a Safari tab, the left screen edge is already Safari's own back gesture.
+> Two navigations from one swipe is worse than no gesture at all, and a page
+> cannot reliably take that edge from the browser without calling
+> `preventDefault` on touches across a region the user also needs for
+> scrolling. In a tab, the browser's gesture is left alone and the Back control
+> is the answer.
+
+The rules, all in [`src/web/gestures.ts`](../src/web/gestures.ts) and unit-tested
+in `tests/gestures.test.ts`:
+
+| Rule | Value |
+| --- | --- |
+| Where it may start | within 28px of the leading edge |
+| Before any decision is made | 8px of movement |
+| To count as a swipe rather than a scroll | horizontal > vertical × 1.4 |
+| To complete the navigation | 32% of the layer's width, **or** 0.45 px/ms |
+| Otherwise | springs back |
+
+Two properties matter more than the numbers:
+
+- **Scrolling wins.** The layer carries `touch-action: pan-y`, so the browser
+  arbitrates: a vertical drag scrolls and cancels the gesture through
+  `pointercancel`. Nothing in this app calls `preventDefault` on a touch region.
+- **Back is navigation, never undo.** The gesture calls the same function the
+  Back control calls. It cannot undo a draft selection, a My Guy level, a
+  filter or anything else that is stored, and it pushes no history state of its
+  own — opening and leaving a detail screen leaves `history.length` unchanged.
+
+There is deliberately **no swipe between the bottom tabs**: they sit above
+horizontal controls (the position filter, the metric rows) and an accidental
+sideways drag would navigate. Tabs are tapped.
+
+Modal sheets support the matching downward swipe-to-dismiss, with the same
+"content scrolls first" rule: a sheet only starts moving once its own content is
+at the top. `e2e/navigation.spec.ts` covers both gestures, in a simulated Home
+Screen launch and in a plain tab.
 
 ## 7. What is deliberately absent
 

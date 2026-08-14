@@ -1,0 +1,72 @@
+name: Smoke-test production
+
+# Looks at the deployed site the way a phone does: iPhone WebKit, three portrait
+# widths, both themes. Read-only — it makes GET requests anyone can make, plus
+# the one write that has to be refused.
+#
+# Runs automatically after every successful deploy, and can be run by hand at
+# any time from the Actions tab.
+
+on:
+  workflow_run:
+    workflows: ['Deploy']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Site to check (defaults to the live one)'
+        required: false
+        default: 'https://fantasy-analyst.juncaj93.workers.dev'
+
+concurrency:
+  group: smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    # A deploy that failed has nothing worth smoke-testing.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps webkit
+
+      - name: Check the live site on an iPhone
+        run: |
+          npx playwright test --config playwright.production.config.ts \
+            --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360
+
+      # Screenshots of every screen at 390, in both themes, so a visual
+      # regression can be looked at rather than argued about.
+      - name: Photograph every screen
+        if: always()
+        run: node scripts/screenshot-production.mjs "$PRODUCTION_URL" screenshots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-screenshots
+          path: |
+            screenshots/
+            test-results/
+          retention-days: 14
+
+      - name: Write the summary
+        if: always()
+        run: |
+          {
+            echo "## Production smoke test"
+            echo
+            echo "**Site:** $PRODUCTION_URL"
+            echo
+            echo "Screens photographed in Light and Dark are attached as the"
+            echo "\`production-screenshots\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
