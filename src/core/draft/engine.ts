@@ -22,6 +22,7 @@ import {
   type WaitGuidance,
 } from './decisions.ts';
 import { NO_CLIFF, buildPositionTierMap, type PositionTierMap, type TierCliff } from './tiers.ts';
+import { SEPARATION, draftScore, separationScore } from './score.ts';
 import { computeNeed, computeScarcity, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
 import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
@@ -215,6 +216,14 @@ export interface DraftRecommendation {
   components: ComponentScore[];
   /** Sum of contributions. Comparable within one board state only. */
   total: number;
+  /**
+   * `total`, as a whole number a person can read: 0–100, higher is better.
+   *
+   * A pure function of `total` and nothing else — see `score.ts`. It is the
+   * same ordering the board is sorted by, so board rank and Score can only
+   * disagree where two totals round to the same number.
+   */
+  score: number;
   reasons: string[];
   counterpoints: string[];
   /** True when a key input (ADP) was missing. */
@@ -390,6 +399,13 @@ export function rankAvailablePlayers(
     }
   }
 
+  /*
+   * Pass one: every component except separation.
+   *
+   * Split in two on purpose. Separation asks how far ahead of his alternatives
+   * a player is, and the only honest answer comes from composites that are
+   * already settled — see the second pass below.
+   */
   const recommendations = available.map((entry) => {
     const { player, adp, signal } = entry;
     const components: ComponentScore[] = [];
@@ -589,6 +605,8 @@ export function rankAvailablePlayers(
       reasons,
       counterpoints,
       degraded: adp == null,
+      // Filled in by the second pass, once every base composite exists.
+      score: 0,
       marketBaseline: baseline,
       marketHeadline: entry.seasonMarkets?.length
         ? seasonHeadline(player.position, entry.seasonMarkets)
@@ -600,6 +618,8 @@ export function rankAvailablePlayers(
     } satisfies DraftRecommendation;
   });
 
+  applySeparation(recommendations);
+
   // Deterministic ordering: total desc, then ADP asc, then name.
   return recommendations.sort(
     (a, b) =>
@@ -607,6 +627,78 @@ export function rankAvailablePlayers(
       (a.adp ?? Number.MAX_SAFE_INTEGER) - (b.adp ?? Number.MAX_SAFE_INTEGER) ||
       a.name.localeCompare(b.name),
   );
+}
+
+/**
+ * Pass two: how isolated each player is, and the readable Score.
+ *
+ * The board already knew that a player who falls gets better — market value is
+ * a function of how far past his ADP the draft has run. What it did not know is
+ * the other half of the same fact: **who is left instead of him.** Three
+ * receivers going in the six picks before your turn moves nobody's ADP by one,
+ * and changes the decision completely.
+ *
+ * So this measures the distance between a player's composite and the composites
+ * of the next few available players at his own position, and adds a bounded
+ * quarter-point for it. Two properties make it safe:
+ *
+ *  - it reads *base composites*, fixed before this function runs, never ordinal
+ *    board rank — so its input cannot be moved by its own output, and a player
+ *    cannot climb because he is already high;
+ *  - it only ever adds, and never more than {@link SEPARATION.weight} — about
+ *    five picks of ADP. A player who slides twenty picks becomes better
+ *    relative to what is left, which is the claim; he does not become a lock.
+ *
+ * Mutates in place, because the recommendations are freshly built above and
+ * nothing else has seen them yet.
+ */
+function applySeparation(recommendations: DraftRecommendation[]): void {
+  const byPosition = new Map<string, { id: string; base: number }[]>();
+  for (const rec of recommendations) {
+    const entry = { id: rec.playerId, base: rec.total };
+    const list = byPosition.get(rec.position);
+    if (list) list.push(entry);
+    else byPosition.set(rec.position, [entry]);
+  }
+
+  for (const rec of recommendations) {
+    const peers = byPosition.get(rec.position) ?? [];
+    const separation = separationScore({
+      base: rec.total,
+      // Himself removed: a player is not one of his own alternatives.
+      positionBases: peers.filter((p) => p.id !== rec.playerId).map((p) => p.base),
+    });
+    const component: ComponentScore = {
+      key: 'separation',
+      label: 'Clear of the alternatives',
+      display: separation.reason,
+      score: separation.score,
+      weight: SEPARATION.weight,
+      contribution: round3(separation.score * SEPARATION.weight),
+      unknown: separation.comparedWith === 0,
+    };
+    rec.components.push(component);
+    rec.total = round3(rec.total + component.contribution);
+    rec.score = draftScore(rec.total);
+
+    // Worth a sentence only when it is most of the component. Below that it is
+    // a tie-breaker, and a bullet saying "0.1 clear of the next three" is the
+    // kind of line this card keeps having to delete.
+    if (separation.score >= 0.5) {
+      rec.reasons.push(`little left like him at ${rec.position}: ${separation.reason}${picksMoved(component.contribution)}`);
+    }
+  }
+}
+
+/**
+ * A contribution, said in the unit the rest of the card uses.
+ *
+ * In the reach regime a point of ADP is worth about 0.05 of contribution, so
+ * this is the honest translation of "how far did that move him".
+ */
+function picksMoved(contribution: number): string {
+  const picks = Math.round(Math.abs(contribution) / 0.05);
+  return picks >= 1 ? ` (about ${picks} ${picks === 1 ? 'spot' : 'spots'})` : '';
 }
 
 /**
@@ -680,13 +772,7 @@ function explain(
 
   // News, said plainly and with the size of the effect attached. A player whose
   // ranking moved because of the user's own research should be able to see that
-  // it did, and by roughly how much.
-  const picksMoved = (contribution: number) => {
-    // In the reach regime a point of ADP is worth about 0.05 of contribution.
-    const picks = Math.round(Math.abs(contribution) / 0.05);
-    return picks >= 1 ? ` (about ${picks} ${picks === 1 ? 'spot' : 'spots'})` : '';
-  };
-
+  // it did, and by roughly how much — `picksMoved` is the translation.
   const lifetimeNews = by('news_lifetime');
   if (lifetimeNews && !lifetimeNews.unknown) {
     if (lifetimeNews.score > 0.25) {

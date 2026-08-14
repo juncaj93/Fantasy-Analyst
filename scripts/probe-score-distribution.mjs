@@ -83,3 +83,68 @@ console.log('\nobserved contribution range per component');
 for (const [key, r] of [...byKey].sort()) {
   console.log(`  ${key.padEnd(20)} weight ${String(r.weight).padStart(5)}  ${r.min.toFixed(3)} … ${r.max.toFixed(3)}`);
 }
+
+/*
+ * Which shape of "separation from the alternatives" actually discriminates?
+ *
+ * Two candidates, and the difference matters. A *gap* measure — how far a
+ * player's composite leads the mean of the next few at his position — is the
+ * obvious one, but the composite's left tail is unbounded (market value is
+ * proportional to how far past his ADP the draft has run) so a single distant
+ * player behind him produces an enormous gap and the component saturates for
+ * everybody. A *count* measure — how many players at his position are within a
+ * short composite band below him — cannot be dragged around by one bad player.
+ *
+ * A component that fires on nearly everybody is wallpaper, and this is the
+ * cheapest place to find out which of the two does that.
+ */
+const ALTERNATIVES = 3;
+const byPosition = new Map();
+for (const rec of recs) {
+  if (!rec.position) continue;
+  const list = byPosition.get(rec.position);
+  if (list) list.push(rec);
+  else byPosition.set(rec.position, [rec]);
+}
+
+const gaps = [];
+const counts = { 0.2: [], 0.3: [], 0.5: [] };
+for (const [, players] of byPosition) {
+  for (const rec of players) {
+    const behind = players
+      .filter((p) => p.playerId !== rec.playerId && p.total <= rec.total)
+      .map((p) => p.total)
+      .sort((a, b) => b - a);
+    if (behind.length > 0) {
+      const window = behind.slice(0, ALTERNATIVES);
+      gaps.push(rec.total - window.reduce((a, b) => a + b, 0) / window.length);
+    }
+    for (const band of Object.keys(counts)) {
+      counts[band].push(behind.filter((t) => rec.total - t <= Number(band)).length);
+    }
+  }
+}
+
+const quantiles = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const q = (p) => sorted[Math.min(sorted.length - 1, Math.round(p * (sorted.length - 1)))];
+  return [0.1, 0.5, 0.75, 0.9, 0.99].map((p) => `p${Math.round(p * 100)} ${q(p).toFixed(2)}`).join('  ');
+};
+
+console.log(`\ngap to the mean of the next ${ALTERNATIVES} at the position (${gaps.length} players)`);
+console.log(`  ${quantiles(gaps)}`);
+for (const full of [0.4, 0.8, 1.5, 3]) {
+  const saturated = gaps.filter((g) => g >= full).length;
+  console.log(`  at full=${full}: ${((100 * saturated) / gaps.length).toFixed(0)}% saturate`);
+}
+
+console.log('\ncomparable alternatives still available within a composite band');
+for (const [band, values] of Object.entries(counts)) {
+  const none = values.filter((n) => n === 0).length;
+  const few = values.filter((n) => n > 0 && n < ALTERNATIVES).length;
+  console.log(
+    `  band ${band}: ${((100 * none) / values.length).toFixed(0)}% have none left, ` +
+      `${((100 * few) / values.length).toFixed(0)}% have 1-${ALTERNATIVES - 1}, ` +
+      `${quantiles(values)}`,
+  );
+}
