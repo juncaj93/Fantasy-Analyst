@@ -1,15 +1,30 @@
 /**
- * Player Intelligence: search, tallies by window, category breakdown and the
- * full evidence timeline (every item preserved, never just an aggregate).
+ * Player Intelligence: search, and one card per player that opens into
+ * everything the app knows about him.
+ *
+ * The same grammar as the draft board, deliberately. A player is the same
+ * player on both screens — same identity row, same tally, same injury tag, same
+ * expand-in-place disclosure — and the difference is only what the expansion
+ * says. On the board it is what a drafter needs in thirty seconds. Here it is
+ * the whole file: what is expected of him this season, what he did last season,
+ * what is wrong with him, the tally in four windows, the categories it came
+ * from, the market's lines, and every piece of evidence behind all of it, never
+ * merely an aggregate.
+ *
+ * That file used to be a screen of its own, reached by pushing. It reads better
+ * as a disclosure: the list stays where it was, the reader keeps their place in
+ * it, and moving between two players is a tap rather than a round trip.
  */
 
 import { useEffect, useState } from 'react';
-import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
+import { api, type EvidenceItem, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
 import {
   Badge,
   CompactTally,
   DetailLabel,
+  Disclose,
   Empty,
+  InjuryTag,
   PositionBadge,
   Signal,
   SignedValue,
@@ -17,7 +32,7 @@ import {
   formatDate,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, PushScreen, SearchField, SkeletonRows } from '../components/native.tsx';
+import { NavBar, SearchField, SkeletonRows } from '../components/native.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -40,7 +55,7 @@ interface PlayerListItem {
   myGuy?: MyGuyFlag;
 }
 
-interface PlayerDetail {
+interface PlayerFile {
   player: { id: string; name: string; position: string; team: string; status: string | null; aliases: string[] };
   signal: PlayerSignal;
   evidence: EvidenceItem[];
@@ -48,12 +63,12 @@ interface PlayerDetail {
   myGuy?: MyGuyFlag;
 }
 
-export function PlayersScreen() {
+export function PlayersScreen({ resetNonce }: { resetNonce: number }) {
   const [query, setQuery] = useState('');
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
-  const [detail, setDetail] = useState<PlayerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,9 +87,19 @@ export function PlayersScreen() {
     };
   }, [query]);
 
-  const open = async (id: string) => {
-    setDetail(await api.get<PlayerDetail>(`/api/players/${id}`));
-  };
+  /*
+   * Tapping Players while already on Players clears the search.
+   *
+   * The tab you are on is the one control that has nothing left to do, so iOS
+   * gives it this job. It clears what you typed and returns to the top, and
+   * that is the whole of it: an open card stays open, and the hearts, the queue
+   * and every tally are server state that a tab tap has no business touching.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    setQuery('');
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [resetNonce]);
 
   /**
    * Star a player from the list.
@@ -88,24 +113,10 @@ export function PlayersScreen() {
     try {
       const res = await api.post<{ myGuy: MyGuyFlag }>(`/api/players/${playerId}/my-guy`, { level });
       setPlayers((current) => current.map((p) => (p.id === playerId ? { ...p, myGuy: res.myGuy } : p)));
-      setDetail((current) =>
-        current && current.player.id === playerId ? { ...current, myGuy: res.myGuy } : current,
-      );
     } finally {
       setFlagging(null);
     }
   };
-
-  if (detail) {
-    return (
-      <PlayerDetailView
-        detail={detail}
-        busy={flagging === detail.player.id}
-        onMyGuy={(level) => void setMyGuy(detail.player.id, level)}
-        onBack={() => setDetail(null)}
-      />
-    );
-  }
 
   return (
     <>
@@ -115,10 +126,9 @@ export function PlayersScreen() {
         A title reading "Players" over a search field, on the screen reached by
         tapping a tab labelled Players, is a row of the phone spent saying it a
         third time. The field carries the identity — and its own label, for
-        anyone listening rather than looking — and the list starts higher than
-        it did before any of this. A magnifier, a compact field, and a clear
-        control that appears only when there is something to clear; clearing
-        empties the field and nothing else.
+        anyone listening rather than looking. A magnifier, a compact field, and
+        a clear control that appears only when there is something to clear;
+        clearing empties the field and nothing else.
       */}
       <NavBar
         testId="players-nav"
@@ -135,233 +145,403 @@ export function PlayersScreen() {
       {loading && players.length === 0 ? (
         <SkeletonRows rows={8} testId="players-skeleton" />
       ) : players.length === 0 ? (
-        <Empty>No players found. Run a Sleeper player sync from the Team screen.</Empty>
+        <Empty>
+          {query
+            ? `Nobody matching “${query}”.`
+            : 'No players found. Run a Sleeper player sync from the Team screen.'}
+        </Empty>
       ) : (
-        players.map((p) => (
-          <button
-            className={positionCardClass(p.position)}
-            key={p.id}
-            data-position={(p.position ?? '').toUpperCase()}
-            onClick={() => void open(p.id)}
-            data-testid="player-search-row"
-            data-player-id={p.id}
-          >
-            <div className="player-row-top">
-              <span className="rank" aria-hidden="true">
-                {p.adjustedRank == null ? '—' : Math.round(p.adjustedRank)}
-              </span>
-              {/*
-                A heart here, a star on the draft board — two different marks.
-                This one is an opinion and moves the player up your board; the
-                star over there is a bookmark and changes nothing.
-              */}
-              <MyGuyControl
-                myGuy={p.myGuy ?? EMPTY_MY_GUY}
-                busy={flagging === p.id}
-                onChange={(level) => void setMyGuy(p.id, level)}
-              />
-              <span className="player-name">{p.name}</span>
-              {/* The same headline tally, in the same place, as on the draft board. */}
-              <CompactTally net={p.signal?.raw.net ?? 0} label="Lifetime research tally" />
-              <PositionBadge position={p.position} team={p.team} />
-            </div>
-            {/*
-              The history stays here rather than moving up with the headline —
-              this is the screen where the windows are the point, and a row that
-              says only "+11" would have lost what the draft board never had.
-            */}
-            <div className="player-row-metrics">
-              <span className="metric">
-                Lifetime <SignedValue net={p.signal?.raw.net ?? 0} />
-                {(p.signal?.raw.items ?? 0) > 0 ? <span className="faint"> ({p.signal!.raw.items})</span> : null}
-              </span>
-              <span className="metric">
-                21d <SignedValue net={p.signal?.last30.net ?? 0} />
-              </span>
-              {/* Say where the order came from, and what the news changed. */}
-              {p.draftRank != null ? (
-                <span className="metric">
-                  Sleeper <strong>{p.draftRank}</strong>
-                </span>
-              ) : (
-                <span className="metric faint">unranked</span>
-              )}
-              {p.movement ? (
-                <Badge tone={p.movement > 0 ? 'pos' : 'neg'}>
-                  {p.movement > 0 ? `▲ ${p.movement}` : `▼ ${Math.abs(p.movement)}`}
-                </Badge>
-              ) : null}
-              {p.status ? <Badge tone="warn">{p.status}</Badge> : null}
-              {(p.signal?.pendingCount ?? 0) > 0 ? <Badge tone="warn">{p.signal!.pendingCount} to review</Badge> : null}
-            </div>
-          </button>
-        ))
+        <div role="list" aria-label="Players, best first" data-testid="players-list">
+          {players.map((p) => (
+            <PlayerRow
+              key={p.id}
+              player={p}
+              expanded={expanded === p.id}
+              busy={flagging === p.id}
+              onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
+              onMyGuy={(level) => void setMyGuy(p.id, level)}
+            />
+          ))}
+        </div>
       )}
     </>
   );
 }
 
 /**
- * One player, in the same visual language as the expanded draft player:
- * identity first, then the numbers, then the evidence that produced them. The
- * content differs — nobody is drafting here — but the grammar does not.
+ * One player, collapsed to the same shape a draft row has.
+ *
+ * Rank, the user's own flag, the name, the headline tally, the injury tag and
+ * the position — then the windows and the ranking underneath. The only
+ * difference from the board is which numbers are worth the second line: there
+ * it is the four that decide a pick, here it is the tally over time and where
+ * the ranking came from.
  */
-function PlayerDetailView({
-  detail,
-  onBack,
-  onMyGuy,
+function PlayerRow({
+  player,
+  expanded,
   busy,
+  onToggle,
+  onMyGuy,
 }: {
-  detail: PlayerDetail;
-  onBack: () => void;
-  onMyGuy: (level: 0 | 1 | 2 | 3) => void;
+  player: PlayerListItem;
+  expanded: boolean;
   busy: boolean;
+  onToggle: () => void;
+  onMyGuy: (level: 0 | 1 | 2 | 3) => void;
 }) {
-  const { player, signal, evidence, props } = detail;
   return (
-    /*
-      A pushed screen, not a page swap.
-
-      It carries the same Back it always had, and in a Home Screen app it can
-      also be swiped away from the leading edge — the gesture calls this exact
-      `onBack`, so the two can never disagree about where they lead. Nothing
-      here is undone by leaving: the heart, the tallies and the evidence are
-      server state and stay as they were.
-    */
-    <PushScreen
-      title={player.name}
-      subtitle={
-        <>
-          {player.position || '—'} · {player.team || 'FA'}
-          {/* A zero here is an absence rather than a reading, so it is not printed. */}
-          {signal.raw.net === 0 ? null : (
-            <>
-              {' · '}
-              <CompactTally net={signal.raw.net} label="Lifetime research tally" /> lifetime
-            </>
-          )}
-        </>
-      }
-      backLabel="Players"
-      onBack={onBack}
-      testId="player-detail-screen"
-      trailing={
-        <MyGuyControl myGuy={detail.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={(level) => onMyGuy(level)} />
-      }
+    <div
+      className={positionCardClass(player.position, expanded ? 'player-row-open' : '')}
+      data-testid="player-search-row"
+      data-player-id={player.id}
+      data-position={(player.position ?? '').toUpperCase()}
+      role="listitem"
     >
-      <div className="card">
-        {/*
-          The name is the screen's title and is not printed twice. What is left
-          here is what the title cannot carry: the headline tally, and the
-          designation when there is one.
-        */}
-        {player.status ? (
-          <div className="badge-row" style={{ marginTop: 0, marginBottom: 8 }}>
-            <Badge tone="warn">{player.status}</Badge>
-          </div>
-        ) : null}
-        <DetailLabel>News by window</DetailLabel>
-        <table className="compact">
-          <thead>
-            <tr>
-              <th>Window</th>
-              <th>Pos</th>
-              <th>Neg</th>
-              <th>Net</th>
-              <th>Items</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(
-              [
-                ['Last 7d', signal.last7],
-                ['Last 21d', signal.last30],
-                ['Season', signal.seasonToDate],
-                ['Lifetime', signal.raw],
-              ] as const
-            ).map(([label, w]) => (
-              <tr key={label}>
-                <td>{label}</td>
-                <td>{w.positive}</td>
-                <td>{w.negative}</td>
-                <td>
-                  <Signal net={w.net} />
-                </td>
-                <td>{w.items}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {signal.pendingCount > 0 ? (
-          <div className="hint hint-caution">
-            {signal.pendingCount} news item{signal.pendingCount === 1 ? '' : 's'} still waiting for your review, so
-            {signal.pendingCount === 1 ? ' it is' : ' they are'} not counted in these tallies yet.
-          </div>
-        ) : null}
-      </div>
+      <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
+        <div className="player-row-top">
+          <span className="rank" aria-hidden="true">
+            {player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
+          </span>
+          {/*
+            A heart here, a star on the draft board — two different marks. This
+            one is an opinion and moves the player up your board; the star over
+            there is a bookmark and changes nothing.
+          */}
+          <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />
+          <span className="player-name">{player.name}</span>
+          {/* The same headline tally, in the same place, as on the draft board. */}
+          <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
+          {/*
+            And the same availability tag: nothing at all for a healthy player,
+            `Q` for a questionable one. This was a word-length badge reading
+            "Questionable" or "Out", which is the same fact said three times as
+            loudly as the board says it.
+          */}
+          <InjuryTag status={player.status} />
+          <PositionBadge position={player.position} team={player.team} />
+        </div>
 
-      {Object.keys(signal.categoryBreakdown).length > 0 ? (
+        <div className="player-row-metrics">
+          <span className="metric">
+            Lifetime <SignedValue net={player.signal?.raw.net ?? 0} />
+            {(player.signal?.raw.items ?? 0) > 0 ? <span className="faint"> ({player.signal!.raw.items})</span> : null}
+          </span>
+          <span className="metric">
+            21d <SignedValue net={player.signal?.last30.net ?? 0} />
+          </span>
+          {/* Say where the order came from, and what the news changed. */}
+          {player.draftRank != null ? (
+            <span className="metric">
+              Sleeper <strong>{player.draftRank}</strong>
+            </span>
+          ) : (
+            <span className="metric faint">unranked</span>
+          )}
+          {player.movement ? (
+            <Badge tone={player.movement > 0 ? 'pos' : 'neg'}>
+              {player.movement > 0 ? `▲ ${player.movement}` : `▼ ${Math.abs(player.movement)}`}
+            </Badge>
+          ) : null}
+          {(player.signal?.pendingCount ?? 0) > 0 ? (
+            <Badge tone="warn">{player.signal!.pendingCount} to review</Badge>
+          ) : null}
+        </div>
+      </button>
+
+      <Disclose open={expanded}>
+        <PlayerFileView playerId={player.id} position={player.position} />
+      </Disclose>
+    </div>
+  );
+}
+
+/**
+ * Everything the app knows about him, fetched when the card opens.
+ *
+ * Two requests, because the answers come from two places that fail
+ * independently: the tally, the categories, the market lines and the evidence
+ * are this app's own record, and the outlook, last season and the injury report
+ * are read from elsewhere. Either can be missing without taking the other with
+ * it, and neither is asked for until somebody actually opens the card.
+ */
+function PlayerFileView({ playerId, position }: { playerId: string; position: string | null }) {
+  const [file, setFile] = useState<PlayerFile | null>(null);
+  const [detail, setDetail] = useState<PlayerDetail | null>(null);
+  const [detailFailed, setDetailFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFile(null);
+    setDetail(null);
+    setDetailFailed(false);
+    api
+      .get<PlayerFile>(`/api/players/${playerId}`)
+      .then((res) => {
+        if (!cancelled) setFile(res);
+      })
+      .catch(() => {
+        /* the section simply does not appear */
+      });
+    api
+      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
+      .then((res) => {
+        if (!cancelled) setDetail(res);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
+
+  return (
+    <div className="explain" data-testid="player-file">
+      <SeasonOutlook detail={detail} failed={detailFailed} />
+      <LastSeasonLine detail={detail} failed={detailFailed} position={position} />
+
+      {detail?.injuryContext ? (
         <>
-          <div className="section-title">Categories</div>
-          <div className="card card-tight">
-            <div className="badge-row" style={{ marginTop: 0 }}>
-              {Object.entries(signal.categoryBreakdown).map(([cat, v]) => (
-                <Badge key={cat} tone={v.positive > v.negative ? 'pos' : v.negative > v.positive ? 'neg' : 'neutral'}>
-                  {cat}: +{v.positive} / −{v.negative}
-                </Badge>
-              ))}
-            </div>
+          <DetailLabel>Injury context</DetailLabel>
+          <div className="muted" data-testid="injury-context">
+            {detail.injuryContext}
           </div>
         </>
       ) : null}
 
-      <div className="section-title">Vegas props</div>
+      {/*
+        What is wrong with him now, as against what he came back from above.
+        Two different facts under two different headings, because a player
+        returning from an ACL and a player with a sore hamstring on Friday are
+        not the same situation and must not read as one.
+      */}
+      {detail?.injury ? (
+        <>
+          <DetailLabel>{detail.injury.label}</DetailLabel>
+          <div className="muted" data-testid="injury-current">
+            {detail.injury.line ?? detail.injury.label}
+            {detail.injury.provenance ? <span className="faint"> — {detail.injury.provenance}</span> : null}
+          </div>
+          {detail.injury.conflict ? (
+            <div className="muted" data-testid="injury-conflict">
+              Sources disagree — {detail.injury.conflict}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {file ? <PlayerRecord file={file} /> : <div className="spinner">Reading his file…</div>}
+    </div>
+  );
+}
+
+/** The tally in four windows, the categories, the market and the evidence. */
+function PlayerRecord({ file }: { file: PlayerFile }) {
+  const { signal, evidence, props } = file;
+  return (
+    <>
+      <DetailLabel>News by window</DetailLabel>
+      <table className="compact">
+        <thead>
+          <tr>
+            <th>Window</th>
+            <th>Pos</th>
+            <th>Neg</th>
+            <th>Net</th>
+            <th>Items</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(
+            [
+              ['Last 7d', signal.last7],
+              ['Last 21d', signal.last30],
+              ['Season', signal.seasonToDate],
+              ['Lifetime', signal.raw],
+            ] as const
+          ).map(([label, w]) => (
+            <tr key={label}>
+              <td>{label}</td>
+              <td>{w.positive}</td>
+              <td>{w.negative}</td>
+              <td>
+                <Signal net={w.net} />
+              </td>
+              <td>{w.items}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {signal.pendingCount > 0 ? (
+        <div className="hint hint-caution">
+          {signal.pendingCount} news item{signal.pendingCount === 1 ? '' : 's'} still waiting for your review, so
+          {signal.pendingCount === 1 ? ' it is' : ' they are'} not counted in these tallies yet.
+        </div>
+      ) : null}
+
+      {Object.keys(signal.categoryBreakdown).length > 0 ? (
+        <>
+          <DetailLabel>Categories</DetailLabel>
+          <div className="badge-row" style={{ marginTop: 0 }}>
+            {Object.entries(signal.categoryBreakdown).map(([cat, v]) => (
+              <Badge key={cat} tone={v.positive > v.negative ? 'pos' : v.negative > v.positive ? 'neg' : 'neutral'}>
+                {cat}: +{v.positive} / −{v.negative}
+              </Badge>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <DetailLabel>Vegas props</DetailLabel>
       {props.length === 0 ? (
-        <div className="card card-tight muted">
+        <div className="muted">
           No prop data cached for this player. <Unknown what="Vegas expectation" />
         </div>
       ) : (
-        <div className="card card-tight">
-          <table className="compact">
-            <thead>
-              <tr>
-                <th>Market</th>
-                <th>Line</th>
-                <th>Books</th>
+        <table className="compact">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Line</th>
+              <th>Books</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.map((p) => (
+              <tr key={p.market}>
+                <td>{p.market}</td>
+                <td>
+                  {p.line != null
+                    ? p.line
+                    : p.impliedProbability != null
+                      ? `${Math.round(p.impliedProbability * 100)}%`
+                      : '—'}
+                </td>
+                <td>{p.bookCount}</td>
               </tr>
-            </thead>
-            <tbody>
-              {props.map((p) => (
-                <tr key={p.market}>
-                  <td>{p.market}</td>
-                  <td>
-                    {p.line != null
-                      ? p.line
-                      : p.impliedProbability != null
-                        ? `${Math.round(p.impliedProbability * 100)}%`
-                        : '—'}
-                  </td>
-                  <td>{p.bookCount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       )}
 
-      <div className="section-title" data-testid="evidence-heading">
+      <div className="detail-label" data-testid="evidence-heading">
         Evidence timeline ({evidence.length})
       </div>
       {evidence.length === 0 ? (
-        <Empty>No evidence recorded yet.</Empty>
+        <div className="muted">No evidence recorded yet.</div>
       ) : (
-        <div className="card">
-          {evidence.map((e) => (
-            <EvidenceRow key={e.id} item={e} />
-          ))}
-        </div>
+        evidence.map((e) => <EvidenceRow key={e.id} item={e} />)
       )}
-    </PushScreen>
+    </>
+  );
+}
+
+/**
+ * What is expected of him this season, in the words of whoever wrote it.
+ *
+ * The same component the draft card uses, and the same rules: the provider's own
+ * sentences, their author named, shortened only by selection and never by
+ * rewriting — and when it has been cut, the card says so and offers the rest.
+ */
+function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
+  if (failed) return null;
+  if (!detail) {
+    return (
+      <>
+        <DetailLabel>Season outlook</DetailLabel>
+        <div className="muted" data-testid="outlook-pending">
+          Looking it up…
+        </div>
+      </>
+    );
+  }
+  if (!detail.outlook) {
+    return (
+      <>
+        <DetailLabel>Season outlook</DetailLabel>
+        <div className="muted" data-testid="outlook-none">
+          {detail.outlookNote ?? 'No outlook published for him.'}
+        </div>
+      </>
+    );
+  }
+  return <OutlookBody outlook={detail.outlook} />;
+}
+
+function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
+  const [whole, setWhole] = useState(false);
+  const attribution = outlook.source ? <span className="outlook-source"> — {outlook.source}, via Sleeper</span> : null;
+
+  return (
+    <>
+      <DetailLabel>{outlook.title}</DetailLabel>
+      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
+        {whole ? outlook.fullText : outlook.text}
+        {attribution}
+      </div>
+      {outlook.summarised ? (
+        <button
+          type="button"
+          className="link-button"
+          data-testid="outlook-toggle"
+          onClick={(e) => {
+            // The row underneath is a toggle; expanding the text is not
+            // "collapse this player".
+            e.stopPropagation();
+            setWhole((v) => !v);
+          }}
+        >
+          {whole ? 'Show the short version' : 'Read the full outlook'}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** `16 GP · WR7 half-PPR`, on the same terms as the draft card states it. */
+function LastSeasonLine({
+  detail,
+  failed,
+  position,
+}: {
+  detail: PlayerDetail | null;
+  failed: boolean;
+  position: string | null;
+}) {
+  if (failed || !detail) return null;
+  const season = detail.lastSeason?.season;
+  const games = detail.lastSeason?.gamesPlayed;
+  const rank = detail.lastSeason?.positionRank;
+  if (!season) return null;
+  return (
+    <>
+      <DetailLabel>{season}</DetailLabel>
+      <div className="season-line" data-testid="last-season">
+        <span className="metric">
+          {games == null ? (
+            <>
+              GP <Unknown what={`${season} games played`} />
+            </>
+          ) : (
+            <>
+              <strong>{games}</strong> GP
+            </>
+          )}
+        </span>
+        <span className="metric" title={detail.lastSeason?.scoring}>
+          {rank == null ? (
+            <>
+              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
+            </>
+          ) : (
+            <>
+              <strong>{rank}</strong> half-PPR
+            </>
+          )}
+        </span>
+      </div>
+    </>
   );
 }
 

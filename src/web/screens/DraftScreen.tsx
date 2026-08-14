@@ -24,13 +24,16 @@ import {
   DetailLabel,
   Disclose,
   Empty,
+  InjuryTag,
   Notice,
   PositionBadge,
   Unknown,
   formatShortAge,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+/* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
+import { matchesQuery } from '../search.ts';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
  *
@@ -47,8 +50,6 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
-/* What Sleeper says about a player's availability right now. Never a ranking input. */
-import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 
 /**
@@ -66,7 +67,16 @@ import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 const QUEUE_FILTER = '★';
 const ALL_FILTER = 'ALL';
 
-export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; unlocked: boolean }) {
+export function DraftScreen({
+  leagues,
+  unlocked,
+  resetNonce,
+}: {
+  leagues: LeagueSummary[];
+  unlocked: boolean;
+  /** Bumped when the Draft tab is tapped while already on Draft. */
+  resetNonce: number;
+}) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const draftId = selected?.draftId ?? null;
 
@@ -74,6 +84,16 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
+  /**
+   * Finding one player on a board of hundreds.
+   *
+   * Presentation only, and deliberately so: the board arrives ranked and the
+   * query filters what is drawn without touching the order, the scores or which
+   * players are available. A row keeps the rank it has on the whole board, so
+   * searching tells you where he actually sits rather than renumbering him to 1.
+   */
+  const [query, setQuery] = useState('');
+  const searching = query.trim().length > 0;
   /*
    * Which of the two tier treatments this view gets.
    *
@@ -98,13 +118,22 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   const inFlight = useRef(false);
 
   const load = useCallback(
-    async (pos: string) => {
+    async (pos: string, deep: boolean) => {
       if (!draftId) return;
       setLoading(true);
       try {
-        const query =
-          pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
-        setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=40${query}`));
+        const filter = pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
+        /*
+         * A search asks about the whole pool, not the top forty.
+         *
+         * The ranking is computed over every available player either way — the
+         * limit only decides how many of them are sent — so asking for a deeper
+         * slice while a query is active costs the server nothing and is what
+         * makes it possible to find the man ranked 130th. It goes back to forty
+         * the moment the field is cleared.
+         */
+        const limit = deep ? 250 : 40;
+        setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${limit}${filter}`));
         setUpdatedAt(Date.now());
         setError(null);
       } catch (err) {
@@ -116,9 +145,21 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
     [draftId],
   );
 
+  /*
+   * Refetched when the filter changes, and once when a search begins or ends —
+   * not on every keystroke. What the user types filters rows that are already
+   * here; only the depth of the slice needs the server.
+   */
   useEffect(() => {
-    void load(position);
-  }, [load, position]);
+    void load(position, searching);
+  }, [load, position, searching]);
+
+  /* Tapping Draft while already on Draft clears the search and nothing else. */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    setQuery('');
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [resetNonce]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 15_000);
@@ -141,7 +182,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
       setFlagging(playerId);
       try {
         await api.post<{ queued: boolean }>(`/api/players/${playerId}/queue`, { queued });
-        if (position === QUEUE_FILTER) await load(position);
+        if (position === QUEUE_FILTER) await load(position, searching);
         else
           setBoard((current) =>
             current
@@ -160,7 +201,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         setFlagging(null);
       }
     },
-    [load, position],
+    [load, position, searching],
   );
 
   /**
@@ -187,7 +228,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         // server nominates; a finished one stops asking.
         setPollSeconds(res.pollIntervalSeconds > 0 ? res.pollIntervalSeconds : 0);
       }
-      await load(position);
+      await load(position, searching);
       setNow(Date.now());
       setError(null);
     } catch (err) {
@@ -196,7 +237,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
       inFlight.current = false;
       setRefreshing(false);
     }
-  }, [draftId, load, position, unlocked]);
+  }, [draftId, load, position, searching, unlocked]);
 
   /**
    * Automatic polling, unchanged in substance: while a draft is live the app
@@ -216,7 +257,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
       try {
         const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
         if (cancelled) return;
-        await load(position);
+        await load(position, searching);
         if (cancelled) return;
         setNow(Date.now());
         if (res.pollIntervalSeconds <= 0) setPollSeconds(0);
@@ -235,7 +276,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [draftId, load, pollSeconds, position]);
+  }, [draftId, load, pollSeconds, position, searching]);
 
   if (!selected) {
     return (
@@ -257,6 +298,19 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   }
   if (error && !board) return <Notice tone="error">{error}</Notice>;
   if (!board) return <Empty>No draft data.</Empty>;
+
+  /*
+   * What is drawn, and what each row is called.
+   *
+   * The rank is fixed before the filter runs, so a searched player carries the
+   * number he has on the whole board rather than his position in the result.
+   * Tier lines are drawn only on an unfiltered single-position ladder: a line
+   * between two rows that are not adjacent on the board would be claiming a
+   * boundary that is not there.
+   */
+  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
+    matchesQuery(item.rec.name, query),
+  );
 
   return (
     <>
@@ -345,6 +399,22 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         does, and naming it "Filter to QB" would replace a perfectly good
         accessible name with a worse one.
       */}
+      {/*
+        Search, on the board.
+
+        During a draft the question is often "where is he" rather than "who is
+        best", and the answer used to require scrolling forty rows or knowing to
+        star him first. It filters; it does not re-rank, re-score or change who
+        is available, and every row keeps its real board rank.
+      */}
+      <SearchField
+        value={query}
+        onChange={setQuery}
+        placeholder="Search the board"
+        label="Search the board"
+        testId="draft-search"
+      />
+
       <SegmentedControl
         label="Filter by position"
         value={position}
@@ -365,11 +435,13 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         list already says by being ranked. The list keeps its accessible name so
         a screen reader still hears one; sighted readers get the players sooner.
       */}
-      {board.recommendations.length === 0 ? (
+      {visible.length === 0 ? (
         <Empty>
-          {position === QUEUE_FILTER
-            ? 'Your queue is empty. Tap the ☆ beside a player to add them.'
-            : 'No available players match this filter.'}
+          {searching
+            ? `Nobody available matching “${query.trim()}”.`
+            : position === QUEUE_FILTER
+              ? 'Your queue is empty. Tap the ☆ beside a player to add them.'
+              : 'No available players match this filter.'}
         </Empty>
       ) : (
         <div
@@ -377,7 +449,7 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
         >
-          {withTierDividers(board.recommendations, isSinglePosition).map((item) => (
+          {visible.map((item) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
               {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
@@ -655,36 +727,6 @@ function usePlayerDetail(playerId: string) {
   }, [playerId]);
 
   return { detail, failed };
-}
-
-/**
- * `Q`, `D`, `OUT`, `IR` — beside the name, without expanding anything.
- *
- * This is the one fact about a player that can change a pick before any of the
- * numbers do, and it was previously invisible on the board: it lived in the
- * player dictionary and appeared on the Players screen, which is not where
- * drafting happens.
- *
- * Two letters at most, because forty rows have room for two letters. The word
- * is in the accessible name and the tooltip, so the colour is an accelerator
- * and never the thing carrying the meaning — the same rule the position tint
- * follows. A healthy player renders nothing at all: a badge on every row is a
- * badge that means nothing.
- */
-function InjuryTag({ status }: { status: string | null }) {
-  const tag = injuryStatusTag(status);
-  if (!tag) return null;
-  return (
-    <span
-      className={`injury-tag injury-${tag.tone}`}
-      data-testid="injury-tag"
-      data-status={tag.code}
-      title={tag.label}
-      aria-label={tag.label}
-    >
-      {tag.code}
-    </span>
-  );
 }
 
 /**

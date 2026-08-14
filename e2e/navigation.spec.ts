@@ -50,48 +50,50 @@ async function drag(
   await page.mouse.up();
 }
 
-/** Open a player's detail screen from the Players list. */
-async function openPlayerDetail(page: Page) {
-  await page.getByTestId('tab-players').click();
-  const row = page.getByTestId('player-search-row').first();
-  await expect(row).toBeVisible();
-  const playerId = await row.getAttribute('data-player-id');
-  await row.click();
-  await expect(page.getByTestId('player-detail-screen')).toBeVisible();
-  return playerId!;
+/**
+ * Open one of Setup's areas, which is the app's pushed layer.
+ *
+ * Vegas is the one to use: it is entirely read-only, so a test that swipes away
+ * from it cannot be accused of having changed something on the way out.
+ */
+async function openSetupArea(page: Page, area = 'vegas') {
+  await page.getByTestId('tab-setup').click();
+  await expect(page.getByTestId(`setup-step-${area}`)).toBeVisible();
+  await page.getByTestId(`setup-step-${area}`).click();
+  await expect(page.getByTestId(`setup-detail-${area}`)).toBeVisible();
 }
 
 test.describe('pushed detail screens', () => {
   test('a detail screen carries its own title and a Back control', async ({ page }) => {
     await page.goto('/');
-    await openPlayerDetail(page);
+    await openSetupArea(page);
 
     const back = page.getByTestId('back-button');
     await expect(back).toBeVisible();
     // Back says where it goes, which is the list it was opened from.
-    await expect(back).toContainText('Players');
+    await expect(back).toContainText('Setup');
 
     await back.click();
-    await expect(page.getByTestId('player-detail-screen')).toHaveCount(0);
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toHaveCount(0);
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 
   test('opening and leaving a detail screen adds no history entry', async ({ page }) => {
     await page.goto('/');
     const before = await page.evaluate(() => window.history.length);
 
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     expect(await page.evaluate(() => window.history.length), 'a detail is not a new page').toBe(before);
 
     await page.getByTestId('back-button').click();
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
     expect(await page.evaluate(() => window.history.length)).toBe(before);
     expect(new URL(page.url()).pathname).toBe('/');
   });
 
   test('a reload leaves the reader on the app, not in a broken half-state', async ({ page }) => {
     await page.goto('/');
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     await page.reload();
     await expect(page.getByTestId('tab-draft')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
@@ -108,6 +110,27 @@ test.describe('pushed detail screens', () => {
     await back.click();
     await expect(page.getByTestId('setup-step-newsletter')).toBeVisible();
   });
+
+  /**
+   * A player is not a pushed screen any more — it opens where it sits.
+   *
+   * Which is the point: the list keeps its scroll and its search, and moving
+   * between two players costs one tap rather than a round trip.
+   */
+  test('a player opens in place, without leaving the list', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-players').click();
+    const rows = page.getByTestId('player-search-row');
+    await expect(rows.first()).toBeVisible();
+    const before = await rows.count();
+
+    await rows.first().click();
+    await expect(rows.first().getByTestId('player-file')).toBeVisible();
+    await expect(rows, 'the list is still the list').toHaveCount(before);
+    await expect(page.getByTestId('back-button')).toHaveCount(0);
+
+    await rows.first().locator('.row-button').click();
+  });
 });
 
 test.describe('the back gesture, as a Home Screen app', () => {
@@ -120,48 +143,43 @@ test.describe('the back gesture, as a Home Screen app', () => {
   });
 
   test('a swipe from the leading edge goes back where Back goes', async ({ page }) => {
-    await openPlayerDetail(page);
-    await expect(page.getByTestId('player-detail-screen')).toHaveAttribute('data-swipe-back', 'on');
+    await openSetupArea(page);
+    await expect(page.getByTestId('setup-detail-vegas')).toHaveAttribute('data-swipe-back', 'on');
 
     await drag(page, { x: 4, y: 420 }, { x: 330, y: 430 });
 
-    await expect(page.getByTestId('player-detail-screen')).toHaveCount(0);
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toHaveCount(0);
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 
   test('the swipe changes nothing but which screen is showing', async ({ page }) => {
-    const playerId = await openPlayerDetail(page);
-    const control = page
-      .locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`)
-      .getByTestId('my-guy-control');
-
+    await openSetupArea(page);
     await drag(page, { x: 4, y: 420 }, { x: 330, y: 430 });
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
 
-    // Back is navigation: the player's own flag is exactly where it was.
-    await expect(control).toHaveAttribute('data-level', '0');
-    // …and so is the draft queue, which a stray tap on the way out could reach.
+    // Back is navigation, never undo: nothing the gesture passed over changed.
+    expect(await page.locator('html').getAttribute('data-theme'), 'the appearance is untouched').toBeNull();
     await page.getByTestId('tab-draft').click();
     await page.getByTestId('queue-filter').click();
     await expect(page.getByText(/Your queue is empty/)).toBeVisible();
   });
 
   test('an incomplete swipe snaps back and stays on the screen', async ({ page }) => {
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     await drag(page, { x: 4, y: 420 }, { x: 60, y: 424 });
-    await expect(page.getByTestId('player-detail-screen')).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
   });
 
   test('a vertical drag from the edge scrolls rather than navigating', async ({ page }) => {
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     await drag(page, { x: 6, y: 500 }, { x: 12, y: 180 });
-    await expect(page.getByTestId('player-detail-screen')).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
   });
 
   test('a swipe that did not start at the edge does nothing', async ({ page }) => {
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     await drag(page, { x: 200, y: 420 }, { x: 360, y: 424 });
-    await expect(page.getByTestId('player-detail-screen')).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
   });
 
   test('a top-level tab cannot be swiped away', async ({ page }) => {
@@ -183,23 +201,23 @@ test.describe('the back gesture, as a Home Screen app', () => {
 
   test('still navigates with reduced motion, without animating', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     await drag(page, { x: 4, y: 420 }, { x: 330, y: 430 });
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 });
 
 test.describe('the back gesture in a browser tab', () => {
   test('is not offered, because the edge is the browser’s there', async ({ page }) => {
     await page.goto('/');
-    await openPlayerDetail(page);
+    await openSetupArea(page);
     // The layer says so, and the gesture is inert: the screen stays put.
-    await expect(page.getByTestId('player-detail-screen')).toHaveAttribute('data-swipe-back', 'off');
+    await expect(page.getByTestId('setup-detail-vegas')).toHaveAttribute('data-swipe-back', 'off');
     await drag(page, { x: 4, y: 420 }, { x: 340, y: 424 });
-    await expect(page.getByTestId('player-detail-screen')).toBeVisible();
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
     // Back itself still works, which is the point: nothing was taken away.
     await page.getByTestId('back-button').click();
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 });
 

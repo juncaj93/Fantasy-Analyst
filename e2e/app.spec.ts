@@ -1084,6 +1084,72 @@ test.describe('draft room', () => {
     await expect(page.getByTestId('recommendation-row')).toHaveCount(before);
   });
 
+  /**
+   * Finding one player on a board of hundreds.
+   *
+   * The search filters what is drawn and touches nothing else: the order, the
+   * scores and who is available are the board's, and a row keeps the rank it
+   * has on the whole board rather than being renumbered to 1 by the filter.
+   */
+  test.describe('search', () => {
+    test('filters the board to what was typed, keeping real board ranks', async ({ page }) => {
+      const search = page.getByTestId('draft-search');
+      await expect(search).toBeVisible();
+
+      const before = await page.getByTestId('recommendation-row').count();
+      await search.fill('sotelo');
+
+      const rows = page.getByTestId('recommendation-row');
+      await expect(rows).toHaveCount(1);
+      await expect(rows.first().locator('.player-name')).toHaveText('Andre Sotelo');
+      // The rank is his place on the board, not his place in the result.
+      expect(Number(await rows.first().locator('.rank').innerText())).toBeGreaterThan(1);
+
+      // Clearing puts the board back exactly as it was.
+      await page.getByTestId('search-clear').click();
+      await expect(page.getByTestId('recommendation-row')).toHaveCount(before);
+    });
+
+    test('matches on either name, in any order, ignoring punctuation', async ({ page }) => {
+      const search = page.getByTestId('draft-search');
+      await search.fill('brennan kai');
+      await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
+      await expect(page.getByTestId('recommendation-row').first().locator('.player-name')).toHaveText('Kai Brennan');
+      await search.fill('');
+    });
+
+    test('reaches past the forty rows the board opens with', async ({ page }) => {
+      // Somebody outside the default slice: the search asks for a deeper one
+      // rather than pretending he is not there.
+      const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=250')).json();
+      const deep = board.recommendations[board.recommendations.length - 1] as { name: string };
+      expect(board.recommendations.length).toBeGreaterThan(0);
+
+      await page.getByTestId('draft-search').fill(deep.name);
+      await expect(page.getByTestId('recommendation-row').first().locator('.player-name')).toHaveText(deep.name);
+      await page.getByTestId('draft-search').fill('');
+    });
+
+    test('says so plainly when nobody matches, and changes no state', async ({ page }) => {
+      await page.getByTestId('draft-search').fill('zzzznobody');
+      await expect(page.getByTestId('recommendation-row')).toHaveCount(0);
+      await expect(page.getByText(/Nobody available matching/)).toBeVisible();
+      await page.getByTestId('draft-search').fill('');
+      await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
+    });
+
+    test('draws no tier line across a filtered result', async ({ page }) => {
+      await page.getByRole('button', { name: 'QB', exact: true }).click();
+      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await page.getByTestId('draft-search').fill('a');
+      // A line between two rows that are not adjacent on the board would be
+      // claiming a boundary that is not there.
+      await expect(page.getByTestId('tier-divider')).toHaveCount(0);
+      await page.getByTestId('draft-search').fill('');
+      await page.getByRole('button', { name: 'ALL', exact: true }).click();
+    });
+  });
+
   test('offers no control that could make a pick', async ({ page }) => {
     const joined = (await page.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     expect(joined).not.toContain('draft this');
@@ -1247,6 +1313,70 @@ test.describe('player intelligence', () => {
     await expect(page.getByTestId('evidence-heading')).toBeVisible();
     await expect(page.getByRole('cell', { name: 'Last 7d' })).toBeVisible();
     await expect(page.getByRole('cell', { name: 'Lifetime' })).toBeVisible();
+  });
+
+  /**
+   * The same player, the same way, on both screens.
+   *
+   * A card here opens in place exactly as a draft card does, and carries what
+   * the draft card carries — the outlook, last season, the injury — as well as
+   * everything only this screen has: the four windows, the categories, the
+   * market lines and every piece of evidence.
+   */
+  test('opens a player in place, with the whole file inside it', async ({ page }) => {
+    const row = page.locator('[data-testid="player-search-row"][data-player-id="1004"]');
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+
+    const file = row.getByTestId('player-file');
+    await expect(file).toBeVisible();
+    // What the draft card shows…
+    await expect(row.getByTestId('outlook')).toBeVisible();
+    await expect(row.getByTestId('last-season')).toBeVisible();
+    // …and what only this screen has.
+    await expect(row.getByRole('cell', { name: 'Season' })).toBeVisible();
+    await expect(row.getByTestId('evidence-heading')).toBeVisible();
+    await expect(row.getByText(/Vegas props/)).toBeVisible();
+
+    // It is a disclosure, not a screen: no Back, and the list is still here.
+    await expect(page.getByTestId('back-button')).toHaveCount(0);
+    expect(await page.getByTestId('player-search-row').count()).toBeGreaterThan(1);
+
+    await row.locator('.row-button').click();
+    await expect(row.getByTestId('player-file')).toHaveCount(0);
+  });
+
+  /**
+   * Availability, said the same way it is said on the board.
+   *
+   * `Active` was a badge reading "Active" and Questionable was one reading
+   * "Questionable" — the same fact, three times the width, in a different
+   * vocabulary from the screen next door. Healthy players now carry nothing and
+   * a questionable one carries `Q`.
+   */
+  test('tags availability with the board’s own letters, or nothing at all', async ({ page }) => {
+    // `evaluateAll` does not wait, and the list arrives after a debounce.
+    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    const tagged = await page
+      .getByTestId('player-search-row')
+      .evaluateAll((rows) =>
+        rows.map((r) => ({
+          name: r.querySelector('.player-name')?.textContent ?? '',
+          tag: r.querySelector('[data-testid="injury-tag"]')?.getAttribute('data-status') ?? null,
+          text: r.textContent ?? '',
+        })),
+      );
+    const byName = new Map(tagged.map((t) => [t.name, t]));
+
+    expect(byName.get('Andre Sotelo')?.tag).toBe('Q');
+    expect(byName.get('Julian Reyes')?.tag).toBe('OUT');
+    expect(byName.get('Marcus Vance')?.tag, 'a healthy player carries nothing').toBeNull();
+
+    // And the long-form words are gone from the rows entirely.
+    for (const row of tagged) {
+      expect(row.text, `"${row.name}" still says Questionable in words`).not.toContain('Questionable');
+      expect(row.text).not.toContain('Active');
+    }
   });
 
   test('shows the original excerpt for every evidence item, not just a tally', async ({ page }) => {

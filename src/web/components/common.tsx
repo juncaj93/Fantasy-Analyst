@@ -12,6 +12,8 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
+/* What Sleeper says about a player's availability right now. Never a ranking input. */
+import { injuryStatusTag } from '../../core/draft/injury.ts';
 
 /**
  * An inline disclosure that opens in place.
@@ -50,6 +52,35 @@ export function Disclose({ open, children }: { open: boolean; children: ReactNod
     <div className={shown ? 'disclose disclose-open' : 'disclose'} data-disclosed={shown ? 'yes' : 'no'}>
       <div>{children}</div>
     </div>
+  );
+}
+
+/**
+ * `Q`, `D`, `OUT`, `IR` — current availability, beside the name.
+ *
+ * The one fact about a player that can change a decision before any of the
+ * numbers do, and it reads the same on every screen that shows a player. Two or
+ * three characters at most, because forty rows have room for two or three
+ * characters; the word itself is in the accessible name and the tooltip, so the
+ * colour is an accelerator and never the thing carrying the meaning.
+ *
+ * A healthy player renders nothing at all. `Active` is not a status worth a
+ * badge — it is the absence of one — and a board where every row carries a
+ * badge is a board where the badge means nothing.
+ */
+export function InjuryTag({ status }: { status: string | null | undefined }) {
+  const tag = injuryStatusTag(status);
+  if (!tag) return null;
+  return (
+    <span
+      className={`injury-tag injury-${tag.tone}`}
+      data-testid="injury-tag"
+      data-status={tag.code}
+      title={tag.label}
+      aria-label={tag.label}
+    >
+      {tag.code}
+    </span>
   );
 }
 

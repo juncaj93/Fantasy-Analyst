@@ -169,21 +169,54 @@ test.describe('the deployed app', () => {
     expect(await page.locator('html').getAttribute('data-theme')).toBeNull();
   });
 
-  test('the player detail is a pushed screen with a Back that returns', async ({ page }) => {
+  test('a player opens in place, carrying his whole file', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
     test.skip((await rows.count()) === 0, 'no player list on this deployment');
 
-    await rows.first().click();
-    const detail = page.getByTestId('player-detail-screen');
-    await expect(detail).toBeVisible();
-    // In a browser tab the edge belongs to Safari, and the app says so.
-    await expect(detail).toHaveAttribute('data-swipe-back', 'off');
-
-    await page.getByTestId('back-button').click();
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    const first = rows.first();
+    await first.click();
+    await expect(first.getByTestId('player-file')).toBeVisible();
+    await expect(first.getByTestId('evidence-heading')).toBeVisible();
+    // A disclosure, not a screen: the list is still underneath it.
+    expect(await rows.count()).toBeGreaterThan(0);
     expect(new URL(page.url()).pathname).toBe('/');
+    await first.locator('.row-button').click();
+  });
+
+  test('Setup’s areas are pushed screens, and the edge stays Safari’s in a tab', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    await page.getByTestId('setup-step-vegas').click();
+    const pushed = page.getByTestId('setup-detail-vegas');
+    await expect(pushed).toBeVisible();
+    // In a browser tab the edge belongs to Safari, and the app says so.
+    await expect(pushed).toHaveAttribute('data-swipe-back', 'off');
+    await page.getByTestId('back-button').click();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
+  });
+
+  test('the board can be searched, and the search can be cleared', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    const search = page.getByTestId('draft-search');
+    await expect(search).toBeVisible();
+
+    const rows = page.getByTestId('recommendation-row');
+    test.skip((await rows.count()) === 0, 'no draft board on this deployment');
+    const before = await rows.count();
+    const name = (await rows.first().locator('.player-name').innerText()).split(' ').pop()!;
+
+    await search.fill(name);
+    await page.waitForTimeout(500);
+    const narrowed = await rows.count();
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThanOrEqual(before);
+
+    await page.getByTestId('search-clear').click();
+    await page.waitForTimeout(700);
+    expect(await rows.count()).toBe(before);
   });
 
   test('is installable, and still refuses a write from a stranger', async ({ page, request }) => {

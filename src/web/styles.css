@@ -81,6 +81,14 @@
   --selected: var(--accent);
   --selected-tint: var(--accent-tint);
   --pressed: rgb(17 24 39 / 6%);
+  /*
+   * A status chip that has to be readable on any card, including one washed in
+   * its own colour. Deliberately outside the position palette and outside the
+   * semantic one: slate is the only thing on this screen that is nobody's hue,
+   * which is exactly why it can sit on all six of them.
+   */
+  --status-neutral: #4a5567;
+  --on-status-neutral: #ffffff;
   --live: #157a4c;
   --live-tint: var(--pos-tint);
   --locked: #64707f;
@@ -274,6 +282,9 @@
     --selected: var(--accent);
     --selected-tint: var(--accent-tint);
     --pressed: rgb(255 255 255 / 8%);
+    /* Inverted, for the same reason: light against dark tints. */
+    --status-neutral: #b3c0d1;
+    --on-status-neutral: #10151b;
     --live: #4fc98a;
     --live-tint: var(--pos-tint);
     --locked: #82909f;
@@ -345,6 +356,8 @@
   --selected: var(--accent);
   --selected-tint: var(--accent-tint);
   --pressed: rgb(255 255 255 / 8%);
+  --status-neutral: #b3c0d1;
+  --on-status-neutral: #10151b;
   --live: #4fc98a;
   --live-tint: var(--pos-tint);
   --locked: #82909f;
@@ -1480,23 +1493,43 @@ body,
   white-space: nowrap;
 }
 
-/* Questionable: worth seeing, not worth alarm. */
+/*
+ * Questionable: worth seeing, not worth alarm — and legible on every card.
+ *
+ * This was amber text on an amber tint, which is invisible on a receiver. The
+ * WR cards are washed in almost exactly that hue, and `Q` is the tag that
+ * appears on more players than any other, so the one status a reader sees most
+ * was the one disappearing most. Nothing amber can fix that: a chip painted in
+ * a hue can only ever be as visible as the card it lands on.
+ *
+ * So it stops being amber. Slate is nobody's colour here — not a position, not
+ * a semantic state — and it inverts between the themes, so the chip is dark on
+ * the pale tints and light on the dark ones. It cannot blend with any of the
+ * six, and it stays the quietest of the three severities, which is right: this
+ * is the one that means "watch him", not "he is not playing".
+ *
+ * The three now differ in shape as well as colour — slate, amber, red — and the
+ * letter still says which is which, so none of it rests on colour alone.
+ */
 .injury-caution {
-  color: var(--warn);
-  background: var(--warn-tint);
-  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  color: var(--on-status-neutral);
+  background: var(--status-neutral);
+  border-color: transparent;
+  box-shadow: var(--shadow-1);
 }
 
 /* Doubtful: the same hue, filled, because it usually means no. */
 .injury-serious {
   color: var(--on-accent);
   background: var(--warn);
+  box-shadow: var(--shadow-1);
 }
 
 /* Out, IR, PUP, suspended: he is not playing. */
 .injury-out {
   color: var(--on-accent);
   background: var(--neg);
+  box-shadow: var(--shadow-1);
 }
 
 /*
