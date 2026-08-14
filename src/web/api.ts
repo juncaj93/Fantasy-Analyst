@@ -133,6 +133,8 @@ export interface SlotProgress {
   filled: number;
   required: number;
   accepts: string[];
+  /** The bench row: depth held, not a starting slot left open. */
+  bench?: boolean;
 }
 
 export interface RosterAlert {

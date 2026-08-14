@@ -20,9 +20,15 @@ test('opens straight to the app with no login wall', async ({ page }) => {
   await expect(page.getByTestId('board-list')).toBeVisible();
 });
 
+/**
+ * The banner that used to say this is gone. The state is not: it moved to the
+ * Setup tab, where unlocking happens, as a mark plus an accessible name — so it
+ * still reads to a screen reader without costing every page a line of chrome.
+ */
 test('shows that it is view-only until unlocked', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('.header-meta')).toContainText('view only');
+  await expect(page.getByTestId('view-only')).toBeVisible();
+  await expect(page.getByTestId('tab-setup')).toHaveAccessibleName(/view only/i);
 });
 
 test('refuses changes until unlocked, then allows them', async ({ page }) => {
@@ -42,7 +48,7 @@ test('refuses changes until unlocked, then allows them', async ({ page }) => {
   await unlock.getByLabel('Passphrase').fill(PASSPHRASE);
   await unlock.getByRole('button', { name: 'Unlock' }).click();
 
-  // The unlock card goes away and the header stops saying view-only.
+  // The unlock card goes away and the view-only mark goes with it.
   await expect(page.getByTestId('unlock-card')).toHaveCount(0);
-  await expect(page.locator('.header-meta')).not.toContainText('view only');
+  await expect(page.getByTestId('view-only')).toHaveCount(0);
 });

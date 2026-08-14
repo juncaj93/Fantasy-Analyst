@@ -78,18 +78,23 @@ export function App() {
 
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
+  /*
+   * No banner.
+   *
+   * A two-line header saying "Fantasy Analyst" and the league name sat above
+   * every page, and both halves were already somewhere better: the product name
+   * is the app the user opened, and the league name is printed by the one screen
+   * that is actually talking about a league. On a phone it cost ~40px of every
+   * screen to repeat what the screen underneath was about to say.
+   *
+   * The one thing it carried that nothing else did is whether changes are
+   * possible at all, and that has moved to the Setup tab — where unlocking
+   * happens — as a mark rather than a sentence.
+   */
+  const viewOnly = !unlocked && canUnlock;
+
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="header-row">
-          <h1>Fantasy Analyst</h1>
-          <span className="header-meta">
-            {overview?.selectedLeague?.name ?? 'no league'}
-            {unlocked ? '' : ' · view only'}
-          </span>
-        </div>
-      </header>
-
       <main className="app-main">
         {error ? <Notice tone="error">{error}</Notice> : null}
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} /> : null}
@@ -117,11 +122,15 @@ export function App() {
             t.id === 'review' && overview
               ? overview.pendingEvidence + overview.pendingIdentity
               : 0;
+          // Where unlocking happens is where "you cannot change anything yet"
+          // belongs. A dot, not a word, because it is a state and not a task.
+          const locked = t.id === 'setup' && viewOnly;
           return (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               aria-current={tab === t.id ? 'page' : undefined}
+              aria-label={locked ? `${t.label} — view only, unlock to make changes` : undefined}
               data-testid={`tab-${t.id}`}
             >
               <span className="tab-glyph" aria-hidden="true">
@@ -129,6 +138,7 @@ export function App() {
               </span>
               {t.label}
               {badge > 0 ? <span className="tab-badge">{badge}</span> : null}
+              {locked ? <span className="tab-lock" data-testid="view-only" aria-hidden="true" /> : null}
             </button>
           );
         })}

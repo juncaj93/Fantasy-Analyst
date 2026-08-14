@@ -29,6 +29,7 @@ import {
   Stat,
   Unknown,
   formatShortAge,
+  positionCardClass,
 } from '../components/common.tsx';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
@@ -378,30 +379,62 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
 }
 
 /**
- * One line: how much of a starting lineup you have.
+ * Slot names short enough to sit six-across on a 360px phone.
  *
- * `0/1 QB · 1/2 RB · 3/3 WR · 0/1 TE · 0/2 FLEX`, from the league's own roster
- * settings and the live pick stream. Deliberately status only — the ranked list
- * below is where "so take a receiver" belongs, and saying it twice in different
- * words is how a draft screen fills up with prose.
+ * Only the ones whose Sleeper spelling is too long to print. Anything not named
+ * here — `QB`, `RB`, `WR`, `TE`, `DEF`, `BN` — is already as short as it gets
+ * and passes through unchanged, so a league with an unusual slot still shows
+ * its real name rather than a blank.
+ */
+const SLOT_LABELS: Record<string, string> = {
+  FLEX: 'FLX',
+  SUPER_FLEX: 'SFLX',
+  WRRB_FLEX: 'W/R',
+  REC_FLEX: 'W/T',
+  WRRB_WRT: 'FLX',
+  IDP_FLEX: 'IDP',
+};
+
+/**
+ * One line: how much of a starting lineup you have, and how much of a bench.
+ *
+ * `0/1 QB · 1/2 RB · 3/3 WR · 0/1 TE · 0/2 FLX · 0/6 BN`, from the league's own
+ * roster settings and the live pick stream. Deliberately status only — the
+ * ranked list below is where "so take a receiver" belongs, and saying it twice
+ * in different words is how a draft screen fills up with prose.
+ *
+ * The bench number is the one that needs saying out loud, because "how much
+ * room is left" is a different question from "what is missing" and the line
+ * only answered the second. Both come from one allocation in `liveRoster`, so
+ * no player can be counted in both.
  */
 function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   if (progress.length === 0) return null;
   return (
     <div className="roster-progress" data-testid="roster-progress">
-      {progress.map((slot) => (
-        <span
-          key={slot.slot}
-          className={slot.filled >= slot.required ? 'slot slot-done' : 'slot'}
-          data-slot={slot.slot}
-          title={`${slot.filled} of ${slot.required} ${slot.slot} starting slot${slot.required === 1 ? '' : 's'} filled`}
-        >
-          <strong>
-            {slot.filled}/{slot.required}
-          </strong>{' '}
-          {slot.slot}
-        </span>
-      ))}
+      {progress.map((slot) => {
+        const label = SLOT_LABELS[slot.slot] ?? slot.slot;
+        const classes = ['slot'];
+        if (slot.filled >= slot.required) classes.push('slot-done');
+        if (slot.bench) classes.push('slot-bench');
+        return (
+          <span
+            key={slot.slot}
+            className={classes.join(' ')}
+            data-slot={slot.slot}
+            title={
+              slot.bench
+                ? `${slot.filled} of ${slot.required} bench spot${slot.required === 1 ? '' : 's'} used`
+                : `${slot.filled} of ${slot.required} ${slot.slot} starting slot${slot.required === 1 ? '' : 's'} filled`
+            }
+          >
+            <strong>
+              {slot.filled}/{slot.required}
+            </strong>{' '}
+            {label}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -431,7 +464,7 @@ function RecommendationRow({
   const pos = (rec.position ?? '').toUpperCase();
   return (
     <div
-      className={`player-row card-pos card-pos-${pos}${expanded ? ' player-row-open' : ''}`}
+      className={positionCardClass(pos, expanded ? 'player-row-open' : '')}
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
       data-position={pos}

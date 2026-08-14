@@ -62,17 +62,32 @@
   /* Four well-separated hues plus two extras; all readable for the common
      forms of colour blindness, and never the only carrier of meaning. */
   --pos-QB-line: #2f62c9;
-  --pos-QB-tint: #e8eeff;
+  --pos-QB-tint: #dde7ff;
   --pos-RB-line: #0d7350;
-  --pos-RB-tint: #e0f4ec;
+  --pos-RB-tint: #d2efe3;
   --pos-WR-line: #98590c;
-  --pos-WR-tint: #fdf0d9;
+  --pos-WR-tint: #fbe9c8;
   --pos-TE-line: #7233b8;
-  --pos-TE-tint: #f2e9fd;
+  --pos-TE-tint: #ebdefc;
   --pos-K-line: #0d6b76;
-  --pos-K-tint: #ddf1f3;
+  --pos-K-tint: #cfebee;
   --pos-DEF-line: #ab2f68;
-  --pos-DEF-tint: #fce7f1;
+  --pos-DEF-tint: #fbdcea;
+
+  /*
+   * How much of the position's hue the card actually shows.
+   *
+   * The strength is a token rather than a number buried in `.card-pos` because
+   * Light and Dark need different amounts of it to look like the same design.
+   * On white, a little pigment goes a long way and more would make the board
+   * loud; on a near-black surface the same mixture disappears, which is exactly
+   * what it was doing — the tint was technically present and practically
+   * invisible. Dark therefore takes almost all of the tint, and the tints it
+   * takes are themselves darker and more saturated so "almost all" still lands
+   * on a readable card.
+   */
+  --pos-mix: 62%;
+  --pos-mix-open: 76%;
 
   /* -- elevation and focus ---------------------------------------------- */
   --shadow-1: 0 1px 2px rgb(17 24 39 / 6%), 0 1px 1px rgb(17 24 39 / 4%);
@@ -95,6 +110,34 @@
    */
   --tabbar-height: 50px;
   --motion: 160ms;
+
+  /*
+   * The device insets, named once, and named because `env()` cannot be
+   * overridden.
+   *
+   * A layout written directly against `env(safe-area-inset-bottom)` can only be
+   * checked on hardware that has an inset — which is not the browser any test
+   * runs in, and is exactly why a 34px strip of empty tab bar survived several
+   * passes. Behind a custom property it is the same value in production and a
+   * number a browser test can set and then measure.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /*
+   * What the tab bar reserves for the home indicator — less than the inset.
+   *
+   * The full inset is 34px on every modern iPhone, and spending all of it below
+   * the labels is what produced a bar tall enough to read as a blank strip
+   * stuck under the navigation. The indicator itself is a 5px pill sitting
+   * about 8px off the bottom edge, so ~20px keeps the labels clear of it with
+   * room to spare and hands the other 14px back to the page.
+   *
+   * The floor is zero, not a few pixels of "looks better": a device with no
+   * home indicator has nothing to clear, and giving it padding anyway is how
+   * the bar grows on the one class of screen that never had the problem.
+   */
+  --nav-inset: max(0px, calc(var(--safe-bottom) - 14px));
 }
 
 /*
@@ -144,18 +187,27 @@
     --locked: #83919f;
     --confidence: #83919f;
 
-    --pos-QB-line: #7cabf8;
-    --pos-QB-tint: #172441;
-    --pos-RB-line: #55c795;
-    --pos-RB-tint: #102c22;
-    --pos-WR-line: #e0ad57;
-    --pos-WR-tint: #302512;
-    --pos-TE-line: #b58cf5;
-    --pos-TE-tint: #241a3d;
-    --pos-K-line: #52bcc6;
-    --pos-K-tint: #0f2b2e;
-    --pos-DEF-line: #ef85b4;
-    --pos-DEF-tint: #351827;
+    /*
+     * Darker, more saturated, and taken almost neat — see `--pos-mix`. The old
+     * pair (a pale tint at 45% of a near-black surface) was a difference of two
+     * or three points of luminance, which is not a difference on a phone in
+     * daylight.
+     */
+    --pos-QB-line: #8fb8fa;
+    --pos-QB-tint: #1c2f5e;
+    --pos-RB-line: #5fd0a0;
+    --pos-RB-tint: #103c2d;
+    --pos-WR-line: #e8b862;
+    --pos-WR-tint: #3d2d0e;
+    --pos-TE-line: #c09bf7;
+    --pos-TE-tint: #2c1e55;
+    --pos-K-line: #5cc7d1;
+    --pos-K-tint: #10393f;
+    --pos-DEF-line: #f492bd;
+    --pos-DEF-tint: #44172c;
+
+    --pos-mix: 92%;
+    --pos-mix-open: 100%;
 
     --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
     --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
@@ -200,18 +252,22 @@
   --locked: #83919f;
   --confidence: #83919f;
 
-  --pos-QB-line: #7cabf8;
-  --pos-QB-tint: #172441;
-  --pos-RB-line: #55c795;
-  --pos-RB-tint: #102c22;
-  --pos-WR-line: #e0ad57;
-  --pos-WR-tint: #302512;
-  --pos-TE-line: #b58cf5;
-  --pos-TE-tint: #241a3d;
-  --pos-K-line: #52bcc6;
-  --pos-K-tint: #0f2b2e;
-  --pos-DEF-line: #ef85b4;
-  --pos-DEF-tint: #351827;
+  /* Same values as the media query above, for an explicit Dark choice. */
+  --pos-QB-line: #8fb8fa;
+  --pos-QB-tint: #1c2f5e;
+  --pos-RB-line: #5fd0a0;
+  --pos-RB-tint: #103c2d;
+  --pos-WR-line: #e8b862;
+  --pos-WR-tint: #3d2d0e;
+  --pos-TE-line: #c09bf7;
+  --pos-TE-tint: #2c1e55;
+  --pos-K-line: #5cc7d1;
+  --pos-K-tint: #10393f;
+  --pos-DEF-line: #f492bd;
+  --pos-DEF-tint: #44172c;
+
+  --pos-mix: 92%;
+  --pos-mix-open: 100%;
 
   --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
@@ -245,8 +301,7 @@ body {
 body,
 .card,
 .player-row,
-.tabbar,
-.app-header {
+.tabbar {
   transition:
     background-color var(--motion) ease,
     border-color var(--motion) ease,
@@ -276,7 +331,7 @@ body,
 .app-main {
   flex: 1;
   /*
-   * The bottom padding clears the fixed tab bar exactly.
+   * The bottom padding clears the fixed tab bar exactly. Once.
    *
    * `--tabbar-height` is measured from the bar itself at runtime (see
    * useTabbarHeight) and already includes whatever the home indicator reserved
@@ -284,8 +339,14 @@ body,
    * an extra 34px of empty page below the last row on an iPhone, which is the
    * black strip. The fallback value in :root only has to be sane for the frame
    * before the measurement lands.
+   *
+   * The top inset is this element's now, because the header that used to absorb
+   * it no longer exists. In Safari's normal portrait browsing it is zero — the
+   * browser's own chrome is already holding the status bar — so this costs
+   * nothing there and still keeps the first card off the notch in standalone
+   * mode and in landscape.
    */
-  padding: var(--space-3) var(--space-4) calc(var(--tabbar-height) + var(--space-3));
+  padding: calc(var(--safe-top) + var(--space-3)) var(--space-4) calc(var(--tabbar-height) + var(--space-3));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -299,43 +360,20 @@ body,
 
 /* ------------------------------------------------------------------ header */
 /*
- * App chrome, not a hero. One line: the product on the left, the league it is
- * talking about on the right, and a hairline underneath it.
+ * There is no app header.
+ *
+ * The global banner is gone; the top inset it used to absorb is now the scroll
+ * container's, so the first card clears the status bar without a bar of chrome
+ * existing to hold it up.
+ *
+ * `.header-row` survives because it was never the banner's: it is the
+ * title-and-meta line inside a card, used across Setup, Team and Review.
  */
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: var(--header-surface);
-  backdrop-filter: saturate(180%) blur(12px);
-  -webkit-backdrop-filter: saturate(180%) blur(12px);
-  border-bottom: 1px solid var(--border);
-  padding: calc(5px + env(safe-area-inset-top)) var(--space-4) 5px;
-}
-
-.app-header h1 {
-  font-size: 0.95rem;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: -0.012em;
-}
-
 .header-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-}
-
-.header-meta {
-  font-size: 0.72rem;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------- tab bar */
@@ -356,15 +394,19 @@ body,
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-top: 1px solid var(--border);
   /*
-   * Flush against the bottom edge.
+   * Flush against the bottom edge, and no taller than it has to be.
    *
-   * The bar itself reaches the physical bottom of the viewport; the home
-   * indicator's reserved strip is added as padding INSIDE it, so the tinted
+   * The bar itself reaches the physical bottom of the viewport; the clearance
+   * the home indicator needs is added as padding INSIDE it, so the tinted
    * surface runs all the way down and the buttons sit above the indicator. The
    * alternative — offsetting the whole bar upwards — leaves a strip of page
    * showing underneath, which is what made it look like it was floating.
+   *
+   * What that clearance is worth is `--nav-inset`, which is deliberately less
+   * than the full inset: see the token. Nothing else in the page may add the
+   * inset again.
    */
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--nav-inset);
 }
 
 .tabbar button {
@@ -400,6 +442,24 @@ body,
 
 .tabbar button[aria-current='page'] .tab-glyph {
   opacity: 1;
+}
+
+/*
+ * "You are reading, not editing" — where editing is unlocked.
+ *
+ * This is all that survives of the banner's second line. A ring rather than a
+ * count, so it cannot be mistaken for the review badge, and the button carries
+ * the sentence in its accessible name so the mark is never the only carrier.
+ */
+.tab-lock {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(7px);
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  border: 1.5px solid var(--text-faint);
 }
 
 .tab-badge {
@@ -709,12 +769,12 @@ body,
  * same at this opacity, and is computed once rather than per frame.
  */
 .card-pos {
-  border-left: 3px solid var(--pos-line, var(--border));
-  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface)) 45%, var(--surface));
+  border-left: 4px solid var(--pos-line, var(--border));
+  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface)) var(--pos-mix), var(--surface));
 }
 
 .card-pos.player-row-open {
-  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface-raised)) 55%, var(--surface-raised));
+  background: color-mix(in srgb, var(--pos-tint-bg, var(--surface-raised)) var(--pos-mix-open), var(--surface-raised));
 }
 
 .card-pos-QB {
@@ -749,11 +809,14 @@ body,
 
 /*
  * Inside a tinted card the badge no longer has to carry the colour on its own,
- * so it steps back to a neutral chip and stops competing with the name.
+ * so it steps back to an outline and stops competing with the name — but it
+ * keeps the letters and it keeps the hue in its text, because the tint is an
+ * accelerator and the word is what actually says the position.
  */
 .card-pos .pos-pill[class*='pos-'] {
   background: transparent;
-  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 35%, transparent);
+  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 55%, transparent);
+  color: var(--pos-line, var(--text-dim));
 }
 
 .team-code {
@@ -1612,6 +1675,22 @@ table.compact tr:last-child td {
 
 .roster-progress .slot-done strong {
   color: var(--text-faint);
+}
+
+/*
+ * Bench is depth, not a hole in the lineup, so the eye is given somewhere to
+ * separate the two — a hairline instead of the interpunct every other pair
+ * gets. It is the same line, still one row tall, and still scrolls with the
+ * rest at 360px.
+ */
+.roster-progress .slot-bench::before {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 0.72em;
+  background: var(--border-strong);
+  vertical-align: -0.05em;
+  margin-right: var(--space-3);
 }
 
 /*

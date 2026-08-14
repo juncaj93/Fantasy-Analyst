@@ -16,6 +16,7 @@ import {
   Notice,
   PositionBadge,
   SignedValue,
+  positionCardClass,
 } from '../components/common.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 
@@ -110,7 +111,13 @@ function TradeRow({
   const reasons = withoutRepeats(suggestion.reasons);
   const counterpoints = withoutRepeats(suggestion.counterpoints, reasons);
   return (
-    <button className="player-row" data-testid="trade-row" aria-expanded={expanded} onClick={onToggle}>
+    <button
+      className={positionCardClass(suggestion.position)}
+      data-testid="trade-row"
+      data-position={(suggestion.position ?? '').toUpperCase()}
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
       <div className="player-row-top">
         <span className="player-name">{suggestion.name}</span>
         <PositionBadge position={suggestion.position} team={suggestion.team} />

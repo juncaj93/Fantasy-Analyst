@@ -55,6 +55,27 @@ export function PositionBadge({ position, team }: { position: string | null; tea
   );
 }
 
+/** The positions the palette has a hue for. Anything else stays neutral. */
+const TINTED_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+
+/**
+ * The class list that paints a card in its player's position colour.
+ *
+ * One function rather than a template string repeated on five screens, so
+ * "which positions are tinted" and "what the classes are called" are answered
+ * in one place. The colours themselves are semantic tokens in the stylesheet;
+ * this only decides who gets them.
+ *
+ * An unknown or missing position deliberately falls through to the untinted
+ * card. A grey row is honest about not knowing; picking a hue for it would be
+ * inventing a fact about the player.
+ */
+export function positionCardClass(position: string | null | undefined, extra = ''): string {
+  const pos = (position ?? '').toUpperCase();
+  const tint = TINTED_POSITIONS.includes(pos) ? ` card-pos card-pos-${pos}` : '';
+  return `player-row${tint}${extra ? ` ${extra}` : ''}`;
+}
+
 export function Badge({
   children,
   tone = 'neutral',
