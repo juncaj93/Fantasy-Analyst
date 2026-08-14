@@ -20,12 +20,12 @@ import {
   type SlotProgress,
 } from '../api.ts';
 import {
+  CompactTally,
   DetailLabel,
   Empty,
   Loading,
   Notice,
   PositionBadge,
-  Signal,
   Unknown,
   formatShortAge,
   positionCardClass,
@@ -521,6 +521,15 @@ function RecommendationRow({
           <span className="rank">{rank}</span>
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
+          {/*
+            The tally, beside the name it is about.
+
+            It used to be a fifth column of the metrics row reading "▲ +6 pos",
+            which spent three tokens and a third of the line on a number. Up
+            here it is one token attached to the player, and the row below is
+            free for the four numbers that describe the decision.
+          */}
+          <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
           <InjuryTag status={rec.status} />
           <PositionBadge position={rec.position} team={rec.team} />
         </div>
@@ -535,35 +544,32 @@ function RecommendationRow({
         */}
         <DecisionTags rec={rec} showCliffProximity={showCliffProximity} />
 
+        {/*
+          Four numbers, four different questions, in the order they are asked.
+
+          Score is how strongly this app recommends him; ADP is where the market
+          takes him; Val is the difference between the market and this pick; Next
+          is whether he survives to your following turn. The labels are short
+          because at 360px four labelled numbers is exactly what one line holds —
+          `Value` and `Next pick` cost the fourth column its space.
+        */}
         <div className="player-row-metrics">
+          <span className="metric" data-testid="score-metric">
+            Score{' '}
+            <strong className="score-value" title={`Composite recommendation strength, 0-100 (raw ${rec.total})`}>
+              {rec.score}
+            </strong>
+          </span>
           <span className="metric">
             ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
           </span>
           <span className="metric">
-            Value{' '}
+            Val{' '}
             <strong className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}>
               {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
             </strong>
           </span>
           <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
-          {/*
-            One signal, not two.
-
-            Lifetime and 30-day were printed side by side on every row, so a
-            player nobody has written about read "– 0 flat – 0 flat" — two
-            columns of nothing on forty rows. The lifetime tally is the one that
-            drives AVOID and the ranking, so it is the one that stays; the recent
-            window appears only when it has something of its own to say, and both
-            are always in the breakdown behind the tap.
-          */}
-          {rec.newsLifetimeNet !== 0 || rec.news30Net !== 0 ? (
-            <Signal net={rec.newsLifetimeNet} label="lifetime news" />
-          ) : null}
-          {rec.news30Net !== 0 && rec.news30Net !== rec.newsLifetimeNet ? (
-            <span className="metric">
-              30d <Signal net={rec.news30Net} label="news, last 30 days" />
-            </span>
-          ) : null}
         </div>
 
         {/*
@@ -814,14 +820,14 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
   if (probability == null) {
     return (
       <span className="metric">
-        Next pick <Unknown what="survival" />
+        Next <Unknown what="survival" />
       </span>
     );
   }
   const pct = Math.round(probability * 100);
   return (
     <span className="metric" data-testid="survival">
-      Next pick{' '}
+      Next{' '}
       <strong
         className={`survival survival-${band}`}
         data-band={band}

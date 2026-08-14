@@ -73,6 +73,8 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   newsConflicted: boolean;
   components: ComponentScore[];
   total: number;
+  /** `total` as a whole number, 0–100, higher is better. Board order follows it. */
+  score: number;
   reasons: string[];
   counterpoints: string[];
   degraded: boolean;

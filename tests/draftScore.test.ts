@@ -173,7 +173,8 @@ function signal(net: number, items = 4): PlayerSignal {
   return s;
 }
 
-const find = (ranked: { playerId: string }[], id: string) => ranked.find((r) => r.playerId === id)!;
+const find = <T extends { playerId: string }>(ranked: T[], id: string): T =>
+  ranked.find((r) => r.playerId === id)!;
 
 describe('the Score on a real board', () => {
   it('is attached to every player and agrees with board order', () => {

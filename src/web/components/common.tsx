@@ -54,9 +54,16 @@ export function CompactTally({ net, label }: { net: number; label?: string }) {
   );
 }
 
-/** Just the number, coloured and signed. For places that already say what it is. */
+/**
+ * The same number, in a place that has already labelled it — a window cell, a
+ * table row — so a zero is a real reading and is printed rather than omitted.
+ *
+ * Shares {@link CompactTally}'s classes on purpose: `+11` under "Lifetime" on
+ * Trades and `+11` beside a name on the draft board are the same fact, and they
+ * should not be two different greens. Size comes from where it sits.
+ */
 export function SignedValue({ net }: { net: number }) {
-  const cls = net > 0 ? 'sig sig-pos' : net < 0 ? 'sig sig-neg' : 'sig sig-none';
+  const cls = net > 0 ? 'tally tally-pos' : net < 0 ? 'tally tally-neg' : 'tally tally-none';
   return <span className={cls}>{net > 0 ? `+${net}` : net}</span>;
 }
 

@@ -885,6 +885,60 @@ body,
   font-weight: 650;
 }
 
+/*
+ * The compact tally, beside the name.
+ *
+ * Small enough that the name stays the loudest thing in the row, and never
+ * allowed to shrink out of the identity line when a long name and an injury tag
+ * compete for it — `flex: none` is what stops the browser resolving that
+ * argument by squashing the number. The sign is the non-colour carrier of the
+ * meaning, so this needs no glyph and no word after it.
+ */
+.tally {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * Beside a name it is a footnote, so it is sized here rather than on the
+ * primitive — the same component labelled "Lifetime" in a Trades window cell is
+ * the headline of that cell and takes its size from there. `flex: none` is what
+ * stops the browser settling an argument between a long name, an injury tag and
+ * this by squashing the number.
+ */
+.player-row-top .tally {
+  font-size: 0.72rem;
+  letter-spacing: -0.01em;
+  flex: none;
+}
+
+.tally-pos {
+  color: var(--pos);
+}
+
+.tally-neg {
+  color: var(--neg);
+}
+
+/* Only ever printed where a zero is a reading rather than an absence. */
+.tally-none {
+  color: var(--text-faint);
+}
+
+/*
+ * The Score: a shade bolder than the metrics beside it, and nothing else.
+ *
+ * The card already carries position tint, a green/red tally, value colour,
+ * survival colour and injury colour. A sixth traffic light — a bar, a grade, a
+ * badge — would be the one that finally made the row unreadable, so this is
+ * weight and colour-of-text only.
+ */
+.score-value {
+  color: var(--text);
+  font-weight: 750;
+}
+
 /* Positive/negative always pair colour with a glyph + word. */
 .sig {
   font-weight: 650;

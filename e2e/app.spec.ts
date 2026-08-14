@@ -305,6 +305,95 @@ test.describe('draft room', () => {
   });
 
   /**
+   * The four numbers, and the tally that stopped being one of them.
+   *
+   * The metrics line used to read `ADP · Value · Next pick · ▲ +6 pos`, which
+   * spent a third of itself on the tally and had no room left for the thing the
+   * board is actually deciding. The tally is now one token beside the name and
+   * the line carries `Score · ADP · Val · Next`.
+   */
+  test('reads Score · ADP · Val · Next, with the tally beside the name', async ({ page }) => {
+    const first = page.getByTestId('recommendation-row').first();
+    const metrics = await first.locator('.player-row-metrics').innerText();
+
+    expect(metrics).toMatch(/Score\s+\d{1,3}/);
+    expect(metrics).toContain('ADP');
+    expect(metrics).toMatch(/\bVal\b/);
+    expect(metrics).toMatch(/\bNext\b/);
+    // The long labels are what cost the fourth column its space.
+    expect(metrics).not.toMatch(/\bValue\b/);
+    expect(metrics).not.toMatch(/Next pick/);
+
+    // Score is a whole number in range, and not a percentage.
+    const score = Number(metrics.match(/Score\s+(\d{1,3})/)![1]);
+    expect(Number.isInteger(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(100);
+    expect(metrics).not.toMatch(/Score\s+\d+%/);
+
+    // The tally: a signed number, in the identity row, with no arrow and no word.
+    const tally = page.getByTestId('compact-tally').first();
+    await expect(tally).toBeVisible();
+    const text = (await tally.innerText()).trim();
+    expect(text).toMatch(/^[+-]\d+$/);
+    for (const gone of ['▲', '▼', 'pos', 'neg']) {
+      expect(text, `"${gone}" should be gone from the tally`).not.toContain(gone);
+    }
+    // Beside the name, not under it.
+    const row = tally.locator('xpath=..');
+    expect(await row.getAttribute('class')).toContain('player-row-top');
+
+    // And nowhere in the metrics line.
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    expect(board.recommendations.some((r: { newsLifetimeNet: number }) => r.newsLifetimeNet !== 0)).toBe(true);
+    for (const row of await page.getByTestId('recommendation-row').all()) {
+      const line = await row.locator('.player-row-metrics').innerText();
+      expect(line).not.toMatch(/▲|▼|\bpos\b|\bneg\b/);
+    }
+  });
+
+  /**
+   * The left-hand number never stopped meaning board rank.
+   *
+   * Adding a second number to the row is exactly how that could go wrong, so
+   * this checks both: the ranks still count 1, 2, 3 down the list, and the
+   * Scores are in the order the ranks claim.
+   */
+  test('keeps the leftmost number as board rank, with Score agreeing', async ({ page }) => {
+    const ranks = await page.locator('[data-testid="recommendation-row"] .rank').allInnerTexts();
+    expect(ranks.slice(0, 5)).toEqual(['1', '2', '3', '4', '5']);
+
+    const scores = await page
+      .locator('[data-testid="recommendation-row"] .score-value')
+      .evaluateAll((nodes) => nodes.map((n) => Number(n.textContent)));
+    expect(scores.length).toBeGreaterThan(3);
+    for (let i = 1; i < scores.length; i++) {
+      expect(scores[i], `row ${i + 1} scores above row ${i}`).toBeLessThanOrEqual(scores[i - 1]!);
+    }
+  });
+
+  /**
+   * Density, at the width where it is hardest.
+   *
+   * Two numbers were added to a row that was already full. The failure this
+   * guards against is not overflow — the shell test covers that — but the
+   * quieter one: the line wrapping into two, or the name being squeezed to
+   * nothing to make room for them.
+   */
+  test('fits the identity row and the metrics line on one line each', async ({ page }) => {
+    const first = page.getByTestId('recommendation-row').first();
+    const name = await first.locator('.player-name').boundingBox();
+    const metrics = await first.locator('.player-row-metrics').boundingBox();
+    const top = await first.locator('.player-row-top').boundingBox();
+
+    // The name is still the dominant thing in its row.
+    expect(name!.width).toBeGreaterThan(top!.width * 0.35);
+    // One line each: two would roughly double these.
+    expect(top!.height).toBeLessThan(34);
+    expect(metrics!.height).toBeLessThan(26);
+  });
+
+  /**
    * Market context, where it exists.
    *
    * The seeded slate prices a few players and not others, which is exactly the
