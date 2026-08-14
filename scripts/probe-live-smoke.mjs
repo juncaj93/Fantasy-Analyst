@@ -90,5 +90,39 @@ function componentOf(rec, key) {
   return rec.components.find((c) => c.key === key)?.contribution ?? 0;
 }
 
+// 3. The quota guard, in production.
+//
+// The point of the budget is that a problem is visible while it is still a
+// number. So this asks the deployed app what it thinks it has spent, and — more
+// importantly — that asking costs nothing: the route reads the ledger, and if it
+// ever started calling the provider this check is what would notice.
+const budget = await get('/api/vegas/budget');
+check('/api/vegas/budget responds', budget.status === 200, `HTTP ${budget.status}`);
+if (budget.json) {
+  const b = budget.json.budget ?? {};
+  check(
+    'it reports a month, a state and a ceiling',
+    typeof b.month === 'string' && typeof b.state === 'string' && b.limit > 0,
+    `${b.used} of ${b.limit} in ${b.month} (${b.state}, counted by ${b.source})`,
+  );
+  check(
+    'the guard is not already in the reserve',
+    b.state !== 'hard_stop',
+    b.note ?? '',
+  );
+  check(
+    'the next refresh is scoped to the roster, not the slate',
+    (budget.json.nextPlan?.estimatedEntities ?? 0) <= 12,
+    `${budget.json.nextPlan?.events?.length ?? 0} game(s), ${budget.json.nextPlan?.estimatedEntities ?? 0} entities`,
+  );
+  const spent = Object.entries(budget.json.bySource ?? {})
+    .map(([source, entities]) => `${source} ${entities}`)
+    .join(' · ');
+  console.log(`      spent this month: ${spent || 'nothing yet'}`);
+  for (const row of (budget.json.recent ?? []).slice(0, 3)) {
+    console.log(`      ${row.at} ${row.source} ${row.outcome} ${row.entities} — ${row.reason ?? ''}`);
+  }
+}
+
 console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}`);
 process.exit(failures === 0 ? 0 : 1);
