@@ -5,7 +5,17 @@
 
 import { useEffect, useState } from 'react';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerSignal } from '../api.ts';
-import { Badge, DetailLabel, Empty, Loading, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
+import {
+  Badge,
+  DetailLabel,
+  Empty,
+  Loading,
+  PositionBadge,
+  Signal,
+  Unknown,
+  formatDate,
+  positionCardClass,
+} from '../components/common.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -114,8 +124,9 @@ export function PlayersScreen() {
       ) : (
         players.map((p) => (
           <button
-            className="player-row"
+            className={positionCardClass(p.position)}
             key={p.id}
+            data-position={(p.position ?? '').toUpperCase()}
             onClick={() => void open(p.id)}
             data-testid="player-search-row"
             data-player-id={p.id}

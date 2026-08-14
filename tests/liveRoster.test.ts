@@ -139,12 +139,71 @@ describe('roster progress line', () => {
       { slot: 'TE', filled: 0, required: 1, accepts: ['TE'] },
       // The third receiver is the one covering FLEX.
       { slot: 'FLEX', filled: 1, required: 1, accepts: ['RB', 'WR', 'TE'] },
+      // …so nobody is left over, and the bench is untouched.
+      { slot: 'BN', filled: 0, required: SHAPE.benchSlots, accepts: [], bench: true },
     ]);
   });
 
-  it('never shows a slot the league does not have', () => {
-    const noKicker = rosterProgress(buildRosterShape(['QB', 'RB', 'WR', 'BN']), { QB: 1, K: 2 });
-    expect(noKicker.map((s) => s.slot)).toEqual(['QB', 'RB', 'WR']);
+  it('never shows a starting slot the league does not have', () => {
+    const noKicker = rosterProgress(buildRosterShape(['QB', 'RB', 'WR', 'BN']), { QB: 1 });
+    expect(noKicker.map((s) => s.slot)).toEqual(['QB', 'RB', 'WR', 'BN']);
+  });
+
+  it('has no bench row in a league configured without a bench', () => {
+    const noBench = rosterProgress(buildRosterShape(['QB', 'RB', 'WR', 'FLEX']), { QB: 1 });
+    expect(noBench.map((s) => s.slot)).toEqual(['QB', 'RB', 'WR', 'FLEX']);
+  });
+
+  it('has no FLEX row in a league that does not use one', () => {
+    const noFlex = rosterProgress(buildRosterShape(['QB', 'RB', 'RB', 'WR', 'BN', 'BN']), { RB: 2 });
+    expect(noFlex.map((s) => s.slot)).toEqual(['QB', 'RB', 'WR', 'BN']);
+  });
+
+  /**
+   * The half of the line that was missing.
+   *
+   * Bench is depth held beyond the lineup, so the same player may never be
+   * counted in both halves — which is the only way `1/2 RB … 0/5 BN` can be
+   * read as a statement about one roster.
+   */
+  describe('bench', () => {
+    it('counts only players the starting slots did not take', () => {
+      // Three receivers: two start, one covers FLEX, none reach the bench.
+      const lean = rosterProgress(SHAPE, { WR: 3 });
+      expect(lean.find((s) => s.slot === 'BN')).toMatchObject({ filled: 0, required: SHAPE.benchSlots });
+
+      // A fourth has nowhere else to go.
+      const deep = rosterProgress(SHAPE, { WR: 4 });
+      expect(deep.find((s) => s.slot === 'BN')).toMatchObject({ filled: 1 });
+    });
+
+    it('counts a player at a position the league does not start as bench depth', () => {
+      const withKicker = rosterProgress(buildRosterShape(['QB', 'RB', 'WR', 'BN', 'BN']), { QB: 1, K: 2 });
+      expect(withKicker.find((s) => s.slot === 'BN')).toMatchObject({ filled: 2, required: 2 });
+    });
+
+    it('reports the league’s configured bench capacity, not a guess', () => {
+      const shape = buildRosterShape(['QB', 'RB', 'WR', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN']);
+      expect(rosterProgress(shape, {}).find((s) => s.slot === 'BN')).toMatchObject({ filled: 0, required: 6 });
+    });
+
+    /**
+     * A roster holding more players than it has room for is a fact about
+     * Sleeper, not about this arithmetic. `9/6 BN` would say the app had
+     * miscounted.
+     */
+    it('never reports more bench used than the league has', () => {
+      const over = rosterProgress(buildRosterShape(['QB', 'BN', 'BN']), { RB: 9 });
+      expect(over.find((s) => s.slot === 'BN')).toMatchObject({ filled: 2, required: 2 });
+    });
+
+    it('moves as picks are made', () => {
+      // SHAPE starts QB/RB/RB/WR/WR/TE/FLEX, so the fourth receiver is the
+      // first player with nowhere to start.
+      expect(rosterProgress(SHAPE, { WR: 3 }).find((s) => s.slot === 'BN')!.filled).toBe(0);
+      expect(rosterProgress(SHAPE, { WR: 4 }).find((s) => s.slot === 'BN')!.filled).toBe(1);
+      expect(rosterProgress(SHAPE, { WR: 5 }).find((s) => s.slot === 'BN')!.filled).toBe(2);
+    });
   });
 
   it('collapses repeated flex slots into one row', () => {

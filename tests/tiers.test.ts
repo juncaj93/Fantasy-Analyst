@@ -213,3 +213,72 @@ describe('the tier map', () => {
     expect(after.severity).toBe('last_in_tier');
   });
 });
+
+/**
+ * The grouping the board draws.
+ *
+ * A tier ends at a cliff and not at a thinning. The two used to be the same
+ * boundary, which put the model at odds with its own words — a thinning says
+ * "comparable players remain", and comparable players are one tier — and made
+ * the grouping useless to draw, because thinnings are common by design.
+ */
+describe('tiers as groups', () => {
+  /**
+   * The brief's own example, in shape rather than in names.
+   *
+   * Four quarterbacks inside six picks of each other, then a material drop to
+   * two more. Nothing here is tuned to a threshold: the same four numbers
+   * spaced like receivers would not group, because the distribution decides.
+   */
+  const QB_CLUSTER = [61, 63, 65, 67, 89, 93];
+
+  it('groups a genuine cluster together and separates what follows it', () => {
+    const rows = describePositionTiers('QB', QB_CLUSTER);
+    expect(rows.map((r) => r.tierIndex)).toEqual([0, 0, 0, 0, 1, 1]);
+    // Exactly one boundary, and it is the 22-pick hole, not any of the twos.
+    expect(rows.filter((r) => r.severity === 'last_in_tier').map((r) => r.adp)).toEqual([67]);
+  });
+
+  it('reports the whole tier to every member of it, not just the ones after him', () => {
+    const map = buildPositionTierMap('QB', QB_CLUSTER, { picksUntilNext: 8 });
+    for (const adp of [61, 63, 65, 67]) expect(map.at(adp).tierSize).toBe(4);
+    for (const adp of [89, 93]) expect(map.at(adp).tierSize).toBe(2);
+    // …while "how many are left if I pass" still counts from him onwards.
+    expect(map.at(61).remainingInTier).toBe(4);
+    expect(map.at(67).remainingInTier).toBe(1);
+  });
+
+  it('says which gap opened a tier, the same way for every member of it', () => {
+    const map = buildPositionTierMap('QB', QB_CLUSTER, { picksUntilNext: 8 });
+    // Nothing opened the best tier.
+    expect(map.at(61).tierGapBefore).toBeNull();
+    expect(map.at(89).tierGapBefore).toBe(22);
+    expect(map.at(93).tierGapBefore).toBe(22);
+  });
+
+  it('knows the difference between a tier that ends and a board that ends', () => {
+    const map = buildPositionTierMap('QB', QB_CLUSTER, { picksUntilNext: 8 });
+    expect(map.at(61).tierEndsAtCliff).toBe(true);
+    // The last tier runs off the end of the board. Nothing is about to run out.
+    expect(map.at(89).tierEndsAtCliff).toBe(false);
+  });
+
+  it('does not split a tier at a thinning', () => {
+    // The reported running back board thins once and never cliffs.
+    const rows = describePositionTiers('RB', RB_BOARD);
+    expect(rows.some((r) => r.severity === 'thinning')).toBe(true);
+    expect(rows.every((r) => r.tierIndex === 0)).toBe(true);
+  });
+
+  /**
+   * Still market-only. This is the property the previous pass established and
+   * the one most easily lost: the grouping is a fact about the board, so it may
+   * not move when the roster does.
+   */
+  it('groups identically whatever the roster looks like', () => {
+    const empty = describePositionTiers('QB', QB_CLUSTER, { picksUntilNext: 0 });
+    const late = describePositionTiers('QB', QB_CLUSTER, { picksUntilNext: 40 });
+    expect(empty.map((r) => r.tierIndex)).toEqual(late.map((r) => r.tierIndex));
+    expect(empty.map((r) => r.severity)).toEqual(late.map((r) => r.severity));
+  });
+});

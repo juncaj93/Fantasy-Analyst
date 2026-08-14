@@ -25,6 +25,7 @@ import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { NewsletterService } from './newsletterService.ts';
+import { PlayerDetailService } from './playerDetailService.ts';
 import type { SleeperUserSetting } from './sleeperSync.ts';
 
 /** `ok` = done, `warn` = needs you, `todo` = not started, `off` = optional/not enabled. */
@@ -134,7 +135,18 @@ export interface SetupStatus {
       reason: string;
     };
   };
+  /**
+   * The two Sleeper feeds behind the expanded player card, and the one thing
+   * Sleeper does not publish.
+   *
+   * Stated here because a half-loaded pipeline is invisible from the card: a
+   * player with no statistics row looks exactly like a player who did not play,
+   * and the only place the difference shows is a count of what landed.
+   */
+  playerDetail: PlayerDetailDiagnostics;
 }
+
+export type PlayerDetailDiagnostics = Awaited<ReturnType<PlayerDetailService['diagnostics']>>;
 
 export class SetupService {
   private readonly players: PlayerRepo;
@@ -315,6 +327,7 @@ export class SetupService {
           reason: seasonStatus.reason,
         },
       },
+      playerDetail: await new PlayerDetailService(this.db).diagnostics(),
     };
   }
 

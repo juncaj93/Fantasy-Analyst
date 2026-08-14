@@ -24,6 +24,7 @@ import {
   PositionBadge,
   Signal,
   Unknown,
+  positionCardClass,
 } from '../components/common.tsx';
 
 interface OpenSlot {
@@ -335,10 +336,11 @@ function RosterRow({
 }) {
   return (
     <button
-      className="player-row"
+      className={positionCardClass(player.position)}
       aria-expanded={selected}
       onClick={() => onToggle(player.playerId)}
       data-testid="roster-row"
+      data-position={(player.position ?? '').toUpperCase()}
       data-player-id={player.playerId}
     >
       <div className="player-row-top">

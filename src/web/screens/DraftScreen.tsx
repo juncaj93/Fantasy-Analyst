@@ -10,25 +10,25 @@
  * only, and never touches Sleeper.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   type DraftBoard,
   type DraftRecommendation,
   type LeagueSummary,
+  type PlayerDetail,
   type SlotProgress,
 } from '../api.ts';
 import {
   DetailLabel,
   Empty,
   Loading,
-  MetricGrid,
   Notice,
   PositionBadge,
   Signal,
-  Stat,
   Unknown,
   formatShortAge,
+  positionCardClass,
 } from '../components/common.tsx';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
@@ -40,6 +40,12 @@ import {
  * be computed from two different rules.
  */
 import { survivalBand } from '../../core/draft/survival.ts';
+/*
+ * The two tier decisions the board draws: where a line goes, and who is worth
+ * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
+ * both live in core so they can be checked without a browser.
+ */
+import { tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import {
   AvoidBadge,
   QueueControl,
@@ -67,8 +73,15 @@ const ALL_FILTER = 'ALL';
 
 /** How many reasons the expanded player shows before "Show all reasons". */
 const REASONS_SHOWN = 3;
-/** Counterpoints are an argument, not a second recommendation. */
-const COUNTERPOINTS_SHOWN = 2;
+/**
+ * One counterpoint, not a second list of reasons.
+ *
+ * Two were shown, which turned "the strongest argument against him" into a pair
+ * of arguments of unequal weight — and the second was usually the first in
+ * other words. The rest are still computed and still in the ledger; the card
+ * shows the one that would actually change a pick.
+ */
+const COUNTERPOINTS_SHOWN = 1;
 
 export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; unlocked: boolean }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
@@ -78,6 +91,16 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
+  /*
+   * Which of the two tier treatments this view gets.
+   *
+   * Filtered to one position the board is a ladder, so the breaks in it can be
+   * drawn where they fall. `ALL` and the queue are mixed-position lists where
+   * consecutive rows are usually different positions, and a line across them
+   * would be claiming a boundary that does not exist — so those get the
+   * proximity tag on the players it is actually about instead.
+   */
+  const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
 
@@ -360,16 +383,20 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
         >
-          {board.recommendations.map((rec, i) => (
-            <RecommendationRow
-              key={rec.playerId}
-              rank={i + 1}
-              rec={rec}
-              expanded={expanded === rec.playerId}
-              onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
-              onQueue={setQueued}
-              busy={flagging === rec.playerId}
-            />
+          {withTierDividers(board.recommendations, isSinglePosition).map((item) => (
+            /* The divider goes above the row that opens the tier, not instead of it. */
+            <Fragment key={item.rec.playerId}>
+              {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
+              <RecommendationRow
+                rank={item.rank}
+                rec={item.rec}
+                showCliffProximity={!isSinglePosition}
+                expanded={expanded === item.rec.playerId}
+                onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
+                onQueue={setQueued}
+                busy={flagging === item.rec.playerId}
+              />
+            </Fragment>
           ))}
         </div>
       )}
@@ -378,30 +405,93 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
 }
 
 /**
- * One line: how much of a starting lineup you have.
+ * Slot names short enough to sit six-across on a 360px phone.
  *
- * `0/1 QB · 1/2 RB · 3/3 WR · 0/1 TE · 0/2 FLEX`, from the league's own roster
- * settings and the live pick stream. Deliberately status only — the ranked list
- * below is where "so take a receiver" belongs, and saying it twice in different
- * words is how a draft screen fills up with prose.
+ * Only the ones whose Sleeper spelling is too long to print. Anything not named
+ * here — `QB`, `RB`, `WR`, `TE`, `DEF`, `BN` — is already as short as it gets
+ * and passes through unchanged, so a league with an unusual slot still shows
+ * its real name rather than a blank.
+ */
+const SLOT_LABELS: Record<string, string> = {
+  FLEX: 'FLX',
+  SUPER_FLEX: 'SFLX',
+  WRRB_FLEX: 'W/R',
+  REC_FLEX: 'W/T',
+  WRRB_WRT: 'FLX',
+  IDP_FLEX: 'IDP',
+};
+
+/**
+ * One line: how much of a starting lineup you have, and how much of a bench.
+ *
+ * `0/1 QB · 1/2 RB · 3/3 WR · 0/1 TE · 0/2 FLX · 0/6 BN`, from the league's own
+ * roster settings and the live pick stream. Deliberately status only — the
+ * ranked list below is where "so take a receiver" belongs, and saying it twice
+ * in different words is how a draft screen fills up with prose.
+ *
+ * The bench number is the one that needs saying out loud, because "how much
+ * room is left" is a different question from "what is missing" and the line
+ * only answered the second. Both come from one allocation in `liveRoster`, so
+ * no player can be counted in both.
  */
 function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   if (progress.length === 0) return null;
   return (
     <div className="roster-progress" data-testid="roster-progress">
-      {progress.map((slot) => (
-        <span
-          key={slot.slot}
-          className={slot.filled >= slot.required ? 'slot slot-done' : 'slot'}
-          data-slot={slot.slot}
-          title={`${slot.filled} of ${slot.required} ${slot.slot} starting slot${slot.required === 1 ? '' : 's'} filled`}
-        >
-          <strong>
-            {slot.filled}/{slot.required}
-          </strong>{' '}
-          {slot.slot}
-        </span>
-      ))}
+      {progress.map((slot) => {
+        const label = SLOT_LABELS[slot.slot] ?? slot.slot;
+        const classes = ['slot'];
+        if (slot.filled >= slot.required) classes.push('slot-done');
+        if (slot.bench) classes.push('slot-bench');
+        return (
+          <span
+            key={slot.slot}
+            className={classes.join(' ')}
+            data-slot={slot.slot}
+            title={
+              slot.bench
+                ? `${slot.filled} of ${slot.required} bench spot${slot.required === 1 ? '' : 's'} used`
+                : `${slot.filled} of ${slot.required} ${slot.slot} starting slot${slot.required === 1 ? '' : 's'} filled`
+            }
+          >
+            <strong>
+              {slot.filled}/{slot.required}
+            </strong>{' '}
+            {label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A row to draw, and whether a tier boundary falls immediately above it. */
+interface BoardItem {
+  rec: DraftRecommendation;
+  rank: number;
+  divider: boolean;
+}
+
+/** The rows, each told whether a tier boundary falls above it. */
+function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
+  const flags = enabled ? tierDividerFlags(recs.map((rec) => rec.tierCliff.tierIndex)) : [];
+  return recs.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
+}
+
+/**
+ * The break itself: a hairline and two words.
+ *
+ * It is a `listitem` rather than a decoration because it is information — a
+ * screen reader that skipped it would hear one undifferentiated run of players
+ * — and because a `list` may not contain anything else.
+ */
+function TierDivider({ gap }: { gap: number | null }) {
+  return (
+    <div className="tier-divider" role="listitem" data-testid="tier-divider">
+      <span className="tier-divider-label">
+        Tier drop
+        {gap == null ? null : <span className="tier-divider-gap"> ~{Math.round(gap)} picks</span>}
+      </span>
     </div>
   );
 }
@@ -417,6 +507,7 @@ function RecommendationRow({
   rank,
   rec,
   expanded,
+  showCliffProximity,
   onToggle,
   onQueue,
   busy,
@@ -424,6 +515,8 @@ function RecommendationRow({
   rank: number;
   rec: DraftRecommendation;
   expanded: boolean;
+  /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
+  showCliffProximity: boolean;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -431,7 +524,7 @@ function RecommendationRow({
   const pos = (rec.position ?? '').toUpperCase();
   return (
     <div
-      className={`player-row card-pos card-pos-${pos}${expanded ? ' player-row-open' : ''}`}
+      className={positionCardClass(pos, expanded ? 'player-row-open' : '')}
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
       data-position={pos}
@@ -453,7 +546,7 @@ function RecommendationRow({
           space. AVOID stays, because "the research is against him" is not
           something a percentage can say.
         */}
-        <DecisionTags rec={rec} />
+        <DecisionTags rec={rec} showCliffProximity={showCliffProximity} />
 
         <div className="player-row-metrics">
           <span className="metric">
@@ -506,21 +599,60 @@ function RecommendationRow({
 }
 
 /**
+ * Last season and this season's outlook, fetched when the card opens.
+ *
+ * Not part of the board response on purpose. The board is what a live draft
+ * waits on and it must never wait on a third party; this is asked for after the
+ * user has already decided to look at one player, and a failure to answer costs
+ * that one section and nothing else.
+ */
+function usePlayerDetail(playerId: string) {
+  const [detail, setDetail] = useState<PlayerDetail | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null);
+    setFailed(false);
+    api
+      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
+
+  return { detail, failed };
+}
+
+/**
  * The expanded player.
  *
- * Ordered the way a pick is actually made: what the app concludes, the four
- * numbers behind it, the two or three strongest reasons, the best argument
- * against, then the market context. The component-by-component arithmetic is
- * unchanged and complete — it has simply stopped being the first thing the user
- * reads during a live draft, which is what it had become.
+ * Rewritten around one rule: **it may not repeat the card it opened from.**
  *
- * Nothing here recalculates anything. Every string and number on screen comes
- * from the same board response as before.
+ * It used to lead with a grid of ADP, value, survival and the news tally —
+ * every one of which is printed two lines above, on the collapsed row, in the
+ * same units. Four tiles of restated numbers is what made the expansion feel
+ * like a diagnostics panel: the reader has already read them, so the first
+ * thing the card does is waste their time.
+ *
+ * What it says instead is what the row cannot: why this rank, the single best
+ * argument against, what is expected of him this season, and what he actually
+ * did last season. Then the arithmetic, in full and folded away.
+ *
+ * Nothing here recalculates anything.
  */
 function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
+  const { detail, failed } = usePlayerDetail(rec.playerId);
+
   // Only the caution leads. The timing states used to headline this card as
-  // "Take Now"; the survival tile below says the same thing in a number, and
-  // the sentence that gave it context is the first reason in the list.
+  // "Take Now"; the survival percentage on the row says the same thing in a
+  // number, and the sentence that gave it context is the first reason below.
   const verdict = rec.avoid.active ? draftVerdict(rec.avoid, rec.wait) : null;
   // Anything already said as the headline does not get said again as a bullet.
   const said = [verdict?.label, verdict?.detail, rec.avoid.active ? rec.avoid.trendNote : null];
@@ -529,51 +661,12 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
   const topReasons = reasons.slice(0, REASONS_SHOWN);
   const moreReasons = reasons.slice(REASONS_SHOWN);
   const cliffNote = saidAlready(rec.tierCliff.message, said) ? null : rec.tierCliff.message;
-  const hasContext =
-    !!cliffNote ||
-    rec.news30Net !== 0 ||
-    rec.news7Net !== 0 ||
-    rec.myGuy.level > 0 ||
-    rec.queued ||
-    rec.marketBaseline?.points != null;
 
   return (
     <div className="explain" data-testid="player-detail">
       {verdict ? (
         <Verdict tone={verdict.tone} label={verdict.label} detail={verdict.detail} glyph={verdict.glyph} />
       ) : null}
-
-      <MetricGrid>
-        <Stat label="ADP" value={rec.adp == null ? <Unknown what="ADP" /> : rec.adp} />
-        <Stat
-          label="Value"
-          value={
-            rec.adpValue == null ? (
-              <Unknown what="value" />
-            ) : (
-              <span className={rec.adpValue > 0 ? 'sig sig-pos' : rec.adpValue < 0 ? 'sig sig-neg' : 'sig sig-none'}>
-                {rec.adpValue > 0 ? '+' : ''}
-                {rec.adpValue}
-              </span>
-            )
-          }
-          hint="Picks between his draft-order rank and this pick"
-        />
-        <Stat
-          label="Next pick"
-          value={
-            rec.survivalProbability == null ? (
-              <Unknown what="survival" />
-            ) : (
-              <span className={`survival survival-${survivalBand(rec.survivalProbability)}`}>
-                {Math.round(rec.survivalProbability * 100)}%
-              </span>
-            )
-          }
-          hint="Chance he is still there at your next pick"
-        />
-        <Stat label="Lifetime" value={<Signal net={rec.newsLifetimeNet} label="lifetime news" />} />
-      </MetricGrid>
 
       {topReasons.length > 0 ? (
         <>
@@ -588,18 +681,68 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
         </>
       ) : null}
 
+      {/*
+        One counterpoint, not a second list of reasons.
+
+        Two were shown before, which turned the strongest argument against him
+        into a pair of arguments of unequal weight — and the second was usually
+        the first restated. When there genuinely is not one, saying so is worth
+        a line: "nothing argues against him" is a real answer, and inventing a
+        doubt to fill the space would be worse than silence.
+      */}
+      <DetailLabel>Counterpoint</DetailLabel>
       {counterpoints.length > 0 ? (
-        <>
-          <DetailLabel>{counterpoints.length === 1 ? 'Counterpoint' : 'Counterpoints'}</DetailLabel>
-          <ReasonList muted items={counterpoints.slice(0, COUNTERPOINTS_SHOWN)} />
-        </>
+        <ReasonList muted items={counterpoints.slice(0, COUNTERPOINTS_SHOWN)} />
+      ) : (
+        <div className="muted" data-testid="no-counterpoint">
+          No major counterpoint.
+        </div>
+      )}
+
+      <SeasonOutlook detail={detail} failed={failed} />
+      <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
+
+      {/*
+        The user's own two marks, which the row shows as glyphs and never
+        explains. Separate lines because they do separate things: the heart
+        moved him up this board, and the star did not and is not claiming to.
+      */}
+      {rec.myGuy.level > 0 || rec.queued ? (
+        <div className="decision-detail" data-testid="player-marks">
+          {rec.myGuy.level > 0 ? (
+            <div className="muted" data-testid="detail-my-guy">
+              {rec.myGuy.stars} {rec.myGuy.label} — your own rating from the players list, separate from the news
+              tally. It moves him up this board.
+            </div>
+          ) : null}
+          {rec.queued ? (
+            <div className="muted" data-testid="detail-queued">
+              ★ In your queue — a bookmark for the ★ filter. It does not change his ranking.
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
-      {hasContext ? (
-        <>
-          <DetailLabel>Market &amp; trend</DetailLabel>
+      {/*
+        Full explainability, kept in full and kept out of the way. Every
+        component, its weight, its raw score and its contribution, exactly as
+        the engine produced them — plus the three readings that used to sit
+        above it and are reference rather than decision: where the market has
+        this player's position breaking, what the season line implies, and the
+        recent halves of a tally whose lifetime figure is already on the row.
+      */}
+      <details className="disclosure" data-testid="advanced-breakdown">
+        <summary>Advanced breakdown</summary>
+
+        {cliffNote || rec.marketBaseline?.points != null || rec.news30Net !== 0 || rec.news7Net !== 0 ? (
           <div className="decision-detail" data-testid="player-context">
             {cliffNote ? <div className="muted">{cliffNote}</div> : null}
+            {rec.marketBaseline?.points != null ? (
+              <div className="muted" data-testid="market-baseline">
+                Season market implies <strong>{rec.marketBaseline.points}</strong> points in this league&rsquo;s
+                scoring — {rec.marketBaseline.note}.
+              </div>
+            ) : null}
             {rec.news30Net !== 0 || rec.news7Net !== 0 ? (
               <div className="player-row-metrics" style={{ marginTop: 0 }}>
                 <span className="metric">
@@ -610,39 +753,9 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
                 </span>
               </div>
             ) : null}
-            {rec.marketBaseline?.points != null ? (
-              <div className="muted" data-testid="market-baseline">
-                Season market implies <strong>{rec.marketBaseline.points}</strong> points in this league&rsquo;s
-                scoring — {rec.marketBaseline.note}.
-              </div>
-            ) : null}
-            {/*
-              Two separate marks, said separately, because they do separate
-              things. The heart moved him up this board; the star did not and
-              is not claiming to.
-            */}
-            {rec.myGuy.level > 0 ? (
-              <div className="muted" data-testid="detail-my-guy">
-                {rec.myGuy.stars} {rec.myGuy.label} — your own rating from the players list, separate from the news
-                tally. It moves him up this board.
-              </div>
-            ) : null}
-            {rec.queued ? (
-              <div className="muted" data-testid="detail-queued">
-                ★ In your queue — a bookmark for the ★ filter. It does not change his ranking.
-              </div>
-            ) : null}
           </div>
-        </>
-      ) : null}
+        ) : null}
 
-      {/*
-        Full explainability, kept in full and kept out of the way. Every
-        component, its weight, its raw score and its contribution, exactly as
-        the engine produced them.
-      */}
-      <details className="disclosure" data-testid="advanced-breakdown">
-        <summary>Advanced breakdown</summary>
         <div className="components">
           {rec.components.map((c) => (
             <div className="component" key={c.key}>
@@ -670,6 +783,103 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
         </div>
       </details>
     </div>
+  );
+}
+
+/**
+ * What is expected of him this season, in the words of whoever wrote it.
+ *
+ * Sleeper serves this through a public endpoint, and it is editorial writing
+ * rather than anything Sleeper or this app generated — so it carries its
+ * author. Two or three sentences: the full text runs past a thousand
+ * characters, and a wall of prose in a live draft is scrolled past rather than
+ * read, taking whatever is under it off the screen.
+ */
+function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
+  if (failed) return null;
+  if (!detail) {
+    return (
+      <>
+        <DetailLabel>Season outlook</DetailLabel>
+        <div className="muted" data-testid="outlook-pending">
+          Looking it up…
+        </div>
+      </>
+    );
+  }
+  if (!detail.outlook) {
+    return (
+      <>
+        <DetailLabel>Season outlook</DetailLabel>
+        <div className="muted" data-testid="outlook-none">
+          {detail.outlookNote ?? 'No outlook published for him.'}
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <DetailLabel>{detail.outlook.title}</DetailLabel>
+      <div className="outlook" data-testid="outlook">
+        {detail.outlook.summary}
+        {detail.outlook.source ? (
+          <span className="outlook-source"> — {detail.outlook.source}, via Sleeper</span>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+/**
+ * `16 GP · WR7 half-PPR`.
+ *
+ * Two numbers, one line, and neither is guessed. A player who did not appear
+ * last season has no games and no finish, and gets a dash: Sleeper will happily
+ * report him as the 1,240th receiver, which looks like a result and is really
+ * his place in a directory.
+ */
+function LastSeasonLine({
+  detail,
+  failed,
+  position,
+}: {
+  detail: PlayerDetail | null;
+  failed: boolean;
+  position: string | null;
+}) {
+  if (failed || !detail) return null;
+  const season = detail.lastSeason?.season;
+  const games = detail.lastSeason?.gamesPlayed;
+  const rank = detail.lastSeason?.positionRank;
+  if (!season) return null;
+  return (
+    <>
+      <DetailLabel>{season}</DetailLabel>
+      <div className="season-line" data-testid="last-season">
+        <span className="metric">
+          {games == null ? (
+            <>
+              GP <Unknown what={`${season} games played`} />
+            </>
+          ) : (
+            <>
+              <strong>{games}</strong> GP
+            </>
+          )}
+        </span>
+        <span className="metric" title={detail.lastSeason?.scoring}>
+          {rank == null ? (
+            <>
+              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
+            </>
+          ) : (
+            <>
+              <strong>{rank}</strong> half-PPR
+            </>
+          )}
+        </span>
+      </div>
+    </>
   );
 }
 
@@ -708,11 +918,26 @@ function SurvivalMetric({ probability }: { probability: number | null }) {
  * name, are the user's own mark, and are how they find who they were looking
  * for.
  */
-function DecisionTags({ rec }: { rec: DraftRecommendation }) {
-  if (!rec.avoid.active) return null;
+function DecisionTags({ rec, showCliffProximity }: { rec: DraftRecommendation; showCliffProximity: boolean }) {
+  const away = showCliffProximity ? tierCliffProximity(rec.tierCliff) : null;
+  if (!rec.avoid.active && away == null) return null;
   return (
     <div className="tag-row" data-testid="decision-tags">
-      <AvoidBadge avoid={rec.avoid} />
+      {rec.avoid.active ? <AvoidBadge avoid={rec.avoid} /> : null}
+      {away == null ? null : (
+        <span
+          className="tag tag-cliff"
+          data-testid="tier-cliff-tag"
+          data-away={away}
+          title={
+            away === 1
+              ? `The last ${rec.position} left in the best group on the board`
+              : `Two ${rec.position}s left in the best group on the board`
+          }
+        >
+          Tier cliff · {away} away
+        </span>
+      )}
     </div>
   );
 }

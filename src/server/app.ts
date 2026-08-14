@@ -52,6 +52,7 @@ import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
+import { PlayerDetailService } from './services/playerDetailService.ts';
 
 export interface AppEnv extends AuthEnv {
   db: Database;
@@ -574,6 +575,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       myGuy: myGuy(flag.level),
       queued: flag.queued,
     });
+  });
+
+  /**
+   * The context an expanded card adds: last season, and this season's outlook.
+   *
+   * Separate from the board on purpose. The board is what a live draft waits
+   * on, and it must never wait on a third party — so nothing here is fetched
+   * until a card is actually open, and then at most once per player per week.
+   *
+   * A read, not a change, so it needs no passphrase.
+   */
+  router.get('/api/players/:id/detail', async (ctx) => {
+    const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+    return jsonResponse(await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id));
   });
 
   /**

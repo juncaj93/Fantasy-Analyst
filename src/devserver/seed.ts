@@ -21,6 +21,9 @@ import { PropsRepo } from '../server/repos/props.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
+import { PlayerDetailRepo } from '../server/repos/playerDetail.ts';
+import { buildSeasonStatLines } from '../core/sleeper/seasonStats.ts';
+import { lastCompletedSeason, outlookSeason } from '../server/services/playerDetailService.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
 export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
@@ -36,6 +39,29 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
   '1010': { player_id: '1010', search_rank: 10, first_name: 'Rhys', last_name: 'Donnelly', full_name: 'Rhys Donnelly', team: 'LAR', position: 'QB', active: true, injury_status: null },
   '1011': { player_id: '1011', search_rank: 11, first_name: 'Cal', last_name: 'Whitfield', full_name: 'Cal Whitfield', team: 'NYJ', position: 'WR', active: true, injury_status: null },
   '1012': { player_id: '1012', search_rank: 12, first_name: 'Bo', last_name: 'Ashworth', full_name: 'Bo Ashworth', team: 'SEA', position: 'RB', active: true, injury_status: null },
+  /*
+   * Depth at quarterback and tight end, so the board has a *shape*.
+   *
+   * Two players at a position cannot have a tier structure — the model refuses
+   * to call a cliff in a pool that small, and rightly — so the demo board had
+   * nothing for the tier layer to draw and nothing for a browser test to check.
+   * These are chosen to produce exactly two structures worth seeing:
+   *
+   *   QB — four inside four picks of each other, then a 22-pick hole. One
+   *        divider, and a top tier of four: too many to be running out.
+   *   TE — two, then a 28-pick hole. The same divider, and a top tier of two,
+   *        which is what `Tier cliff · 2 away` is for.
+   *
+   * Nothing here is tuned to a threshold: the distribution decides, and the
+   * numbers below are ordinary draft spacing for the two positions.
+   */
+  '1013': { player_id: '1013', search_rank: 13, first_name: 'Emil', last_name: 'Draeger', full_name: 'Emil Draeger', team: 'MIN', position: 'QB', active: true, injury_status: null },
+  '1014': { player_id: '1014', search_rank: 14, first_name: 'Jonah', last_name: 'Priestley', full_name: 'Jonah Priestley', team: 'TB', position: 'QB', active: true, injury_status: null },
+  '1015': { player_id: '1015', search_rank: 15, first_name: 'Casey', last_name: 'Lindqvist', full_name: 'Casey Lindqvist', team: 'DEN', position: 'QB', active: true, injury_status: null },
+  '1016': { player_id: '1016', search_rank: 16, first_name: 'Ruben', last_name: 'Castellanos', full_name: 'Ruben Castellanos', team: 'PIT', position: 'QB', active: true, injury_status: null },
+  '1017': { player_id: '1017', search_rank: 17, first_name: 'Miles', last_name: 'Barrowman', full_name: 'Miles Barrowman', team: 'CLE', position: 'TE', active: true, injury_status: null },
+  '1018': { player_id: '1018', search_rank: 18, first_name: 'Teo', last_name: 'Ferreira', full_name: 'Teo Ferreira', team: 'HOU', position: 'TE', active: true, injury_status: null },
+  '1019': { player_id: '1019', search_rank: 19, first_name: 'Grant', last_name: 'Aldous', full_name: 'Grant Aldous', team: 'WAS', position: 'TE', active: true, injury_status: null },
 };
 
 export const DEMO_ADP_CSV = `name,position,team,adp,rank
@@ -46,11 +72,18 @@ Julian Reyes,RB,MIA,11.2,4
 Owen Fitzgerald,WR,PHI,14.6,5
 Silas Mbeki,RB,GB,19.3,6
 Trey Halloran,QB,SF,24.8,7
-Andre Sotelo,TE,DAL,28.1,8
-Nate Kowalski,TE,DET,33.7,9
-Cal Whitfield,WR,NYJ,41.2,10
-Rhys Donnelly,QB,LAR,52.9,11
-Bo Ashworth,RB,SEA,58.4,12
+Emil Draeger,QB,MIN,26.5,8
+Andre Sotelo,TE,DAL,28.1,9
+Jonah Priestley,QB,TB,28.9,10
+Casey Lindqvist,QB,DEN,30.2,11
+Nate Kowalski,TE,DET,33.7,12
+Cal Whitfield,WR,NYJ,41.2,13
+Rhys Donnelly,QB,LAR,52.9,14
+Ruben Castellanos,QB,PIT,55.4,15
+Bo Ashworth,RB,SEA,58.4,16
+Miles Barrowman,TE,CLE,62.0,17
+Teo Ferreira,TE,HOU,66.5,18
+Grant Aldous,TE,WAS,70.1,19
 `;
 
 /** Exercises positive, negative, negation, mixed, and ambiguity paths. */
@@ -222,6 +255,8 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
   // only the weekly half of it.
   const seasonMarkets = await new SeasonMarketService(db, provider).refresh({ force: true });
 
+  await seedPlayerDetail(db);
+
   return {
     players: players.length,
     leagues: 1,
@@ -231,4 +266,98 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     props: propCount,
     seasonMarkets: seasonMarkets.quotes,
   };
+}
+
+/**
+ * Last season and this season's outlook, for the demo board.
+ *
+ * Seeded rather than fetched, for two reasons. The obvious one is that these
+ * players do not exist, so nobody has written an outlook about them. The one
+ * that matters more: the browser suite shares one dev server, and a card that
+ * reaches Sleeper when it finds no cached outlook would turn every test run
+ * into a burst of live requests to a third party for player ids that are not
+ * theirs.
+ *
+ * So the misses are seeded too. A recorded miss is how the app remembers "there
+ * is no outlook for him" without asking again, and seeding one for every demo
+ * player who has no outlook is what keeps the suite entirely local.
+ */
+async function seedPlayerDetail(db: Database): Promise<void> {
+  const now = new Date();
+  const at = now.toISOString();
+  const statsSeason = lastCompletedSeason(now);
+  const season = outlookSeason(now);
+  const repo = new PlayerDetailRepo(db);
+
+  /*
+   * A spread that exercises every state the card has: a full season, a
+   * partial one, and a player who did not appear at all — whose line must come
+   * back as a dash rather than as a rank in the twelve hundreds.
+   */
+  const lines: { id: string; position: string; gp: number | null; points: number | null }[] = [
+    { id: '1001', position: 'RB', gp: 17, points: 291.4 },
+    { id: '1002', position: 'WR', gp: 16, points: 268.9 },
+    { id: '1003', position: 'QB', gp: 17, points: 334.2 },
+    { id: '1004', position: 'TE', gp: 12, points: 148.6 },
+    { id: '1005', position: 'WR', gp: 17, points: 254.1 },
+    { id: '1006', position: 'RB', gp: 14, points: 212.8 },
+    { id: '1007', position: 'WR', gp: 15, points: 201.5 },
+    { id: '1008', position: 'RB', gp: 9, points: 118.3 },
+    { id: '1009', position: 'TE', gp: 17, points: 161.2 },
+    { id: '1010', position: 'QB', gp: 13, points: 233.7 },
+    { id: '1011', position: 'WR', gp: 17, points: 176.4 },
+    // Never played: no games, no points, and therefore no finish.
+    { id: '1012', position: 'RB', gp: null, points: null },
+    { id: '1013', position: 'QB', gp: 16, points: 289.5 },
+    { id: '1014', position: 'QB', gp: 15, points: 271.3 },
+    { id: '1015', position: 'QB', gp: 17, points: 262.9 },
+    { id: '1016', position: 'QB', gp: 11, points: 168.4 },
+    { id: '1017', position: 'TE', gp: 16, points: 139.8 },
+    { id: '1018', position: 'TE', gp: 14, points: 121.5 },
+    { id: '1019', position: 'TE', gp: null, points: null },
+  ];
+
+  // Ranked by the same function production uses, so the demo cannot show a
+  // finish the real pipeline would not have produced.
+  const payload: Record<string, { gp: number | null; pts_half_ppr: number | null }> = {};
+  const positions = new Map(lines.map((l) => [l.id, l.position]));
+  for (const line of lines) payload[line.id] = { gp: line.gp, pts_half_ppr: line.points };
+  const { lines: ranked, diagnostics } = buildSeasonStatLines(payload, (id) => positions.get(id) ?? null);
+
+  await repo.saveSeasonStats(statsSeason, ranked, at);
+  await repo.recordStatsRun({
+    season: statsSeason,
+    fetchedAt: at,
+    source: 'demo seed',
+    rowsReturned: diagnostics.returned,
+    rowsMatched: diagnostics.matched,
+    rowsUnmatched: diagnostics.unmatched,
+    rankDisagreements: diagnostics.rankDisagreements,
+    note: 'synthetic demo data',
+  });
+
+  /** Two written outlooks; everyone else is honestly recorded as having none. */
+  const written: Record<string, string> = {
+    '1005':
+      'Brennan enters his third year as the clear number one in Buffalo after a target share that climbed every ' +
+      'month of last season. The arrival of a second inside receiver should cost him volume on early downs but not ' +
+      'in the red zone, where he was targeted more than anyone at the position. Health is the only real question: ' +
+      'the ankle that cost him two games in November was managed rather than resolved.',
+    '1004':
+      'Sotelo is being used as a move tight end rather than in line, which is what makes him interesting in a ' +
+      'half-PPR league. Dallas lost both slot receivers and has not replaced either. He is listed as questionable ' +
+      'into camp with a hamstring, and the staff have been unusually candid that they will not rush him.',
+  };
+
+  for (const line of lines) {
+    const body = written[line.id];
+    if (body) {
+      await repo.saveOutlook(
+        { playerId: line.id, season, title: `${season} Season Outlook`, body, source: 'demo' },
+        at,
+      );
+    } else {
+      await repo.recordOutlookMiss(line.id, season, at, 'no outlook published for this player');
+    }
+  }
 }

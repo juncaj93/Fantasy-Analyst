@@ -116,24 +116,41 @@ export function openStarters(shape: RosterShape, counts: Record<string, number>)
 }
 
 export interface SlotProgress {
-  /** `QB`, `RB`, …, or a flex slot name such as `FLEX` or `SUPER_FLEX`. */
+  /** `QB`, `RB`, …, a flex slot name such as `FLEX` or `SUPER_FLEX`, or `BN`. */
   slot: string;
   filled: number;
   required: number;
   /** Which positions can fill it. */
   accepts: string[];
+  /**
+   * True for the bench row, which counts depth rather than a lineup slot.
+   *
+   * The draft line renders it the same way, but the two are not the same
+   * question: a starting slot is a hole in your lineup, and a bench spot is
+   * room to keep somebody.
+   */
+  bench?: boolean;
 }
 
 /**
- * Every starting slot the league actually has, and how many are covered.
+ * Every starting slot the league actually has, how many are covered, and how
+ * much of the bench has been used.
  *
  * The same allocation as `openStarters` — fixed slots first, then whatever is
  * left over offered to the flex — reported from the other end: filled out of
  * required, in the league's own order, so the draft header can say
- * `0/1 QB · 1/2 RB · 3/3 WR` instead of a paragraph about what to do next.
+ * `0/1 QB · 1/2 RB · 3/3 WR · 0/2 FLEX · 0/6 BN` instead of a paragraph about
+ * what to do next.
  *
- * Slots the league does not have simply do not appear. Bench spots are not
- * slots to fill, so they are not here either.
+ * Slots the league does not have simply do not appear, and neither does the
+ * bench row in a league configured without one.
+ *
+ * **Bench is depth, not leftovers of a lineup decision.** It is every player
+ * held beyond the ones this same allocation put in a starting slot — so a
+ * fourth receiver in a league that starts three counts once, on the bench, and
+ * never twice. No player is assigned to a *particular* bench spot, because
+ * mid-draft that is a decision the user has not made and the app must not
+ * invent one.
  */
 export function rosterProgress(shape: RosterShape, counts: Record<string, number>): SlotProgress[] {
   const spare: Record<string, number> = { ...counts };
@@ -157,6 +174,29 @@ export function rosterProgress(shape: RosterShape, counts: Record<string, number
     }
     row.required++;
     if (source) row.filled++;
+  }
+
+  if (shape.benchSlots > 0) {
+    /*
+     * Whatever the starting allocation above did not consume.
+     *
+     * Counting the leftovers rather than re-deriving from totals is what keeps
+     * the two halves of the line consistent: every player is in exactly one of
+     * these numbers, including a player at a position this league does not
+     * start, who is occupying a bench spot and nothing else.
+     *
+     * It cannot exceed the configured bench — a roster that somehow holds more
+     * players than it has room for is a Sleeper-side fact, and reporting
+     * `9/6 BN` would say the app had miscounted rather than that the league had.
+     */
+    const depth = Object.values(spare).reduce((total, left) => total + Math.max(0, left), 0);
+    rows.push({
+      slot: 'BN',
+      filled: Math.min(depth, shape.benchSlots),
+      required: shape.benchSlots,
+      accepts: [],
+      bench: true,
+    });
   }
 
   return rows;

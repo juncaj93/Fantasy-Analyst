@@ -20,6 +20,7 @@ import { createApp, refreshVegas, type AppEnv } from '../server/app.ts';
 import type { Database } from '../server/db.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
+import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 
 export interface WorkerEnv {
   DB: Database;
@@ -81,6 +82,21 @@ export default {
     const appEnv = toAppEnv(env);
     if (event.cron.startsWith('0 9')) {
       await new SleeperSyncService(env.DB, appEnv.sleeper).syncPlayers();
+      /*
+       * Last season's line, on the same clock and deliberately after the
+       * dictionary: the statistics are matched against the players this app
+       * knows, so syncing them in the other order would report every new player
+       * as unmatched for a day.
+       *
+       * A finished season does not change, so a failure here is not worth
+       * taking the player sync down with it — the cards fall back to saying
+       * nothing, which is what they said before this existed.
+       */
+      try {
+        await new PlayerDetailService(env.DB, { sleeper: appEnv.sleeper }).refreshSeasonStats();
+      } catch (err) {
+        console.error('season stats refresh failed', err);
+      }
       return;
     }
     await refreshVegas(appEnv);

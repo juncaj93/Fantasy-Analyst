@@ -86,11 +86,35 @@ export type CliffSeverity = 'none' | 'thinning' | 'last_in_tier';
 
 export interface TierCliff {
   severity: CliffSeverity;
-  /** Which cluster the player sits in, 0-based, best first. */
+  /** Which tier the player sits in, 0-based, best available first. */
   tierIndex: number | null;
-  /** Players in his cluster from him onwards, himself included. */
+  /** Players in his tier from him onwards, himself included. */
   remainingInTier: number;
-  /** Picks to the next cluster, when he is at the edge of one. */
+  /**
+   * Every available player in his tier, wherever he sits in it.
+   *
+   * `remainingInTier` answers "how many are left if I pass on him", which is
+   * the question the ranking asks. This answers "how big is this group", which
+   * is the question the board asks — and the two differ for everyone except the
+   * first player in a tier.
+   */
+  tierSize: number;
+  /**
+   * True when the tier is closed by a real cliff rather than by running out of
+   * board. The last tier at a position has nothing after it, and "last group
+   * left" is not a warning about scarcity.
+   */
+  tierEndsAtCliff: boolean;
+  /**
+   * The cliff gap that opened this tier, in picks — the same value for every
+   * member of it, `null` for the best tier, which nothing opened.
+   *
+   * Carried by every member rather than only by the first because the board is
+   * ordered by the ranking and not by draft order, so which member of a tier
+   * appears first on screen is not knowable here.
+   */
+  tierGapBefore: number | null;
+  /** Picks to the next tier, when he is at the edge of one. */
   gapToNextTier: number | null;
   /** Cluster-mates expected to still be there at the user's next pick. */
   survivingTierMates: number;
@@ -128,6 +152,9 @@ export const NO_CLIFF: TierCliff = {
   severity: 'none',
   tierIndex: null,
   remainingInTier: 0,
+  tierSize: 0,
+  tierEndsAtCliff: false,
+  tierGapBefore: null,
   gapToNextTier: null,
   survivingTierMates: 0,
   gapToNext: null,
@@ -370,12 +397,27 @@ function capCliffs(rows: TierRow[]): void {
   }
 }
 
-/** A cluster ends wherever the board thins. Tier 0 is the best group left. */
+/**
+ * A tier ends at a cliff. Tier 0 is the best group left.
+ *
+ * It used to end at *either* label, cliff or thinning, which put the model at
+ * odds with its own words: a thinning says in as many words that "comparable
+ * players remain", and players who are comparable to each other are one tier by
+ * definition. Splitting there also made the count useless to draw — thinnings
+ * are common by design (any gap 1.25× the local spacing qualifies), so a real
+ * receiver board carried about twenty of them across eighty players, and a line
+ * every four rows is wallpaper rather than structure. Cliffs are rare and
+ * capped: seven across those same eighty.
+ *
+ * Nothing about ranking moves. `score` is computed from severity, anomaly and
+ * urgency and never from which tier a player landed in; the grouping is read by
+ * the board and by the messages, both of which now mean one thing.
+ */
 function numberTiers(rows: TierRow[]): void {
   let tier = 0;
   for (const row of rows) {
     row.tierIndex = tier;
-    if (row.severity !== 'none') tier += 1;
+    if (row.severity === 'last_in_tier') tier += 1;
   }
 }
 
@@ -391,6 +433,9 @@ function toCliff(
     severity: row.severity,
     tierIndex: row.tierIndex,
     remainingInTier: 0,
+    tierSize: 0,
+    tierEndsAtCliff: false,
+    tierGapBefore: null,
     gapToNextTier: null,
     survivingTierMates: 0,
     gapToNext: row.gapToNext,
@@ -401,7 +446,7 @@ function toCliff(
     message: null,
   };
 
-  // His cluster, from him to its end: the players who are genuinely the same
+  // His tier, from him to its end: the players who are genuinely the same
   // decision as him. Everything before him is better and goes first.
   let remaining = 0;
   let surviving = 0;
@@ -410,10 +455,26 @@ function toCliff(
     const at = countAt.get(rows[j]!.adp) ?? 1;
     remaining += at;
     if (rows[j]!.adp > horizon) surviving += at;
-    if (rows[j]!.severity !== 'none') break;
+    if (rows[j]!.severity === 'last_in_tier') {
+      base.tierEndsAtCliff = true;
+      break;
+    }
   }
   base.remainingInTier = remaining;
   base.survivingTierMates = surviving;
+
+  // The whole tier, including the players ahead of him in it, and the cliff
+  // that opened it. Both are facts about the group rather than about him, so
+  // every member reports the same numbers.
+  let size = 0;
+  for (const other of rows) {
+    if (other.tierIndex === row.tierIndex) size += countAt.get(other.adp) ?? 1;
+  }
+  base.tierSize = size;
+  if (row.tierIndex > 0) {
+    const opener = rows.find((r) => r.tierIndex === row.tierIndex - 1 && r.severity === 'last_in_tier');
+    base.tierGapBefore = opener?.gapToNext ?? null;
+  }
 
   if (row.severity === 'none') return base;
 

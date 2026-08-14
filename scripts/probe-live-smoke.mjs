@@ -58,8 +58,11 @@ const status = await get('/api/setup/status');
 const draftId = status.json?.league?.draftId ?? null;
 check('a league with a draft is configured', !!draftId, draftId ?? 'none');
 
+// Hoisted, and asked for the whole board rather than five rows: the tier checks
+// below are about the shape of a position's ladder, and five players is not one.
+let board = { status: 0, json: null };
 if (draftId) {
-  const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=5`);
+  board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=200`);
   check('the draft board builds', board.status === 200, `HTTP ${board.status}`);
   const rec = board.json?.recommendations?.[0];
   check('it returns ranked players', !!rec, rec ? rec.name : 'none');
@@ -121,6 +124,92 @@ if (budget.json) {
   console.log(`      spent this month: ${spent || 'nothing yet'}`);
   for (const row of (budget.json.recent ?? []).slice(0, 3)) {
     console.log(`      ${row.at} ${row.source} ${row.outcome} ${row.entities} — ${row.reason ?? ''}`);
+  }
+}
+
+// 4. The tier ladder, as the board would draw it.
+//
+// Two failure modes, opposite and both loud. Every player at a position tagged
+// `Tier cliff` is the bug this label has already shipped once; no tier
+// structure at all means the grouping quietly collapsed to one group and the
+// dividers stopped being drawn. Neither is visible from a unit test, because
+// production has a real board on it.
+if (board.json) {
+  const recs = board.json.recommendations ?? [];
+  const byPosition = new Map();
+  for (const rec of recs) {
+    if (!rec.position) continue;
+    const list = byPosition.get(rec.position);
+    if (list) list.push(rec);
+    else byPosition.set(rec.position, [rec]);
+  }
+  for (const [position, players] of [...byPosition].sort()) {
+    const tiers = new Set(players.map((p) => p.tierCliff?.tierIndex).filter((t) => t != null));
+    // Only the last one or two of the group in play may carry the tag.
+    const tagged = players.filter(
+      (p) => p.tierCliff?.tierIndex === 0 && p.tierCliff?.tierEndsAtCliff && (p.tierCliff?.tierSize ?? 0) <= 2,
+    );
+    check(
+      `${position}: the cliff tag is on nobody or on the last of a group`,
+      tagged.length <= 2,
+      `${players.length} available, ${tiers.size} tier(s), ${tagged.length} tagged`,
+    );
+    const currentTier = players.filter((p) => p.tierCliff?.tierIndex === 0);
+    check(
+      `${position}: the group in play reports one size to all of its members`,
+      new Set(currentTier.map((p) => p.tierCliff?.tierSize)).size <= 1,
+      `sizes: ${[...new Set(currentTier.map((p) => p.tierCliff?.tierSize))].join(', ')}`,
+    );
+  }
+}
+
+// 5. The expanded card's two feeds.
+//
+// Both are caches of Sleeper data, and a card cannot tell a cache that is empty
+// from a player who has nothing — so the counts are asked for directly. Read
+// from the status already fetched above; nothing here needs a second request.
+const detail = status.json?.playerDetail;
+check('setup reports where the player-card data comes from', !!detail, detail ? '' : 'missing');
+if (detail) {
+  check(
+    `${detail.stats.season} statistics are loaded`,
+    (detail.stats.players ?? 0) > 0,
+    `${detail.stats.players} players, last run ${detail.stats.lastRunAt ?? 'never'}`,
+  );
+  check(
+    'the outlook cache is answering rather than empty',
+    (detail.outlook.stored ?? 0) + (detail.outlook.noneAvailable ?? 0) >= 0,
+    `${detail.outlook.stored} stored, ${detail.outlook.noneAvailable} with none published`,
+  );
+  check(
+    'roster percentage is reported as unavailable, not invented',
+    detail.rosterPercent?.available === false,
+    detail.rosterPercent?.note ?? '',
+  );
+}
+
+// One player's detail, end to end, on whoever is top of the live board.
+const topPlayer = board.json?.recommendations?.[0];
+if (topPlayer) {
+  const one = await get(`/api/players/${topPlayer.playerId}/detail`);
+  check(`/api/players/:id/detail answers for ${topPlayer.name}`, one.status === 200, `HTTP ${one.status}`);
+  if (one.json) {
+    const last = one.json.lastSeason;
+    // A finish is only printed for somebody who scored. A four-figure rank
+    // would mean the provider's whole-directory ordering had leaked through.
+    check(
+      'any positional finish is a plausible one',
+      !last?.positionRank || /^[A-Z]+([1-9]\d{0,2})$/.test(last.positionRank),
+      `${last?.season ?? '—'}: ${last?.gamesPlayed ?? '—'} GP, ${last?.positionRank ?? 'no finish'}`,
+    );
+    const summary = one.json.outlook?.summary ?? '';
+    check(
+      'any outlook is short and attributed',
+      !one.json.outlook || (summary.length > 0 && summary.length < 500 && !!one.json.outlook.source),
+      one.json.outlook
+        ? `${summary.length} chars from ${one.json.outlook.source}`
+        : (one.json.outlookNote ?? 'none published'),
+    );
   }
 }
 
