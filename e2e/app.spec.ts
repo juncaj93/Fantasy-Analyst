@@ -775,6 +775,20 @@ test.describe('draft room', () => {
     expect(status.injury.reportSource).toBe('nflverse');
     expect(status.injury.lastRun.outcome).toBe('ok');
     expect(status.injury.players).toBeGreaterThan(0);
+
+    /*
+     * The three timestamps, which are the whole reason the five-minute cadence
+     * is honest. "Checked" moves every tick; the report itself changes rarely.
+     * A panel that showed only the first would claim the data was two minutes
+     * old when its newest report was from Wednesday.
+     */
+    await expect(panel.getByTestId('injury-freshness')).toContainText(/Checked/i);
+    await expect(panel.getByTestId('injury-freshness')).toContainText(/the report itself last changed/i);
+    expect(Date.parse(status.injury.sourceModifiedAt)).toBeLessThan(Date.parse(status.injury.checkedAt));
+
+    // And what actually moved, which only exists because transitions are stored.
+    await expect(panel.getByTestId('injury-events')).toContainText(/limited → full/i);
+    expect(status.injury.writesToday).toBeLessThan(status.injury.writeCeiling);
   });
 
   test('the expanded player fits on the screen without opening Advanced', async ({ page }) => {

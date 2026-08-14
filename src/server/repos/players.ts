@@ -209,6 +209,32 @@ export class PlayerRepo {
   }
 
   /** Search by name fragment for the Players screen. */
+  /**
+   * Players whose lookup key is one of these, and nothing else.
+   *
+   * The injury ingest needs to resolve a few hundred names out of a dictionary
+   * of four thousand, and building an in-memory index of the whole dictionary to
+   * do it cost 17ms of CPU — more than a Worker invocation is allowed in total.
+   * This asks the indexed column for exactly the keys in hand instead.
+   *
+   * Returns every candidate for an ambiguous key rather than picking one: the
+   * caller decides, and declining is a legitimate answer.
+   */
+  async findByNormalizedNames(names: string[]): Promise<CanonicalPlayer[]> {
+    const unique = [...new Set(names.filter((n) => n.length > 0))];
+    if (unique.length === 0) return [];
+    const out: CanonicalPlayer[] = [];
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const holes = batch.map(() => '?').join(', ');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM players WHERE normalized_name IN (${holes})`)
+        .bind(...batch)
+        .all<PlayerRow>();
+      for (const row of results ?? []) out.push(toPlayer(row));
+    }
+    return out;
+  }
+
   async search(query: string, limit = 40): Promise<CanonicalPlayer[]> {
     const like = `%${query.toLowerCase()}%`;
     const rows = await this.db

@@ -13,6 +13,7 @@
 
 import { chunk, MAX_BOUND_PARAMS, type Database } from '../db.ts';
 import { normalizePractice, type PracticeStatus } from '../../core/injury/model.ts';
+import type { ComparableInjury, InjuryEvent } from '../../core/injury/diff.ts';
 
 export interface StoredInjuryReport {
   playerId: string;
@@ -43,6 +44,14 @@ export interface InjurySourceRun {
   /** `ok` | `not_published` | `failed` — a preseason 404 is not a failure. */
   outcome: 'ok' | 'not_published' | 'failed';
   note: string | null;
+  /**
+   * Players whose normalized state moved in this ingest.
+   *
+   * Present only on a run that actually wrote something, and not persisted —
+   * it is the hand-off to targeted Start/Sit and Trade recomputation, which is
+   * a fact about this invocation rather than about the run's history.
+   */
+  changedPlayerIds?: string[];
 }
 
 /** Bound parameters per row, for D1's cap. */
@@ -225,5 +234,314 @@ function toReport(row: Record<string, unknown>): StoredInjuryReport {
     source: String(row['source']),
     publishedAt: row['published_at'] == null ? null : String(row['published_at']),
     fetchedAt: String(row['fetched_at']),
+  };
+}
+
+
+/** What we last saw upstream, and who currently holds the ingest lease. */
+export interface InjurySourceState {
+  source: string;
+  season: string;
+  etag: string | null;
+  lastModified: string | null;
+  /** When we last asked. Moves every tick, change or no change. */
+  checkedAt: string | null;
+  /** When the FILE last changed. The one that belongs next to a designation. */
+  sourceModifiedAt: string | null;
+  /** When we last actually stored something. */
+  ingestedAt: string | null;
+  lastOutcome: string | null;
+  lastNote: string | null;
+  lockOwner: string | null;
+  lockExpiresAt: string | null;
+}
+
+/**
+ * Storage for the five-minute check: the fingerprint, the lease, the events and
+ * the write budget.
+ *
+ * Split from {@link InjuryRepo} only by concern, not by table ownership — it is
+ * the same database and the same migration. Kept in one class so the ingest
+ * reads and writes its own bookkeeping without threading two repositories
+ * through every call.
+ */
+export class InjurySourceRepo {
+  constructor(private readonly db: Database) {}
+
+  async get(source: string, season: string): Promise<InjurySourceState | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM injury_source_state WHERE source = ? AND season = ?`)
+      .bind(source, season)
+      .first<Record<string, unknown>>();
+    return row ? toSourceState(row) : null;
+  }
+
+  /**
+   * Record that we looked.
+   *
+   * Deliberately separate from recording that we *stored* something: the common
+   * tick updates only `checked_at`, which is one write against a one-row table
+   * and is what keeps "is the pipeline alive" answerable without pretending the
+   * data is newer than it is.
+   */
+  async recordCheck(
+    source: string,
+    season: string,
+    patch: {
+      checkedAt: string;
+      etag?: string | null;
+      lastModified?: string | null;
+      sourceModifiedAt?: string | null;
+      ingestedAt?: string | null;
+      outcome: string;
+      note: string | null;
+    },
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO injury_source_state
+           (source, season, etag, last_modified, checked_at, source_modified_at, ingested_at,
+            last_outcome, last_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source, season) DO UPDATE SET
+           -- COALESCE so a check that learned nothing new does not erase what
+           -- an earlier successful ingest already established.
+           etag = COALESCE(excluded.etag, etag),
+           last_modified = COALESCE(excluded.last_modified, last_modified),
+           checked_at = excluded.checked_at,
+           source_modified_at = COALESCE(excluded.source_modified_at, source_modified_at),
+           ingested_at = COALESCE(excluded.ingested_at, ingested_at),
+           last_outcome = excluded.last_outcome,
+           last_note = excluded.last_note`,
+      )
+      .bind(
+        source,
+        season,
+        patch.etag ?? null,
+        patch.lastModified ?? null,
+        patch.checkedAt,
+        patch.sourceModifiedAt ?? null,
+        patch.ingestedAt ?? null,
+        patch.outcome,
+        patch.note,
+      )
+      .run();
+  }
+
+  /**
+   * Claim the right to ingest, or find out somebody else has it.
+   *
+   * A compare-and-swap, because D1 has no advisory locks: the UPDATE only
+   * matches a row whose lease is absent or expired, and SQLite reports how many
+   * rows it changed. One means it is ours. Zero means another invocation is
+   * mid-ingest and this one should stop — downloading and parsing the same file
+   * twice concurrently is exactly the waste the five-minute cadence could
+   * otherwise cause.
+   *
+   * The lease expires rather than being released, so a Worker killed mid-parse
+   * cannot wedge the pipeline: the first tick after expiry takes over.
+   */
+  async acquireLock(
+    source: string,
+    season: string,
+    owner: string,
+    now: Date,
+    leaseSeconds: number,
+  ): Promise<boolean> {
+    const expiresAt = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+    const nowIso = now.toISOString();
+
+    // The row may not exist on a first ever run; insert it unlocked, ignoring a
+    // race where somebody else inserted it first.
+    await this.db
+      .prepare(
+        `INSERT INTO injury_source_state (source, season, checked_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(source, season) DO NOTHING`,
+      )
+      .bind(source, season, nowIso)
+      .run();
+
+    const result = await this.db
+      .prepare(
+        `UPDATE injury_source_state
+            SET lock_owner = ?, lock_expires_at = ?
+          WHERE source = ? AND season = ?
+            AND (lock_expires_at IS NULL OR lock_expires_at < ?)`,
+      )
+      .bind(owner, expiresAt, source, season, nowIso)
+      .run();
+
+    return (result.meta.changes ?? 0) > 0;
+  }
+
+  /** Give it back early. Only the owner may, so a late finisher cannot free a lease it lost. */
+  async releaseLock(source: string, season: string, owner: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE injury_source_state SET lock_owner = NULL, lock_expires_at = NULL
+          WHERE source = ? AND season = ? AND lock_owner = ?`,
+      )
+      .bind(source, season, owner)
+      .run();
+  }
+
+  // ------------------------------------------------------------------ events
+
+  /**
+   * Append transitions, ignoring ones already recorded.
+   *
+   * `event_key` is the primary key and is derived from the transition itself,
+   * so `DO NOTHING` is what makes re-ingesting an unchanged file free rather
+   * than duplicative.
+   */
+  async recordEvents(events: InjuryEvent[], meta: { source: string; sourceModifiedAt: string | null; detectedAt: string }): Promise<number> {
+    if (events.length === 0) return 0;
+    let written = 0;
+    const perStatement = Math.floor(MAX_BOUND_PARAMS / 10);
+    for (const batch of chunk(events, perStatement)) {
+      const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const binds: (string | number | null)[] = [];
+      for (const e of batch) {
+        binds.push(
+          e.eventKey,
+          e.playerId,
+          e.season,
+          e.week,
+          e.kind,
+          e.from,
+          e.to,
+          meta.source,
+          meta.sourceModifiedAt,
+          meta.detectedAt,
+        );
+      }
+      const result = await this.db
+        .prepare(
+          `INSERT INTO injury_events
+             (event_key, player_id, season, week, kind, from_value, to_value, source,
+              source_modified_at, detected_at)
+           VALUES ${values}
+           ON CONFLICT(event_key) DO NOTHING`,
+        )
+        .bind(...binds)
+        .run();
+      written += result.meta.changes ?? 0;
+    }
+    return written;
+  }
+
+  /** The most recent transitions, for diagnostics and for "what changed since". */
+  async recentEvents(limit = 20): Promise<
+    { playerId: string; season: string; week: number; kind: string; from: string | null; to: string | null; detectedAt: string }[]
+  > {
+    const { results } = await this.db
+      .prepare(
+        `SELECT player_id, season, week, kind, from_value, to_value, detected_at
+           FROM injury_events ORDER BY detected_at DESC, rowid DESC LIMIT ?`,
+      )
+      .bind(Math.max(1, limit))
+      .all<Record<string, unknown>>();
+    return (results ?? []).map((row) => ({
+      playerId: String(row['player_id']),
+      season: String(row['season']),
+      week: Number(row['week']),
+      kind: String(row['kind']),
+      from: row['from_value'] == null ? null : String(row['from_value']),
+      to: row['to_value'] == null ? null : String(row['to_value']),
+      detectedAt: String(row['detected_at']),
+    }));
+  }
+
+  // ------------------------------------------------------------ write budget
+
+  /** How many rows this pipeline has written today (UTC, matching D1's reset). */
+  async writesToday(day: string): Promise<number> {
+    const row = await this.db
+      .prepare(`SELECT rows_written FROM injury_write_budget WHERE day = ?`)
+      .bind(day)
+      .first<Record<string, unknown>>();
+    return Number(row?.['rows_written'] ?? 0);
+  }
+
+  async addWrites(day: string, rows: number, now: string): Promise<void> {
+    if (rows <= 0) return;
+    await this.db
+      .prepare(
+        `INSERT INTO injury_write_budget (day, rows_written, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(day) DO UPDATE SET
+           rows_written = rows_written + excluded.rows_written,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(day, rows, now)
+      .run();
+  }
+
+  /**
+   * The stored rows the incoming ingest would overwrite, keyed for the diff.
+   *
+   * Reads only the (player, week) pairs the file actually contains, so the
+   * comparison costs one read of roughly the same size as the ingest rather
+   * than a scan of the season.
+   */
+  async comparableFor(keys: { playerId: string; week: number }[], season: string): Promise<Map<string, ComparableInjury>> {
+    const out = new Map<string, ComparableInjury>();
+    if (keys.length === 0) return out;
+
+    const ids = [...new Set(keys.map((k) => k.playerId))];
+    const weeks = [...new Set(keys.map((k) => k.week))];
+    // Bounded by the parameter cap: chunk the players, and pass the weeks whole
+    // since a season has at most a couple of dozen.
+    for (const batch of chunk(ids, Math.max(1, MAX_BOUND_PARAMS - weeks.length - 1))) {
+      const idHoles = batch.map(() => '?').join(', ');
+      const weekHoles = weeks.map(() => '?').join(', ');
+      const { results } = await this.db
+        .prepare(
+          `SELECT player_id, season, week, report_status, primary_injury, practice_status
+             FROM player_injury_reports
+            WHERE season = ? AND player_id IN (${idHoles}) AND week IN (${weekHoles})`,
+        )
+        .bind(season, ...batch, ...weeks)
+        .all<Record<string, unknown>>();
+      for (const row of results ?? []) {
+        const item: ComparableInjury = {
+          playerId: String(row['player_id']),
+          season: String(row['season']),
+          week: Number(row['week']),
+          reportStatus: row['report_status'] == null ? null : String(row['report_status']),
+          primaryInjury: row['primary_injury'] == null ? null : String(row['primary_injury']),
+          practiceStatus: normalizePractice(row['practice_status'] == null ? null : String(row['practice_status'])),
+        };
+        out.set(`${item.playerId}:${item.season}:${item.week}`, item);
+      }
+    }
+    return out;
+  }
+
+  /** How many rows the store holds for a season, for the anomaly guard. */
+  async storedCount(season: string): Promise<number> {
+    const row = await this.db
+      .prepare(`SELECT COUNT(*) AS n FROM player_injury_reports WHERE season = ?`)
+      .bind(season)
+      .first<Record<string, unknown>>();
+    return Number(row?.['n'] ?? 0);
+  }
+}
+
+function toSourceState(row: Record<string, unknown>): InjurySourceState {
+  const text = (key: string) => (row[key] == null ? null : String(row[key]));
+  return {
+    source: String(row['source']),
+    season: String(row['season']),
+    etag: text('etag'),
+    lastModified: text('last_modified'),
+    checkedAt: text('checked_at'),
+    sourceModifiedAt: text('source_modified_at'),
+    ingestedAt: text('ingested_at'),
+    lastOutcome: text('last_outcome'),
+    lastNote: text('last_note'),
+    lockOwner: text('lock_owner'),
+    lockExpiresAt: text('lock_expires_at'),
   };
 }

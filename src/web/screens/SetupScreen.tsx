@@ -1330,10 +1330,42 @@ function InjurySourceHealth({
           </>
         ) : null}
       </div>
+      {/*
+        The three timestamps, which are routinely confused and must not be.
+        "Checked" moves every five minutes; "the report itself" is when the NFL
+        last changed anything. Showing only the first would say "updated 2
+        minutes ago" about a report from Wednesday.
+      */}
+      <div className="faint" style={{ marginTop: 6 }} data-testid="injury-freshness">
+        Checked {injury.checkedAt ? formatAge(injury.checkedAt) : 'not yet'} · the report itself last changed{' '}
+        {injury.sourceModifiedAt ? formatAge(injury.sourceModifiedAt) : 'unknown'}
+        {injury.ingestedAt ? ` · last stored ${formatAge(injury.ingestedAt)}` : ''}.
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        It is checked <strong>every five minutes, all day</strong>, because a player is ruled out ninety minutes before
+        kickoff and kickoff is 9:30am for a London game, Thursday night, or Friday on a holiday. The check is a
+        conditional request: when nothing has changed the answer carries no data and nothing is written, so the cost
+        of asking constantly is close to nothing.
+        {injury.writesToday > 0 ? ` ${injury.writesToday} of ${injury.writeCeiling} daily writes used.` : ''}
+      </div>
       <div className="faint" style={{ marginTop: 6 }}>
         The report carries one practice status per <em>week</em>, not one per practice day, so the app compares weeks
         and does not claim a Wednesday-to-Friday sequence it cannot see.
       </div>
+      {/*
+        What actually moved, most recent first. This is the payoff of storing
+        transitions rather than only the current answer: "Q → Out" is the single
+        most valuable thing the pipeline produces and it is invisible in a table
+        that only ever holds the latest state.
+      */}
+      {injury.recentEvents.length > 0 ? (
+        <div className="faint" style={{ marginTop: 6 }} data-testid="injury-events">
+          Recent changes:{' '}
+          {injury.recentEvents
+            .map((e) => `${e.kind === 'practice' ? 'practice ' : ''}${e.from ?? '—'} → ${e.to ?? '—'}`)
+            .join(' · ')}
+        </div>
+      ) : null}
       {unlocked ? (
         <>
           <button

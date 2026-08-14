@@ -43,10 +43,15 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #   ODDS_API_KEY     only when VEGAS_PROVIDER = "the-odds-api"
 
 [triggers]
+# Every 5 minutes -> injury check. Almost always a conditional 304 with no body
+#   and no database write; see migrations/0013 and core/injury/nflverse.ts. A
+#   flat cadence rather than fixed windows because kickoff is 9:30am for London
+#   games, Thursday night, Friday on holidays and Saturday in December, and a
+#   player is ruled out ninety minutes before any of them.
 # Saturday 23:00 UTC and Sunday 15:00 UTC -> Vegas refresh.
-# Daily 09:00 UTC -> Sleeper player dictionary sync.
+# Daily 09:00 UTC -> Sleeper player dictionary sync + last season's statistics.
 # Day-of-week must be named or 1-7 here: Cloudflare rejects "0" for Sunday.
-crons = ["0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
+crons = ["*/5 * * * *", "0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
 
 [observability]
 enabled = true

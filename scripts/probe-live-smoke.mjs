@@ -296,6 +296,46 @@ if (injury) {
     !!run,
     run ? `${run.outcome}, ${run.fetchedAt}` : 'never run',
   );
+
+  /*
+   * The five-minute check, which is the thing that has to be alive.
+   *
+   * `checkedAt` moves on every tick whether or not anything changed, so a
+   * `checkedAt` more than about fifteen minutes old means the cron has stopped
+   * — the one failure that would silently return the app to reading a report
+   * from yesterday morning while looking like it works.
+   */
+  if (injury.checkedAt) {
+    const minutes = (Date.now() - Date.parse(injury.checkedAt)) / 60_000;
+    check(
+      'the five-minute injury check is running',
+      minutes < 15,
+      `last checked ${minutes.toFixed(1)} minutes ago`,
+    );
+  } else {
+    console.log('      never checked yet — expected only in the first minutes after a deploy');
+  }
+
+  /*
+   * The three timestamps must stay distinguishable. Collapsing them is how a
+   * card ends up saying "updated 2 minutes ago" about Wednesday's report.
+   */
+  check(
+    'checking and ingesting are reported separately',
+    'checkedAt' in injury && 'sourceModifiedAt' in injury && 'ingestedAt' in injury,
+    `checked ${injury.checkedAt ?? 'never'} · source ${injury.sourceModifiedAt ?? 'unknown'} · stored ${injury.ingestedAt ?? 'never'}`,
+  );
+
+  /*
+   * And the budget. This pipeline is designed to spend a few dozen writes a
+   * day; a number in the thousands means the diff has stopped working and every
+   * tick is rewriting the board.
+   */
+  check(
+    'the injury pipeline is not churning the database',
+    (injury.writesToday ?? 0) < injury.writeCeiling,
+    `${injury.writesToday ?? 0} of ${injury.writeCeiling} writes used today`,
+  );
   if (run?.outcome === 'ok') {
     const mapped = run.matchedById + run.matchedByName;
     check(

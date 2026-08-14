@@ -468,6 +468,24 @@ export interface SetupStatus {
       outcome: 'ok' | 'not_published' | 'failed';
       note: string | null;
     } | null;
+    /** When we last looked. Moves every five minutes, change or no change. */
+    checkedAt: string | null;
+    /** When the report itself last changed. The one that qualifies a designation. */
+    sourceModifiedAt: string | null;
+    /** When anything was last stored. */
+    ingestedAt: string | null;
+    lastOutcome: string | null;
+    lastNote: string | null;
+    writesToday: number;
+    writeCeiling: number;
+    recentEvents: {
+      playerId: string;
+      week: number;
+      kind: string;
+      from: string | null;
+      to: string | null;
+      detectedAt: string;
+    }[];
   };
 }
 
