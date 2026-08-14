@@ -344,6 +344,12 @@ body,
  * Three owners, three properties, no overlap. Anything that adds a fourth —
  * a wrapper with bottom padding, a spacer element, a second `min-height` —
  * double-counts and shows up as blank space.
+ *
+ * And the other half of it, because this has been misread more than once: in a
+ * normal iOS Safari tab, everything below the visual viewport is Safari's own
+ * URL field and button bar. Page CSS cannot remove it, so do not add spacers,
+ * negative margins or viewport hacks aimed at it. Launching from the Home
+ * Screen is what removes Safari's chrome — see docs/IOS_WEB_APP.md.
  */
 #root {
   min-height: 100dvh;
@@ -2142,4 +2148,55 @@ table.compact tr:last-child td {
 .scroll-x {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ====================================================== add to home screen */
+/*
+ * The one-time prompt in a Safari tab, and the instructions in Setup.
+ *
+ * Sized to one line plus its two controls at 360px, because it appears above
+ * whatever the user actually opened the app for and has to be cheap enough to
+ * ignore. It is not a banner: dismissing it is permanent, and Setup keeps the
+ * same words for good.
+ */
+.install-prompt {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.install-prompt-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.install-mark {
+  flex: 0 0 auto;
+  color: var(--accent-text);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.install-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.install-prompt .icon-btn {
+  width: 34px;
+  color: var(--text-dim);
+}
+
+.install-steps {
+  margin: var(--space-4) 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.install-steps li {
+  margin-bottom: var(--space-3);
 }

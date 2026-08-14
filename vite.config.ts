@@ -7,7 +7,14 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   plugins: [react()],
   root: r('./src/web'),
-  publicDir: false,
+  /*
+   * Copied verbatim to the site root: the web app manifest and the Home Screen
+   * icons, which have to be fetchable at stable paths (`/manifest.webmanifest`,
+   * `/apple-touch-icon.png`) because iOS asks for them by URL and never sees
+   * the bundle. Hashed asset names would break that, which is why they are not
+   * imported through the graph.
+   */
+  publicDir: r('./src/web/public'),
   resolve: {
     alias: {
       '@core': r('./src/core'),

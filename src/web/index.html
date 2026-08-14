@@ -7,9 +7,40 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5"
     />
     <meta name="theme-color" content="#f4f6fa" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Fantasy Analyst</title>
+
+    <!--
+      Home Screen web app.
+
+      The manifest is what makes "Add to Home Screen" open Fantasy Analyst as a
+      standalone app instead of a Safari tab — no URL field, no bottom button
+      bar. That, and not any amount of page CSS, is the answer to the blank
+      strip under the navigation: in a normal tab those pixels are Safari's
+      chrome and the page cannot have them. docs/IOS_WEB_APP.md has the whole
+      argument and the measurements behind it.
+
+      Both capability tags are here on purpose. `mobile-web-app-capable` is the
+      standard one; the `apple-` spelling is what older iOS reads, and dropping
+      it would quietly downgrade anyone who has not updated.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Fantasy" />
+    <meta name="application-name" content="Fantasy" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!--
+      `default`, not `black-translucent`.
+
+      Translucent puts the web view behind the clock, and this app has no header
+      bar to absorb that — the first card would slide under the status bar, and
+      its text is white on every theme, which is unreadable over the light
+      page. `default` lets iOS draw the status bar itself and tint it from the
+      theme-color above, which the boot script keeps in step with the chosen
+      appearance — so the status bar follows Light and Dark like everything else.
+    -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!--
       Appearance, applied before the first paint.
 
