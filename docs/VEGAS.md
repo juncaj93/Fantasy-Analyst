@@ -8,8 +8,8 @@ development and tests cost no quota.
 
 `SportsGameOddsProvider` is implemented and tested **against the live API's
 real payloads**, captured by `scripts/probe-sportsgameodds.mjs` running through
-the Probe workflow. It is not enabled yet — see "Enabling SportsGameOdds"
-below for the one config change and the one thing still worth checking.
+the Probe workflow. It is not enabled yet — see "What the free plan actually
+charges for" and "Enabling SportsGameOdds" below.
 
 `OddsApiProvider` (The Odds API) is implemented and tested against recorded
 payload shapes, and remains the fallback. It is **not enabled**, because the
@@ -87,10 +87,134 @@ points directly. It is not wired up: the book's scoring is not this league's
 scoring, so it would need treating as its own signal rather than as a
 projection. It is the most promising thing to add to the weekly layer.
 
+## What the free plan actually charges for
+
+Measured against the live account on 14 August 2026, by reading
+`/v2/account/usage`, making one request, and reading it again
+(`scripts/probe-sgo-quota.mjs`, `probe-sgo-quota-scale.mjs`,
+`probe-sgo-team-filter.mjs`). Not read off a pricing page, and not inferred
+from response size.
+
+**The unit is an "entity", and an entity is one event returned.**
+
+| Query | Events back | Odds objects back | Cost |
+|---|---|---|---|
+| `/events?leagueID=NFL&type=match&limit=1` | 1 | 194 | **1 entity** |
+| `/events?eventID=…` | 1 | 194 | **1 entity** |
+| `/events?…&limit=5` | 5 | 342 | **5 entities** |
+| `/events?…&limit=10` | 10 | 594 | **10 entities** |
+| `/events?eventID=…&oddIDs=<one player market>` | 1 | 1 | **1 entity** |
+| `/events?…&teamID=NOT_A_REAL_TEAM_NFL` | 0 | 0 | **1 entity** |
+| `/account/usage` | — | — | **0** |
+
+So the payload is free and the row is not. Filtering by market (`oddIDs` is
+honoured, and narrows a 194-object answer to one) saves bandwidth, worker CPU
+and database rows — it does not save quota. Asking for fewer *events* is the
+only thing that does.
+
+**The account (tier `amateur`):**
+
+| Window | Requests | Entities |
+|---|---|---|
+| per second | unlimited | unlimited |
+| per minute | **10** | unlimited |
+| per hour | 50,000 | 250,000 |
+| per day | 500,000 | 3,000,000 |
+| per month | unlimited | **2,500** |
+
+Two limits bind: 2,500 entities a month, and ten requests a minute. Everything
+else is unreachable.
+
+Other answers, for the record: an empty or failed response still costs one
+entity; `teamID` filtering is honoured server-side (verified with a real team
+id *and* a nonsense one, because a silently-ignored filter would return the
+whole slate and charge for it); `bookmakerID` and `includeAltLine` were
+accepted but changed nothing on the free plan, where `byBookmaker` is empty and
+one quote is the provider's own consensus; and `/account/usage` moves neither
+counter, so the app can check its own spending before every call for nothing.
+
+### What that corrected
+
+This document previously said a Sunday slate was "roughly 3,200 objects
+against a free plan of 2,500 a month". That was counting odds objects, and the
+plan does not count odds objects. A sixteen-game Sunday is **sixteen entities**.
+
+The real risk was somewhere else entirely: the season-market probe ran daily
+with `limit=25` on two requests, so up to **50 entities a day — 1,500 a
+month**, 60% of the allowance, for markets this provider does not publish. It
+is now `limit=1` on both (2 entities), skipped once the draft is complete, and
+counted like everything else.
+
+## The fetch strategy
+
+Roster first, never the slate.
+
+1. **Discovery, at most once every 72 hours.** One request per team the roster
+   spans, filtered by `teamID` and bounded to the next eight days. Eight teams
+   cost eight entities however many games the league is playing. The answer
+   carries the odds too — there is no schedule-only request — so this *is* the
+   week's first fetch, and what it learns is stored in `vegas_events` so the
+   next refresh does not pay to find the same games again.
+2. **Targeted refreshes afterwards.** `buildFetchPlan` starts from the players
+   whose week is still undecided, maps them to events, deduplicates (two
+   rostered players in one game is one fetch), drops games that have kicked off,
+   drops players whose lines are still fresh, and sorts what is left by
+   priority.
+3. **The budget decides how much of that plan runs**, and it is told before the
+   first request, not after the last.
+
+Markets are whitelisted at the adapter: passing yards/TDs, rushing yards,
+receptions, receiving yards, anytime TD, full-game over/unders only. Alternate
+lines, quarter props, first-touchdown and defensive props are dropped. One
+book, because the free plan publishes one — the provider's own consensus,
+reported as a single book rather than dressed up as agreement.
+
+### What a month costs
+
+| | Entities |
+|---|---|
+| Weekly discovery (8 roster teams) | 9 |
+| Two scheduled refreshes (8 games each) | 16 |
+| Near-kickoff top-ups for close calls | 3 |
+| **Per week** | **28** |
+| Season markets (2 per run, daily, until the draft ends) | 60 |
+| **Per month (5 weeks)** | **200 of 2,500 — 8%** |
+
+`simulateMonth` in `src/core/vegas/plan.ts` computes this, and
+`tests/vegas.budget.test.ts` fails if the shipped strategy stops fitting.
+
+## The budget
+
+`src/core/vegas/budget.ts` holds every threshold. The month's usage is read
+from the provider (free, authoritative — it also sees spending from a probe or
+another deployment sharing the key) and from the app's own ledger
+(`vegas_usage`, `vegas_usage_log`), and the **larger of the two** is believed,
+because that is the only combination that cannot under-report.
+
+| State | At | Behaviour |
+|---|---|---|
+| healthy | < 50% | normal targeted refreshes |
+| caution | ≥ 50% | low-priority refreshes stop |
+| conservation | ≥ 70% | only close or uncertain decisions |
+| hard stop | ≥ 85% | the reserve: close game-day decisions only |
+| exhausted | 100% | no provider call of any kind |
+
+A refusal is never an error. The last stored lines keep serving, marked stale,
+and Start/Sit lowers its confidence rather than showing a zero. No Vegas data
+beats accidental paid usage.
+
+Manual refresh goes through the same gate — plus a 15-minute per-event cooldown
+and a 4-per-15-minutes rate limit — so a thumb on a button cannot spend the
+month. Nothing in the UI calls a provider: opening Draft, Team, Start/Sit or a
+player card reads the database.
+
+`GET /api/vegas/budget` reports where the month went, by source, with the plan
+the next refresh would run. Setup shows the same numbers in words.
+
 ## Enabling SportsGameOdds
 
 The repository secret `SPORTSGAMEODDS_API_KEY` already exists and is valid —
-the probe authenticated with it. To turn the provider on:
+the probes authenticated with it. To turn the provider on:
 
 1. Make the key available to the Worker:
    ```bash
@@ -98,24 +222,27 @@ the probe authenticated with it. To turn the provider on:
    ```
 2. Set `VEGAS_PROVIDER = "sportsgameodds"` in `wrangler.toml` and redeploy.
 
-The first of those checks is now done: regular-season games do carry
-`receiving_receptions` and `touchdowns` under the identifiers in
-`INBOUND_MARKETS`.
+**It is still `mock`, and the reason is now a narrow one.** Every quota gate the
+activation checklist asks for exists and is tested: measured accounting, a
+targeted request shape, a simulated month at 8% of the allowance, a hard stop, a
+stale-cache fallback, deduplication, and a schedule that cannot fetch the slate.
+What has not happened is a real NFL Sunday. The whole strategy rests on mapping
+Sleeper's team abbreviations onto this provider's team ids, on kickoff times
+being right, and on the plan's staleness arithmetic behaving on a live slate —
+and the preseason cannot test any of that. Flipping the switch is now a
+one-line change whose blast radius is bounded by a budget that stops at 85%.
 
-**The quota one is not, and it is the reason the provider is still off.** A
-regular-season event carries on the order of 200 odds objects, and a full
-Sunday slate is sixteen of them — roughly 3,200 objects for one refresh,
-against a free plan of 2,500 a month. Two scheduled refreshes a week would
-spend the month's allowance in the first weekend. Before flipping
-`VEGAS_PROVIDER`, the refresh has to stop fetching the whole slate: fetch only
-the events the user's own players are in, on demand, and let the cache serve
-everything else. The cache layer, not the adapter, decides when a fetch is
-allowed, so that is where the change goes.
+`docs/STATUS.md` carries the same summary; this file is where the numbers live.
 
-Season-long markets cost nothing to leave on: there are none to fetch, the
-result is cached for a day, and the two requests it makes are small.
+## The fallback: The Odds API
 
-## Verify before enabling a live provider
+Only worth evaluating if SportsGameOdds stops fitting — it currently fits with
+92% of the allowance to spare, so there is no reason to run two providers.
+Nothing here has been measured against the live vendor: outbound requests to
+its domain are blocked by this environment's egress policy, and its free-tier
+terms and credit model must be verified the same way SportsGameOdds' were
+(a probe through the Probe workflow, reading usage before and after) before
+anything is built on them.
 
 Do this yourself before switching:
 
@@ -140,13 +267,16 @@ Do this yourself before switching:
    `src/core/vegas/normalize.ts`. Unknown markets are dropped, never guessed, so
    a stale key degrades to "no data" rather than to wrong data.
 
-## Enabling
+### Enabling it
 
 ```bash
 npx wrangler secret put ODDS_API_KEY
 ```
 
-Set `VEGAS_PROVIDER = "the-odds-api"` in `wrangler.toml` and redeploy.
+Set `VEGAS_PROVIDER = "the-odds-api"` in `wrangler.toml` and redeploy. The
+budget guard is provider-agnostic and would still apply — but its unit is this
+provider's entity, so `BUDGET.monthlyEntities` and the cost model in
+`getPropsForTeams` would both need re-measuring first.
 
 ## Adding a different vendor
 
@@ -166,14 +296,17 @@ Map the vendor's market names into the internal vocabulary inside the adapter.
 Nothing outside `src/core/vegas/` may reference a vendor field name, so no other
 code changes.
 
-## Caching and quota protection
+## Caching
 
-`getPropsWithCache` is the only path that may call a provider.
+`getPropsWithCache` is the only path that may fetch one event's lines, and
+`VegasRefreshService` is the only thing that calls it. Quota policy is above;
+this is the freshness policy.
 
 - **TTL**: 360 minutes normally, 90 minutes within 6 hours of kickoff.
 - **Manual refresh**: allowed only after a 15-minute cooldown per event, and the
   HTTP endpoint is additionally rate limited to 4 refreshes per 15 minutes.
-- **Scheduled cadence**: Saturday 23:00 UTC and Sunday 15:00 UTC.
+- **Scheduled cadence**: Saturday 23:00 UTC and Sunday 15:00 UTC, and each run
+  fetches only the roster's own games — never the slate.
 - **Failure**: on quota exhaustion, auth failure or a network error, the last
   cached snapshot is returned with `stale: true` and the reason attached. It
   never throws and never fabricates a line.

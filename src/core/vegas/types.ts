@@ -136,6 +136,22 @@ export interface PlayerProp {
   impliedProbability: number | null;
 }
 
+/**
+ * What a by-team fetch came back with.
+ *
+ * Each set is paired with the team it was asked for, because that pairing is
+ * the schedule: it is how a rostered player's team becomes an event id. Reading
+ * it back out of the payload would work for one vendor and quietly fail for the
+ * next.
+ */
+export interface TeamPropsResult {
+  results: { teamId: string; set: RawPropSet }[];
+  /** Requests made, against the per-minute ceiling. */
+  requests: number;
+  /** Entities billed — one per event returned, and at least one per request. */
+  entities: number;
+}
+
 export interface QuotaStatus {
   /** Requests remaining in the current period, when the provider reports it. */
   remaining: number | null;
@@ -151,6 +167,23 @@ export interface VegasProvider {
   isConfigured(): boolean;
   getUpcomingNFLGames(opts?: { from?: string; to?: string }): Promise<VegasGame[]>;
   getPlayerProps(eventId: string, markets?: MarketKey[]): Promise<RawPropSet>;
+  /**
+   * The games a given set of teams are playing, with their lines, in one pass.
+   *
+   * The billing unit is one entity per event returned, and this provider has no
+   * way to ask for an event without its odds — so discovering the schedule and
+   * fetching the lines are the same request, and doing them separately would
+   * pay twice. Asking by team is what keeps the bill proportional to the
+   * roster rather than to the slate: eight teams, eight entities, however many
+   * games the league is playing that weekend.
+   *
+   * Optional because it is a shape not every vendor offers; callers fall back
+   * to listing and fetching per event.
+   */
+  getPropsForTeams?(
+    teamIds: string[],
+    opts?: { from?: string; to?: string; markets?: MarketKey[]; maxEvents?: number },
+  ): Promise<TeamPropsResult>;
   /**
    * Season-long player totals, for the draft.
    *

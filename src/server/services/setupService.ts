@@ -23,6 +23,7 @@ import { NewsletterRepo } from '../repos/newsletter.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { NewsletterService } from './newsletterService.ts';
 import type { SleeperUserSetting } from './sleeperSync.ts';
 
@@ -108,6 +109,20 @@ export interface SetupStatus {
     lastRefreshedAt: string | null;
     events: number;
     note: string;
+    /**
+     * The month's spending, so a quota problem is visible before it is an
+     * outage. Read from the ledger — this makes no provider call of its own.
+     */
+    budget: {
+      state: string;
+      used: number;
+      limit: number;
+      remaining: number;
+      month: string;
+      source: string;
+      note: string;
+      bySource: Record<string, number>;
+    };
     /** Season-long market coverage, for the draft. */
     season: {
       season: string;
@@ -157,6 +172,8 @@ export class SetupService {
 
   async status(): Promise<SetupStatus> {
     const seasonStatus = await this.seasonMarkets.status();
+    const usage = new VegasUsageRepo(this.db);
+    const [budget, budgetBySource] = await Promise.all([usage.view(), usage.bySource()]);
     const [playerCount, rankedPlayers, league, snapshot, newsletter, vegasFreshness] = await Promise.all([
       this.players.count(),
       this.players.countRanked(),
@@ -278,6 +295,16 @@ export class SetupService {
           this.vegas.name === 'mock'
             ? 'Practice data only. Start/sit advice will say when a real line is missing rather than guessing.'
             : 'Live betting lines are connected.',
+        budget: {
+          state: budget.state,
+          used: budget.used,
+          limit: budget.limit,
+          remaining: budget.remaining,
+          month: budget.month,
+          source: budget.source,
+          note: budget.note,
+          bySource: budgetBySource,
+        },
         season: {
           season: seasonStatus.season,
           players: seasonStatus.players,

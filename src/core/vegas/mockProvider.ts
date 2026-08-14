@@ -14,6 +14,7 @@ import type {
   SeasonMarketKey,
   SeasonMarketQuote,
   SeasonMarketSet,
+  TeamPropsResult,
   VegasGame,
   VegasProvider,
 } from './types.ts';
@@ -94,6 +95,35 @@ export class MockVegasProvider implements VegasProvider {
       homeTeam: g.homeTeam,
       awayTeam: g.awayTeam,
     }));
+  }
+
+  /**
+   * The same shape the real provider has: ask by team, get the games and their
+   * lines together. Costed the same way too — one entity per event returned —
+   * so the budget arithmetic under test is the arithmetic that will run.
+   */
+  async getPropsForTeams(
+    teamIds: string[],
+    opts: { from?: string; to?: string; markets?: MarketKey[]; maxEvents?: number } = {},
+  ): Promise<TeamPropsResult> {
+    const results: { teamId: string; set: RawPropSet }[] = [];
+    const seen = new Set<string>();
+    for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
+      if (results.length >= (opts.maxEvents ?? 12)) break;
+      const key = teamId.toUpperCase();
+      for (const game of this.games) {
+        if (seen.has(game.eventId)) continue;
+        // A team is in a game if the game names it or if one of its players is
+        // on that team — the fixtures carry both spellings, and so does life.
+        const involved =
+          [game.homeTeam, game.awayTeam].some((t) => t.toUpperCase() === key) ||
+          game.players.some((p) => (p.team ?? '').toUpperCase() === key);
+        if (!involved) continue;
+        seen.add(game.eventId);
+        results.push({ teamId, set: await this.getPlayerProps(game.eventId, opts.markets) });
+      }
+    }
+    return { results, requests: Math.max(1, teamIds.length), entities: Math.max(1, results.length) };
   }
 
   async getPlayerProps(eventId: string, markets: MarketKey[] = MARKET_KEYS): Promise<RawPropSet> {

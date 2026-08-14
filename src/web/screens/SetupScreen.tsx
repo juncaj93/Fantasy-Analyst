@@ -1139,6 +1139,44 @@ function VegasPanel({ status }: { status: SetupStatus }) {
         When a season line exists for a player, the draft shows it on his card and lets it nudge the ranking
         a little. When it does not, the card says nothing rather than guessing.
       </div>
+
+      {/*
+        The month's allowance.
+
+        Not something the user has to act on — it is here so that a quota
+        problem is visible while it is still a number and not yet an outage.
+      */}
+      <div className="section-title">This month&rsquo;s allowance</div>
+      <div className="faint" data-testid="vegas-budget">
+        <strong>
+          {status.vegas.budget.used} of {status.vegas.budget.limit}
+        </strong>{' '}
+        used in {status.vegas.budget.month} ({BUDGET_LABEL[status.vegas.budget.state] ?? status.vegas.budget.state})
+        {status.vegas.budget.source === 'provider' ? ', counted by the provider' : ''}.{' '}
+        {status.vegas.budget.note}.
+      </div>
+      {Object.keys(status.vegas.budget.bySource).length > 0 ? (
+        <div className="faint" style={{ marginTop: 6 }} data-testid="vegas-budget-sources">
+          Spent on:{' '}
+          {Object.entries(status.vegas.budget.bySource)
+            .sort((a, b) => b[1] - a[1])
+            .map(([source, entities]) => `${source} ${entities}`)
+            .join(' · ')}
+          .
+        </div>
+      ) : null}
+      <div className="faint" style={{ marginTop: 6 }}>
+        A refresh asks only about the games your own players are in, and stops entirely before the free
+        allowance runs out — at which point the last lines it fetched stay on screen, marked as old.
+      </div>
     </div>
   );
 }
+
+/** Plain words for the four budget states. Nobody should have to read code. */
+const BUDGET_LABEL: Record<string, string> = {
+  healthy: 'plenty left',
+  caution: 'over half used, so low-priority refreshes have stopped',
+  conservation: 'running low, so only close decisions are refreshed',
+  hard_stop: 'into the reserve, kept for close game-day decisions',
+};

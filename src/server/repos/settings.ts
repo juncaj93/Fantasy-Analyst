@@ -61,4 +61,13 @@ export const SETTING_KEYS = {
   seasonStart: 'season.start',
   vegasProvider: 'vegas.provider',
   lastVegasRefresh: 'vegas.lastRefresh',
+  /**
+   * When the week's schedule was last bought from the provider.
+   *
+   * Separate from the refresh stamp because it answers a different question:
+   * not "when did we last look at the lines" but "when did we last pay to find
+   * out which games the roster is in", which is the thing that must not happen
+   * on every pass.
+   */
+  lastVegasSchedule: 'vegas.lastSchedule',
 } as const;
