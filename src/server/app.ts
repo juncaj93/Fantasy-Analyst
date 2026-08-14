@@ -374,9 +374,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const playerRepo = new PlayerRepo(db);
     const propsRepo = new PropsRepo(db);
-    const [players, propsByPlayer, signals, freshness] = await Promise.all([
+    const [players, propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
       playerRepo.listByIds(mine.playerIds),
       propsRepo.latestForPlayers(mine.playerIds),
+      propsRepo.previousForPlayers(mine.playerIds),
+      propsRepo.kickoffsForPlayers(mine.playerIds),
       new EvidenceRepo(db).getSignals(mine.playerIds),
       propsRepo.freshness(),
     ]);
@@ -390,6 +392,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       inputs.push({
         player,
         props: propsByPlayer.get(id) ?? [],
+        previousProps: previousProps.get(id) ?? [],
+        // Absent means the schedule is unknown, which is never treated as a
+        // lock: refusing a swap the user can still make would be the app
+        // inventing a restriction.
+        kickoff: kickoffs.get(id) ?? null,
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
         propsStale: false,
@@ -896,8 +903,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const playerRepo = new PlayerRepo(db);
     const propsRepo = new PropsRepo(db);
     const evidenceRepo = new EvidenceRepo(db);
-    const [propsByPlayer, signals, freshness] = await Promise.all([
+    const [propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
       propsRepo.latestForPlayers(body.playerIds),
+      propsRepo.previousForPlayers(body.playerIds),
+      propsRepo.kickoffsForPlayers(body.playerIds),
       evidenceRepo.getSignals(body.playerIds),
       propsRepo.freshness(),
     ]);
@@ -909,6 +918,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       inputs.push({
         player,
         props: propsByPlayer.get(id) ?? [],
+        previousProps: previousProps.get(id) ?? [],
+        kickoff: kickoffs.get(id) ?? null,
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
         propsStale: false,

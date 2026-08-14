@@ -12,6 +12,18 @@ import type { PlayerSignal } from '../evidence/types.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import type { PlayerProp } from '../vegas/types.ts';
+import {
+  assessLateSwap,
+  assessRole,
+  compareMarkets,
+  lockState,
+  rolePoints,
+  type LateSwapAssessment,
+  type LockState,
+  type MovementSummary,
+  type RoleAssessment,
+  type RoleMetric,
+} from './decisions.ts';
 import { buildExpectation, type VegasExpectation } from './expectation.ts';
 
 export interface StartSitInput {
@@ -24,6 +36,14 @@ export interface StartSitInput {
   propAgeMinutes?: number | null;
   /** True when the props came from a stale cache. */
   propsStale?: boolean;
+  /** ISO kickoff for this player's game, when the schedule is known. */
+  kickoff?: string | null;
+  /** The same player's lines at an earlier snapshot, for movement. */
+  previousProps?: PlayerProp[];
+  /** Per-game opportunity, when a usage source is connected. */
+  usage?: RoleMetric[];
+  /** Reference time; defaults to now. Injected so tests are deterministic. */
+  now?: string | Date;
 }
 
 export interface StartSitComponent {
@@ -47,6 +67,12 @@ export interface StartSitEvaluation {
   confidence: 'high' | 'medium' | 'low';
   confidenceReasons: string[];
   statusFlag: string | null;
+  /** Whether this player's game has already kicked off. */
+  lock: LockState;
+  /** How the market has moved since the previous snapshot. */
+  movement: MovementSummary;
+  /** Whether the player's opportunity is actually changing. */
+  role: RoleAssessment;
 }
 
 export interface StartSitComparison {
@@ -57,6 +83,8 @@ export interface StartSitComparison {
   confidence: 'high' | 'medium' | 'low';
   reasons: string[];
   warnings: string[];
+  /** Whether the preferred player being the later player is a problem. */
+  lateSwap: LateSwapAssessment;
 }
 
 /** Status penalties in fantasy points. Editable policy, not a projection. */
@@ -147,6 +175,26 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     unknown: false,
   });
 
+  // --- role trend ----------------------------------------------------------
+  // A modest nudge, and only in a close call: a rising role is a reason to
+  // prefer one of two similar players, never a reason to start a worse one.
+  // With no usage source connected this is `insufficient_data` and contributes
+  // nothing, which is the honest answer rather than a zero dressed as a signal.
+  const role = assessRole(input.usage ?? []);
+  const roleValue = rolePoints(role.trend);
+  components.push({
+    key: 'role_trend',
+    label: 'Role trend',
+    display: role.trend === 'insufficient_data' ? 'insufficient data' : role.label,
+    value: roleValue,
+    unknown: role.trend === 'insufficient_data',
+  });
+
+  const movement = compareMarkets(
+    (input.previousProps ?? []).map((p) => ({ market: p.market, line: p.line })),
+    input.props.map((p) => ({ market: p.market, line: p.line })),
+  );
+
   if (input.signal?.pendingCount) {
     confidenceReasons.push(`${input.signal.pendingCount} unreviewed news item(s)`);
   }
@@ -175,6 +223,9 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     confidence,
     confidenceReasons,
     statusFlag: statusKey ? input.injuryStatus ?? null : null,
+    lock: lockState(input.kickoff, input.now ?? new Date()),
+    movement,
+    role,
   };
 }
 
@@ -201,6 +252,13 @@ export function compareStartSit(
       confidence: 'low',
       reasons: [],
       warnings: ['no usable data for any candidate — recommendation withheld'],
+      lateSwap: {
+        verdict: 'unknown',
+        label: 'Late-swap risk unknown',
+        detail: 'There is no usable projection for any candidate, so kickoff timing changes nothing.',
+        gapHours: null,
+        advantage: null,
+      },
     };
   }
 
@@ -239,6 +297,62 @@ export function compareStartSit(
   }
   if (best.statusFlag) warnings.push(`${best.name} is listed ${best.statusFlag}`);
 
+  /*
+   * Late-swap safety.
+   *
+   * The projection compares the week as if it were one moment, and it is not:
+   * if the better player kicks off at night and the alternative locks at one,
+   * the choice disappears before the news does. Measured against the best
+   * candidate that locks earlier, which is the one whose slot would actually be
+   * spent by waiting.
+   */
+  const earlierAlternative =
+    sorted
+      .slice(1)
+      .filter((e) => e.lock.kickoff && best.lock.kickoff && Date.parse(e.lock.kickoff) < Date.parse(best.lock.kickoff))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
+
+  const lateSwap = assessLateSwap(
+    {
+      preferred: { name: best.name, kickoff: best.lock.kickoff, status: best.statusFlag, score: best.score },
+      alternative: earlierAlternative
+        ? {
+            name: earlierAlternative.name,
+            kickoff: earlierAlternative.lock.kickoff,
+            status: earlierAlternative.statusFlag,
+            score: earlierAlternative.score,
+          }
+        : null,
+    },
+    inputs[0]?.now ?? new Date(),
+  );
+
+  if (lateSwap.verdict === 'consider_early_option') {
+    // Named as a warning rather than silently reordering the board: the
+    // projection still prefers the later player, and hiding that would be
+    // making the user's risk decision for them.
+    warnings.push(lateSwap.detail);
+    confidence = confidence === 'high' ? 'medium' : confidence;
+  } else if (lateSwap.verdict === 'worth_waiting') {
+    reasons.push(lateSwap.detail);
+  }
+
+  // A player whose game has started is not a decision any more.
+  const locked = evaluations.filter((e) => e.lock.locked);
+  if (locked.length > 0) {
+    warnings.push(
+      `${locked.map((e) => e.name).join(', ')} ${locked.length === 1 ? 'has' : 'have'} already kicked off — that lineup spot is fixed.`,
+    );
+  }
+
+  const rising = best.role.trend === 'rising_high' || best.role.trend === 'rising_moderate';
+  if (rising && margin != null && margin < minMargin) {
+    reasons.push(`${best.name}'s role is trending up: ${lowerFirst(best.role.detail)}`);
+  }
+
+  const movingUp = best.movement.headline;
+  if (movingUp) reasons.push(`${best.name}: ${lowerFirst(movingUp)} (${best.movement.significant.map((m) => m.display).join('; ')})`);
+
   return {
     evaluations: sorted.concat(evaluations.filter((e) => e.score == null)),
     recommendedPlayerId: best.playerId,
@@ -246,7 +360,12 @@ export function compareStartSit(
     confidence,
     reasons,
     warnings,
+    lateSwap,
   };
+}
+
+function lowerFirst(sentence: string): string {
+  return sentence.charAt(0).toLowerCase() + sentence.slice(1);
 }
 
 function clamp(v: number, lo: number, hi: number): number {

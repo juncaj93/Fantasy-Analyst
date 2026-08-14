@@ -337,6 +337,13 @@ export interface StartSitEvaluation {
   confidence: string;
   confidenceReasons: string[];
   statusFlag: string | null;
+  lock: { locked: boolean; kickoff: string | null; reason: string };
+  movement: {
+    significant: { market: string; direction: string; from: number; to: number; display: string }[];
+    direction: string;
+    headline: string | null;
+  };
+  role: { trend: string; label: string; detail: string; games: number };
 }
 
 export interface StartSitComparison {
@@ -348,6 +355,13 @@ export interface StartSitComparison {
   confidence: string;
   reasons: string[];
   warnings: string[];
+  lateSwap: {
+    verdict: string;
+    label: string;
+    detail: string;
+    gapHours: number | null;
+    advantage: number | null;
+  };
 }
 
 export interface LineupSlot {
@@ -358,6 +372,7 @@ export interface LineupSlot {
   position: string | null;
   score: number | null;
   alreadyStarting: boolean;
+  locked: boolean;
 }
 
 export interface LineupSwap {

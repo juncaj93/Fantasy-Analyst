@@ -29,6 +29,8 @@ export interface LineupSlot {
   score: number | null;
   /** True when the player already occupies a starting spot in Sleeper. */
   alreadyStarting: boolean;
+  /** True when this player's game has kicked off and the slot is now fixed. */
+  locked: boolean;
 }
 
 export interface LineupSwap {
@@ -71,8 +73,22 @@ export function recommendLineup(
   const currentStarters = new Set(opts.currentStarterIds ?? []);
   const evaluations = inputs.map((i) => evaluatePlayer(i, profile));
 
-  const scored = evaluations.filter((e) => e.score != null);
-  const undecidable = evaluations.filter((e) => e.score == null);
+  /*
+   * Locked players are removed from the optimisation entirely.
+   *
+   * Once a game has kicked off the decision is gone: a locked starter keeps
+   * their slot whatever the numbers now say, and a locked bench player can no
+   * longer be moved into one. Ranking them anyway would produce advice the user
+   * physically cannot follow, which is worse than saying nothing — so the
+   * remaining slots are filled from the players who can still be moved, which
+   * is also what makes the board recalculate correctly as each window starts.
+   */
+  const lockedStarters = evaluations.filter((e) => e.lock.locked && currentStarters.has(e.playerId));
+  const lockedIds = new Set(evaluations.filter((e) => e.lock.locked).map((e) => e.playerId));
+  const movable = evaluations.filter((e) => !lockedIds.has(e.playerId));
+
+  const scored = movable.filter((e) => e.score != null);
+  const undecidable = movable.filter((e) => e.score == null);
 
   const slots = buildSlots(shape);
   const warnings: string[] = [];
@@ -92,7 +108,16 @@ export function recommendLineup(
     };
   }
 
-  const assignment = assignBest(scored, slots);
+  // Locked starters hold their slot first; the optimiser then fills what is
+  // left from the players who can still be moved.
+  const reserved = reserveLockedSlots(lockedStarters, slots);
+  const openSlots = slots.map((s, index) => ({ spec: s, index })).filter(({ index }) => !reserved.has(index));
+  const openAssignment = assignBest(scored, openSlots.map((o) => o.spec));
+
+  const assignment = new Map<number, StartSitEvaluation>(reserved);
+  for (const [openIndex, player] of openAssignment) {
+    assignment.set(openSlots[openIndex]!.index, player);
+  }
 
   const filled: LineupSlot[] = slots.map((s, index) => {
     const player = assignment.get(index) ?? null;
@@ -104,6 +129,7 @@ export function recommendLineup(
       position: player?.position ?? null,
       score: player?.score ?? null,
       alreadyStarting: player ? currentStarters.has(player.playerId) : false,
+      locked: player ? lockedIds.has(player.playerId) : false,
     };
   });
 
@@ -145,6 +171,14 @@ export function recommendLineup(
     );
   }
 
+  if (lockedIds.size > 0) {
+    const lockedNames = evaluations.filter((e) => lockedIds.has(e.playerId)).map((e) => e.name);
+    notes.push(
+      `${lockedNames.join(', ')} ${lockedNames.length === 1 ? 'has' : 'have'} already kicked off. ` +
+        `${lockedNames.length === 1 ? 'That spot is' : 'Those spots are'} fixed, and the rest of the lineup is worked out around ${lockedNames.length === 1 ? 'it' : 'them'}.`,
+    );
+  }
+
   const chosen = [...assignment.values()];
   const confidence = worstConfidence(chosen);
   for (const e of chosen) {
@@ -167,6 +201,30 @@ export function recommendLineup(
 interface SlotSpec {
   slot: string;
   accepts: string[];
+}
+
+/**
+ * Hold a slot for each locked starter.
+ *
+ * Most specific slot first: a locked running back should occupy RB and leave
+ * FLEX open for somebody who can still be moved, rather than taking the slot
+ * with the widest eligibility and narrowing everyone else's options.
+ */
+function reserveLockedSlots(
+  lockedStarters: StartSitEvaluation[],
+  slots: SlotSpec[],
+): Map<number, StartSitEvaluation> {
+  const reserved = new Map<number, StartSitEvaluation>();
+  const order = [...lockedStarters].sort((a, b) => a.name.localeCompare(b.name));
+  for (const player of order) {
+    const candidates = slots
+      .map((spec, index) => ({ spec, index }))
+      .filter(({ spec, index }) => !reserved.has(index) && spec.accepts.includes(player.position))
+      .sort((a, b) => a.spec.accepts.length - b.spec.accepts.length || a.index - b.index);
+    const pick = candidates[0];
+    if (pick) reserved.set(pick.index, player);
+  }
+  return reserved;
 }
 
 function buildSlots(shape: RosterShape): SlotSpec[] {

@@ -278,7 +278,9 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
                 <td>{s.slot}</td>
                 <td>
                   {s.name ?? <Unknown what="nobody eligible" />}
-                  {s.name && !s.alreadyStarting ? ' ←' : ''}
+                  {/* A locked slot is settled, so it never carries a change arrow. */}
+                  {s.locked ? <span className="tag tag-calm" data-testid="locked-tag"> 🔒 Locked</span> : null}
+                  {s.name && !s.alreadyStarting && !s.locked ? ' ←' : ''}
                 </td>
                 <td>{s.score == null ? <Unknown what="score" /> : s.score.toFixed(1)}</td>
               </tr>
@@ -355,6 +357,43 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       </div>
       <div className="faint">
         Vegas data {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
+      </div>
+
+      {/*
+        Compact tags for the two things a projection cannot express: whether
+        kickoff timing is a problem, and whether the market has moved since the
+        last look. The numbers behind them are in the reasons and warnings
+        below rather than repeated here.
+      */}
+      <div className="tag-row">
+        {comparison.lateSwap && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown' ? (
+          <span
+            className={comparison.lateSwap.verdict === 'consider_early_option' ? 'tag tag-urgent' : 'tag tag-calm'}
+            title={comparison.lateSwap.detail}
+            data-testid="late-swap-tag"
+          >
+            ⏱ {comparison.lateSwap.label}
+          </span>
+        ) : null}
+        {comparison.evaluations
+          .filter((e) => e.movement?.headline)
+          .map((e) => (
+            <span
+              key={`move-${e.playerId}`}
+              className={e.movement.direction === 'up' ? 'tag tag-star' : 'tag tag-warn'}
+              title={e.movement.significant.map((m) => m.display).join('; ')}
+              data-testid="movement-tag"
+            >
+              {e.movement.direction === 'up' ? '↑' : '↓'} {e.name}: {e.movement.headline}
+            </span>
+          ))}
+        {comparison.evaluations
+          .filter((e) => e.lock?.locked)
+          .map((e) => (
+            <span key={`lock-${e.playerId}`} className="tag tag-calm" data-testid="locked-tag">
+              🔒 {e.name} locked
+            </span>
+          ))}
       </div>
 
       {comparison.warnings.map((w) => (
