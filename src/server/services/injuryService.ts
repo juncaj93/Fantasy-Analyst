@@ -72,6 +72,18 @@ export function injurySeason(now = new Date()): string {
   return String(now.getUTCMonth() >= 2 ? year : year - 1);
 }
 
+/**
+ * The season before the current one — the finished one, and the only one whose
+ * file is guaranteed to be complete and to never change again.
+ *
+ * Derived from `injurySeason` rather than from the calendar directly, so the
+ * two cannot drift apart across the February boundary where "this season" and
+ * "this year" stop agreeing.
+ */
+export function previousSeason(now = new Date()): string {
+  return String(Number(injurySeason(now)) - 1);
+}
+
 export interface InjuryHealth {
   /** Sleeper — the authority on designation, and never not present. */
   statusSource: string;
