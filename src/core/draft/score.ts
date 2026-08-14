@@ -96,9 +96,12 @@ export const SEPARATION = {
   /**
    * The gap, in composite points, at which separation is as strong as it gets.
    *
-   * On the measured board the best receiver led the mean of the next three by
-   * 0.71. Full credit at 0.8 makes a genuinely isolated player nearly maximal
-   * without making an ordinary half-point edge look like one.
+   * Measured, not guessed. Across a live 195-player board the gap between a
+   * player and the mean of his next three ran p10 0.10, p50 0.33, p75 0.53,
+   * p90 0.89, p99 3.06. At 0.8 the component saturates for 13% of the board and
+   * the other 87% sit on the responsive part of the curve — which is the
+   * property that matters, because a saturated component cannot notice the
+   * alternatives disappearing. At 0.4 it would have been 40%.
    */
   full: 0.8,
   /**

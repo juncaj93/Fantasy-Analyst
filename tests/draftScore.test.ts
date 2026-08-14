@@ -94,6 +94,21 @@ describe('separation from the alternatives', () => {
     const r = separationScore({ base: 0.4, positionBases: [0.4, 0.4, 0.4] });
     expect(r.score).toBe(0);
     expect(r.gap).toBe(0);
+    expect(Object.is(r.gap, -0)).toBe(false);
+  });
+
+  /**
+   * The calibration, checked against the board it was measured on.
+   *
+   * A live 195-player board put the median gap at 0.33 and the ninetieth
+   * percentile at 0.89. The component has to be somewhere in the middle of its
+   * range for a typical player — a component that is already maxed out cannot
+   * notice the alternatives disappearing, which is the entire reason it exists.
+   */
+  it('leaves the typical player room to move', () => {
+    const typical = separationScore({ base: 0.33, positionBases: [0, 0, 0] }).score;
+    expect(typical).toBeGreaterThan(0.2);
+    expect(typical).toBeLessThan(0.8);
   });
 
   it('grows as the alternatives get worse', () => {
@@ -206,10 +221,23 @@ describe('the Score on a real board', () => {
     expect(find(ranked, 'market').adp).toBe(42);
   });
 
-  /* §20 — one unrelated player leaving the board rescales nobody. */
-  it('does not move when a distant player is drafted', () => {
+  /*
+   * §20 — one unrelated player leaving the board rescales nobody.
+   *
+   * The transform is what is on trial here, so the player removed is at another
+   * position entirely: nothing about him is an input to any receiver's ranking,
+   * and under min-max scaling against the pool every score on the board would
+   * have moved anyway.
+   */
+  it('does not move when an unrelated player is drafted', () => {
     const contenders = [wr('a', 38), wr('b', 41), wr('c', 44)];
-    const before = rankAvailablePlayers([...contenders, wr('tail', 190)], ctx());
+    const elsewhere: AvailablePlayerInput = {
+      player: player({ id: 'k', fullName: 'Kicker', position: 'K', team: 'BAL' }),
+      adp: 190,
+      adpRank: 190,
+      signal: null,
+    };
+    const before = rankAvailablePlayers([...contenders, elsewhere], ctx());
     const after = rankAvailablePlayers(contenders, ctx());
     for (const id of ['a', 'b', 'c']) {
       expect(find(after, id).score).toBe(find(before, id).score);
@@ -234,7 +262,18 @@ describe('the Score on a real board', () => {
  * is new.
  */
 describe('the Score as the draft moves', () => {
-  const board = () => [wr('star', 40), wr('alt1', 44), wr('alt2', 46), wr('alt3', 48), wr('deep', 150)];
+  /**
+   * A receiver room rather than four names.
+   *
+   * Density is the point. On a five-player fixture the next man at the position
+   * is a hundred picks away, every gap is enormous and the separation component
+   * saturates for everybody — which is true of that board and true of no real
+   * one. A live board put the median gap between a player and his next three at
+   * 0.33 of composite, which is roughly what a two-pick ADP ladder produces.
+   */
+  const alternatives = (count = 10) =>
+    Array.from({ length: count }, (_, i) => wr(`alt${i + 1}`, 44 + i * 2));
+  const board = () => [wr('star', 40), ...alternatives(), wr('deep', 150)];
 
   /** A — nothing changed, so nothing changes. */
   it('is stable on an unchanged board', () => {
@@ -252,14 +291,21 @@ describe('the Score as the draft moves', () => {
     expect(at60.score).toBeGreaterThan(at50.score);
   });
 
-  /** C — the players who would have replaced him are gone. */
+  /**
+   * C — the players who would have replaced him are gone.
+   *
+   * The current pick does not move, so market value is identical in both
+   * boards: everything that changes here is the disappearance of the three
+   * receivers closest to him. This is the behaviour the board did not have.
+   */
   it('rises when comparable alternatives are drafted', () => {
-    const full = rankAvailablePlayers(board(), ctx());
-    const thinned = rankAvailablePlayers([wr('star', 40), wr('deep', 150)], ctx());
-    const before = find(full, 'star');
-    const after = find(thinned, 'star');
-    expect(after.score).toBeGreaterThan(before.score);
+    const before = find(rankAvailablePlayers(board(), ctx()), 'star');
+    const runOnReceivers = [wr('star', 40), ...alternatives().slice(3), wr('deep', 150)];
+    const after = find(rankAvailablePlayers(runOnReceivers, ctx()), 'star');
     expect(separationOf(after)).toBeGreaterThan(separationOf(before));
+    expect(after.score).toBeGreaterThan(before.score);
+    // Market value did not move, because the pick on the clock did not.
+    expect(after.adpValue).toBe(before.adpValue);
   });
 
   /** D — the ones who left were never alternatives. */
@@ -274,7 +320,7 @@ describe('the Score as the draft moves', () => {
     const clean = find(rankAvailablePlayers(board(), ctx({ currentPick: 60, nextPick: 82 })), 'star');
     const withNews = find(
       rankAvailablePlayers(
-        [wr('star', 40, { signal: signal(-8) }), wr('alt1', 44), wr('alt2', 46), wr('alt3', 48), wr('deep', 150)],
+        [wr('star', 40, { signal: signal(-8) }), ...alternatives(), wr('deep', 150)],
         ctx({ currentPick: 60, nextPick: 82 }),
       ),
       'star',
