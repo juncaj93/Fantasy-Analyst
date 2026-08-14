@@ -96,24 +96,123 @@ const COLUMNS = [
 ] as const;
 
 /**
+ * How many weeks back a bounded parse keeps.
+ *
+ * Measured rather than picked. A Workers invocation gets 10ms of CPU on the
+ * free plan; against a real season file the narrowing scan costs about 1.2ms
+ * fixed and the parse about 1.2ms per three hundred rows, and a mid-season week
+ * is roughly three hundred rows:
+ *
+ *     window   rows    parse
+ *        2      636     2.4ms
+ *        3      932     3.8ms
+ *        4     1255     5.2ms
+ *      all     2898    12.1ms   <- over budget on its own
+ *
+ * Three is the practice-trend span and leaves a week of catch-up for a missed
+ * tick, at about half the allowance. Widening it buys history the database is
+ * already accumulating live; narrowing it buys margin that is not needed.
+ *
+ * Losing older weeks costs history, never current state: the latest week is
+ * always parsed, and a player whose newest report is older already has that row
+ * stored from the ingest that saw it.
+ */
+export const RECENT_WEEKS = 3;
+
+/**
+ * Split one CSV line into fields.
+ *
+ * Two paths, and the fast one is what makes a five-minute cadence affordable.
+ * The whole 679KB season file contains **six** quote characters — three lines
+ * out of six thousand — so a plain `split(',')` is correct for essentially the
+ * entire file, and the careful RFC4180 parser is reserved for the handful of
+ * lines that actually need it. Running the careful one over everything cost
+ * 154ms, which is fifteen times a Worker's entire CPU allowance.
+ */
+function splitRow(line: string): string[] {
+  if (!line.includes('"')) return line.split(',');
+  return parseCsv(line)[0] ?? [];
+}
+
+/**
+ * Find one field without building the fields before it.
+ *
+ * Used to read the week out of every line during the narrowing pass. The
+ * columns before it — season, season_type, game_type, team — never contain a
+ * comma or a quote, so counting separators is exact here and costs no
+ * allocation.
+ */
+function fieldAt(line: string, index: number): string {
+  let start = 0;
+  for (let f = 0; f < index; f++) {
+    const next = line.indexOf(',', start);
+    if (next === -1) return '';
+    start = next + 1;
+  }
+  const end = line.indexOf(',', start);
+  return end === -1 ? line.slice(start) : line.slice(start, end);
+}
+
+/**
  * Parse the published CSV.
  *
  * Column names are read from the header rather than assumed by position: this
  * is somebody else's file and a new column inserted in the middle must not
  * silently shift every value by one.
+ *
+ * ## Why it can stop early
+ *
+ * `recentWeeks` bounds the work to the most recent weeks in the file, and the
+ * reason is a hard limit rather than a preference: a Workers invocation gets
+ * **10ms of CPU** on the free plan, and parsing all 6,068 rows of a full season
+ * takes about 160ms. Narrowing to the last few weeks first — a scan that reads
+ * one field per line and allocates nothing — brings the whole ingest under the
+ * ceiling with room to spare.
+ *
+ * Nothing is lost by it. A player whose latest report is from week 12 already
+ * has that row stored from the ingest that saw it; he is not in this file's
+ * recent weeks because nothing about him changed. Only the very first ingest of
+ * an already-underway season sees a shortened history, and this app starts
+ * watching in the preseason, so in practice it accumulates every week live.
+ *
+ * Omit `recentWeeks` to parse the whole file, which is what a test or a one-off
+ * backfill wants.
  */
-export function parseInjuryReport(text: string): ParsedInjuryReport {
-  const table = parseCsv(text);
-  const header = table[0]?.map((h) => h.trim().toLowerCase()) ?? [];
+export function parseInjuryReport(text: string, opts: { recentWeeks?: number } = {}): ParsedInjuryReport {
+  const lines = text.split('\n');
+  const header = splitRow((lines[0] ?? '').replace(/\r$/, '')).map((h) => h.trim().toLowerCase());
   const at = new Map(COLUMNS.map((c) => [c, header.indexOf(c)]));
+  const weekColumn = at.get('week') ?? -1;
+
+  /*
+   * One cheap pass to find the latest week and remember each line's, so the
+   * expensive parse runs over a few hundred rows instead of six thousand.
+   */
+  let latestWeek = 0;
+  const weekOf = new Int32Array(lines.length);
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.length === 0) continue;
+    const week = weekColumn === -1 ? Number.NaN : Number(fieldAt(line, weekColumn));
+    weekOf[i] = Number.isFinite(week) ? week : -1;
+    if (Number.isFinite(week) && week > latestWeek) latestWeek = week;
+  }
+
+  const cutoff =
+    opts.recentWeeks == null || !Number.isFinite(opts.recentWeeks)
+      ? Number.NEGATIVE_INFINITY
+      : latestWeek - opts.recentWeeks + 1;
 
   const rows: InjuryReportRow[] = [];
   let skipped = 0;
-  let latestWeek = 0;
   let season = '';
 
-  for (let i = 1; i < table.length; i++) {
-    const cells = table[i]!;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.length === 0) continue;
+    if (weekOf[i]! < cutoff) continue;
+
+    const cells = splitRow(line.replace(/\r$/, ''));
     const cell = (column: (typeof COLUMNS)[number]): string => {
       const index = at.get(column) ?? -1;
       return index === -1 ? '' : (cells[index] ?? '').trim();
@@ -127,7 +226,6 @@ export function parseInjuryReport(text: string): ParsedInjuryReport {
     }
 
     season ||= cell('season');
-    latestWeek = Math.max(latestWeek, week);
     const practiceRaw = cell('practice_status');
     rows.push({
       season: cell('season'),
@@ -212,12 +310,38 @@ export function normalizeForMatch(name: string): string {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** The validators that decide whether anything needs downloading. */
+export interface SourceFingerprint {
+  /** The strong validator. Preferred, and it survives the CDN redirect. */
+  etag: string | null;
+  /** The raw `Last-Modified` header, as sent, for the conditional request. */
+  lastModified: string | null;
+}
+
+export type FetchOutcome =
+  /** The source changed (or we had no fingerprint): `report` is populated. */
+  | 'ok'
+  /** 304. Nothing to do, and nothing was downloaded. The common answer. */
+  | 'not_modified'
+  /** 404 — a season that has not started. A fact about the calendar. */
+  | 'not_published'
+  /** Anything else. Last-good data stays exactly where it is. */
+  | 'failed';
+
 export interface InjuryReportFetch {
+  outcome: FetchOutcome;
   report: ParsedInjuryReport | null;
   /**
-   * When the file was last published, from the response's `Last-Modified`.
+   * The validators this response reported, to be stored for the next check.
+   *
+   * On a 304 these come back unchanged from what was sent, which is what makes
+   * the check idempotent: storing them again is a no-op.
+   */
+  fingerprint: SourceFingerprint;
+  /**
+   * When the file was last published, from `Last-Modified`, as an ISO string.
    * There is no per-row timestamp in this data, so this is the only freshness
-   * it has, and it is the freshness of the whole file.
+   * it has, and it belongs to the whole file rather than to any player.
    */
   publishedAt: string | null;
   /** Why there is nothing, when there is nothing. Never an exception. */
@@ -225,38 +349,131 @@ export interface InjuryReportFetch {
 }
 
 /**
- * Fetch one season's report.
+ * Ask for the season's report, but only actually receive it if it changed.
  *
- * A 404 is the expected answer before a season starts and is reported as such
- * — the difference between "the source is down" and "there are no injury
- * reports yet in August" is the difference between an alarm and a fact.
+ * ## Why one conditional GET rather than HEAD-then-GET
+ *
+ * Measured against the live endpoint (`scripts/probe-nflverse-conditional.mjs`):
+ *
+ *   - `HEAD` answers 200 with both `ETag` and `Last-Modified`;
+ *   - both validators are **stable across calls**, even though the release
+ *     asset 302s to a signed CDN URL whose query string — expiry, signature,
+ *     JWT — is different every single time. Fingerprinting the redirect target
+ *     would have reported a change on every tick;
+ *   - `If-None-Match` returns **304 with no body**;
+ *   - a deliberately stale validator returns **200 with the whole file**.
+ *
+ * That last pair is the point. One request covers both cases: the ordinary
+ * five-minute tick costs a round trip and no bytes, and the tick where
+ * something actually changed already has the file in hand. A HEAD first would
+ * make the common path no cheaper and the interesting path twice as slow.
+ *
+ * A 404 is the expected answer before a season starts and is reported as such —
+ * the difference between "the source is down" and "there are no injury reports
+ * yet in August" is the difference between an alarm and a fact.
  */
 export async function fetchInjuryReport(
   season: string,
-  opts: { fetch?: FetchLike } = {},
+  opts: { fetch?: FetchLike; fingerprint?: SourceFingerprint | null; recentWeeks?: number } = {},
 ): Promise<InjuryReportFetch> {
   const doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
-  const res = await doFetch(injuryReportUrl(season), { headers: { accept: 'text/csv' } });
+  const known = opts.fingerprint;
+
+  const headers: Record<string, string> = { accept: 'text/csv' };
+  /*
+   * Only one conditional header, and ETag wins where both exist.
+   *
+   * Sending both lets a server that honours only the weaker one answer 200 to a
+   * request the stronger one would have settled, which quietly turns every
+   * check back into a download.
+   */
+  if (known?.etag) headers['if-none-match'] = known.etag;
+  else if (known?.lastModified) headers['if-modified-since'] = known.lastModified;
+
+  let res: Response;
+  try {
+    res = await doFetch(injuryReportUrl(season), { headers });
+  } catch (err) {
+    return {
+      outcome: 'failed',
+      report: null,
+      fingerprint: { etag: known?.etag ?? null, lastModified: known?.lastModified ?? null },
+      publishedAt: null,
+      note: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  // 304: the body was never sent. Keep the fingerprint we asked with — the
+  // response is not obliged to repeat it.
+  if (res.status === 304) {
+    return {
+      outcome: 'not_modified',
+      report: null,
+      fingerprint: {
+        etag: res.headers.get('etag') ?? known?.etag ?? null,
+        lastModified: res.headers.get('last-modified') ?? known?.lastModified ?? null,
+      },
+      publishedAt: toIso(known?.lastModified ?? null),
+      note: null,
+    };
+  }
 
   if (res.status === 404) {
     return {
+      outcome: 'not_published',
       report: null,
+      fingerprint: { etag: null, lastModified: null },
       publishedAt: null,
       note: `nflverse has not published ${season} injury reports yet`,
     };
   }
+
   if (!res.ok) {
-    return { report: null, publishedAt: null, note: `nflverse injuries ${res.status}` };
+    // The old fingerprint is kept deliberately: a 503 is not evidence that the
+    // file changed, and forgetting what we knew would force a needless download
+    // on the next tick.
+    return {
+      outcome: 'failed',
+      report: null,
+      fingerprint: { etag: known?.etag ?? null, lastModified: known?.lastModified ?? null },
+      publishedAt: null,
+      note: `nflverse injuries ${res.status}`,
+    };
   }
 
-  const lastModified = res.headers.get('last-modified');
-  const report = parseInjuryReport(await res.text());
+  const fingerprint: SourceFingerprint = {
+    etag: res.headers.get('etag'),
+    lastModified: res.headers.get('last-modified'),
+  };
+  const report = parseInjuryReport(await res.text(), { recentWeeks: opts.recentWeeks });
   if (report.rows.length === 0) {
-    return { report: null, publishedAt: null, note: `nflverse returned no ${season} rows` };
+    /*
+     * An empty file is a failure, not an update.
+     *
+     * Storing this fingerprint would mark the emptiness as "seen" and the next
+     * tick would 304 against it forever, leaving the app permanently convinced
+     * it was up to date with nothing.
+     */
+    return {
+      outcome: 'failed',
+      report: null,
+      fingerprint: { etag: known?.etag ?? null, lastModified: known?.lastModified ?? null },
+      publishedAt: null,
+      note: `nflverse returned no ${season} rows`,
+    };
   }
+
   return {
+    outcome: 'ok',
     report,
-    publishedAt: lastModified ? new Date(lastModified).toISOString() : null,
+    fingerprint,
+    publishedAt: toIso(fingerprint.lastModified),
     note: null,
   };
+}
+
+function toIso(httpDate: string | null): string | null {
+  if (!httpDate) return null;
+  const at = Date.parse(httpDate);
+  return Number.isFinite(at) ? new Date(at).toISOString() : null;
 }

@@ -22,6 +22,7 @@ import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
 import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 import { InjuryService } from '../server/services/injuryService.ts';
+import { LeagueRepo } from '../server/repos/league.ts';
 
 export interface WorkerEnv {
   DB: Database;
@@ -76,11 +77,37 @@ export default {
 
   /**
    * Cron cadence (see wrangler.toml):
-   *   Sat 23:00 UTC + Sun 15:00 UTC -> Vegas refresh
-   *   Daily 09:00 UTC               -> Sleeper player dictionary sync
+   *   Every 5 minutes  -> injury check (conditional; usually a 304 and no work)
+   *   Sat 23:00 UTC    -> Vegas refresh
+   *   Sun 15:00 UTC    -> Vegas refresh
+   *   Daily 09:00 UTC  -> Sleeper player dictionary + last season's statistics
+   *
+   * The injury check is deliberately the odd one out. Everything else here is a
+   * job that costs real work every time it runs, so it runs on a schedule
+   * chosen to be as infrequent as the data allows. The injury check costs a
+   * conditional request that is almost always answered 304 with no body, so it
+   * can run constantly — and it has to, because a player is ruled out ninety
+   * minutes before kickoff and kickoff is 9:30am for a London game, Thursday
+   * night, Friday on a holiday, or Saturday in December. No fixed window covers
+   * that set; a flat cadence does.
    */
   async scheduled(event: { cron: string }, env: WorkerEnv): Promise<void> {
     const appEnv = toAppEnv(env);
+
+    /*
+     * The five-minute tick. Checked first and returned from immediately,
+     * because it is by far the most frequent path and it must stay cheap.
+     */
+    if (event.cron.startsWith('*/5')) {
+      try {
+        const run = await new InjuryService(env.DB).refresh();
+        await recomputeForChangedPlayers(env, run.changedPlayerIds ?? []);
+      } catch (err) {
+        console.error('injury check failed', err);
+      }
+      return;
+    }
+
     if (event.cron.startsWith('0 9')) {
       await new SleeperSyncService(env.DB, appEnv.sleeper).syncPlayers();
       /*
@@ -99,18 +126,12 @@ export default {
         console.error('season stats refresh failed', err);
       }
       /*
-       * The published injury report, on the same daily clock.
+       * One injury check on this clock too, after the dictionary.
        *
-       * The brief asks for a game-week cadence — Wednesday's first practice
-       * report, Thursday's changes, Friday's designations — and this covers all
-       * three without adding a cron for each. The source is one bulk file for
-       * the whole league that is rewritten as the reports land, so asking for it
-       * once a day sees every one of those and costs a single request; three
-       * separate triggers would see exactly the same file three times.
-       *
-       * It runs after the player sync for the same reason the statistics do:
-       * the rows are mapped onto players this app knows, and the other order
-       * reports a day's worth of new players as unmatched.
+       * Not for freshness — the five-minute tick has that covered — but because
+       * the rows are mapped onto players this app knows, and a check that runs
+       * immediately after a dictionary sync is the one most likely to resolve
+       * players who were unmatched yesterday.
        */
       try {
         await new InjuryService(env.DB).refresh();
@@ -120,20 +141,6 @@ export default {
       return;
     }
 
-    /*
-     * Sunday 15:00 UTC is 11am Eastern: an hour before the early slate and the
-     * moment the day's decisions are actually made. The Vegas refresh already
-     * runs here, so the injury report comes with it — Friday's designations are
-     * the last word before kickoff, and reading them at 09:00 on Saturday is
-     * not the same as reading them now.
-     */
-    if (event.cron.startsWith('0 15')) {
-      try {
-        await new InjuryService(env.DB).refresh();
-      } catch (err) {
-        console.error('injury report refresh failed', err);
-      }
-    }
     await refreshVegas(appEnv);
   },
 
@@ -252,4 +259,52 @@ function decodeBody(body: string, headers: string): string {
     }
   }
   return body;
+}
+
+
+/**
+ * Recompute only what a changed player actually touches.
+ *
+ * The point of the diff is wasted if a three-player update triggers a rebuild of
+ * everything, so this asks the narrow question: is any changed player on the
+ * user's roster? Nobody else's injury changes what this app would tell *this*
+ * user to do — a receiver on a team they have no interest in is news the board
+ * will pick up whenever it is next drawn, not a reason to do work now.
+ *
+ * Start/Sit and Trades both read the normalized injury state at request time
+ * rather than from a cache, so "recompute" here means invalidating nothing and
+ * warming nothing: the work is in deciding whether anything downstream *could*
+ * have changed, and saying so in the log. This is the hook the brief asks for,
+ * and it is honest about the fact that the read path is already live.
+ */
+async function recomputeForChangedPlayers(env: WorkerEnv, changedPlayerIds: string[]): Promise<void> {
+  if (changedPlayerIds.length === 0) return;
+
+  const leagues = new LeagueRepo(env.DB);
+  const league = await leagues.getSelectedLeague().catch(() => null);
+  if (!league) return;
+
+  const rosters = await leagues.listRosters(league.id).catch(() => []);
+  const mine = new Set(rosters.find((r) => r.isMine)?.playerIds ?? []);
+  const owned = new Set(rosters.flatMap((r) => r.playerIds));
+
+  const onMyRoster = changedPlayerIds.filter((id) => mine.has(id));
+  const rosteredElsewhere = changedPlayerIds.filter((id) => !mine.has(id) && owned.has(id));
+
+  if (onMyRoster.length === 0 && rosteredElsewhere.length === 0) return;
+
+  /*
+   * Logged rather than acted on, deliberately.
+   *
+   * Start/Sit and Trades compute from the stored injury state on every request,
+   * so the next time either screen is opened it already reflects this change —
+   * there is no stale cache to bust. Writing one here to "invalidate" would be
+   * inventing a cache in order to clear it. What is worth recording is that the
+   * change reached players the user actually cares about, which is what makes a
+   * missed propagation visible later.
+   */
+  console.log(
+    `injury-propagate roster=${onMyRoster.length} league=${rosteredElsewhere.length} ` +
+      `startSit=${onMyRoster.length} trades=${onMyRoster.length + rosteredElsewhere.length}`,
+  );
 }
