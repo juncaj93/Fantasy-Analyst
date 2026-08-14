@@ -1,5 +1,6 @@
 /** Player + alias persistence, and construction of the in-memory PlayerIndex. */
 
+import { EXCLUDED_POSITIONS } from '../../core/sleeper/transform.ts';
 import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
@@ -38,6 +39,10 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
   };
 }
 
+/** Positions the app refuses to carry, as SQL. */
+const EXCLUDED_LIST = [...EXCLUDED_POSITIONS];
+const EXCLUDED_PLACEHOLDERS = EXCLUDED_LIST.map(() => '?').join(',');
+
 export class PlayerRepo {
   constructor(private readonly db: Database) {}
 
@@ -56,7 +61,14 @@ export class PlayerRepo {
 
   async listAll(): Promise<CanonicalPlayer[]> {
     const [players, aliases] = await Promise.all([
-      this.db.prepare('SELECT * FROM players').all<PlayerRow>(),
+      // Excluded positions are filtered in SQL rather than after the fact: this
+      // is the query every screen ultimately reads through, and a kicker that
+      // was synced before they were dropped should disappear now, not at the
+      // next sync.
+      this.db
+        .prepare(`SELECT * FROM players WHERE position NOT IN (${EXCLUDED_PLACEHOLDERS})`)
+        .bind(...EXCLUDED_LIST)
+        .all<PlayerRow>(),
       this.db.prepare('SELECT player_id, alias FROM player_aliases').all<{ player_id: string; alias: string }>(),
     ]);
     const aliasesByPlayer = new Map<string, string[]>();
@@ -202,11 +214,13 @@ export class PlayerRepo {
     const rows = await this.db
       .prepare(
         `SELECT * FROM players
-          WHERE active = 1 AND (LOWER(full_name) LIKE ? OR normalized_name LIKE ?)
+          WHERE active = 1
+            AND position NOT IN (${EXCLUDED_PLACEHOLDERS})
+            AND (LOWER(full_name) LIKE ? OR normalized_name LIKE ?)
           ORDER BY LENGTH(full_name), full_name
           LIMIT ?`,
       )
-      .bind(like, like, limit)
+      .bind(...EXCLUDED_LIST, like, like, limit)
       .all<PlayerRow>();
     return rows.results.map((r) => toPlayer(r));
   }

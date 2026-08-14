@@ -43,6 +43,15 @@ export interface DraftBoardState {
   rosterAlerts: RosterAlert[];
   /** 1-based round currently on the clock. */
   round: number;
+  /**
+   * Positions this league actually starts, in a sensible reading order.
+   *
+   * The board already hides positions the league does not use; sending the
+   * list means the filter row can stop offering chips that are guaranteed to
+   * return nothing — which is what a DEF chip does in a league with no defence
+   * slot, and what a K chip did everywhere.
+   */
+  startablePositions: string[];
   warnings: string[];
 }
 
@@ -67,7 +76,10 @@ export class DraftBoardService {
     this.evidence = new EvidenceRepo(db);
   }
 
-  async build(draftId: string, opts: { limit?: number; position?: string | null } = {}): Promise<DraftBoardState> {
+  async build(
+    draftId: string,
+    opts: { limit?: number; position?: string | null; queuedOnly?: boolean } = {},
+  ): Promise<DraftBoardState> {
     const draft = await this.leagues.getDraft(draftId);
     if (!draft) throw new Error(`draft ${draftId} not found`);
     const league = await this.leagues.getLeague(draft.leagueId);
@@ -150,6 +162,16 @@ export class DraftBoardService {
     // are included only when nothing is ranked at all, so the board degrades to
     // "everyone" rather than to nothing.
     const positionFilter = opts.position ? opts.position.toUpperCase() : null;
+    /*
+     * The queue, when that is what was asked for.
+     *
+     * Read before the pool is cut rather than after: a player you queued in the
+     * eleventh round is exactly the one you want the filter to surface, and
+     * scoring only the top of the board would hide him. The flag table is a
+     * shortlist by nature, so reading all of it costs nothing.
+     */
+    const allFlags = await new PlayerFlagsRepo(this.db).all();
+    const queuedOnly = opts.queuedOnly === true;
     // Only positions this league starts. A league with no kicker slot should
     // never be shown a kicker, however Sleeper ranks them.
     const startable = startablePositions(buildRosterShape(league.rosterPositions));
@@ -157,12 +179,57 @@ export class DraftBoardService {
       player.active &&
       !takenIds.has(player.id) &&
       (startable.size === 0 || startable.has(player.position)) &&
-      (!positionFilter || player.position === positionFilter);
+      (!positionFilter || player.position === positionFilter) &&
+      (!queuedOnly || (allFlags.get(player.id) ?? 0) > 0);
+
+    /*
+     * "Only ranked players" has to be asked per position, not once for the board.
+     *
+     * Dropping unranked players stops 2,500 names drowning a board that has a
+     * real ranking, and that is right — as long as the position has a ranking
+     * to be dropped from. No published ADP this project uses covers defences,
+     * so a single global test silently erased the entire position from a league
+     * that starts one: the filter chip appeared, the board came back empty, and
+     * nothing said why.
+     *
+     * So a position the ranking does not cover at all keeps its players. A
+     * position the ranking does cover keeps only the ranked ones, exactly as
+     * before.
+     */
+    const rankedByPosition = new Map<string, number>();
+    for (const p of allPlayers) {
+      if (!p.active || rankOf(p) == null) continue;
+      rankedByPosition.set(p.position, (rankedByPosition.get(p.position) ?? 0) + 1);
+    }
+    const positionIsRanked = (position: string): boolean => (rankedByPosition.get(position) ?? 0) > 0;
 
     const pool: CanonicalPlayer[] = allPlayers.filter(
-      (p) => eligible(p) && (rankedCount === 0 || rankOf(p) != null),
+      // Unranked players are normally dropped, but never from your own queue:
+      // you put them there, so leaving them out would be the app overruling you.
+      (p) => eligible(p) && (queuedOnly || !positionIsRanked(p.position) || rankOf(p) != null),
     );
-    pool.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+    /*
+     * Draft order first. Within a position nobody ranks, `search_rank` breaks
+     * the tie — it is emphatically not ADP (it measures who gets looked up) and
+     * is never allowed to set the board's order, but ordering thirty-two
+     * defences by how often they are searched beats ordering them by accident.
+     * Their market-value component is still `unknown` and they are still marked
+     * degraded, so nothing here pretends to a draft position it does not have.
+     */
+    pool.sort(
+      (a, b) =>
+        (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
+        (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+        a.fullName.localeCompare(b.fullName),
+    );
+
+    // Say it out loud, because those rows will look thin next to ranked ones.
+    const unrankedStartable = [...startable].filter((p) => !positionIsRanked(p)).sort();
+    if (unrankedStartable.length > 0 && rankedCount > 0) {
+      warnings.push(
+        `no draft order covers ${unrankedStartable.join(', ')} in this ranking, so they are listed on news and roster need alone`,
+      );
+    }
 
     // Sleeper ranks ~2,500 players; scoring all of them on every request is
     // work nobody reads, and it is far more than any draft will reach. The cap
@@ -173,6 +240,9 @@ export class DraftBoardService {
       warnings.push(
         `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
       );
+    }
+    if (queuedOnly && pool.length === 0) {
+      warnings.push('your queue is empty — tap the star beside a player to add them');
     }
 
     // Non-blocking draft-day readiness: unresolved names are research the user
@@ -186,10 +256,8 @@ export class DraftBoardService {
     }
 
     const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
-    // The user's own shortlist. Fetched for the scored pool only: it is a
-    // handful of players, and a flag on somebody who is already drafted or out
-    // of the pool has nothing to move.
-    const flags = await new PlayerFlagsRepo(this.db).forPlayers(candidates.map((c) => c.id));
+    // The user's own shortlist, already read above.
+    const flags = allFlags;
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
@@ -249,7 +317,17 @@ export class DraftBoardService {
         totalRounds: rounds,
       }),
       round,
+      startablePositions: orderPositions(startable),
       warnings,
     };
   }
+}
+
+/** Conventional reading order, with anything unexpected kept and put last. */
+const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'DEF'];
+
+function orderPositions(positions: Set<string>): string[] {
+  const known = POSITION_ORDER.filter((p) => positions.has(p));
+  const rest = [...positions].filter((p) => !POSITION_ORDER.includes(p)).sort();
+  return [...known, ...rest];
 }

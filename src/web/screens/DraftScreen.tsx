@@ -20,7 +20,20 @@ import {
 import { Badge, Empty, Loading, Notice, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
 import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/decisions.tsx';
 
-const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+/**
+ * The filter row.
+ *
+ * `★` is not a position — it is the user's own queue, and it sits first
+ * because during a draft "who did I want again" is asked more often than any
+ * single position.
+ *
+ * The positions come from the league rather than from a list here. A chip that
+ * can only ever return nothing is worse than no chip: the board already hides
+ * positions the league does not start, so a DEF chip in a league with no
+ * defence slot looked exactly like a bug in the board.
+ */
+const QUEUE_FILTER = '★';
+const ALL_FILTER = 'ALL';
 
 export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
@@ -29,7 +42,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const [board, setBoard] = useState<DraftBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [position, setPosition] = useState('ALL');
+  const [position, setPosition] = useState(ALL_FILTER);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [autoPoll, setAutoPoll] = useState(false);
   const [flagging, setFlagging] = useState<string | null>(null);
@@ -40,7 +53,8 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
       if (!draftId) return;
       setLoading(true);
       try {
-        const query = pos === 'ALL' ? '' : `&position=${pos}`;
+        const query =
+          pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
         setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=40${query}`));
         setError(null);
       } catch (err) {
@@ -148,9 +162,21 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
         <Notice key={w}>{w}</Notice>
       ))}
 
+      {/*
+        Only the star carries a label. A chip reading "QB" already says what it
+        does, and naming it "Filter to QB" would replace a perfectly good
+        accessible name with a worse one.
+      */}
       <div className="filter-row" role="group" aria-label="Filter by position">
-        {POSITIONS.map((p) => (
-          <button key={p} className="chip" aria-pressed={position === p} onClick={() => setPosition(p)}>
+        {[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => (
+          <button
+            key={p}
+            className={p === QUEUE_FILTER ? 'chip chip-queue' : 'chip'}
+            aria-pressed={position === p}
+            aria-label={p === QUEUE_FILTER ? 'Show only your queue' : undefined}
+            data-testid={p === QUEUE_FILTER ? 'queue-filter' : undefined}
+            onClick={() => setPosition(p)}
+          >
             {p}
           </button>
         ))}
@@ -191,10 +217,14 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
       </details>
 
       <div className="section-title" data-testid="recommended-heading">
-        Recommended ({board.recommendations.length})
+        {position === QUEUE_FILTER ? 'Your queue' : 'Recommended'} ({board.recommendations.length})
       </div>
       {board.recommendations.length === 0 ? (
-        <Empty>No available players match this filter.</Empty>
+        <Empty>
+          {position === QUEUE_FILTER
+            ? 'Your queue is empty. Tap the ☆ beside a player to add them.'
+            : 'No available players match this filter.'}
+        </Empty>
       ) : (
         board.recommendations.map((rec, i) => (
           <RecommendationRow

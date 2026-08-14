@@ -367,10 +367,6 @@ body {
   --pos-color: #c084fc;
 }
 
-.pos-K {
-  --pos-color: #94a3b8;
-}
-
 .pos-DEF {
   --pos-color: #f472b6;
 }
@@ -397,10 +393,6 @@ body {
 
   .pos-TE {
     --pos-color: #7e22ce;
-  }
-
-  .pos-K {
-    --pos-color: #475569;
   }
 
   .pos-DEF {
@@ -893,4 +885,43 @@ table.compact th {
 
 .draft-details .badge-row {
   margin-top: 4px;
+}
+
+/*
+ * The heart is the players-list face of the same flag the draft board shows as
+ * a star. Sized and spaced identically so a row does not reflow between
+ * screens; only the glyph and the accent colour differ.
+ */
+.heart-btn {
+  flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: 0.85rem;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.heart-btn-on {
+  border-color: var(--neg);
+  color: var(--neg);
+}
+
+.heart-btn:disabled,
+.star-btn:disabled {
+  opacity: 0.5;
+}
+
+/* The queue filter is the user's own list, so it reads as theirs, not as a position. */
+.chip-queue {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.chip-queue[aria-pressed='true'] {
+  color: inherit;
 }

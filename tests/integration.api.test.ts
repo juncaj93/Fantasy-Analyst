@@ -245,6 +245,50 @@ describe('API with seeded data', () => {
     expect(cleared.myGuy.level).toBe(0);
   });
 
+  it('offers filters only for positions the league actually starts', async () => {
+    const board = await json<{ startablePositions: string[] }>(get('/api/drafts/demo-draft/board', cookie));
+    // The demo league starts QB/RB/RB/WR/WR/TE/FLEX — no defence, no kicker.
+    expect(board.startablePositions).toEqual(['QB', 'RB', 'WR', 'TE']);
+    expect(board.startablePositions).not.toContain('DEF');
+    expect(board.startablePositions).not.toContain('K');
+  });
+
+  it('narrows the board to the queue, and says so when it is empty', async () => {
+    const empty = await json<{ recommendations: unknown[]; warnings: string[] }>(
+      get('/api/drafts/demo-draft/board?queued=1', cookie),
+    );
+    expect(empty.recommendations).toHaveLength(0);
+    expect(empty.warnings.join(' ')).toContain('your queue is empty');
+
+    const board = await json<{ recommendations: { playerId: string }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    const first = board.recommendations[0]!.playerId;
+    const second = board.recommendations[1]!.playerId;
+    await app(post(`/api/players/${first}/my-guy`, { level: 1 }, cookie), env);
+    await app(post(`/api/players/${second}/my-guy`, { level: 3 }, cookie), env);
+
+    const queued = await json<{ recommendations: { playerId: string; myGuy: { level: number } }[] }>(
+      get('/api/drafts/demo-draft/board?queued=1', cookie),
+    );
+    expect(queued.recommendations.map((r) => r.playerId).sort()).toEqual([first, second].sort());
+    for (const rec of queued.recommendations) expect(rec.myGuy.level).toBeGreaterThan(0);
+  });
+
+  it('drops a queued player from the queue once he is taken', async () => {
+    const board = await json<{ recommendations: { playerId: string }[] }>(
+      get('/api/drafts/demo-draft/board', cookie),
+    );
+    await app(post(`/api/players/${board.recommendations[0]!.playerId}/my-guy`, { level: 2 }, cookie), env);
+
+    // Marcus Vance is pick 1 in the seed, so he is already off the board.
+    await app(post('/api/players/1001/my-guy', { level: 3 }, cookie), env);
+    const queued = await json<{ recommendations: { playerId: string }[] }>(
+      get('/api/drafts/demo-draft/board?queued=1', cookie),
+    );
+    expect(queued.recommendations.map((r) => r.playerId)).not.toContain('1001');
+  });
+
   it('refuses a My Guy level outside 0-3, and an unknown player', async () => {
     const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
     const id = board.recommendations[0]!.playerId;
