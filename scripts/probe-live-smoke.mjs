@@ -198,9 +198,18 @@ if (board.json) {
 if (board.json) {
   const recs = board.json.recommendations ?? [];
   const withContext = recs.filter((r) => r.tierContext);
+  /*
+   * A minority, not a majority.
+   *
+   * Every tier but the last ends at a cliff, so "ends at a cliff" alone put the
+   * line on 158 of 195 players — which is the wallpaper this project keeps
+   * having to remove. The line is now gated on the group being small enough
+   * that the teams ahead could take it, and this is what would notice if that
+   * gate ever came off.
+   */
   check(
-    'the tier line is on some cards and not on all of them',
-    withContext.length > 0 && withContext.length < recs.length,
+    'the tier line is on a minority of cards',
+    withContext.length > 0 && withContext.length < recs.length * 0.5,
     `${withContext.length} of ${recs.length}`,
   );
   const overlong = withContext.filter((r) => r.tierContext.length > 90);
