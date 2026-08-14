@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildLiveRoster, openStarters, type LiveRosterInput } from '../src/core/draft/liveRoster.ts';
+import { buildLiveRoster, openStarters, rosterProgress, type LiveRosterInput } from '../src/core/draft/liveRoster.ts';
 import { buildRosterShape } from '../src/core/sleeper/scoring.ts';
 
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN']);
@@ -121,5 +121,55 @@ describe('which starting slots are still open', () => {
   it('does not let extra running backs cover a missing quarterback', () => {
     const open = openStarters(SHAPE, { RB: 6 });
     expect(open.find((o) => o.slot === 'QB')?.count).toBe(1);
+  });
+});
+
+/**
+ * The one line the draft header shows instead of a roster card.
+ *
+ * It is status, not advice: how much of a starting lineup exists, in the
+ * league's own slots. What to do about it is the ranked list's job.
+ */
+describe('roster progress line', () => {
+  it('reports every starting slot the league has, filled out of required', () => {
+    expect(rosterProgress(SHAPE, { QB: 0, RB: 1, WR: 3, TE: 0 })).toEqual([
+      { slot: 'QB', filled: 0, required: 1, accepts: ['QB'] },
+      { slot: 'RB', filled: 1, required: 2, accepts: ['RB'] },
+      { slot: 'WR', filled: 2, required: 2, accepts: ['WR'] },
+      { slot: 'TE', filled: 0, required: 1, accepts: ['TE'] },
+      // The third receiver is the one covering FLEX.
+      { slot: 'FLEX', filled: 1, required: 1, accepts: ['RB', 'WR', 'TE'] },
+    ]);
+  });
+
+  it('never shows a slot the league does not have', () => {
+    const noKicker = rosterProgress(buildRosterShape(['QB', 'RB', 'WR', 'BN']), { QB: 1, K: 2 });
+    expect(noKicker.map((s) => s.slot)).toEqual(['QB', 'RB', 'WR']);
+  });
+
+  it('collapses repeated flex slots into one row', () => {
+    const shape = buildRosterShape(['QB', 'RB', 'WR', 'FLEX', 'FLEX', 'BN']);
+    const progress = rosterProgress(shape, { QB: 1, RB: 2, WR: 2 });
+    expect(progress.find((s) => s.slot === 'FLEX')).toEqual({
+      slot: 'FLEX',
+      filled: 2,
+      required: 2,
+      accepts: ['RB', 'WR', 'TE'],
+    });
+  });
+
+  it('fills fixed slots before flex, so a surplus never hides a gap', () => {
+    const progress = rosterProgress(SHAPE, { RB: 6 });
+    expect(progress.find((s) => s.slot === 'QB')).toMatchObject({ filled: 0, required: 1 });
+    expect(progress.find((s) => s.slot === 'RB')).toMatchObject({ filled: 2, required: 2 });
+    expect(progress.find((s) => s.slot === 'FLEX')).toMatchObject({ filled: 1, required: 1 });
+  });
+
+  it('moves as picks are made', () => {
+    const before = buildLiveRoster(input({ picks: [] })).progress;
+    const after = buildLiveRoster(input()).progress;
+    expect(before.find((s) => s.slot === 'RB')!.filled).toBe(0);
+    expect(after.find((s) => s.slot === 'RB')!.filled).toBe(1);
+    expect(after.find((s) => s.slot === 'WR')!.filled).toBe(1);
   });
 });

@@ -64,8 +64,20 @@ export interface DraftComponentWeights {
  */
 export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   marketValue: 1,
-  need: 0.35,
-  scarcity: 0.3,
+  // Best player available, not best player at a position I am missing.
+  //
+  // Need used to be worth 0.35 — a swing of 0.63 between an empty starting slot
+  // and a filled one, which is about thirteen picks of ADP. Stacked on scarcity
+  // and the tier cliff (both of which also rise when a position is needed) it
+  // was enough to float a quarterback over objectively better players for no
+  // reason except that the quarterback slot was empty. Nobody drafts like that.
+  //
+  // At 0.1, and scaled down further in the early rounds by `needUrgency`, an
+  // empty slot is worth one or two picks in round one and three or four in the
+  // last rounds: enough to break a genuine tie, never enough to beat a better
+  // player.
+  need: 0.1,
+  scarcity: 0.2,
   leagueFit: 0.25,
   newsLifetime: 0.35,
   news30: 0.2,
@@ -78,9 +90,28 @@ export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   // heavily negative player is pushed down twice without being removed.
   avoid: 0.3,
   // Enough to reorder players the market rates similarly; never enough to beat
-  // a genuine bargain.
-  tierCliff: 0.25,
+  // a genuine bargain. Trimmed alongside `need`, because a cliff at a position
+  // you need is scored partly on that need and would otherwise smuggle the
+  // roster-need signal back in at full strength.
+  tierCliff: 0.15,
 };
+
+/**
+ * How much of the roster-need weight applies at this point in the draft.
+ *
+ * Round one is a market: the best player on the board is the best pick, and an
+ * empty quarterback slot in the first ten picks is not news — there are fifteen
+ * rounds left to fill it. By the last rounds an unfilled starting slot is a real
+ * problem, because there is no longer time to solve it, so the same signal is
+ * allowed its full (already small) weight.
+ *
+ * Returns a multiplier in [0.35, 1].
+ */
+export function needUrgency(currentPick: number, totalPicks: number): number {
+  if (!Number.isFinite(totalPicks) || totalPicks <= 1) return 1;
+  const progress = clamp((currentPick - 1) / (totalPicks - 1), 0, 1);
+  return round3(0.35 + 0.65 * progress);
+}
 
 /**
  * Net tally at which each window is considered maxed out.
@@ -286,6 +317,8 @@ export function rankAvailablePlayers(
 
   const picksUntilNext = ctx.nextPick == null ? 0 : Math.max(0, ctx.nextPick - ctx.currentPick);
   const teamCount = estimateTeamCount(ctx);
+  const needRamp = needUrgency(ctx.currentPick, ctx.totalPicks);
+  const needWeight = round3(weights.need * needRamp);
 
   const recommendations = available.map((entry) => {
     const { player, adp, signal } = entry;
@@ -297,14 +330,18 @@ export function rankAvailablePlayers(
     components.push(market);
 
     // --- roster need -------------------------------------------------------
+    // Deliberately light, and lighter still early on: the weight actually used
+    // is on the component, so "score × weight" in the breakdown always shows
+    // the real number rather than a nominal one.
     const need = needs[player.position];
+    const needScoreMapped = round3((need?.score ?? 0.1) * 2 - 1); // map 0..1 onto -1..1
     components.push({
       key: 'need',
       label: 'Roster need',
-      display: need?.reason ?? 'not used by this league',
-      score: round3((need?.score ?? 0.1) * 2 - 1), // map 0..1 onto -1..1
-      weight: weights.need,
-      contribution: round3(((need?.score ?? 0.1) * 2 - 1) * weights.need),
+      display: `${need?.reason ?? 'not used by this league'}${needRamp < 1 ? ' (early-round need is discounted)' : ''}`,
+      score: needScoreMapped,
+      weight: needWeight,
+      contribution: round3(needScoreMapped * needWeight),
       unknown: false,
     });
 
@@ -513,12 +550,10 @@ function explain(
     counterpoints.push('no ADP in the current snapshot — value unknown');
   }
 
-  if (extra.survival != null) {
-    if (extra.survival <= 0.35) reasons.push(`low chance to reach your next pick (${Math.round(extra.survival * 100)}%)`);
-    else if (extra.survival >= 0.75) counterpoints.push(`likely still available at your next pick (${Math.round(extra.survival * 100)}%)`);
-  } else {
-    counterpoints.push('survival estimate unavailable');
-  }
+  // The survival number itself is on the card, in colour, so repeating it as a
+  // bullet said nothing new. The wait guidance below still says it, but only
+  // where it has something to add — the tier, or the slot it would fill.
+  if (extra.survival == null) counterpoints.push('survival estimate unavailable');
 
   if (extra.need && extra.need.startersUnfilled > 0) reasons.push(`fills a starting need: ${extra.need.reason}`);
   else if (extra.need) counterpoints.push(extra.need.reason);
@@ -600,10 +635,16 @@ function explain(
     );
   }
 
+  // Timing, as a sentence about this player rather than as a label.
+  //
+  // "Take Now" and "Can Probably Wait" were chips on every row, which made them
+  // wallpaper; the chance he reaches your next pick is now a number on the card
+  // and does that job better. What is left worth saying is the *why* — the tier
+  // that ends with him, the slot he would fill — so only the detail survives.
   if (extra.wait.state === 'can_probably_wait' || extra.wait.state === 'likely_available_later') {
-    counterpoints.push(`${extra.wait.label.toLowerCase()}: ${lowerFirst(extra.wait.detail)}`);
+    counterpoints.push(lowerFirst(extra.wait.detail));
   } else if (extra.wait.state === 'take_now' || extra.wait.state === 'risky_to_wait') {
-    reasons.push(`${extra.wait.label.toLowerCase()}: ${lowerFirst(extra.wait.detail)}`);
+    reasons.push(lowerFirst(extra.wait.detail));
   }
 
   if (reasons.length === 0) reasons.push('ranked on market value with no standout component');

@@ -107,6 +107,13 @@ export interface WaitGuidance {
   survivalProbability: number | null;
 }
 
+export interface SlotProgress {
+  slot: string;
+  filled: number;
+  required: number;
+  accepts: string[];
+}
+
 export interface RosterAlert {
   key: string;
   severity: 'info' | 'warn' | 'urgent';
@@ -133,6 +140,8 @@ export interface DraftBoard {
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
   rosterAlerts: RosterAlert[];
+  /** Every starting slot the league has, filled out of required. */
+  rosterProgress: SlotProgress[];
   round: number;
   startablePositions: string[];
   warnings: string[];

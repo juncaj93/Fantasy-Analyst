@@ -5,7 +5,7 @@
  * passphrase, and that prompt lives inside Setup.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { DraftScreen } from './screens/DraftScreen.tsx';
@@ -37,6 +37,7 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const tabbar = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -73,6 +74,8 @@ export function App() {
     void refresh();
   }, [checkLock, refresh]);
 
+  useTabbarHeight(tabbar);
+
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
   return (
@@ -108,7 +111,7 @@ export function App() {
         ) : null}
       </main>
 
-      <nav className="tabbar" aria-label="Main navigation">
+      <nav className="tabbar" aria-label="Main navigation" ref={tabbar}>
         {TABS.map((t) => {
           const badge =
             t.id === 'review' && overview
@@ -132,6 +135,40 @@ export function App() {
       </nav>
     </div>
   );
+}
+
+/**
+ * Reserve exactly the space the tab bar occupies — no more, no less.
+ *
+ * The page used to reserve a guessed constant plus the home-indicator inset.
+ * A guess is wrong in both directions: too small and the last row hides behind
+ * the bar, too large and there is a strip of empty page above it that reads as
+ * a black bar at the bottom of the screen. The bar knows its own height,
+ * including whatever the safe-area inset added to it, so it is asked — on
+ * mount, and again whenever it changes, which is what happens when Safari's
+ * chrome collapses and the inset changes with it.
+ */
+function useTabbarHeight(ref: React.MutableRefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const apply = () => {
+      const height = Math.round(node.getBoundingClientRect().height);
+      if (height > 0) document.documentElement.style.setProperty('--tabbar-height', `${height}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', apply);
+      return () => window.removeEventListener('resize', apply);
+    }
+    const observer = new ResizeObserver(apply);
+    observer.observe(node);
+    window.visualViewport?.addEventListener('resize', apply);
+    return () => {
+      observer.disconnect();
+      window.visualViewport?.removeEventListener('resize', apply);
+    };
+  }, [ref]);
 }
 
 /** Inline unlock, shown in Setup. Nothing is hidden behind it — only changes. */

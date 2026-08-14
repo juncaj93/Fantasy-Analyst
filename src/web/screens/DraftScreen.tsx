@@ -17,10 +17,9 @@ import {
   type DraftRecommendation,
   type LeagueSummary,
   type MyGuyFlag,
-  type RosterAlert,
+  type SlotProgress,
 } from '../api.ts';
 import {
-  Badge,
   DetailLabel,
   Empty,
   Loading,
@@ -30,16 +29,13 @@ import {
   Signal,
   Stat,
   Unknown,
-  formatDate,
   formatShortAge,
 } from '../components/common.tsx';
 import {
   AvoidBadge,
   MyGuyControl,
   ReasonList,
-  TierCliffTag,
   Verdict,
-  WaitTag,
   draftVerdict,
   saidAlready,
   withoutRepeats,
@@ -284,6 +280,17 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         </div>
       ) : null}
 
+      {/*
+        Status, not advice.
+
+        This replaces a card that said "3 starting slots still open" and then a
+        sentence telling the user to take the best players available — which the
+        ranked list underneath is already doing, at length. Slots the league
+        does not have never appear, and it updates on the same live roster
+        reconstruction as everything else.
+      */}
+      <RosterProgressLine progress={board.rosterProgress ?? []} />
+
       {error ? <Notice tone="error">{error}</Notice> : null}
       {board.warnings.map((w) => (
         <Notice key={w}>{w}</Notice>
@@ -309,43 +316,13 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
         ))}
       </div>
 
-      <RosterAlerts alerts={board.rosterAlerts ?? []} />
-
       {/*
-        The league's settings and the draft-order provenance still matter — they
-        drive every number on the screen — but they are reference, not the thing
-        being read, so they fold away rather than sit above the list.
-      */}
-      <details className="draft-details">
-        <summary className="muted">League and draft order</summary>
-        <div className="badge-row">
-          {board.adpSnapshot ? (
-            <Badge>
-              Draft order: {board.adpSnapshot.label} · {formatDate(board.adpSnapshot.capturedAt)}
-            </Badge>
-          ) : (
-            <Badge>Draft order: Sleeper</Badge>
-          )}
-          <Badge>{board.league.scoringLabel}</Badge>
-          <Badge>
-            Round {board.round} of {board.rounds}
-          </Badge>
-          <Badge>{board.status.replace('_', ' ')}</Badge>
-          <Badge>Roster {board.myRoster.length}</Badge>
-          {Object.entries(board.rosterCounts).map(([pos, n]) => (
-            <Badge key={pos}>
-              {pos} {n}
-            </Badge>
-          ))}
-        </div>
-        <div className="faint" style={{ marginTop: 4 }}>
-          {board.league.notes.join(' · ')}
-        </div>
-      </details>
+        No heading over the list.
 
-      <div className="section-title" data-testid="recommended-heading">
-        {position === QUEUE_FILTER ? 'Your queue' : 'Recommended'} ({board.recommendations.length})
-      </div>
+        "RECOMMENDED (40)" cost a line of a phone screen to say what the ranked
+        list already says by being ranked. The list keeps its accessible name so
+        a screen reader still hears one; sighted readers get the players sooner.
+      */}
       {board.recommendations.length === 0 ? (
         <Empty>
           {position === QUEUE_FILTER
@@ -353,45 +330,52 @@ export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; u
             : 'No available players match this filter.'}
         </Empty>
       ) : (
-        board.recommendations.map((rec, i) => (
-          <RecommendationRow
-            key={rec.playerId}
-            rank={i + 1}
-            rec={rec}
-            expanded={expanded === rec.playerId}
-            onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
-            onMyGuy={setMyGuy}
-            busy={flagging === rec.playerId}
-          />
-        ))
+        <div
+          role="list"
+          aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
+          data-testid="board-list"
+        >
+          {board.recommendations.map((rec, i) => (
+            <RecommendationRow
+              key={rec.playerId}
+              rank={i + 1}
+              rec={rec}
+              expanded={expanded === rec.playerId}
+              onToggle={() => setExpanded(expanded === rec.playerId ? null : rec.playerId)}
+              onMyGuy={setMyGuy}
+              busy={flagging === rec.playerId}
+            />
+          ))}
+        </div>
       )}
     </>
   );
 }
 
 /**
- * The alerts the shape of the roster is producing.
+ * One line: how much of a starting lineup you have.
  *
- * Capped at three. The screen is a phone during a draft, and a list of eight
- * things to worry about is the same as no advice at all — the loudest ones are
- * the ones worth the space. One status line, one strong sentence each, one
- * quiet one: this is guidance on the way to the list, so it stays shorter than
- * the list.
+ * `0/1 QB · 1/2 RB · 3/3 WR · 0/1 TE · 0/2 FLEX`, from the league's own roster
+ * settings and the live pick stream. Deliberately status only — the ranked list
+ * below is where "so take a receiver" belongs, and saying it twice in different
+ * words is how a draft screen fills up with prose.
  */
-function RosterAlerts({ alerts }: { alerts: RosterAlert[] }) {
-  const order = { urgent: 0, warn: 1, info: 2 } as const;
-  const shown = [...alerts].sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 3);
-  if (shown.length === 0) return null;
+function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
+  if (progress.length === 0) return null;
   return (
-    <div className="card card-tight" data-testid="roster-alerts">
-      <div className="section-title" style={{ margin: '0 0 2px' }}>
-        Your roster
-      </div>
-      {shown.map((alert) => (
-        <div key={alert.key} className={`roster-alert roster-alert-${alert.severity}`} data-testid="roster-alert">
-          <strong>{alert.message}</strong>
-          <div className="faint">{alert.detail}</div>
-        </div>
+    <div className="roster-progress" data-testid="roster-progress">
+      {progress.map((slot) => (
+        <span
+          key={slot.slot}
+          className={slot.filled >= slot.required ? 'slot slot-done' : 'slot'}
+          data-slot={slot.slot}
+          title={`${slot.filled} of ${slot.required} ${slot.slot} starting slot${slot.required === 1 ? '' : 's'} filled`}
+        >
+          <strong>
+            {slot.filled}/{slot.required}
+          </strong>{' '}
+          {slot.slot}
+        </span>
       ))}
     </div>
   );
@@ -419,11 +403,14 @@ function RecommendationRow({
   onMyGuy: (playerId: string, level: 0 | 1 | 2 | 3) => void;
   busy: boolean;
 }) {
+  const pos = (rec.position ?? '').toUpperCase();
   return (
     <div
-      className={expanded ? 'player-row player-row-open' : 'player-row'}
+      className={`player-row card-pos card-pos-${pos}${expanded ? ' player-row-open' : ''}`}
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
+      data-position={pos}
+      role="listitem"
     >
       <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
         <div className="player-row-top">
@@ -434,9 +421,12 @@ function RecommendationRow({
         </div>
 
         {/*
-          At most two tags on the row itself, in the order that decides a pick:
-          a caution outranks urgency, and urgency outranks everything else. The
-          rest of the reasoning is one tap away rather than crowding the list.
+          The only tag left is the one that is a genuine warning. Take Now,
+          Risky to Wait and Can Probably Wait were on nearly every row, which
+          made a row of chips that told the reader nothing; the chance he
+          reaches your next pick is a number and does the same job in less
+          space. AVOID stays, because "the research is against him" is not
+          something a percentage can say.
         */}
         <DecisionTags rec={rec} />
 
@@ -450,12 +440,7 @@ function RecommendationRow({
               {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
             </strong>
           </span>
-          <span className="metric">
-            Lasts{' '}
-            <strong>
-              {rec.survivalProbability == null ? <Unknown what="survival" /> : `${Math.round(rec.survivalProbability * 100)}%`}
-            </strong>
-          </span>
+          <SurvivalMetric probability={rec.survivalProbability} />
           {/*
             One signal, not two.
 
@@ -495,7 +480,10 @@ function RecommendationRow({
  * from the same board response as before.
  */
 function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
-  const verdict = draftVerdict(rec.avoid, rec.wait);
+  // Only the caution leads. The timing states used to headline this card as
+  // "Take Now"; the survival tile below says the same thing in a number, and
+  // the sentence that gave it context is the first reason in the list.
+  const verdict = rec.avoid.active ? draftVerdict(rec.avoid, rec.wait) : null;
   // Anything already said as the headline does not get said again as a bullet.
   const said = [verdict?.label, verdict?.detail, rec.avoid.active ? rec.avoid.trendNote : null];
   const reasons = withoutRepeats(rec.reasons, said);
@@ -528,12 +516,14 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
           hint="Picks between his draft-order rank and this pick"
         />
         <Stat
-          label="Lasts"
+          label="Next pick"
           value={
             rec.survivalProbability == null ? (
               <Unknown what="survival" />
             ) : (
-              `${Math.round(rec.survivalProbability * 100)}%`
+              <span className={`survival survival-${survivalBand(rec.survivalProbability)}`}>
+                {Math.round(rec.survivalProbability * 100)}%
+              </span>
             )
           }
           hint="Chance he is still there at your next pick"
@@ -623,24 +613,61 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
 }
 
 /**
- * The one or two tags that change what the user does with this row.
+ * The chance he is still there at your next pick — as a number, in colour.
  *
- * Priority order is the order a person reads them in: a reason not to take him
- * at all, then a reason to take him now, then the fact that he can wait. Stars
- * are not counted against the budget — they sit beside the name, are the user's
- * own mark, and are how they find the player they were looking for.
+ * This is the whole urgency interface now. Red is "he will not last", amber is
+ * "it is a coin flip", green is "there is time"; the percentage is always
+ * printed, so the colour is an accelerator and never the thing carrying the
+ * meaning. The thresholds are deliberately round numbers — a third and two
+ * thirds — because a reader has to hold them in their head between picks.
+ */
+export function survivalBand(probability: number | null): 'unknown' | 'gone' | 'coinflip' | 'safe' {
+  if (probability == null) return 'unknown';
+  if (probability <= 0.3) return 'gone';
+  if (probability < 0.66) return 'coinflip';
+  return 'safe';
+}
+
+function SurvivalMetric({ probability }: { probability: number | null }) {
+  const band = survivalBand(probability);
+  if (probability == null) {
+    return (
+      <span className="metric">
+        Next pick <Unknown what="survival" />
+      </span>
+    );
+  }
+  const pct = Math.round(probability * 100);
+  return (
+    <span className="metric" data-testid="survival">
+      Next pick{' '}
+      <strong
+        className={`survival survival-${band}`}
+        data-band={band}
+        title={`${pct}% chance he is still available at your next pick`}
+      >
+        {pct}%
+      </strong>
+    </span>
+  );
+}
+
+/**
+ * The one tag worth a row's space.
+ *
+ * Everything else that used to sit here — the tier cliff, and the three wait
+ * states — either says what the survival percentage already says, or is
+ * reference rather than a decision. Both are still computed, still ranked on,
+ * and still explained inside the expanded card; they just stopped being chips
+ * on forty rows. Stars are not counted against the budget: they sit beside the
+ * name, are the user's own mark, and are how they find who they were looking
+ * for.
  */
 function DecisionTags({ rec }: { rec: DraftRecommendation }) {
-  const tags: JSX.Element[] = [];
-  if (rec.avoid.active) tags.push(<AvoidBadge key="avoid" avoid={rec.avoid} />);
-  if (rec.tierCliff.severity !== 'none' && tags.length < 2) {
-    tags.push(<TierCliffTag key="cliff" cliff={rec.tierCliff} />);
-  }
-  if (tags.length < 2 && rec.wait.state !== 'unknown') tags.push(<WaitTag key="wait" wait={rec.wait} />);
-  if (tags.length === 0) return null;
+  if (!rec.avoid.active) return null;
   return (
     <div className="tag-row" data-testid="decision-tags">
-      {tags}
+      <AvoidBadge avoid={rec.avoid} />
     </div>
   );
 }

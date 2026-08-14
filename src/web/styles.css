@@ -89,7 +89,10 @@
   --space-3: 6px;
   --space-4: 10px;
   --space-5: 14px;
-  /* The tab bar's own height, excluding the home-indicator inset. */
+  /*
+   * Replaced at runtime with the bar's measured height (including its safe-area
+   * padding). This value only has to hold for the first frame.
+   */
   --tabbar-height: 50px;
   --motion: 160ms;
 }
@@ -273,12 +276,16 @@ body,
 .app-main {
   flex: 1;
   /*
-   * The bottom padding clears the fixed tab bar exactly: its own height plus
-   * whatever the home indicator reserves. Measured from the bar rather than
-   * guessed, so no blank strip appears under the last row and nothing hides
-   * behind the bar on a device with no inset.
+   * The bottom padding clears the fixed tab bar exactly.
+   *
+   * `--tabbar-height` is measured from the bar itself at runtime (see
+   * useTabbarHeight) and already includes whatever the home indicator reserved
+   * inside it, so the inset must NOT be added again here — doing that was worth
+   * an extra 34px of empty page below the last row on an iPhone, which is the
+   * black strip. The fallback value in :root only has to be sane for the frame
+   * before the measurement lands.
    */
-  padding: var(--space-3) var(--space-4) calc(var(--tabbar-height) + env(safe-area-inset-bottom) + var(--space-3));
+  padding: var(--space-3) var(--space-4) calc(var(--tabbar-height) + var(--space-3));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -680,6 +687,77 @@ body,
   color: var(--text-faint);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/*
+ * The whole card carries the position, not just the pill.
+ *
+ * A faint wash of the position's hue plus a coloured left edge: at a glance the
+ * board separates into runs of receivers and running backs without anybody
+ * reading a letter, and at rest it is still a quiet list of white (or near
+ * black) cards rather than a rainbow. The letters stay on the badge, because
+ * the tint is an accelerator and is not allowed to be the only carrier of the
+ * meaning — and because six per cent of men would see three of these hues as
+ * one colour.
+ */
+.card-pos {
+  border-left: 3px solid var(--pos-line, var(--border));
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--pos-tint-bg, transparent) 90%, transparent),
+    color-mix(in srgb, var(--pos-tint-bg, transparent) 22%, transparent) 45%,
+    transparent 78%
+  ),
+  var(--surface);
+}
+
+.card-pos.player-row-open {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--pos-tint-bg, transparent) 95%, transparent),
+    color-mix(in srgb, var(--pos-tint-bg, transparent) 30%, transparent) 45%,
+    transparent 78%
+  ),
+  var(--surface-raised);
+}
+
+.card-pos-QB {
+  --pos-line: var(--pos-QB-line);
+  --pos-tint-bg: var(--pos-QB-tint);
+}
+
+.card-pos-RB {
+  --pos-line: var(--pos-RB-line);
+  --pos-tint-bg: var(--pos-RB-tint);
+}
+
+.card-pos-WR {
+  --pos-line: var(--pos-WR-line);
+  --pos-tint-bg: var(--pos-WR-tint);
+}
+
+.card-pos-TE {
+  --pos-line: var(--pos-TE-line);
+  --pos-tint-bg: var(--pos-TE-tint);
+}
+
+.card-pos-K {
+  --pos-line: var(--pos-K-line);
+  --pos-tint-bg: var(--pos-K-tint);
+}
+
+.card-pos-DEF {
+  --pos-line: var(--pos-DEF-line);
+  --pos-tint-bg: var(--pos-DEF-tint);
+}
+
+/*
+ * Inside a tinted card the badge no longer has to carry the colour on its own,
+ * so it steps back to a neutral chip and stops competing with the name.
+ */
+.card-pos .pos-pill[class*='pos-'] {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 35%, transparent);
 }
 
 .team-code {
@@ -1493,9 +1571,77 @@ table.compact tr:last-child td {
 }
 
 /*
- * Roster guidance: a status line, one strong sentence, one quiet one. It is
- * advice on the way to the list, so it is deliberately shorter than the list.
+ * How much of a starting lineup you have, in one line.
+ *
+ * `0/1 QB · 1/2 RB · 3/3 WR`. Scrolls sideways rather than wrapping if a league
+ * has an unusual number of slots, because two lines here is two lines fewer of
+ * players. A covered slot goes quiet; the ones still open keep the contrast.
  */
+.roster-progress {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 2px var(--space-3);
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roster-progress::-webkit-scrollbar {
+  display: none;
+}
+
+.roster-progress .slot {
+  flex: 0 0 auto;
+  letter-spacing: 0.01em;
+}
+
+.roster-progress .slot + .slot::before {
+  content: '·';
+  color: var(--text-faint);
+  margin-right: var(--space-3);
+}
+
+.roster-progress .slot strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.roster-progress .slot-done {
+  color: var(--text-faint);
+}
+
+.roster-progress .slot-done strong {
+  color: var(--text-faint);
+}
+
+/*
+ * The chance he lasts, as the urgency interface.
+ *
+ * Red is "he will not be there", amber is a coin flip, green is "there is
+ * time". The number is always printed beside it.
+ */
+/* Doubled class on purpose: `.metric strong` would otherwise out-specify these. */
+.survival {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.survival.survival-gone {
+  color: var(--neg);
+}
+
+.survival.survival-coinflip {
+  color: var(--warn);
+}
+
+.survival.survival-safe {
+  color: var(--pos);
+}
+
 .roster-alert {
   padding: 4px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);

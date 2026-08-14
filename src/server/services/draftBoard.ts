@@ -37,6 +37,13 @@ export interface DraftBoardState {
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   /** Starting slots with nobody to fill them yet. */
   openStarters: { slot: string; count: number; accepts: string[] }[];
+  /**
+   * Every starting slot the league has, filled out of required.
+   *
+   * The draft header states this and nothing else about the roster: `0/1 QB ·
+   * 1/2 RB · 3/3 WR`. What to do about it is the ranked list's job.
+   */
+  rosterProgress: { slot: string; filled: number; required: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
   /** What the shape of the live roster is saying, given how late it is. */
@@ -300,6 +307,7 @@ export class DraftBoardService {
       rosterCounts,
       myRoster,
       openStarters: live.openStarters,
+      rosterProgress: live.progress,
       adpSnapshot: snapshotMeta
         ? {
             id: snapshotMeta.id,
