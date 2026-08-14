@@ -7,12 +7,17 @@
  * a single game, what `statID`/`periodID` they use, and whether the entity on
  * each quote is a player we could resolve.
  *
+ * The first run established that `type` accepts only match, prop and tournament,
+ * that prop and tournament are both empty for the NFL, and that an ordinary game
+ * carries passing/rushing/receiving yards on named players. This run looks past
+ * the near horizon — a season-long market would be dated at the end of the
+ * season, not today — and takes stock of what a regular-season game carries, for
+ * the weekly Start/Sit layer.
+ *
  * Deliberately frugal: the free plan meters objects, so this makes a handful of
  * requests with small limits and prints identifiers and counts, never whole
- * payloads. Running it should cost a rounding error against the monthly budget.
- *
- * Prints only; changes nothing, stores nothing. The key is read from the
- * environment and never echoed — only whether it was present.
+ * payloads. Prints only; changes nothing, stores nothing. The key is read from
+ * the environment and never echoed — only whether it was present.
  */
 
 const KEY = process.env.SPORTSGAMEODDS_API_KEY ?? '';
@@ -27,9 +32,8 @@ let requests = 0;
 
 async function get(path) {
   requests++;
-  const url = `${BASE}${path}`;
   try {
-    const res = await fetch(url, { headers: { 'X-Api-Key': KEY, accept: 'application/json' } });
+    const res = await fetch(`${BASE}${path}`, { headers: { 'X-Api-Key': KEY, accept: 'application/json' } });
     const text = await res.text();
     let json = null;
     try {
@@ -37,23 +41,30 @@ async function get(path) {
     } catch {
       /* keep the raw text for the report */
     }
-    return {
-      status: res.status,
-      json,
-      text,
-      rateLimit: {
-        remaining: res.headers.get('x-ratelimit-remaining') ?? res.headers.get('ratelimit-remaining'),
-        limit: res.headers.get('x-ratelimit-limit') ?? res.headers.get('ratelimit-limit'),
-        objects: res.headers.get('x-objects-remaining') ?? res.headers.get('x-ratelimit-remaining-objects'),
-      },
-    };
+    return { status: res.status, json, text };
   } catch (err) {
-    return { status: 0, json: null, text: `fetch failed: ${err.message}`, rateLimit: {} };
+    return { status: 0, json: null, text: `fetch failed: ${err.message}` };
   }
 }
 
 function head(title) {
   console.log(`\n=== ${title} ===`);
+}
+
+function describeEvents(res, limit = 8) {
+  console.log(`status ${res.status}`);
+  const data = res.json?.data;
+  if (!Array.isArray(data) || data.length === 0) {
+    console.log(`  no data (${(res.text ?? '').slice(0, 200)})`);
+    return [];
+  }
+  for (const event of data.slice(0, limit)) {
+    console.log(
+      `  ${event.eventID} type=${event.type} starts=${event.status?.startsAt ?? '?'} ` +
+        `odds=${Object.keys(event.odds ?? {}).length} players=${Object.keys(event.players ?? {}).length}`,
+    );
+  }
+  return data;
 }
 
 /** Summarise an event's odds by market identity, without printing payloads. */
@@ -69,10 +80,10 @@ function summariseOdds(event, { maxRows = 40 } = {}) {
     const entity = odd?.playerID ?? odd?.statEntityID ?? '';
     const known = entity && players[entity];
     if (known) entry.playerEntities++;
-    if (!entry.example && odd?.sideID === 'over') {
+    if (!entry.example && (odd?.sideID === 'over' || odd?.sideID === 'yes')) {
       entry.example = {
         entity,
-        name: known ? players[entity]?.name ?? null : null,
+        name: known ? (players[entity]?.name ?? null) : null,
         line: odd?.bookOverUnder ?? odd?.fairOverUnder ?? null,
         odds: odd?.bookOdds ?? odd?.fairOdds ?? null,
         marketName: odd?.marketName ?? null,
@@ -94,73 +105,41 @@ function summariseOdds(event, { maxRows = 40 } = {}) {
   if (combos.size === 0) console.log('  (no odds on this event)');
 }
 
-const season = new Date().getUTCFullYear();
+const year = new Date().getUTCFullYear();
 
-// 1. What kinds of NFL event exist right now, beyond single games?
-head('NFL events, unfiltered by type');
-const all = await get(`/events?leagueID=NFL&oddsAvailable=true&limit=20`);
-console.log(`status ${all.status}, rate limit headers: ${JSON.stringify(all.rateLimit)}`);
-if (all.json?.data) {
-  const byType = new Map();
-  for (const event of all.json.data) {
-    const t = event?.type ?? '(none)';
-    const list = byType.get(t) ?? [];
-    list.push(event);
-    byType.set(t, list);
-  }
-  for (const [type, events] of byType) {
-    console.log(`  type="${type}": ${events.length} event(s)`);
-    for (const event of events.slice(0, 4)) {
-      console.log(
-        `    ${event.eventID} starts=${event.status?.startsAt ?? '?'} odds=${Object.keys(event.odds ?? {}).length} players=${Object.keys(event.players ?? {}).length}`,
-      );
-    }
-  }
-} else {
-  console.log(all.text.slice(0, 400));
+// 1. Anything dated past the end of the season — where a season-long market
+//    would have to live, since it settles when the season does.
+head('NFL events starting after the regular season ends');
+describeEvents(await get(`/events?leagueID=NFL&startsAfter=${year}-12-20&limit=10`));
+
+head('NFL events with type=prop, over the whole year');
+describeEvents(await get(`/events?leagueID=NFL&type=prop&startsAfter=${year}-01-01&limit=10`));
+
+head('NFL events with type=tournament, over the whole year');
+const tournaments = describeEvents(await get(`/events?leagueID=NFL&type=tournament&startsAfter=${year}-01-01&limit=10`));
+if (tournaments.length > 0) {
+  head('markets on the first tournament event');
+  summariseOdds(tournaments[0]);
 }
 
-// 2. The documented way to ask for anything that is not a single game.
-for (const type of ['futures', 'prop', 'season', 'tournament']) {
-  head(`NFL events with type=${type}`);
-  const res = await get(`/events?leagueID=NFL&type=${type}&limit=5&oddsAvailable=true`);
+// 2. Is there a catalogue of markets/stats we could read instead of guessing?
+for (const path of ['/stats?leagueID=NFL', '/markets?leagueID=NFL', '/leagues?leagueID=NFL']) {
+  head(`GET ${path}`);
+  const res = await get(path);
   console.log(`status ${res.status}`);
-  if (res.json?.data?.length) {
-    for (const event of res.json.data) {
-      console.log(
-        `  ${event.eventID} type=${event.type} starts=${event.status?.startsAt ?? '?'} odds=${Object.keys(event.odds ?? {}).length} players=${Object.keys(event.players ?? {}).length}`,
-      );
-    }
-    head(`markets on the first type=${type} event`);
-    summariseOdds(res.json.data[0]);
-  } else {
-    console.log(`  no data (${(res.text ?? '').slice(0, 200)})`);
-  }
+  console.log(`  ${(res.text ?? '').slice(0, 600)}`);
 }
 
-// 3. Season identity, if the API accepts it as a filter.
-head(`NFL events for season=${season}, no type filter`);
-const seasonal = await get(`/events?leagueID=NFL&season=${season}&limit=5&oddsAvailable=true`);
-console.log(`status ${seasonal.status}`);
-if (seasonal.json?.data?.length) {
-  for (const event of seasonal.json.data) {
-    console.log(
-      `  ${event.eventID} type=${event.type} starts=${event.status?.startsAt ?? '?'} odds=${Object.keys(event.odds ?? {}).length}`,
-    );
-  }
+// 3. What a REGULAR-season game carries. Preseason games are thin; the weekly
+//    Start/Sit layer will live on these, so the vocabulary matters.
+head('markets on a regular-season NFL game');
+const regular = await get(`/events?leagueID=NFL&type=match&oddsAvailable=true&startsAfter=${year}-09-08&limit=1`);
+const event = regular.json?.data?.[0];
+if (event) {
+  console.log(`  ${event.eventID} starts=${event.status?.startsAt ?? '?'} players=${Object.keys(event.players ?? {}).length}`);
+  summariseOdds(event, { maxRows: 60 });
 } else {
-  console.log(`  no data (${(seasonal.text ?? '').slice(0, 200)})`);
-}
-
-// 4. For contrast: what a normal game event carries, so the two are comparable.
-head('markets on one ordinary NFL game');
-const match = await get(`/events?leagueID=NFL&type=match&oddsAvailable=true&limit=1`);
-if (match.json?.data?.[0]) {
-  const event = match.json.data[0];
-  console.log(`  ${event.eventID} starts=${event.status?.startsAt ?? '?'}`);
-  summariseOdds(event, { maxRows: 12 });
-} else {
-  console.log(`  no data (${(match.text ?? '').slice(0, 200)})`);
+  console.log(`  no data (${(regular.text ?? '').slice(0, 300)})`);
 }
 
 head('cost of this probe');
