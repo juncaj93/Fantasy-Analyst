@@ -13,10 +13,23 @@
  */
 
 import { resolveSeasonMarkets } from '../../core/vegas/season.ts';
+import { canSpend } from '../../core/vegas/budget.ts';
 import type { SeasonMarketSet, VegasProvider } from '../../core/vegas/types.ts';
+import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
+import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import type { Database } from '../db.ts';
+
+/**
+ * What one season probe costs.
+ *
+ * Two requests, each capped at a single event, so two entities — down from the
+ * fifty a `limit=25` pair used to cost. On a daily schedule that is the
+ * difference between 60 entities a month and 1,500 of a 2,500 allowance, spent
+ * on markets this provider does not publish.
+ */
+export const SEASON_PROBE_ENTITIES = 2;
 
 /**
  * How long a stored season snapshot is considered current.
@@ -51,13 +64,15 @@ export function seasonFor(now: Date = new Date()): string {
 export class SeasonMarketService {
   private readonly markets: SeasonMarketsRepo;
   private readonly players: PlayerRepo;
+  private readonly usage: VegasUsageRepo;
 
   constructor(
-    db: Database,
+    private readonly db: Database,
     private readonly provider: VegasProvider,
   ) {
     this.markets = new SeasonMarketsRepo(db);
     this.players = new PlayerRepo(db);
+    this.usage = new VegasUsageRepo(db);
   }
 
   /**
@@ -100,10 +115,50 @@ export class SeasonMarketService {
       return base({ reason: `served from the snapshot taken ${ageMinutes} minute(s) ago` });
     }
 
+    /*
+     * Draft-time context stops being worth quota once the draft is over.
+     *
+     * From then on the same allowance is what the weekly Start/Sit layer runs
+     * on, and a season total nobody is drafting against is the cheapest thing
+     * in the app to stop paying for.
+     */
+    if (!opts.force && (await this.draftIsDone())) {
+      return base({ reason: 'the draft is complete, so season-long markets are no longer refreshed' });
+    }
+
+    // Small, but it is quota, and quota is spent in one place or it is not
+    // guarded at all.
+    const view = await this.usage.view();
+    const decision = canSpend(view, { entities: SEASON_PROBE_ENTITIES, priority: 'low' });
+    if (!decision.allowed) {
+      await this.usage.record({
+        source: 'season',
+        entities: 0,
+        requests: 0,
+        outcome: 'blocked',
+        reason: decision.reason,
+      });
+      return base({ reason: `not fetched: ${decision.reason}` });
+    }
+
     let set: SeasonMarketSet;
     try {
       set = await this.provider.getSeasonPlayerMarkets(season);
+      await this.usage.record({
+        source: 'season',
+        entities: SEASON_PROBE_ENTITIES,
+        requests: 2,
+        outcome: 'fetched',
+        reason: 'season-market probe',
+      });
     } catch (err) {
+      await this.usage.record({
+        source: 'season',
+        entities: SEASON_PROBE_ENTITIES,
+        requests: 2,
+        outcome: 'failed',
+        reason: err instanceof Error ? err.message : String(err),
+      });
       // The last good snapshot stays exactly where it is.
       return base({
         error: err instanceof Error ? err.message : String(err),
@@ -152,6 +207,21 @@ export class SeasonMarketService {
       reason: existing?.note ?? (existing ? 'stored' : 'nothing stored yet'),
       error: null,
     };
+  }
+
+  /**
+   * Is the selected league's draft finished?
+   *
+   * Sleeper's own status is the source of truth. Anything unexpected counts as
+   * "not finished", because the cost of being wrong in that direction is two
+   * entities and the cost of being wrong in the other is a draft board with no
+   * market context on the one day it matters.
+   */
+  private async draftIsDone(): Promise<boolean> {
+    const league = await new LeagueRepo(this.db).getSelectedLeague();
+    if (!league?.draftId) return false;
+    const draft = await new LeagueRepo(this.db).getDraft(league.draftId);
+    return draft?.status === 'complete';
   }
 
   /** The stored lines for a set of players, newest snapshot only. */

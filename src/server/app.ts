@@ -22,8 +22,8 @@ import { ACCEPT_ANY_SENDER } from '../core/newsletter/pipeline.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../core/sleeper/scoring.ts';
-import { getPropsWithCache } from '../core/vegas/cache.ts';
-import { buildConsensus } from '../core/vegas/normalize.ts';
+import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
+import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import type { Database } from './db.ts';
 import {
@@ -936,11 +936,54 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await service.status());
   });
 
+  /**
+   * Manual refresh. Rate limited *and* budgeted.
+   *
+   * The cooldown stops a thumb on a button from becoming a loop; the budget
+   * stops the loop from mattering if it ever gets through. A tap that the
+   * budget declines is a 200 with the reason in it, not an error — the lines
+   * on screen are still the last good ones.
+   */
   router.post('/api/vegas/refresh', async (ctx) => {
     const limit = refreshLimiter.check('vegas');
     if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
     const result = await refreshVegas(ctx.env, { manual: true });
     return jsonResponse(result);
+  });
+
+  /**
+   * Where the month's Vegas allowance has gone.
+   *
+   * Public and read-only: it makes no provider call of its own, it reads the
+   * ledger. Quota problems are only visible before they become outages if
+   * somebody can see them, and this is the page that shows them.
+   */
+  router.get('/api/vegas/budget', async (ctx) => {
+    const usage = new VegasUsageRepo(ctx.env.db);
+    const [view, bySource, recent, preview] = await Promise.all([
+      usage.view(),
+      usage.bySource(),
+      usage.recent(10),
+      new VegasRefreshService(ctx.env.db, ctx.env.vegas).preview(),
+    ]);
+    return jsonResponse({
+      provider: ctx.env.vegas.name,
+      configured: ctx.env.vegas.isConfigured(),
+      budget: view,
+      bySource,
+      recent,
+      nextPlan: {
+        events: preview.plan.events.map((e) => ({
+          eventId: e.eventId,
+          kickoff: e.kickoff,
+          players: e.playerIds.length,
+          priority: e.priority,
+          reason: e.reason,
+        })),
+        estimatedEntities: preview.plan.estimatedEntities,
+        skipped: preview.plan.skipped.length,
+      },
+    });
   });
 
   // ---------------------------------------------------------------- start/sit
@@ -1034,43 +1077,19 @@ function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export async function refreshVegas(
-  env: AppEnv,
-  opts: { manual?: boolean } = {},
-): Promise<{ provider: string; events: number; fresh: number; cached: number; stale: number; errors: string[] }> {
-  const propsRepo = new PropsRepo(env.db);
-  const index = await new PlayerRepo(env.db).buildIndex();
-  const errors: string[] = [];
-  let fresh = 0;
-  let cached = 0;
-  let stale = 0;
-
-  let games: { eventId: string }[] = [];
-  try {
-    games = await env.vegas.getUpcomingNFLGames();
-  } catch (err) {
-    errors.push(`could not list games: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  for (const game of games) {
-    const result = await getPropsWithCache(game.eventId, env.vegas, propsRepo, { manual: opts.manual ?? false });
-    if (result.origin === 'fresh') fresh++;
-    else if (result.origin === 'cache') cached++;
-    else stale++;
-    if (result.error) errors.push(`${game.eventId}: ${result.error}`);
-
-    if (result.origin === 'fresh' && result.snapshot) {
-      const snapshotId = await propsRepo.snapshotId(
-        result.snapshot.provider,
-        result.snapshot.eventId,
-        result.snapshot.fetchedAt,
-      );
-      if (snapshotId != null) {
-        await propsRepo.saveConsensus(snapshotId, buildConsensus(result.snapshot.raw.quotes ?? [], index));
-      }
-    }
-  }
-
-  await new SettingsRepo(env.db).set(SETTING_KEYS.lastVegasRefresh, new Date().toISOString());
-  return { provider: env.vegas.name, events: games.length, fresh, cached, stale, errors };
+/**
+ * Refresh weekly lines, inside the budget.
+ *
+ * This used to list every upcoming NFL game and fetch props for all of them.
+ * The provider bills one entity per event returned and the free plan is 2,500 a
+ * month, so a slate fetch on a timer was an unattended standing order — and the
+ * games it paid for were mostly ones nobody on the roster is playing in.
+ *
+ * The work now lives in `VegasRefreshService`, which starts from the roster,
+ * asks the budget before it spends, and records every entity. This wrapper is
+ * kept because the scheduled worker and the manual route both call it, and
+ * neither should have to know any of that.
+ */
+export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {}): Promise<VegasRefreshReport> {
+  return new VegasRefreshService(env.db, env.vegas).refresh(opts);
 }

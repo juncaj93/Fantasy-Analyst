@@ -34,6 +34,7 @@ import {
   type SeasonMarketKey,
   type SeasonMarketQuote,
   type SeasonMarketSet,
+  type TeamPropsResult,
   type VegasGame,
   type VegasProvider,
 } from './types.ts';
@@ -159,14 +160,37 @@ export class SportsGameOddsProvider implements VegasProvider {
     return { ...this.quota };
   }
 
-  async getUpcomingNFLGames(opts: { from?: string; to?: string } = {}): Promise<VegasGame[]> {
+  /**
+   * The account's own accounting, straight from the provider.
+   *
+   * Costs nothing: reading it was measured not to move either the request or
+   * the entity counter. That makes it the right thing to check before every
+   * refresh — it is the only number that also sees spending from a probe or
+   * from another deployment sharing the key.
+   */
+  async getAccountUsage(): Promise<unknown> {
+    const body = await this.request<{ data?: unknown }>('/account/usage');
+    return body.data ?? null;
+  }
+
+  /**
+   * The slate. Bounded, and deliberately not what the refresh uses.
+   *
+   * One entity per event returned, so an unbounded listing is an unbounded
+   * bill: `limit=50` used to be up to a fifth of the month in a single call.
+   * The weekly refresh asks by team instead (`getPropsForTeams`), which costs
+   * what the roster spans; this is left for the cases that genuinely want the
+   * slate, with a cap small enough that nobody can spend a month by accident.
+   */
+  async getUpcomingNFLGames(opts: { from?: string; to?: string; maxEvents?: number } = {}): Promise<VegasGame[]> {
     const from = (opts.from ?? new Date().toISOString()).slice(0, 10);
     const to = (opts.to ?? new Date(Date.now() + this.horizonDays * 86_400_000).toISOString()).slice(0, 10);
+    const limit = Math.max(1, Math.min(opts.maxEvents ?? 8, 16));
     // `type=match` matters: an unfiltered NFL query also answers with novelty
     // events (the Puppy Bowl, with markets like "sex of the winning touchdown
     // scorer"), which are not games anybody is starting a lineup for.
     const events = await this.request<{ data?: SgoEvent[] }>(
-      `/events?leagueID=NFL&type=match&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=50`,
+      `/events?leagueID=NFL&type=match&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=${limit}`,
     );
 
     const games: VegasGame[] = [];
@@ -187,7 +211,6 @@ export class SportsGameOddsProvider implements VegasProvider {
   }
 
   async getPlayerProps(eventId: string, markets: MarketKey[] = MARKET_KEYS): Promise<RawPropSet> {
-    const wanted = new Set(markets);
     const body = await this.request<{ data?: SgoEvent[] }>(
       `/events?eventID=${encodeURIComponent(eventId)}&oddsAvailable=true`,
     );
@@ -195,7 +218,11 @@ export class SportsGameOddsProvider implements VegasProvider {
     if (!event) {
       throw new VegasProviderError(`event ${eventId} not found`, this.name, 'parse');
     }
+    return this.toPropSet(event, eventId, new Set(markets));
+  }
 
+  /** One event's odds board, reduced to the quotes this app keeps. */
+  private toPropSet(event: SgoEvent, eventId: string, wanted: Set<MarketKey>): RawPropSet {
     const players = event.players ?? {};
     const quotes: RawPropQuote[] = [];
 
@@ -242,6 +269,56 @@ export class SportsGameOddsProvider implements VegasProvider {
   }
 
   /**
+   * The roster's games, and their lines, in one pass.
+   *
+   * Measured behaviour, not documented behaviour (see docs/VEGAS.md): the plan
+   * bills one *entity* per event returned, and `/events` always answers with an
+   * event's odds attached — there is no cheaper "schedule only" shape. So the
+   * cheapest correct thing is to ask by team, once per team, and treat what
+   * comes back as both the schedule and the fetch.
+   *
+   * `teamID` is honoured server-side — verified against a real team id and a
+   * nonsense one, because a filter that is quietly ignored would return the
+   * whole slate and charge for it. The nonsense id answered with no events, at
+   * a cost of one entity: an empty response still costs, which is why the
+   * request count is reported back for the ledger rather than inferred from the
+   * number of events.
+   */
+  async getPropsForTeams(
+    teamIds: string[],
+    opts: { from?: string; to?: string; markets?: MarketKey[]; maxEvents?: number } = {},
+  ): Promise<TeamPropsResult> {
+    const from = (opts.from ?? new Date().toISOString()).slice(0, 10);
+    const to = (opts.to ?? new Date(Date.now() + this.horizonDays * 86_400_000).toISOString()).slice(0, 10);
+    const wanted = new Set(opts.markets ?? MARKET_KEYS);
+    const maxEvents = opts.maxEvents ?? 12;
+
+    const results: { teamId: string; set: RawPropSet }[] = [];
+    const seen = new Set<string>();
+    let requests = 0;
+    let entities = 0;
+
+    for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
+      if (results.length >= maxEvents) break;
+      const body = await this.request<{ data?: SgoEvent[] }>(
+        `/events?leagueID=NFL&type=match&teamID=${encodeURIComponent(teamId)}` +
+          `&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=4`,
+      );
+      requests++;
+      const events = body.data ?? [];
+      entities += Math.max(1, events.length);
+
+      for (const event of events) {
+        if (!event.eventID || seen.has(event.eventID) || event.status?.cancelled) continue;
+        seen.add(event.eventID);
+        results.push({ teamId, set: this.toPropSet(event, event.eventID, wanted) });
+      }
+    }
+
+    return { results, requests, entities };
+  }
+
+  /**
    * Season-long player totals.
    *
    * Everything this provider publishes for the NFL is a single game: `type`
@@ -264,15 +341,25 @@ export class SportsGameOddsProvider implements VegasProvider {
     const quotes: SeasonMarketQuote[] = [];
     const events: SgoEvent[] = [];
 
-    // Anything that is not a single game. Empty for the NFL today.
+    /*
+     * `limit=1`, not 25, and that is a quota decision as much as a correctness
+     * one.
+     *
+     * The bill is one entity per event returned, so the old `limit=25` pair
+     * cost up to fifty entities every time it ran — 1,500 a month on a daily
+     * schedule, against an allowance of 2,500, for markets this provider does
+     * not publish. The question being asked is "does a season-shaped event
+     * exist at all", and one event answers it exactly as well as
+     * twenty-five do. If one ever comes back, the limit is the thing to raise.
+     */
     const props = await this.request<{ data?: SgoEvent[] }>(
-      `/events?leagueID=NFL&type=prop&oddsAvailable=true&limit=25`,
+      `/events?leagueID=NFL&type=prop&oddsAvailable=true&limit=1`,
     );
     events.push(...(props.data ?? []));
 
     // …and any event that quotes a season-length period, whatever its type.
     const seasonal = await this.request<{ data?: SgoEvent[] }>(
-      `/events?leagueID=NFL&season=${encodeURIComponent(season)}&oddsAvailable=true&limit=25`,
+      `/events?leagueID=NFL&season=${encodeURIComponent(season)}&oddsAvailable=true&limit=1`,
     );
     events.push(...(seasonal.data ?? []));
 

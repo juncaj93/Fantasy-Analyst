@@ -331,6 +331,17 @@ export interface SetupStatus {
     lastRefreshedAt: string | null;
     events: number;
     note: string;
+    /** The month's provider allowance, read from the ledger. */
+    budget: {
+      state: string;
+      used: number;
+      limit: number;
+      remaining: number;
+      month: string;
+      source: string;
+      note: string;
+      bySource: Record<string, number>;
+    };
     season: {
       season: string;
       players: number;

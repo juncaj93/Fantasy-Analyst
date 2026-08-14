@@ -296,6 +296,41 @@ test.describe('vegas', () => {
     await expect(health).toContainText(/market line|Nothing stored/);
     await expect(panel).toContainText('the card says nothing rather than guessing');
   });
+
+  /**
+   * The month's allowance, in plain words.
+   *
+   * Not a control — there is nothing here to act on. It exists so a quota
+   * problem is visible while it is still a number rather than an outage, which
+   * is the whole reason the budget is tracked at all.
+   */
+  test('shows what is left of the month’s provider allowance', async ({ page }) => {
+    await openSetup(page);
+    await page.getByTestId('setup-step-vegas').click();
+    const panel = page.getByTestId('panel-vegas');
+    await expect(panel).toContainText('This month\u2019s allowance');
+
+    const budget = page.getByTestId('vegas-budget');
+    await expect(budget).toBeVisible();
+    // "n of 2500 used in YYYY-MM", and a state said in words rather than a code.
+    await expect(budget).toContainText(/\d+ of \d+/);
+    await expect(budget).toContainText(/plenty left|over half used|running low|into the reserve/);
+    await expect(panel).toContainText('only about the games your own players are in');
+  });
+
+  test('reports the budget without asking the provider for anything', async ({ page }) => {
+    // The diagnostics route reads the ledger. If it ever started fetching, this
+    // is the test that would have to be deleted to keep it passing.
+    const response = await page.request.get('/api/vegas/budget');
+    expect(response.ok()).toBeTruthy();
+    const body = (await response.json()) as {
+      budget: { limit: number; state: string; used: number };
+      nextPlan: { estimatedEntities: number };
+    };
+    expect(body.budget.limit).toBeGreaterThan(0);
+    expect(['healthy', 'caution', 'conservation', 'hard_stop']).toContain(body.budget.state);
+    expect(body.nextPlan.estimatedEntities).toBeGreaterThanOrEqual(0);
+  });
 });
 
 test.describe('review actions added for setup', () => {
