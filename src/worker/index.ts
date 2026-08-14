@@ -14,6 +14,7 @@ import { SleeperClient } from '../core/sleeper/client.ts';
 import { toEmailMessage } from '../core/newsletter/source.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
+import { SportsGameOddsProvider } from '../core/vegas/sportsGameOddsProvider.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import { createApp, refreshVegas, type AppEnv } from '../server/app.ts';
 import type { Database } from '../server/db.ts';
@@ -26,7 +27,8 @@ export interface WorkerEnv {
   APP_PASSPHRASE?: string;
   SESSION_SECRET?: string;
   ODDS_API_KEY?: string;
-  /** 'mock' (default) or 'the-odds-api'. */
+  SPORTSGAMEODDS_API_KEY?: string;
+  /** 'mock' (default), 'sportsgameodds' or 'the-odds-api'. */
   VEGAS_PROVIDER?: string;
   /**
    * The dedicated address the FF Newsletter is subscribed to, e.g.
@@ -39,6 +41,9 @@ export interface WorkerEnv {
 const app = createApp();
 
 function buildVegasProvider(env: WorkerEnv): VegasProvider {
+  if (env.VEGAS_PROVIDER === 'sportsgameodds') {
+    return new SportsGameOddsProvider({ apiKey: env.SPORTSGAMEODDS_API_KEY });
+  }
   if (env.VEGAS_PROVIDER === 'the-odds-api') {
     return new OddsApiProvider({ apiKey: env.ODDS_API_KEY });
   }
