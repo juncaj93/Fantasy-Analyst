@@ -128,10 +128,15 @@ export default {
       /*
        * One injury check on this clock too, after the dictionary.
        *
-       * Not for freshness — the five-minute tick has that covered — but because
-       * the rows are mapped onto players this app knows, and a check that runs
-       * immediately after a dictionary sync is the one most likely to resolve
-       * players who were unmatched yesterday.
+       * Not for freshness — the five-minute tick has that covered — and not, as
+       * an earlier version of this comment claimed, to re-resolve players who
+       * were unmatched yesterday: this is the same conditional path, so if the
+       * file has not changed it answers 304 and returns without re-reading
+       * anything. Re-mapping only happens when the source itself moves.
+       *
+       * It stays because it costs one conditional request and it is the one
+       * injury check that does not depend on the five-minute cron still being
+       * scheduled — a floor under the freshest thing this app has.
        */
       try {
         await new InjuryService(env.DB).refresh();

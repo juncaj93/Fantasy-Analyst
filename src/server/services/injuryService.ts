@@ -98,6 +98,21 @@ export interface InjuryHealth {
   /** How the last check went — including `not_modified`, the usual answer. */
   lastOutcome: string | null;
   lastNote: string | null;
+  /**
+   * The stored validators, verbatim.
+   *
+   * These are the whole mechanism: a check sends one of them back and the
+   * server answers 304. Exposing them makes the difference between the two
+   * ways a tick can write nothing directly observable rather than inferred --
+   * a validator present means "asked, and the file had not changed", and a
+   * validator absent means there was nothing to ask about, which is what a
+   * season whose file has not been published yet looks like.
+   *
+   * Both are public HTTP validators for a public file. Neither identifies
+   * anyone or authorizes anything.
+   */
+  etag: string | null;
+  lastModified: string | null;
   /** Rows this pipeline has written today, against its own ceiling. */
   writesToday: number;
   writeCeiling: number;
@@ -550,6 +565,8 @@ export class InjuryService {
       ingestedAt: state?.ingestedAt ?? null,
       lastOutcome: state?.lastOutcome ?? null,
       lastNote: state?.lastNote ?? null,
+      etag: state?.etag ?? null,
+      lastModified: state?.lastModified ?? null,
       writesToday: writes,
       writeCeiling: DAILY_WRITE_CEILING,
       recentEvents: events.map((e) => ({
