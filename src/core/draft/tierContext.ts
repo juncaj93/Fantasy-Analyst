@@ -28,6 +28,14 @@ import type { TierCliff } from './tiers.ts';
 export const CLIFF_IS_NEAR = 2;
 
 /**
+ * How big a group can be before "thinning" stops being true, when there is no
+ * demand scan to measure it against.
+ *
+ * Only a fallback. The real test is below and is measured.
+ */
+const QUIET_ABOVE = 4;
+
+/**
  * The line, or `null` when there is nothing worth a line.
  *
  * Shown for the player's whole tier, not only for whoever happens to sit at its
@@ -47,6 +55,7 @@ export function tierContextLine(
   if (!tier.tierEndsAtCliff) return null;
   const left = tier.tierSize > 0 ? tier.tierSize : tier.remainingInTier;
   if (left <= 0) return null;
+  if (!worthSaying(left, demand)) return null;
 
   /*
    * Two words for two situations, and the difference is how close the drop is.
@@ -61,6 +70,27 @@ export function tierContextLine(
   if (pressure) parts.push(pressure);
 
   return parts.join(' · ');
+}
+
+/**
+ * Is this group small enough that running out is a real prospect?
+ *
+ * Every tier but the last ends at a cliff by construction, so "ends at a cliff"
+ * on its own would put a line on four cards in five — and "WR board thinning ·
+ * 12 left in this tier" is not a warning, it is a large comfortable group with
+ * an alarming word in front of it. Production said so plainly: 158 of 195.
+ *
+ * The measured test is whether the teams picking before your next turn could
+ * plausibly take the whole group. Twelve receivers with eleven teams ahead is
+ * not thinning; five with eleven ahead is. A cliff is always worth saying
+ * whatever the arithmetic, and with no scan to measure against — your last pick
+ * of the draft, or a slot Sleeper has not published — a small fixed number
+ * stands in.
+ */
+function worthSaying(left: number, demand: PositionDemand | null): boolean {
+  if (left <= CLIFF_IS_NEAR) return true;
+  if (!demand || demand.teamsAhead === 0) return left <= QUIET_ABOVE;
+  return left <= demand.teamsAhead;
 }
 
 /**

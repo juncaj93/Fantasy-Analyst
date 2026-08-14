@@ -12,6 +12,7 @@ import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { demandBetweenPicks } from '../../core/draft/demandAhead.ts';
+import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { tierContextLine } from '../../core/draft/tierContext.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
@@ -34,7 +35,18 @@ import { PlayerRepo } from '../repos/players.ts';
  */
 export type BoardRecommendation = DraftRecommendation & {
   queued: boolean;
-  /** Sleeper's current designation — `Questionable`, `Out`, `IR`. Null if fit. */
+  /**
+   * The injury designation worth showing — `Questionable`, `Out`, `IR` — or
+   * null.
+   *
+   * Filtered here rather than in the card. The canonical `status` field falls
+   * back to Sleeper's *roster* status when there is no injury, so it reads
+   * `Active` for almost everybody and `DNR` for a long tail; sending that
+   * meant every one of two hundred players arrived carrying a "status" the
+   * board must then know to ignore. The rule for what counts lives in
+   * `injury.ts`, so it is applied once and cannot drift between the wire and
+   * the screen.
+   */
   status: string | null;
   /**
    * One line of market context, or null when the board has nothing to say.
@@ -368,7 +380,7 @@ export class DraftBoardService {
     const recommendations = ranked.map((rec) => ({
       ...rec,
       queued: allFlags.get(rec.playerId)?.queued === true,
-      status: byId.get(rec.playerId)?.status ?? null,
+      status: designationOf(byId.get(rec.playerId)?.status ?? null),
       tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
     }));
 
@@ -416,6 +428,11 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/** The status only when it is a designation a drafter acts on. */
+function designationOf(status: string | null): string | null {
+  return injuryStatusTag(status) ? status : null;
 }
 
 /** Conventional reading order, with anything unexpected kept and put last. */

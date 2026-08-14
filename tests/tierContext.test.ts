@@ -12,18 +12,19 @@ import { NO_CLIFF, type TierCliff } from '../src/core/draft/tiers.ts';
 import type { PositionDemand } from '../src/core/draft/demandAhead.ts';
 
 function tier(over: Partial<TierCliff>): TierCliff {
-  return { ...NO_CLIFF, tierIndex: 0, tierSize: 5, tierEndsAtCliff: true, ...over };
+  return { ...NO_CLIFF, tierIndex: 0, tierSize: 4, tierEndsAtCliff: true, ...over };
 }
+/** Eleven teams pick before your next turn, as in round one of a 12-team draft. */
 const demand = (over: Partial<PositionDemand> = {}): PositionDemand => ({
-  teamsAhead: 4,
-  needing: 4,
-  couldHaveCovered: 4,
+  teamsAhead: 11,
+  needing: 11,
+  couldHaveCovered: 11,
   ...over,
 });
 
 describe('the tier-context line', () => {
   it('says how many are left in the group', () => {
-    expect(tierContextLine('WR', tier({ tierSize: 5 }), null)).toBe('WR board thinning · 5 left in this tier');
+    expect(tierContextLine('WR', tier({ tierSize: 4 }), null)).toBe('WR board thinning · 4 left in this tier');
   });
 
   it('calls it a cliff once the group is nearly gone', () => {
@@ -36,8 +37,8 @@ describe('the tier-context line', () => {
    * "five left" is the same useful fact to all five of them.
    */
   it('reads the same for every member of a group', () => {
-    const mid = tierContextLine('WR', tier({ tierSize: 5, severity: 'none' }), null);
-    const edge = tierContextLine('WR', tier({ tierSize: 5, severity: 'last_in_tier' }), null);
+    const mid = tierContextLine('WR', tier({ tierSize: 4, severity: 'none' }), null);
+    const edge = tierContextLine('WR', tier({ tierSize: 4, severity: 'last_in_tier' }), null);
     expect(mid).toBe(edge);
   });
 
@@ -61,8 +62,8 @@ describe('the tier-context line', () => {
     });
 
     it('reports when they all still need one', () => {
-      expect(tierContextLine('WR', tier({ tierSize: 5 }), demand({ needing: 4 }))).toBe(
-        'WR board thinning · 5 left in this tier · all 4 teams ahead need WR',
+      expect(tierContextLine('WR', tier({ tierSize: 4 }), demand({ teamsAhead: 4, needing: 4, couldHaveCovered: 4 }))).toBe(
+        'WR board thinning · 4 left in this tier · all 4 teams ahead need WR',
       );
     });
 
@@ -83,8 +84,8 @@ describe('the tier-context line', () => {
      * so it is left off rather than padded onto the line.
      */
     it('stays quiet about a split field', () => {
-      expect(tierContextLine('WR', tier({ tierSize: 5 }), demand({ teamsAhead: 4, needing: 2 }))).toBe(
-        'WR board thinning · 5 left in this tier',
+      expect(tierContextLine('WR', tier({ tierSize: 4 }), demand({ teamsAhead: 4, needing: 2 }))).toBe(
+        'WR board thinning · 4 left in this tier',
       );
     });
 
@@ -103,8 +104,8 @@ describe('the tier-context line', () => {
     });
 
     it('says nothing when nobody picks before you do again', () => {
-      expect(tierContextLine('WR', tier({ tierSize: 5 }), demand({ teamsAhead: 0, needing: 0 }))).toBe(
-        'WR board thinning · 5 left in this tier',
+      expect(tierContextLine('WR', tier({ tierSize: 4 }), demand({ teamsAhead: 0, needing: 0 }))).toBe(
+        'WR board thinning · 4 left in this tier',
       );
     });
   });
@@ -125,5 +126,36 @@ describe('the tier-context line', () => {
     expect(tierContextLine('WR', tier({ tierSize: 4 }), null)).toContain('4 left');
     expect(tierContextLine('WR', tier({ tierSize: 3 }), null)).toContain('3 left');
     expect(tierContextLine('WR', tier({ tierSize: 1 }), null)).toBe('WR tier cliff · 1 left');
+  });
+
+  /**
+   * The check that keeps this from becoming the next thing to delete.
+   *
+   * Every tier but the last ends at a cliff, so "ends at a cliff" on its own
+   * puts a line on four cards in five — production said 158 of 195 — and
+   * "12 left in this tier" is a large comfortable group with an alarming word
+   * in front of it. The measured test is whether the teams picking before your
+   * next turn could plausibly take the whole group.
+   */
+  describe('only when running out is a real prospect', () => {
+    it('stays quiet about a group bigger than the field ahead of you', () => {
+      expect(tierContextLine('WR', tier({ tierSize: 12 }), demand({ teamsAhead: 11 }))).toBeNull();
+    });
+
+    it('speaks when the field ahead could take the whole group', () => {
+      expect(tierContextLine('WR', tier({ tierSize: 11 }), demand({ teamsAhead: 11 }))).toContain('11 left');
+      expect(tierContextLine('WR', tier({ tierSize: 5 }), demand({ teamsAhead: 11 }))).toContain('5 left');
+    });
+
+    it('always says it for a cliff, whatever the arithmetic', () => {
+      expect(tierContextLine('TE', tier({ tierSize: 2 }), demand({ teamsAhead: 1 }))).toContain('tier cliff');
+      expect(tierContextLine('TE', tier({ tierSize: 1 }), null)).toContain('tier cliff');
+    });
+
+    /** Your last pick of the draft, or a slot Sleeper never published. */
+    it('falls back to a small fixed group when there is nothing to measure', () => {
+      expect(tierContextLine('WR', tier({ tierSize: 4 }), null)).toContain('4 left');
+      expect(tierContextLine('WR', tier({ tierSize: 5 }), null)).toBeNull();
+    });
   });
 });
