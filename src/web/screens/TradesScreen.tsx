@@ -8,7 +8,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
-import { Badge, Empty, Loading, Notice, PositionBadge, Signal } from '../components/common.tsx';
+import {
+  Confidence,
+  DetailLabel,
+  Empty,
+  Loading,
+  Notice,
+  PositionBadge,
+  SignedValue,
+} from '../components/common.tsx';
+import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 
 export function TradesScreen() {
   const [board, setBoard] = useState<TradeBoard | null>(null);
@@ -77,8 +86,17 @@ export function TradesScreen() {
   );
 }
 
-const CONFIDENCE_TONE = { high: 'pos', medium: 'neutral', low: 'warn' } as const;
-
+/**
+ * One trade idea.
+ *
+ * The three tally windows used to sit side by side as three identical signals,
+ * which read as the same number printed three times — `+13 pos +13 pos +13 pos`.
+ * Nothing is merged and nothing is hidden: each window is simply named, so the
+ * eye can see at once whether the case is a lifetime body of evidence, a recent
+ * move, or both. Confidence qualifies that signal rather than competing with it,
+ * so it sits at the end of the trend line in the quietest treatment that is
+ * still legible.
+ */
 function TradeRow({
   suggestion,
   expanded,
@@ -89,6 +107,8 @@ function TradeRow({
   onToggle: () => void;
 }) {
   const w = suggestion.windows;
+  const reasons = withoutRepeats(suggestion.reasons);
+  const counterpoints = withoutRepeats(suggestion.counterpoints, reasons);
   return (
     <button className="player-row" data-testid="trade-row" aria-expanded={expanded} onClick={onToggle}>
       <div className="player-row-top">
@@ -96,37 +116,47 @@ function TradeRow({
         <PositionBadge position={suggestion.position} team={suggestion.team} />
       </div>
 
-      <div className="player-row-metrics">
-        <Signal net={w.last30} label="last 30 days" />
-        <Signal net={w.last7} label="last 7 days" />
-        <Signal net={w.lifetime} label="lifetime" />
-        <span className="metric">
-          <Badge tone={CONFIDENCE_TONE[suggestion.confidence]}>{suggestion.confidence} confidence</Badge>
-        </span>
+      <div className="window-row" data-testid="trade-windows">
+        <div className="window-cell">
+          <div className="window-label">Lifetime</div>
+          <div className="window-value">
+            <SignedValue net={w.lifetime} />
+          </div>
+        </div>
+        <div className="window-cell">
+          <div className="window-label">30d</div>
+          <div className="window-value">
+            <SignedValue net={w.last30} />
+          </div>
+        </div>
+        <div className="window-cell">
+          <div className="window-label">7d</div>
+          <div className="window-value">
+            <SignedValue net={w.last7} />
+          </div>
+        </div>
+      </div>
+
+      <div className="trade-trend">
+        <span className="trade-line">{reasons[0]}</span>
+        <Confidence level={suggestion.confidence} />
       </div>
 
       {expanded ? (
         <div className="explain">
-          <strong style={{ fontSize: '0.8rem' }}>Why</strong>
-          <ul>
-            {suggestion.reasons.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-          {suggestion.counterpoints.length > 0 ? (
+          <DetailLabel>Why</DetailLabel>
+          <ReasonList items={reasons} />
+          {counterpoints.length > 0 ? (
             <>
-              <strong style={{ fontSize: '0.8rem' }}>Counterpoints</strong>
-              <ul>
-                {suggestion.counterpoints.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
+              <DetailLabel>{counterpoints.length === 1 ? 'Counterpoint' : 'Counterpoints'}</DetailLabel>
+              <ReasonList muted items={counterpoints} />
             </>
           ) : null}
+          <div className="faint" style={{ marginTop: 6 }}>
+            {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
+          </div>
         </div>
-      ) : (
-        <div className="faint">{suggestion.reasons[0]}</div>
-      )}
+      ) : null}
     </button>
   );
 }

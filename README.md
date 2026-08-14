@@ -44,9 +44,11 @@ adopted rather than migrated.
 
 **Draft Room** — ranks available players from live Sleeper draft state, showing
 ADP, ADP value, survival-to-your-next-pick, news signal, roster need,
-positional scarcity and league fit. Tap any player to see every component score,
-its weight, its contribution, the reasons and the counterpoints.
-It never drafts.
+positional scarcity and league fit. Tap any player for the conclusion, the four
+numbers behind it, the strongest reasons and the best counterpoint; every
+component score, its weight and its contribution stay one disclosure further in
+under **Advanced breakdown**. The header's ↻ force-syncs the latest picks from
+Sleeper. It never drafts.
 
 **Team** — Sleeper connection, league selection, ADP import, roster, and
 start/sit comparison built from Vegas market expectation, news signal,
@@ -63,7 +65,9 @@ reprocessing.
 
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
-tell the app which sender to trust. No commands, no jargon.
+tell the app which sender to trust. No commands, no jargon. Appearance lives
+here too: **System** (the default, following the phone), **Light** or **Dark**,
+kept on the device and applied before the first paint.
 
 ## Newsletter, automatically
 

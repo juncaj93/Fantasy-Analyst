@@ -1,47 +1,225 @@
 /*
- * Mobile-first styles targeting iPhone Safari portrait (390 / 375 / 360 px).
+ * Fantasy Analyst — mobile-first styles for iPhone Safari portrait
+ * (390 / 375 / 360 px).
  *
- * Principles from docs/06_UI_AND_QA.md:
+ * Principles carried over from docs/06_UI_AND_QA.md:
  *  - compact and information-dense, not a spreadsheet
  *  - colour is never the only indicator: every +/- state also carries a glyph
  *    and a word
  *  - touch targets >= 44px
  *  - respects system font scaling (rem-based type)
+ *
+ * Everything visual is expressed as a semantic token below. A component never
+ * names a colour; it names a role — card surface, secondary text, positive —
+ * so Light and Dark are two settings of one design system rather than two
+ * stylesheets that have to be kept in step by hand.
  */
 
+/* ==================================================================== tokens */
+
 :root {
-  --bg: #0b0f14;
-  --surface: #131a22;
-  --surface-2: #1a232d;
-  --border: #26313d;
-  --text: #e8eef5;
-  --text-dim: #97a6b8;
-  --text-faint: #6b7b8f;
-  --pos: #4ade80;
-  --neg: #f87171;
-  --warn: #fbbf24;
-  --accent: #60a5fa;
+  color-scheme: light;
+
+  /* -- surfaces ---------------------------------------------------------- */
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceff5;
+  --surface-inset: #f6f8fb;
+  --nav-surface: #ffffffec;
+  --header-surface: #f4f6faee;
+
+  /* -- lines ------------------------------------------------------------- */
+  --border: #e0e5ee;
+  --border-strong: #c6cede;
+
+  /* -- text -------------------------------------------------------------- */
+  --text: #141a23;
+  --text-dim: #515e70;
+  --text-faint: #6d7a8c;
+
+  /* -- semantic states --------------------------------------------------- */
+  --accent: #2a5fd8;
+  --accent-text: #23509e;
+  --accent-tint: #e7eeff;
+  --on-accent: #ffffff;
+
+  --pos: #157a4c;
+  --pos-tint: #e2f4ea;
+  --neg: #c02828;
+  --neg-tint: #fceaea;
+  --warn: #96590a;
+  --warn-tint: #fdf0da;
+
+  --selected: var(--accent);
+  --selected-tint: var(--accent-tint);
+  --live: #157a4c;
+  --live-tint: var(--pos-tint);
+  --locked: #6d7a8c;
+  --confidence: #6d7a8c;
+
+  /* -- position colours -------------------------------------------------- */
+  /* Four well-separated hues plus two extras; all readable for the common
+     forms of colour blindness, and never the only carrier of meaning. */
+  --pos-QB-line: #2f62c9;
+  --pos-QB-tint: #e8eeff;
+  --pos-RB-line: #0d7350;
+  --pos-RB-tint: #e0f4ec;
+  --pos-WR-line: #98590c;
+  --pos-WR-tint: #fdf0d9;
+  --pos-TE-line: #7233b8;
+  --pos-TE-tint: #f2e9fd;
+  --pos-K-line: #0d6b76;
+  --pos-K-tint: #ddf1f3;
+  --pos-DEF-line: #ab2f68;
+  --pos-DEF-tint: #fce7f1;
+
+  /* -- elevation and focus ---------------------------------------------- */
+  --shadow-1: 0 1px 2px rgb(17 24 39 / 6%), 0 1px 1px rgb(17 24 39 / 4%);
+  --shadow-2: 0 2px 8px rgb(17 24 39 / 8%), 0 1px 2px rgb(17 24 39 / 5%);
+  --focus-ring: 0 0 0 3px rgb(42 95 216 / 32%);
+
+  /* -- geometry ---------------------------------------------------------- */
+  --radius-sm: 6px;
   --radius: 10px;
+  --radius-lg: 14px;
   --tap: 44px;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 10px;
+  --space-5: 14px;
   /* The tab bar's own height, excluding the home-indicator inset. */
-  --tabbar-height: 52px;
+  --tabbar-height: 50px;
+  --motion: 160ms;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f8fa;
-    --surface: #ffffff;
-    --surface-2: #eef2f6;
-    --border: #d6dee7;
-    --text: #10161d;
-    --text-dim: #4a5a6b;
-    --text-faint: #6b7b8f;
-    --pos: #15803d;
-    --neg: #b91c1c;
-    --warn: #a16207;
-    --accent: #1d4ed8;
+/*
+ * Dark is a designed expression of the same system, not an inversion: a softer
+ * page black, card surfaces that separate by tone rather than by outline, and
+ * quieter borders so the screen stops reading as a stack of rectangles.
+ *
+ * The declarations appear twice on purpose. The media query serves System, and
+ * the attribute rule lets an explicit Light or Dark choice win over the phone —
+ * in both directions — without either one shadowing the other.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --bg: #0d1116;
+    --surface: #161c24;
+    --surface-raised: #1c232d;
+    --surface-sunken: #10151b;
+    --surface-inset: #1a212a;
+    --nav-surface: #161c24ee;
+    --header-surface: #0d1116e6;
+
+    --border: #242c37;
+    --border-strong: #384453;
+
+    --text: #e9eef6;
+    --text-dim: #a6b3c4;
+    --text-faint: #83919f;
+
+    --accent: #6ea3f7;
+    --accent-text: #8fbaff;
+    --accent-tint: #16264a;
+    --on-accent: #07101f;
+
+    --pos: #4fc98a;
+    --pos-tint: #12301f;
+    --neg: #f47b74;
+    --neg-tint: #351a1a;
+    --warn: #e2ab4c;
+    --warn-tint: #33270f;
+
+    --selected: var(--accent);
+    --selected-tint: var(--accent-tint);
+    --live: #4fc98a;
+    --live-tint: var(--pos-tint);
+    --locked: #83919f;
+    --confidence: #83919f;
+
+    --pos-QB-line: #7cabf8;
+    --pos-QB-tint: #172441;
+    --pos-RB-line: #55c795;
+    --pos-RB-tint: #102c22;
+    --pos-WR-line: #e0ad57;
+    --pos-WR-tint: #302512;
+    --pos-TE-line: #b58cf5;
+    --pos-TE-tint: #241a3d;
+    --pos-K-line: #52bcc6;
+    --pos-K-tint: #0f2b2e;
+    --pos-DEF-line: #ef85b4;
+    --pos-DEF-tint: #351827;
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
+    --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
   }
 }
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0d1116;
+  --surface: #161c24;
+  --surface-raised: #1c232d;
+  --surface-sunken: #10151b;
+  --surface-inset: #1a212a;
+  --nav-surface: #161c24ee;
+  --header-surface: #0d1116e6;
+
+  --border: #242c37;
+  --border-strong: #384453;
+
+  --text: #e9eef6;
+  --text-dim: #a6b3c4;
+  --text-faint: #83919f;
+
+  --accent: #6ea3f7;
+  --accent-text: #8fbaff;
+  --accent-tint: #16264a;
+  --on-accent: #07101f;
+
+  --pos: #4fc98a;
+  --pos-tint: #12301f;
+  --neg: #f47b74;
+  --neg-tint: #351a1a;
+  --warn: #e2ab4c;
+  --warn-tint: #33270f;
+
+  --selected: var(--accent);
+  --selected-tint: var(--accent-tint);
+  --live: #4fc98a;
+  --live-tint: var(--pos-tint);
+  --locked: #83919f;
+  --confidence: #83919f;
+
+  --pos-QB-line: #7cabf8;
+  --pos-QB-tint: #172441;
+  --pos-RB-line: #55c795;
+  --pos-RB-tint: #102c22;
+  --pos-WR-line: #e0ad57;
+  --pos-WR-tint: #302512;
+  --pos-TE-line: #b58cf5;
+  --pos-TE-tint: #241a3d;
+  --pos-K-line: #52bcc6;
+  --pos-K-tint: #0f2b2e;
+  --pos-DEF-line: #ef85b4;
+  --pos-DEF-tint: #351827;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 2px 10px rgb(0 0 0 / 45%);
+  --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* ================================================================== chrome */
 
 * {
   box-sizing: border-box;
@@ -58,6 +236,26 @@ body {
   font-size: 15px;
   line-height: 1.35;
   -webkit-text-size-adjust: 100%;
+}
+
+/* A theme change should feel like a light being turned down, not a page swap. */
+body,
+.card,
+.player-row,
+.tabbar,
+.app-header {
+  transition:
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    color var(--motion) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 #root {
@@ -80,27 +278,39 @@ body {
    * guessed, so no blank strip appears under the last row and nothing hides
    * behind the bar on a device with no inset.
    */
-  padding: 6px 10px calc(var(--tabbar-height) + env(safe-area-inset-bottom) + 6px);
+  padding: var(--space-3) var(--space-4) calc(var(--tabbar-height) + env(safe-area-inset-bottom) + var(--space-3));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
 }
 
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
 /* ------------------------------------------------------------------ header */
+/*
+ * App chrome, not a hero. One line: the product on the left, the league it is
+ * talking about on the right, and a hairline underneath it.
+ */
 .app-header {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--header-surface);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--border);
-  padding: calc(6px + env(safe-area-inset-top)) 10px 6px;
+  padding: calc(5px + env(safe-area-inset-top)) var(--space-4) 5px;
 }
 
 .app-header h1 {
-  font-size: 1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
 }
 
 .header-row {
@@ -111,9 +321,14 @@ body {
 }
 
 .header-meta {
-  font-size: 0.75rem;
-  color: var(--text-dim);
+  font-size: 0.72rem;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------- tab bar */
@@ -129,8 +344,9 @@ body {
      covering the bottom of the page. */
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--nav-surface);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-top: 1px solid var(--border);
   /*
    * Flush against the bottom edge.
@@ -142,70 +358,87 @@ body {
    * showing underneath, which is what made it look like it was floating.
    */
   padding-bottom: env(safe-area-inset-bottom);
-  padding-bottom: max(env(safe-area-inset-bottom), 0px);
 }
 
 .tabbar button {
   position: relative;
   min-height: var(--tap);
-  padding: 8px 1px;
+  padding: 6px 1px;
   background: none;
   border: none;
   color: var(--text-faint);
   /* Six tabs at 360px leaves 60px each; the label must not force a wrap. */
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   white-space: nowrap;
   font-weight: 600;
+  letter-spacing: 0.01em;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 3px;
   cursor: pointer;
 }
 
 .tabbar button[aria-current='page'] {
-  color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
 }
 
 .tabbar .tab-glyph {
-  font-size: 1rem;
+  font-size: 1.05rem;
   line-height: 1;
+  opacity: 0.85;
+}
+
+.tabbar button[aria-current='page'] .tab-glyph {
+  opacity: 1;
 }
 
 .tab-badge {
   position: absolute;
-  top: 4px;
+  top: 3px;
   left: 50%;
   transform: translateX(6px);
   background: var(--warn);
-  color: #10161d;
+  color: var(--on-accent);
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   padding: 0 4px;
   font-weight: 700;
   min-width: 15px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ---------------------------------------------------------------- surfaces */
+/* ================================================================ surfaces */
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
   padding: 8px 10px;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .card-tight {
-  padding: 6px 8px;
+  padding: 6px 9px;
+}
+
+/* A card inside a card should read as a paragraph, not as a second box. */
+.card .card {
+  background: var(--surface-inset);
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .section-title {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-faint);
-  margin: 8px 2px 4px;
+  margin: 10px 2px 4px;
   font-weight: 700;
 }
 
@@ -216,15 +449,20 @@ body {
 
 .faint {
   color: var(--text-faint);
-  font-size: 0.75rem;
+  font-size: 0.76rem;
 }
 
-/* ------------------------------------------------------------- status bar */
+/* ------------------------------------------------------------ metric tiles */
+/*
+ * The at-a-glance numbers: a large tabular value with a small quiet label. Used
+ * for a player's key figures and for anything else that is genuinely a
+ * headline figure rather than a row of metadata.
+ */
 .statusbar {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   overflow-x: auto;
-  padding: 2px 0 6px;
+  padding: 2px 0 var(--space-3);
   scrollbar-width: none;
 }
 
@@ -232,30 +470,52 @@ body {
   display: none;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.metric-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .stat {
   flex: 0 0 auto;
-  background: var(--surface);
+  background: var(--surface-inset);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 8px;
-  min-width: 70px;
+  border-radius: var(--radius-sm);
+  padding: 5px 7px;
+  min-width: 0;
 }
 
 .stat .stat-label {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat .stat-value {
-  font-size: 1rem;
+  font-size: 0.98rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------------------ player rows */
+.stat-value .sig {
+  font-size: 0.9rem;
+}
+
+/* ============================================================= player rows */
 /* The header is sticky, so anything scrolled to the top of the viewport lands
    underneath it and cannot be tapped. Reserve its height when scrolling. */
 .player-row,
@@ -268,18 +528,17 @@ body {
  * Dense but not cramped.
  *
  * The row keeps the full 44px tap target — thumbs did not get smaller — but
- * loses the padding and the gap that were buying nothing. Six pixels of margin
- * and four of padding per row is roughly a third of a row's height across
- * forty of them, which is several more players on screen for no loss of
- * legibility.
+ * loses the padding and the gap that were buying nothing. A quieter border and
+ * a flat surface stop forty of these reading as forty outlined boxes; the
+ * accent line appears only when the row is the one being read.
  */
 .player-row {
   width: 100%;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
   margin-bottom: 3px;
   color: inherit;
   font: inherit;
@@ -288,27 +547,58 @@ body {
   min-height: var(--tap);
 }
 
-.player-row[aria-expanded='true'] {
-  border-color: var(--accent);
+.player-row:active,
+.player-row:has(> .row-button:active) {
+  background: var(--surface-sunken);
+}
+
+/*
+ * A row whose detail carries its own controls is a container with a button
+ * header rather than one big button — a button may not contain buttons. Both
+ * shapes look identical, and both say the same thing when they are open.
+ */
+.row-button {
+  width: 100%;
+  display: block;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.player-row[aria-expanded='true'],
+.player-row-open {
+  border-color: var(--selected);
+  box-shadow: var(--shadow-2);
+  background: var(--surface-raised);
 }
 
 .player-row-top {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .rank {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-faint);
   font-weight: 700;
-  min-width: 18px;
+  min-width: 17px;
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * The name is the loudest thing in the row: everything else is a qualifier on
+ * it, so it gets the size and the weight and the rest step down.
+ */
 .player-name {
   font-weight: 650;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
+  letter-spacing: -0.012em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -317,106 +607,105 @@ body {
 }
 
 .pos-team {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-dim);
   font-weight: 600;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 /*
  * Position colours.
  *
- * Four hues that stay apart for the common forms of colour blindness — blue,
- * green, amber and violet — rather than the red/green pair that would read as
- * one colour to a deuteranope. The letters are always present, so the colour is
- * an accelerator for scanning and never the thing carrying the meaning.
- *
- * Kept as a tinted pill rather than a filled block: at forty rows a screen,
- * saturated backgrounds stop being information and start being noise.
+ * A tinted pill rather than a filled block: at forty rows a screen, saturated
+ * backgrounds stop being information and start being noise. The letters are
+ * always present, so the colour is an accelerator for scanning and never the
+ * thing carrying the meaning.
  */
 .pos-pill {
   display: inline-block;
-  min-width: 26px;
+  min-width: 27px;
   text-align: center;
   padding: 1px 4px;
-  border-radius: 4px;
-  font-size: 0.64rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.62rem;
   font-weight: 800;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-sunken);
   color: var(--text-dim);
 }
 
 .pos-QB {
-  --pos-color: #60a5fa;
+  --pos-line: var(--pos-QB-line);
+  --pos-tint-bg: var(--pos-QB-tint);
 }
 
 .pos-RB {
-  --pos-color: #34d399;
+  --pos-line: var(--pos-RB-line);
+  --pos-tint-bg: var(--pos-RB-tint);
 }
 
 .pos-WR {
-  --pos-color: #fbbf24;
+  --pos-line: var(--pos-WR-line);
+  --pos-tint-bg: var(--pos-WR-tint);
 }
 
 .pos-TE {
-  --pos-color: #c084fc;
+  --pos-line: var(--pos-TE-line);
+  --pos-tint-bg: var(--pos-TE-tint);
+}
+
+.pos-K {
+  --pos-line: var(--pos-K-line);
+  --pos-tint-bg: var(--pos-K-tint);
 }
 
 .pos-DEF {
-  --pos-color: #f472b6;
+  --pos-line: var(--pos-DEF-line);
+  --pos-tint-bg: var(--pos-DEF-tint);
 }
 
 .pos-pill[class*='pos-'] {
-  border-color: color-mix(in srgb, var(--pos-color, var(--border)) 55%, transparent);
-  background: color-mix(in srgb, var(--pos-color, var(--surface-2)) 16%, transparent);
-  color: var(--pos-color, var(--text-dim));
+  border-color: color-mix(in srgb, var(--pos-line, var(--border)) 40%, transparent);
+  background: var(--pos-tint-bg, var(--surface-sunken));
+  color: var(--pos-line, var(--text-dim));
 }
 
-/* Light mode needs darker hues to keep contrast against a white surface. */
-@media (prefers-color-scheme: light) {
-  .pos-QB {
-    --pos-color: #1d4ed8;
-  }
-
-  .pos-RB {
-    --pos-color: #047857;
-  }
-
-  .pos-WR {
-    --pos-color: #a16207;
-  }
-
-  .pos-TE {
-    --pos-color: #7e22ce;
-  }
-
-  .pos-DEF {
-    --pos-color: #be185d;
-  }
+/* The trailing word or date on a list row: what tapping it does, said quietly. */
+.row-action {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .team-code {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
+/*
+ * Metadata: readable, but plainly subordinate to the name. Labels are tertiary,
+ * values secondary, and every number is tabular so columns line up down the
+ * list even though they are not in a table.
+ */
 .player-row-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
-  font-size: 0.74rem;
-  color: var(--text-dim);
+  align-items: center;
+  gap: 3px 9px;
+  margin-top: 3px;
+  font-size: 0.73rem;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
 
 .metric strong {
-  color: var(--text);
+  color: var(--text-dim);
   font-weight: 650;
 }
 
@@ -438,25 +727,173 @@ body {
   color: var(--text-faint);
 }
 
-/* ------------------------------------------------------------ explanation */
+.metric strong.sig-pos {
+  color: var(--pos);
+}
+
+.metric strong.sig-neg {
+  color: var(--neg);
+}
+
+/* ========================================================= player detail */
+/*
+ * The expanded player.
+ *
+ * Answers, in order: what is this app telling me, on what numbers, for what
+ * reasons, and what argues against it. The model's own arithmetic is real and
+ * still reachable, but it is reference material during a live draft, so it sits
+ * behind a disclosure rather than at the end of every card.
+ */
 .explain {
-  margin-top: 8px;
-  border-top: 1px dashed var(--border);
-  padding-top: 8px;
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
 }
 
 .explain ul {
-  margin: 4px 0 0;
-  padding-left: 16px;
+  margin: var(--space-2) 0 0;
+  padding-left: 15px;
 }
 
 .explain li {
   margin-bottom: 3px;
   font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.detail-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 700;
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.detail-label:first-child {
+  margin-top: 0;
+}
+
+/*
+ * The conclusion, said once and said loudest. A tinted left rule carries the
+ * semantic colour instead of a second bordered box inside the card.
+ */
+.verdict {
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-inset);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 6px 9px;
+  margin-bottom: var(--space-3);
+}
+
+.verdict-label {
+  font-size: 0.86rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.verdict-detail {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.verdict-take {
+  border-left-color: var(--pos);
+  background: var(--pos-tint);
+}
+
+.verdict-take .verdict-label {
+  color: var(--pos);
+}
+
+.verdict-avoid {
+  border-left-color: var(--neg);
+  background: var(--neg-tint);
+}
+
+.verdict-avoid .verdict-label {
+  color: var(--neg);
+}
+
+.verdict-risky {
+  border-left-color: var(--warn);
+  background: var(--warn-tint);
+}
+
+.verdict-risky .verdict-label {
+  color: var(--warn);
+}
+
+.verdict-calm {
+  border-left-color: var(--border-strong);
+}
+
+.verdict-calm .verdict-label {
+  color: var(--text-dim);
+}
+
+.reason-list {
+  margin: 0;
+  padding-left: 15px;
+}
+
+.reason-list li {
+  font-size: 0.8rem;
+  margin-bottom: 2px;
+  color: var(--text-dim);
+}
+
+.reason-list li::marker {
+  color: var(--text-faint);
+}
+
+.counterpoints li {
+  color: var(--text-faint);
+}
+
+/* A disclosure that reads as a control, not as another card. */
+.disclosure {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.disclosure > summary,
+.link-summary {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--accent-text);
+  cursor: pointer;
+  padding: 5px 0;
+  list-style: none;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.disclosure > summary::-webkit-details-marker,
+.link-summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure > summary::after,
+.link-summary::after {
+  content: '▸';
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.disclosure[open] > summary::after {
+  content: '▾';
 }
 
 .components {
-  margin-top: 8px;
+  margin-top: var(--space-3);
   display: grid;
   gap: 3px;
 }
@@ -464,7 +901,7 @@ body {
 .component {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 6px;
+  gap: var(--space-3);
   font-size: 0.75rem;
   padding: 3px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
@@ -483,16 +920,18 @@ body {
   grid-column: 1 / -1;
   color: var(--text-faint);
   font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
 }
 
-/* --------------------------------------------------------------- controls */
+/* ================================================================ controls */
+
 button.btn,
 a.btn {
   min-height: var(--tap);
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   font-weight: 650;
@@ -501,18 +940,23 @@ a.btn {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  box-shadow: var(--shadow-1);
+}
+
+button.btn:active {
+  background: var(--surface-sunken);
 }
 
 button.btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #05080c;
+  color: var(--on-accent);
 }
 
 button.btn-sm {
-  min-height: 38px;
+  min-height: 36px;
   padding: 6px 10px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 button:disabled {
@@ -522,8 +966,85 @@ button:disabled {
 
 .btn-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+/*
+ * A compact icon control. Square, quiet, and a full tap target — used where a
+ * labelled pill would cost more room than the action is worth.
+ */
+.icon-btn {
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-btn:active {
+  background: var(--surface-sunken);
+}
+
+.icon-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.icon-spin {
+  display: inline-block;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Segmented control — Appearance, and anything else with 2–4 exclusive modes. */
+.segmented {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  width: 100%;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+
+.segmented button {
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background-color var(--motion) ease,
+    color var(--motion) ease;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
 }
 
 input,
@@ -532,13 +1053,19 @@ textarea {
   width: 100%;
   min-height: var(--tap);
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   /* 16px avoids iOS Safari zoom-on-focus */
   font-size: 16px;
+}
+
+input[type='checkbox'] {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
 }
 
 textarea {
@@ -549,79 +1076,107 @@ textarea {
 
 label {
   display: block;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: var(--text-dim);
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
 }
 
 .field {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-4);
 }
 
-/* ----------------------------------------------------------------- badges */
+/* ================================================================== badges */
+
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.68rem;
-  font-weight: 700;
+  font-size: 0.67rem;
+  font-weight: 650;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-sunken);
   color: var(--text-dim);
   white-space: nowrap;
 }
 
 .badge-warn {
-  border-color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: var(--warn-tint);
   color: var(--warn);
 }
 
 .badge-pos {
-  border-color: var(--pos);
+  border-color: color-mix(in srgb, var(--pos) 40%, transparent);
+  background: var(--pos-tint);
   color: var(--pos);
 }
 
 .badge-neg {
-  border-color: var(--neg);
+  border-color: color-mix(in srgb, var(--neg) 40%, transparent);
+  background: var(--neg-tint);
   color: var(--neg);
 }
 
 .badge-row {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-top: 4px;
+  margin-top: var(--space-2);
 }
 
-/* ---------------------------------------------------------------- notices */
+/*
+ * Confidence is a qualifier on a signal, never a rival to it: quiet by default,
+ * and only tinted when it is low enough to change what the reader does.
+ */
+.badge-confidence {
+  border-color: transparent;
+  background: transparent;
+  color: var(--confidence);
+  font-weight: 600;
+  font-size: 0.66rem;
+  padding-left: 0;
+  padding-right: 0;
+  white-space: nowrap;
+}
+
+.badge-confidence-low {
+  color: var(--warn);
+}
+
+/* ================================================================= notices */
+
 .notice {
   border: 1px solid var(--border);
   border-left: 3px solid var(--warn);
   background: var(--surface);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 7px 9px;
   font-size: 0.78rem;
   color: var(--text-dim);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .notice-error {
   border-left-color: var(--neg);
+  background: var(--neg-tint);
   color: var(--neg);
 }
 
 .notice-ok {
   border-left-color: var(--pos);
+  background: var(--pos-tint);
+  color: var(--text-dim);
 }
 
-/* --------------------------------------------------------------- evidence */
+/* ================================================================ evidence */
+
 .evidence {
   border-left: 3px solid var(--border);
-  padding: 6px 0 6px 8px;
-  margin-bottom: 8px;
+  padding: 6px 0 6px 9px;
+  margin-bottom: var(--space-3);
 }
 
 .evidence.pos {
@@ -646,15 +1201,17 @@ label {
   font-size: 0.68rem;
   color: var(--text-faint);
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
+/* ================================================================== chips */
+
 .filter-row {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding-bottom: var(--space-3);
   scrollbar-width: none;
 }
 
@@ -662,28 +1219,44 @@ label {
   display: none;
 }
 
+/*
+ * Filter pills: shorter, tighter and unmistakably selected without a saturated
+ * fill. The selected state is a tinted surface with a real border and darker
+ * text — legible in sunlight, and calm in a row of seven.
+ */
 .chip {
   flex: 0 0 auto;
-  min-height: 34px;
-  padding: 5px 11px;
+  min-height: 32px;
+  padding: 4px 11px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-dim);
   font-size: 0.78rem;
   font-weight: 650;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  transition:
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    color var(--motion) ease;
 }
 
 .chip[aria-pressed='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #05080c;
+  background: var(--selected-tint);
+  border-color: color-mix(in srgb, var(--selected) 45%, transparent);
+  color: var(--accent-text);
+}
+
+/* The queue filter is the user's own list, so it reads as theirs, not as a position. */
+.chip-queue {
+  color: var(--accent-text);
+  font-weight: 800;
 }
 
 .empty {
   text-align: center;
-  padding: 28px 12px;
+  padding: 26px 12px;
   color: var(--text-faint);
   font-size: 0.85rem;
 }
@@ -695,11 +1268,7 @@ label {
   font-size: 0.8rem;
 }
 
-.login-wrap {
-  max-width: 340px;
-  margin: 15dvh auto;
-  padding: 0 16px;
-}
+/* ================================================================= tables */
 
 table.compact {
   width: 100%;
@@ -717,94 +1286,225 @@ table.compact td {
 
 table.compact th {
   color: var(--text-faint);
-  font-size: 0.68rem;
+  font-size: 0.67rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  font-weight: 700;
 }
 
-/* ------------------------------------------------------- decision quality */
+table.compact tr:last-child td {
+  border-bottom: none;
+}
+
+/* ====================================================== decision quality */
 /*
  * Tags that change a pick. Every one carries a word and a glyph as well as a
- * colour, so none of them depends on colour vision to be read.
+ * colour, so none of them depends on colour vision to be read — and they are
+ * deliberately not all the same shape. A row is allowed at most two, and the
+ * loudest treatment is reserved for the two states that stop a reader:
+ * take-now and avoid.
  */
 .tag-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 3px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .tag {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.66rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 5px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-sunken);
   color: var(--text-dim);
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
+/* Strongest action: a filled, unmissable chip. */
+.tag-take {
+  border-color: transparent;
+  background: var(--pos);
+  color: var(--on-accent);
+}
+
+/* Strongest warning. */
 .tag-avoid {
-  border-color: var(--neg);
-  color: var(--neg);
-  background: color-mix(in srgb, var(--neg) 12%, transparent);
+  border-color: transparent;
+  background: var(--neg);
+  color: var(--on-accent);
 }
 
+/* Positional urgency: tinted, loud enough to see, quieter than an action. */
+.tag-cliff,
 .tag-urgent {
-  border-color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: var(--warn-tint);
   color: var(--warn);
 }
 
+/* Moderate caution: outline only. */
+.tag-risky,
 .tag-warn {
-  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  background: transparent;
   color: var(--text-dim);
 }
 
+/* Calm guidance: barely there, on purpose. */
 .tag-calm {
-  border-color: var(--border);
+  border-color: transparent;
+  background: var(--surface-sunken);
   color: var(--text-faint);
+  font-weight: 600;
 }
 
 .tag-star {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-tint);
+  color: var(--accent-text);
 }
 
 /*
- * The star control. Sized to the standard tap target so it can be hit with a
- * thumb during a draft without hitting the row underneath it.
+ * The My Guy control.
+ *
+ * A glyph, not a box: the old bordered square read as a button competing with
+ * the player's name. The tap target is unchanged — 28px inside a 44px row —
+ * and the selected state is carried by the filled glyph and the accent colour
+ * rather than by an outline.
  */
-.star-btn {
+.star-btn,
+.heart-btn {
   flex: 0 0 auto;
   min-width: 28px;
   min-height: 28px;
-  padding: 0 4px;
-  font-size: 0.85rem;
+  padding: 0 3px;
+  font-size: 0.95rem;
   line-height: 1;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-faint);
   cursor: pointer;
+  transition:
+    color var(--motion) ease,
+    background-color var(--motion) ease;
 }
 
 .star-btn-on {
-  border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-tint);
 }
 
+.heart-btn-on {
+  color: var(--neg);
+  background: var(--neg-tint);
+}
+
+.heart-btn:disabled,
 .star-btn:disabled {
   opacity: 0.5;
 }
 
+/* =========================================================== draft screen */
+/*
+ * One compact line where five stat cards used to be.
+ *
+ * Everything that row carried is still on screen or one tap away; the point is
+ * that the player list starts near the top of the viewport instead of below a
+ * block of chrome the user has already read.
+ */
+.draft-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 2px 2px var(--space-3);
+  min-height: 34px;
+}
+
+.draft-league {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.71rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.draft-pick {
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.draft-turn {
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.draft-turn-now {
+  color: var(--warn);
+}
+
+/* Freshness, said in as few characters as it can be said in. */
+.draft-updated {
+  font-size: 0.67rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.draft-refresh-note {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  padding: 0 2px var(--space-3);
+  margin-top: -4px;
+}
+
+.draft-details {
+  margin: 0 0 var(--space-3);
+}
+
+.draft-details summary {
+  font-size: 0.72rem;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.draft-details .badge-row {
+  margin-top: var(--space-2);
+}
+
+/*
+ * Roster guidance: a status line, one strong sentence, one quiet one. It is
+ * advice on the way to the list, so it is deliberately shorter than the list.
+ */
 .roster-alert {
-  padding: 5px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   font-size: 0.78rem;
+}
+
+.roster-alert strong {
+  font-weight: 650;
+  color: var(--text);
 }
 
 .roster-alert:last-child {
@@ -820,108 +1520,142 @@ table.compact th {
   flex-direction: column;
   gap: 3px;
   font-size: 0.78rem;
-  padding-bottom: 6px;
-  margin-bottom: 6px;
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 
-/* ------------------------------------------------------ draft screen chrome */
+/* ================================================================= trades */
 /*
- * One compact line where five stat cards used to be.
+ * Three windows of the same tally, labelled.
  *
- * Everything that row carried is still on screen or one tap away; the point is
- * that the player list starts near the top of the viewport instead of below a
- * block of chrome the user has already read.
+ * They used to sit side by side as three identical signals, which read as one
+ * number printed three times. Naming each window is the whole fix: the data is
+ * unchanged and none of it is hidden.
  */
-.draft-bar {
+.window-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.window-cell {
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  min-width: 0;
+}
+
+.window-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.window-value {
+  font-size: 0.86rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-trend {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
+/* The reason is the point of the row, so it wraps rather than truncates. */
+.trade-trend .trade-line {
+  min-width: 0;
+  flex: 1;
+}
+
+/* ================================================================== team */
+
+/*
+ * A caution said in a sentence.
+ *
+ * Missing data and late kickoffs are ordinary conditions, not incidents, so
+ * they get an accent rule and readable secondary text instead of a bordered box
+ * nested inside the card that already has a border.
+ */
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: var(--space-3);
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+}
+
+.hint-caution {
+  border-left-color: color-mix(in srgb, var(--warn) 65%, transparent);
+}
+
+.swap {
+  padding: 5px 0 5px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  margin-top: var(--space-3);
+  font-size: 0.82rem;
+}
+
+.roster-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 2px 6px;
-  min-height: 32px;
+  gap: var(--space-3);
+  padding: 5px 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  min-height: 38px;
 }
 
-.draft-league {
-  font-size: 0.95rem;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.pick-no {
+  font-size: 0.67rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.draft-status {
+.live-dot {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.draft-pick {
+  gap: 5px;
+  font-size: 0.7rem;
   font-weight: 700;
-  color: var(--text);
+  color: var(--live);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.draft-turn {
-  font-weight: 700;
+.live-dot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--live);
 }
 
-.draft-turn-now {
-  color: var(--warn);
-}
-
-.draft-details {
-  margin: 0 0 6px;
-}
-
-.draft-details summary {
-  font-size: 0.72rem;
-  padding: 2px 0;
-  cursor: pointer;
-}
-
-.draft-details .badge-row {
-  margin-top: 4px;
-}
-
-/*
- * The heart is the players-list face of the same flag the draft board shows as
- * a star. Sized and spaced identically so a row does not reflow between
- * screens; only the glyph and the accent colour differ.
- */
-.heart-btn {
-  flex: 0 0 auto;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 4px;
-  font-size: 0.85rem;
-  line-height: 1;
-  border-radius: 6px;
+/* A grouped list: one card holding rows, instead of a card per row. */
+.list-card {
+  background: var(--surface);
   border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-faint);
-  cursor: pointer;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
 }
 
-.heart-btn-on {
-  border-color: var(--neg);
-  color: var(--neg);
+.list-card > *:last-child {
+  border-bottom: none;
 }
 
-.heart-btn:disabled,
-.star-btn:disabled {
-  opacity: 0.5;
-}
-
-/* The queue filter is the user's own list, so it reads as theirs, not as a position. */
-.chip-queue {
-  color: var(--accent);
-  font-weight: 800;
-}
-
-.chip-queue[aria-pressed='true'] {
-  color: inherit;
+/* Wide content must scroll inside itself rather than widen the page. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }

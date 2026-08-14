@@ -14,7 +14,17 @@ import {
   type RosterPlayer,
   type StartSitComparison,
 } from '../api.ts';
-import { Badge, Empty, formatAge, Loading, Notice, PositionBadge, Signal, Unknown } from '../components/common.tsx';
+import {
+  Badge,
+  Confidence,
+  Empty,
+  formatAge,
+  Loading,
+  Notice,
+  PositionBadge,
+  Signal,
+  Unknown,
+} from '../components/common.tsx';
 
 interface OpenSlot {
   slot: string;
@@ -222,9 +232,7 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
     <div className="card" data-testid="lineup-card">
       <div className="header-row">
         <strong>This week&rsquo;s lineup</strong>
-        <Badge tone={lineup.confidence === 'high' ? 'pos' : lineup.confidence === 'low' ? 'neg' : 'warn'}>
-          {lineup.confidence} confidence
-        </Badge>
+        <Confidence level={lineup.confidence} />
       </div>
 
       {lineup.swaps.length === 0 ? (
@@ -239,31 +247,40 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
             {lineup.swaps.length} change{lineup.swaps.length === 1 ? '' : 's'} to consider
             {gain != null && gain > 0 ? ` · worth about ${gain} pts` : ''}
           </div>
+          {/*
+            A swap is a sentence, not a box. The card used to hold a bordered
+            card per change, which made three suggestions look like three
+            separate screens; an accent rule and the type do the same job in a
+            third of the height.
+          */}
           {lineup.swaps.map((s) => (
-            <div className="card card-tight" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap">
+            <div className="swap" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap">
               <div>
-                <strong>Start {s.inName}</strong> over {s.outName}{' '}
-                <span className="faint">({s.slot})</span>
+                <strong>Start {s.inName}</strong> over {s.outName} <span className="faint">({s.slot})</span>
               </div>
               <div className="faint">
                 +{s.gain} pts · {s.reason}
               </div>
             </div>
           ))}
-          <div className="faint" style={{ margin: '4px 2px' }}>
+          <div className="faint" style={{ margin: '6px 2px 0' }}>
             Make changes in Sleeper — this app never edits a lineup.
           </div>
         </>
       )}
 
+      {/*
+        Missing data is ordinary, not an incident: it gets a caution rule and a
+        readable sentence rather than an inset warning box.
+      */}
       {lineup.warnings.map((w) => (
-        <Notice key={w} tone="warn">
+        <div className="hint hint-caution" key={w}>
           {w}
-        </Notice>
+        </div>
       ))}
 
-      <details style={{ marginTop: 6 }}>
-        <summary className="muted">Recommended lineup in full</summary>
+      <details className="disclosure">
+        <summary>Recommended lineup in full</summary>
         <table className="compact">
           <thead>
             <tr>
@@ -349,9 +366,7 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
         <strong data-testid="comparison-verdict">
           {winner ? `Start ${winner.name}` : 'No recommendation'}
         </strong>
-        <Badge tone={comparison.confidence === 'high' ? 'pos' : comparison.confidence === 'low' ? 'neg' : 'warn'}>
-          {comparison.confidence} confidence
-        </Badge>
+        <Confidence level={comparison.confidence} />
       </div>
       <div className="faint">
         Vegas data {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
@@ -395,15 +410,15 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       </div>
 
       {comparison.warnings.map((w) => (
-        <Notice key={w}>{w}</Notice>
+        <div className="hint hint-caution" key={w}>
+          {w}
+        </div>
       ))}
 
       {comparison.reasons.length > 0 ? (
-        <ul style={{ paddingLeft: 16, margin: '6px 0' }}>
+        <ul className="reason-list" style={{ margin: '8px 0' }}>
           {comparison.reasons.map((r) => (
-            <li key={r} style={{ fontSize: '0.8rem' }}>
-              {r}
-            </li>
+            <li key={r}>{r}</li>
           ))}
         </ul>
       ) : null}
@@ -433,8 +448,8 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       </table>
 
       {comparison.evaluations.map((e) => (
-        <details key={e.playerId} style={{ marginTop: 6 }}>
-          <summary className="muted">{e.name} breakdown</summary>
+        <details className="disclosure" key={e.playerId}>
+          <summary>{e.name} breakdown</summary>
           <div className="components">
             {e.components.map((c) => (
               <div className="component" key={c.key}>
@@ -492,26 +507,37 @@ function LiveDraftRoster({
   const positions = Object.keys(roster.counts).sort();
   return (
     <>
-      <div className="card">
+      {/*
+        Live, but quietly so: a dot and a word, not a coloured banner. What is
+        still missing is the sentence worth reading here, so it gets the type.
+      */}
+      <div className="card card-tight" data-testid="live-draft-card">
         <div className="header-row">
-          <Badge tone="pos">Live draft</Badge>
+          <span className="live-dot">Live draft</span>
           <span className="faint">
             {roster.picksMade} {roster.picksMade === 1 ? 'pick' : 'picks'} · {roster.filled} filled ·{' '}
             {roster.remaining} left
           </span>
         </div>
         {roster.openStarters.length > 0 ? (
-          <div className="faint" style={{ marginTop: 6 }}>
+          <div className="muted" style={{ marginTop: 4 }}>
             Still need:{' '}
-            {roster.openStarters.map((o) => `${o.count > 1 ? `${o.count} ` : ''}${o.slot}`).join(', ')}
+            <strong>
+              {roster.openStarters.map((o) => `${o.count > 1 ? `${o.count} ` : ''}${o.slot}`).join(', ')}
+            </strong>
           </div>
         ) : (
-          <div className="faint" style={{ marginTop: 6 }}>
+          <div className="muted" style={{ marginTop: 4 }}>
             Every starting slot is covered.
           </div>
         )}
       </div>
 
+      {/*
+        One card per position group holding one line per player, rather than one
+        card per player. Same information, roughly three times as many players
+        on a phone screen.
+      */}
       {roster.drafted.length === 0 ? (
         <Empty>Nothing drafted yet. Your picks appear here as you make them.</Empty>
       ) : (
@@ -520,19 +546,17 @@ function LiveDraftRoster({
             <div className="section-title">
               {position} ({roster.counts[position]})
             </div>
-            {roster.drafted
-              .filter((p) => (p.position || 'UNKNOWN') === position)
-              .map((p) => (
-                <div key={p.playerId} className="card">
-                  <div className="header-row">
-                    <strong>{p.name}</strong>
-                    <span className="faint">{p.pickNo ? `pick ${p.pickNo}` : 'on roster'}</span>
-                  </div>
-                  <div className="faint">
+            <div className="list-card">
+              {roster.drafted
+                .filter((p) => (p.position || 'UNKNOWN') === position)
+                .map((p) => (
+                  <div key={p.playerId} className="roster-line" data-testid="drafted-line">
+                    <span className="player-name">{p.name}</span>
                     <PositionBadge position={p.position} team={p.team} />
+                    <span className="pick-no">{p.pickNo ? `#${p.pickNo}` : 'held'}</span>
                   </div>
-                </div>
-              ))}
+                ))}
+            </div>
           </div>
         ))
       )}

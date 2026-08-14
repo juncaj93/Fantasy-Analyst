@@ -401,7 +401,12 @@ suggestions).
 4. **Draft weights are untuned defaults.**
 5. **Survival probability is a heuristic**, labelled as an estimate.
 6. **Rate limiting is per-isolate**, not distributed — fine for one user.
-7. **Draft polling is client-driven** via the Live toggle.
+7. **Draft polling is client-driven.** The Draft header carries a refresh
+   control (↻) that force-syncs the pick stream from Sleeper and rebuilds the
+   board; a live draft then keeps updating itself at the interval the server
+   nominates until it finishes or a sync fails. Syncing is a write, so a
+   view-only reader's refresh rebuilds the board from stored state and never
+   starts a background write loop.
 8. **The browser suite shares one dev server across all three viewports.** Run
    repeatedly against a reused server, accumulated review-queue state can make
    `can reassign an item to the right player` fail; it passes on a fresh server,

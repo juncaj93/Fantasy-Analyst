@@ -98,13 +98,54 @@ test.describe('draft room', () => {
     const first = page.getByTestId('recommendation-row').first();
     await first.click();
     await expect(first.locator('.explain')).toBeVisible();
+    await expect(first.getByText('Why this rank')).toBeVisible();
+
+    // The default expansion is a decision, not a derivation: the raw component
+    // arithmetic is present but folded away until it is asked for.
+    await expect(first.locator('.component').first()).toBeHidden();
+    await first.getByTestId('advanced-breakdown').locator('summary').click();
 
     // Components are exposed individually, not collapsed into one opaque score.
     const labels = (await first.locator('.component-label').allInnerTexts()).join(' | ');
     for (const label of ['ADP value', 'Roster need', 'Positional scarcity', 'League fit', 'Survival to next pick', 'Total']) {
       expect(labels, `missing component: ${label}`).toContain(label);
     }
-    await expect(first.getByText('Why')).toBeVisible();
+  });
+
+  test('leads the expanded player with the conclusion and the key numbers', async ({ page }) => {
+    const first = page.getByTestId('recommendation-row').first();
+    await first.click();
+
+    // One conclusion, said once, in a semantic treatment rather than a fourth
+    // identical yellow chip.
+    const verdict = first.getByTestId('verdict');
+    await expect(verdict).toBeVisible();
+    expect(await first.getByTestId('verdict').count()).toBe(1);
+
+    // The four numbers a pick is actually made on, before any prose.
+    const tiles = first.locator('.metric-grid .stat-label');
+    expect((await tiles.allInnerTexts()).map((t) => t.trim().toLowerCase())).toEqual([
+      'adp',
+      'value',
+      'lasts',
+      'lifetime',
+    ]);
+
+    // Reasons are capped by default; the rest are one tap away, never deleted.
+    expect(await first.locator('.reason-list').first().locator('li').count()).toBeLessThanOrEqual(3);
+
+    // The conclusion is not repeated verbatim further down the card.
+    const label = (await verdict.locator('.verdict-label').innerText()).trim();
+    const bullets = await first.locator('.reason-list li').allInnerTexts();
+    expect(bullets.map((b) => b.trim())).not.toContain(label);
+  });
+
+  test('the expanded player fits on the screen without opening Advanced', async ({ page }) => {
+    const first = page.getByTestId('recommendation-row').first();
+    await first.click();
+    const box = await first.boundingBox();
+    // Identity, verdict, numbers, reasons and counterpoint inside one viewport.
+    expect(box!.height).toBeLessThan(page.viewportSize()!.height);
   });
 
   test('filters the board by position', async ({ page }) => {
@@ -188,6 +229,78 @@ test.describe('draft room', () => {
     await after.getByTestId('my-guy-control').click();
     await after.getByTestId('my-guy-control').click();
     await after.getByTestId('my-guy-control').click();
+  });
+
+  /**
+   * The Sleeper sync is stubbed here on purpose. What is being checked is the
+   * contract between the button and the app — one request per tap, the board
+   * rebuilt afterwards, the last good state kept when it fails — not Sleeper's
+   * availability from CI.
+   */
+  test('offers a refresh control rather than a live/pause switch', async ({ page }) => {
+    const refresh = page.getByTestId('draft-refresh');
+    await expect(refresh).toBeVisible();
+    await expect(refresh).toHaveAccessibleName(/refresh/i);
+
+    const box = await refresh.boundingBox();
+    expect(box!.width, 'must be tappable one-handed').toBeGreaterThanOrEqual(44);
+
+    // The control no longer implies the user maintains a connection.
+    const buttons = (await page.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    expect(buttons).not.toContain('live');
+    expect(buttons).not.toContain('pause');
+  });
+
+  test('refresh force-syncs the draft and rebuilds the board', async ({ page }) => {
+    let syncs = 0;
+    let boards = 0;
+    await page.route('**/api/drafts/*/sync', async (route) => {
+      syncs++;
+      // Long enough that a second tap lands while the first is in flight.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'drafting', pollIntervalSeconds: 0 }),
+      });
+    });
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      boards++;
+      await route.continue();
+    });
+
+    const refresh = page.getByTestId('draft-refresh');
+    await refresh.click();
+    // Repeated taps while it is working must not queue a second sync.
+    await refresh.dispatchEvent('click');
+    await refresh.dispatchEvent('click');
+    await expect(refresh).toBeEnabled();
+
+    expect(syncs, 'one sync per tap, never overlapping').toBe(1);
+    expect(boards, 'the board is rebuilt from the new state').toBeGreaterThanOrEqual(1);
+    // The list is never blanked while refreshing.
+    await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
+    await expect(page.getByTestId('draft-updated')).toContainText(/just now|ago/);
+  });
+
+  test('a failed refresh keeps the last good draft state on screen', async ({ page }) => {
+    const before = await page.getByTestId('recommendation-row').count();
+    await page.route('**/api/drafts/*/sync', (route) =>
+      route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Sleeper did not respond' }),
+      }),
+    );
+
+    await page.getByTestId('draft-refresh').click();
+
+    const note = page.getByTestId('draft-refresh-note');
+    await expect(note).toContainText('Sleeper did not respond');
+    await expect(note).toContainText('last draft state');
+    // Concise and non-blocking: no full-width error banner, no empty board.
+    await expect(page.locator('.notice-error')).toHaveCount(0);
+    await expect(page.getByTestId('recommendation-row')).toHaveCount(before);
   });
 
   test('offers no control that could make a pick', async ({ page }) => {

@@ -1,8 +1,14 @@
 /**
  * Shared presentational primitives.
  *
- * Accessibility rule enforced here: a positive/negative state is ALWAYS
- * expressed with a glyph and a word in addition to colour.
+ * Every screen builds from these, so a card, a position badge or a metric row
+ * looks and behaves identically on Draft, Team, Trades, Players, Review and
+ * Setup. Two rules are enforced here:
+ *
+ *  1. a positive/negative state is ALWAYS expressed with a glyph and a word in
+ *     addition to colour;
+ *  2. nothing names a colour — only a semantic role from the theme tokens — so
+ *     Light and Dark stay two settings of one design system.
  */
 
 import type { ReactNode } from 'react';
@@ -20,18 +26,25 @@ export function Signal({ net, items, label }: { net: number; items?: number; lab
   );
 }
 
+/** Just the number, coloured and signed. For places that already say what it is. */
+export function SignedValue({ net }: { net: number }) {
+  const cls = net > 0 ? 'sig sig-pos' : net < 0 ? 'sig sig-neg' : 'sig sig-none';
+  return <span className={cls}>{net > 0 ? `+${net}` : net}</span>;
+}
+
 /**
  * A player's position, colour-coded so a long list can be scanned at a glance.
  *
  * The letters stay: colour is an accelerator, never the carrier of the meaning,
  * so this reads identically to somebody who cannot separate the hues. The
- * palette is deliberately restrained — a small pill rather than a coloured row,
- * because forty of these on one screen is what the draft board actually looks
- * like and saturated blocks at that density stop being information.
+ * palette is deliberately restrained — a small tinted pill rather than a
+ * coloured row, because forty of these on one screen is what the draft board
+ * actually looks like and saturated blocks at that density stop being
+ * information. Same size, same radius, same hues on every screen.
  */
 export function PositionBadge({ position, team }: { position: string | null; team?: string | null }) {
   const pos = (position ?? '').toUpperCase();
-  const known = ['QB', 'RB', 'WR', 'TE', 'DEF'].includes(pos);
+  const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
   return (
     <span className="pos-team">
       <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
@@ -53,6 +66,18 @@ export function Badge({
   return <span className={cls}>{children}</span>;
 }
 
+/**
+ * How sure the app is, said quietly.
+ *
+ * Confidence qualifies a signal; it is not a rival to it. Low confidence is the
+ * only level that changes what a reader does, so it is the only one that gets
+ * any colour.
+ */
+export function Confidence({ level }: { level: string }) {
+  const cls = level === 'low' ? 'badge badge-confidence badge-confidence-low' : 'badge badge-confidence';
+  return <span className={cls}>{level} confidence</span>;
+}
+
 export function Notice({
   children,
   tone = 'warn',
@@ -64,6 +89,7 @@ export function Notice({
   return <div className={cls}>{children}</div>;
 }
 
+/** A headline number with a small label. Large value, quiet label, tabular. */
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
     <div className="stat" title={hint}>
@@ -71,6 +97,16 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
       <div className="stat-value">{value}</div>
     </div>
   );
+}
+
+/** The at-a-glance row of key numbers used at the top of any player detail. */
+export function MetricGrid({ children, columns = 4 }: { children: ReactNode; columns?: 3 | 4 }) {
+  return <div className={columns === 3 ? 'metric-grid metric-grid-3' : 'metric-grid'}>{children}</div>;
+}
+
+/** A small uppercase label introducing a block inside a detail view. */
+export function DetailLabel({ children }: { children: ReactNode }) {
+  return <div className="detail-label">{children}</div>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {
@@ -107,4 +143,15 @@ export function formatAge(iso: string | null | undefined): string {
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+}
+
+/** "just now" / "20s" / "4m" — short enough to sit beside a control. */
+export function formatShortAge(at: number | null, now: number): string {
+  if (at == null) return '';
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins}m ago`;
+  return `${Math.round(mins / 60)}h ago`;
 }

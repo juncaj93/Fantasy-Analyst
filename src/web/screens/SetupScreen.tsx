@@ -19,6 +19,15 @@ import {
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
+import {
+  APPEARANCES,
+  APPEARANCE_LABELS,
+  applyAppearance,
+  readAppearance,
+  storeAppearance,
+  watchSystemAppearance,
+  type Appearance,
+} from '../theme.ts';
 
 type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | null;
 
@@ -82,6 +91,8 @@ export function SetupScreen({
         </Notice>
       )}
 
+      <AppearanceCard />
+
       {status.steps.map((step) => (
         <button
           key={step.id}
@@ -96,7 +107,7 @@ export function SetupScreen({
               {STATE_ICON[step.state] ?? '○'}
             </span>
             <span className="player-name">{step.title}</span>
-            <span className="pos-team">{open === step.id ? 'Close' : 'Open'}</span>
+            <span className="row-action">{open === step.id ? 'Close' : 'Open'}</span>
           </div>
           <div className="player-row-metrics">
             <span className="metric">{step.summary}</span>
@@ -113,6 +124,53 @@ export function SetupScreen({
 
       <HelpMyScores onChanged={refreshAll} />
     </>
+  );
+}
+
+/**
+ * Appearance: System, Light or Dark.
+ *
+ * A preference of this phone rather than of the account, so it is kept on the
+ * device: it works for a view-only reader, needs no passphrase, and costs no
+ * request. Choosing one applies immediately — no reload, and nothing else on
+ * screen changes state.
+ */
+function AppearanceCard() {
+  const [mode, setMode] = useState<Appearance>(() => readAppearance());
+
+  useEffect(() => {
+    applyAppearance(mode);
+    // While System is selected the stylesheet follows the phone on its own;
+    // this only keeps the Safari toolbar tint in step when iOS flips.
+    return watchSystemAppearance(() => applyAppearance(mode));
+  }, [mode]);
+
+  return (
+    <div className="card card-tight" data-testid="appearance">
+      <div className="section-title" style={{ margin: '0 0 6px' }}>
+        Appearance
+      </div>
+      <div className="segmented" role="group" aria-label="Appearance">
+        {APPEARANCES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={mode === option}
+            data-testid={`appearance-${option}`}
+            onClick={() => {
+              storeAppearance(option);
+              setMode(option);
+            }}
+          >
+            {APPEARANCE_LABELS[option]}
+          </button>
+        ))}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        System follows your phone, and keeps following it when your phone changes at sunset. Light and
+        Dark stay exactly as you set them here, on this phone.
+      </div>
+    </div>
   );
 }
 
@@ -169,7 +227,7 @@ function HelpMyScores({ onChanged }: { onChanged: () => void }) {
             !
           </span>
           <span className="player-name">Help my scores</span>
-          <span className="pos-team">{open ? 'Close' : 'Fix'}</span>
+          <span className="row-action">{open ? 'Close' : 'Fix'}</span>
         </div>
         <div className="player-row-metrics">
           <span className="metric">{status.summary.headline}</span>
@@ -809,7 +867,7 @@ function NewsletterHistory() {
               >
                 <div className="player-row-top">
                   <span className="player-name">{m.subject || '(no subject)'}</span>
-                  <span className="pos-team">{formatDate(m.receivedAt)}</span>
+                  <span className="row-action">{formatDate(m.receivedAt)}</span>
                 </div>
                 <div className="player-row-metrics">
                   <Badge tone={m.status === 'processed' ? 'pos' : m.status === 'quarantined' ? 'warn' : 'neg'}>

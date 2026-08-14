@@ -2,7 +2,9 @@
  * Draft Room.
  *
  * Above the fold: draft state, picks until your turn, top recommendations.
- * Tap a player to reveal the component breakdown and the reasoning.
+ * Tap a player to reveal the case for him — the conclusion, the numbers, the
+ * two or three reasons, and the strongest argument against. The model's own
+ * arithmetic is still there in full, one disclosure further in.
  *
  * There is deliberately no "draft this player" control — the tool recommends
  * only, and never touches Sleeper.
@@ -17,8 +19,31 @@ import {
   type MyGuyFlag,
   type RosterAlert,
 } from '../api.ts';
-import { Badge, Empty, Loading, Notice, PositionBadge, Signal, Unknown, formatDate } from '../components/common.tsx';
-import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/decisions.tsx';
+import {
+  Badge,
+  DetailLabel,
+  Empty,
+  Loading,
+  MetricGrid,
+  Notice,
+  PositionBadge,
+  Signal,
+  Stat,
+  Unknown,
+  formatDate,
+  formatShortAge,
+} from '../components/common.tsx';
+import {
+  AvoidBadge,
+  MyGuyControl,
+  ReasonList,
+  TierCliffTag,
+  Verdict,
+  WaitTag,
+  draftVerdict,
+  saidAlready,
+  withoutRepeats,
+} from '../components/decisions.tsx';
 
 /**
  * The filter row.
@@ -35,7 +60,12 @@ import { AvoidBadge, MyGuyControl, TierCliffTag, WaitTag } from '../components/d
 const QUEUE_FILTER = '★';
 const ALL_FILTER = 'ALL';
 
-export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
+/** How many reasons the expanded player shows before "Show all reasons". */
+const REASONS_SHOWN = 3;
+/** Counterpoints are an argument, not a second recommendation. */
+const COUNTERPOINTS_SHOWN = 2;
+
+export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; unlocked: boolean }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const draftId = selected?.draftId ?? null;
 
@@ -44,9 +74,17 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [autoPoll, setAutoPoll] = useState(false);
   const [flagging, setFlagging] = useState<string | null>(null);
-  const timer = useRef<number | null>(null);
+
+  /** Manual refresh state: in-flight guard, last success, last complaint. */
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
+  /** Seconds between automatic syncs; 0 once the draft stops moving. */
+  const [pollSeconds, setPollSeconds] = useState(0);
+  /** Re-renders the freshness cue without touching anything else. */
+  const [now, setNow] = useState(() => Date.now());
+  const inFlight = useRef(false);
 
   const load = useCallback(
     async (pos: string) => {
@@ -56,6 +94,7 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
         const query =
           pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
         setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=40${query}`));
+        setUpdatedAt(Date.now());
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -69,6 +108,11 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
   useEffect(() => {
     void load(position);
   }, [load, position]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   /**
    * Star a player, then reload the board.
@@ -92,26 +136,79 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
     [load, position],
   );
 
-  // Poll Sleeper for new picks while the draft is live. Interval comes from the
-  // server so an inactive draft stops burning requests.
+  /**
+   * Force-sync the live draft from Sleeper, then rebuild the board.
+   *
+   * This is the one control the draft header needs. It pulls the latest pick
+   * stream through the same sync path the app has always used, and the board
+   * request that follows is what recomputes the roster, the available pool, the
+   * recommendation order, the tier-cliff and wait guidance and the roster
+   * alerts — none of that logic is touched here.
+   *
+   * Failure is not allowed to cost the user their screen: the last good board
+   * stays exactly where it is and the complaint is one quiet line.
+   */
+  const refreshNow = useCallback(async () => {
+    if (!draftId || inFlight.current) return;
+    inFlight.current = true;
+    setRefreshing(true);
+    setRefreshNote(null);
+    try {
+      if (unlocked) {
+        const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
+        // A live draft keeps updating itself afterwards, at the interval the
+        // server nominates; a finished one stops asking.
+        setPollSeconds(res.pollIntervalSeconds > 0 ? res.pollIntervalSeconds : 0);
+      }
+      await load(position);
+      setNow(Date.now());
+      setError(null);
+    } catch (err) {
+      setRefreshNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      inFlight.current = false;
+      setRefreshing(false);
+    }
+  }, [draftId, load, position, unlocked]);
+
+  /**
+   * Automatic polling, unchanged in substance: while a draft is live the app
+   * keeps pulling picks on its own at the interval the server sets. The manual
+   * control above is a "now" button on top of it, not a replacement — and it is
+   * what arms it, so a view-only reader never starts a background write loop.
+   */
   useEffect(() => {
-    if (!autoPoll || !draftId) return;
-    const tick = async () => {
+    if (!draftId || pollSeconds <= 0) return;
+    let cancelled = false;
+    let handle = window.setTimeout(async function tick() {
+      if (cancelled || inFlight.current) {
+        if (!cancelled) handle = window.setTimeout(tick, pollSeconds * 1000);
+        return;
+      }
+      inFlight.current = true;
       try {
         const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
+        if (cancelled) return;
         await load(position);
-        if (res.pollIntervalSeconds <= 0) setAutoPoll(false);
-        else timer.current = window.setTimeout(tick, res.pollIntervalSeconds * 1000);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setAutoPoll(false);
+        if (cancelled) return;
+        setNow(Date.now());
+        if (res.pollIntervalSeconds <= 0) setPollSeconds(0);
+        else handle = window.setTimeout(tick, res.pollIntervalSeconds * 1000);
+      } catch {
+        // Nobody asked for this request, so it does not get to raise an alarm.
+        if (!cancelled) {
+          setPollSeconds(0);
+          setRefreshNote('Automatic updates stopped. Tap refresh to try again.');
+        }
+      } finally {
+        inFlight.current = false;
       }
-    };
-    void tick();
+    }, pollSeconds * 1000);
     return () => {
-      if (timer.current) window.clearTimeout(timer.current);
+      cancelled = true;
+      window.clearTimeout(handle);
     };
-  }, [autoPoll, draftId, load, position]);
+  }, [draftId, load, pollSeconds, position]);
 
   if (!selected) {
     return (
@@ -152,10 +249,40 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
             {board.picksUntilMyTurn == null ? '—' : board.onTheClock ? 'YOUR PICK' : `${board.picksUntilMyTurn} to go`}
           </span>
         </span>
-        <button className="btn btn-sm" onClick={() => setAutoPoll((v) => !v)}>
-          {autoPoll ? '⏸' : '▶ Live'}
+        {updatedAt != null ? (
+          <span className="draft-updated" data-testid="draft-updated">
+            {formatShortAge(updatedAt, now)}
+          </span>
+        ) : null}
+        {/*
+          A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
+          implied the user had to keep a link open; what they actually want is
+          "show me what just happened", so that is what the control says.
+        */}
+        <button
+          type="button"
+          className="icon-btn"
+          data-testid="draft-refresh"
+          aria-label={
+            unlocked
+              ? 'Refresh draft from Sleeper'
+              : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
+          }
+          aria-busy={refreshing}
+          disabled={refreshing}
+          onClick={() => void refreshNow()}
+        >
+          <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
+            ↻
+          </span>
         </button>
       </div>
+
+      {refreshNote ? (
+        <div className="draft-refresh-note" data-testid="draft-refresh-note" role="status">
+          {refreshNote} Showing the last draft state received.
+        </div>
+      ) : null}
 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {board.warnings.map((w) => (
@@ -247,7 +374,9 @@ export function DraftScreen({ leagues }: { leagues: LeagueSummary[] }) {
  *
  * Capped at three. The screen is a phone during a draft, and a list of eight
  * things to worry about is the same as no advice at all — the loudest ones are
- * the ones worth the space.
+ * the ones worth the space. One status line, one strong sentence each, one
+ * quiet one: this is guidance on the way to the list, so it stays shorter than
+ * the list.
  */
 function RosterAlerts({ alerts }: { alerts: RosterAlert[] }) {
   const order = { urgent: 0, warn: 1, info: 2 } as const;
@@ -255,7 +384,9 @@ function RosterAlerts({ alerts }: { alerts: RosterAlert[] }) {
   if (shown.length === 0) return null;
   return (
     <div className="card card-tight" data-testid="roster-alerts">
-      <div className="section-title">Your roster</div>
+      <div className="section-title" style={{ margin: '0 0 2px' }}>
+        Your roster
+      </div>
       {shown.map((alert) => (
         <div key={alert.key} className={`roster-alert roster-alert-${alert.severity}`} data-testid="roster-alert">
           <strong>{alert.message}</strong>
@@ -266,6 +397,13 @@ function RosterAlerts({ alerts }: { alerts: RosterAlert[] }) {
   );
 }
 
+/**
+ * One recommendation.
+ *
+ * The header is the button and the detail is its sibling rather than its child:
+ * the expanded view contains its own controls (Advanced, Show all reasons), and
+ * a button may not contain buttons.
+ */
 function RecommendationRow({
   rank,
   rec,
@@ -282,124 +420,205 @@ function RecommendationRow({
   busy: boolean;
 }) {
   return (
-    <button
-      className="player-row"
-      aria-expanded={expanded}
-      onClick={onToggle}
+    <div
+      className={expanded ? 'player-row player-row-open' : 'player-row'}
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
     >
-      <div className="player-row-top">
-        <span className="rank">{rank}</span>
-        <MyGuyControl myGuy={rec.myGuy} busy={busy} onChange={(level) => onMyGuy(rec.playerId, level)} />
-        <span className="player-name">{rec.name}</span>
-        <PositionBadge position={rec.position} team={rec.team} />
-      </div>
+      <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
+        <div className="player-row-top">
+          <span className="rank">{rank}</span>
+          <MyGuyControl myGuy={rec.myGuy} busy={busy} onChange={(level) => onMyGuy(rec.playerId, level)} />
+          <span className="player-name">{rec.name}</span>
+          <PositionBadge position={rec.position} team={rec.team} />
+        </div>
 
-      {/*
-        At most two tags on the row itself, in the order that decides a pick:
-        a caution outranks urgency, and urgency outranks everything else. The
-        rest of the reasoning is one tap away rather than crowding the list.
-      */}
-      <DecisionTags rec={rec} />
-
-      <div className="player-row-metrics">
-        <span className="metric">
-          ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
-        </span>
-        <span className="metric">
-          Value{' '}
-          <strong className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}>
-            {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-          </strong>
-        </span>
-        <span className="metric">
-          Lasts{' '}
-          <strong>
-            {rec.survivalProbability == null ? <Unknown what="survival" /> : `${Math.round(rec.survivalProbability * 100)}%`}
-          </strong>
-        </span>
         {/*
-          One signal, not two.
-
-          Lifetime and 30-day were printed side by side on every row, so a
-          player nobody has written about read "– 0 flat – 0 flat" — two
-          columns of nothing on forty rows. The lifetime tally is the one that
-          drives AVOID and the ranking, so it is the one that stays; the recent
-          window appears only when it has something of its own to say, and both
-          are always in the breakdown behind the tap.
+          At most two tags on the row itself, in the order that decides a pick:
+          a caution outranks urgency, and urgency outranks everything else. The
+          rest of the reasoning is one tap away rather than crowding the list.
         */}
-        {rec.newsLifetimeNet !== 0 || rec.news30Net !== 0 ? (
-          <Signal net={rec.newsLifetimeNet} label="lifetime news" />
-        ) : null}
-        {rec.news30Net !== 0 && rec.news30Net !== rec.newsLifetimeNet ? (
-          <span className="metric">
-            30d <Signal net={rec.news30Net} label="news, last 30 days" />
-          </span>
-        ) : null}
-      </div>
+        <DecisionTags rec={rec} />
 
-      {expanded ? (
-        <div className="explain">
-          {/* The full decision picture, only once the user asked for it. */}
-          {rec.tierCliff.message || rec.avoid.trendNote || rec.wait.state !== 'unknown' ? (
-            <div className="decision-detail">
-              {rec.avoid.active ? <div className="sig-neg">{rec.avoid.message}</div> : null}
-              {rec.avoid.trendNote ? <div className="muted">{rec.avoid.trendNote}</div> : null}
-              {rec.tierCliff.message ? <div>{rec.tierCliff.message}</div> : null}
-              {rec.wait.state !== 'unknown' ? (
-                <div>
-                  <strong>{rec.wait.label}</strong> — {rec.wait.detail}
-                </div>
-              ) : null}
-            </div>
+        <div className="player-row-metrics">
+          <span className="metric">
+            ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
+          </span>
+          <span className="metric">
+            Value{' '}
+            <strong className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}>
+              {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
+            </strong>
+          </span>
+          <span className="metric">
+            Lasts{' '}
+            <strong>
+              {rec.survivalProbability == null ? <Unknown what="survival" /> : `${Math.round(rec.survivalProbability * 100)}%`}
+            </strong>
+          </span>
+          {/*
+            One signal, not two.
+
+            Lifetime and 30-day were printed side by side on every row, so a
+            player nobody has written about read "– 0 flat – 0 flat" — two
+            columns of nothing on forty rows. The lifetime tally is the one that
+            drives AVOID and the ranking, so it is the one that stays; the recent
+            window appears only when it has something of its own to say, and both
+            are always in the breakdown behind the tap.
+          */}
+          {rec.newsLifetimeNet !== 0 || rec.news30Net !== 0 ? (
+            <Signal net={rec.newsLifetimeNet} label="lifetime news" />
           ) : null}
-          <strong style={{ fontSize: '0.8rem' }}>Why</strong>
-          <ul>
-            {rec.reasons.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-          {rec.counterpoints.length > 0 ? (
-            <>
-              <strong style={{ fontSize: '0.8rem' }}>Counterpoints</strong>
-              <ul>
-                {rec.counterpoints.map((c) => (
-                  <li key={c} className="muted">
-                    {c}
-                  </li>
-                ))}
-              </ul>
-            </>
+          {rec.news30Net !== 0 && rec.news30Net !== rec.newsLifetimeNet ? (
+            <span className="metric">
+              30d <Signal net={rec.news30Net} label="news, last 30 days" />
+            </span>
           ) : null}
-          <div className="components">
-            {rec.components.map((c) => (
-              <div className="component" key={c.key}>
-                <span className="component-label">
-                  {c.label}
-                  {c.unknown ? ' (unknown)' : ''}
+        </div>
+      </button>
+
+      {expanded ? <DraftPlayerDetail rec={rec} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The expanded player.
+ *
+ * Ordered the way a pick is actually made: what the app concludes, the four
+ * numbers behind it, the two or three strongest reasons, the best argument
+ * against, then the market context. The component-by-component arithmetic is
+ * unchanged and complete — it has simply stopped being the first thing the user
+ * reads during a live draft, which is what it had become.
+ *
+ * Nothing here recalculates anything. Every string and number on screen comes
+ * from the same board response as before.
+ */
+function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
+  const verdict = draftVerdict(rec.avoid, rec.wait);
+  // Anything already said as the headline does not get said again as a bullet.
+  const said = [verdict?.label, verdict?.detail, rec.avoid.active ? rec.avoid.trendNote : null];
+  const reasons = withoutRepeats(rec.reasons, said);
+  const counterpoints = withoutRepeats(rec.counterpoints, [...said, ...reasons]);
+  const topReasons = reasons.slice(0, REASONS_SHOWN);
+  const moreReasons = reasons.slice(REASONS_SHOWN);
+  const cliffNote = saidAlready(rec.tierCliff.message, said) ? null : rec.tierCliff.message;
+  const hasContext = !!cliffNote || rec.news30Net !== 0 || rec.news7Net !== 0 || rec.myGuy.level > 0;
+
+  return (
+    <div className="explain" data-testid="player-detail">
+      {verdict ? (
+        <Verdict tone={verdict.tone} label={verdict.label} detail={verdict.detail} glyph={verdict.glyph} />
+      ) : null}
+
+      <MetricGrid>
+        <Stat label="ADP" value={rec.adp == null ? <Unknown what="ADP" /> : rec.adp} />
+        <Stat
+          label="Value"
+          value={
+            rec.adpValue == null ? (
+              <Unknown what="value" />
+            ) : (
+              <span className={rec.adpValue > 0 ? 'sig sig-pos' : rec.adpValue < 0 ? 'sig sig-neg' : 'sig sig-none'}>
+                {rec.adpValue > 0 ? '+' : ''}
+                {rec.adpValue}
+              </span>
+            )
+          }
+          hint="Picks between his draft-order rank and this pick"
+        />
+        <Stat
+          label="Lasts"
+          value={
+            rec.survivalProbability == null ? (
+              <Unknown what="survival" />
+            ) : (
+              `${Math.round(rec.survivalProbability * 100)}%`
+            )
+          }
+          hint="Chance he is still there at your next pick"
+        />
+        <Stat label="Lifetime" value={<Signal net={rec.newsLifetimeNet} label="lifetime news" />} />
+      </MetricGrid>
+
+      {topReasons.length > 0 ? (
+        <>
+          <DetailLabel>Why this rank</DetailLabel>
+          <ReasonList items={topReasons} />
+          {moreReasons.length > 0 ? (
+            <details className="disclosure" data-testid="all-reasons">
+              <summary>Show all reasons ({reasons.length})</summary>
+              <ReasonList items={moreReasons} />
+            </details>
+          ) : null}
+        </>
+      ) : null}
+
+      {counterpoints.length > 0 ? (
+        <>
+          <DetailLabel>{counterpoints.length === 1 ? 'Counterpoint' : 'Counterpoints'}</DetailLabel>
+          <ReasonList muted items={counterpoints.slice(0, COUNTERPOINTS_SHOWN)} />
+        </>
+      ) : null}
+
+      {hasContext ? (
+        <>
+          <DetailLabel>Market &amp; trend</DetailLabel>
+          <div className="decision-detail" data-testid="player-context">
+            {cliffNote ? <div className="muted">{cliffNote}</div> : null}
+            {rec.news30Net !== 0 || rec.news7Net !== 0 ? (
+              <div className="player-row-metrics" style={{ marginTop: 0 }}>
+                <span className="metric">
+                  30d <Signal net={rec.news30Net} label="news, last 30 days" />
                 </span>
-                <span className="component-value">
-                  {c.contribution > 0 ? '+' : ''}
-                  {c.contribution.toFixed(2)}
-                </span>
-                <span className="component-detail">
-                  {c.display} · score {c.score.toFixed(2)} × weight {c.weight}
+                <span className="metric">
+                  7d <Signal net={rec.news7Net} label="news, last 7 days" />
                 </span>
               </div>
-            ))}
-            <div className="component">
+            ) : null}
+            {rec.myGuy.level > 0 ? (
+              <div className="muted">
+                {rec.myGuy.stars} {rec.myGuy.label} — your own flag, separate from the news tally.
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {/*
+        Full explainability, kept in full and kept out of the way. Every
+        component, its weight, its raw score and its contribution, exactly as
+        the engine produced them.
+      */}
+      <details className="disclosure" data-testid="advanced-breakdown">
+        <summary>Advanced breakdown</summary>
+        <div className="components">
+          {rec.components.map((c) => (
+            <div className="component" key={c.key}>
               <span className="component-label">
-                <strong>Total</strong>
+                {c.label}
+                {c.unknown ? ' (unknown)' : ''}
               </span>
               <span className="component-value">
-                <strong>{rec.total.toFixed(2)}</strong>
+                {c.contribution > 0 ? '+' : ''}
+                {c.contribution.toFixed(2)}
+              </span>
+              <span className="component-detail">
+                {c.display} · score {c.score.toFixed(2)} × weight {c.weight}
               </span>
             </div>
+          ))}
+          <div className="component">
+            <span className="component-label">
+              <strong>Total</strong>
+            </span>
+            <span className="component-value">
+              <strong>{rec.total.toFixed(2)}</strong>
+            </span>
           </div>
         </div>
-      ) : null}
-    </button>
+      </details>
+    </div>
   );
 }
 
