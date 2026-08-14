@@ -519,12 +519,18 @@ body,
  * page's own inset, and the negative top margin hands it the status-bar inset
  * that `.app-main` would otherwise be holding for it.
  */
+.nav-bar > .search {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 .nav-bar {
   position: sticky;
   top: 0;
   z-index: 20;
   margin: calc(-1 * var(--safe-top)) calc(-1 * var(--page-x)) var(--sp-2);
-  padding: calc(var(--safe-top) + var(--sp-2)) var(--page-x) var(--sp-2);
+  padding: calc(var(--safe-top) + var(--sp-1) + 2px) var(--page-x) calc(var(--sp-1) + 2px);
   background: var(--nav-surface);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
@@ -1045,7 +1051,12 @@ body,
   background: var(--surface);
   border: 0;
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) 10px;
+  /*
+   * Six pixels above and below, which is the difference between ten players on
+   * a phone and eleven. The tap target is untouched — `min-height` still holds
+   * the row at 44px, and the two lines of type inside it are unchanged.
+   */
+  padding: 6px var(--sp-2) 6px 10px;
   margin-bottom: var(--sp-1);
   color: inherit;
   font: inherit;

@@ -31,21 +31,33 @@ export function NavBar({
   subtitle,
   leading,
   trailing,
+  content,
   testId,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   subtitle?: ReactNode;
   leading?: ReactNode;
   trailing?: ReactNode;
+  /**
+   * A control that *is* the bar, in place of a title.
+   *
+   * One screen needs this: a list whose whole purpose is searching it. iOS puts
+   * the search field in the bar there rather than under a title that repeats
+   * the tab you just tapped, and doing the same is worth a row of players on
+   * every phone.
+   */
+  content?: ReactNode;
   testId?: string;
 }) {
   return (
     <div className="nav-bar" data-testid={testId ?? 'nav-bar'}>
       {leading}
-      <div className="nav-title-wrap">
-        <div className="nav-title">{title}</div>
-        {subtitle ? <div className="nav-subtitle">{subtitle}</div> : null}
-      </div>
+      {content ?? (
+        <div className="nav-title-wrap">
+          <div className="nav-title">{title}</div>
+          {subtitle ? <div className="nav-subtitle">{subtitle}</div> : null}
+        </div>
+      )}
       {trailing ? <div className="nav-actions">{trailing}</div> : null}
     </div>
   );

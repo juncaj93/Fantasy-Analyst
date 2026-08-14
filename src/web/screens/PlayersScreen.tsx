@@ -109,19 +109,28 @@ export function PlayersScreen() {
 
   return (
     <>
-      <NavBar title="Players" />
       {/*
-        Search, in the shape iOS uses for it: a magnifier, a compact field and a
-        clear control that appears only when there is something to clear.
-        Clearing empties the field and nothing else — what the query matches,
-        and in what order, is unchanged.
+        The search field is this screen's navigation bar.
+
+        A title reading "Players" over a search field, on the screen reached by
+        tapping a tab labelled Players, is a row of the phone spent saying it a
+        third time. The field carries the identity — and its own label, for
+        anyone listening rather than looking — and the list starts higher than
+        it did before any of this. A magnifier, a compact field, and a clear
+        control that appears only when there is something to clear; clearing
+        empties the field and nothing else.
       */}
-      <SearchField
-        value={query}
-        onChange={setQuery}
-        placeholder="Search players"
-        label="Search players"
-        testId="player-search"
+      <NavBar
+        testId="players-nav"
+        content={
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search players"
+            label="Search players"
+            testId="player-search"
+          />
+        }
       />
       {loading && players.length === 0 ? (
         <SkeletonRows rows={8} testId="players-skeleton" />
