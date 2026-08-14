@@ -25,7 +25,7 @@ import { PlayerDetailRepo } from '../server/repos/playerDetail.ts';
 import { buildSeasonStatLines } from '../core/sleeper/seasonStats.ts';
 import { lastCompletedSeason, outlookSeason } from '../server/services/playerDetailService.ts';
 import { injurySeason } from '../server/services/injuryService.ts';
-import { InjuryRepo } from '../server/repos/injury.ts';
+import { InjuryRepo, InjurySourceRepo } from '../server/repos/injury.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
 export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
@@ -458,4 +458,39 @@ async function seedInjuryReports(db: Database): Promise<void> {
     outcome: 'ok',
     note: 'synthetic demo data',
   });
+
+  /*
+   * The five-minute check's own bookkeeping.
+   *
+   * `checked_at` is now, `source_modified_at` is deliberately older: that gap is
+   * the whole point of storing three timestamps rather than one, and a demo
+   * where they were identical could not show a panel getting it right.
+   */
+  const source = new InjurySourceRepo(db);
+  const changedHoursAgo = new Date(now.getTime() - 6 * 3_600_000).toISOString();
+  await source.recordCheck('nflverse', season, {
+    checkedAt: at,
+    etag: '"demo-v1"',
+    lastModified: new Date(changedHoursAgo).toUTCString(),
+    sourceModifiedAt: changedHoursAgo,
+    ingestedAt: changedHoursAgo,
+    outcome: 'not_modified',
+    note: null,
+  });
+
+  // One transition, so the panel has something real to show.
+  await source.recordEvents(
+    [
+      {
+        eventKey: `1004:${season}:12:practice:limited>full`,
+        playerId: '1004',
+        season,
+        week: 12,
+        kind: 'practice',
+        from: 'limited',
+        to: 'full',
+      },
+    ],
+    { source: 'nflverse', sourceModifiedAt: changedHoursAgo, detectedAt: changedHoursAgo },
+  );
 }

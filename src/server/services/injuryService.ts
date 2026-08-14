@@ -22,7 +22,7 @@
  */
 
 import type { Database } from '../db.ts';
-import { InjuryRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
+import { InjuryRepo, InjurySourceRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import {
   NO_INJURY_INFORMATION,
@@ -32,15 +32,37 @@ import {
   type InjuryState,
 } from '../../core/injury/model.ts';
 import {
+  RECENT_WEEKS,
   fetchInjuryReport,
   latestByPlayer,
-  normalizeForMatch,
   type FetchLike,
   type InjuryReportRow,
 } from '../../core/injury/nflverse.ts';
+import { normalizeName } from '../../core/identity/normalize.ts';
+import type { CanonicalPlayer } from '../../core/identity/types.ts';
+import { diffInjuries, keyOf, looksAnomalous } from '../../core/injury/diff.ts';
 
 export const INJURY_SOURCE = 'nflverse';
 export const STATUS_SOURCE = 'sleeper';
+
+/**
+ * How long one invocation may own the ingest.
+ *
+ * Comfortably longer than a parse of the whole season file and comfortably
+ * shorter than the gap between ticks, so a crashed Worker costs at most one
+ * skipped check rather than a wedged pipeline.
+ */
+export const INGEST_LEASE_SECONDS = 120;
+
+/**
+ * The most rows this pipeline may write in a UTC day before it stops.
+ *
+ * D1's free tier allows 100,000. A healthy day here is a few dozen — several
+ * hundred on a week rollover, when every player's latest week genuinely
+ * advances. Five thousand is far above any legitimate day and far below
+ * anything that would threaten the rest of the app.
+ */
+export const DAILY_WRITE_CEILING = 5_000;
 
 /** The season injury reports are published for: the one being played. */
 export function injurySeason(now = new Date()): string {
@@ -62,17 +84,45 @@ export interface InjuryHealth {
   latestWeek: number | null;
   /** Plain sentence for the panel, so the state is readable without arithmetic. */
   summary: string;
+  /**
+   * The three timestamps, kept apart on purpose.
+   *
+   * `checkedAt` moves every five minutes. `sourceModifiedAt` is when the NFL's
+   * report last actually changed. `ingestedAt` is when we last stored anything.
+   * A panel that showed only the first would say "updated 2 minutes ago" about
+   * a report from Wednesday, which is the most expensive kind of wrong.
+   */
+  checkedAt: string | null;
+  sourceModifiedAt: string | null;
+  ingestedAt: string | null;
+  /** How the last check went — including `not_modified`, the usual answer. */
+  lastOutcome: string | null;
+  lastNote: string | null;
+  /** Rows this pipeline has written today, against its own ceiling. */
+  writesToday: number;
+  writeCeiling: number;
+  /** The most recent transitions, newest first. */
+  recentEvents: {
+    playerId: string;
+    week: number;
+    kind: string;
+    from: string | null;
+    to: string | null;
+    detectedAt: string;
+  }[];
 }
 
 export class InjuryService {
   private readonly repo: InjuryRepo;
+  private readonly source: InjurySourceRepo;
   private readonly players: PlayerRepo;
 
   constructor(
     db: Database,
-    private readonly deps: { fetch?: FetchLike; now?: () => Date } = {},
+    private readonly deps: { fetch?: FetchLike; now?: () => Date; log?: (line: string) => void } = {},
   ) {
     this.repo = new InjuryRepo(db);
+    this.source = new InjurySourceRepo(db);
     this.players = new PlayerRepo(db);
   }
 
@@ -81,14 +131,27 @@ export class InjuryService {
   }
 
   /**
-   * Pull the season's injury report and store what maps.
+   * One tick of the five-minute check.
    *
-   * Ingested in bulk, once, rather than per card: the file is one request for
-   * the whole league and mapping it locally is what keeps a Sunday-morning
-   * refresh from becoming a thousand of them.
+   * Three frequencies, and the whole design is refusing to conflate them:
+   *
+   *   - **check** every five minutes — a conditional GET, usually 304, no body,
+   *     one bookkeeping write;
+   *   - **ingest** only when the file actually changed — parse once;
+   *   - **write** only for players whose normalized state actually moved.
+   *
+   * A file republished with three revised players arrives as four hundred rows,
+   * three hundred and ninety-seven of them identical to what is stored. Writing
+   * all four hundred every five minutes would cost more than the entire daily
+   * D1 free-tier budget to record three facts.
+   *
+   * Never throws. Every failure mode — network, 404, schema change, a lease
+   * somebody else holds — returns a run describing what happened and leaves the
+   * last-good data untouched.
    */
   async refresh(season = injurySeason(this.now())): Promise<InjurySourceRun> {
-    const fetchedAt = this.now().toISOString();
+    const now = this.now();
+    const fetchedAt = now.toISOString();
     const base: InjurySourceRun = {
       source: INJURY_SOURCE,
       season,
@@ -103,37 +166,119 @@ export class InjuryService {
       note: null,
     };
 
+    const known = await this.source.get(INJURY_SOURCE, season).catch(() => null);
+
     let fetched;
     try {
-      fetched = await fetchInjuryReport(season, { fetch: this.deps.fetch });
+      fetched = await fetchInjuryReport(season, {
+        fetch: this.deps.fetch,
+        fingerprint: known ? { etag: known.etag, lastModified: known.lastModified } : null,
+        /*
+         * Bounded on purpose. Parsing a whole season costs about 160ms of CPU
+         * and a Workers invocation is allowed 10ms; narrowing to the recent
+         * weeks first brings the whole ingest in under the ceiling. Nothing is
+         * lost — a player whose latest report is older already has that row
+         * stored, because the ingest that saw it wrote it.
+         */
+        recentWeeks: RECENT_WEEKS,
+      });
     } catch (err) {
-      const run = { ...base, note: err instanceof Error ? err.message : String(err) };
-      await this.repo.recordRun(run);
-      return run;
+      const note = err instanceof Error ? err.message : String(err);
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        outcome: 'failed',
+        note,
+      });
+      return { ...base, note };
     }
 
-    if (!fetched.report) {
+    /*
+     * The common answer, and the one that has to be nearly free.
+     *
+     * Nothing is downloaded, nothing is parsed, no player row is touched, no
+     * event is appended and nothing downstream recomputes. The only write is
+     * `checked_at` on a one-row table, which is what keeps "the pipeline is
+     * alive" answerable without pretending the data got newer.
+     */
+    if (fetched.outcome === 'not_modified') {
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        etag: fetched.fingerprint.etag,
+        lastModified: fetched.fingerprint.lastModified,
+        outcome: 'not_modified',
+        note: null,
+      });
+      this.log(`injury-refresh checked=true modified=false writes=0 season=${season}`);
+      return { ...base, outcome: 'ok', note: 'source unchanged', publishedAt: known?.sourceModifiedAt ?? null };
+    }
+
+    if (fetched.outcome === 'not_published' || fetched.outcome === 'failed') {
       /*
        * No file is usually not a fault.
        *
-       * In August `injuries_2026.csv` is a 404 because the NFL has not filed an
+       * `injuries_2026.csv` is a 404 in August because the NFL has not filed an
        * injury report yet. Recording that as a failure would put a red light on
        * a panel for a condition that resolves itself in September, and an alarm
        * that cries wolf every preseason is an alarm nobody reads in November.
        */
-      const notPublished = (fetched.note ?? '').includes('not published');
-      const run: InjurySourceRun = {
-        ...base,
-        outcome: notPublished ? 'not_published' : 'failed',
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        outcome: fetched.outcome,
         note: fetched.note,
-      };
+      });
+      const run: InjurySourceRun = { ...base, outcome: fetched.outcome, note: fetched.note };
       await this.repo.recordRun(run);
       return run;
     }
 
-    const report = fetched.report;
-    const index = await this.buildIdentityIndex();
+    /*
+     * The source changed. Exactly one invocation may act on that.
+     *
+     * At a five-minute cadence a slow ingest could still be running when the
+     * next tick fires; both would download the same file and race to write the
+     * same rows. The lease is a compare-and-swap that expires, so a Worker
+     * killed mid-parse cannot wedge the pipeline either.
+     */
+    const owner = `${fetchedAt}:${season}`;
+    const holds = await this.source
+      .acquireLock(INJURY_SOURCE, season, owner, now, INGEST_LEASE_SECONDS)
+      .catch(() => false);
+    if (!holds) {
+      this.log(`injury-refresh modified=true skipped=locked season=${season}`);
+      return { ...base, outcome: 'ok', note: 'another ingest is already running' };
+    }
+
+    try {
+      return await this.ingest(fetched, season, base);
+    } finally {
+      await this.source.releaseLock(INJURY_SOURCE, season, owner).catch(() => {});
+    }
+  }
+
+  /**
+   * Parse the changed file, and write only what moved.
+   *
+   * Runs under the lease. Split out so the lock's `finally` cannot be skipped by
+   * an early return, and so the expensive path reads as one thing.
+   */
+  private async ingest(
+    fetched: Awaited<ReturnType<typeof fetchInjuryReport>>,
+    season: string,
+    base: InjurySourceRun,
+  ): Promise<InjurySourceRun> {
+    const report = fetched.report!;
+    const fetchedAt = base.fetchedAt;
+    /*
+     * Timed, because the CPU ceiling is the binding constraint here and the
+     * only honest way to know the real number is to measure the real runtime.
+     * Local measurement against the 2025 file puts a mid-season ingest at
+     * roughly 5ms of parsing against a 10ms allowance — but that box is not a
+     * Workers isolate, and D1 calls that count as CPU there do not here. This
+     * lands in the log line so production answers the question itself.
+     */
+    const startedAt = Date.now();
     const latest = latestByPlayer(report);
+    const index = await this.resolveIdentities([...latest.values()].map((v) => v.latest));
 
     const rows: StoredInjuryReport[] = [];
     let matchedById = 0;
@@ -165,8 +310,7 @@ export class InjuryService {
       });
     }
 
-    await this.repo.saveReports(rows);
-    const run: InjurySourceRun = {
+    const withRun = {
       ...base,
       latestWeek: report.latestWeek,
       publishedAt: fetched.publishedAt,
@@ -174,11 +318,119 @@ export class InjuryService {
       matchedById,
       matchedByName,
       unmatched,
+    };
+
+    /*
+     * A file that parsed to nothing recognisable is a parser or schema problem,
+     * not an empty league. Overwriting good data with it is the one outcome
+     * worth refusing outright.
+     */
+    if (rows.length === 0) {
+      const note = 'no rows in the file mapped to a known player — source shape may have changed';
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        outcome: 'failed',
+        note,
+      });
+      const run: InjurySourceRun = { ...withRun, outcome: 'failed', note };
+      await this.repo.recordRun(run);
+      return run;
+    }
+
+    /*
+     * The diff works on the narrow shape — the fields that change a decision —
+     * but what gets written is the whole row, so the full record is kept beside
+     * it and recovered by key rather than reconstructed.
+     */
+    const fullByKey = new Map(rows.map((r) => [keyOf(r), r]));
+    const comparable = rows.map((r) => ({
+      playerId: r.playerId,
+      season: r.season,
+      week: r.week,
+      reportStatus: r.reportStatus,
+      primaryInjury: r.primaryInjury,
+      practiceStatus: r.practiceStatus,
+    }));
+    const stored = await this.source
+      .comparableFor(comparable.map((r) => ({ playerId: r.playerId, week: r.week })), season)
+      .catch(() => new Map());
+    const storedCount = await this.source.storedCount(season).catch(() => 0);
+    const diff = diffInjuries(comparable, stored);
+
+    /*
+     * A parser that breaks does not fail loudly — it reads every field as empty
+     * and reports that all four hundred players simultaneously became healthy.
+     * That is indistinguishable from a real mass update except by its size.
+     */
+    if (looksAnomalous(diff, storedCount)) {
+      const note =
+        `refused: ${diff.changed.length} of ${diff.examined} players changed at once, ` +
+        'which looks like a source or parser change rather than news';
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        outcome: 'anomaly',
+        note,
+      });
+      const run: InjurySourceRun = { ...withRun, outcome: 'failed', note };
+      await this.repo.recordRun(run);
+      this.log(`injury-refresh modified=true anomaly=true changed=${diff.changed.length} writes=0`);
+      return run;
+    }
+
+    /*
+     * The budget guard. Free-tier D1 allows 100,000 writes a day and this
+     * pipeline is built to use a few dozen; a bug that starts rewriting
+     * everything on every tick would burn the allowance in an afternoon and
+     * take the rest of the app down with it.
+     */
+    const day = fetchedAt.slice(0, 10);
+    const spent = await this.source.writesToday(day).catch(() => 0);
+    const wanted = diff.changed.length + diff.events.length;
+    if (spent + wanted > DAILY_WRITE_CEILING) {
+      const note = `refused: ${spent} injury writes already today, ${wanted} more would pass the ${DAILY_WRITE_CEILING} ceiling`;
+      await this.source.recordCheck(INJURY_SOURCE, season, {
+        checkedAt: fetchedAt,
+        outcome: 'budget',
+        note,
+      });
+      const run: InjurySourceRun = { ...withRun, outcome: 'failed', note };
+      await this.repo.recordRun(run);
+      return run;
+    }
+
+    // Only the rows whose normalized state moved.
+    const toWrite = diff.changed.map((c) => fullByKey.get(keyOf(c))!).filter(Boolean);
+    await this.repo.saveReports(toWrite);
+    const eventsWritten = await this.source.recordEvents(diff.events, {
+      source: INJURY_SOURCE,
+      sourceModifiedAt: fetched.publishedAt,
+      detectedAt: fetchedAt,
+    });
+    await this.source.addWrites(day, diff.changed.length + eventsWritten, fetchedAt);
+
+    await this.source.recordCheck(INJURY_SOURCE, season, {
+      checkedAt: fetchedAt,
+      etag: fetched.fingerprint.etag,
+      lastModified: fetched.fingerprint.lastModified,
+      sourceModifiedAt: fetched.publishedAt,
+      ingestedAt: fetchedAt,
       outcome: 'ok',
       note: null,
-    };
+    });
+
+    const run: InjurySourceRun = { ...withRun, outcome: 'ok', note: null };
     await this.repo.recordRun(run);
-    return run;
+    this.log(
+      `injury-refresh modified=true parsed=${diff.examined} unchanged=${diff.unchanged} ` +
+        `changed=${diff.changed.length} events=${eventsWritten} writes=${diff.changed.length + eventsWritten} ` +
+        `ms=${Date.now() - startedAt}`,
+    );
+    return { ...run, changedPlayerIds: diff.changedPlayerIds };
+  }
+
+  private log(line: string): void {
+    // Structured, short, and never carrying a payload or a secret.
+    (this.deps.log ?? console.log)(line);
   }
 
   /**
@@ -277,7 +529,14 @@ export class InjuryService {
   }
 
   async health(season = injurySeason(this.now())): Promise<InjuryHealth> {
-    const [lastRun, coverage] = await Promise.all([this.repo.latestRun(), this.repo.coverage(season)]);
+    const day = this.now().toISOString().slice(0, 10);
+    const [lastRun, coverage, state, writes, events] = await Promise.all([
+      this.repo.latestRun(),
+      this.repo.coverage(season),
+      this.source.get(INJURY_SOURCE, season).catch(() => null),
+      this.source.writesToday(day).catch(() => 0),
+      this.source.recentEvents(6).catch(() => []),
+    ]);
     return {
       statusSource: STATUS_SOURCE,
       reportSource: INJURY_SOURCE,
@@ -285,62 +544,91 @@ export class InjuryService {
       lastRun,
       players: coverage.players,
       latestWeek: coverage.latestWeek,
-      summary: describeHealth(season, lastRun, coverage),
+      summary: describeHealth(season, lastRun, coverage, state),
+      checkedAt: state?.checkedAt ?? null,
+      sourceModifiedAt: state?.sourceModifiedAt ?? null,
+      ingestedAt: state?.ingestedAt ?? null,
+      lastOutcome: state?.lastOutcome ?? null,
+      lastNote: state?.lastNote ?? null,
+      writesToday: writes,
+      writeCeiling: DAILY_WRITE_CEILING,
+      recentEvents: events.map((e) => ({
+        playerId: e.playerId,
+        week: e.week,
+        kind: e.kind,
+        from: e.from,
+        to: e.to,
+        detectedAt: e.detectedAt,
+      })),
     };
   }
 
   /**
-   * GSIS first, normalized name second.
+   * Resolve only the players this file actually mentions.
    *
-   * Measured against the real file: of the players at positions this app
-   * carries, 27.5% match on a trimmed identifier and 71.4% on a name, for 98.9%
-   * overall with five unmatched. The identifier is preferred wherever it exists
-   * because a name is a guess that happens to be usually right — and Sleeper
-   * publishes one for only about a third of its dictionary, which is why the
-   * name path carries most of the load.
+   * The first version of this built an in-memory index of the entire player
+   * dictionary — four thousand names, each through a chain of regexes — and it
+   * cost **17ms of CPU**, more than a Workers invocation is allowed in total.
+   * The file names a couple of hundred players, so it asks for those.
    *
-   * The five that miss are all names that are ambiguous in Sleeper's own data,
-   * and `resolveToCanonical` declines them on purpose.
+   * It also stops keeping a private notion of what a name normalizes to. The
+   * app has one canonical normalizer and an indexed column populated from it;
+   * a second one living here was a matching stack of its own, which is exactly
+   * what the identity layer exists to prevent.
+   *
+   * GSIS is still preferred where it decides anything. It is no longer the
+   * first lookup — the name is, because that is what is indexed — but when a
+   * key is ambiguous the identifier breaks the tie, which is strictly better
+   * than the previous behaviour of declining every ambiguous name outright.
    */
-  private async buildIdentityIndex(): Promise<IdentityIndex> {
-    const all = await this.players.listAll();
-    const byGsis = new Map<string, string>();
-    const byName = new Map<string, string[]>();
-    for (const player of all) {
-      const gsis = player.externalIds?.['gsis']?.trim();
-      if (gsis) byGsis.set(gsis, player.id);
-      const key = normalizeForMatch(player.fullName);
-      const list = byName.get(key);
-      if (list) list.push(player.id);
-      else byName.set(key, [player.id]);
+  private async resolveIdentities(rows: InjuryReportRow[]): Promise<IdentityIndex> {
+    const keys = rows.map((r) => normalizeName(r.fullName));
+    const candidates = await this.players.findByNormalizedNames(keys);
+
+    const byName = new Map<string, CanonicalPlayer[]>();
+    for (const player of candidates) {
+      const list = byName.get(player.normalizedName);
+      if (list) list.push(player);
+      else byName.set(player.normalizedName, [player]);
     }
-    return { byGsis, byName };
+    return { byName };
   }
 }
 
 interface IdentityIndex {
-  byGsis: Map<string, string>;
-  byName: Map<string, string[]>;
+  /** Every candidate for a lookup key, ambiguity included. */
+  byName: Map<string, CanonicalPlayer[]>;
 }
 
 /**
  * Map one report row onto a canonical player, or decline.
  *
- * Declining is a real outcome and is counted. An ambiguous name — two players
- * this app knows sharing one normalized name — is not resolved by picking one:
- * an injury attached to the wrong player is worse than an injury attached to
- * nobody, and the count is what makes the gap visible in Setup.
+ * Declining is a real outcome and is counted. Two players this app knows
+ * sharing one lookup key is not resolved by picking one — an injury attached to
+ * the wrong player is worse than an injury attached to nobody — unless the
+ * report carries a GSIS id that matches exactly one of them, which is the
+ * whole reason the identifier is worth having.
  */
 export function resolveToCanonical(
   row: InjuryReportRow,
   index: IdentityIndex,
 ): { playerId: string; by: 'id' | 'name' } | null {
-  if (row.gsisId) {
-    const byId = index.byGsis.get(row.gsisId);
-    if (byId) return { playerId: byId, by: 'id' };
+  const candidates = index.byName.get(normalizeName(row.fullName)) ?? [];
+  if (candidates.length === 0) return null;
+
+  if (candidates.length === 1) {
+    // A matching identifier on an unambiguous name is still worth reporting as
+    // an identifier match: it is the stronger evidence, and the counts in Setup
+    // are how the mapping's health is judged.
+    const only = candidates[0]!;
+    const by = row.gsisId && only.externalIds?.['gsis']?.trim() === row.gsisId ? 'id' : 'name';
+    return { playerId: only.id, by };
   }
-  const candidates = index.byName.get(normalizeForMatch(row.fullName)) ?? [];
-  if (candidates.length === 1) return { playerId: candidates[0]!, by: 'name' };
+
+  if (row.gsisId) {
+    const exact = candidates.filter((c) => c.externalIds?.['gsis']?.trim() === row.gsisId);
+    if (exact.length === 1) return { playerId: exact[0]!.id, by: 'id' };
+  }
   return null;
 }
 
@@ -359,8 +647,17 @@ function describeHealth(
   season: string,
   run: InjurySourceRun | null,
   coverage: { players: number; latestWeek: number | null },
+  state?: { checkedAt: string | null; lastOutcome: string | null } | null,
 ): string {
-  if (!run) return `Sleeper designations only — the ${season} injury report has not been ingested yet.`;
+  /*
+   * A season that has not started still has a live pipeline behind it, and
+   * saying "never ingested" without saying "checked four minutes ago" reads as
+   * a broken feature rather than an empty calendar.
+   */
+  if (!run) {
+    const checking = state?.checkedAt ? ' The five-minute check is running.' : '';
+    return `Sleeper designations only — the ${season} injury report has not been ingested yet.${checking}`;
+  }
   if (run.outcome === 'not_published') {
     return `Sleeper designations only — nflverse has not published ${season} injury reports yet, which is expected before the season starts.`;
   }
