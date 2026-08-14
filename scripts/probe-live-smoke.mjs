@@ -1,0 +1,94 @@
+/**
+ * Does the deployed site actually serve what was just shipped?
+ *
+ * The deploy workflow already checks that the app is up, reads its database and
+ * refuses an unauthenticated write. This asks the next question: are the
+ * surfaces added by the most recent work answering in production, against the
+ * real database rather than a seeded one?
+ *
+ * Read-only. Public endpoints only — no passphrase, no writes, nothing stored.
+ */
+
+const BASE = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
+
+let failures = 0;
+
+async function get(path) {
+  const res = await fetch(`${BASE}${path}`, { headers: { accept: 'application/json' } });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* keep the text */
+  }
+  return { status: res.status, json, text };
+}
+
+function check(label, ok, detail) {
+  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
+  if (!ok) failures++;
+}
+
+console.log(`Checking ${BASE}\n`);
+
+// 1. Season-long market status: the route exists and the season-scoped tables
+//    answer. Empty is the expected, honest state for this provider.
+const season = await get('/api/vegas/season');
+check('/api/vegas/season responds', season.status === 200, `HTTP ${season.status}`);
+if (season.json) {
+  check(
+    'it reports a season and a provider',
+    typeof season.json.season === 'string' && typeof season.json.provider === 'string',
+    `${season.json.provider} / ${season.json.season}`,
+  );
+  check(
+    'it says why it has what it has',
+    typeof season.json.reason === 'string' && season.json.reason.length > 0,
+    season.json.reason,
+  );
+  console.log(
+    `      stored: ${season.json.quotes} quote(s) across ${season.json.players} player(s), ` +
+      `${season.json.unresolved} unresolved, fetched ${season.json.fetchedAt ?? 'never'}`,
+  );
+}
+
+// 2. The draft board: the shape the new Draft screen reads.
+const status = await get('/api/setup/status');
+const draftId = status.json?.league?.draftId ?? null;
+check('a league with a draft is configured', !!draftId, draftId ?? 'none');
+
+if (draftId) {
+  const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=5`);
+  check('the draft board builds', board.status === 200, `HTTP ${board.status}`);
+  const rec = board.json?.recommendations?.[0];
+  check('it returns ranked players', !!rec, rec ? rec.name : 'none');
+  check(
+    'every starting slot is reported for the roster line',
+    Array.isArray(board.json?.rosterProgress) && board.json.rosterProgress.length > 0,
+    (board.json?.rosterProgress ?? []).map((s) => `${s.filled}/${s.required} ${s.slot}`).join(' · '),
+  );
+  if (rec) {
+    check(
+      'the market component is present on every player',
+      rec.components.some((c) => c.key === 'market_expectation'),
+    );
+    check(
+      'an unpriced player is unknown rather than zero',
+      rec.marketBaseline == null || rec.marketBaseline.points != null,
+      rec.marketHeadline ?? 'no market line, and none shown',
+    );
+    check('roster need is a light contributor', Math.abs(componentOf(rec, 'need')) <= 0.2, `need ${componentOf(rec, 'need')}`);
+  }
+  console.log(
+    `      alerts still computed: ${(board.json?.rosterAlerts ?? []).length}, ` +
+      `startable positions: ${(board.json?.startablePositions ?? []).join(', ')}`,
+  );
+}
+
+function componentOf(rec, key) {
+  return rec.components.find((c) => c.key === key)?.contribution ?? 0;
+}
+
+console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}`);
+process.exit(failures === 0 ? 0 : 1);
