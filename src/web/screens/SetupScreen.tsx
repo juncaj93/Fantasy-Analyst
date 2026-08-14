@@ -1342,6 +1342,19 @@ function InjurySourceHealth({
         {injury.ingestedAt ? ` · last stored ${formatAge(injury.ingestedAt)}` : ''}.
       </div>
       {/*
+        Whether the data can be trusted, which is not the same question as
+        whether it was checked. `checkedAt` moves every five minutes either way,
+        so on its own it reads identically when the pipeline is healthy and when
+        every ingest has failed since Thursday.
+      */}
+      <div
+        className="faint"
+        style={{ marginTop: 6, fontWeight: injury.consecutiveFailures > 0 ? 600 : undefined }}
+        data-testid="injury-data-health"
+      >
+        {injury.dataHealth}
+      </div>
+      {/*
         Last season, kept visibly apart from everything above it.
 
         It answers a question the rest of this panel cannot while the current

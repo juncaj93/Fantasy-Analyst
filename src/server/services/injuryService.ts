@@ -127,6 +127,22 @@ export interface InjuryHealth {
   etag: string | null;
   lastModified: string | null;
   /**
+   * Ingests that started and did not finish, in a row.
+   *
+   * The field that stops a fresh `checkedAt` from vouching for stale data. A
+   * pipeline checking happily every five minutes while four consecutive ingests
+   * died looks identical to a healthy one from every other number here.
+   */
+  consecutiveFailures: number;
+  failingSince: string | null;
+  /** The highest week the store has, so a gap against the source is visible. */
+  caughtUpThrough: number | null;
+  /**
+   * One sentence a person can act on, derived from the numbers above rather
+   * than from any single one of them.
+   */
+  dataHealth: string;
+  /**
    * Last season, which is a different question from this one.
    *
    * Present so the panel can distinguish two states that both look like "no
@@ -243,6 +259,7 @@ export class InjuryService {
         outcome: 'failed',
         note,
       });
+      await this.source.recordIngestFailure(INJURY_SOURCE, season, fetchedAt, note).catch(() => {});
       return { ...base, note };
     }
 
@@ -262,6 +279,11 @@ export class InjuryService {
         outcome: 'not_modified',
         note: null,
       });
+      /*
+       * A 304 is the pipeline working, so it ends a run of failures. It says
+       * nothing about how far the store is caught up, so that is left alone.
+       */
+      await this.source.recordIngestSuccess(INJURY_SOURCE, season, null).catch(() => {});
       this.log(`injury-refresh checked=true modified=false writes=0 season=${season}`);
       return { ...base, outcome: 'ok', note: 'source unchanged', publishedAt: known?.sourceModifiedAt ?? null };
     }
@@ -307,6 +329,92 @@ export class InjuryService {
     } finally {
       await this.source.releaseLock(INJURY_SOURCE, season, owner).catch(() => {});
     }
+  }
+
+  /**
+   * Fill in a week the app was not running for.
+   *
+   * The steady-state window is one week, which is right while the app is up and
+   * wrong the moment it is not: an app that misses a fortnight comes back, reads
+   * the latest week, and leaves a hole where two weeks of practice history
+   * should be. The hole is invisible in current state -- the latest week is
+   * still the latest week -- and shows up later as a practice trend computed
+   * across a gap.
+   *
+   * So this walks the gap, one week per tick, oldest first. It is deliberately
+   * separate from `refresh` and deliberately quieter:
+   *
+   *   - it writes rows and nothing else. No diff, no events, no downstream
+   *     recomputation, because a week from a fortnight ago cannot change whether
+   *     anybody plays on Sunday;
+   *   - it never touches the stored validator, so it cannot make a half-filled
+   *     season look ingested;
+   *   - it costs one bounded week, so it fits the same budget as a normal tick.
+   *
+   * Returns the week it filled, or null when there was no gap to fill.
+   */
+  async catchUpOneWeek(season = injurySeason(this.now())): Promise<{ week: number; rows: number } | null> {
+    const state = await this.source.get(INJURY_SOURCE, season).catch(() => null);
+    const latestStored = state?.caughtUpThrough ?? null;
+    if (latestStored == null) return null;
+
+    const coverage = await this.repo.coverage(season).catch(() => ({ players: 0, latestWeek: null }));
+    const haveThrough = coverage.latestWeek ?? 0;
+    /*
+     * The gap is between the oldest week the store is missing and the newest it
+     * has. `caught_up_through` is the file's latest week at the last successful
+     * ingest; anything below it that is absent is a week nobody read.
+     */
+    const missing = await this.repo.missingWeekBefore(season, latestStored).catch(() => null);
+    if (missing == null || missing >= latestStored) return null;
+    void haveThrough;
+
+    const fetched = await fetchInjuryReport(season, {
+      fetch: this.deps.fetch,
+      fingerprint: null,
+      weeks: { from: missing, to: missing },
+    });
+    if (fetched.outcome !== 'ok' || !fetched.report) return null;
+
+    const rows = await this.rowsFor(fetched.report.rows, season, fetched.publishedAt);
+    await this.repo.saveReports(rows);
+    await this.source
+      .addWrites(this.now().toISOString().slice(0, 10), rows.length, this.now().toISOString())
+      .catch(() => {});
+
+    this.log(`injury-catchup season=${season} week=${missing} rows=${rows.length}`);
+    return { week: missing, rows: rows.length };
+  }
+
+  /** Map raw rows onto canonical players. Unresolved rows are dropped, not guessed. */
+  private async rowsFor(
+    raw: InjuryReportRow[],
+    season: string,
+    publishedAt: string | null,
+  ): Promise<StoredInjuryReport[]> {
+    const index = await this.resolveIdentities(raw);
+    const fetchedAt = this.now().toISOString();
+    const out: StoredInjuryReport[] = [];
+    for (const row of raw) {
+      const match = resolveToCanonical(row, index);
+      if (!match) continue;
+      out.push({
+        playerId: match.playerId,
+        season: row.season || season,
+        week: row.week,
+        team: row.team || null,
+        reportStatus: row.reportStatus,
+        primaryInjury: row.primaryInjury,
+        secondaryInjury: row.secondaryInjury,
+        practiceStatus: row.practiceStatus,
+        practiceRaw: row.practiceRaw,
+        gsisId: row.gsisId,
+        source: INJURY_SOURCE,
+        publishedAt,
+        fetchedAt,
+      });
+    }
+    return out;
   }
 
   /**
@@ -425,6 +533,7 @@ export class InjuryService {
         outcome: 'anomaly',
         note,
       });
+      await this.source.recordIngestFailure(INJURY_SOURCE, season, fetchedAt, note).catch(() => {});
       const run: InjurySourceRun = { ...withRun, outcome: 'failed', note };
       await this.repo.recordRun(run);
       this.log(`injury-refresh modified=true anomaly=true changed=${diff.changed.length} writes=0`);
@@ -447,6 +556,7 @@ export class InjuryService {
         outcome: 'budget',
         note,
       });
+      await this.source.recordIngestFailure(INJURY_SOURCE, season, fetchedAt, note).catch(() => {});
       const run: InjurySourceRun = { ...withRun, outcome: 'failed', note };
       await this.repo.recordRun(run);
       return run;
@@ -471,6 +581,15 @@ export class InjuryService {
       outcome: 'ok',
       note: null,
     });
+
+    /*
+     * The ingest finished, so any run of failures is over and the store is now
+     * current through this file's latest week. Recorded together because they
+     * are the same fact: the pipeline did the thing it exists to do.
+     */
+    await this.source
+      .recordIngestSuccess(INJURY_SOURCE, season, report.latestWeek || null)
+      .catch(() => {});
 
     const run: InjurySourceRun = { ...withRun, outcome: 'ok', note: null };
     await this.repo.recordRun(run);
@@ -611,6 +730,10 @@ export class InjuryService {
       lastNote: state?.lastNote ?? null,
       etag: state?.etag ?? null,
       lastModified: state?.lastModified ?? null,
+      consecutiveFailures: state?.consecutiveFailures ?? 0,
+      failingSince: state?.failingSince ?? null,
+      caughtUpThrough: state?.caughtUpThrough ?? null,
+      dataHealth: describeDataHealth(state, lastRun),
       history: {
         season: previous,
         phase: progress?.phase ?? null,
@@ -744,4 +867,35 @@ function describeHealth(
   const mapped = run.matchedById + run.matchedByName;
   const share = run.rowsReturned > 0 ? Math.round((100 * mapped) / run.rowsReturned) : 0;
   return `Week ${coverage.latestWeek ?? run.latestWeek} of ${season}: ${coverage.players} players carry a report, ${share}% of the source mapped (${run.unmatched} unmatched).`;
+}
+
+/**
+ * One sentence about whether the injury data can be trusted right now.
+ *
+ * Written because `checkedAt` is the most dangerous number in this system. It
+ * moves every five minutes whether or not anything was ingested, so a panel
+ * that reports only "checked 2 minutes ago" says exactly the same thing when
+ * the pipeline is healthy and when it has been failing since Thursday. The
+ * order below is deliberate: failure first, because a run of failed ingests is
+ * the one state that a fresh check actively disguises.
+ */
+export function describeDataHealth(
+  state: { consecutiveFailures?: number; failingSince?: string | null; ingestedAt?: string | null } | null,
+  lastRun: { outcome?: string } | null,
+): string {
+  const failures = state?.consecutiveFailures ?? 0;
+  if (failures >= 2) {
+    const since = state?.failingSince ? ` since ${state.failingSince.slice(0, 16).replace('T', ' ')}` : '';
+    return `Checks are running, but the last ${failures} injury ingests did not complete${since}. The report shown is the last one that landed.`;
+  }
+  if (failures === 1) {
+    return 'The most recent injury ingest did not complete. The report shown is the last one that landed, and the next check will retry.';
+  }
+  if (lastRun?.outcome === 'not_published') {
+    return 'No injury report is published for this season yet, so availability comes from Sleeper alone. Checked every five minutes.';
+  }
+  if (!state?.ingestedAt) {
+    return 'Nothing has been ingested yet. Availability comes from Sleeper alone.';
+  }
+  return 'Injury data is current: the source is being checked every five minutes and the last ingest completed.';
 }

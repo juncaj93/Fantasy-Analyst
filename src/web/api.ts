@@ -499,6 +499,12 @@ export interface SetupStatus {
      */
     etag: string | null;
     lastModified: string | null;
+    /** Ingests that started and did not finish, in a row. Zero is healthy. */
+    consecutiveFailures: number;
+    failingSince: string | null;
+    caughtUpThrough: number | null;
+    /** One sentence about whether the data can be trusted, not just checked. */
+    dataHealth: string;
     /**
      * Last season's backfill. Separate from everything above, which is about
      * the season being played — history never answers a question about today.
