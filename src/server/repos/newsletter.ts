@@ -43,6 +43,8 @@ export interface IdentityReviewRecord {
   candidates: { playerId: string; name: string; team: string; position: string; detail: string }[];
   proposedPolarity: string | null;
   proposedCategory: string | null;
+  /** What this item would have been worth had the name resolved. */
+  proposedMagnitude: number;
   status: string;
 }
 
@@ -156,7 +158,15 @@ export class NewsletterRepo {
     return row ? toMessage(row) : null;
   }
 
-  /** Insert identity-ambiguity items, deduped on content. */
+  /**
+   * Insert identity-ambiguity items, deduped on content.
+   *
+   * A row that already exists is left alone with one exception: while it is
+   * still `pending`, its proposed magnitude is refreshed. That is what lets a
+   * re-import correct a review recorded before magnitude was carried at all —
+   * without it, "JSN +11" would stay stuck at the ±1 stand-in the old path
+   * wrote. Resolved rows are history and are never rewritten.
+   */
   async insertIdentityReviews(items: IdentityReviewItem[]): Promise<number> {
     if (items.length === 0) return 0;
     const now = nowIso();
@@ -167,8 +177,8 @@ export class NewsletterRepo {
         .prepare(
           `INSERT INTO identity_reviews (
              dedupe_key, source_message_id, source_date, excerpt, matched_text, reason,
-             candidates_json, proposed_polarity, proposed_category, status, created_at
-           ) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?)
+             candidates_json, proposed_polarity, proposed_category, proposed_magnitude, status, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?)
            ON CONFLICT(dedupe_key) DO NOTHING`,
         )
         .bind(
@@ -181,10 +191,22 @@ export class NewsletterRepo {
           toJson(item.candidates),
           item.proposedPolarity,
           item.proposedCategory,
+          item.proposedMagnitude,
           now,
         )
         .run();
-      if ((res.meta?.changes ?? 0) > 0) inserted++;
+      if ((res.meta?.changes ?? 0) > 0) {
+        inserted++;
+        continue;
+      }
+      await this.db
+        .prepare(
+          `UPDATE identity_reviews
+              SET proposed_magnitude = ?, proposed_polarity = ?
+            WHERE dedupe_key = ? AND status = 'pending'`,
+        )
+        .bind(item.proposedMagnitude, item.proposedPolarity, key)
+        .run();
     }
     return inserted;
   }
@@ -252,6 +274,7 @@ function toIdentityReview(r: Record<string, unknown>): IdentityReviewRecord {
     candidates: parseJson(r['candidates_json'], []),
     proposedPolarity: (r['proposed_polarity'] as string | null) ?? null,
     proposedCategory: (r['proposed_category'] as string | null) ?? null,
+    proposedMagnitude: Number(r['proposed_magnitude'] ?? 1),
     status: String(r['status']),
   };
 }

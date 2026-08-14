@@ -99,6 +99,15 @@ export interface TallyImportOutcome {
   ambiguous: TallyImportResult['ambiguous'];
   unmatched: TallyImportResult['unmatched'];
   conflicts: string[];
+  /**
+   * Rows from an earlier import of this same document that the current one
+   * replaces — chiefly the ±1 stand-ins the identity-repair path wrote before
+   * magnitude was carried. Retired so the score is counted once, at its real
+   * size.
+   */
+  superseded: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  /** Superseded-looking rows left alone because the user had ruled on them. */
+  keptForUserOverride: { playerId: string; excerpt: string }[];
   detail: string;
 }
 
@@ -351,10 +360,35 @@ export class NewsletterService {
     // only in this response.
     const identityReviews = await this.messages.insertIdentityReviews(result.identityReviews);
 
+    // The document owns its message id, so whatever else still carries that id
+    // came from an earlier import of the same file and has now been replaced.
+    // Without this the run would double count: a name the user has since
+    // confirmed resolves on its own this time, so the fixed importer writes the
+    // real "+11" row while the old ±1 stand-in for the same row is still there.
+    const { superseded, keptForUserOverride } = await this.evidence.supersedeStaleImports(
+      result.sourceMessageId,
+      result.evidence.map((e) => e.dedupeKey),
+      'superseded-by-tally-reimport',
+    );
+
     const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
-    for (const playerId of [...new Set(result.evidence.map((e) => e.playerId))]) {
+    const touched = new Set([
+      ...result.evidence.map((e) => e.playerId),
+      ...superseded.map((e) => e.playerId),
+    ]);
+    for (const playerId of touched) {
       await this.evidence.refreshSignal(playerId, { seasonStart });
     }
+
+    const detail =
+      `${result.detail} ${inserted} new item(s) stored${skipped ? `, ${skipped} already present` : ''}.` +
+      (identityReviews ? ` ${identityReviews} name(s) are waiting in Review.` : '') +
+      (superseded.length
+        ? ` ${superseded.length} item(s) from an earlier import of this document were replaced.`
+        : '') +
+      (keptForUserOverride.length
+        ? ` ${keptForUserOverride.length} item(s) you had corrected were left exactly as you set them.`
+        : '');
 
     return {
       rowsParsed: result.rowsParsed,
@@ -365,9 +399,14 @@ export class NewsletterService {
       ambiguous: result.ambiguous,
       unmatched: result.unmatched,
       conflicts: result.conflicts,
-      detail:
-        `${result.detail} ${inserted} new item(s) stored${skipped ? `, ${skipped} already present` : ''}.` +
-        (identityReviews ? ` ${identityReviews} name(s) are waiting in Review.` : ''),
+      superseded: superseded.map((e) => ({
+        playerId: e.playerId,
+        excerpt: e.excerpt,
+        polarity: e.polarity,
+        magnitude: e.magnitude,
+      })),
+      keptForUserOverride: keptForUserOverride.map((e) => ({ playerId: e.playerId, excerpt: e.excerpt })),
+      detail,
     };
   }
 

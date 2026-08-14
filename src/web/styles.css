@@ -23,6 +23,8 @@
   --accent: #60a5fa;
   --radius: 10px;
   --tap: 44px;
+  /* The tab bar's own height, excluding the home-indicator inset. */
+  --tabbar-height: 52px;
 }
 
 @media (prefers-color-scheme: light) {
@@ -72,7 +74,13 @@ body {
 
 .app-main {
   flex: 1;
-  padding: 8px 10px calc(72px + env(safe-area-inset-bottom));
+  /*
+   * The bottom padding clears the fixed tab bar exactly: its own height plus
+   * whatever the home indicator reserves. Measured from the bar rather than
+   * guessed, so no blank strip appears under the last row and nothing hides
+   * behind the bar on a device with no inset.
+   */
+  padding: 6px 10px calc(var(--tabbar-height) + env(safe-area-inset-bottom) + 6px);
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -124,7 +132,17 @@ body {
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
+  /*
+   * Flush against the bottom edge.
+   *
+   * The bar itself reaches the physical bottom of the viewport; the home
+   * indicator's reserved strip is added as padding INSIDE it, so the tinted
+   * surface runs all the way down and the buttons sit above the indicator. The
+   * alternative — offsetting the whole bar upwards — leaves a strip of page
+   * showing underneath, which is what made it look like it was floating.
+   */
   padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
 }
 
 .tabbar button {
@@ -174,12 +192,12 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px;
-  margin-bottom: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
 }
 
 .card-tight {
-  padding: 8px 10px;
+  padding: 6px 8px;
 }
 
 .section-title {
@@ -187,7 +205,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-faint);
-  margin: 12px 2px 6px;
+  margin: 8px 2px 4px;
   font-weight: 700;
 }
 
@@ -246,14 +264,23 @@ body {
   scroll-margin-top: 64px;
 }
 
+/*
+ * Dense but not cramped.
+ *
+ * The row keeps the full 44px tap target — thumbs did not get smaller — but
+ * loses the padding and the gap that were buying nothing. Six pixels of margin
+ * and four of padding per row is roughly a third of a row's height across
+ * forty of them, which is several more players on screen for no loss of
+ * legibility.
+ */
 .player-row {
   width: 100%;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  margin-bottom: 6px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin-bottom: 3px;
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -294,6 +321,96 @@ body {
   color: var(--text-dim);
   font-weight: 600;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * Position colours.
+ *
+ * Four hues that stay apart for the common forms of colour blindness — blue,
+ * green, amber and violet — rather than the red/green pair that would read as
+ * one colour to a deuteranope. The letters are always present, so the colour is
+ * an accelerator for scanning and never the thing carrying the meaning.
+ *
+ * Kept as a tinted pill rather than a filled block: at forty rows a screen,
+ * saturated backgrounds stop being information and start being noise.
+ */
+.pos-pill {
+  display: inline-block;
+  min-width: 26px;
+  text-align: center;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+.pos-QB {
+  --pos-color: #60a5fa;
+}
+
+.pos-RB {
+  --pos-color: #34d399;
+}
+
+.pos-WR {
+  --pos-color: #fbbf24;
+}
+
+.pos-TE {
+  --pos-color: #c084fc;
+}
+
+.pos-K {
+  --pos-color: #94a3b8;
+}
+
+.pos-DEF {
+  --pos-color: #f472b6;
+}
+
+.pos-pill[class*='pos-'] {
+  border-color: color-mix(in srgb, var(--pos-color, var(--border)) 55%, transparent);
+  background: color-mix(in srgb, var(--pos-color, var(--surface-2)) 16%, transparent);
+  color: var(--pos-color, var(--text-dim));
+}
+
+/* Light mode needs darker hues to keep contrast against a white surface. */
+@media (prefers-color-scheme: light) {
+  .pos-QB {
+    --pos-color: #1d4ed8;
+  }
+
+  .pos-RB {
+    --pos-color: #047857;
+  }
+
+  .pos-WR {
+    --pos-color: #a16207;
+  }
+
+  .pos-TE {
+    --pos-color: #7e22ce;
+  }
+
+  .pos-K {
+    --pos-color: #475569;
+  }
+
+  .pos-DEF {
+    --pos-color: #be185d;
+  }
+}
+
+.team-code {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .player-row-metrics {
@@ -611,4 +728,169 @@ table.compact th {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* ------------------------------------------------------- decision quality */
+/*
+ * Tags that change a pick. Every one carries a word and a glyph as well as a
+ * colour, so none of them depends on colour vision to be read.
+ */
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tag-avoid {
+  border-color: var(--neg);
+  color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 12%, transparent);
+}
+
+.tag-urgent {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.tag-warn {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  color: var(--text-dim);
+}
+
+.tag-calm {
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+
+.tag-star {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * The star control. Sized to the standard tap target so it can be hit with a
+ * thumb during a draft without hitting the row underneath it.
+ */
+.star-btn {
+  flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: 0.85rem;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.star-btn-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.star-btn:disabled {
+  opacity: 0.5;
+}
+
+.roster-alert {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+.roster-alert:last-child {
+  border-bottom: none;
+}
+
+.roster-alert-urgent strong {
+  color: var(--warn);
+}
+
+.decision-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------ draft screen chrome */
+/*
+ * One compact line where five stat cards used to be.
+ *
+ * Everything that row carried is still on screen or one tap away; the point is
+ * that the player list starts near the top of the viewport instead of below a
+ * block of chrome the user has already read.
+ */
+.draft-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  min-height: 32px;
+}
+
+.draft-league {
+  font-size: 0.95rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.draft-pick {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.draft-turn {
+  font-weight: 700;
+}
+
+.draft-turn-now {
+  color: var(--warn);
+}
+
+.draft-details {
+  margin: 0 0 6px;
+}
+
+.draft-details summary {
+  font-size: 0.72rem;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.draft-details .badge-row {
+  margin-top: 4px;
 }

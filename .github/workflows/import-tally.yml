@@ -83,6 +83,8 @@ jobs:
             console.log('stored (new):   ', r.inserted);
             console.log('already present:', r.alreadyPresent);
             console.log('sent to review: ', r.identityReviews);
+            console.log('replaced:       ', (r.superseded ?? []).length);
+            console.log('kept (yours):   ', (r.keptForUserOverride ?? []).length);
 
             const lines = [
               '## Tally import',
@@ -94,8 +96,17 @@ jobs:
               ['| stored (new) |', r.inserted, '|'].join(' '),
               ['| already present |', r.alreadyPresent, '|'].join(' '),
               ['| names sent to review |', r.identityReviews, '|'].join(' '),
+              ['| replaced from an earlier import |', (r.superseded ?? []).length, '|'].join(' '),
+              ['| left as you corrected them |', (r.keptForUserOverride ?? []).length, '|'].join(' '),
               '',
             ];
+            if (r.superseded?.length) {
+              lines.push('### Replaced by the real aggregate row', '');
+              for (const s of r.superseded) {
+                lines.push('- ' + s.playerId + ': was ' + s.polarity + ' ' + s.magnitude + ' — ' + s.excerpt);
+              }
+              lines.push('');
+            }
             if (r.conflicts?.length) {
               lines.push('### Contradictions in the document', '');
               for (const c of r.conflicts) lines.push('- ' + c);

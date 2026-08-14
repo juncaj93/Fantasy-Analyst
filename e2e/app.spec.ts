@@ -53,11 +53,37 @@ test.describe('draft room', () => {
     await expect(page.getByTestId('recommended-heading')).toBeVisible();
   });
 
-  test('shows live draft state above the fold', async ({ page }) => {
-    await expect(page.getByText('Pick', { exact: true })).toBeVisible();
-    await expect(page.getByText('Until you', { exact: true })).toBeVisible();
+  test('shows live draft state above the fold, on one line', async ({ page }) => {
+    // The stat-card banner is gone by design, but nothing it carried is: the
+    // pick number, the round and the wait are still the first thing on screen,
+    // beside the league name.
     await expect(page.getByTestId('board-league-name')).toHaveText('Demo Dynasty');
+    const status = page.getByTestId('draft-status');
+    await expect(status).toBeVisible();
+    await expect(status).toContainText('#3');
+    await expect(status).toContainText('R1');
+
+    // Everything else about the league is available, just folded away.
+    await expect(page.getByText(/Draft order/)).toHaveCount(1);
+    await page.getByText('League and draft order').click();
     await expect(page.getByText(/Draft order/)).toBeVisible();
+  });
+
+  test('puts the player list high on the screen', async ({ page }) => {
+    // The point of removing the banner: the first player should be visible
+    // without scrolling, on the smallest supported phone.
+    const heading = await page.getByTestId('recommended-heading').boundingBox();
+    const firstRow = await page.getByTestId('recommendation-row').first().boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(heading!.y).toBeLessThan(viewport.height * 0.35);
+    expect(firstRow!.y + firstRow!.height).toBeLessThan(viewport.height);
+  });
+
+  test('colour-codes positions without losing the letters', async ({ page }) => {
+    const pill = page.getByTestId('recommendation-row').first().locator('.pos-pill');
+    await expect(pill).toBeVisible();
+    // Colour is an accelerator; the position text is what carries the meaning.
+    expect((await pill.innerText()).trim()).toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
   });
 
   test('ranks available players and hides drafted ones', async ({ page }) => {
@@ -87,6 +113,63 @@ test.describe('draft room', () => {
     for (const text of await page.locator('.pos-team').allInnerTexts()) {
       expect(text).toContain('QB');
     }
+  });
+
+  test('says what the shape of the roster means, not just what is missing', async ({ page }) => {
+    const alerts = page.getByTestId('roster-alert');
+    expect(await alerts.count()).toBeGreaterThan(0);
+    // A bare label is what the brief rules out: each alert carries its reason.
+    const first = alerts.first();
+    expect((await first.innerText()).split('\n').filter(Boolean).length).toBeGreaterThan(1);
+  });
+
+  test('shows at most two decision tags on a row', async ({ page }) => {
+    const rows = page.getByTestId('recommendation-row');
+    const count = await rows.count();
+    for (let i = 0; i < Math.min(count, 10); i++) {
+      const tags = rows.nth(i).getByTestId('decision-tags').locator('.tag');
+      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
+    }
+  });
+
+  test('stars a player, keeps it across a reload, and explains the boost', async ({ page }) => {
+    const row = page.getByTestId('recommendation-row').first();
+    const playerId = await row.getAttribute('data-player-id');
+    const star = row.getByTestId('my-guy-control');
+    await expect(star).toHaveAttribute('data-level', '0');
+
+    await star.click();
+    const flagged = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '1');
+
+    // Tapping cycles rather than opening a menu — one thumb, one clock.
+    await flagged.getByTestId('my-guy-control').click();
+    await expect(flagged.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+
+    await page.reload();
+    const afterReload = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(afterReload.getByTestId('my-guy-control')).toHaveAttribute('data-level', '2');
+
+    await afterReload.click();
+    await expect(afterReload.locator('.explain')).toContainText('Strong My Guy');
+
+    // Leave the board as it was found, so the shared dev server stays clean.
+    await afterReload.getByTestId('my-guy-control').click();
+    await afterReload.getByTestId('my-guy-control').click();
+    await expect(
+      page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`).getByTestId('my-guy-control'),
+    ).toHaveAttribute('data-level', '0');
+  });
+
+  test('starring does not also expand the row', async ({ page }) => {
+    const row = page.getByTestId('recommendation-row').first();
+    const playerId = await row.getAttribute('data-player-id');
+    await row.getByTestId('my-guy-control').click();
+    const after = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
+    await expect(after.locator('.explain')).toHaveCount(0);
+    await after.getByTestId('my-guy-control').click();
+    await after.getByTestId('my-guy-control').click();
+    await after.getByTestId('my-guy-control').click();
   });
 
   test('offers no control that could make a pick', async ({ page }) => {

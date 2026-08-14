@@ -1,0 +1,11 @@
+-- Carry magnitude through the identity-review path.
+--
+-- An unresolved name used to record only its polarity, so confirming who it was
+-- created evidence worth ±1 no matter what the source actually said. That is
+-- wrong for an imported tally row: "JSN +11" is a net score somebody already
+-- decided, and flattening it to +1 both loses the user's research and puts the
+-- AVOID threshold (lifetime <= -5) out of reach for any imported row.
+--
+-- Existing rows default to 1, which is exactly what they contributed before, so
+-- this column changes nothing until a re-import writes the real score.
+ALTER TABLE identity_reviews ADD COLUMN proposed_magnitude REAL NOT NULL DEFAULT 1;

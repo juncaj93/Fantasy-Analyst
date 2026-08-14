@@ -102,21 +102,75 @@ export class PropsRepo implements SnapshotStore {
         .all<Record<string, unknown>>();
       for (const r of rows.results) {
         const pid = String(r['player_id']);
-        const prop: PlayerProp = {
-          playerId: pid,
-          sourcePlayerName: String(r['source_player_name'] ?? ''),
-          market: String(r['market']) as PlayerProp['market'],
-          line: r['line'] == null ? null : Number(r['line']),
-          overPrice: r['over_price'] == null ? null : Number(r['over_price']),
-          underPrice: r['under_price'] == null ? null : Number(r['under_price']),
-          bookCount: Number(r['book_count'] ?? 0),
-          consensusMethod: String(r['consensus_method'] ?? 'none') as PlayerProp['consensusMethod'],
-          books: parseJson<string[]>(r['books_json'], []),
-          impliedProbability: r['implied_probability'] == null ? null : Number(r['implied_probability']),
-        };
+        const prop = toProp(pid, r);
         const list = out.get(pid);
         if (list) list.push(prop);
         else out.set(pid, [prop]);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Kickoff time per player, taken from the newest snapshot that quoted them.
+   *
+   * The schedule is not stored separately — a prop snapshot carries the game it
+   * belongs to, so the event a player has lines for is the game they are
+   * playing in. Players nobody quoted are simply absent, and the caller treats
+   * an absent kickoff as "unknown" rather than as "not playing".
+   */
+  async kickoffsForPlayers(playerIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (playerIds.length === 0) return out;
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT pp.player_id AS player_id, ps.game_start AS game_start
+             FROM player_props pp
+             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+            WHERE pp.player_id IN (${placeholders})
+            ORDER BY ps.fetched_at ASC`,
+        )
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      // Ascending, so the last write per player is the newest snapshot's view.
+      for (const r of rows.results) out.set(String(r['player_id']), String(r['game_start']));
+    }
+    return out;
+  }
+
+  /**
+   * The lines each player carried at the previous snapshot of their game.
+   *
+   * "Previous" is the second-newest snapshot for that event, which is what
+   * makes movement mean "since the last time the app looked" rather than
+   * "since some arbitrary point". A player whose game has only been fetched
+   * once has no previous lines, and no movement is claimed for them.
+   */
+  async previousForPlayers(playerIds: string[]): Promise<Map<string, PlayerProp[]>> {
+    const out = new Map<string, PlayerProp[]>();
+    if (playerIds.length === 0) return out;
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT pp.* FROM player_props pp
+             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+            WHERE pp.player_id IN (${placeholders})
+              AND ps.id = (
+                SELECT id FROM prop_snapshots s2
+                 WHERE s2.event_id = ps.event_id
+                 ORDER BY s2.fetched_at DESC LIMIT 1 OFFSET 1
+              )`,
+        )
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      for (const r of rows.results) {
+        const pid = String(r['player_id']);
+        const list = out.get(pid) ?? [];
+        list.push(toProp(pid, r));
+        out.set(pid, list);
       }
     }
     return out;
@@ -133,4 +187,20 @@ export class PropsRepo implements SnapshotStore {
       events: row ? Number(row['events'] ?? 0) : 0,
     };
   }
+}
+
+/** One consensus row as stored, in the shape the engines read. */
+function toProp(playerId: string, r: Record<string, unknown>): PlayerProp {
+  return {
+    playerId,
+    sourcePlayerName: String(r['source_player_name'] ?? ''),
+    market: String(r['market']) as PlayerProp['market'],
+    line: r['line'] == null ? null : Number(r['line']),
+    overPrice: r['over_price'] == null ? null : Number(r['over_price']),
+    underPrice: r['under_price'] == null ? null : Number(r['under_price']),
+    bookCount: Number(r['book_count'] ?? 0),
+    consensusMethod: String(r['consensus_method'] ?? 'none') as PlayerProp['consensusMethod'],
+    books: parseJson<string[]>(r['books_json'], []),
+    impliedProbability: r['implied_probability'] == null ? null : Number(r['implied_probability']),
+  };
 }

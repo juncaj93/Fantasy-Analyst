@@ -28,6 +28,9 @@ jobs:
       - name: Run it
         env:
           SCRIPT: ${{ inputs.script }}
+          # Only the odds probe reads this, and it prints whether the key was
+          # present rather than the key itself.
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
         run: |
           set -uo pipefail
           case "$SCRIPT" in

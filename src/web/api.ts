@@ -69,6 +69,50 @@ export interface DraftRecommendation {
   reasons: string[];
   counterpoints: string[];
   degraded: boolean;
+  tierCliff: TierCliff;
+  avoid: AvoidTag;
+  myGuy: MyGuyFlag;
+  wait: WaitGuidance;
+}
+
+export interface TierCliff {
+  severity: 'none' | 'thinning' | 'last_in_tier';
+  tierIndex: number | null;
+  remainingInTier: number;
+  gapToNextTier: number | null;
+  survivingTierMates: number;
+  score: number;
+  message: string | null;
+}
+
+export interface AvoidTag {
+  active: boolean;
+  lifetimeNet: number;
+  score: number;
+  message: string;
+  trendNote: string | null;
+}
+
+export interface MyGuyFlag {
+  level: 0 | 1 | 2 | 3;
+  label: string;
+  stars: string;
+  score: number;
+}
+
+export interface WaitGuidance {
+  state: 'take_now' | 'risky_to_wait' | 'can_probably_wait' | 'likely_available_later' | 'unknown';
+  label: string;
+  detail: string;
+  survivalProbability: number | null;
+}
+
+export interface RosterAlert {
+  key: string;
+  severity: 'info' | 'warn' | 'urgent';
+  message: string;
+  detail: string;
+  positions: string[];
 }
 
 export interface DraftBoard {
@@ -88,6 +132,8 @@ export interface DraftBoard {
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
   recommendations: DraftRecommendation[];
+  rosterAlerts: RosterAlert[];
+  round: number;
   warnings: string[];
 }
 
@@ -291,6 +337,13 @@ export interface StartSitEvaluation {
   confidence: string;
   confidenceReasons: string[];
   statusFlag: string | null;
+  lock: { locked: boolean; kickoff: string | null; reason: string };
+  movement: {
+    significant: { market: string; direction: string; from: number; to: number; display: string }[];
+    direction: string;
+    headline: string | null;
+  };
+  role: { trend: string; label: string; detail: string; games: number };
 }
 
 export interface StartSitComparison {
@@ -302,6 +355,13 @@ export interface StartSitComparison {
   confidence: string;
   reasons: string[];
   warnings: string[];
+  lateSwap: {
+    verdict: string;
+    label: string;
+    detail: string;
+    gapHours: number | null;
+    advantage: number | null;
+  };
 }
 
 export interface LineupSlot {
@@ -312,6 +372,7 @@ export interface LineupSlot {
   position: string | null;
   score: number | null;
   alreadyStarting: boolean;
+  locked: boolean;
 }
 
 export interface LineupSwap {

@@ -11,6 +11,7 @@
  */
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
+import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
@@ -40,6 +41,7 @@ import { AdpRepo } from './repos/adp.ts';
 import { EvidenceRepo } from './repos/evidence.ts';
 import { LeagueRepo } from './repos/league.ts';
 import { NewsletterRepo } from './repos/newsletter.ts';
+import { PlayerFlagsRepo } from './repos/playerFlags.ts';
 import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
@@ -372,9 +374,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const playerRepo = new PlayerRepo(db);
     const propsRepo = new PropsRepo(db);
-    const [players, propsByPlayer, signals, freshness] = await Promise.all([
+    const [players, propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
       playerRepo.listByIds(mine.playerIds),
       propsRepo.latestForPlayers(mine.playerIds),
+      propsRepo.previousForPlayers(mine.playerIds),
+      propsRepo.kickoffsForPlayers(mine.playerIds),
       new EvidenceRepo(db).getSignals(mine.playerIds),
       propsRepo.freshness(),
     ]);
@@ -388,6 +392,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       inputs.push({
         player,
         props: propsByPlayer.get(id) ?? [],
+        previousProps: previousProps.get(id) ?? [],
+        // Absent means the schedule is unknown, which is never treated as a
+        // lock: refusing a swap the user can still make would be the app
+        // inventing a restriction.
+        kickoff: kickoffs.get(id) ?? null,
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
         propsStale: false,
@@ -506,6 +515,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       .slice(0, Math.max(limit * 3, 120));
 
     const signals = await new EvidenceRepo(ctx.env.db).getSignals(shortlist.map((p) => p.id));
+    const flags = await new PlayerFlagsRepo(ctx.env.db).forPlayers(shortlist.map((p) => p.id));
     const ordered = orderPlayers(
       shortlist.map((p) => ({
         id: p.id,
@@ -529,6 +539,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         adjustedRank: adjusted,
         movement,
         signal: signals.get(row.player.id) ?? null,
+        myGuy: myGuy(flags.get(row.player.id) ?? 0),
       })),
     });
   });
@@ -542,6 +553,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const seasonStart = await new SettingsRepo(db).get<string | null>(SETTING_KEYS.seasonStart, null);
     const signal = aggregatePlayerSignal(player.id, items, { seasonStart });
     const props = await new PropsRepo(db).latestForPlayers([player.id]);
+    const level = await new PlayerFlagsRepo(db).get(player.id);
     return jsonResponse({
       player: {
         id: player.id,
@@ -554,7 +566,27 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       signal,
       evidence: items,
       props: props.get(player.id) ?? [],
+      // The user's own opinion, alongside the ledger and never mixed into it.
+      myGuy: myGuy(level),
     });
+  });
+
+  /**
+   * Mark a player as one the user personally wants — ★, ★★ or ★★★.
+   *
+   * Separate from the evidence ledger by design: this is preference, not news,
+   * and the two are weighed separately by the draft engine. Level 0 clears it.
+   */
+  router.post('/api/players/:id/my-guy', async (ctx) => {
+    const body = await ctx.json<{ level?: number }>();
+    const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+    const raw = Number(body?.level ?? 0);
+    if (!Number.isInteger(raw) || raw < 0 || raw > 3) {
+      return errorResponse('level must be 0, 1, 2 or 3', 400);
+    }
+    const stored = await new PlayerFlagsRepo(ctx.env.db).set(player.id, toMyGuyLevel(raw));
+    return jsonResponse({ playerId: player.id, name: player.fullName, myGuy: myGuy(stored) });
   });
 
   // -------------------------------------------------------------- newsletter
@@ -871,8 +903,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const playerRepo = new PlayerRepo(db);
     const propsRepo = new PropsRepo(db);
     const evidenceRepo = new EvidenceRepo(db);
-    const [propsByPlayer, signals, freshness] = await Promise.all([
+    const [propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
       propsRepo.latestForPlayers(body.playerIds),
+      propsRepo.previousForPlayers(body.playerIds),
+      propsRepo.kickoffsForPlayers(body.playerIds),
       evidenceRepo.getSignals(body.playerIds),
       propsRepo.freshness(),
     ]);
@@ -884,6 +918,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       inputs.push({
         player,
         props: propsByPlayer.get(id) ?? [],
+        previousProps: previousProps.get(id) ?? [],
+        kickoff: kickoffs.get(id) ?? null,
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
         propsStale: false,

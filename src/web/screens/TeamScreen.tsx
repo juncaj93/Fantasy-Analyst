@@ -14,7 +14,7 @@ import {
   type RosterPlayer,
   type StartSitComparison,
 } from '../api.ts';
-import { Badge, Empty, Loading, Notice, Signal, Unknown, formatAge } from '../components/common.tsx';
+import { Badge, Empty, formatAge, Loading, Notice, PositionBadge, Signal, Unknown } from '../components/common.tsx';
 
 interface OpenSlot {
   slot: string;
@@ -278,7 +278,9 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
                 <td>{s.slot}</td>
                 <td>
                   {s.name ?? <Unknown what="nobody eligible" />}
-                  {s.name && !s.alreadyStarting ? ' ←' : ''}
+                  {/* A locked slot is settled, so it never carries a change arrow. */}
+                  {s.locked ? <span className="tag tag-calm" data-testid="locked-tag"> 🔒 Locked</span> : null}
+                  {s.name && !s.alreadyStarting && !s.locked ? ' ←' : ''}
                 </td>
                 <td>{s.score == null ? <Unknown what="score" /> : s.score.toFixed(1)}</td>
               </tr>
@@ -325,9 +327,7 @@ function RosterRow({
       <div className="player-row-top">
         <span className="rank">{selected ? '✓' : ''}</span>
         <span className="player-name">{player.name}</span>
-        <span className="pos-team">
-          {player.position} · {player.team || 'FA'}
-        </span>
+        <PositionBadge position={player.position} team={player.team} />
       </div>
       <div className="player-row-metrics">
         <Signal net={player.recentNet} label="recent news (21d)" />
@@ -355,6 +355,43 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       </div>
       <div className="faint">
         Vegas data {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
+      </div>
+
+      {/*
+        Compact tags for the two things a projection cannot express: whether
+        kickoff timing is a problem, and whether the market has moved since the
+        last look. The numbers behind them are in the reasons and warnings
+        below rather than repeated here.
+      */}
+      <div className="tag-row">
+        {comparison.lateSwap && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown' ? (
+          <span
+            className={comparison.lateSwap.verdict === 'consider_early_option' ? 'tag tag-urgent' : 'tag tag-calm'}
+            title={comparison.lateSwap.detail}
+            data-testid="late-swap-tag"
+          >
+            ⏱ {comparison.lateSwap.label}
+          </span>
+        ) : null}
+        {comparison.evaluations
+          .filter((e) => e.movement?.headline)
+          .map((e) => (
+            <span
+              key={`move-${e.playerId}`}
+              className={e.movement.direction === 'up' ? 'tag tag-star' : 'tag tag-warn'}
+              title={e.movement.significant.map((m) => m.display).join('; ')}
+              data-testid="movement-tag"
+            >
+              {e.movement.direction === 'up' ? '↑' : '↓'} {e.name}: {e.movement.headline}
+            </span>
+          ))}
+        {comparison.evaluations
+          .filter((e) => e.lock?.locked)
+          .map((e) => (
+            <span key={`lock-${e.playerId}`} className="tag tag-calm" data-testid="locked-tag">
+              🔒 {e.name} locked
+            </span>
+          ))}
       </div>
 
       {comparison.warnings.map((w) => (
@@ -492,7 +529,7 @@ function LiveDraftRoster({
                     <span className="faint">{p.pickNo ? `pick ${p.pickNo}` : 'on roster'}</span>
                   </div>
                   <div className="faint">
-                    {p.position} · {p.team || 'FA'}
+                    <PositionBadge position={p.position} team={p.team} />
                   </div>
                 </div>
               ))}

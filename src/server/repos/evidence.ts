@@ -137,6 +137,62 @@ export class EvidenceRepo {
     return Number(row?.n ?? 0);
   }
 
+  /**
+   * Retire evidence a re-import has replaced.
+   *
+   * A tally document owns every row that carries its message id. Re-importing it
+   * recomputes that set from the file, and anything still bearing the id that is
+   * no longer in it is a leftover from an earlier revision or an earlier code
+   * path — most importantly the ±1 stand-ins the identity-repair path used to
+   * write, which would otherwise be counted a second time alongside the real
+   * aggregate row the fixed importer now produces.
+   *
+   * Retired rather than deleted: `ignored` stops it counting while the record of
+   * what was imported, and when, stays in the ledger. A row the user has ruled
+   * on is never touched — their correction outranks anything an import decides —
+   * and is reported back so the caller can say so out loud.
+   */
+  async supersedeStaleImports(
+    sourceMessageId: string,
+    keepDedupeKeys: string[],
+    note: string,
+  ): Promise<{ superseded: EvidenceItem[]; keptForUserOverride: EvidenceItem[] }> {
+    const keep = new Set(keepDedupeKeys);
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM evidence_items
+          WHERE source_message_id = ?
+            AND review_status IN ('auto_applied','accepted','corrected','pending')`,
+      )
+      .bind(sourceMessageId)
+      .all<EvidenceRow>();
+
+    const superseded: EvidenceItem[] = [];
+    const keptForUserOverride: EvidenceItem[] = [];
+    const now = nowIso();
+
+    for (const row of rows.results) {
+      if (keep.has(row.dedupe_key)) continue;
+      const item = toItem(row);
+      if (item.userOverride) {
+        keptForUserOverride.push(item);
+        continue;
+      }
+      const notes = parseJson<string[]>(row.notes_json, []);
+      await this.db
+        .prepare(
+          `UPDATE evidence_items
+              SET review_status = 'ignored', notes_json = ?, updated_at = ?
+            WHERE id = ?`,
+        )
+        .bind(toJson([...notes, note]), now, row.id)
+        .run();
+      superseded.push(item);
+    }
+
+    return { superseded, keptForUserOverride };
+  }
+
   async listForPlayer(playerId: string, limit = 100): Promise<EvidenceItem[]> {
     const rows = await this.db
       .prepare('SELECT * FROM evidence_items WHERE player_id = ? ORDER BY source_date DESC, id DESC LIMIT ?')

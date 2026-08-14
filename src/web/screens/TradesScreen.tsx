@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
-import { Badge, Empty, Loading, Notice, Signal } from '../components/common.tsx';
+import { Badge, Empty, Loading, Notice, PositionBadge, Signal } from '../components/common.tsx';
 
 export function TradesScreen() {
   const [board, setBoard] = useState<TradeBoard | null>(null);
@@ -93,9 +93,7 @@ function TradeRow({
     <button className="player-row" data-testid="trade-row" aria-expanded={expanded} onClick={onToggle}>
       <div className="player-row-top">
         <span className="player-name">{suggestion.name}</span>
-        <span className="pos-team">
-          {suggestion.position} · {suggestion.team || 'FA'}
-        </span>
+        <PositionBadge position={suggestion.position} team={suggestion.team} />
       </div>
 
       <div className="player-row-metrics">

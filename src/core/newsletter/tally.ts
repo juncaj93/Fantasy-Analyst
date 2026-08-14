@@ -51,6 +51,12 @@ export interface TallyImportResult {
   unmatched: { name: string; reason: string }[];
   /** Rows that contradict each other or their own section. */
   conflicts: string[];
+  /**
+   * The id every row was filed under, whether it was passed in or derived from
+   * the document. The caller needs it to find what a previous import of the
+   * same document left behind.
+   */
+  sourceMessageId: string;
   /** Human-readable summary, safe to show as-is. */
   detail: string;
 }
@@ -186,6 +192,9 @@ export function importTally(
         })),
         proposedPolarity: polarityOf(row.score),
         proposedCategory: null,
+        // The row's own net score, so confirming who this is recovers the score
+        // the user actually wrote rather than a ±1 stand-in for it.
+        proposedMagnitude: Math.abs(row.score),
       });
       if (match.status === 'ambiguous') {
         ambiguous.push({
@@ -253,6 +262,7 @@ export function importTally(
     ambiguous,
     unmatched,
     conflicts,
+    sourceMessageId,
     detail: parts.join(' '),
   };
 }

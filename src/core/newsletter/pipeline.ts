@@ -74,6 +74,15 @@ export interface IdentityReviewItem {
   /** The classification the sentence would have received. */
   proposedPolarity: Classification['polarity'];
   proposedCategory: string | null;
+  /**
+   * The magnitude the item would have carried had the name resolved.
+   *
+   * Kept so that confirming who somebody is recreates the evidence the app
+   * would have written anyway, rather than a flattened ±1 stand-in. For a
+   * newsletter sentence that is the rule's own magnitude; for an imported tally
+   * row it is the row's net score.
+   */
+  proposedMagnitude: number;
 }
 
 /**
@@ -305,6 +314,9 @@ export function processNewsletter(
           })),
           proposedPolarity: classification.polarity,
           proposedCategory: classification.category,
+          // The sentence's own magnitude, unchanged: resolving the name later
+          // should produce the item this sentence would have produced all along.
+          proposedMagnitude: classification.magnitude,
         });
       }
 

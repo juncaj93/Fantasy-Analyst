@@ -6,10 +6,60 @@
 deterministic, obviously-synthetic lines and never touches the network, so
 development and tests cost no quota.
 
+`SportsGameOddsProvider` is implemented and tested **against the live API's
+real payloads**, captured by `scripts/probe-sportsgameodds.mjs` running through
+the Probe workflow. It is not enabled yet — see "Enabling SportsGameOdds"
+below for the one config change and the one thing still worth checking.
+
 `OddsApiProvider` (The Odds API) is implemented and tested against recorded
-payload shapes, but is **not enabled**, because the free tier's terms and NFL
-player-prop coverage could not be verified from this environment — outbound
-requests to the vendor's domain are blocked by the network egress policy here.
+payload shapes, and remains the fallback. It is **not enabled**, because the
+free tier's terms and NFL player-prop coverage could not be verified from this
+environment — outbound requests to the vendor's domain are blocked by the
+network egress policy here.
+
+## What the live SportsGameOdds API actually returns
+
+Established by probe, not by documentation. Each of these is a way an adapter
+written from the docs would have failed silently:
+
+- **Kickoff is `status.startsAt`.** There is no top-level `startTime`.
+- **`event.players` is a directory** keyed by player id (`TONY_POLLARD_1_NFL`),
+  carrying the full name the identity matcher needs.
+- **Odds are an object keyed by an odd id** of the form
+  `{statID}-{statEntityID}-{periodID}-{betTypeID}-{sideID}`, e.g.
+  `rushing_yards-TONY_POLLARD_1_NFL-game-ou-over`. The same five fields are
+  also present on the quote itself.
+- **The line is `bookOverUnder` and the price is `bookOdds`**, both strings.
+  `fairOverUnder` / `fairOdds` are the provider's own de-vigged view.
+- **`byBookmaker` is empty on the free plan.** A quote is one consensus number,
+  so the adapter reports a single book rather than dressing it up as agreement
+  between several.
+- **An unfiltered `leagueID=NFL` query answers with novelty events** — the first
+  probe came back with Puppy Bowl XX and "sex of the winning touchdown scorer".
+  Real games are `type=match`.
+
+Market identifiers confirmed present on a live NFL event: `passing_yards`,
+`rushing_yards`, `receiving_yards`. The event sampled was preseason and carried
+no receptions or touchdown markets; those identifiers follow the same naming
+scheme and are mapped, and a market that never appears simply produces no
+quotes rather than an error.
+
+## Enabling SportsGameOdds
+
+The repository secret `SPORTSGAMEODDS_API_KEY` already exists and is valid —
+the probe authenticated with it. To turn the provider on:
+
+1. Make the key available to the Worker:
+   ```bash
+   npx wrangler secret put SPORTSGAMEODDS_API_KEY
+   ```
+2. Set `VEGAS_PROVIDER = "sportsgameodds"` in `wrangler.toml` and redeploy.
+
+Still worth checking on the first live Sunday, because the sampled event was
+preseason: that regular-season games carry `receptions` and anytime-touchdown
+markets under the identifiers in `INBOUND_MARKETS`, and that a full slate stays
+inside the free plan's 2,500 objects a month. The cache layer, not the adapter,
+decides when a fetch is allowed, so the lever for that is the refresh cadence.
 
 ## Verify before enabling a live provider
 
