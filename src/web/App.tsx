@@ -37,7 +37,7 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const tabbar = useRef<HTMLElement | null>(null);
+  const measureTabbar = useTabbarHeight();
 
   const refresh = useCallback(async () => {
     try {
@@ -73,8 +73,6 @@ export function App() {
     void checkLock();
     void refresh();
   }, [checkLock, refresh]);
-
-  useTabbarHeight(tabbar);
 
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
@@ -116,7 +114,7 @@ export function App() {
         ) : null}
       </main>
 
-      <nav className="tabbar" aria-label="Main navigation" ref={tabbar}>
+      <nav className="tabbar" aria-label="Main navigation" ref={measureTabbar}>
         {TABS.map((t) => {
           const badge =
             t.id === 'review' && overview
@@ -157,10 +155,26 @@ export function App() {
  * including whatever the safe-area inset added to it, so it is asked — on
  * mount, and again whenever it changes, which is what happens when Safari's
  * chrome collapses and the inset changes with it.
+ *
+ * **A callback ref, not an effect over a ref object, and that is the whole
+ * point.** This was written as `useEffect(..., [ref])`, which runs once after
+ * the first render — and on the first render the app is still showing its
+ * loading state, so there is no bar in the document and `ref.current` is null.
+ * The effect bailed, its dependency never changed, and it never ran again: the
+ * measurement had simply never happened. The page spent every session
+ * reserving the 50px fallback for a bar that is 45px without a home indicator
+ * and 62px with one — over-reserving on a desktop, and hiding the last row
+ * behind the bar on a phone.
+ *
+ * A callback ref runs when the node actually arrives, which is the event this
+ * cares about.
  */
-function useTabbarHeight(ref: React.MutableRefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const node = ref.current;
+function useTabbarHeight(): (node: HTMLElement | null) => void {
+  const dispose = useRef<(() => void) | null>(null);
+
+  return useCallback((node: HTMLElement | null) => {
+    dispose.current?.();
+    dispose.current = null;
     if (!node) return;
 
     /*
@@ -183,12 +197,25 @@ function useTabbarHeight(ref: React.MutableRefObject<HTMLElement | null>) {
     apply();
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', apply);
-      return () => window.removeEventListener('resize', apply);
+      dispose.current = () => window.removeEventListener('resize', apply);
+      return;
     }
+    /*
+     * Observed as a border box, which is the difference between working and
+     * not.
+     *
+     * A ResizeObserver watches the *content* box unless told otherwise, and
+     * everything that changes this bar's height changes its padding: the whole
+     * mechanism is `padding-bottom: var(--nav-inset)`. The content box — a row
+     * of 44px buttons — never moves. So the observer sat there, correctly
+     * reporting that nothing had changed, through exactly the event it exists
+     * to catch: Safari's chrome collapsing, the inset going from 0 to 34, and
+     * the bar growing by 17px that the page then failed to reserve.
+     */
     const observer = new ResizeObserver(apply);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [ref]);
+    observer.observe(node, { box: 'border-box' });
+    dispose.current = () => observer.disconnect();
+  }, []);
 }
 
 /** Inline unlock, shown in Setup. Nothing is hidden behind it — only changes. */

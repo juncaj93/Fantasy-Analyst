@@ -190,6 +190,38 @@ if (board.json) {
   }
 }
 
+// 4b. The one line of context the expanded card kept, and the injury tags.
+//
+// Both are quiet failures if they go wrong: a tier line on every card is
+// wallpaper, a tier line on none of them means the grouping collapsed, and an
+// injury tag that appears on healthy players is worse than no tag.
+if (board.json) {
+  const recs = board.json.recommendations ?? [];
+  const withContext = recs.filter((r) => r.tierContext);
+  check(
+    'the tier line is on some cards and not on all of them',
+    withContext.length > 0 && withContext.length < recs.length,
+    `${withContext.length} of ${recs.length}`,
+  );
+  const overlong = withContext.filter((r) => r.tierContext.length > 90);
+  check('it is one short line, never a paragraph', overlong.length === 0, withContext[0]?.tierContext ?? '');
+
+  const tagged = recs.filter((r) => r.status);
+  check(
+    'injury designations are carried, and not by everybody',
+    tagged.length < recs.length,
+    tagged.length === 0
+      ? 'nobody is currently designated'
+      : `${tagged.length} designated: ${[...new Set(tagged.map((r) => r.status))].join(', ')}`,
+  );
+  // Ranking is ordered by total regardless of who is hurt.
+  const totals = recs.map((r) => r.total);
+  check(
+    'the board is still ordered by score, not by health',
+    totals.every((t, i) => i === 0 || totals[i - 1] >= t),
+  );
+}
+
 // 5. The expanded card's two feeds.
 //
 // Both are caches of Sleeper data, and a card cannot tell a cache that is empty
@@ -229,13 +261,20 @@ if (topPlayer) {
       !last?.positionRank || /^[A-Z]+([1-9]\d{0,2})$/.test(last.positionRank),
       `${last?.season ?? '—'}: ${last?.gamesPlayed ?? '—'} GP, ${last?.positionRank ?? 'no finish'}`,
     );
-    const summary = one.json.outlook?.summary ?? '';
+    const text = one.json.outlook?.text ?? '';
     check(
-      'any outlook is short and attributed',
-      !one.json.outlook || (summary.length > 0 && summary.length < 500 && !!one.json.outlook.source),
+      'any outlook is whole and attributed',
+      !one.json.outlook || (text.length > 0 && !!one.json.outlook.source),
       one.json.outlook
-        ? `${summary.length} chars from ${one.json.outlook.source}`
+        ? `${text.length} chars from ${one.json.outlook.source}`
         : (one.json.outlookNote ?? 'none published'),
+    );
+    // A named injury, or nothing. Never a diagnosis the app made up.
+    check(
+      'injury context is a label rather than a retelling',
+      !one.json.injuryContext ||
+        (one.json.injuryContext.startsWith('Major injury history:') && one.json.injuryContext.length < 80),
+      one.json.injuryContext ?? 'nothing named in the source',
     );
   }
 }

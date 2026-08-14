@@ -44,6 +44,130 @@ test.describe('shell', () => {
     await login(page);
     await expect(page.getByTestId('tab-review').locator('.tab-badge')).toBeVisible();
   });
+
+  /**
+   * The bottom of the screen, which has been wrong twice.
+   *
+   * The symptom both times was a strip of blank space under the navigation.
+   * The cause is always double-counting: `env(safe-area-inset-bottom)` read in
+   * two places, or a spacer reserving what the bar already reserves. So this
+   * asserts the ownership rather than a pixel count — one owner for the
+   * viewport height, one for the inset, one for the reservation — and does it
+   * with the inset forced on, because the browser these tests run in reports
+   * zero for it and the bug only exists when it does not.
+   */
+  test.describe('the bottom bar', () => {
+    const INSET = 34;
+
+    async function geometry(page: Page, inset: number) {
+      await page.goto('/');
+      await expect(page.getByTestId('tab-draft')).toBeVisible();
+      await page.addStyleTag({ content: `:root { --safe-bottom: ${inset}px; }` });
+      await page.waitForTimeout(300);
+      return page.evaluate(() => {
+        const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
+        const main = document.querySelector('.app-main')!;
+        const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
+        const last = rows[rows.length - 1]?.getBoundingClientRect() ?? null;
+        return {
+          viewport: window.innerHeight,
+          navTop: Math.round(nav.top),
+          navBottom: Math.round(nav.bottom),
+          navHeight: Math.round(nav.height),
+          gapBelowNav: Math.round(window.innerHeight - nav.bottom),
+          reserved: getComputedStyle(main).paddingBottom,
+          measuredBar: getComputedStyle(document.documentElement).getPropertyValue('--tabbar-height').trim(),
+          documentHeight: document.documentElement.scrollHeight,
+          lastRowBottom: last ? Math.round(last.bottom) : null,
+        };
+      });
+    }
+
+    test('sits flush to the bottom with nothing beneath it', async ({ page }) => {
+      for (const inset of [0, INSET]) {
+        const g = await geometry(page, inset);
+        expect(g.gapBelowNav, `inset ${inset}: nothing may show below the bar`).toBe(0);
+        expect(g.navBottom, `inset ${inset}: the bar reaches the viewport bottom`).toBe(g.viewport);
+      }
+    });
+
+    test('spends the indicator inset once, and less of it than the device offers', async ({ page }) => {
+      const flat = await geometry(page, 0);
+      const inset = await geometry(page, INSET);
+      // A screen with no home indicator gets no padding at all.
+      expect(flat.navHeight, 'no inset, no extra height').toBe(44 + 1);
+      // With one, the bar grows by the clearance and not by the whole inset.
+      const grew = inset.navHeight - flat.navHeight;
+      expect(grew).toBeGreaterThan(0);
+      expect(grew, 'the full 34px inset is what read as a blank strip').toBeLessThan(INSET);
+    });
+
+    test('reserves exactly the bar, once', async ({ page }) => {
+      const g = await geometry(page, INSET);
+      // The page reserves the bar's measured height (which already contains the
+      // inset) plus one gap — never the inset a second time.
+      const reserved = Number.parseFloat(g.reserved);
+      const bar = Number.parseFloat(g.measuredBar);
+      expect(bar).toBe(g.navHeight);
+      expect(reserved - bar, 'the reservation is the bar plus a hairline gap').toBeLessThanOrEqual(10);
+      expect(reserved).toBeGreaterThanOrEqual(bar);
+    });
+
+    test('lets the last row scroll clear of the bar', async ({ page }) => {
+      await page.goto('/');
+      await expect(page.getByTestId('board-list')).toBeVisible();
+      await page.addStyleTag({ content: `:root { --safe-bottom: ${INSET}px; }` });
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(300);
+      const clear = await page.evaluate(() => {
+        const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
+        const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
+        const last = rows[rows.length - 1]!.getBoundingClientRect();
+        return { lastBottom: Math.round(last.bottom), navTop: Math.round(nav.top) };
+      });
+      expect(clear.lastBottom, 'the last player must not sit under the bar').toBeLessThanOrEqual(clear.navTop);
+    });
+
+    test('is the same geometry in Light and Dark', async ({ page }) => {
+      const heights: number[] = [];
+      for (const theme of ['light', 'dark'] as const) {
+        await page.goto('/');
+        await expect(page.getByTestId('tab-draft')).toBeVisible();
+        await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+        await page.addStyleTag({ content: `:root { --safe-bottom: ${INSET}px; }` });
+        await page.waitForTimeout(300);
+        const g = await page.evaluate(() => {
+          const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
+          return {
+            height: Math.round(nav.height),
+            gap: Math.round(window.innerHeight - nav.bottom),
+            // The surface must run to the bottom edge, so the inset is bar and
+            // not page: a transparent strip there is the "grey/black" one.
+            background: getComputedStyle(document.querySelector('.tabbar')!).backgroundColor,
+          };
+        });
+        expect(g.gap).toBe(0);
+        expect(g.background).not.toBe('rgba(0, 0, 0, 0)');
+        heights.push(g.height);
+      }
+      expect(heights[0]).toBe(heights[1]);
+    });
+
+    /** One owner for the viewport height: a second `100dvh` is a second claim. */
+    test('claims the viewport height exactly once', async ({ page }) => {
+      await page.goto('/');
+      await expect(page.getByTestId('tab-draft')).toBeVisible();
+      const claims = await page.evaluate(() =>
+        ['#root', '.app', '.app-main'].map((sel) => {
+          const el = document.querySelector(sel)!;
+          return { sel, minHeight: getComputedStyle(el).minHeight };
+        }),
+      );
+      const viewport = await page.evaluate(() => window.innerHeight);
+      const full = claims.filter((c) => Math.abs(Number.parseFloat(c.minHeight) - viewport) < 2);
+      expect(full.map((c) => c.sel)).toEqual(['#root']);
+    });
+  });
 });
 
 test.describe('draft room', () => {
@@ -183,9 +307,16 @@ test.describe('draft room', () => {
       expect(line.toLowerCase()).not.toContain(word);
     }
 
-    // Expanded, the same market says what it is worth in this league's points.
-    await withMarket.first().locator('.row-button').click();
-    await expect(withMarket.first().getByTestId('market-baseline')).toContainText('points in this league');
+    /*
+     * What the market is worth in this league's points is still computed and
+     * still returned — it has stopped being printed, along with the rest of the
+     * ranking's workings. The collapsed line above is the market context the
+     * card shows now.
+     */
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    const priced = board.recommendations.filter((r: { marketBaseline: unknown }) => r.marketBaseline);
+    expect(priced.length).toBeGreaterThan(0);
+    expect(priced[0].marketBaseline.points).not.toBeNull();
   });
 
   test('colour-codes positions without losing the letters', async ({ page }) => {
@@ -203,91 +334,130 @@ test.describe('draft room', () => {
     await expect(page.locator('[data-testid="recommendation-row"][data-player-id="1002"]')).toHaveCount(0);
   });
 
-  test('explains a recommendation with component scores on tap', async ({ page }) => {
+  /**
+   * The expansion stopped explaining the ranking.
+   *
+   * "Why this rank", its bullets, the counterpoint and the component
+   * arithmetic all justified a position the reader can already see, on a screen
+   * where the question is "who is this and should I take him". They are gone
+   * from here — and still computed, still returned by the board, so nothing was
+   * deleted from the system.
+   */
+  test('shows no ranking rationale in the quick expansion', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
     await first.click();
-    await expect(first.locator('.explain')).toBeVisible();
-    await expect(first.getByText('Why this rank')).toBeVisible();
+    await expect(first.getByTestId('player-detail')).toBeVisible();
 
-    // The default expansion is a decision, not a derivation: the raw component
-    // arithmetic is present but folded away until it is asked for.
-    await expect(first.locator('.component').first()).toBeHidden();
-    await first.getByTestId('advanced-breakdown').locator('summary').click();
+    const detail = (await first.locator('.explain').innerText()).toLowerCase();
+    for (const gone of ['why this rank', 'show all reasons', 'counterpoint', 'advanced breakdown']) {
+      expect(detail, `"${gone}" should be gone from the quick expansion`).not.toContain(gone);
+    }
+    // Structurally, not only by wording.
+    for (const selector of ['.reason-list', '.component', '.metric-grid', '.stat-label', '.verdict']) {
+      await expect(first.locator(`.explain ${selector}`)).toHaveCount(0);
+    }
+    await expect(first.getByTestId('advanced-breakdown')).toHaveCount(0);
+    await expect(first.getByTestId('all-reasons')).toHaveCount(0);
+  });
 
-    // Components are exposed individually, not collapsed into one opaque score.
-    const labels = (await first.locator('.component-label').allInnerTexts()).join(' | ');
-    for (const label of ['ADP value', 'Roster need', 'Positional scarcity', 'League fit', 'Survival to next pick', 'Total']) {
+  /** …and the engine still produces all of it, for anything that wants it. */
+  test('still computes the full explanation behind the board', async ({ page }) => {
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=3')).json();
+    const rec = board.recommendations[0];
+    expect(rec.reasons.length, 'reasons are still produced').toBeGreaterThan(0);
+    const labels = rec.components.map((c: { label: string }) => c.label).join(' | ');
+    for (const label of ['ADP value', 'Roster need', 'Positional scarcity', 'League fit', 'Survival to next pick']) {
       expect(labels, `missing component: ${label}`).toContain(label);
     }
   });
 
   /**
-   * The rule the expansion is built on: it may not repeat the row it opened
-   * from. It used to lead with a grid of ADP, value, survival and the tally —
-   * all four printed two lines above, in the same units.
+   * One line of context survives, because it is a fact about the board rather
+   * than about the model — and it is absent whenever the tier is ordinary,
+   * which is what stops it becoming the next thing to delete.
    */
-  test('adds context to the row rather than restating it', async ({ page }) => {
-    const first = page.getByTestId('recommendation-row').first();
-    await first.click();
-    await expect(first.getByTestId('player-detail')).toBeVisible();
+  test('keeps one tier-context line, and only where it means something', async ({ page }) => {
+    // The seeded tight ends are two deep in front of a real cliff.
+    const te = page.locator('[data-testid="recommendation-row"]', { hasText: 'Nate Kowalski' }).first();
+    await te.scrollIntoViewIfNeeded();
+    await te.click();
+    await expect(te.getByTestId('tier-context')).toContainText(/TE tier cliff · 2 left/i);
+    await te.locator('.row-button').click();
 
-    /*
-     * Checked structurally rather than by looking for the words.
-     *
-     * "position is nearly exhausted before your next pick" is a reason, not a
-     * restated survival tile, and a reason is allowed to use a number to make
-     * its point — "this is a reach: -4.8 picks" is the argument, not a second
-     * printing of the value. What may not come back is the grid of labelled
-     * tiles that restated all four without adding anything.
-     */
-    await expect(first.locator('.explain .metric-grid')).toHaveCount(0);
-    await expect(first.locator('.explain .stat-label')).toHaveCount(0);
+    // The receivers have no computed cliff on this board, so they get no line.
+    const wr = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
+    await wr.scrollIntoViewIfNeeded();
+    await wr.click();
+    await expect(wr.getByTestId('tier-context')).toHaveCount(0);
+    await wr.locator('.row-button').click();
 
-    // What replaced it: context the row does not have.
-    await expect(first.getByText('Why this rank')).toBeVisible();
-    await expect(first.getByText('Counterpoint', { exact: true })).toBeVisible();
-
-    // At most one conclusion, and only when there is a genuine warning.
-    expect(await first.getByTestId('verdict').count()).toBeLessThanOrEqual(1);
-
-    // Reasons are capped by default; the rest are one tap away, never deleted.
-    expect(await first.locator('.reason-list').first().locator('li').count()).toBeLessThanOrEqual(3);
-
-    // Nothing in the reasons repeats a conclusion shown above them.
-    const verdicts = await first.locator('.verdict-label').allInnerTexts();
-    const bullets = (await first.locator('.reason-list li').allInnerTexts()).map((b) => b.trim());
-    for (const label of verdicts) expect(bullets).not.toContain(label.trim());
-  });
-
-  test('answers with one counterpoint, or says there is none', async ({ page }) => {
-    const rows = page.getByTestId('recommendation-row');
-    for (let i = 0; i < Math.min(await rows.count(), 4); i++) {
-      const row = rows.nth(i);
-      await row.click();
-      await expect(row.getByText('Counterpoint', { exact: true })).toBeVisible();
-
-      const lists = row.locator('.reason-list');
-      const counterpoints = lists.nth((await lists.count()) - 1);
-      const bullets = await counterpoints.locator('li').count();
-      if (bullets === 0) {
-        // Nothing is invented to fill the space; the absence is stated.
-        await expect(row.getByTestId('no-counterpoint')).toBeVisible();
-      } else {
-        expect(bullets, 'exactly one counterpoint by default').toBe(1);
-      }
-      await row.locator('.row-button').click();
+    // It is one line, not a section: no heading, no bullets.
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    const lines = board.recommendations
+      .map((r: { tierContext: string | null }) => r.tierContext)
+      .filter(Boolean) as string[];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).not.toContain('\n');
+      expect(line.length).toBeLessThan(90);
     }
   });
 
   /**
-   * The outlook is written by somebody, and says so.
-   *
-   * Sleeper serves it through a public endpoint; the demo data stands in for it
-   * so the suite never reaches a third party for player ids that are not
-   * theirs. What is asserted is the shape: a heading, a short paragraph, an
-   * attribution, and an honest sentence when there is none.
+   * Current availability, without expanding anything. This was previously
+   * visible only on the Players screen, which is not where drafting happens.
    */
-  test('shows a short attributed season outlook, and admits when there is none', async ({ page }) => {
+  test('tags current injury status on the collapsed card', async ({ page }) => {
+    const tagged = await page
+      .getByTestId('recommendation-row')
+      .evaluateAll((rows) =>
+        rows.map((r) => ({
+          name: r.querySelector('.player-name')?.textContent ?? '',
+          tag: r.querySelector('[data-testid="injury-tag"]')?.getAttribute('data-status') ?? null,
+          label: r.querySelector('[data-testid="injury-tag"]')?.getAttribute('aria-label') ?? null,
+        })),
+      );
+    const byName = new Map(tagged.map((t) => [t.name, t]));
+
+    expect(byName.get('Julian Reyes')?.tag).toBe('OUT');
+    expect(byName.get('Nate Kowalski')?.tag).toBe('IR');
+    expect(byName.get('Andre Sotelo')?.tag).toBe('Q');
+    expect(byName.get('Cal Whitfield')?.tag).toBe('D');
+    // A healthy player carries nothing at all.
+    expect(byName.get('Kai Brennan')?.tag).toBeNull();
+
+    // The word is always there for a screen reader; the colour only accelerates.
+    expect(byName.get('Andre Sotelo')?.label).toBe('Questionable');
+
+    // Three distinct tones, so severity is visible at a glance too.
+    const colours = await page
+      .locator('[data-testid="injury-tag"]')
+      .evaluateAll((nodes) => [...new Set(nodes.map((n) => getComputedStyle(n).backgroundColor))]);
+    expect(colours.length).toBeGreaterThan(1);
+  });
+
+  /** Showing a status must not quietly become a second injury penalty. */
+  test('the injury tags do not reorder the board', async ({ page }) => {
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    const ranked = board.recommendations.map((r: { total: number }) => r.total);
+    expect([...ranked].sort((a: number, b: number) => b - a)).toEqual(ranked);
+    // The tagged players are not all at the bottom — they sit on their merits.
+    const positions = board.recommendations
+      .map((r: { status: string | null }, i: number) => (r.status ? i : -1))
+      .filter((i: number) => i >= 0);
+    expect(Math.min(...positions)).toBeLessThan(board.recommendations.length / 2);
+  });
+
+  /**
+   * The outlook is written by somebody, says so, and is shown whole.
+   *
+   * It used to be cut to the first two or three sentences. These paragraphs
+   * open with last season and work forwards, so the clip routinely dropped the
+   * depth-chart and workload half — the fantasy-relevant part — to save space
+   * on a card that has since lost three sections. Compressing it here instead
+   * would mean paraphrasing somebody else's analysis under their name.
+   */
+  test('shows the whole attributed season outlook, and admits when there is none', async ({ page }) => {
     const withOutlook = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
     await withOutlook.click();
     const outlook = withOutlook.getByTestId('outlook');
@@ -295,10 +465,11 @@ test.describe('draft room', () => {
     await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
     await expect(outlook).toContainText('via Sleeper');
 
-    // Two or three sentences, not the whole paragraph.
-    const text = (await outlook.innerText()).split(' — ')[0]!;
-    expect((text.match(/[.!?](\s|$)/g) ?? []).length).toBeLessThanOrEqual(3);
-    expect(text.length).toBeLessThan(420);
+    // The whole of what the source holds, not a prefix of it.
+    const shown = (await outlook.innerText()).split(' — ')[0]!.trim();
+    const stored = await (await page.request.get('/api/players/1005/detail')).json();
+    expect(shown).toBe(stored.outlook.text);
+    expect(shown.length).toBeGreaterThan(300);
     await withOutlook.locator('.row-button').click();
 
     const without = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();
@@ -306,6 +477,34 @@ test.describe('draft room', () => {
     await without.click();
     await expect(without.getByTestId('outlook-none')).toContainText(/no .* outlook published/i);
     await without.locator('.row-button').click();
+  });
+
+  /**
+   * Injury context is a label, not a retelling: the outlook above already
+   * explains it in the words of somebody who knows, and the app repeating that
+   * in its own words would be duplication at best and paraphrase at worst.
+   */
+  test('names a major injury only when the source names one', async ({ page }) => {
+    // Reyes's outlook says he tore an ACL.
+    const hurt = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
+    await hurt.scrollIntoViewIfNeeded();
+    await hurt.click();
+    await expect(hurt.getByTestId('injury-context')).toContainText('Major injury history: ACL');
+    // One line, not a paragraph, and it does not restate the outlook.
+    const context = await hurt.getByTestId('injury-context').innerText();
+    expect(context.length).toBeLessThan(80);
+    await hurt.locator('.row-button').click();
+
+    /*
+     * Brennan's outlook mentions an ankle that cost him two games. That is a
+     * gap in a game log, not a major injury history, and inventing one from it
+     * is the failure this section is written to avoid.
+     */
+    const fit = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
+    await fit.scrollIntoViewIfNeeded();
+    await fit.click();
+    await expect(fit.getByTestId('injury-context')).toHaveCount(0);
+    await expect(fit.getByText('Injury context')).toHaveCount(0);
   });
 
   test('shows last season as games played and a half-PPR finish', async ({ page }) => {
@@ -521,11 +720,17 @@ test.describe('draft room', () => {
     const afterReload = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
     await expect(afterReload.getByTestId('queue-control')).toHaveAttribute('data-queued', '1');
 
-    // The expanded card says what the star did — and, pointedly, what it did not.
-    await afterReload.click();
-    await expect(afterReload.getByTestId('detail-queued')).toContainText('does not change his ranking');
-    // Starring is not rating: no My Guy line appears from it.
-    await expect(afterReload.getByTestId('detail-my-guy')).toHaveCount(0);
+    /*
+     * What the star did not do, checked against the board rather than against a
+     * sentence on a card.
+     *
+     * The expansion used to explain this in words; it explains nothing now. The
+     * guarantee is better tested at the source anyway — the ranking is byte for
+     * byte the same with the star lit, which is the claim the sentence was
+     * making on its behalf.
+     */
+    const starred = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    expect(starred.recommendations.find((r: { playerId: string }) => r.playerId === playerId).queued).toBe(true);
 
     // Leave the board as it was found, so the shared dev server stays clean.
     await afterReload.getByTestId('queue-control').click();

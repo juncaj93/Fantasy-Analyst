@@ -46,15 +46,9 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
-import {
-  AvoidBadge,
-  QueueControl,
-  ReasonList,
-  Verdict,
-  draftVerdict,
-  saidAlready,
-  withoutRepeats,
-} from '../components/decisions.tsx';
+/* What Sleeper says about a player's availability right now. Never a ranking input. */
+import { injuryStatusTag } from '../../core/draft/injury.ts';
+import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 
 /**
  * The filter row.
@@ -70,18 +64,6 @@ import {
  */
 const QUEUE_FILTER = '★';
 const ALL_FILTER = 'ALL';
-
-/** How many reasons the expanded player shows before "Show all reasons". */
-const REASONS_SHOWN = 3;
-/**
- * One counterpoint, not a second list of reasons.
- *
- * Two were shown, which turned "the strongest argument against him" into a pair
- * of arguments of unequal weight — and the second was usually the first in
- * other words. The rest are still computed and still in the ledger; the card
- * shows the one that would actually change a pick.
- */
-const COUNTERPOINTS_SHOWN = 1;
 
 export function DraftScreen({ leagues, unlocked }: { leagues: LeagueSummary[]; unlocked: boolean }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
@@ -539,6 +521,7 @@ function RecommendationRow({
           <span className="rank">{rank}</span>
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
+          <InjuryTag status={rec.status} />
           <PositionBadge position={rec.position} team={rec.team} />
         </div>
 
@@ -635,157 +618,88 @@ function usePlayerDetail(playerId: string) {
 }
 
 /**
- * The expanded player.
+ * `Q`, `D`, `OUT`, `IR` — beside the name, without expanding anything.
  *
- * Rewritten around one rule: **it may not repeat the card it opened from.**
+ * This is the one fact about a player that can change a pick before any of the
+ * numbers do, and it was previously invisible on the board: it lived in the
+ * player dictionary and appeared on the Players screen, which is not where
+ * drafting happens.
  *
- * It used to lead with a grid of ADP, value, survival and the news tally —
- * every one of which is printed two lines above, on the collapsed row, in the
- * same units. Four tiles of restated numbers is what made the expansion feel
- * like a diagnostics panel: the reader has already read them, so the first
- * thing the card does is waste their time.
+ * Two letters at most, because forty rows have room for two letters. The word
+ * is in the accessible name and the tooltip, so the colour is an accelerator
+ * and never the thing carrying the meaning — the same rule the position tint
+ * follows. A healthy player renders nothing at all: a badge on every row is a
+ * badge that means nothing.
+ */
+function InjuryTag({ status }: { status: string | null }) {
+  const tag = injuryStatusTag(status);
+  if (!tag) return null;
+  return (
+    <span
+      className={`injury-tag injury-${tag.tone}`}
+      data-testid="injury-tag"
+      data-status={tag.code}
+      title={tag.label}
+      aria-label={tag.label}
+    >
+      {tag.code}
+    </span>
+  );
+}
+
+/**
+ * The expanded player: four things, and nothing that explains the ranking.
  *
- * What it says instead is what the row cannot: why this rank, the single best
- * argument against, what is expected of him this season, and what he actually
- * did last season. Then the arithmetic, in full and folded away.
+ * It has been cut twice now, and this is the cut that changes what it is for.
+ * The first pass removed the grid of restated numbers. This one removes the
+ * ranking rationale entirely — the bullets under "Why this rank", the
+ * counterpoint, and the component arithmetic behind Advanced. All three
+ * explained a position the reader can already see, in a place where the
+ * question is not "why is he ranked here" but "who is this and should I take
+ * him". A live draft is thirty seconds long.
  *
- * Nothing here recalculates anything.
+ * What is left is a fantasy snapshot: where his position is breaking and who
+ * ahead of you still needs one, what is expected of him this season, what he
+ * did last season, and whether he is coming back from something.
+ *
+ * The rationale is not deleted from the system — the board response still
+ * carries every reason, counterpoint, component, weight and contribution, and
+ * the engine still computes them. They have stopped being rendered here.
  */
 function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
 
-  // Only the caution leads. The timing states used to headline this card as
-  // "Take Now"; the survival percentage on the row says the same thing in a
-  // number, and the sentence that gave it context is the first reason below.
-  const verdict = rec.avoid.active ? draftVerdict(rec.avoid, rec.wait) : null;
-  // Anything already said as the headline does not get said again as a bullet.
-  const said = [verdict?.label, verdict?.detail, rec.avoid.active ? rec.avoid.trendNote : null];
-  const reasons = withoutRepeats(rec.reasons, said);
-  const counterpoints = withoutRepeats(rec.counterpoints, [...said, ...reasons]);
-  const topReasons = reasons.slice(0, REASONS_SHOWN);
-  const moreReasons = reasons.slice(REASONS_SHOWN);
-  const cliffNote = saidAlready(rec.tierCliff.message, said) ? null : rec.tierCliff.message;
-
   return (
     <div className="explain" data-testid="player-detail">
-      {verdict ? (
-        <Verdict tone={verdict.tone} label={verdict.label} detail={verdict.detail} glyph={verdict.glyph} />
-      ) : null}
-
-      {topReasons.length > 0 ? (
-        <>
-          <DetailLabel>Why this rank</DetailLabel>
-          <ReasonList items={topReasons} />
-          {moreReasons.length > 0 ? (
-            <details className="disclosure" data-testid="all-reasons">
-              <summary>Show all reasons ({reasons.length})</summary>
-              <ReasonList items={moreReasons} />
-            </details>
-          ) : null}
-        </>
-      ) : null}
-
       {/*
-        One counterpoint, not a second list of reasons.
-
-        Two were shown before, which turned the strongest argument against him
-        into a pair of arguments of unequal weight — and the second was usually
-        the first restated. When there genuinely is not one, saying so is worth
-        a line: "nothing argues against him" is a real answer, and inventing a
-        doubt to fill the space would be worse than silence.
+        The one piece of ranking context that survives, because it is a fact
+        about the board rather than about the model: where this position breaks,
+        how many are left before it does, and whether the teams picking before
+        you still need one. Absent whenever the tier is ordinary — most of the
+        time — which is what keeps it from becoming wallpaper.
       */}
-      <DetailLabel>Counterpoint</DetailLabel>
-      {counterpoints.length > 0 ? (
-        <ReasonList muted items={counterpoints.slice(0, COUNTERPOINTS_SHOWN)} />
-      ) : (
-        <div className="muted" data-testid="no-counterpoint">
-          No major counterpoint.
+      {rec.tierContext ? (
+        <div className="tier-context" data-testid="tier-context">
+          {rec.tierContext}
         </div>
-      )}
+      ) : null}
 
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
 
       {/*
-        The user's own two marks, which the row shows as glyphs and never
-        explains. Separate lines because they do separate things: the heart
-        moved him up this board, and the star did not and is not claiming to.
+        A label, not a retelling. The outlook above has already explained the
+        injury in the words of somebody who knows; saying it again in the app's
+        own words would be duplication at best and paraphrase at worst.
       */}
-      {rec.myGuy.level > 0 || rec.queued ? (
-        <div className="decision-detail" data-testid="player-marks">
-          {rec.myGuy.level > 0 ? (
-            <div className="muted" data-testid="detail-my-guy">
-              {rec.myGuy.stars} {rec.myGuy.label} — your own rating from the players list, separate from the news
-              tally. It moves him up this board.
-            </div>
-          ) : null}
-          {rec.queued ? (
-            <div className="muted" data-testid="detail-queued">
-              ★ In your queue — a bookmark for the ★ filter. It does not change his ranking.
-            </div>
-          ) : null}
-        </div>
+      {detail?.injuryContext ? (
+        <>
+          <DetailLabel>Injury context</DetailLabel>
+          <div className="muted" data-testid="injury-context">
+            {detail.injuryContext}
+          </div>
+        </>
       ) : null}
-
-      {/*
-        Full explainability, kept in full and kept out of the way. Every
-        component, its weight, its raw score and its contribution, exactly as
-        the engine produced them — plus the three readings that used to sit
-        above it and are reference rather than decision: where the market has
-        this player's position breaking, what the season line implies, and the
-        recent halves of a tally whose lifetime figure is already on the row.
-      */}
-      <details className="disclosure" data-testid="advanced-breakdown">
-        <summary>Advanced breakdown</summary>
-
-        {cliffNote || rec.marketBaseline?.points != null || rec.news30Net !== 0 || rec.news7Net !== 0 ? (
-          <div className="decision-detail" data-testid="player-context">
-            {cliffNote ? <div className="muted">{cliffNote}</div> : null}
-            {rec.marketBaseline?.points != null ? (
-              <div className="muted" data-testid="market-baseline">
-                Season market implies <strong>{rec.marketBaseline.points}</strong> points in this league&rsquo;s
-                scoring — {rec.marketBaseline.note}.
-              </div>
-            ) : null}
-            {rec.news30Net !== 0 || rec.news7Net !== 0 ? (
-              <div className="player-row-metrics" style={{ marginTop: 0 }}>
-                <span className="metric">
-                  30d <Signal net={rec.news30Net} label="news, last 30 days" />
-                </span>
-                <span className="metric">
-                  7d <Signal net={rec.news7Net} label="news, last 7 days" />
-                </span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="components">
-          {rec.components.map((c) => (
-            <div className="component" key={c.key}>
-              <span className="component-label">
-                {c.label}
-                {c.unknown ? ' (unknown)' : ''}
-              </span>
-              <span className="component-value">
-                {c.contribution > 0 ? '+' : ''}
-                {c.contribution.toFixed(2)}
-              </span>
-              <span className="component-detail">
-                {c.display} · score {c.score.toFixed(2)} × weight {c.weight}
-              </span>
-            </div>
-          ))}
-          <div className="component">
-            <span className="component-label">
-              <strong>Total</strong>
-            </span>
-            <span className="component-value">
-              <strong>{rec.total.toFixed(2)}</strong>
-            </span>
-          </div>
-        </div>
-      </details>
     </div>
   );
 }
@@ -825,7 +739,7 @@ function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed
     <>
       <DetailLabel>{detail.outlook.title}</DetailLabel>
       <div className="outlook" data-testid="outlook">
-        {detail.outlook.summary}
+        {detail.outlook.text}
         {detail.outlook.source ? (
           <span className="outlook-source"> — {detail.outlook.source}, via Sleeper</span>
         ) : null}

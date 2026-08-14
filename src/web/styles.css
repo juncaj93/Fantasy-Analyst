@@ -125,19 +125,30 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
   /*
-   * What the tab bar reserves for the home indicator — less than the inset.
+   * How far up the screen the home indicator actually reaches.
    *
-   * The full inset is 34px on every modern iPhone, and spending all of it below
-   * the labels is what produced a bar tall enough to read as a blank strip
-   * stuck under the navigation. The indicator itself is a 5px pill sitting
-   * about 8px off the bottom edge, so ~20px keeps the labels clear of it with
-   * room to spare and hands the other 14px back to the page.
-   *
-   * The floor is zero, not a few pixels of "looks better": a device with no
-   * home indicator has nothing to clear, and giving it padding anyway is how
-   * the bar grows on the one class of screen that never had the problem.
+   * It is a 5px pill sitting 8px off the bottom edge, so it occupies 8–13px and
+   * nothing above 13px collides with it. This is a measurement of the hardware,
+   * not a taste setting, which is why it is written as one.
    */
-  --nav-inset: max(0px, calc(var(--safe-bottom) - 14px));
+  --home-indicator-reach: 13px;
+
+  /*
+   * What the tab bar reserves for it, which is deliberately not the inset.
+   *
+   * `env(safe-area-inset-bottom)` is 34px on every modern iPhone — a generous
+   * region iOS asks apps to keep *controls* out of, not a required margin. A
+   * tab bar that spends all 34px below its labels is 20px taller than it needs
+   * to be, and that surplus is what reads as a blank strip stuck under the
+   * navigation. Clearing the indicator needs the indicator's reach plus a
+   * little air.
+   *
+   * Capped by the inset so it can never add space the device did not ask for,
+   * and floored at zero so a screen with no indicator gets nothing: giving
+   * padding to a device that never had the problem is how a fix for one screen
+   * becomes a regression on another.
+   */
+  --nav-inset: max(0px, min(var(--safe-bottom), calc(var(--home-indicator-reach) + var(--space-2))));
 }
 
 /*
@@ -316,16 +327,44 @@ body,
   }
 }
 
+/*
+ * ============================================================== the shell
+ *
+ * Who owns what, stated once, because getting this wrong is what puts an
+ * unexplained strip under the navigation:
+ *
+ *   `#root`     owns the viewport height. `100dvh` and nothing else does.
+ *   `.tabbar`   owns the home-indicator inset. `env()` is read in exactly one
+ *               place in this stylesheet — `--safe-bottom` — and consumed in
+ *               exactly one rule, the bar's own bottom padding.
+ *   `.app-main` owns the reservation for the bar, and reserves the bar's
+ *               *measured* height, which already contains that inset. It must
+ *               never add the inset itself.
+ *
+ * Three owners, three properties, no overlap. Anything that adds a fourth —
+ * a wrapper with bottom padding, a spacer element, a second `min-height` —
+ * double-counts and shows up as blank space.
+ */
 #root {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 
+/*
+ * The app fills the root and does not restate its height.
+ *
+ * This carried its own `min-height: 100dvh` while sitting inside a root that
+ * already had one. Harmless in the common case and exactly the kind of
+ * duplicated claim that stops being harmless the moment anything above it
+ * gains a border or a margin — at which point the page becomes a viewport plus
+ * that much, and the extra hangs below the fold as dead space.
+ */
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  flex: 1;
+  min-height: 0;
 }
 
 .app-main {
@@ -909,6 +948,64 @@ body,
 
 .detail-label:first-child {
   margin-top: 0;
+}
+
+/*
+ * Where his position is breaking, in one line.
+ *
+ * The whole of what used to be a section of bullets, a section of
+ * counterpoints and a disclosure of arithmetic. Set as a quiet inset strip
+ * rather than a heading plus body, because a heading over a single line is two
+ * lines to say one thing.
+ */
+.tier-context {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-inset);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 4px 8px;
+  margin-bottom: var(--space-4);
+  letter-spacing: 0.005em;
+}
+
+/*
+ * Current availability, beside the name.
+ *
+ * Sized to two or three characters and no more. The three tones are the three
+ * decisions a drafter makes about a status — watch it, worry about it, he is
+ * not playing — and each carries its word in the title and the accessible name.
+ */
+.injury-tag {
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Questionable: worth seeing, not worth alarm. */
+.injury-caution {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+/* Doubtful: the same hue, filled, because it usually means no. */
+.injury-serious {
+  color: var(--on-accent);
+  background: var(--warn);
+}
+
+/* Out, IR, PUP, suspended: he is not playing. */
+.injury-out {
+  color: var(--on-accent);
+  background: var(--neg);
 }
 
 /*

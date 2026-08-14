@@ -17,7 +17,8 @@
  */
 
 import { SleeperClient } from '../../core/sleeper/client.ts';
-import { fetchPlayerOutlook, summariseOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
+import { fetchPlayerOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
+import { majorInjuryHistory } from '../../core/draft/injury.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -70,8 +71,23 @@ export interface OutlookView {
   season: string;
   /** The provider's heading, e.g. `2026 Season Outlook`. */
   title: string;
-  /** Two or three sentences. The whole text is stored, not shown. */
-  summary: string;
+  /**
+   * The outlook, whole and unedited.
+   *
+   * It used to be cut to the first two or three sentences. That was a
+   * reasonable guess at "a card should be short" and a bad trade in practice:
+   * these paragraphs open with last season and work forwards, so the clipped
+   * version routinely dropped the depth-chart and workload sentences — the
+   * fantasy-relevant half — to save space on a card that has since lost a
+   * section of bullets, a section of counterpoints and a disclosure.
+   *
+   * The alternative was to compress it here. Any honest compression of a
+   * thousand characters into three sentences either drops context or starts
+   * paraphrasing, and paraphrasing somebody else's analysis while attributing
+   * it to them is worse than showing more of it. So: all of it, in their words,
+   * with their name on it.
+   */
+  text: string;
   /** Who wrote it. Shown, not merely stored. */
   source: string | null;
   fetchedAt: string;
@@ -86,6 +102,16 @@ export interface PlayerDetailView {
    * "none published" and is not allowed to imply the app failed to look.
    */
   outlookNote: string | null;
+  /**
+   * `Major injury history: ACL` — one line, or nothing.
+   *
+   * Deliberately a label rather than a sentence. The outlook above it already
+   * explains the injury in the words of somebody who knows; repeating that in
+   * the app's own paraphrase would be both duplication and invention. This says
+   * only which named injury is in the text, so a reader scanning the card sees
+   * it without reading the paragraph.
+   */
+  injuryContext: string | null;
 }
 
 export class PlayerDetailService {
@@ -137,7 +163,17 @@ export class PlayerDetailService {
       : null;
 
     const { outlook, note } = await this.outlookFor(playerId, season, now);
-    return { playerId, lastSeason, outlook, outlookNote: note };
+    /*
+     * Read out of the outlook, and only out of the outlook.
+     *
+     * The other candidate sources were considered and rejected: the status
+     * field says what is wrong today and nothing about last year, and the
+     * newsletter ledger records that somebody was written about, not what
+     * happened to them. A named diagnosis in supported prose is the one signal
+     * here that cannot be produced by guessing.
+     */
+    const history = majorInjuryHistory(outlook?.text ?? null);
+    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext: history?.line ?? null };
   }
 
   private async outlookFor(
@@ -284,7 +320,9 @@ function toView(
   return {
     season,
     title: outlook.title ?? `${season} Season Outlook`,
-    summary: summariseOutlook(outlook.body),
+    // Whole, and only whitespace-normalised — the stored body arrives as one
+    // paragraph but nothing guarantees it stays that way.
+    text: outlook.body.replace(/\s+/g, ' ').trim(),
     source: outlook.source,
     fetchedAt,
   };

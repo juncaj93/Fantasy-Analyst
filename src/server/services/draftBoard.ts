@@ -11,6 +11,8 @@ import { computeNeed } from '../../core/draft/need.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
+import { demandBetweenPicks } from '../../core/draft/demandAhead.ts';
+import { tierContextLine } from '../../core/draft/tierContext.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
@@ -30,7 +32,20 @@ import { PlayerRepo } from '../repos/players.ts';
  * and the ranking must come out identical whether or not the star is lit. The
  * engine cannot accidentally read what it is never given.
  */
-export type BoardRecommendation = DraftRecommendation & { queued: boolean };
+export type BoardRecommendation = DraftRecommendation & {
+  queued: boolean;
+  /** Sleeper's current designation — `Questionable`, `Out`, `IR`. Null if fit. */
+  status: string | null;
+  /**
+   * One line of market context, or null when the board has nothing to say.
+   *
+   * Attached out here rather than produced by the engine, because half of it —
+   * who picks before you do again and what they still need — is live draft
+   * state the engine is deliberately never given. Nothing about the ranking
+   * depends on it; it is read by the card and by nothing else.
+   */
+  tierContext: string | null;
+};
 
 export interface DraftBoardState {
   draftId: string;
@@ -311,7 +326,7 @@ export class DraftBoardService {
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
-    const recommendations = rankAvailablePlayers(
+    const ranked = rankAvailablePlayers(
       candidates.map((player) => ({
         player,
         adp: rankOf(player),
@@ -329,8 +344,33 @@ export class DraftBoardService {
         totalPicks: teams * rounds,
       },
     )
-      .slice(0, opts.limit ?? 50)
-      .map((rec) => ({ ...rec, queued: allFlags.get(rec.playerId)?.queued === true }));
+      .slice(0, opts.limit ?? 50);
+
+    /*
+     * How short the teams picking before your next turn are, per position.
+     *
+     * Computed once for the whole board from the pick stream, the actual snake
+     * order and the league's own starting slots — never from ADP or from how
+     * many are left. It is attached to the tier line below and read nowhere
+     * else; no score, weight or ordering sees it.
+     */
+    const demand = demandBetweenPicks({
+      picks,
+      positionOf: (id) => byId.get(id)?.position ?? null,
+      currentPick,
+      horizonPick: horizon?.pickNo ?? null,
+      mySlot,
+      teams,
+      type: draft.type,
+      shape,
+    });
+
+    const recommendations = ranked.map((rec) => ({
+      ...rec,
+      queued: allFlags.get(rec.playerId)?.queued === true,
+      status: byId.get(rec.playerId)?.status ?? null,
+      tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
+    }));
 
     return {
       draftId,

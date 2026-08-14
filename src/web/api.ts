@@ -52,7 +52,14 @@ export interface ComponentScore {
   unknown: boolean;
 }
 
-export interface DraftRecommendation {
+export interface DraftRecommendationExtras {
+  /** Sleeper's current designation — `Questionable`, `Out`, `IR`. */
+  status: string | null;
+  /** One line of market context, or null when the board has nothing to say. */
+  tierContext: string | null;
+}
+
+export interface DraftRecommendation extends DraftRecommendationExtras {
   playerId: string;
   name: string;
   position: string;
@@ -161,13 +168,16 @@ export interface PlayerDetail {
   outlook: {
     season: string;
     title: string;
-    summary: string;
+    /** The whole outlook, in the words of whoever wrote it. */
+    text: string;
     /** Who wrote it. Shown on the card, not merely stored. */
     source: string | null;
     fetchedAt: string;
   } | null;
   /** Why there is no outlook, when there is none. */
   outlookNote: string | null;
+  /** `Major injury history: ACL` — a label, not a retelling. Null when none. */
+  injuryContext: string | null;
 }
 
 export interface RosterAlert {
