@@ -411,13 +411,57 @@ Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
 on the real Safari engine, not only on Chromium locally.
 
+## Milestone 5 — tally magnitude, decision quality, visual pass (done)
+
+**The tally magnitude repair.** An imported tally row is a net score somebody
+already decided across several issues, and the app was losing all but one point
+of it. Not in the importer — that always wrote the real magnitude — but on the
+identity path: an unresolved name recorded only its polarity, so confirming who
+it was created evidence worth ±1 whatever the source said. That is how
+"JSN +11" reached Jaxon Smith-Njigba as +1, and why AVOID (lifetime <= -5) was
+unreachable for any imported row. An identity review now carries the magnitude
+the item would have had if the name had resolved; sentence-level scoring is
+untouched. A tally document also owns every row bearing its message id, so
+re-importing after a confirmation retires the ±1 stand-in instead of counting
+the score twice. Verified against the document in the repository: the reference
+totals reconcile and JSN reaches +11 and stays there across three imports.
+
+**Decision quality — draft.** Tier cliffs (tiers built from real ADP gaps, with
+the gap scaling by draft position), roster construction alerts that read the
+round as well as the roster, ★/★★/★★★ My Guy stored apart from the evidence
+ledger, automatic AVOID, and Take Now / Risky to Wait / Can Probably Wait. All
+five move the ranking rather than decorating it, and all their thresholds live
+in `src/core/draft/decisions.ts`.
+
+**Decision quality — weekly.** Locked games (a started player leaves the
+optimisation entirely, and the rest of the lineup is worked out around them),
+late-swap safety, and market movement read from the snapshots already kept. The
+role-change detector is complete and tested but returns "insufficient data":
+no per-game usage source is connected, and inventing one would be fabrication.
+
+**Visual pass.** Position colour coding everywhere a position appears, the
+draft stat banner replaced by one line, league settings folded away, denser
+rows, and a tab bar flush with the safe area. Six players fit where five did on
+a 360px phone.
+
+**Vegas.** `SportsGameOddsProvider` is implemented and tested against the live
+API's real payloads, captured by probe. Not enabled — see docs/VEGAS.md.
+
+Checks at this milestone: 683 unit/integration tests, 139 Chromium mobile
+browser tests, typecheck, build and `wrangler deploy --dry-run` all green.
+
 ## Recommended next work
 
-1. **After the first real newsletters arrive**, read the coverage report and add
+1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written
+   and tested against live payloads; what a preseason event could not show is
+   whether regular-season games carry `receptions` and anytime-touchdown
+   markets, and what a full slate costs against 2,500 objects a month.
+2. **Connect a per-game usage source** (nflverse or similar). The role-change
+   detector is finished and returns "insufficient data" until one exists; it is
+   the last input the weekly decision layer is missing.
+3. **After the first real newsletters arrive**, read the coverage report and add
    the missing phrase families. This is the single highest-value improvement to
    tally quality.
-2. **Verify and enable a live Vegas provider**, then confirm the cache keeps a
-   full NFL Sunday inside the free tier.
 3. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
    adjustable without a deploy.
 4. **Tier visualisation on the draft board** — the scarcity component already
