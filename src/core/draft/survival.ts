@@ -54,8 +54,18 @@ export interface SurvivalInput {
   adp: number | null;
   /** The overall pick number currently on the clock. */
   currentPick: number;
-  /** The user's next pick number, straight from the live snake order. */
-  nextPick: number;
+  /**
+   * The pick he would have to survive to if you passed on him now.
+   *
+   * **Never the pick on the clock.** On the clock that is the selection being
+   * made, and asking whether a player available now is available now is a
+   * question with one answer for everybody — see `waitHorizonForSlot`, which is
+   * where this comes from.
+   *
+   * `null` on the final selection of a draft: there is no later pick, so there
+   * is nothing to survive to and the answer is unknown rather than certain.
+   */
+  nextPick: number | null;
 }
 
 export interface SurvivalEstimate {
@@ -81,6 +91,24 @@ export function adpSpread(adp: number): number {
 const LOGISTIC_SCALE = 1.702; // logistic approximation to the normal CDF
 
 export function estimateSurvival(input: SurvivalInput): SurvivalEstimate {
+  /*
+   * No later pick at all — the last selection of the draft.
+   *
+   * There is nothing to survive to, so there is no probability. This used to
+   * arrive here as "next pick = this pick" and come back as a confident 100%,
+   * which is the opposite of what it means: not "he is certain to be there"
+   * but "there is no there".
+   */
+  if (input.nextPick == null) {
+    return {
+      probability: null,
+      unconditional: null,
+      spread: null,
+      picksUntilNext: 0,
+      note: 'no pick after this one, so there is nothing for him to last until',
+    };
+  }
+
   const picksUntilNext = Math.max(0, input.nextPick - input.currentPick);
 
   if (input.adp == null || !Number.isFinite(input.adp)) {
@@ -93,12 +121,14 @@ export function estimateSurvival(input: SurvivalInput): SurvivalEstimate {
     };
   }
   if (picksUntilNext === 0) {
+    // S(x)/S(x). True, and no longer reachable from a board: the horizon is
+    // always a pick later than the one on the clock.
     return {
       probability: 1,
       unconditional: 1,
       spread: null,
       picksUntilNext: 0,
-      note: 'you are on the clock',
+      note: 'the horizon is this pick, so there is nothing to wait through',
     };
   }
 

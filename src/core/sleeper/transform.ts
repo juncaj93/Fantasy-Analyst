@@ -242,8 +242,11 @@ export function pickNumbersForSlot(
 }
 
 /**
- * The user's next pick strictly after `currentPickNo`, plus how many picks away
- * it is. Returns `null` when the user has no remaining picks.
+ * The user's next pick, counting the one on the clock. `null` when they have no
+ * picks left.
+ *
+ * This answers "when is my turn", which is what the header says — on the clock
+ * it is this pick, zero picks away, and the screen reads `YOUR PICK`.
  */
 export function nextPickForSlot(
   slot: number,
@@ -255,6 +258,37 @@ export function nextPickForSlot(
   const picks = pickNumbersForSlot(slot, teams, rounds, type);
   for (const p of picks) {
     if (p >= currentPickNo) return { pickNo: p, picksUntil: p - currentPickNo };
+  }
+  return null;
+}
+
+/**
+ * The pick a player would have to survive to if you pass on him now.
+ *
+ * A different question from `nextPickForSlot`, and the difference only shows on
+ * the clock — which is the one moment it matters.
+ *
+ * Off the clock the two agree: your next turn is in the future either way. On
+ * the clock they diverge, because "when is my turn" is *now* and "when could I
+ * next take him" is your following selection. Measuring survival against the
+ * pick you are currently making asks whether a player available now will still
+ * be available now, which is true of everybody — so the whole board read 100%
+ * exactly when the number was being used to make a decision.
+ *
+ * Returns `null` on your final selection of the draft. There is no later pick,
+ * so "will he last" has no answer, and the honest report is that it is unknown
+ * rather than certain.
+ */
+export function waitHorizonForSlot(
+  slot: number,
+  teams: number,
+  rounds: number,
+  type: string,
+  currentPickNo: number,
+): { pickNo: number; picksUntil: number } | null {
+  const picks = pickNumbersForSlot(slot, teams, rounds, type);
+  for (const p of picks) {
+    if (p > currentPickNo) return { pickNo: p, picksUntil: p - currentPickNo };
   }
   return null;
 }

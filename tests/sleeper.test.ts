@@ -10,6 +10,7 @@ import {
   toDraftRecord,
   toLeagueRecord,
   toRosterRecords,
+  waitHorizonForSlot,
 } from '../src/core/sleeper/transform.ts';
 import type { SleeperPlayer } from '../src/core/sleeper/types.ts';
 
@@ -174,6 +175,44 @@ describe('snake draft pick maths', () => {
 
   it('returns null once the slot has no picks left', () => {
     expect(nextPickForSlot(3, 12, 4, 'snake', 200)).toBeNull();
+  });
+
+  /**
+   * The pick a player has to survive to if you pass on him — which is not the
+   * pick you are making.
+   *
+   * The bug: on the clock, survival was measured against the selection being
+   * made right now, so every available player came back "100% to reach your
+   * next pick". True, useless, and shown at the one moment the number is
+   * actually being used to choose somebody.
+   */
+  describe('the wait horizon', () => {
+    it('agrees with your next turn while you are waiting for it', () => {
+      expect(waitHorizonForSlot(3, 12, 4, 'snake', 10)).toEqual({ pickNo: 22, picksUntil: 12 });
+      expect(waitHorizonForSlot(3, 12, 4, 'snake', 10)).toEqual(nextPickForSlot(3, 12, 4, 'snake', 10));
+    });
+
+    it('skips past the pick on the clock to the one after it', () => {
+      // Slot 3 in a 12-team snake picks at 3, 22, 27, 46. On the clock at 22,
+      // the question is whether he lasts to 27 — not whether he lasts to 22.
+      expect(nextPickForSlot(3, 12, 4, 'snake', 22)).toEqual({ pickNo: 22, picksUntil: 0 });
+      expect(waitHorizonForSlot(3, 12, 4, 'snake', 22)).toEqual({ pickNo: 27, picksUntil: 5 });
+    });
+
+    it('measures the turn correctly, where the wait is shortest', () => {
+      // 22 and 27 are back to back at the turn; 27 to 46 is the long wait.
+      expect(waitHorizonForSlot(3, 12, 4, 'snake', 27)).toEqual({ pickNo: 46, picksUntil: 19 });
+    });
+
+    it('is null on your last selection, because there is nothing after it', () => {
+      expect(nextPickForSlot(3, 12, 4, 'snake', 46)).toEqual({ pickNo: 46, picksUntil: 0 });
+      expect(waitHorizonForSlot(3, 12, 4, 'snake', 46)).toBeNull();
+    });
+
+    it('works the same way in a linear draft', () => {
+      expect(waitHorizonForSlot(3, 12, 3, 'linear', 15)).toEqual({ pickNo: 27, picksUntil: 12 });
+      expect(waitHorizonForSlot(3, 12, 3, 'linear', 27)).toBeNull();
+    });
   });
 
   it('handles nonsense input without throwing', () => {

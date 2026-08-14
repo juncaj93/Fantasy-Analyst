@@ -68,6 +68,33 @@ Where a line goes on screen is separate arithmetic in `tierBoard.ts`, because
 the board is ordered by the ranking and not by draft order: a line the first
 time the list reaches each tier, never twice, never above the first row.
 
+### "Next pick %" was asking about the wrong pick
+
+Reported after the pass above and fixed: on the clock, survival was measured
+against **the selection being made right now**. A player available now is
+available now, so every row read 100% — at the one moment the number exists to
+choose between them, and 100% reads as "there is time".
+
+The snake order now answers two questions, and the distinction is the whole fix:
+
+- `nextPickForSlot` — "when is my turn". On the clock that is this pick, and the
+  header still reads `YOUR PICK`. Unchanged.
+- `waitHorizonForSlot` — "when could I next take him if I pass". One pick
+  further on while the clock is running, identical otherwise.
+
+The board passes the **horizon** into the engine, so survival, positional
+scarcity and tier urgency all measure against it. All three had gone flat
+together on the clock, because all three read the same zero-length gap.
+
+On your final selection the horizon is `null` and stays null: survival is
+**unknown**, not 100%. It used to arrive as "next pick = this pick" and come
+back certain, which is not optimism but the opposite of the truth — there is no
+later pick for anyone to last until.
+
+`tests/draft.onTheClock.test.ts` builds a real board through the real service at
+pick 22 of a 12-team snake and fails if any of this regresses; three of its five
+cases fail against the old code.
+
 ### The expanded card, and what Sleeper actually publishes
 
 It opened with a grid of ADP, value, survival and the tally — all four printed
@@ -293,7 +320,7 @@ that prints a provider payload must do the same.
 
 ```bash
 npm run typecheck          # tsc
-npx vitest run             # 840 tests, 35 files
+npx vitest run             # 851 tests, 36 files
 CI=1 npm run e2e:chromium  # 226 tests at 390/375/360
 npm run build
 npx wrangler deploy --dry-run

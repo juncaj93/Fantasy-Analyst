@@ -188,6 +188,8 @@ export interface DraftBoard {
   picksMade: number;
   mySlot: number | null;
   myNextPick: number | null;
+  /** The pick "will he last" is measured against: your next one after this. */
+  waitHorizonPick: number | null;
   picksUntilMyTurn: number | null;
   onTheClock: boolean;
   league: { id: string; name: string; scoringLabel: string; notes: string[] };

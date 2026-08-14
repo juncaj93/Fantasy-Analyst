@@ -14,7 +14,7 @@ import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
-import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
+import { nextPickForSlot, slotForRoster, slotFromPicks, waitHorizonForSlot } from '../../core/sleeper/transform.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -44,6 +44,15 @@ export interface DraftBoardState {
   myNextPick: number | null;
   picksUntilMyTurn: number | null;
   onTheClock: boolean;
+  /**
+   * The pick every "will he last" number on this board is measured against —
+   * your next selection *after* the one on the clock.
+   *
+   * The same as `myNextPick` while you are waiting for your turn, and one pick
+   * further on once it arrives. Sent so the board can name it rather than
+   * leaving the reader to work out which pick "next pick" meant.
+   */
+  waitHorizonPick: number | null;
   league: { id: string; name: string; scoringLabel: string; notes: string[] };
   rosterCounts: Record<string, number>;
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
@@ -123,7 +132,22 @@ export class DraftBoardService {
     const mySlot =
       slotForRoster(draft.slotToRosterId, myRosterRecord?.rosterId ?? null) ??
       slotFromPicks(picks, myRosterRecord?.rosterId ?? null, myRosterRecord?.ownerId ?? null);
+    /*
+     * Two different questions about the same snake order.
+     *
+     * `next` is "when is my turn", which is what the header says: on the clock
+     * it is this pick, and the screen reads YOUR PICK.
+     *
+     * `horizon` is "when could I next take him if I pass", which is what every
+     * wait-flavoured number is measured against — survival, positional
+     * scarcity, and how urgent a tier cliff is. Off the clock they are the same
+     * pick. On the clock they are not, and using `next` there asked whether a
+     * player available now would still be available now: true of everybody, so
+     * the entire board read 100% at the one moment the number was being used to
+     * decide something.
+     */
     const next = mySlot == null ? null : nextPickForSlot(mySlot, teams, rounds, draft.type, currentPick);
+    const horizon = mySlot == null ? null : waitHorizonForSlot(mySlot, teams, rounds, draft.type, currentPick);
     // Without a slot there is no "your next pick", so survival and scarcity are
     // both computed against an unknown horizon. Say so rather than let the board
     // look confident about numbers it could not work out.
@@ -298,7 +322,7 @@ export class DraftBoardService {
       })),
       {
         currentPick,
-        nextPick: next?.pickNo ?? null,
+        nextPick: horizon?.pickNo ?? null,
         shape,
         profile,
         rosterCounts,
@@ -320,6 +344,7 @@ export class DraftBoardService {
       myNextPick: next?.pickNo ?? null,
       picksUntilMyTurn: next?.picksUntil ?? null,
       onTheClock: next?.pickNo === currentPick,
+      waitHorizonPick: horizon?.pickNo ?? null,
       league: {
         id: league.id,
         name: league.name,
