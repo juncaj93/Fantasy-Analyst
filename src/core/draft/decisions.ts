@@ -19,6 +19,7 @@
 
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { NeedBreakdown, RosterCounts } from './need.ts';
+import type { TierCliff } from './tiers.ts';
 
 // --------------------------------------------------------------- thresholds
 
@@ -58,22 +59,6 @@ export const DECISION_THRESHOLDS = {
     label: { 1: 'My Guy', 2: 'Strong My Guy', 3: 'Must-Have' } as Record<number, string>,
   },
 
-  tiers: {
-    /** Minimum ADP gap that can start a new tier, however early the pick. */
-    minGap: 8,
-    /**
-     * ...or this share of the player's own ADP, whichever is larger.
-     *
-     * Draft capital gets noisier the later you go: eight picks is a chasm at
-     * ADP 10 and a rounding error at ADP 150, so the bar scales.
-     */
-    gapRatio: 0.09,
-    /** A cliff is only worth saying out loud when this few remain in the tier. */
-    lastCallSize: 2,
-    /** Picks before the user's next selection below which a cliff is not urgent. */
-    minPicksUntilNext: 3,
-  },
-
   wait: {
     /** At or above this survival probability, say the player is likely to last. */
     likelyAvailable: 0.85,
@@ -92,147 +77,6 @@ export const DECISION_THRESHOLDS = {
     lopsidedGap: 3,
   },
 } as const;
-
-// -------------------------------------------------------------------- tiers
-
-export interface PositionTier {
-  /** 0 is the best tier at the position. */
-  index: number;
-  /** ADPs in the tier, ascending. */
-  adps: number[];
-  /** Gap in picks between this tier and the next one, null for the last tier. */
-  gapToNext: number | null;
-}
-
-/** The gap that separates tiers at a given point on the board. */
-export function tierBreakGap(adp: number): number {
-  return Math.max(DECISION_THRESHOLDS.tiers.minGap, adp * DECISION_THRESHOLDS.tiers.gapRatio);
-}
-
-/**
- * Split the still-available players at one position into tiers.
- *
- * A tier is just a run of players with no meaningful gap between them: if the
- * next man up goes about when this one does, they are interchangeable for the
- * purpose of deciding whether to wait.
- */
-export function buildPositionTiers(availableAdps: number[]): PositionTier[] {
-  const sorted = [...availableAdps].filter((a) => Number.isFinite(a)).sort((a, b) => a - b);
-  if (sorted.length === 0) return [];
-
-  const tiers: PositionTier[] = [];
-  let current: number[] = [sorted[0]!];
-
-  for (let i = 1; i < sorted.length; i++) {
-    const previous = sorted[i - 1]!;
-    const adp = sorted[i]!;
-    if (adp - previous >= tierBreakGap(previous)) {
-      tiers.push({ index: tiers.length, adps: current, gapToNext: round1(adp - previous) });
-      current = [adp];
-    } else {
-      current.push(adp);
-    }
-  }
-  tiers.push({ index: tiers.length, adps: current, gapToNext: null });
-  return tiers;
-}
-
-export type CliffSeverity = 'none' | 'thinning' | 'last_in_tier';
-
-export interface TierCliff {
-  severity: CliffSeverity;
-  /** Which tier the player sits in, 0-based. */
-  tierIndex: number | null;
-  /** Players at this position in the same tier, this one included. */
-  remainingInTier: number;
-  /** Picks between the end of this tier and the start of the next. */
-  gapToNextTier: number | null;
-  /** Expected to still be in the tier when the user picks again. */
-  survivingTierMates: number;
-  /** -1..1, folded into the ranking. Positive means "act sooner". */
-  score: number;
-  /** One short sentence, or null when there is nothing worth saying. */
-  message: string | null;
-}
-
-export interface TierCliffInput {
-  position: string;
-  playerAdp: number | null;
-  /** ADPs of every still-available player at the position. */
-  availableAdps: number[];
-  picksUntilNext: number;
-  /** 0..1 from `computeNeed`. A cliff at a position you have covered matters less. */
-  needScore: number;
-}
-
-/**
- * How close this player is to the edge of their tier, and whether that matters.
- *
- * Deliberately conservative. Flagging every gap would make the warning
- * meaningless within one round, so a cliff has to clear three bars at once: the
- * player is genuinely near the end of a tier, the next tier is genuinely worse,
- * and enough picks happen before the user's next turn for it to bite.
- */
-export function assessTierCliff(input: TierCliffInput): TierCliff {
-  const none: TierCliff = {
-    severity: 'none',
-    tierIndex: null,
-    remainingInTier: 0,
-    gapToNextTier: null,
-    survivingTierMates: 0,
-    score: 0,
-    message: null,
-  };
-
-  if (input.playerAdp == null || input.availableAdps.length === 0) return none;
-
-  const tiers = buildPositionTiers(input.availableAdps);
-  const tier = tiers.find((t) => t.adps.some((a) => Math.abs(a - input.playerAdp!) < 0.001));
-  if (!tier) return none;
-
-  // Only players at or after this one matter: the ones ahead of him in the tier
-  // are better and will go first, so they are not the alternative to waiting.
-  const atOrAfter = tier.adps.filter((a) => a >= input.playerAdp!);
-  const remainingInTier = atOrAfter.length;
-  const horizon = input.playerAdp + input.picksUntilNext;
-  const survivingTierMates = atOrAfter.filter((a) => a > horizon).length;
-
-  const { lastCallSize, minPicksUntilNext } = DECISION_THRESHOLDS.tiers;
-  const enoughPicksPass = input.picksUntilNext >= minPicksUntilNext;
-
-  let severity: CliffSeverity = 'none';
-  if (enoughPicksPass && survivingTierMates === 0 && remainingInTier <= lastCallSize) {
-    severity = 'last_in_tier';
-  } else if (enoughPicksPass && survivingTierMates <= 1 && remainingInTier <= lastCallSize + 2) {
-    severity = 'thinning';
-  }
-
-  if (severity === 'none') return { ...none, tierIndex: tier.index, remainingInTier, gapToNextTier: tier.gapToNext };
-
-  // A cliff is only as important as the position is. Needing nobody at the
-  // position turns "last in tier" into a fact rather than a call to action.
-  const base = severity === 'last_in_tier' ? 1 : 0.55;
-  const score = round3(clamp(base * (0.4 + 0.6 * input.needScore), 0, 1));
-
-  const gap = tier.gapToNext;
-  const gapPhrase = gap == null ? 'nothing comparable is left after them' : `the next group starts ~${Math.round(gap)} picks later`;
-  const message =
-    severity === 'last_in_tier'
-      ? remainingInTier === 1
-        ? `Last ${input.position} in this tier — ${gapPhrase}.`
-        : `${remainingInTier} ${input.position}s left in this tier — ${gapPhrase}.`
-      : `${input.position} tier is thinning — about ${survivingTierMates} comparable ${input.position}${survivingTierMates === 1 ? '' : 's'} should reach your next pick.`;
-
-  return {
-    severity,
-    tierIndex: tier.index,
-    remainingInTier,
-    gapToNextTier: tier.gapToNext,
-    survivingTierMates,
-    score,
-    message,
-  };
-}
 
 // -------------------------------------------------------------------- avoid
 
@@ -556,10 +400,6 @@ function lower(sentence: string): string {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
-}
-
-function round1(v: number): number {
-  return Math.round(v * 10) / 10;
 }
 
 function round3(v: number): number {

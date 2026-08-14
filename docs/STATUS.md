@@ -444,12 +444,32 @@ re-importing after a confirmation retires the ±1 stand-in instead of counting
 the score twice. Verified against the document in the repository: the reference
 totals reconcile and JSN reaches +11 and stays there across three imports.
 
-**Decision quality — draft.** Tier cliffs (tiers built from real ADP gaps, with
-the gap scaling by draft position), roster construction alerts that read the
-round as well as the roster, ★/★★/★★★ My Guy stored apart from the evidence
-ledger, automatic AVOID, and Take Now / Risky to Wait / Can Probably Wait. All
-five move the ranking rather than decorating it, and all their thresholds live
-in `src/core/draft/decisions.ts`.
+**Decision quality — draft.** Tier cliffs, roster construction alerts that read
+the round as well as the roster, ♥/♥♥/♥♥♥ My Guy stored apart from both the
+evidence ledger and the draft queue, and automatic AVOID. All move the ranking
+rather than decorating it; their thresholds live in
+`src/core/draft/decisions.ts`, the tier ones in `src/core/draft/tiers.ts` and
+the survival ones in `src/core/draft/survival.ts`.
+
+**Tier calibration.** A cliff is a hole in the market, judged against how that
+position is actually spaced: the gap to the next available player must clear an
+absolute floor for the position (QB 12, TE 13, RB/WR 8 picks), be at least twice
+the median spacing locally and position-wide, and not simply be the point where
+the position turns uniformly sparse. Thinning is the same measure, more
+permissive, and says only that depth is reducing. No more than a fifth of a
+position may wear the cliff label at once. The reported tight end board — ADP
+40, 51, 67, 68, 76, 78, 99 — went from seven cliffs to one, and the reported
+running back board from several to none. Nothing about the user's roster, the
+tally, My Guy, AVOID or Vegas can change the classification; they move the
+ranking through their own components.
+
+**Survival.** The chance a player lasts to your next pick is now conditional on
+his being available *now*: `S(next) / S(current)` under the same logistic model
+around ADP, computed in log space so a deep faller does not divide zero by zero.
+A player at ADP 45 still on the board at pick 60 reads ~38% to reach pick 68
+rather than ~5%, which is the difference between an estimate and an artefact.
+The exact next pick comes from the live snake order, and the colour bands
+(0–30 red, 31–65 amber, 66–100 green) are defined once, beside the model.
 
 **Decision quality — weekly.** Locked games (a started player leaves the
 optimisation entirely, and the rest of the lineup is worked out around them),
@@ -482,7 +502,7 @@ browser tests, typecheck, build and `wrangler deploy --dry-run` all green.
    tally quality.
 3. **Draft-weight tuning UI**, so the market-value vs personal-signal balance is
    adjustable without a deploy.
-4. **Tier visualisation on the draft board** — the scarcity component already
-   computes tier gaps.
+4. **Tier visualisation on the draft board** — the tier map already computes
+   the ladder, the gaps and the ratios per position; nothing draws them.
 5. **Re-reading everything at once**, rather than one newsletter at a time.
    Worth doing only once real issues have accumulated.

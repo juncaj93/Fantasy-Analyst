@@ -44,12 +44,14 @@ adopted rather than migrated.
 
 **Draft Room** — ranks available players from live Sleeper draft state on a
 best-player-available basis: market value leads, the news tally and your own
-★ flags matter, and roster need is a light contextual tiebreaker rather than a
-reason to reach. Each card carries ADP, ADP value, the colour-coded chance he
-is still there at your next pick, the news signal, and the season market
-expectation where one exists. Tap any player for the conclusion, the four
-numbers behind it, the strongest reasons and the best counterpoint; every
-component score, its weight and its contribution stay one disclosure further in
+♥ My Guy ratings matter, and roster need is a light contextual tiebreaker rather
+than a reason to reach. The ★ beside a player is a bookmark — it fills your
+queue and the ★ filter, and deliberately changes no ranking. Each card carries
+ADP, ADP value, the colour-coded chance he is still there at your next pick —
+conditioned on his still being available now, not on his ADP alone — the news
+signal, and the season market expectation where one exists. Tap any player for
+the conclusion, the four numbers behind it, the strongest reasons and the best
+counterpoint; every component score, its weight and its contribution stay one disclosure further in
 under **Advanced breakdown**. The header's ↻ force-syncs the latest picks from
 Sleeper. It never drafts.
 

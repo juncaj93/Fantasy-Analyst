@@ -162,6 +162,49 @@ describe('AVOID moves the board', () => {
   });
 });
 
+describe('the tier labels a real board produces', () => {
+  /**
+   * End to end, through the ranking rather than the classifier: the reported
+   * tight end board, scored the way the Draft screen scores it. Every one of
+   * these seven came back `Tier cliff` before this pass.
+   */
+  it('does not stamp a spread-out tight end board with cliffs', () => {
+    const board = [40, 51, 68, 67, 78, 76, 99];
+    const ranked = rankAvailablePlayers(
+      board.map((adp, i) => ({
+        player: player({ id: `te-${i}`, fullName: `TE ${i}`, team: 'BUF', position: 'TE' }),
+        adp,
+        adpRank: i + 1,
+        signal: null,
+      })),
+      { ...CTX, currentPick: 32, nextPick: 44, rosterCounts: { QB: 1, RB: 1, WR: 1, TE: 0 } },
+    );
+    const cliffs = ranked.filter((r) => r.tierCliff.severity === 'last_in_tier');
+    expect(cliffs).toHaveLength(1);
+    expect(cliffs[0]!.adp).toBe(78);
+    // And the ones that are not cliffs say what was measured instead of nothing.
+    const quiet = ranked.find((r) => r.adp === 67)!;
+    expect(contributionOf(quiet, 'tier_cliff')).toBe(0);
+    expect(quiet.components.find((c) => c.key === 'tier_cliff')!.display).toContain('picks later');
+  });
+
+  it('is unmoved by roster need', () => {
+    const board = [40, 51, 68, 67, 78, 76, 99].map((adp, i) => ({
+      player: player({ id: `te-${i}`, fullName: `TE ${i}`, team: 'BUF', position: 'TE' }),
+      adp,
+      adpRank: i + 1,
+      signal: null,
+    }));
+    const severities = (rosterCounts: Record<string, number>) =>
+      rankAvailablePlayers(board, { ...CTX, currentPick: 32, nextPick: 44, rosterCounts })
+        .sort((a, b) => (a.adp ?? 0) - (b.adp ?? 0))
+        .map((r) => `${r.adp}:${r.tierCliff.severity}`);
+    // A tight end already rostered changes what the pick is worth, and must not
+    // change whether the market has a hole in it.
+    expect(severities({ QB: 1, RB: 1, WR: 1, TE: 0 })).toEqual(severities({ QB: 1, RB: 2, WR: 3, TE: 2 }));
+  });
+});
+
 describe('tier cliffs move the board', () => {
   /**
    * The brief's own case: a slightly lower-ranked player who is about to
@@ -171,11 +214,21 @@ describe('tier cliffs move the board', () => {
     const te = TEST_PLAYERS.find((p) => p.active && p.position === 'TE')!;
     const wr = WR_A!;
     const others = WRS.slice(1, 6);
+    // The rest of the tight ends, in a bunch a long way after him. A cliff is a
+    // shape in the position, so the position has to be on the board for one to
+    // exist at all.
+    const laterTes = [62, 66, 70, 74].map((adp, i) => ({
+      player: player({ id: `te-${i}`, fullName: `Late TE ${i}`, team: 'BUF', position: 'TE' }),
+      adp,
+      adpRank: 20 + i,
+      signal: null,
+    }));
 
     const ranked = rankAvailablePlayers(
       [
-        // The TE is alone before a long gap, at a position with an empty slot.
+        // The TE is at the end of his group, before a long gap.
         { player: te, adp: 30, adpRank: 2, signal: null },
+        ...laterTes,
         // The WR sits in a deep, unbroken tier.
         { player: wr, adp: 28, adpRank: 1, signal: null },
         ...others.map((p, i) => ({ player: p, adp: 31 + i * 3, adpRank: 3 + i, signal: null })),

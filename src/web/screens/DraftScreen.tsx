@@ -30,6 +30,16 @@ import {
   Unknown,
   formatShortAge,
 } from '../components/common.tsx';
+/*
+ * The chance he is still there at your next pick — as a number, in colour.
+ *
+ * This is the whole urgency interface. Red is "he will not last", amber is "it
+ * is a coin flip", green is "there is time"; the percentage is always printed,
+ * so the colour is an accelerator and never the thing carrying the meaning.
+ * The bands come from the model itself, so the colour and the number can never
+ * be computed from two different rules.
+ */
+import { survivalBand } from '../../core/draft/survival.ts';
 import {
   AvoidBadge,
   QueueControl,
@@ -661,22 +671,6 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
       </details>
     </div>
   );
-}
-
-/**
- * The chance he is still there at your next pick — as a number, in colour.
- *
- * This is the whole urgency interface now. Red is "he will not last", amber is
- * "it is a coin flip", green is "there is time"; the percentage is always
- * printed, so the colour is an accelerator and never the thing carrying the
- * meaning. The thresholds are deliberately round numbers — a third and two
- * thirds — because a reader has to hold them in their head between picks.
- */
-export function survivalBand(probability: number | null): 'unknown' | 'gone' | 'coinflip' | 'safe' {
-  if (probability == null) return 'unknown';
-  if (probability <= 0.3) return 'gone';
-  if (probability < 0.66) return 'coinflip';
-  return 'safe';
 }
 
 function SurvivalMetric({ probability }: { probability: number | null }) {
