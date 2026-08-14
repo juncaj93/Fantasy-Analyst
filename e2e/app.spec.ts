@@ -7,7 +7,22 @@
  * Vegas data is missing.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+/**
+ * Wait for a disclosure to finish opening before reading its text.
+ *
+ * The expanded player animates its height, and while that reveal is still
+ * clipping the content WebKit reports it as rendering no text at all — an
+ * element can be visible, and `innerText` still be empty, for the ~200ms the
+ * card takes to open. Reading through that window turns a negative assertion
+ * ("this word is gone") into one that passes because there were no words yet,
+ * which is worse than a failing test. Nothing here relaxes an assertion; it
+ * only waits for the thing being asserted about to exist.
+ */
+async function revealed(locator: Locator): Promise<void> {
+  await expect.poll(async () => (await locator.innerText()).trim().length).toBeGreaterThan(0);
+}
 
 /** The session is established once by `auth.setup.ts` and reused here. */
 async function login(page: Page) {
@@ -457,6 +472,7 @@ test.describe('draft room', () => {
     await first.click();
     await expect(first.getByTestId('player-detail')).toBeVisible();
 
+    await revealed(first.locator('.explain'));
     const detail = (await first.locator('.explain').innerText()).toLowerCase();
     for (const gone of ['why this rank', 'show all reasons', 'counterpoint', 'advanced breakdown']) {
       expect(detail, `"${gone}" should be gone from the quick expansion`).not.toContain(gone);
@@ -576,6 +592,7 @@ test.describe('draft room', () => {
     await expect(outlook).toContainText('via Sleeper');
 
     const stored = (await (await page.request.get('/api/players/1007/detail')).json()).outlook;
+    await revealed(outlook);
     const short = (await outlook.innerText()).split(' — ')[0]!.trim();
 
     // Materially shorter than the source…
@@ -611,6 +628,7 @@ test.describe('draft room', () => {
     await expect(outlook).toHaveAttribute('data-summarised', 'no');
     await expect(withOutlook.getByTestId('outlook-toggle')).toHaveCount(0);
 
+    await revealed(outlook);
     const shown = (await outlook.innerText()).split(' — ')[0]!.trim();
     const stored = await (await page.request.get('/api/players/1005/detail')).json();
     expect(shown).toBe(stored.outlook.fullText);
@@ -690,6 +708,7 @@ test.describe('draft room', () => {
     await hurt.click();
     await expect(hurt.getByTestId('injury-context')).toContainText('Major injury history: ACL');
     // One line, not a paragraph, and it does not restate the outlook.
+    await revealed(hurt.getByTestId('injury-context'));
     const context = await hurt.getByTestId('injury-context').innerText();
     expect(context.length).toBeLessThan(80);
     await hurt.locator('.row-button').click();
@@ -732,6 +751,7 @@ test.describe('draft room', () => {
   test('shows no roster percentage, and says why in Setup', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
     await first.click();
+    await revealed(first.locator('.explain'));
     expect((await first.locator('.explain').innerText()).toLowerCase()).not.toContain('rostered');
 
     await page.getByTestId('tab-setup').click();
