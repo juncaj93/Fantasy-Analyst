@@ -520,6 +520,53 @@ describe('a tick of the five-minute check', () => {
     for (let i = 0; i < 3; i++) expect((await service.refresh(SEASON)).outcome).toBe('not_published');
     expect(calls).toBe(3);
     expect(await new InjuryRepo(db).coverage(SEASON)).toEqual({ players: 0, latestWeek: null });
+
+    /*
+     * And it stores no fingerprint, which is the part that matters.
+     *
+     * A missing file has no validator worth keeping. Storing one anyway would
+     * make every later check send it, and a source that answered 304 to a
+     * validator for a file that does not exist would leave this permanently
+     * "unchanged" against nothing.
+     *
+     * It is also what keeps the two kinds of quiet tick apart: a stored
+     * validator means the file was asked about and had not changed, and no
+     * stored validator means there was nothing to ask about. Zero writes only
+     * means the pipeline is cheap in the first case.
+     */
+    const health = await service.health(SEASON);
+    expect(health.etag).toBeNull();
+    expect(health.lastModified).toBeNull();
+    expect(health.ingestedAt).toBeNull();
+    expect(health.lastOutcome).toBe('not_published');
+    expect(health.checkedAt).not.toBeNull();
+    expect(health.players).toBe(0);
+  });
+
+  /** The other quiet tick: a file that exists, unchanged, keeps its validator. */
+  it('holds the validator it was given once the file does exist', async () => {
+    const db = await setup();
+    const source = origin({ body: csv(WEEK5), etag: '"v1"' });
+    const service = new InjuryService(db, { log: () => {}, fetch: source.fetch });
+
+    expect((await service.refresh(SEASON)).outcome).toBe('ok');
+
+    /*
+     * A run reports whether the tick was healthy, so an unchanged source is a
+     * successful run — `ok`, with the reason in the note. Whether the file
+     * moved is a different question, and it is answered by the stored outcome.
+     */
+    const second = await service.refresh(SEASON);
+    expect(second.outcome).toBe('ok');
+    expect(second.note).toBe('source unchanged');
+    // The second tick asked and was answered without a byte of the file.
+    expect(source.state.bodiesSent).toBe(1);
+    expect(source.state.conditionalHits).toBe(1);
+
+    const health = await service.health(SEASON);
+    expect(health.etag).toBe('"v1"');
+    expect(health.ingestedAt).not.toBeNull();
+    expect(health.lastOutcome).toBe('not_modified');
   });
 
   it('ingests automatically the moment the file first appears', async () => {

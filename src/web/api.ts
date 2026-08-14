@@ -476,6 +476,12 @@ export interface SetupStatus {
     ingestedAt: string | null;
     lastOutcome: string | null;
     lastNote: string | null;
+    /**
+     * The stored HTTP validators. Present means the last check had something to
+     * ask about; absent means the file for this season does not exist yet.
+     */
+    etag: string | null;
+    lastModified: string | null;
     writesToday: number;
     writeCeiling: number;
     recentEvents: {
