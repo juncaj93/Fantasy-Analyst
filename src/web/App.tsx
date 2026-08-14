@@ -42,6 +42,19 @@ export function App() {
   const [canUnlock, setCanUnlock] = useState(true);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<Tab>('draft');
+  /*
+   * Tapping the tab you are already on.
+   *
+   * It is the one control on screen with nothing left to do, and iOS gives it a
+   * job: it takes you back to the top of the screen and clears whatever you had
+   * narrowed it down to. Here that means the search field on Draft and on
+   * Players — and only the search field. Nothing that is stored is touched: not
+   * a heart, not the queue, not a filter, not a tally.
+   *
+   * A counter rather than a boolean, because the interesting event is "it
+   * happened again" and a screen has to be able to notice the second tap.
+   */
+  const [resetNonce, setResetNonce] = useState(0);
   /** First load only: land on Setup when there is nothing to show yet. */
   const [, setLanded] = useState(false);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -107,10 +120,10 @@ export function App() {
         {error ? <Notice tone="error">{error}</Notice> : null}
         {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
         <InstallPrompt />
-        {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} /> : null}
+        {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
-        {tab === 'players' ? <PlayersScreen /> : null}
+        {tab === 'players' ? <PlayersScreen resetNonce={resetNonce} /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
         {tab === 'setup' ? (
           <SetupScreen
@@ -138,7 +151,10 @@ export function App() {
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => {
+                if (tab === t.id) setResetNonce((n) => n + 1);
+                else setTab(t.id);
+              }}
               aria-current={tab === t.id ? 'page' : undefined}
               aria-label={locked ? `${t.label} — view only, unlock to make changes` : undefined}
               data-testid={`tab-${t.id}`}

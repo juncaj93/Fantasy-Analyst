@@ -181,6 +181,118 @@ test.describe('the two themes are one design', () => {
   });
 });
 
+/**
+ * Tapping the tab you are already on.
+ *
+ * The one control on screen with nothing left to do, so it gets the job iOS
+ * gives it: back to the top, and clear what you had narrowed the screen down
+ * to. It must clear the search and *only* the search — everything else on these
+ * screens is stored state that a stray tap has no business touching.
+ */
+test.describe('the active tab, tapped again', () => {
+  test('clears the search on Players', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    const search = page.getByLabel('Search players');
+    await search.fill('vance');
+    await page.waitForTimeout(400);
+    const narrowed = await page.getByTestId('player-search-row').count();
+
+    await page.getByTestId('tab-players').click();
+    await expect(search).toHaveValue('');
+    await page.waitForTimeout(400);
+    expect(await page.getByTestId('player-search-row').count()).toBeGreaterThan(narrowed);
+    // Still on Players: it clears the screen, it does not leave it.
+    await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('clears the search on Draft, and nothing else', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    // Narrow by position as well, so it is clear which one gets cleared.
+    await page.getByRole('button', { name: 'QB', exact: true }).click();
+    await page.getByTestId('draft-search').fill('lind');
+    await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
+
+    await page.getByTestId('tab-draft').click();
+    await expect(page.getByTestId('draft-search')).toHaveValue('');
+    // The position filter is a choice, not a search: it survives.
+    await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'ALL', exact: true }).click();
+  });
+
+  test('does not disturb a screen with nothing to clear', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    await page.getByTestId('tab-setup').click();
+    await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+  });
+});
+
+/**
+ * The status chip has to be readable on the card it lands on.
+ *
+ * `Q` was amber on an amber tint, which is invisible on a receiver — the tag
+ * that appears on more players than any other, disappearing on one position in
+ * six. This measures the thing that was wrong: the chip against the card
+ * underneath it, on every position the palette paints.
+ */
+test.describe('injury tags', () => {
+  test('stand off every position colour, in both themes', async ({ page }) => {
+    await page.goto('/');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await open(page, 'draft');
+
+      const readings = await page.evaluate(() => {
+        /** `rgb(r g b)` and `color(srgb 0-1 …)` both, as 0-255. */
+        const channels = (value: string): number[] => {
+          const nums = (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+          return value.startsWith('color(') ? nums.map((n) => n * 255) : nums;
+        };
+        const luminance = (rgb: number[]) => {
+          const f = (c: number) => {
+            const v = c / 255;
+            return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
+        };
+
+        // Put the caution chip on one card of every position that is on screen,
+        // which is the only way to see it against all six.
+        const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
+        const perPosition = new Map<string, Element>();
+        for (const row of rows) {
+          const position = row.getAttribute('data-position') ?? '';
+          if (perPosition.has(position)) continue;
+          const probe = document.createElement('span');
+          probe.className = 'injury-tag injury-caution probe';
+          probe.textContent = 'Q';
+          row.querySelector('.player-row-top')!.append(probe);
+          perPosition.set(position, row);
+        }
+
+        return [...perPosition.entries()].map(([position, row]) => {
+          const chip = row.querySelector('.probe')!;
+          const a = luminance(channels(getComputedStyle(chip).backgroundColor));
+          const b = luminance(channels(getComputedStyle(row).backgroundColor));
+          return {
+            position,
+            contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+          };
+        });
+      });
+
+      expect(readings.length, 'the board should show several positions').toBeGreaterThan(1);
+      for (const { position, contrast } of readings) {
+        expect(contrast, `Q is lost on ${position} in ${theme} (${contrast.toFixed(2)}:1)`).toBeGreaterThan(3);
+      }
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+});
+
 test.describe('reduced motion', () => {
   test('expanding a player is instant, and still expands', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });

@@ -33,7 +33,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Lines | `--separator` `--separator-soft` `--border-strong` |
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
-| Injury | `.injury-caution` `.injury-serious` `.injury-out` |
+| Injury | `.injury-caution` `.injury-serious` `.injury-out`, over `--status-neutral` |
 | Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` for how much of it a card shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-pill` `--tap: 44` |
@@ -45,6 +45,14 @@ icon, asset or branding — every glyph in the app is drawn in
 page and a card. Anything greyer looked calmer on a desk and vanished on a phone
 in daylight.
 
+`--status-neutral` exists for the same reason in reverse. A chip that lands on a
+card washed in a position's colour cannot be painted in a hue and stay legible —
+`Q` was amber on the amber WR tint, and disappeared. Slate is nobody's colour
+here, and it inverts between the themes, so the one status a reader sees most
+often is readable on all six positions. The severity ladder is then slate →
+amber → red, which is shape as well as colour, and the letter still says which
+is which.
+
 ## Primitives
 
 | Component | What it is |
@@ -53,7 +61,7 @@ in daylight.
 | `BackButton` / `PushScreen` | A pushed detail screen and its Back control, plus the edge-swipe gesture where the platform allows it (see [IOS_WEB_APP.md §9](./IOS_WEB_APP.md)). |
 | `ListGroup` / `ListRow` | The grouped list: one surface, rows divided by hairlines, trailing value and chevron. |
 | `SegmentedControl` | Two to seven exclusive modes on a sunken track; the selected one is raised, not filled. |
-| `SearchField` | Magnifier, compact field, clear control that appears only when there is something to clear. |
+| `SearchField` | Magnifier, compact field, clear control that appears only when there is something to clear. Used on Draft and Players; the matching itself is `src/web/search.ts`, which filters rows and never re-ranks them. |
 | `Sheet` | A modal sheet: rounded top, grab handle, dimmed backdrop, swipe-to-dismiss, and a Done control because a gesture is never the only way out. |
 | `SkeletonRows` | Loading at the shape of what is coming, so the page does not jump when it lands. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
