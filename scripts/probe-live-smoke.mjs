@@ -223,11 +223,32 @@ if (board.json) {
       ? 'nobody is currently designated'
       : `${tagged.length} designated: ${[...new Set(tagged.map((r) => r.status))].join(', ')}`,
   );
-  // Ranking is ordered by total regardless of who is hurt.
-  const totals = recs.map((r) => r.total);
+  /*
+   * Ranking is ordered by total regardless of who is hurt.
+   *
+   * Checked among the players the market has priced, because the board has one
+   * deliberate exception to "order follows total" and it is not injury: a
+   * player with no published ADP is ranked after every player who has one. The
+   * arithmetic alone gets that backwards -- an unknown market contributes zero
+   * while a genuine reach contributes a negative, so sorting on the total alone
+   * floats anonymous players above ranked ones. The tail is checked separately
+   * below.
+   */
+  const priced = recs.filter((r) => r.adp != null);
+  const pricedTotals = priced.map((r) => r.total);
   check(
     'the board is still ordered by score, not by health',
-    totals.every((t, i) => i === 0 || totals[i - 1] >= t),
+    pricedTotals.every((t, i) => i === 0 || pricedTotals[i - 1] >= t),
+    `${priced.length} priced players in order`,
+  );
+  const firstUnpriced = recs.findIndex((r) => r.adp == null);
+  const lastPriced = recs.map((r) => r.adp == null).lastIndexOf(false);
+  check(
+    'and players it cannot price are ranked after the ones it can',
+    firstUnpriced === -1 || firstUnpriced > lastPriced,
+    firstUnpriced === -1
+      ? 'every player on the board carries an ADP'
+      : `first unpriced at ${firstUnpriced + 1}, last priced at ${lastPriced + 1}, of ${recs.length}`,
   );
 }
 
@@ -246,9 +267,18 @@ if (board.json) {
     scores.length > 0 && scores.every((s) => Number.isInteger(s) && s >= 0 && s <= 100),
     `${scores[0]} … ${scores[scores.length - 1]}`,
   );
+  /*
+   * The Score is a transform of the total, so it must agree with the order the
+   * total produced -- among the players that order actually ranks. The unpriced
+   * tail is placed by policy rather than by arithmetic, so a Score there can
+   * legitimately sit above the priced player in front of it; what must never
+   * happen is the priced part of the board disagreeing with itself.
+   */
+  const pricedScores = recs.filter((r) => r.adp != null).map((r) => r.score);
   check(
     'Score never contradicts board order',
-    scores.every((s, i) => i === 0 || scores[i - 1] >= s),
+    pricedScores.every((s, i) => i === 0 || pricedScores[i - 1] >= s),
+    `across ${pricedScores.length} priced players`,
   );
   const top = scores.slice(0, 20);
   check(

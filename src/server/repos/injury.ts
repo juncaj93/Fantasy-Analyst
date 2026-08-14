@@ -159,6 +159,32 @@ export class InjuryRepo {
     return (results ?? []).map(toReport).reverse();
   }
 
+  /**
+   * The oldest week below `through` that has no stored rows at all.
+   *
+   * Used by catch-up to find the hole an outage left. Deliberately asks for the
+   * *oldest* gap rather than the newest: filling forward keeps the stored weeks
+   * contiguous as they arrive, so a practice trend read part-way through a
+   * catch-up is computed over a run of real weeks rather than over a gap.
+   *
+   * Returns null when there is no gap, which is the ordinary case and the one
+   * this must answer cheaply -- it is asked on every tick.
+   */
+  async missingWeekBefore(season: string, through: number): Promise<number | null> {
+    if (!Number.isFinite(through) || through <= 1) return null;
+    const { results } = await this.db
+      .prepare(`SELECT DISTINCT week FROM player_injury_reports WHERE season = ? AND week <= ? ORDER BY week`)
+      .bind(season, through)
+      .all<{ week: number }>();
+    const present = new Set((results ?? []).map((r) => Number(r.week)));
+    if (present.size === 0) return null;
+    const earliest = Math.min(...present);
+    for (let week = earliest; week < through; week++) {
+      if (!present.has(week)) return week;
+    }
+    return null;
+  }
+
   async recordRun(run: InjurySourceRun): Promise<void> {
     await this.db
       .prepare(
@@ -254,6 +280,18 @@ export interface InjurySourceState {
   lastNote: string | null;
   lockOwner: string | null;
   lockExpiresAt: string | null;
+  /**
+   * Ingests that started and did not finish, in a row.
+   *
+   * The number that stops a fresh `checkedAt` from vouching for stale data: a
+   * pipeline checking happily every five minutes while four consecutive ingests
+   * died is not healthy, and only this can say so.
+   */
+  consecutiveFailures: number;
+  /** When the current run of failures began. Null while the count is zero. */
+  failingSince: string | null;
+  /** The highest week actually stored, so a gap against the source is visible. */
+  caughtUpThrough: number | null;
 }
 
 /**
@@ -341,6 +379,47 @@ export class InjurySourceRepo {
    * The lease expires rather than being released, so a Worker killed mid-parse
    * cannot wedge the pipeline: the first tick after expiry takes over.
    */
+  /**
+   * Record that an ingest did not finish.
+   *
+   * Separate from `recordCheck` because the two answer different questions and
+   * a failed ingest must not be allowed to look like a check that found nothing.
+   * `failing_since` is set only on the transition into failure, so it keeps
+   * saying when the trouble started rather than when it was last observed.
+   */
+  async recordIngestFailure(source: string, season: string, at: string, note: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE injury_source_state
+            SET consecutive_failures = consecutive_failures + 1,
+                failing_since = COALESCE(failing_since, ?),
+                last_outcome = 'ingest_failed',
+                last_note = ?
+          WHERE source = ? AND season = ?`,
+      )
+      .bind(at, note, source, season)
+      .run();
+  }
+
+  /**
+   * Record that an ingest finished.
+   *
+   * Including one that finished with nothing to write: an unchanged source is a
+   * healthy answer, and a run of them should not look like a run of failures.
+   */
+  async recordIngestSuccess(source: string, season: string, caughtUpThrough: number | null): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE injury_source_state
+            SET consecutive_failures = 0,
+                failing_since = NULL,
+                caught_up_through = COALESCE(?, caught_up_through)
+          WHERE source = ? AND season = ?`,
+      )
+      .bind(caughtUpThrough, source, season)
+      .run();
+  }
+
   async acquireLock(
     source: string,
     season: string,
@@ -543,5 +622,8 @@ function toSourceState(row: Record<string, unknown>): InjurySourceState {
     lastNote: text('last_note'),
     lockOwner: text('lock_owner'),
     lockExpiresAt: text('lock_expires_at'),
+    consecutiveFailures: Number(row['consecutive_failures'] ?? 0),
+    failingSince: text('failing_since'),
+    caughtUpThrough: row['caught_up_through'] == null ? null : Number(row['caught_up_through']),
   };
 }

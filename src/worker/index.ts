@@ -103,8 +103,18 @@ export default {
      */
     if (event.cron.startsWith('*/5')) {
       try {
-        const run = await new InjuryService(env.DB).refresh();
+        const injuries = new InjuryService(env.DB);
+        const run = await injuries.refresh();
         await recomputeForChangedPlayers(env, run.changedPlayerIds ?? []);
+        /*
+         * And one week of any gap an outage left behind.
+         *
+         * Only when the check itself found nothing to do, so a tick never pays
+         * for both a real ingest and a catch-up week. The gap is filled oldest
+         * first, one week per tick, and writes rows without touching current
+         * state -- a week from a fortnight ago cannot change who plays today.
+         */
+        if ((run.changedPlayerIds ?? []).length === 0) await injuries.catchUpOneWeek();
       } catch (err) {
         console.error('injury check failed', err);
       }

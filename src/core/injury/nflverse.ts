@@ -98,26 +98,30 @@ const COLUMNS = [
 /**
  * How many weeks back a bounded parse keeps.
  *
- * Measured rather than picked. A Workers invocation gets 10ms of CPU on the
- * free plan; against a real season file the narrowing scan costs about 1.2ms
- * fixed and the parse about 1.2ms per three hundred rows, and a mid-season week
- * is roughly three hundred rows:
+ * One. A Workers invocation gets 10ms of CPU on the free plan, and the work
+ * that counts against it is the JavaScript — parsing, folding, diffing — not
+ * the D1 calls, which are I/O there however they look in a Node benchmark.
+ * Measured against the real season file truncated to a mid-season week:
  *
- *     window   rows    parse
- *        2      636     2.4ms
- *        3      932     3.8ms
- *        4     1255     5.2ms
- *      all     2898    12.1ms   <- over budget on its own
+ *     window   rows    parse + fold + diff
+ *        1      337    2.4ms
+ *        3     1021    3.1ms
+ *      all     6068    over budget on the parse alone
  *
- * Three is the practice-trend span and leaves a week of catch-up for a missed
- * tick, at about half the allowance. Widening it buys history the database is
- * already accumulating live; narrowing it buys margin that is not needed.
+ * Either window fits. One is chosen because the extra two weeks buy nothing:
+ * the *current* state of a player is his latest reported week, the practice
+ * trend is read back from weeks the database has already accumulated, and
+ * re-parsing two settled weeks on every republish is work whose only product is
+ * a diff that finds nothing.
  *
  * Losing older weeks costs history, never current state: the latest week is
  * always parsed, and a player whose newest report is older already has that row
- * stored from the ingest that saw it.
+ * stored from the ingest that saw it. The gap a one-week window can open — the
+ * app missing a whole reporting week while it was down — is a real one, and it
+ * is a catch-up problem rather than a reason to re-read settled weeks 288 times
+ * a day.
  */
-export const RECENT_WEEKS = 3;
+export const RECENT_WEEKS = 1;
 
 /**
  * Split one CSV line into fields.

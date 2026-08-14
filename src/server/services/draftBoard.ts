@@ -359,18 +359,18 @@ export class DraftBoardService {
     // work nobody reads, and it is far more than any draft will reach. The cap
     // is applied after the position filter, so filtering by QB still considers
     // the best quarterbacks rather than whoever survived a global cut.
+    /*
+     * Capped silently, and deliberately so.
+     *
+     * This used to push a warning saying how many players were below the cut.
+     * That was reasonable when the pool was two hundred priced players and the
+     * cut meant something; now that every eligible player is a candidate it
+     * reads "2,764 further down the order are not scored", which is a true
+     * sentence about three hundred players nobody will draft, sitting at the
+     * top of the screen during a draft. The counts belong in `poolHealth`,
+     * where the probe reads them, not in the two lines above the board.
+     */
     const candidates = pool.slice(0, MAX_CANDIDATES);
-    if (pool.length > candidates.length) {
-      /*
-       * "Ranked lower" would now be a lie for most of them. Since unpriced
-       * players are kept, the tail of this pool is players with no draft
-       * position at all, ordered by how often they are looked up — so the
-       * sentence says what actually decided it.
-       */
-      warnings.push(
-        `showing the deepest ${MAX_CANDIDATES} available; ${pool.length - candidates.length} further down the order are not scored`,
-      );
-    }
     if (queuedOnly && pool.length === 0) {
       warnings.push('your queue is empty — tap the star beside a player to add them');
     }
