@@ -482,6 +482,25 @@ export interface SetupStatus {
      */
     etag: string | null;
     lastModified: string | null;
+    /**
+     * Last season's backfill. Separate from everything above, which is about
+     * the season being played — history never answers a question about today.
+     */
+    history: {
+      season: string;
+      phase: string | null;
+      weeksDone: number;
+      lastWeek: number | null;
+      rowsSeen: number;
+      playersSummarized: number;
+      significantPlayers: number;
+      etag: string | null;
+      lastModified: string | null;
+      ingestedAt: string | null;
+      lastOutcome: string | null;
+      completedAt: string | null;
+      note: string | null;
+    };
     writesToday: number;
     writeCeiling: number;
     recentEvents: {

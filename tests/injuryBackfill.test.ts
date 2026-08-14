@@ -306,3 +306,57 @@ describe('last season never becomes this season', () => {
     expect(await new InjuryHistoryRepo(db).forPlayers(['p-ann'], HISTORY_SEASON)).toEqual(before);
   });
 });
+
+describe('where the history is allowed to appear', () => {
+  /**
+   * The Trades case the brief names: context beside a healthy player, and no
+   * standing penalty for having been hurt last year.
+   */
+  it('gives a trade line without moving trade urgency', async () => {
+    const { tradeInjuryContext } = await import('../src/core/injury/trades.ts');
+    const { NO_INJURY_INFORMATION } = await import('../src/core/injury/model.ts');
+    const healthy = { ...NO_INJURY_INFORMATION, designation: 'healthy' as const };
+
+    const context = tradeInjuryContext(healthy, { history: '2025: missed 6 games with a hamstring injury' });
+
+    expect(context.line).toBe('Healthy now · 2025: missed 6 games with a hamstring injury');
+    expect(context.category).toBe('healthy');
+    expect(context.urgencyDelta, 'last season is never a standing discount').toBe(0);
+  });
+
+  it('says nothing extra when there is no history to report', async () => {
+    const { tradeInjuryContext } = await import('../src/core/injury/trades.ts');
+    const { NO_INJURY_INFORMATION } = await import('../src/core/injury/model.ts');
+    const healthy = { ...NO_INJURY_INFORMATION, designation: 'healthy' as const };
+    expect(tradeInjuryContext(healthy, {}).line).toBeNull();
+  });
+
+  /** A current designation is the story; history must not displace it. */
+  it('still leads with the current designation when there is one', async () => {
+    const { tradeInjuryContext } = await import('../src/core/injury/trades.ts');
+    const { NO_INJURY_INFORMATION } = await import('../src/core/injury/model.ts');
+    const out = { ...NO_INJURY_INFORMATION, designation: 'out' as const, bodyPart: 'Knee' };
+
+    const context = tradeInjuryContext(out, { history: '2025: missed 6 games with a hamstring injury' });
+
+    expect(context.line).toContain('multi-week absence');
+    expect(context.line).not.toContain('2025');
+    expect(context.urgencyDelta).toBeLessThan(0);
+  });
+
+  it('reports last season in the health panel, apart from this season', async () => {
+    const db = await setup();
+    const source = origin(season2025());
+    await runToCompletion(new InjuryHistoryService(db, { fetch: source.fetch, log: () => {} }));
+
+    const health = await new InjuryService(db, { log: () => {} }).health(CURRENT_SEASON);
+
+    expect(health.history.season).toBe(HISTORY_SEASON);
+    expect(health.history.phase).toBe('done');
+    expect(health.history.significantPlayers).toBe(1);
+    expect(health.history.etag).toBe('"season-2025"');
+    // And the current season is still reported as having nothing of its own.
+    expect(health.players).toBe(0);
+    expect(health.etag).toBeNull();
+  });
+});

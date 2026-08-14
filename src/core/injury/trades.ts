@@ -71,7 +71,14 @@ export const NO_TRADE_INJURY: TradeInjuryContext = {
  */
 export function tradeInjuryContext(
   state: InjuryState,
-  opts: { outlook?: string | null } = {},
+  opts: {
+    outlook?: string | null;
+    /**
+     * Last season's counted note, e.g. `2025: missed 6 games with a hamstring
+     * injury`. Context only -- it never moves urgency.
+     */
+    history?: string | null;
+  } = {},
 ): TradeInjuryContext {
   /*
    * A named structural injury, from supported text.
@@ -111,6 +118,25 @@ export function tradeInjuryContext(
       urgencyDelta: TRADE_INJURY.majorRecovery,
       line: `Healthy now · prior ${history.injuries[0]} noted in the season outlook`,
       note: `Returning from ${history.injuries[0]}, which the season outlook names — worth pricing, not worth avoiding.`,
+    };
+  }
+
+  /*
+   * Last season, on a player who is fine today.
+   *
+   * Context and nothing else: `urgencyDelta` is zero, deliberately and
+   * permanently. A player who missed six games last October is not a sell
+   * signal this August — he is a player with a history a trading partner may
+   * also remember, and the app's job is to say so once, not to price it. The
+   * branch above is different: a *named structural* injury from supported prose
+   * is a claim about this season's availability, and it carries a number.
+   */
+  if (opts.history) {
+    return {
+      category: 'healthy',
+      urgencyDelta: 0,
+      line: `Healthy now · ${opts.history}`,
+      note: null,
     };
   }
 
