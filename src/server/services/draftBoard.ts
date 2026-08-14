@@ -117,6 +117,29 @@ export interface DraftBoardState {
    * slot, and what a K chip did everywhere.
    */
   startablePositions: string[];
+  /**
+   * Where the player count stands at each stage that can lose one.
+   *
+   * A completeness report rather than a statistic. The board silently ending
+   * near ADP 78 was possible because no stage said how many players it had
+   * dropped; these numbers make the next such regression visible immediately,
+   * in the response itself.
+   */
+  poolHealth: {
+    /** Active, startable, not already drafted — before any cap. */
+    activeEligible: number;
+    drafted: number;
+    /** How many of those were actually scored (bounded by `cap`). */
+    scored: number;
+    /** How many were sent, after the caller's own limit. */
+    returned: number;
+    withAdp: number;
+    /** Kept rather than deleted — the whole point of the repair. */
+    withoutAdp: number;
+    deepestAdp: number | null;
+    byPosition: Record<string, number>;
+    cap: number;
+  };
   warnings: string[];
 }
 
@@ -126,7 +149,7 @@ export interface DraftBoardState {
  * Comfortably more than any draft reaches (a 12-team, 16-round draft is 192
  * picks), while keeping the request small enough to answer quickly.
  */
-const MAX_CANDIDATES = 300;
+export const MAX_CANDIDATES = 300;
 
 export class DraftBoardService {
   private readonly leagues: LeagueRepo;
@@ -285,11 +308,30 @@ export class DraftBoardService {
     }
     const positionIsRanked = (position: string): boolean => (rankedByPosition.get(position) ?? 0) > 0;
 
-    const pool: CanonicalPlayer[] = allPlayers.filter(
-      // Unranked players are normally dropped, but never from your own queue:
-      // you put them there, so leaving them out would be the app overruling you.
-      (p) => eligible(p) && (queuedOnly || !positionIsRanked(p.position) || rankOf(p) != null),
-    );
+    /*
+     * Everyone eligible, whether or not the market has priced him.
+     *
+     * This used to keep a player only if his position had no ranking at all or
+     * he personally had an ADP — which sounds like tidiness and was in fact the
+     * ceiling on the whole board. The published ADP file covers about two
+     * hundred players; every other active quarterback, back, receiver and tight
+     * end in the league was being deleted from the draft universe for the crime
+     * of not appearing in it. That is precisely backwards: a player nobody has
+     * ranked is a player you might get late, which is the one thing a draft
+     * assistant is for in the eleventh round.
+     *
+     * Missing ADP is now unknown rather than disqualifying. It costs the player
+     * nothing he has earned: `marketValueComponent` already returns `unknown`
+     * with a zero contribution when ADP is null, scarcity is flagged the same
+     * way, `Val` is null and the row is marked degraded — so an unpriced player
+     * is ranked on what is actually known about him and shows `ADP —` rather
+     * than a number the app made up.
+     *
+     * The sort below puts every priced player first, so nothing about the top
+     * of the board moves; unranked players fill the tail in `search_rank` order,
+     * and `MAX_CANDIDATES` still bounds how many are scored.
+     */
+    const pool: CanonicalPlayer[] = allPlayers.filter(eligible);
     /*
      * Draft order first. Within a position nobody ranks, `search_rank` breaks
      * the tie — it is emphatically not ADP (it measures who gets looked up) and
@@ -319,8 +361,14 @@ export class DraftBoardService {
     // the best quarterbacks rather than whoever survived a global cut.
     const candidates = pool.slice(0, MAX_CANDIDATES);
     if (pool.length > candidates.length) {
+      /*
+       * "Ranked lower" would now be a lie for most of them. Since unpriced
+       * players are kept, the tail of this pool is players with no draft
+       * position at all, ordered by how often they are looked up — so the
+       * sentence says what actually decided it.
+       */
       warnings.push(
-        `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
+        `showing the deepest ${MAX_CANDIDATES} available; ${pool.length - candidates.length} further down the order are not scored`,
       );
     }
     if (queuedOnly && pool.length === 0) {
@@ -447,6 +495,32 @@ export class DraftBoardService {
       }),
       round,
       startablePositions: orderPositions(startable),
+      /*
+       * The counts, so a truncated board can never look healthy again.
+       *
+       * This board once ended near ADP 78 and said nothing about it, because
+       * every stage was individually reasonable and nothing reported what it
+       * had thrown away. These are the numbers that would have made it obvious
+       * in one glance, and they are computed from the same variables the board
+       * was built from rather than recounted afterwards.
+       */
+      poolHealth: {
+        activeEligible: pool.length,
+        drafted: takenIds.size,
+        scored: candidates.length,
+        returned: recommendations.length,
+        withAdp: recommendations.filter((r) => r.adp != null).length,
+        withoutAdp: recommendations.filter((r) => r.adp == null).length,
+        deepestAdp: recommendations.reduce<number | null>(
+          (deepest, r) => (r.adp == null ? deepest : Math.max(deepest ?? r.adp, r.adp)),
+          null,
+        ),
+        byPosition: recommendations.reduce<Record<string, number>>((counts, r) => {
+          counts[r.position] = (counts[r.position] ?? 0) + 1;
+          return counts;
+        }, {}),
+        cap: MAX_CANDIDATES,
+      },
       warnings,
     };
   }

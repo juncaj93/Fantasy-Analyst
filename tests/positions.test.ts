@@ -172,9 +172,22 @@ describe('defences depend on the league, not on the app', () => {
     expect(board.warnings.join(' ')).toContain('no draft order covers DEF');
     for (const rec of board.recommendations) expect(rec.degraded).toBe(true);
 
-    // A position the ranking DOES cover still drops its unranked players.
+    /*
+     * A position the ranking covers keeps its unranked players too.
+     *
+     * This used to assert the opposite, and the opposite was the bug: the
+     * published ADP file lists a couple of hundred players, so requiring an ADP
+     * deleted every other active quarterback in the league from the draft
+     * universe. The priced player still leads — the unpriced one is behind him,
+     * carrying no ADP rather than an invented one.
+     */
     const qbs = await new DraftBoardService(db).build('tonys-draft', { position: 'QB' });
-    expect(qbs.recommendations.map((r) => r.name)).toEqual(['Patrick Mahomes']);
+    expect(qbs.recommendations.map((r) => r.name)).toEqual(['Patrick Mahomes', 'Unranked Passer']);
+
+    const unpriced = qbs.recommendations.find((r) => r.name === 'Unranked Passer')!;
+    expect(unpriced.adp, 'no ADP is null, never a sentinel').toBeNull();
+    expect(unpriced.adpValue, 'and no value is computed from one').toBeNull();
+    expect(unpriced.degraded, 'the row says it is thinner than the others').toBe(true);
   });
 
   it('is still carried through the player dictionary', () => {
