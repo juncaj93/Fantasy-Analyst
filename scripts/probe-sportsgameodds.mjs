@@ -67,8 +67,16 @@ function rateLimitHeaders(headers) {
 }
 
 console.log('=== 1. upcoming NFL events ===');
-// leagueID rather than a date range: the point is one small page, not a week.
-const events = await get('/events?leagueID=NFL&limit=3');
+/*
+ * Filtered to real, future games.
+ *
+ * An unfiltered NFL query answers with novelty events — the first page came
+ * back as Puppy Bowl XX from 2024, whose odds are "sex of the winning
+ * touchdown scorer". Those are `type: 'prop'` rather than a match, and writing
+ * an adapter against them would map the wrong thing entirely.
+ */
+const from = new Date().toISOString().slice(0, 10);
+const events = await get(`/events?leagueID=NFL&type=match&startsAfter=${from}&oddsAvailable=true&limit=3`);
 console.log('status:', events.status);
 for (const line of rateLimitHeaders(events.headers)) console.log('  header', line);
 
@@ -91,9 +99,12 @@ if (!first) {
 console.log('\nfirst event shape:');
 console.log(' ', shape(first, 0, 3));
 // The few fields the adapter actually needs, named explicitly so a rename is obvious.
-for (const field of ['eventID', 'leagueID', 'startTime', 'status', 'teams', 'odds']) {
+// Kickoff lives on `status.startsAt`, not a top-level `startTime` — worth
+// naming explicitly, because the absence is silent and the adapter needs it.
+for (const field of ['eventID', 'leagueID', 'type', 'status', 'teams', 'players']) {
   console.log(`  ${field}:`, field in first ? shape(first[field], 0, 2) : '(absent)');
 }
+console.log('  status.startsAt:', first.status?.startsAt ?? '(absent)');
 
 const eventId = first.eventID ?? first.id ?? null;
 console.log('\n=== 2. player props for one event ===');
@@ -124,16 +135,42 @@ if (!odds) {
 const oddKeys = Array.isArray(odds) ? [] : Object.keys(odds);
 console.log('odds container:', Array.isArray(odds) ? `array(${odds.length})` : `object with ${oddKeys.length} keys`);
 
-const sampleKeys = oddKeys.slice(0, 15);
-console.log('\nsample market identifiers:');
-for (const k of sampleKeys) console.log('  ', k);
+/*
+ * An oddID is `{statID}-{statEntityID}-{periodID}-{betTypeID}-{sideID}`.
+ *
+ * statID is the market, statEntityID is who it is about (a side for a game
+ * line, a player id for a prop), and betTypeID separates over/under from
+ * moneyline. Those three are what the adapter maps; everything else is detail.
+ */
+const values = Array.isArray(odds) ? odds : Object.values(odds);
+const statIds = [...new Set(values.map((o) => o?.statID).filter(Boolean))].sort();
+const betTypes = [...new Set(values.map((o) => o?.betTypeID).filter(Boolean))].sort();
+const periods = [...new Set(values.map((o) => o?.periodID).filter(Boolean))].sort();
 
-const sample = Array.isArray(odds) ? odds[0] : odds[sampleKeys[0]];
-console.log('\none quote, shaped:');
-console.log(' ', shape(sample, 0, 3));
+console.log('quotes on this event:', values.length);
+console.log('betTypeIDs:', betTypes.join(', '));
+console.log('periodIDs:', periods.join(', '));
+console.log(`\ndistinct statIDs (${statIds.length}):`);
+for (const id of statIds) console.log('  ', id);
 
-// Which of our six internal markets appear at all.
-const WANTED = ['passing_yards', 'passing_touchdowns', 'rushing_yards', 'receptions', 'receiving_yards', 'touchdowns'];
-const haystack = (Array.isArray(odds) ? odds.map((o) => JSON.stringify(o)) : oddKeys).join(' ').toLowerCase();
-console.log('\nmarkets we need, by whether the identifier appears anywhere:');
-for (const want of WANTED) console.log(`  ${want}: ${haystack.includes(want.replace(/_/g, '')) || haystack.includes(want) ? 'present' : 'not found'}`);
+// A player prop rather than a game line: statEntityID that is not a side.
+const playerQuote = values.find((o) => o?.betTypeID === 'ou' && !/^(side1|side2|home|away|all)$/.test(String(o?.statEntityID ?? '')));
+console.log('\none player over/under quote, shaped:');
+console.log(' ', playerQuote ? shape(playerQuote, 0, 3) : '(none found — this event may carry game lines only)');
+if (playerQuote) {
+  console.log('  oddID:', playerQuote.oddID);
+  console.log('  marketName:', playerQuote.marketName);
+  console.log('  statEntityID:', playerQuote.statEntityID);
+  // Where the actual number lives is the one thing an adapter cannot guess.
+  for (const field of ['bookOverUnder', 'fairOverUnder', 'overUnder', 'bookOdds', 'fairOdds', 'closeOverUnder']) {
+    if (field in playerQuote) console.log(`  ${field}:`, JSON.stringify(playerQuote[field]));
+  }
+  const books = playerQuote.byBookmaker ?? {};
+  const bookNames = Object.keys(books);
+  console.log('  byBookmaker keys:', bookNames.slice(0, 8).join(', ') || '(empty)');
+  if (bookNames[0]) console.log('  one bookmaker entry:', shape(books[bookNames[0]], 0, 2));
+}
+
+// How a player id resolves to a name — identity matching depends on it.
+const players = detail?.players ?? null;
+console.log('\nplayer directory on the event:', players ? shape(players, 0, 2) : '(absent)');
