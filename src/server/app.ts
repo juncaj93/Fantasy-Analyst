@@ -586,6 +586,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    *
    * A read, not a change, so it needs no passphrase.
    */
+  /**
+   * Pull last season's statistics now, rather than waiting for the nightly run.
+   *
+   * The cron is the normal path and this changes nothing about it. What this is
+   * for is the two moments the cron cannot cover: a fresh deployment, whose
+   * cards would say nothing about last season until the next 09:00, and a run
+   * that failed and left partial coverage. Idempotent — the same season fetched
+   * twice replaces its own rows — and it returns the counts rather than a bare
+   * ok, because "it worked" and "it matched eleven players" look identical from
+   * a card.
+   *
+   * A change, so it needs the passphrase.
+   */
+  router.post('/api/players/season-stats/refresh', async (ctx) => {
+    const service = new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper });
+    return jsonResponse(await service.refreshSeasonStats());
+  });
+
   router.get('/api/players/:id/detail', async (ctx) => {
     const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
     if (!player) return errorResponse('player not found', 404);
