@@ -161,6 +161,24 @@ test.describe('draft room', () => {
     ).toHaveAttribute('data-level', '0');
   });
 
+  test('the star filter shows only the players you queued', async ({ page }) => {
+    const row = page.getByTestId('recommendation-row').first();
+    const playerId = await row.getAttribute('data-player-id');
+    await row.getByTestId('my-guy-control').click();
+
+    await page.getByTestId('queue-filter').click();
+    const queued = page.getByTestId('recommendation-row');
+    await expect(queued).toHaveCount(1);
+    await expect(queued.first()).toHaveAttribute('data-player-id', playerId!);
+    await expect(page.getByTestId('recommended-heading')).toContainText('Your queue');
+
+    // Clearing the flag empties the queue, and the screen says how to fill it.
+    await queued.first().getByTestId('my-guy-control').click();
+    await queued.first().getByTestId('my-guy-control').click();
+    await queued.first().getByTestId('my-guy-control').click();
+    await expect(page.getByText(/Your queue is empty/)).toBeVisible();
+  });
+
   test('starring does not also expand the row', async ({ page }) => {
     const row = page.getByTestId('recommendation-row').first();
     const playerId = await row.getAttribute('data-player-id');
@@ -245,6 +263,23 @@ test.describe('player intelligence', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
     await openTab(page, 'players');
+  });
+
+  test('shows the same flag as a heart here, not a star', async ({ page }) => {
+    const control = page.getByTestId('player-search-row').first().getByTestId('my-guy-control');
+    await expect(control).toHaveAttribute('data-icon', 'heart');
+    // Colour is not doing the work: the glyph itself changes.
+    expect((await control.innerText()).trim()).toBe('♡');
+
+    await control.click();
+    await expect(control).toHaveAttribute('data-level', '1');
+    expect((await control.innerText()).trim()).toBe('♥');
+
+    // Leave the shared dev server as it was found.
+    await control.click();
+    await control.click();
+    await control.click();
+    await expect(control).toHaveAttribute('data-level', '0');
   });
 
   test('searches players and opens the evidence timeline', async ({ page }) => {

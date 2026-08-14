@@ -114,7 +114,13 @@ export function PlayersScreen() {
               <span className="rank" aria-hidden="true">
                 {p.adjustedRank == null ? '—' : Math.round(p.adjustedRank)}
               </span>
+              {/*
+                A heart here, a star on the draft board — one stored value.
+                Nobody is drafting on this screen, so the question is simply who
+                you rate; heart a player now and he is queued when it opens.
+              */}
               <MyGuyControl
+                icon="heart"
                 myGuy={p.myGuy ?? EMPTY_MY_GUY}
                 busy={flagging === p.id}
                 onChange={(level) => void setMyGuy(p.id, level)}

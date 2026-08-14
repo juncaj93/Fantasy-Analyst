@@ -426,7 +426,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const service = new DraftBoardService(ctx.env.db);
     const limit = Number(ctx.url.searchParams.get('limit') ?? 40);
     const position = ctx.url.searchParams.get('position');
-    return jsonResponse(await service.build(ctx.params['id']!, { limit, position }));
+    // `queued=1` narrows the board to the user's own queue.
+    const queuedOnly = ctx.url.searchParams.get('queued') === '1';
+    return jsonResponse(await service.build(ctx.params['id']!, { limit, position, queuedOnly }));
   });
 
   router.post('/api/drafts/:id/sync', async (ctx) => {

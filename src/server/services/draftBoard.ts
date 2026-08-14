@@ -67,7 +67,10 @@ export class DraftBoardService {
     this.evidence = new EvidenceRepo(db);
   }
 
-  async build(draftId: string, opts: { limit?: number; position?: string | null } = {}): Promise<DraftBoardState> {
+  async build(
+    draftId: string,
+    opts: { limit?: number; position?: string | null; queuedOnly?: boolean } = {},
+  ): Promise<DraftBoardState> {
     const draft = await this.leagues.getDraft(draftId);
     if (!draft) throw new Error(`draft ${draftId} not found`);
     const league = await this.leagues.getLeague(draft.leagueId);
@@ -150,6 +153,16 @@ export class DraftBoardService {
     // are included only when nothing is ranked at all, so the board degrades to
     // "everyone" rather than to nothing.
     const positionFilter = opts.position ? opts.position.toUpperCase() : null;
+    /*
+     * The queue, when that is what was asked for.
+     *
+     * Read before the pool is cut rather than after: a player you queued in the
+     * eleventh round is exactly the one you want the filter to surface, and
+     * scoring only the top of the board would hide him. The flag table is a
+     * shortlist by nature, so reading all of it costs nothing.
+     */
+    const allFlags = await new PlayerFlagsRepo(this.db).all();
+    const queuedOnly = opts.queuedOnly === true;
     // Only positions this league starts. A league with no kicker slot should
     // never be shown a kicker, however Sleeper ranks them.
     const startable = startablePositions(buildRosterShape(league.rosterPositions));
@@ -157,10 +170,13 @@ export class DraftBoardService {
       player.active &&
       !takenIds.has(player.id) &&
       (startable.size === 0 || startable.has(player.position)) &&
-      (!positionFilter || player.position === positionFilter);
+      (!positionFilter || player.position === positionFilter) &&
+      (!queuedOnly || (allFlags.get(player.id) ?? 0) > 0);
 
     const pool: CanonicalPlayer[] = allPlayers.filter(
-      (p) => eligible(p) && (rankedCount === 0 || rankOf(p) != null),
+      // Unranked players are normally dropped, but never from your own queue:
+      // you put them there, so leaving them out would be the app overruling you.
+      (p) => eligible(p) && (queuedOnly || rankedCount === 0 || rankOf(p) != null),
     );
     pool.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
 
@@ -174,6 +190,9 @@ export class DraftBoardService {
         `showing the top ${MAX_CANDIDATES} available by draft order; ${pool.length - candidates.length} ranked lower are not scored`,
       );
     }
+    if (queuedOnly && pool.length === 0) {
+      warnings.push('your queue is empty — tap the star beside a player to add them');
+    }
 
     // Non-blocking draft-day readiness: unresolved names are research the user
     // did that is not reaching the board. Say so here rather than only in Setup,
@@ -186,10 +205,8 @@ export class DraftBoardService {
     }
 
     const signals = await this.evidence.getSignals(candidates.map((c) => c.id));
-    // The user's own shortlist. Fetched for the scored pool only: it is a
-    // handful of players, and a flag on somebody who is already drafted or out
-    // of the pool has nothing to move.
-    const flags = await new PlayerFlagsRepo(this.db).forPlayers(candidates.map((c) => c.id));
+    // The user's own shortlist, already read above.
+    const flags = allFlags;
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
