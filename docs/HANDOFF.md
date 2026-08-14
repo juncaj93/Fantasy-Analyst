@@ -5,12 +5,104 @@ Written at the end of the session of 2026-08-14. Read this first, then
 numbers, which are the most load-bearing measurements in the repository.
 
 Live: <https://fantasy-analyst.juncaj93.workers.dev>
-`main` is at `ffbb948`, deployed, green, and in sync. Nothing is half-finished
-and there is no queued spec.
+`main` is deployed, green, and in sync. Nothing is half-finished and there is no
+queued spec.
 
 ---
 
-## What landed in this session
+## The Draft visual pass — chrome, colour, tiers, and the expanded card
+
+A fifth brief arrived after the four below and is delivered. Six things.
+
+**The global banner is gone.** "Fantasy Analyst" plus the league name sat above
+every page; the first is the app the user already opened and the second was
+printed again four pixels below it by the draft bar. The one thing it carried
+that nothing else did — whether changes are possible at all — is now a ring on
+the Setup tab with the sentence in the button's accessible name.
+
+**The tab bar stopped spending the whole home-indicator inset.** 34px below the
+labels is a bar tall enough to read as a blank strip. The indicator is a 5px
+pill about 8px off the bottom edge; `--nav-inset` keeps ~20px and hands the rest
+back. **Both insets are custom properties now** (`--safe-top`, `--safe-bottom`)
+and that is the load-bearing part: `env()` cannot be overridden, so a layout
+written directly against it can only be checked on hardware that has an inset,
+which is why the strip survived several passes. Measured at 390×844 with the
+inset simulated: 43px of list reclaimed, one more collapsed card per screen.
+
+**The roster line ends with the bench.** `0/1 QB · 1/2 RB · … · 0/5 BN`, where
+bench is depth held beyond what the starting allocation took, out of the
+league's configured spots, from the same allocation so nobody is counted twice.
+Kickers are still not modelled, so a K slot still does not appear.
+
+**Position tint is a token, not a number.** Dark was a pale tint mixed 45% into
+a near-black surface — two or three points of luminance, which is not a
+difference on a phone in daylight. `--pos-mix` is 62% in Light and 92% in Dark,
+and the dark tints are deeper and more saturated. Same mapping now paints
+Players, Team and Trades from `positionCardClass()`.
+
+### Tiers are drawn now, and a tier means one thing
+
+The map has known where a position breaks since the last pass and nothing drew
+it. Two treatments, because the two boards are different lists:
+
+- **filtered to one position** — a hairline, `TIER DROP`, and the gap in picks;
+- **`ALL` and the queue** — no lines (a rule across mixed positions claims a
+  boundary that does not exist), and `Tier cliff · N away` on the last one or
+  two players of the tier *in play* at their position.
+
+Three conditions keep that tag narrow, and they matter: his tier is the best one
+left, a real cliff closes it rather than the board running out, and it is down
+to one or two. Being *somewhere* in a tier that eventually cliffs describes
+every player in it — which is how this board once stamped every tight end.
+
+**A tier is delimited by cliffs only.** It used to end at either label. That
+contradicted the model's own words (a thinning says "comparable players
+remain", and comparable players are one tier) and made the grouping useless to
+draw: thinnings are common by design, so a real receiver board carries ~20
+across 80 players. Cliffs are rare and capped: 7 across the same 80. `TierCliff`
+now carries `tierSize`, `tierEndsAtCliff` and `tierGapBefore`. **No ranking
+moved** — `score` never read the grouping, and 801 tests agreed before the UI
+was touched.
+
+Where a line goes on screen is separate arithmetic in `tierBoard.ts`, because
+the board is ordered by the ranking and not by draft order: a line the first
+time the list reaches each tier, never twice, never above the first row.
+
+### The expanded card, and what Sleeper actually publishes
+
+It opened with a grid of ADP, value, survival and the tally — all four printed
+two lines above on the row just tapped. It now leads with why the rank is what
+it is, then **exactly one** counterpoint (or an honest "No major counterpoint"),
+then the outlook, then last season. Advanced keeps every component, weight and
+contribution, plus the tier note, the season-market implication and the recent
+tally halves — reference rather than decision.
+
+**The season outlook is real and it is Sleeper's.** `get_player_outlook(sport,
+player_id, season)` on `sleeper.app/graphql` — the same endpoint that proved
+Sleeper publishes no ADP, listed under introspection, no key. It returns a
+title, the text, and `source: "rotowire"`. **That attribution is shown**, not
+merely stored: this is editorial writing Sleeper serves, not writing Sleeper
+generated. There is no bulk form and nothing loops to invent one — it is fetched
+when a card opens and cached for a week, *misses included* (30 days), because
+most players have none and asking every time is unbounded third-party fetching.
+
+**2025 games and the half-PPR finish come from `/stats/nfl/regular/2025`.** One
+request, every player, a season that has stopped changing — so it runs on the
+nightly cron after the player dictionary (before it, every new player reads as
+unmatched). The finish is computed in `seasonStats.ts` rather than taken from
+`pos_rank_half_ppr`, for one reason worth not undoing: **Sleeper ranks everyone
+on its books including players who never took a snap**, so a rookie comes back
+as `WR1240`, which looks like a result. Ranking only the players who scored
+means somebody who did not play has no finish. Both are stored so the
+disagreement is counted rather than assumed.
+
+**Sleeper publishes no roster percentage.** Checked twice — absent from the
+player dictionary, no field in the GraphQL schema. The card shows none and Setup
+says so in words. Do not re-litigate this by scraping the app.
+
+---
+
+## What landed earlier in this session
 
 Four briefs arrived and all four are delivered, merged and deployed.
 
@@ -171,7 +263,13 @@ that prints a provider payload must do the same.
 ### Still true from the previous session
 
 - **Sleeper publishes no ADP.** Confirmed by full GraphQL introspection. ADP
-  comes from beatadp.com via `refresh-adp.yml`. Do not re-litigate.
+  comes from beatadp.com via `refresh-adp.yml`. Do not re-litigate. The same
+  introspection *does* list `get_player_outlook`, which is where the season
+  outlook comes from — "no ADP" was never "no player data".
+- **beatadp.com is blocked by the egress proxy** from this container (403 on
+  CONNECT), so ADP cannot be fetched locally. `refresh-adp.yml` runs it on a
+  GitHub runner. `api.sleeper.app` and `sleeper.app/graphql` *are* reachable
+  here, which is how the outlook and stats endpoints were established.
 - **`search_rank` is not ADP.** It measures who gets looked up; it is a search
   tie-break only.
 - **D1 caps bound parameters at 100.** `MAX_BOUND_PARAMS = 90`; chunk any new
@@ -195,11 +293,15 @@ that prints a provider payload must do the same.
 
 ```bash
 npm run typecheck          # tsc
-npx vitest run             # 794 tests, 33 files
-CI=1 npm run e2e:chromium  # 199 tests at 390/375/360
+npx vitest run             # 840 tests, 35 files
+CI=1 npm run e2e:chromium  # 226 tests at 390/375/360
 npm run build
 npx wrangler deploy --dry-run
 ```
+
+Note `npx playwright test` with no project will try WebKit, which is not
+installed here, and report ~225 failures that are all the missing browser. Use
+`e2e:chromium`; CI runs WebKit and has never disagreed.
 
 Deployment is automatic on push to `main` (`deploy.yml`), which applies D1
 migrations first. Crons in `wrangler.toml`: Sat 23:00 and Sun 15:00 UTC for the
@@ -229,10 +331,13 @@ Nothing blocking. In rough order of value:
    (event types, the market catalogue's periods, a live sweep). The pipeline is
    built and will light up if they ever appear; `INBOUND_SEASON_MARKETS` is
    where they would land.
-4. **Tier visualisation on the draft board.** The tier map already computes the
-   ladder, gaps and ratios per position; nothing draws them.
-5. **Draft-weight tuning UI**, so the market-vs-signal balance is adjustable
+4. **Draft-weight tuning UI**, so the market-vs-signal balance is adjustable
    without a deploy.
+5. **The season-outlook cache fills one card at a time.** That is deliberate —
+   there is no bulk query and a loop over the board would be exactly the
+   fetching this project refuses — but it means the first open of each player
+   costs one request. If it ever feels slow mid-draft, warm the top of the
+   board from the nightly cron rather than widening the request path.
 6. `origin/claude/probe-sgo-season` is a stale temp branch; deleting it failed
    with a remote hangup. Harmless — its scripts are on `main`.
 
