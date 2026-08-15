@@ -234,6 +234,38 @@ Fetches go through `getPropsWithCache`, which refuses to refresh inside the TTL,
 enforces a manual-refresh cooldown, and on any failure serves the last cached
 snapshot explicitly marked stale. It never throws and never fabricates.
 
+## Team marks
+
+`src/core/nfl/teams.ts` is the only place that answers "which club is this, what
+is it called, and which file draws it". Screens reach it through the `TeamLogo`
+primitive in `src/web/components/common.tsx`, which `PositionBadge` renders — so
+Draft, Team, Players, Trades, Start/Sit and Review all get the identical
+treatment from one edit.
+
+Codes are Sleeper's. Anything else — `JAC`, `OAK`, `WSH`, `SD`, `STL` — is
+folded onto them by the identity layer's existing `normalizeTeam`, so there is
+no second alias table beside the logos.
+
+The 32 marks are **bundled**, at `src/web/public/logos/nfl/<code>.webp`, served
+from this app's own origin at a path that never changes. That was chosen over
+hot-linking a logo CDN for four reasons: the PWA keeps working offline, there is
+no third-party runtime dependency to go down or start rate-limiting, coverage is
+a fact a test can check against the filesystem rather than a hope, and the marks
+can actually be seen in local visual QA. They are 96px transparent WebP, ~3.4 kB
+each and ~110 kB for the set, drawn at 22px — so a mark is one small cacheable
+request per club, not per player row.
+
+The artwork was rendered once from the `nfl-team-logos` npm package (ISC, v1.5.0)
+into flat files; the package is not a dependency of this project. To regenerate,
+extract each component to SVG with `react-dom/server` and rasterise to 96px WebP
+with `sharp`, keyed by the lowercased canonical code. Club marks are the
+respective clubs' trademarks, used here only to identify the club a player plays
+for in a private tool.
+
+Nothing in this path ranks, scores or decides anything, and every step degrades
+to the team abbreviation: an unknown code, a free agent, a missing file and a
+failed request all end at the same `CHI`-style fallback the rows printed before.
+
 ## Safety invariants
 
 - No endpoint writes to Sleeper. There is no pick or lineup mutation path, and a

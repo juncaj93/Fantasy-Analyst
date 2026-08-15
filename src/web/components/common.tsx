@@ -14,6 +14,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 /* What Sleeper says about a player's availability right now. Never a ranking input. */
 import { injuryStatusTag } from '../../core/draft/injury.ts';
+/* The 32 clubs and their marks. Presentation metadata; never a ranking input. */
+import { nflTeam, nflTeamLogoUrl } from '../../core/nfl/teams.ts';
+import { normalizeTeam } from '../../core/identity/normalize.ts';
 
 /**
  * An inline disclosure that opens in place.
@@ -139,6 +142,67 @@ export function SignedValue({ net }: { net: number }) {
 }
 
 /**
+ * A club's mark, in place of its abbreviation.
+ *
+ * `WR · CHI` asks the reader to decode three letters; `WR · 🐻` is recognised
+ * before it is read, and on a forty-row board that difference is the whole
+ * point. The abbreviation does not disappear — it moves into the accessible
+ * name, where a screen reader says the better thing anyway ("Chicago Bears"
+ * rather than "chih").
+ *
+ * Three rules hold this to being decoration that never costs anything:
+ *
+ *  1. **the box is fixed before the image exists.** The stylesheet's
+ *     `--team-logo` decides how big a mark is; the square `width`/`height` here
+ *     are the intrinsic-ratio hint that reserves the slot even in the frame
+ *     before the stylesheet applies. Either way a mark that has not downloaded
+ *     yet occupies exactly the space it will occupy later, so a slow network
+ *     re-flows nothing.
+ *  2. **failure falls back to the abbreviation.** A missing file, a blocked
+ *     request or an offline first paint shows `CHI`, which is what the row said
+ *     before this existed. There is no state in which the reader gets an empty
+ *     gap or a broken-image glyph.
+ *  3. **an unknown team is not an error.** Free agents and codes we do not
+ *     recognise take the same path as a failed load, because they want the same
+ *     answer on screen.
+ *
+ * The failure is remembered per URL rather than as a bare boolean: the draft
+ * board re-sorts under its rows, React reuses the component instances, and a
+ * boolean would let one team's broken load blank out whichever team landed in
+ * that row next.
+ */
+export function TeamLogo({ team }: { team: string | null | undefined }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const club = nflTeam(team);
+  const src = nflTeamLogoUrl(team);
+
+  if (club && src && failedSrc !== src) {
+    return (
+      <img
+        className="team-logo"
+        data-testid="team-logo"
+        data-team={club.code}
+        src={src}
+        alt={club.name}
+        width={22}
+        height={22}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailedSrc(src)}
+      />
+    );
+  }
+
+  // Whatever we can honestly call the team, which for a free agent is nothing.
+  const code = club?.code ?? normalizeTeam(team);
+  return (
+    <span className="team-code" data-testid="team-code">
+      {code || 'FA'}
+    </span>
+  );
+}
+
+/**
  * A player's position, colour-coded so a long list can be scanned at a glance.
  *
  * The letters stay: colour is an accelerator, never the carrier of the meaning,
@@ -147,6 +211,9 @@ export function SignedValue({ net }: { net: number }) {
  * coloured row, because forty of these on one screen is what the draft board
  * actually looks like and saturated blocks at that density stop being
  * information. Same size, same radius, same hues on every screen.
+ *
+ * The club beside it is drawn as its mark rather than spelled out; see
+ * {@link TeamLogo} for what happens when it cannot be.
  */
 export function PositionBadge({ position, team }: { position: string | null; team?: string | null }) {
   const pos = (position ?? '').toUpperCase();
@@ -156,7 +223,7 @@ export function PositionBadge({ position, team }: { position: string | null; tea
       <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
         {pos || '—'}
       </span>
-      {team !== undefined ? <span className="team-code">{team || 'FA'}</span> : null}
+      {team !== undefined ? <TeamLogo team={team} /> : null}
     </span>
   );
 }
