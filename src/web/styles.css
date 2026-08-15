@@ -1588,7 +1588,7 @@ body,
 }
 
 /*
- * `Tier cliff · 2 away`, tucked into the end of the metrics line.
+ * `Tier cliff · 2 left`, tucked into the end of the metrics line.
  *
  * Deliberately smaller and quieter than the numbers it sits beside: it
  * qualifies the row, it is not one of the four things the row is about. Amber
@@ -1637,7 +1637,9 @@ body,
  *
  * Measured rather than chosen: the four metrics want up to 244px when a player
  * has a three-digit ADP and a three-digit Val, and the full nineteen-character
- * chip is 95px. 390px of phone leaves 345px for the pair and fits; 375px
+ * chip is 95px. Both spellings the chip can print — `Tier cliff · 2 left` and
+ * `Tier cliff · last 1` — are that same nineteen characters, and neither
+ * carries a `w`, so the measurement below is an upper bound for both. 390px of phone leaves 345px for the pair and fits; 375px
  * leaves 330px and does not. Below that the chip drops to `Cliff · 2`, which
  * is 50px and leaves the numbers room to spare on every board this app draws.
  *
