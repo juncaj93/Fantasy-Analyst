@@ -53,6 +53,23 @@ import { survivalBand } from '../../core/draft/survival.ts';
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
+/*
+ * Staying level with Sleeper without being asked.
+ *
+ * The lifecycle, the cadence, the deduping and the "did anything actually
+ * change" decision all live in draftRefresh.ts, deliberately away from this
+ * screen: it is the one piece of this app that has to be driven by a clock, and
+ * a scheduler buried in a thousand-line component is a scheduler nobody can
+ * test. This file supplies it with the two things only a screen knows — how to
+ * sync, and what to rebuild when the answer is new.
+ */
+import {
+  createDraftRefreshController,
+  installDraftRefreshProbe,
+  type DraftRefreshController,
+  type DraftRefreshState,
+  type DraftSyncResult,
+} from '../draftRefresh.ts';
 
 /**
  * The filter row.
@@ -137,33 +154,84 @@ export function DraftScreen({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
 
-  /** Manual refresh state: in-flight guard, last success, last complaint. */
+  /** Manual refresh state: in-flight spinner, last success, last complaint. */
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
-  /** Seconds between automatic syncs; 0 once the draft stops moving. */
-  const [pollSeconds, setPollSeconds] = useState(0);
+  /** What the automatic loop is doing. Rendered as one compact cue, no more. */
+  const [refreshState, setRefreshState] = useState<DraftRefreshState | null>(null);
   /** Re-renders the freshness cue without touching anything else. */
   const [now, setNow] = useState(() => Date.now());
-  const inFlight = useRef(false);
+
+  /**
+   * The current board and filter, readable from outside React's render cycle.
+   *
+   * The refresh controller lives for as long as the screen does and is *not*
+   * rebuilt when the filter changes — restarting it on every chip tap would
+   * throw away the fingerprint it had, and the next poll would then rebuild a
+   * board that had not changed. So it reads these two facts through refs rather
+   * than capturing them, which is also how "is it my pick" stays current between
+   * one poll and the next without a second render.
+   */
+  const boardRef = useRef<DraftBoard | null>(null);
+  const positionRef = useRef(position);
+  positionRef.current = position;
+  const controllerRef = useRef<DraftRefreshController | null>(null);
 
   const load = useCallback(
-    async (pos: string) => {
+    async (pos: string, options: { quiet?: boolean } = {}) => {
       if (!draftId) return;
-      setLoading(true);
+      /*
+       * A poll is not a page load.
+       *
+       * `loading` is what puts the skeleton on screen, and an automatic refresh
+       * that raised it every five seconds would flash the whole board at a
+       * reader who is trying to read it. Only a filter change — a thing the user
+       * did, and expects to wait for — is allowed to.
+       */
+      if (!options.quiet) setLoading(true);
       try {
         const filter = pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
-        setBoard(await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`));
+        const next = await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`);
+        boardRef.current = next;
+        setBoard(next);
+        /*
+         * A player who has just been drafted cannot stay expanded.
+         *
+         * Everything else the reader has set up — the filter, the search, the
+         * scroll, the queue — survives untouched, because none of it is derived
+         * from the board. This one is: it names a row, and the row is gone.
+         */
+        setExpanded((current) =>
+          current && !next.recommendations.some((rec) => rec.playerId === current) ? null : current,
+        );
         setUpdatedAt(Date.now());
         setError(null);
       } catch (err) {
+        /*
+         * A quiet load reports upwards instead of painting a banner.
+         *
+         * Two things follow from that, and both matter. The refresh controller
+         * is the one holding the fingerprint it was about to record as applied —
+         * swallowing this would tell it the board had been rebuilt from a
+         * response that never arrived, and the board would then sit stale until
+         * the *next* pick, with nothing on screen admitting it. And a background
+         * failure has not earned a red notice across a board the reader is
+         * using: the controller already knows how to retry, back off, and say
+         * "sync delayed" once it has failed enough times to mean it.
+         */
+        if (options.quiet) throw err;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (!options.quiet) setLoading(false);
       }
     },
     [draftId],
   );
+
+  /** The latest `load`, reachable from the controller without restarting it. */
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   /*
    * Refetched when the filter changes, and only then.
@@ -228,78 +296,113 @@ export function DraftScreen({
   );
 
   /**
-   * Force-sync the live draft from Sleeper, then rebuild the board.
+   * The automatic loop, alive for exactly as long as this screen is.
    *
-   * This is the one control the draft header needs. It pulls the latest pick
-   * stream through the same sync path the app has always used, and the board
-   * request that follows is what recomputes the roster, the available pool, the
-   * recommendation order, the tier-cliff and wait guidance and the roster
-   * alerts — none of that logic is touched here.
+   * Mounting *is* the trigger, and that is the whole fix. Draft is rendered only
+   * while it is the current tab, so every way into it — the app opening here, a
+   * tap on the destination, coming back from Team, a PWA resuming into it —
+   * arrives through this effect and gets one immediate sync. Every way out
+   * unmounts it, which stops the polling; nothing keeps asking Sleeper from the
+   * Players tab. The lifecycle listeners are registered here rather than in the
+   * controller so they are torn down by the same cleanup, with no chance of a
+   * listener outliving the thing it wakes.
    *
-   * Failure is not allowed to cost the user their screen: the last good board
-   * stays exactly where it is and the complaint is one quiet line.
+   * Pulling new picks is a write, and writes need the passphrase — so a
+   * view-only reader gets no loop at all. That is not a lesser version of this
+   * feature: without a session the sync would 401 on every tick and the board
+   * could not learn anything new from it anyway.
+   */
+  useEffect(() => {
+    if (!draftId || !unlocked) {
+      setRefreshState(null);
+      return;
+    }
+
+    const controller = createDraftRefreshController({
+      sync: () => api.post<DraftSyncResult>(`/api/drafts/${draftId}/sync`),
+      /*
+       * The expensive half, reached only when the fingerprint moved.
+       *
+       * Rebuilding the board is what recomputes availability, the live rosters,
+       * the tier bands, the Next% survival runs and the opportunity cost — none
+       * of which is duplicated or retuned here. The refresh layer's whole
+       * contribution is deciding that it is worth doing.
+       */
+      applyChange: () => loadRef.current(positionRef.current, { quiet: true }),
+      isOnClock: () => boardRef.current?.onTheClock ?? false,
+      isVisible: () => document.visibilityState !== 'hidden',
+      isOnline: () => navigator.onLine !== false,
+      onState: setRefreshState,
+      onError: (err, reason) => {
+        // Only a tap gets an answer. A failed background poll is the
+        // controller's problem — it backs off, keeps the last good board, and
+        // says "delayed" once it has failed enough times to mean it.
+        if (reason === 'manual') setRefreshNote(err instanceof Error ? err.message : String(err));
+      },
+      now: () => Date.now(),
+      setTimer: (fn, ms) => window.setTimeout(fn, ms),
+      clearTimer: (handle) => window.clearTimeout(handle),
+    });
+    controllerRef.current = controller;
+    controller.start();
+
+    /*
+     * Coming back, in all the ways iOS says it.
+     *
+     * Safari suspends a backgrounded tab and does not run its timers, so the
+     * only honest way to be current after a resume is to ask again the moment
+     * the page is visible. It fires several of these signals for one resume, in
+     * no promised order — the controller coalesces them into one request.
+     */
+    const onVisibility = () => controller.visibilityChanged();
+    const onResume = () => controller.resume('resume');
+    const onOnline = () => controller.resume('online');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onResume);
+    window.addEventListener('focus', onResume);
+    window.addEventListener('online', onOnline);
+
+    const removeProbe = installDraftRefreshProbe(() => ({
+      ...controller.getState(),
+      draftId,
+      routeActive: true,
+      visible: document.visibilityState !== 'hidden',
+      online: navigator.onLine !== false,
+      onClock: boardRef.current?.onTheClock ?? false,
+    }));
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onResume);
+      window.removeEventListener('focus', onResume);
+      window.removeEventListener('online', onOnline);
+      removeProbe();
+      controller.stop();
+      controllerRef.current = null;
+    };
+  }, [draftId, unlocked]);
+
+  /**
+   * Force-sync now.
+   *
+   * The glyph does not own a request any more — it asks the same controller the
+   * clock asks, which is what makes a tap during an automatic poll join that
+   * poll instead of racing it. Without a session it still does the one useful
+   * thing it can: rebuild the board from the state already stored.
    */
   const refreshNow = useCallback(async () => {
-    if (!draftId || inFlight.current) return;
-    inFlight.current = true;
+    if (!draftId || refreshing) return;
     setRefreshing(true);
     setRefreshNote(null);
     try {
-      if (unlocked) {
-        const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
-        // A live draft keeps updating itself afterwards, at the interval the
-        // server nominates; a finished one stops asking.
-        setPollSeconds(res.pollIntervalSeconds > 0 ? res.pollIntervalSeconds : 0);
-      }
-      await load(position);
+      const controller = controllerRef.current;
+      if (controller) await controller.refreshNow('manual');
+      else await load(positionRef.current);
       setNow(Date.now());
-      setError(null);
-    } catch (err) {
-      setRefreshNote(err instanceof Error ? err.message : String(err));
     } finally {
-      inFlight.current = false;
       setRefreshing(false);
     }
-  }, [draftId, load, position, searching, unlocked]);
-
-  /**
-   * Automatic polling, unchanged in substance: while a draft is live the app
-   * keeps pulling picks on its own at the interval the server sets. The manual
-   * control above is a "now" button on top of it, not a replacement — and it is
-   * what arms it, so a view-only reader never starts a background write loop.
-   */
-  useEffect(() => {
-    if (!draftId || pollSeconds <= 0) return;
-    let cancelled = false;
-    let handle = window.setTimeout(async function tick() {
-      if (cancelled || inFlight.current) {
-        if (!cancelled) handle = window.setTimeout(tick, pollSeconds * 1000);
-        return;
-      }
-      inFlight.current = true;
-      try {
-        const res = await api.post<{ status: string; pollIntervalSeconds: number }>(`/api/drafts/${draftId}/sync`);
-        if (cancelled) return;
-        await load(position);
-        if (cancelled) return;
-        setNow(Date.now());
-        if (res.pollIntervalSeconds <= 0) setPollSeconds(0);
-        else handle = window.setTimeout(tick, res.pollIntervalSeconds * 1000);
-      } catch {
-        // Nobody asked for this request, so it does not get to raise an alarm.
-        if (!cancelled) {
-          setPollSeconds(0);
-          setRefreshNote('Automatic updates stopped. Tap refresh to try again.');
-        }
-      } finally {
-        inFlight.current = false;
-      }
-    }, pollSeconds * 1000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [draftId, load, pollSeconds, position, searching]);
+  }, [draftId, load, refreshing]);
 
   if (!selected) {
     return (
@@ -343,6 +446,16 @@ export function DraftScreen({
     matchesQuery(item.rec.name, query),
   );
 
+  /*
+   * When the board last moved, and when it was last checked.
+   *
+   * The controller knows both once it is running; before it has said anything —
+   * a view-only reader, or the first frame — the board's own arrival time is the
+   * only answer there is, and it is the right one.
+   */
+  const changedAt = refreshState?.lastChangedAt ?? updatedAt;
+  const checkedAt = refreshState?.lastCheckedAt ?? updatedAt;
+
   return (
     <>
       {/*
@@ -370,9 +483,25 @@ export function DraftScreen({
                   ? 'YOUR PICK'
                   : `${board.picksUntilMyTurn} to go`}
             </span>
-            {updatedAt != null ? (
-              <span className="draft-updated" data-testid="draft-updated">
-                {formatShortAge(updatedAt, now)}
+            {/*
+              Two different facts, one of which is worth a word.
+
+              What the reader wants to know is how old the *board* is — when the
+              draft last actually moved — and that is what is printed. When the
+              app has just checked and found nothing new, this deliberately does
+              not tick over to "just now": a draft where nobody has picked for
+              two minutes is two minutes old, and saying otherwise would be the
+              app congratulating itself for polling. The moment of the last check
+              is carried as an attribute beside it, which is where the probe and
+              the tests read it and where it costs the header no pixels.
+            */}
+            {changedAt != null ? (
+              <span
+                className="draft-updated"
+                data-testid="draft-updated"
+                data-checked-age={checkedAt == null ? '' : String(Math.max(0, Math.round((now - checkedAt) / 1000)))}
+              >
+                {formatShortAge(changedAt, now)}
               </span>
             ) : null}
           </span>
@@ -406,6 +535,25 @@ export function DraftScreen({
       {refreshNote ? (
         <div className="draft-refresh-note" data-testid="draft-refresh-note" role="status">
           {refreshNote} Showing the last draft state received.
+        </div>
+      ) : null}
+
+      {/*
+        Behind, and still trying.
+
+        Shown only after the automatic loop has failed twice running, because one
+        failed poll on a phone is a tunnel and not a fault, and a line that
+        appears every time a lift door closes teaches the reader to ignore it.
+        It never replaces the board: the last good state is the most useful thing
+        on the screen precisely when the sync is struggling, and an error page
+        where the players were would be the worst possible trade mid-draft.
+
+        Suppressed while a manual complaint is up, so a failed tap gets one
+        answer rather than two saying the same thing.
+      */}
+      {refreshState?.stale && !refreshNote ? (
+        <div className="draft-refresh-note" data-testid="draft-sync-stale" role="status">
+          Draft sync delayed · retrying
         </div>
       ) : null}
 

@@ -503,6 +503,40 @@ test.describe('the deployed app', () => {
     const write = await request.post('/api/sleeper/sync-players', { failOnStatusCode: false });
     expect([401, 503]).toContain(write.status());
   });
+
+  /**
+   * A stranger on the Draft page does not poll Sleeper.
+   *
+   * The board now syncs itself while a live draft is open — on arrival, on
+   * resume, and every few seconds after that. Pulling picks is a write, so it
+   * needs the session, and this suite never authenticates: from here the loop
+   * must not exist at all. That is the read-only half of the guarantee, and it
+   * is the half this suite can prove. The polling itself is exercised where a
+   * session exists — `e2e/draft-autorefresh.spec.ts`, against a Sleeper the
+   * test controls.
+   *
+   * The probe's absence is the assertion: it is installed by the controller and
+   * removed with it, so "no probe" is exactly "no loop running".
+   */
+  test('does not poll Sleeper for a reader with no session', async ({ page }) => {
+    await page.goto('/');
+    const tabs = await expectedTabs(page);
+    test.skip(!tabs.includes('draft'), 'Draft is out of season on this deployment');
+
+    await open(page, 'draft');
+    let syncs = 0;
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && /\/api\/drafts\/.*\/sync/.test(req.url())) syncs++;
+    });
+    // Two cadences' worth of nothing.
+    await page.waitForTimeout(12_000);
+
+    expect(syncs, 'an unauthenticated reader starts no background sync loop').toBe(0);
+    expect(
+      await page.evaluate(() => typeof (window as unknown as { __draftRefresh?: unknown }).__draftRefresh),
+      'and no refresh controller is running',
+    ).toBe('undefined');
+  });
 });
 
 /**

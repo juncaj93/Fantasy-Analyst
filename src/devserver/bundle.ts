@@ -11,3 +11,4 @@ export { createApp } from '../server/app.ts';
 export { SleeperClient } from '../core/sleeper/client.ts';
 export { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 export { seedDemoData, MOCK_GAMES, DEMO_NEWSLETTER } from './seed.ts';
+export { withDemoSleeper } from './sleeperMock.ts';
