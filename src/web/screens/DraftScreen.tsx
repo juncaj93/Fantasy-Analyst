@@ -1090,10 +1090,19 @@ function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: bo
        * reader hears "Tier cliff, 2 away" on a 360px phone and on a desktop.
        */
       aria-label={`Tier cliff, ${away} away`}
+      /*
+       * His group, not "the best group on the board".
+       *
+       * The warning used to be restricted to the top tier at a position, so
+       * naming it that way was accurate. It is not restricted any more — a
+       * two-man group four tiers down with a fourteen-pick hole under it is the
+       * same fact about the same decision — and the old wording would have been
+       * quietly wrong on most of the cards that now carry this.
+       */
       title={
         away === 1
-          ? `The last ${rec.position} left in the best group on the board`
-          : `Two ${rec.position}s left in the best group on the board`
+          ? `The last ${rec.position} before a real drop at the position`
+          : `Two ${rec.position}s left before a real drop at the position`
       }
     >
       {/*
