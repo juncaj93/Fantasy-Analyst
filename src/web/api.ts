@@ -40,6 +40,19 @@ export interface Overview {
   pendingIdentity: number;
   vegas: { provider: string; configured: boolean; fetchedAt: string | null; events: number };
   adpSnapshot: { id: number; label: string; capturedAt: string; matchedCount: number } | null;
+  /**
+   * Where the season is, and therefore whether Draft is still a destination.
+   *
+   * Optional so a client running against an older deployment keeps the tab
+   * rather than losing it to a missing field — the same safe direction the
+   * resolver itself takes when it knows nothing.
+   */
+  season?: {
+    phase: 'preseason' | 'regular' | 'postseason' | 'offseason';
+    draftVisible: boolean;
+    reason: string;
+    assumed: boolean;
+  };
 }
 
 export interface ComponentScore {
@@ -256,6 +269,8 @@ export interface DraftBoard {
   rosterProgress: SlotProgress[];
   round: number;
   startablePositions: string[];
+  /** Whether the W/R/T flex view is worth a chip in this league. */
+  offersFlex?: boolean;
   /**
    * How many players survived each stage that can lose one.
    *
@@ -666,9 +681,20 @@ export interface StartSitEvaluation {
   role: { trend: string; label: string; detail: string; games: number };
 }
 
+/** Which lineup spot a comparison is actually about. */
+export interface ComparisonSlot {
+  slot: string | null;
+  accepts: string[];
+  /** False when the selected players share no legal lineup slot. */
+  comparable: boolean;
+  detail: string;
+}
+
 export interface StartSitComparison {
   league: { id: string; name: string; scoringLabel: string };
   dataFreshness: { fetchedAt: string | null; provider: string | null; events: number };
+  /** Absent on responses from an older deployment. */
+  slot?: ComparisonSlot;
   evaluations: StartSitEvaluation[];
   recommendedPlayerId: string | null;
   margin: number | null;
@@ -710,6 +736,13 @@ export interface LineupRecommendation {
   found: boolean;
   error?: string;
   dataFreshness: { fetchedAt: string | null; provider: string | null; events: number };
+  /** The slots this league starts, which is the order the Team screen uses. */
+  rosterShape?: {
+    starters: Record<string, number>;
+    flex: { slot: string; positions: string[] }[];
+    totalStarters: number;
+    superflex: boolean;
+  };
   slots: LineupSlot[];
   bench: StartSitEvaluation[];
   undecidable: StartSitEvaluation[];
@@ -721,6 +754,48 @@ export interface LineupRecommendation {
   notes: string[];
 }
 
+
+/**
+ * Waiver-aware lineup advice.
+ *
+ * Advisory in every sense: there is no add, drop, claim or bid anywhere in this
+ * app, and nothing on this type describes a transaction that happened.
+ */
+export interface WaiverCandidate {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+  score: number | null;
+  /** Points gained over whoever the optimiser has in the slot. */
+  gain: number;
+  reasons: string[];
+  statusFlag: string | null;
+}
+
+export interface WaiverUpgrade {
+  slot: string;
+  accepts: string[];
+  /** `unfilled` when nobody on the roster can legally start there. */
+  need: 'unfilled' | 'upgrade';
+  currentPlayerId: string | null;
+  currentName: string | null;
+  currentScore: number | null;
+  bar: number;
+  candidates: WaiverCandidate[];
+}
+
+export interface WaiverAdvice {
+  league: { id: string; name: string; scoringLabel: string };
+  found: boolean;
+  upgrades: WaiverUpgrade[];
+  /** Said plainly when nothing available beats what the roster already has. */
+  headline: string | null;
+  notes: string[];
+  considered: number;
+  threshold?: number;
+  pool?: { scanned: number; perPosition: number };
+}
 
 /** Help My Scores: unresolved names and what they are costing. */
 export interface RepairStatus {

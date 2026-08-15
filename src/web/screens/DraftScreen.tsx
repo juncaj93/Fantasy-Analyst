@@ -32,6 +32,8 @@ import {
   positionCardClass,
 } from '../components/common.tsx';
 import { NavBar, SearchFilterRow, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+/* One shared answer to "which players does this filter mean". */
+import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
 import { matchesQuery } from '../search.ts';
 /*
@@ -126,12 +128,12 @@ export function DraftScreen({
    * Which of the two tier treatments this view gets.
    *
    * Filtered to one position the board is a ladder, so the breaks in it can be
-   * drawn where they fall. `ALL` and the queue are mixed-position lists where
-   * consecutive rows are usually different positions, and a line across them
-   * would be claiming a boundary that does not exist — so those get the
+   * drawn where they fall. `ALL`, the queue and `FLX` are mixed-position lists
+   * where consecutive rows are usually different positions, and a line across
+   * them would be claiming a boundary that does not exist — so those get the
    * proximity tag on the players it is actually about instead.
    */
-  const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER;
+  const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER && position !== FLX_FILTER;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
 
@@ -453,11 +455,28 @@ export function DraftScreen({
           label="Filter by position"
           value={position}
           onChange={setPosition}
-          segments={[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => ({
+          /*
+            The queue, everybody, the flex view, then the positions the league
+            actually starts.
+
+            FLX sits next to ALL rather than among the positions because it is
+            the same kind of thing they are — a view over the board — and not a
+            position a player has. It appears only where it can return
+            something; see `offersFlex`, decided from the league's own slots.
+          */
+          segments={[
+            QUEUE_FILTER,
+            ALL_FILTER,
+            ...(board.offersFlex ? [FLX_FILTER] : []),
+            ...(board.startablePositions ?? []),
+          ].map((p) => ({
             id: p,
             label: p,
             ...(p === QUEUE_FILTER
               ? { ariaLabel: 'Show only your queue', className: 'chip-queue', testId: 'queue-filter' }
+              : {}),
+            ...(p === FLX_FILTER
+              ? { ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends', testId: 'flx-filter' }
               : {}),
           }))}
         />

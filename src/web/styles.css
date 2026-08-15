@@ -1317,6 +1317,30 @@ body,
 }
 
 /*
+ * The lineup slot a recommended starter is filling.
+ *
+ * It sits where the rank sits on a draft row, because it is doing the same job:
+ * the small fixed-width mark on the leading edge that tells you what this row's
+ * place in the list means. Fixed width so eight cards line their names up
+ * whether the slot is spelled QB or SUPER_FLEX, and tabular so they do not
+ * shuffle sideways between renders.
+ *
+ * It also carries the recommendation in words. The card tint says "starter" to
+ * a reader who can see it; this says it to one who cannot, and to one looking
+ * at a phone in the sun.
+ */
+.slot-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/*
  * The name is the loudest thing in the row: everything else is a qualifier on
  * it, so it gets the size and the weight and the rest step down.
  */
@@ -2668,6 +2692,23 @@ table.compact tr:last-child td {
   color: var(--text-dim);
   white-space: nowrap;
   letter-spacing: 0.005em;
+}
+
+/*
+ * A tag you can tap to remove, rather than one that only reads.
+ *
+ * The same trick the segmented control uses: the control is a full 44px target
+ * and the tinted pill inside it stays tag-sized, so a row of four chosen
+ * players is still a compact row and every one of them is still a fingertip.
+ * `background-clip: content-box` is what keeps the paint on the pill while the
+ * padding carries the reach — painting the whole target would make the
+ * selection the loudest thing in the sheet, which it is not: it is a record of
+ * what you have already done.
+ */
+.chip-removable {
+  min-height: var(--tap);
+  padding-block: 12px;
+  background-clip: content-box;
 }
 
 /* Strongest action: a filled, unmissable chip. */

@@ -9,6 +9,7 @@ import { rosterAlerts, type RosterAlert } from '../../core/draft/decisions.ts';
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
 import { computeNeed } from '../../core/draft/need.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
+import { offersFlexFilter, positionMatchesFilter } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { demandBetweenPicks } from '../../core/draft/demandAhead.ts';
@@ -117,6 +118,14 @@ export interface DraftBoardState {
    * slot, and what a K chip did everywhere.
    */
   startablePositions: string[];
+  /**
+   * Whether the W/R/T flex view is worth a chip in this league.
+   *
+   * The same rule as every other chip: a filter that can only ever return
+   * nothing is worse than no filter. A league that starts none of RB, WR or TE
+   * has nothing for FLX to show.
+   */
+  offersFlex: boolean;
   /**
    * Where the player count stands at each stage that can lose one.
    *
@@ -284,7 +293,9 @@ export class DraftBoardService {
       player.active &&
       !takenIds.has(player.id) &&
       (startable.size === 0 || startable.has(player.position)) &&
-      (!positionFilter || player.position === positionFilter) &&
+      // `FLX` narrows to RB/WR/TE; every other value is the exact position it
+      // names. One helper, shared with the player list and the compare picker.
+      positionMatchesFilter(player.position, positionFilter) &&
       (!queuedOnly || allFlags.get(player.id)?.queued === true);
 
     /*
@@ -495,6 +506,7 @@ export class DraftBoardService {
       }),
       round,
       startablePositions: orderPositions(startable),
+      offersFlex: offersFlexFilter(startable),
       /*
        * The counts, so a truncated board can never look healthy again.
        *

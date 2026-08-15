@@ -35,9 +35,21 @@ jobs:
     runs-on: ubuntu-latest
     # A hung browser is a real failure mode, and without this it is invisible:
     # the job sits at "in progress" for six hours and nobody learns anything.
-    # The suite takes about six minutes, so twenty is generous and still fails
-    # fast enough to be worth reading.
+    #
+    # One viewport per runner, rather than all three in sequence. The three
+    # widths are completely independent -- they share no state, no server and no
+    # order -- so running them one after another only ever bought a longer wall
+    # clock, and the suite eventually grew past this timeout and started being
+    # cancelled two thirds of the way through with nothing failing. Split, each
+    # runner does about a third of the work, so twenty minutes goes back to
+    # meaning "the browser is stuck" rather than "the suite got bigger".
     timeout-minutes: 20
+    strategy:
+      # Every width reports for itself: a failure at 360 is usually a layout
+      # fact about 360, and cancelling the other two would hide whether it is.
+      fail-fast: false
+      matrix:
+        project: [webkit-iphone-390, webkit-iphone-375, webkit-small-360]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,11 +58,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps webkit
-      - run: npm run e2e
+      - run: npx playwright test --project=${{ matrix.project }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          # Artifact names have to be unique across a matrix, or the shards
+          # race to write one and all but the first fail on upload.
+          name: playwright-report-${{ matrix.project }}
           path: |
             playwright-report/
             test-results/

@@ -100,6 +100,8 @@ export interface SleeperState {
   week: number;
   season_type: string;
   display_week?: number;
+  /** Sleeper's own week counter across the whole season. */
+  leg?: number;
 }
 
 /** Normalized league record persisted in D1. */
@@ -113,6 +115,13 @@ export interface LeagueRecord {
   rosterPositions: string[];
   leagueSettings: Record<string, unknown>;
   draftId: string | null;
+  /**
+   * Sleeper's own `pre_draft` / `drafting` / `in_season` / `complete`.
+   *
+   * Optional because every league stored before this column existed has none,
+   * and absent is read as "not known" rather than as "not in season".
+   */
+  status?: string | null;
   lastSyncedAt: string;
 }
 

@@ -21,12 +21,21 @@ import { TeamScreen } from './screens/TeamScreen.tsx';
 type Tab = 'draft' | 'team' | 'trades' | 'players' | 'review' | 'setup';
 
 /*
- * The six destinations, unchanged.
+ * The destinations.
  *
  * The glyphs are drawn rather than typed — see components/icons.tsx. Two of the
  * six characters this used to print were being resolved to colour emoji on a
  * phone, which put a blue gear and a green tick in a row of grey marks at a
  * size and weight no stylesheet could reach.
+ *
+ * Draft is seasonal, and it is the only one that is. Once the regular season is
+ * under way it leaves the bar — the board it opens is about a draft that
+ * finished weeks ago, and a sixth of the most valuable strip of glass in the app
+ * is too much to spend on a museum. It is dropped from this list rather than
+ * disabled or blanked, so the bar repacks around five and nothing is left
+ * holding an empty slot; the screen itself is untouched and still renders when
+ * the app is on it. See core/sleeper/phase.ts for when "under way" begins, and
+ * why a completed draft is emphatically not the answer.
  */
 const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
   { id: 'draft', label: 'Draft', Icon: BoardIcon },
@@ -58,6 +67,16 @@ export function App() {
   const [resetNonce, setResetNonce] = useState(0);
   /** First load only: land on Setup when there is nothing to show yet. */
   const [, setLanded] = useState(false);
+  /**
+   * Whether the reader has chosen a destination themselves.
+   *
+   * The app opens on Draft, which is a default rather than a decision. When the
+   * season has moved on and Draft is no longer in the bar, that default has to
+   * move too — otherwise the app opens on a screen with no lit destination. A
+   * screen the reader *asked* for is a different matter and is never taken away
+   * from under them, which is what keeps the route reachable.
+   */
+  const chosen = useRef(false);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +116,29 @@ export function App() {
     void refresh();
   }, [checkLock, refresh]);
 
+  /*
+   * Which destinations the bar carries right now.
+   *
+   * Unknown keeps Draft: the overview says nothing about the season on an older
+   * deployment, and losing the board because a field was absent would be the
+   * worst possible failure mode for a seasonal tab.
+   */
+  const draftVisible = overview?.season?.draftVisible ?? true;
+  const tabs = draftVisible ? TABS : TABS.filter((t) => t.id !== 'draft');
+
+  /*
+   * In season, the app opens on Team instead.
+   *
+   * Only when the reader has not chosen for themselves. Draft is still a real
+   * screen and still renders — this moves a *default*, so the app never opens on
+   * a destination the bar no longer shows, and never navigates out from under
+   * somebody who went there deliberately.
+   */
+  useEffect(() => {
+    if (draftVisible || chosen.current) return;
+    setTab((current) => (current === 'draft' ? 'team' : current));
+  }, [draftVisible]);
+
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
   /*
@@ -123,7 +165,7 @@ export function App() {
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
-        {tab === 'players' ? <PlayersScreen resetNonce={resetNonce} /> : null}
+        {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
         {tab === 'setup' ? (
           <SetupScreen
@@ -140,8 +182,10 @@ export function App() {
       </main>
 
       <FloatingToolbar
+        tabs={tabs}
         active={tab}
         onSelect={(id) => {
+          chosen.current = true;
           if (tab === id) setResetNonce((n) => n + 1);
           else setTab(id);
         }}
@@ -153,7 +197,7 @@ export function App() {
 }
 
 /**
- * The six destinations, in one compact floating control.
+ * The destinations, in one compact floating control.
  *
  * **It holds no state, and that is the point.** Which destination is current is
  * a fact about the app, passed in; the toolbar renders it and reports taps
@@ -163,15 +207,20 @@ export function App() {
  * lands a first-time reader on Setup without anybody having touched this
  * control, and the toolbar has to be right about that too.
  *
- * Nothing about the destinations changed here: same six, same order, same
- * names, same tap, same screen.
+ * Which destinations there *are* is passed in for the same reason. The bar is
+ * sized by its contents — `width: max-content` over a column grid — so handing
+ * it five instead of six repacks it and re-centres it with no gap, no stretch
+ * and no arithmetic here: the one destination that comes and goes costs this
+ * component nothing but a prop.
  */
 function FloatingToolbar({
+  tabs,
   active,
   onSelect,
   reviewBadge,
   viewOnly,
 }: {
+  tabs: typeof TABS;
   active: Tab;
   onSelect: (id: Tab) => void;
   reviewBadge: number;
@@ -193,7 +242,7 @@ function FloatingToolbar({
        */
       data-keyboard={keyboardOpen ? 'open' : 'closed'}
     >
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const badge = t.id === 'review' ? reviewBadge : 0;
         // Where unlocking happens is where "you cannot change anything yet"
         // belongs. A dot, not a word, because it is a state and not a task.

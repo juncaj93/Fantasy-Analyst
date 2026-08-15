@@ -432,6 +432,142 @@ test.describe('modal layering', () => {
   });
 });
 
+/**
+ * Draft is seasonal, and it is the only destination that is.
+ *
+ * The regular season is stood in for at the one place the app reads it — the
+ * overview's `season` block — which is exactly how the real transition arrives:
+ * Sleeper's `/state/nfl` flips, the server resolves it, and the client is told.
+ * Everything downstream of that answer is real.
+ *
+ * Both directions are asserted, because the expensive failure is not "the tab
+ * stayed too long" — it is a user losing their board in the middle of August.
+ */
+test.describe('Draft, once the regular season starts', () => {
+  /** Answer the overview as if week one had kicked off. */
+  async function inRegularSeason(page: Page) {
+    await page.route('**/api/overview', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        json: {
+          ...body,
+          season: { phase: 'regular', draftVisible: false, reason: 'week 1', assumed: false },
+        },
+      });
+    });
+  }
+
+  test('is in the bar before the season starts', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    expect(await page.locator('.tabbar button').count()).toBe(6);
+  });
+
+  test('leaves the bar once the season is under way', async ({ page }) => {
+    await inRegularSeason(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-team')).toBeVisible();
+    await expect(page.getByTestId('tab-draft')).toHaveCount(0);
+    expect(await page.locator('.tabbar button').count()).toBe(5);
+    // The other five are all still there, named what they were.
+    for (const tab of ['team', 'trades', 'players', 'review', 'setup'] as const) {
+      await expect(page.getByTestId(`tab-${tab}`)).toBeVisible();
+    }
+  });
+
+  /**
+   * The bar repacks; it does not leave a hole where Draft was.
+   *
+   * Measured the same way the six-destination bar is: the pill is as wide as
+   * what is in it, with no slack, and it is still centred and still clear of
+   * the edges. A bar that kept an empty slot would be wider than its contents.
+   */
+  test('rebalances with no gap and stays a centred floating pill', async ({ page }) => {
+    await inRegularSeason(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-team')).toBeVisible();
+
+    const bar = await toolbar(page);
+    expect(bar.width).toBeLessThanOrEqual(bar.viewportWidth - 40);
+    expect(bar.bottom).toBeLessThan(bar.viewportHeight);
+    expect(bar.height).toBeGreaterThanOrEqual(54);
+    expect(bar.height).toBeLessThanOrEqual(64);
+
+    const geometry = await page.evaluate(() => {
+      const el = document.querySelector('.tabbar')!;
+      const style = getComputedStyle(el);
+      const chrome =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth);
+      const box = el.getBoundingClientRect();
+      const buttons = [...el.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+      return {
+        slack: Math.round(box.width - (buttons.reduce((sum, b) => sum + b.width, 0) + chrome)),
+        centreOffset: Math.round(Math.abs(box.left + box.width / 2 - window.innerWidth / 2)),
+        // The largest horizontal gap between neighbouring destinations.
+        biggestGap: Math.round(
+          Math.max(...buttons.slice(1).map((b, i) => b.left - buttons[i]!.right)),
+        ),
+        minWidth: Math.round(Math.min(...buttons.map((b) => b.width))),
+        minHeight: Math.round(Math.min(...buttons.map((b) => b.height))),
+      };
+    });
+    expect(geometry.slack, 'the pill is stretched rather than packed').toBeLessThanOrEqual(2);
+    expect(geometry.centreOffset, 'the bar is no longer centred').toBeLessThanOrEqual(1);
+    expect(geometry.biggestGap, 'an empty Draft slot was left behind').toBeLessThanOrEqual(2);
+    // Still a fingertip each.
+    expect(geometry.minWidth).toBeGreaterThanOrEqual(44);
+    expect(geometry.minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  /** The app opens somewhere that is in the bar, and lights it. */
+  test('opens on Team instead, with exactly one destination current', async ({ page }) => {
+    await inRegularSeason(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    await expect(page.getByTestId('league-card').first()).toBeVisible();
+  });
+
+  /**
+   * Hiding the destination did not delete the screen.
+   *
+   * The board is still rendered when the app is on it — the tab is a way in,
+   * not the only thing keeping the route alive — and the browser's own
+   * navigation behaves exactly as it always did, because the app still pushes
+   * no history of its own.
+   */
+  test('keeps the Draft screen itself reachable', async ({ page }) => {
+    await inRegularSeason(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-team')).toBeVisible();
+
+    // The board is still built and still served: hiding a destination is a
+    // navigation change, and it deleted no route and no historical draft data.
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=5')).json();
+    expect(board.recommendations.length).toBeGreaterThan(0);
+
+    const before = await page.evaluate(() => window.history.length);
+    await page.getByTestId('tab-players').click();
+    await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
+    expect(await page.evaluate(() => window.history.length), 'a tab is not a page').toBe(before);
+    expect(new URL(page.url()).pathname).toBe('/');
+  });
+
+  test('comes back when the season answer does', async ({ page }) => {
+    await inRegularSeason(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toHaveCount(0);
+
+    await page.unroute('**/api/overview');
+    await page.reload();
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+  });
+});
+
 test.describe('reduced motion', () => {
   test('the toolbar still arrives and leaves, without animating', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });

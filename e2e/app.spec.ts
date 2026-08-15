@@ -34,6 +34,13 @@ async function openTab(page: Page, tab: 'draft' | 'team' | 'players' | 'review')
   await page.getByTestId(`tab-${tab}`).click();
 }
 
+/** Pick one player in the open comparison sheet. */
+async function choose(page: Page, playerId: string) {
+  const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${playerId}"]`);
+  await row.click();
+  await expect(row).toHaveAttribute('data-chosen', 'true');
+}
+
 test.describe('shell', () => {
   test('never scrolls horizontally at this width', async ({ page }) => {
     await login(page);
@@ -1245,24 +1252,45 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(page.getByTestId('league-card').first()).toBeVisible();
   });
 
-  test('shows the league in use with its scoring profile', async ({ page }) => {
+  /**
+   * The header is the league's name, and nothing else.
+   *
+   * It used to carry the season, the team count and the scoring format under
+   * the name, with a row of badges under that repeating the flex count and the
+   * passing-TD rule. None of it changes what to do this week and all of it cost
+   * rows of a phone screen before the first player appeared. The settings still
+   * drive every number below — see the scoring-profile assertion at the end.
+   */
+  test('shows the league title alone in the header', async ({ page }) => {
     const card = page.getByTestId('league-card').first();
     await expect(card).toContainText('Demo Dynasty');
-    await expect(card).toContainText('Half PPR');
     // Choosing a league lives in Setup; Team only refreshes it.
     await expect(card.getByRole('button', { name: 'Refresh' })).toBeVisible();
+
+    const header = (await card.innerText()).toLowerCase();
+    for (const gone of ['half ppr', 'ppr', 'teams', '2026', 'flex slot', 'pt passing']) {
+      expect(header, `the header still prints "${gone}"`).not.toContain(gone);
+    }
+
+    // ...and the settings it stopped printing are still the ones being used.
+    const lineup = await (await page.request.get('/api/leagues/demo-league/lineup')).json();
+    expect(lineup.league.scoringLabel).toBe('Half PPR');
+    expect((lineup.slots as { slot: string }[]).map((s) => s.slot)).toContain('FLEX');
   });
 
-  test('lists the roster split into starters and bench', async ({ page }) => {
-    await expect(page.getByText('Starters', { exact: true })).toBeVisible();
-    await expect(page.getByText('Bench', { exact: true })).toBeVisible();
-    expect(await page.getByTestId('roster-row').count()).toBeGreaterThan(2);
+  test('lists recommended starters by slot, then the bench', async ({ page }) => {
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.getByTestId('bench-title')).toBeVisible();
+    // Seven slots: QB, RB, RB, WR, WR, TE, FLEX — the league's own shape.
+    expect(await page.getByTestId('starter-row').count()).toBe(7);
+    expect(await page.getByTestId('bench-row').count()).toBeGreaterThan(0);
   });
 
   test('compares two players and explains the recommendation', async ({ page }) => {
-    await page.locator('[data-testid="roster-row"][data-player-id="1001"]').click();
-    await page.locator('[data-testid="roster-row"][data-player-id="1004"]').click();
-    await page.getByRole('button', { name: /Compare 2 players/ }).click();
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await choose(page, '1004');
+    await page.getByTestId('compare-run').click();
 
     const comparison = page.getByTestId('comparison');
     await expect(comparison).toBeVisible();
@@ -1316,9 +1344,10 @@ test.describe('team, ADP import and start/sit', () => {
    * worth ingesting at all.
    */
   test('names the injury and the practice week in a start/sit comparison', async ({ page }) => {
-    await page.locator('[data-testid="roster-row"][data-player-id="1001"]').click();
-    await page.locator('[data-testid="roster-row"][data-player-id="1004"]').click();
-    await page.getByRole('button', { name: /Compare 2 players/ }).click();
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await choose(page, '1004');
+    await page.getByTestId('compare-run').click();
 
     const line = page.getByTestId('startsit-injury');
     await expect(line).toContainText(/hamstring/i);
@@ -1342,9 +1371,10 @@ test.describe('team, ADP import and start/sit', () => {
 
   test('shows a degraded, honest state when Vegas data is missing', async ({ page }) => {
     // Cal Whitfield (1011) is rostered but has no props in the mock game.
-    await page.locator('[data-testid="roster-row"][data-player-id="1001"]').click();
-    await page.locator('[data-testid="roster-row"][data-player-id="1011"]').click();
-    await page.getByRole('button', { name: /Compare 2 players/ }).click();
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await choose(page, '1011');
+    await page.getByTestId('compare-run').click();
 
     const comparison = page.getByTestId('comparison');
     await expect(comparison).toContainText('no Vegas data for');

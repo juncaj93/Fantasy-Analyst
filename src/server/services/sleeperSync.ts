@@ -6,6 +6,7 @@
  */
 
 import type { SleeperClient } from '../../core/sleeper/client.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
 import {
   toCanonicalPlayers,
   toDraftPickRecords,
@@ -81,8 +82,39 @@ export class SleeperSyncService {
     for (const league of leagues) {
       await this.leagues.upsertLeague(toLeagueRecord(league, now));
     }
+    await this.syncNflState();
     await this.settings.logSync('leagues', 'ok', `${leagues.length} leagues for ${season}`, startedAt);
     return { imported: leagues.length };
+  }
+
+  /**
+   * Read and remember where the NFL season is.
+   *
+   * Best effort on purpose: this is one small request beside work that matters
+   * more, and a failure means the app keeps the state it already had. The
+   * consequence of not knowing is that the Draft tab stays visible, which is
+   * the safe direction to be wrong in.
+   */
+  async syncNflState(): Promise<NflState | null> {
+    try {
+      const state = await this.client.getState();
+      if (!state) return null;
+      const record: NflState = {
+        season: state.season ?? null,
+        seasonType: state.season_type ?? null,
+        week: typeof state.week === 'number' ? state.week : null,
+        leg: typeof state.leg === 'number' ? state.leg : null,
+        fetchedAt: nowIso(),
+      };
+      await this.settings.set(SETTING_KEYS.nflState, record);
+      return record;
+    } catch {
+      return null;
+    }
+  }
+
+  async getNflState(): Promise<NflState | null> {
+    return this.settings.get<NflState | null>(SETTING_KEYS.nflState, null);
   }
 
   /** Refresh a single league: settings, rosters and its drafts. */
@@ -103,6 +135,8 @@ export class SleeperSyncService {
     for (const draft of drafts) {
       await this.leagues.upsertDraft(toDraftRecord(draft, now));
     }
+    // Refreshing a league is also the moment to notice the season moved on.
+    await this.syncNflState();
     await this.settings.logSync('league', 'ok', `${leagueId}: ${rosters.length} rosters`, startedAt);
     return { rosters: rosters.length, drafts: drafts.length };
   }
