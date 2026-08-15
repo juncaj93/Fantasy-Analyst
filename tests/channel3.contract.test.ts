@@ -412,6 +412,76 @@ describe('the awkward cases the brief enumerates', () => {
     )!;
     expect(graph.unknown).toBe(true);
     expect(graph.beneficiaries).toEqual([]);
+    expect(graph.pivot).toBeNull();
     expect(graph.notes.join(' ')).toMatch(/unknown/);
+  });
+
+  it('surfaces the emergency pivot only when the beneficiary is unrostered', () => {
+    const absence = {
+      team: 'DET',
+      absent: {
+        playerId: 'rb1',
+        name: 'Star Back',
+        position: 'RB',
+        weeks: [1, 2, 3, 4].map((w) => week({ week: w, carries: 19 })),
+      },
+      teammates: [
+        {
+          playerId: 'rb2',
+          name: 'Second Back',
+          position: 'RB',
+          weeks: [
+            ...[1, 2, 3, 4].map((w) => week({ week: w, carries: 5 })),
+            week({ week: 5, carries: 17 }),
+            week({ week: 6, carries: 16 }),
+          ],
+        },
+        {
+          playerId: 'wr1',
+          name: 'A Receiver',
+          position: 'WR',
+          weeks: [1, 2, 3, 4, 5, 6].map((w) => week({ week: w, targets: 8 })),
+        },
+      ],
+    };
+    const graph = buildBeneficiaryGraph(absence);
+    const rostered = beneficiaryContract(graph, [])!;
+    const free = beneficiaryContract(graph, ['rb2'])!;
+
+    expect(rostered.pivot).toBeNull();
+    expect(free.pivot!.playerId).toBe('rb2');
+    expect(free.pivot!.detail).toMatch(/unrostered/);
+
+    const payload = channel3Payload({
+      season: '2025',
+      week: 7,
+      generatedAt: NOW,
+      players: [],
+      beneficiaries: [free],
+    });
+    expect(validateChannel3Payload(payload)).toEqual([]);
+    expect(payload.beneficiaries[0]!.pivot!.name).toBe('Second Back');
+  });
+
+  it('rejects a pivot that is not one of the beneficiaries', () => {
+    const payload = channel3Payload({
+      season: '2025',
+      week: 7,
+      generatedAt: NOW,
+      players: [],
+      beneficiaries: [
+        {
+          absentPlayerId: 'rb1',
+          absentName: 'Star Back',
+          team: 'DET',
+          unknown: false,
+          vacated: { carries: 18, targets: 4 },
+          beneficiaries: [],
+          pivot: { playerId: 'nobody', name: 'Nobody', detail: '', confidence: 'low' },
+          notes: [],
+        },
+      ],
+    });
+    expect(validateChannel3Payload(payload).join(' ')).toMatch(/not one of the beneficiaries/);
   });
 });

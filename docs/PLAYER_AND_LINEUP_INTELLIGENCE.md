@@ -225,6 +225,8 @@ that produced any scored field) over every output above.
 
 - absence is `null`, never a zero;
 - confidence and freshness travel inside the payload;
+- beneficiary graphs are team-level, and each carries the unrostered
+  `pivot` — a name, a sentence and a confidence, and nothing that acts;
 - `validateChannel3Payload()` returns every problem in plain language — a wrong
   version, an unknown confidence level, a `NaN` anywhere in the tree, a source
   marked missing that carries an observation time, a self-grade claiming it

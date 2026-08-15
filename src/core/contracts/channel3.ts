@@ -27,7 +27,7 @@
  */
 
 import type { BoundaryReport } from '../startsit/boundary.ts';
-import type { BeneficiaryGraph } from '../injury/beneficiaries.ts';
+import { emergencyPivot, type BeneficiaryGraph } from '../injury/beneficiaries.ts';
 import type { FragilityAssessment } from '../startsit/fragility.ts';
 import type { ModeSuggestion } from '../startsit/modeSuggest.ts';
 import type { MultiWeekValue } from '../value/multiWeek.ts';
@@ -117,6 +117,15 @@ export interface BeneficiaryContract {
     confidence: ConfidenceLevel;
     display: string;
   }[];
+  /**
+   * The best beneficiary who is actually unrostered, when there is one.
+   *
+   * Advisory, and the whole of what "automatic emergency pickup" means here: a
+   * name, a sentence and a confidence. Nothing in this app adds, drops, claims
+   * or queues a player, and a contract field that carried an action would be
+   * the first place that changed.
+   */
+  pivot: { playerId: string; name: string; detail: string; confidence: ConfidenceLevel } | null;
   notes: string[];
 }
 
@@ -161,6 +170,14 @@ export interface Channel3Payload {
   generatedAt: string;
   players: PlayerIntelligence[];
   lineup: LineupIntelligence | null;
+  /**
+   * Who gains from an absence, one entry per player who is out.
+   *
+   * Team-level rather than player-level, because that is the shape of the
+   * question: an absence is one fact about one offence, and hanging a copy of
+   * it off each beneficiary would let two copies disagree.
+   */
+  beneficiaries: BeneficiaryContract[];
   /** Present only when a graded week exists. Never partially filled. */
   selfGrade: SelfGradeReport | null;
 }
@@ -220,7 +237,11 @@ export function scheduleContract(outlook: RoleScheduleOutlook | null): ScheduleC
   };
 }
 
-export function beneficiaryContract(graph: BeneficiaryGraph | null): BeneficiaryContract | null {
+export function beneficiaryContract(
+  graph: BeneficiaryGraph | null,
+  /** Player ids that are unrostered in this league, for the pivot. */
+  availablePlayerIds: Iterable<string> = [],
+): BeneficiaryContract | null {
   if (!graph) return null;
   return {
     absentPlayerId: graph.absentPlayerId,
@@ -239,6 +260,7 @@ export function beneficiaryContract(graph: BeneficiaryGraph | null): Beneficiary
       confidence: b.confidence,
       display: b.display,
     })),
+    pivot: emergencyPivot(graph, availablePlayerIds),
     notes: graph.notes,
   };
 }
@@ -317,6 +339,7 @@ export function channel3Payload(opts: {
   generatedAt: string;
   players: PlayerIntelligence[];
   lineup?: LineupIntelligence | null;
+  beneficiaries?: BeneficiaryContract[];
   selfGrade?: SelfGradeReport | null;
 }): Channel3Payload {
   return {
@@ -327,6 +350,7 @@ export function channel3Payload(opts: {
     generatedAt: opts.generatedAt,
     players: opts.players,
     lineup: opts.lineup ?? null,
+    beneficiaries: opts.beneficiaries ?? [],
     selfGrade: opts.selfGrade ?? null,
   };
 }
@@ -368,6 +392,15 @@ export function validateChannel3Payload(payload: Channel3Payload): string[] {
   }
 
   if (payload.lineup) problems.push(...finiteProblems(payload.lineup, 'lineup'));
+  for (const graph of payload.beneficiaries) {
+    if (graph.unknown && graph.beneficiaries.length > 0) {
+      problems.push(`${graph.absentName}: the graph says unknown and still names beneficiaries`);
+    }
+    if (graph.pivot && !graph.beneficiaries.some((b) => b.playerId === graph.pivot!.playerId)) {
+      problems.push(`${graph.absentName}: the emergency pivot is not one of the beneficiaries`);
+    }
+    problems.push(...finiteProblems(graph, `beneficiaries.${graph.absentPlayerId}`));
+  }
   if (payload.selfGrade) {
     if (payload.selfGrade.appliedChanges.length > 0) {
       problems.push('the self-grade reports applied changes, which it must never do');
