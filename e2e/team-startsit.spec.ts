@@ -1,0 +1,270 @@
+/**
+ * Team: the recommendation, drawn.
+ *
+ * The claims this file defends are the ones a reader makes with their eyes in
+ * two seconds — which cards are the recommended lineup, which are backups, and
+ * whether anything on waivers is worth a move — plus the one interaction that
+ * has real edges in it: choosing between two and four players to compare, from
+ * a pool that is deliberately not limited to the roster.
+ *
+ * The demo league starts QB, RB, RB, WR, WR, TE and a FLEX, and the demo roster
+ * is four players — one of them on injured reserve. That is not a tidy fixture
+ * and it is the better one: most slots have nobody legal for them, which is
+ * exactly the state the screen has to be honest about.
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+async function openTeam(page: Page) {
+  await page.goto('/');
+  await page.getByTestId('tab-team').click();
+  await expect(page.getByTestId('league-card').first()).toBeVisible();
+  await expect(page.getByTestId('starters-title')).toBeVisible();
+}
+
+/** Pick one player in the open comparison sheet. */
+async function choose(page: Page, playerId: string) {
+  const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${playerId}"]`);
+  await row.click();
+  await expect(row).toHaveAttribute('data-chosen', 'true');
+}
+
+test.describe('the recommended lineup, at a glance', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  /**
+   * Starters carry the position tint; backups do not.
+   *
+   * Read from the class the card actually renders with, because that is the
+   * thing the colour comes from — asserting a computed background would be
+   * asserting the design's current opinion about opacity rather than the
+   * property that matters.
+   */
+  test('tints recommended starters and leaves backups neutral', async ({ page }) => {
+    const filled = page.locator('[data-testid="starter-row"][data-starter="true"]');
+    expect(await filled.count(), 'the demo roster fills three slots').toBe(3);
+
+    for (const card of await filled.all()) {
+      const position = (await card.getAttribute('data-position'))!;
+      await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
+    }
+
+    for (const card of await page.getByTestId('bench-row').all()) {
+      await expect(card).not.toHaveClass(/card-pos/);
+      // ...and the badge stays, because which position he plays is still a fact.
+      await expect(card.locator('.pos-pill')).toHaveCount(1);
+    }
+  });
+
+  /**
+   * The tint is never the only cue.
+   *
+   * A card says which slot it is filling and says the word "Starter"; a bench
+   * card says "Bench". Both carry it in the accessible name too, so the answer
+   * survives a screen reader, a monochrome display and bright sunlight.
+   */
+  test('says starter and bench in words, not only in colour', async ({ page }) => {
+    const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
+    await expect(starter).toContainText('Starter');
+    await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
+
+    const bench = page.getByTestId('bench-row').first();
+    await expect(bench).toContainText('Bench');
+    await expect(bench).toHaveAttribute('aria-label', /bench/i);
+  });
+
+  /**
+   * The order is the league's slots, not a cross-position ranking.
+   *
+   * A backup quarterback sorted above a starting flex player by raw score is
+   * the specific failure this prevents: the lineup is a set of slots, and the
+   * slots are what the reader is reading down.
+   */
+  test('orders starters by lineup slot', async ({ page }) => {
+    const slots = await page.getByTestId('starter-row').evaluateAll((rows) =>
+      rows.map((r) => r.getAttribute('data-slot')),
+    );
+    expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX']);
+  });
+
+  /** A slot nothing can fill says so, rather than being quietly dropped. */
+  test('shows an unfillable slot honestly', async ({ page }) => {
+    const empty = page.locator('[data-testid="starter-row"][data-starter="empty"]');
+    expect(await empty.count()).toBeGreaterThan(0);
+    await expect(empty.first()).toContainText('Nobody eligible to start here');
+  });
+
+  /**
+   * Nate Kowalski is on injured reserve and is one of two tight ends here. He
+   * is on the bench, untinted, and the tight-end slot went to the other one.
+   */
+  test('never highlights a player who cannot play', async ({ page }) => {
+    const kowalski = page.locator('[data-testid="bench-row"][data-player-id="1009"]');
+    await expect(kowalski).toBeVisible();
+    await expect(kowalski).not.toHaveClass(/card-pos/);
+    await expect(page.locator('[data-testid="starter-row"][data-player-id="1009"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="starter-row"][data-slot="TE"]')).toContainText('Andre Sotelo');
+  });
+});
+
+test.describe('waiver upgrades', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('names the slot, who is in it, and who is available', async ({ page }) => {
+    const card = page.getByTestId('waiver-card');
+    await expect(card).toBeVisible();
+    const qb = page.locator('[data-testid="waiver-upgrade"][data-slot="QB"]');
+    await expect(qb).toContainText('QB upgrade available');
+    await expect(qb).toContainText('Best available');
+    await expect(qb).toContainText('Trey Halloran');
+  });
+
+  /** Advisory, and it says so. Nothing here executes anything. */
+  test('offers no control that would make a transaction', async ({ page }) => {
+    const card = page.getByTestId('waiver-card');
+    await expect(card).toContainText('add or drop in Sleeper');
+    const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
+      expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * A player another manager owns is never offered.
+   *
+   * Devin Okafor is the rival's receiver and outscores the one this roster
+   * starts; the API is asked directly because "he is not on the screen" could
+   * be true for the wrong reason.
+   */
+  test('never recommends a rostered player', async ({ page }) => {
+    const waivers = await (await page.request.get('/api/leagues/demo-league/waivers')).json();
+    const offered = (waivers.upgrades as { candidates: { playerId: string }[] }[]).flatMap((u) =>
+      u.candidates.map((c) => c.playerId),
+    );
+    expect(offered).not.toContain('1002');
+    expect(offered.length, 'and it does offer somebody').toBeGreaterThan(0);
+  });
+});
+
+test.describe('the comparison tool', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('opens as a sheet from a compact entry point', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    await expect(page.getByTestId('compare-run')).toBeDisabled();
+  });
+
+  for (const count of [2, 3, 4] as const) {
+    test(`ranks ${count} players`, async ({ page }) => {
+      await page.getByTestId('compare-open').click();
+      for (const id of ['1001', '1005', '1008', '1012'].slice(0, count)) await choose(page, id);
+      await page.getByTestId('compare-run').click();
+
+      const order = page.getByTestId('comparison-order');
+      await expect(order).toBeVisible();
+      await expect(order.locator('li')).toHaveCount(count);
+      await expect(order.locator('li').first()).toContainText('Start:');
+    });
+  }
+
+  test('refuses a fifth player out loud, and keeps the four already chosen', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    for (const id of ['1001', '1005', '1008', '1012']) await choose(page, id);
+
+    const fifth = page.locator('[data-testid="compare-candidate"][data-player-id="1007"]');
+    await fifth.click();
+    await expect(fifth).toHaveAttribute('data-chosen', 'false');
+    await expect(page.getByTestId('compare-sheet')).toContainText('Up to 4 players at once');
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
+  });
+
+  test('cannot choose the same player twice', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    // The second tap is the only thing it can be: a removal.
+    await page.locator('[data-testid="compare-candidate"][data-player-id="1001"]').click();
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(0);
+    await choose(page, '1001');
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(1);
+  });
+
+  /**
+   * The pool is not the roster.
+   *
+   * Marcus Vance is owned here and Kai Brennan is a free agent, and comparing
+   * them is an ordinary question — the picker says which is which rather than
+   * refusing one of them.
+   */
+  test('compares a rostered player against a free agent', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1001"]')).toContainText(
+      'Your roster',
+    );
+    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1005"]')).toContainText(
+      'Free agent',
+    );
+    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1002"]')).toContainText(
+      'Rostered elsewhere',
+    );
+
+    await choose(page, '1001');
+    await choose(page, '1005');
+    await page.getByTestId('compare-run').click();
+    await expect(page.getByTestId('comparison-verdict')).toContainText('Start');
+  });
+
+  /**
+   * Two players who cannot share a slot get an honest answer instead of a
+   * ranking. Trey Halloran is a quarterback and Kai Brennan a receiver; this
+   * league starts one quarterback and a W/R/T flex, so there is no lineup in
+   * which the question means anything.
+   */
+  test('says so when the players are not the same lineup decision', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1003');
+    await choose(page, '1005');
+    await page.getByTestId('compare-run').click();
+
+    await expect(page.getByTestId('comparison-verdict')).toContainText('Not the same lineup decision');
+    await expect(page.getByTestId('comparison-slot')).toContainText('do not share a lineup slot');
+    // The per-player numbers are still there — honest, just not a verdict.
+    await expect(page.getByTestId('comparison')).toContainText('Trey Halloran');
+  });
+
+  /** Launching from a slot keeps the comparison about that slot. */
+  test('opens narrowed when launched from a lineup slot', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-slot="TE"]').click();
+    const sheet = page.getByTestId('compare-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText('Compare for TE');
+    // The player whose card was tapped is already in the comparison.
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(1);
+
+    await choose(page, '1009');
+    await page.getByTestId('compare-run').click();
+    await expect(page.getByTestId('comparison-slot')).toContainText('TE');
+  });
+
+  /**
+   * One engine, not two.
+   *
+   * The sheet's ranking and the lineup card's own numbers come from the same
+   * evaluation, so the score a player is given in the comparison is the score
+   * the recommended lineup gave him.
+   */
+  test('uses the same start/sit engine the lineup does', async ({ page }) => {
+    const lineup = await (await page.request.get('/api/leagues/demo-league/lineup')).json();
+    const te = (lineup.slots as { slot: string; playerId: string | null; score: number | null }[]).find(
+      (s) => s.slot === 'TE',
+    )!;
+
+    await page.getByTestId('compare-open').click();
+    await choose(page, te.playerId!);
+    await choose(page, '1001');
+    await page.getByTestId('compare-run').click();
+
+    const row = page.getByTestId('comparison').locator('tbody tr', { hasText: 'Andre Sotelo' });
+    await expect(row).toContainText(te.score!.toFixed(1));
+  });
+});

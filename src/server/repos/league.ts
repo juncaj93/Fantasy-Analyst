@@ -16,8 +16,8 @@ export class LeagueRepo {
       .prepare(
         `INSERT INTO leagues (
            id, sleeper_league_id, name, season, total_rosters, scoring_settings_json,
-           roster_positions_json, league_settings_json, draft_id, is_selected, last_synced_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,COALESCE((SELECT is_selected FROM leagues WHERE id = ?), 0),?)
+           roster_positions_json, league_settings_json, draft_id, status, is_selected, last_synced_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT is_selected FROM leagues WHERE id = ?), 0),?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            season = excluded.season,
@@ -26,6 +26,9 @@ export class LeagueRepo {
            roster_positions_json = excluded.roster_positions_json,
            league_settings_json = excluded.league_settings_json,
            draft_id = excluded.draft_id,
+           -- A sync that could not read the status must not erase the one we
+           -- already had: absent means unknown, and unknown is not a change.
+           status = COALESCE(excluded.status, leagues.status),
            last_synced_at = excluded.last_synced_at`,
       )
       .bind(
@@ -38,6 +41,7 @@ export class LeagueRepo {
         toJson(league.rosterPositions),
         toJson(league.leagueSettings),
         league.draftId,
+        league.status ?? null,
         league.id,
         league.lastSyncedAt,
       )
@@ -247,6 +251,7 @@ function rowToLeague(row: Record<string, unknown>): LeagueRecord & { isSelected:
     rosterPositions: parseJson<string[]>(row['roster_positions_json'], []),
     leagueSettings: parseJson<Record<string, unknown>>(row['league_settings_json'], {}),
     draftId: (row['draft_id'] as string | null) ?? null,
+    status: (row['status'] as string | null) ?? null,
     lastSyncedAt: String(row['last_synced_at'] ?? ''),
     isSelected: Number(row['is_selected'] ?? 0) === 1,
   };

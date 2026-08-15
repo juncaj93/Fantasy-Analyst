@@ -147,7 +147,18 @@ export default {
     }
 
     if (event.cron.startsWith('0 9')) {
-      await new SleeperSyncService(env.DB, appEnv.sleeper).syncPlayers();
+      const sleeperSync = new SleeperSyncService(env.DB, appEnv.sleeper);
+      await sleeperSync.syncPlayers();
+      /*
+       * Where the season is, once a day.
+       *
+       * It changes on a Tuesday morning and decides one thing: whether Draft is
+       * still a destination. A league refresh already updates it, but a user who
+       * has not opened Setup since August would otherwise keep a stale answer
+       * through week one — so it rides the nightly clock as well. It swallows
+       * its own failures, and not knowing keeps the tab.
+       */
+      await sleeperSync.syncNflState();
       /*
        * Last season's line, on the same clock and deliberately after the
        * dictionary: the statistics are matched against the players this app

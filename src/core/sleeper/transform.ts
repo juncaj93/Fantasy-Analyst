@@ -157,6 +157,7 @@ export function toLeagueRecord(league: SleeperLeague, now: string): LeagueRecord
     rosterPositions: league.roster_positions ?? [],
     leagueSettings: league.settings ?? {},
     draftId: league.draft_id ?? null,
+    status: league.status ?? null,
     lastSyncedAt: now,
   };
 }

@@ -59,6 +59,14 @@ export const SETTING_KEYS = {
   /** In-app override for the dedicated inbound email address. */
   inboundAddress: 'newsletter.inboundAddress',
   seasonStart: 'season.start',
+  /**
+   * Sleeper's own `/state/nfl`, as last read.
+   *
+   * Cached rather than fetched per request: it changes once a week, and the
+   * one thing it decides — whether the regular season has started — must not
+   * put a network call in front of every render of the toolbar.
+   */
+  nflState: 'sleeper.nflState',
   vegasProvider: 'vegas.provider',
   lastVegasRefresh: 'vegas.lastRefresh',
   /**

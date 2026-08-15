@@ -13,7 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
-import { compareStartSit } from '../core/startsit/engine.ts';
+import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
@@ -21,7 +21,10 @@ import { normalizeName } from '../core/identity/normalize.ts';
 import { ACCEPT_ANY_SENDER } from '../core/newsletter/pipeline.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
-import { buildRosterShape, buildScoringProfile, leagueFitNotes } from '../core/sleeper/scoring.ts';
+import { positionMatchesFilter, resolveComparisonSlot } from '../core/sleeper/eligibility.ts';
+import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
+import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
+import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -143,6 +146,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       new AdpRepo(db).latest(),
     ]);
     const selected = leagues.find((l) => l.isSelected) ?? null;
+
+    /*
+     * Where the season is, and therefore whether Draft is still a destination.
+     *
+     * Answered from what is already stored — Sleeper's last-read `/state/nfl`,
+     * the league's own status, the draft's status — so the toolbar costs no
+     * network call of its own. Nothing known means preseason, which keeps the
+     * tab; see `resolveSeasonPhase` for why that is the safe direction.
+     */
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const draft = selected?.draftId ? await new LeagueRepo(db).getDraft(selected.draftId) : null;
+    const season = resolveSeasonPhase({
+      state,
+      league: selected ? { season: selected.season, status: selected.status ?? null } : null,
+      draft: draft ? { status: draft.status } : null,
+    });
+
     return jsonResponse({
       players,
       leagues: leagues.length,
@@ -151,6 +171,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       pendingIdentity: identity,
       vegas: { ...props, provider: ctx.env.vegas.name, configured: ctx.env.vegas.isConfigured() },
       adpSnapshot: adp,
+      season,
     });
   });
 
@@ -376,62 +397,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       });
     }
 
-    const playerRepo = new PlayerRepo(db);
-    const propsRepo = new PropsRepo(db);
-    const [players, propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
-      playerRepo.listByIds(mine.playerIds),
-      propsRepo.latestForPlayers(mine.playerIds),
-      propsRepo.previousForPlayers(mine.playerIds),
-      propsRepo.kickoffsForPlayers(mine.playerIds),
-      new EvidenceRepo(db).getSignals(mine.playerIds),
-      propsRepo.freshness(),
+    const [inputs, freshness] = await Promise.all([
+      startSitInputsFor(db, mine.playerIds),
+      new PropsRepo(db).freshness(),
     ]);
-
-    /*
-     * Availability, resolved once for the whole roster.
-     *
-     * Sleeper's designation and the published injury report are combined here
-     * rather than in the engine, so every screen reads the same state — and a
-     * failure of the secondary source costs the practice detail and nothing
-     * else, because the resolver falls back to Sleeper on its own.
-     */
-    const injuries = await new InjuryService(db)
-      .statesFor([...players.values()].map((p) => ({ playerId: p.id, status: p.status })))
-      .catch(() => new Map());
-
-    /*
-     * Per-game opportunity, for the role trend.
-     *
-     * Absent for a player with fewer than six games stored, which is the
-     * ordinary state in September and is passed through as absent rather than
-     * padded: `assessRole` answers `insufficient_data` for a short series, and
-     * that is the honest answer rather than a trend invented from four games.
-     */
-    const usage = await new UsageService(db)
-      .roleMetricsFor([...players.values()].map((p) => ({ playerId: p.id, position: p.position })))
-      .catch(() => new Map());
-
-    const inputs = [];
-    for (const id of mine.playerIds) {
-      const player = players.get(id);
-      // A roster entry with no canonical player is a gap in the dictionary, not
-      // a reason to fail the whole screen.
-      if (!player) continue;
-      inputs.push({
-        player,
-        props: propsByPlayer.get(id) ?? [],
-        previousProps: previousProps.get(id) ?? [],
-        // Absent means the schedule is unknown, which is never treated as a
-        // lock: refusing a swap the user can still make would be the app
-        // inventing a restriction.
-        kickoff: kickoffs.get(id) ?? null,
-        signal: signals.get(id) ?? null,
-        injuryStatus: player.status,
-        injury: injuries.get(id) ?? null,
-        usage: usage.get(id) ?? undefined,
-        propsStale: false,
-      });
-    }
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
@@ -444,10 +413,90 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: freshness,
+      /*
+       * The slots the league actually starts, sent alongside the assignment.
+       *
+       * The Team screen orders its recommended starters by this rather than by
+       * score, so a backup quarterback never sits above a starting flex player
+       * on a cross-position ranking that answers no question anybody asked.
+       */
+      rosterShape: shape,
       ...recommendation,
       notes: unknownPlayers > 0
         ? [...recommendation.notes, `${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`]
         : recommendation.notes,
+    });
+  });
+
+  /**
+   * Whether anybody unrostered would actually improve the lineup.
+   *
+   * Its own request rather than part of the lineup, and deliberately: the Team
+   * screen draws the roster from data it already has and this arrives beside it,
+   * so the free-agent scan can never be the reason the screen is slow to appear.
+   *
+   * Advisory only. There is no add, no drop, no claim and no bid anywhere in
+   * this app, and this endpoint is a GET that writes nothing.
+   */
+  router.get('/api/leagues/:id/waivers', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    if (!mine) {
+      return jsonResponse({
+        league: { id: league.id, name: league.name },
+        found: false,
+        upgrades: [],
+        headline: null,
+        notes: [],
+        considered: 0,
+      });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+
+    /*
+     * Sleeper decides who is available, and it decides it for the whole league.
+     *
+     * Every player on every roster — mine, and the eleven managers I am playing
+     * against — is off the table. This set is also handed to the engine, which
+     * checks it again: it is the one mistake this feature must never make.
+     */
+    const rosteredIds = new Set<string>();
+    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
+
+    const startable = startablePositions(shape);
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable });
+
+    const [rosterInputs, candidateInputs, freshness] = await Promise.all([
+      startSitInputsFor(db, mine.playerIds),
+      startSitInputsFor(db, candidateIds),
+      new PropsRepo(db).freshness(),
+    ]);
+
+    const lineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
+    const advice = recommendWaiverUpgrades({
+      roster: rosterInputs,
+      candidates: candidateInputs,
+      shape,
+      profile,
+      rosteredPlayerIds: rosteredIds,
+      currentStarterIds: mine.starterIds,
+      lineup,
+    });
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name, scoringLabel: profile.label },
+      found: true,
+      dataFreshness: freshness,
+      ...advice,
+      /** How the pool was bounded, so a thin answer is never a mystery. */
+      pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
     });
   });
 
@@ -535,8 +584,35 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const snapshot = await new AdpRepo(ctx.env.db).latest();
     const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
 
-    const pool = q ? await repo.search(q, 200) : (await repo.listAll()).filter((p) => p.active);
-    const filtered = position ? pool.filter((p) => p.position === position.toUpperCase()) : pool;
+    /*
+     * A filter narrows what comes back, so the pool it narrows has to be wider.
+     *
+     * The search returns the best N matches for the text; filtering those to one
+     * position afterwards can leave a handful, which looks exactly like "there
+     * are no more players called that". Asking for more when a filter is on
+     * costs nothing when it is off.
+     */
+    const pool = q ? await repo.search(q, position ? 400 : 200) : (await repo.listAll()).filter((p) => p.active);
+    // `FLX` is a view over RB/WR/TE and is never a position on a player — see
+    // core/sleeper/eligibility.ts, which every screen's filter goes through.
+    const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
+
+    /*
+     * Who owns whom, when the caller says which league they mean.
+     *
+     * The comparison picker needs it: comparing a bench player against a free
+     * agent is a real question, and comparing one against a player another
+     * manager owns is not a question at all. Sleeper's rosters are the whole
+     * answer, and the field is simply absent when no league was named.
+     */
+    const availabilityLeagueId = ctx.url.searchParams.get('leagueId');
+    const availability = new Map<string, 'mine' | 'rostered' | 'available'>();
+    if (availabilityLeagueId) {
+      const rosters = await new LeagueRepo(ctx.env.db).listRosters(availabilityLeagueId);
+      for (const roster of rosters) {
+        for (const id of roster.playerIds) availability.set(id, roster.isMine ? 'mine' : 'rostered');
+      }
+    }
 
     const shortlist = [...filtered]
       .sort(
@@ -573,6 +649,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         signal: signals.get(row.player.id) ?? null,
         myGuy: myGuy(flags.get(row.player.id)?.level ?? 0),
         queued: flags.get(row.player.id)?.queued ?? false,
+        ...(availabilityLeagueId
+          ? { availability: availability.get(row.player.id) ?? ('available' as const) }
+          : {}),
       })),
     });
   });
@@ -1085,64 +1164,189 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   // ---------------------------------------------------------------- start/sit
+  /**
+   * Rank two to four candidates for the same lineup spot.
+   *
+   * The players may come from anywhere — the user's own roster, the free-agent
+   * pool, or a mixture — because "should I start my tight end or the one sitting
+   * on waivers" is an ordinary question and refusing to answer it would be an
+   * arbitrary restriction. Who is *addable* is a separate matter, answered by
+   * the waiver endpoint; this one only ranks.
+   */
+  const MAX_COMPARE = 4;
   router.post('/api/startsit/compare', async (ctx) => {
-    const body = await ctx.json<{ leagueId?: string; playerIds?: string[] }>();
-    if (!body?.playerIds || body.playerIds.length < 2) return errorResponse('at least two playerIds required', 400);
+    const body = await ctx.json<{ leagueId?: string; playerIds?: string[]; slot?: string | null }>();
+    const requested = body?.playerIds ?? [];
+    if (requested.length < 2) return errorResponse('at least two playerIds required', 400);
+    // Duplicates are rejected rather than quietly collapsed: silently comparing
+    // three players when four were sent would be answering a different question.
+    if (new Set(requested).size !== requested.length) return errorResponse('the same player was sent twice', 400);
+    if (requested.length > MAX_COMPARE) {
+      return errorResponse(`at most ${MAX_COMPARE} players can be compared at once`, 400);
+    }
+
     const db = ctx.env.db;
     const leagueRepo = new LeagueRepo(db);
-    const league = body.leagueId ? await leagueRepo.getLeague(body.leagueId) : await leagueRepo.getSelectedLeague();
+    const league = body?.leagueId ? await leagueRepo.getLeague(body.leagueId) : await leagueRepo.getSelectedLeague();
     if (!league) return errorResponse('no league selected', 400);
 
     const playerRepo = new PlayerRepo(db);
-    const propsRepo = new PropsRepo(db);
-    const evidenceRepo = new EvidenceRepo(db);
-    const [propsByPlayer, previousProps, kickoffs, signals, freshness] = await Promise.all([
-      propsRepo.latestForPlayers(body.playerIds),
-      propsRepo.previousForPlayers(body.playerIds),
-      propsRepo.kickoffsForPlayers(body.playerIds),
-      evidenceRepo.getSignals(body.playerIds),
-      propsRepo.freshness(),
+    for (const id of requested) {
+      if (!(await playerRepo.getById(id))) return errorResponse(`player ${id} not found`, 404);
+    }
+
+    const [inputs, freshness] = await Promise.all([
+      startSitInputsFor(db, requested),
+      new PropsRepo(db).freshness(),
     ]);
 
-    const compared = [];
-    for (const id of body.playerIds) {
-      const player = await playerRepo.getById(id);
-      if (!player) return errorResponse(`player ${id} not found`, 404);
-      compared.push(player);
-    }
-    // The same resolved availability the lineup screen uses, so the two cannot
-    // disagree about a player they are both looking at.
-    const injuries = await new InjuryService(db)
-      .statesFor(compared.map((p) => ({ playerId: p.id, status: p.status })))
-      .catch(() => new Map());
-    // The same per-game series the lineup screen reads, so the two screens
-    // cannot disagree about whether a player's role is moving.
-    const usage = await new UsageService(db)
-      .roleMetricsFor(compared.map((p) => ({ playerId: p.id, position: p.position })))
-      .catch(() => new Map());
-
-    const inputs = compared.map((player) => ({
-      player,
-      props: propsByPlayer.get(player.id) ?? [],
-      previousProps: previousProps.get(player.id) ?? [],
-      kickoff: kickoffs.get(player.id) ?? null,
-      signal: signals.get(player.id) ?? null,
-      injuryStatus: player.status,
-      injury: injuries.get(player.id) ?? null,
-      usage: usage.get(player.id) ?? undefined,
-      propsStale: false,
-    }));
-
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    /*
+     * Which lineup spot this is actually about.
+     *
+     * Sent alongside the ranking rather than instead of it: a comparison with no
+     * legal shared slot still produces honest per-player numbers, and the screen
+     * says plainly that they are not competing for the same spot instead of
+     * printing "Start X" for a decision that does not exist.
+     */
+    const slot = resolveComparisonSlot(
+      inputs.map((i) => i.player.position),
+      shape,
+      body?.slot ?? null,
+    );
+
     const comparison = compareStartSit(inputs, profile);
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       dataFreshness: freshness,
+      slot,
       ...comparison,
     });
   });
 
   return (request, env) => router.handle(request, env);
+}
+
+/**
+ * Everything the start/sit engine knows about a set of players.
+ *
+ * One function, used by the lineup, the head-to-head comparison and the waiver
+ * scan alike, because the alternative is three copies that drift: a player who
+ * is Questionable on one screen and healthy on another is not a display bug, it
+ * is two different answers to a lineup question.
+ *
+ * A player missing from the dictionary is skipped rather than fatal — a gap in
+ * the player list is not a reason to fail the whole screen.
+ */
+async function startSitInputsFor(db: Database, playerIds: string[]): Promise<StartSitInput[]> {
+  if (playerIds.length === 0) return [];
+  const propsRepo = new PropsRepo(db);
+  const [players, propsByPlayer, previousProps, kickoffs, signals] = await Promise.all([
+    new PlayerRepo(db).listByIds(playerIds),
+    propsRepo.latestForPlayers(playerIds),
+    propsRepo.previousForPlayers(playerIds),
+    propsRepo.kickoffsForPlayers(playerIds),
+    new EvidenceRepo(db).getSignals(playerIds),
+  ]);
+
+  /*
+   * Availability, resolved once for everybody.
+   *
+   * Sleeper's designation and the published injury report are combined here
+   * rather than in the engine, so every screen reads the same state — and a
+   * failure of the secondary source costs the practice detail and nothing else,
+   * because the resolver falls back to Sleeper on its own.
+   */
+  const injuries = await new InjuryService(db)
+    .statesFor([...players.values()].map((p) => ({ playerId: p.id, status: p.status })))
+    .catch(() => new Map());
+
+  /*
+   * Per-game opportunity, for the role trend.
+   *
+   * Absent for a player with fewer than six games stored, which is the ordinary
+   * state in September and is passed through as absent rather than padded:
+   * `assessRole` answers `insufficient_data` for a short series, and that is the
+   * honest answer rather than a trend invented from four games.
+   */
+  const usage = await new UsageService(db)
+    .roleMetricsFor([...players.values()].map((p) => ({ playerId: p.id, position: p.position })))
+    .catch(() => new Map());
+
+  const inputs: StartSitInput[] = [];
+  for (const id of playerIds) {
+    const player = players.get(id);
+    if (!player) continue;
+    inputs.push({
+      player,
+      props: propsByPlayer.get(id) ?? [],
+      previousProps: previousProps.get(id) ?? [],
+      // Absent means the schedule is unknown, which is never treated as a lock:
+      // refusing a change the user can still make would be the app inventing a
+      // restriction.
+      kickoff: kickoffs.get(id) ?? null,
+      signal: signals.get(id) ?? null,
+      injuryStatus: player.status,
+      injury: injuries.get(id) ?? null,
+      usage: usage.get(id) ?? undefined,
+      propsStale: false,
+    });
+  }
+  return inputs;
+}
+
+/**
+ * How many unrostered players per position the waiver scan will score.
+ *
+ * The pool is thousands of players and the intelligence is not free, so the
+ * scan takes a bounded slice off the top of the draft order instead. Twelve is
+ * comfortably past where a startable free agent is ever found, and it keeps the
+ * whole scan to a few dozen players — which is what keeps Team quick on a phone.
+ */
+const FREE_AGENTS_PER_POSITION = 12;
+
+/**
+ * The best few unrostered players at each position this league starts.
+ *
+ * Ordered by the imported draft ranking, falling back to Sleeper's own
+ * `search_rank` where no ranking covers a position. That is an ordering, not a
+ * judgement — the actual comparison is the same start/sit engine everything else
+ * uses, run afterwards on this shortlist.
+ */
+async function boundedFreeAgents(
+  db: Database,
+  opts: { rosteredIds: Set<string>; startable: Set<string> },
+): Promise<string[]> {
+  const adpRepo = new AdpRepo(db);
+  const snapshot = await adpRepo.latest();
+  const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
+
+  const available = (await new PlayerRepo(db).listAll()).filter(
+    (p) =>
+      p.active &&
+      !opts.rosteredIds.has(p.id) &&
+      (opts.startable.size === 0 || opts.startable.has(p.position)),
+  );
+
+  const byPosition = new Map<string, typeof available>();
+  for (const p of available) {
+    const bucket = byPosition.get(p.position);
+    if (bucket) bucket.push(p);
+    else byPosition.set(p.position, [p]);
+  }
+
+  const ids: string[] = [];
+  for (const bucket of byPosition.values()) {
+    bucket.sort(
+      (a, b) =>
+        (ranks.get(a.id)?.adp ?? Infinity) - (ranks.get(b.id)?.adp ?? Infinity) ||
+        (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+        a.fullName.localeCompare(b.fullName),
+    );
+    for (const p of bucket.slice(0, FREE_AGENTS_PER_POSITION)) ids.push(p.id);
+  }
+  return ids;
 }
 
 /**

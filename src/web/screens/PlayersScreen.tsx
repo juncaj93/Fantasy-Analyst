@@ -16,8 +16,10 @@
  * it, and moving between two players is a tap rather than a round trip.
  */
 
-import { useEffect, useState } from 'react';
-import { api, type EvidenceItem, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
+import { useEffect, useMemo, useState } from 'react';
+import { api, type EvidenceItem, type LeagueSummary, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
+import { FLX_FILTER, offersFlexFilter } from '../../core/sleeper/eligibility.ts';
+import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import {
   Badge,
   CompactTally,
@@ -32,7 +34,7 @@ import {
   formatDate,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, SearchField, SkeletonRows } from '../components/native.tsx';
+import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -63,19 +65,45 @@ interface PlayerFile {
   myGuy?: MyGuyFlag;
 }
 
-export function PlayersScreen({ resetNonce }: { resetNonce: number }) {
+const ALL_FILTER = 'ALL';
+
+export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const [query, setQuery] = useState('');
+  const [position, setPosition] = useState(ALL_FILTER);
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  /*
+   * The chips come from the league, exactly as the draft board's do.
+   *
+   * A filter that can only ever return nothing is worse than no filter — the
+   * reason a defence chip stopped appearing in a league with no defence slot.
+   * With no league selected the list is unfiltered and the row is not drawn at
+   * all, because there is nothing to derive it from.
+   */
+  const selected = leagues.find((l) => l.isSelected) ?? null;
+  const segments = useMemo(() => {
+    if (!selected) return [];
+    const startable = startablePositions(buildRosterShape(selected.rosterPositions));
+    if (startable.size === 0) return [];
+    return [
+      ALL_FILTER,
+      ...(offersFlexFilter(startable) ? [FLX_FILTER] : []),
+      ...[...startable].sort(),
+    ];
+  }, [selected]);
 
   useEffect(() => {
     let cancelled = false;
     const handle = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await api.get<{ players: PlayerListItem[] }>(`/api/players?q=${encodeURIComponent(query)}`);
+        const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
+        const res = await api.get<{ players: PlayerListItem[] }>(
+          `/api/players?q=${encodeURIComponent(query)}${filter}`,
+        );
         if (!cancelled) setPlayers(res.players);
       } finally {
         if (!cancelled) setLoading(false);
@@ -85,7 +113,7 @@ export function PlayersScreen({ resetNonce }: { resetNonce: number }) {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query]);
+  }, [query, position]);
 
   /*
    * Tapping Players while already on Players clears the search.
@@ -142,13 +170,34 @@ export function PlayersScreen({ resetNonce }: { resetNonce: number }) {
           />
         }
       />
+      {segments.length > 0 ? (
+        <div className="control-row" data-testid="players-controls">
+          <SegmentedControl
+            label="Filter by position"
+            value={position}
+            onChange={setPosition}
+            segments={segments.map((p) => ({
+              id: p,
+              label: p,
+              ...(p === FLX_FILTER
+                ? {
+                    ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends',
+                    testId: 'flx-filter',
+                  }
+                : {}),
+            }))}
+          />
+        </div>
+      ) : null}
       {loading && players.length === 0 ? (
         <SkeletonRows rows={8} testId="players-skeleton" />
       ) : players.length === 0 ? (
         <Empty>
           {query
-            ? `Nobody matching “${query}”.`
-            : 'No players found. Run a Sleeper player sync from the Team screen.'}
+            ? `Nobody matching “${query}”${position === ALL_FILTER ? '' : ` under ${position}`}.`
+            : position === ALL_FILTER
+              ? 'No players found. Run a Sleeper player sync from the Team screen.'
+              : `No ${position} players found.`}
         </Empty>
       ) : (
         <div role="list" aria-label="Players, best first" data-testid="players-list">
