@@ -569,9 +569,16 @@ season starts, so in production the feed correctly reports `not_published`, and
 the 304 path, a real ingest and the mapped share will first be exercised by the
 first published file of the season.
 
-Checks at this milestone: 1,215 unit/integration tests (48 new), 139 Chromium
-mobile browser tests, seven deliberate mutations each caught by a named test,
-typecheck, build and `wrangler deploy --dry-run` green.
+Checks at this milestone: 1,216 unit/integration tests (49 new, plus one that
+runs only against a downloaded copy of the whole 8.3MiB file), 547 Chromium
+mobile browser tests, typecheck, build and `wrangler deploy --dry-run` green.
+
+And eight deliberate mutations, each caught by a named test: a naive comma
+split (10 tests), dropping the ascending-index sort (10), parsing the whole
+file rather than one week (2), widening the position filter (2), lowering the
+six-game minimum (2), including playoff weeks in the series (1), turning a
+missing game into a zero (1), and trimming the read window before the season
+type had been read (1).
 
 ## Recommended next work
 
