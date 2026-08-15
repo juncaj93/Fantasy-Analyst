@@ -580,6 +580,83 @@ six-game minimum (2), including playoff weeks in the series (1), turning a
 missing game into a zero (1), and trimming the read window before the season
 type had been read (1).
 
+## Milestone 14 — the intelligence layer beneath the engines (done)
+
+Eleven new `core/` modules, one versioned contract, and 120 tests. No screen
+changed, and that was the instruction rather than a shortcut: the brief asks for
+reusable outputs, and the parallel Team/Waivers UI work stays mergeable because
+nothing here touches it. Full detail in
+[docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](PLAYER_AND_LINEUP_INTELLIGENCE.md).
+
+**Opportunity, separated from efficiency.** `core/xfp/` converts targets, target
+depth, carries and attempts into expected points under the league's own scoring,
+reconstructs what actually happened from the same rows, and reports the gap. Four
+readings come out of it — touchdown regression risk, production outrunning
+opportunity, a healthy role behind a bad box score, and a thin role behind one —
+and the first two are the difference between a sell and a hold on the same hot
+month. It scores **nothing**: opportunity is already in the lineup score once as
+`usage_level` and the market's number is in it again as `vegas`, so a third count
+off the same carries was the failure mode the whole module was arranged to avoid.
+A test asserts the engine's score is unchanged by everything in the file.
+
+**Who gets the football.** The beneficiary graph reads the games a team has
+already played without a starter rather than a depth chart nobody publishes: with
+him against without him, per teammate, per game. A week with no row for him and
+rows for two teammates is a game he missed; a week with no rows for anybody is
+the bye — derived from the data, because that distinction is the whole
+reliability of the sample. With no absence to read it falls back to depth
+inference, labelled as inference at low confidence, and with neither it says
+`unknown` and names nobody.
+
+**What would change the answer.** For calls inside 2.5 points, the conditions are
+found by re-running the real evaluation with one input moved and bisecting for
+the flip — the market line a challenger would have to reach, the practice report
+that would demote the leader, the wind speed that would end it. Computed against
+the engine rather than against a copy of its arithmetic, so a boundary cannot
+drift away from the recommendation it annotates. Unreachable conditions are
+dropped rather than printed.
+
+**Floor, Balanced or Ceiling, chosen before it is asked.** A substantial
+favourite gets Floor and a substantial underdog gets Ceiling, and the
+circularity that idea invites is closed structurally: `suggestMode` accepts
+market points per player and nothing else, so a mode-weighted score has no field
+to travel in on. Thin coverage or an unknown opponent lands on Balanced with
+`auto: false`, which is how a screen tells a choice from a default.
+
+**Plan B is not Plan C.** Contingency lineups are real `recommendLineup` calls
+with the clock moved to just before the questionable player's kickoff, so slot
+legality, FLEX rules, the Out gate and locked starters all come from the
+optimiser rather than from a second copy of its rules. The bench receiver who
+covers the hole at ten in the morning is unavailable at four, and that is the
+only thing the module exists to say.
+
+**The app grades itself, and is not allowed to act on it.** Every recommendation
+is recorded before kickoff with the model version that produced it and each
+source's own `observedAt`; `lookaheadViolations()` returns every place a record
+contains information from after the decision. Grading is two verdicts kept
+apart: who scored more, and whether the call was defensible on pregame
+information — judged by opportunity, so an alternative who won on a fluky
+seventy-yard score grades as `sound_but_unlucky` and one who won on the better
+opportunity grades as a real miss. The weekly report separates observed
+evidence, counterfactual reasoning, suggested bounded changes and actual model
+changes; the last is always empty, suggestions are capped at 15% and only ever
+reductions, and nothing is proposed at all below twenty graded decisions.
+
+**Consumed through one door.** `core/contracts/channel3.ts` carries a contract
+version and the model version, states absence as `null` rather than zero, keeps
+confidence and freshness inside the payload, and ships a validator that catches a
+`NaN` anywhere in the tree, an unknown confidence level, a source marked missing
+that carries an observation time, and a self-grade claiming it applied something.
+Two payloads are built end to end in the tests — one fully connected, one with
+nothing connected — and both validate.
+
+Checks at this milestone: 1,783 unit/integration tests, typecheck, build and
+`wrangler deploy --dry-run` green.
+
+**Not built, deliberately:** no UI, no persistence for the grading ledger, and no
+red-zone data — so the expected-points model is opportunity-shaped and says so on
+every number it produces.
+
 ## Recommended next work
 
 1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written

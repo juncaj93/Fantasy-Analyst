@@ -13,6 +13,11 @@ src/
     vegas/     provider interface, adapters, market normalization, cache policy
     draft/     draft recommendation components
     startsit/  start/sit components + Vegas -> fantasy-points conversion
+    xfp/       expected points from opportunity, and the gap to what happened
+    schedule/  role-specific schedule strength, weeks ahead
+    value/     this-week and next-four-week player value
+    grading/   recommendation ledger, counterfactual grading, weekly self-grade
+    contracts/ the versioned surface all of the above is consumed through
   server/      D1-shaped persistence, services, HTTP router, auth
   worker/      Cloudflare Worker entry (fetch + scheduled + email)
   web/         React SPA (iPhone Safari first)
@@ -183,6 +188,29 @@ unknown or the user has no later pick.
 availability status and an uncertainty penalty for thin/partial/stale market
 data. Missing markets are reported, never imputed; if nothing is usable the
 recommendation is withheld.
+
+## Advanced intelligence layer
+
+A second tier of `core/` sits beside the engines rather than inside them:
+expected points from opportunity (`xfp/`), the injury-beneficiary graph, decision
+boundaries for close calls, mode suggestion, role-specific schedule strength
+(`schedule/`), multi-week value (`value/`), contingency lineups, fragility,
+bench optionality, streaming, and the self-grading ledger (`grading/`).
+
+Two rules hold the layer together and both are enforced in code rather than
+promised in prose. **Nothing here enters a lineup score** unless it is named as
+doing so — `assessXfp` returns `points: 0`, `assessFragility` returns
+`projectionEffect: 0`, and `assessOptionality` has no points field at all, so a
+caller cannot add roster-management value to a projection by accident. And
+**everything is consumed through one versioned envelope**,
+`core/contracts/channel3.ts`, where absence is `null` rather than zero and
+confidence and freshness travel with the numbers.
+
+Where a question was already answered somewhere in the app, the answer is reused
+rather than reimplemented: the contingency plans are real `recommendLineup`
+calls with the clock moved, the schedule outlook is `assessMatchup` applied
+forward, and the decision boundaries bisect the actual `evaluatePlayer`. Full
+detail in [docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](PLAYER_AND_LINEUP_INTELLIGENCE.md).
 
 ## Live draft refresh
 
