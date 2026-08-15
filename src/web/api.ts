@@ -190,8 +190,26 @@ export interface PlayerDetail {
   } | null;
   /** Why there is no outlook, when there is none. */
   outlookNote: string | null;
-  /** `Major injury history: ACL` — a label, not a retelling. Null when none. */
+  /**
+   * `2025: missed 9 games with a toe injury` — one line about last season, or
+   * a label like `Major injury history: ACL` when only the outlook named one.
+   *
+   * Reconciled against the games played shown above it, so the two can never
+   * describe different seasons. Null when there is nothing to say.
+   */
   injuryContext: string | null;
+  /** The arithmetic behind that line, for evidence and debug views. */
+  availability: {
+    season: string;
+    gamesPlayed: number | null;
+    gamesAvailable: number | null;
+    gamesMissedTotal: number | null;
+    injuryAttributedMisses: number;
+    unresolvedMisses: number | null;
+    confidence: string;
+    parts: { part: string; games: number; episodes: number }[];
+    corroborated: boolean;
+  } | null;
   /** Current availability: designation, body part, practice week, provenance. */
   injury: {
     designation: string;

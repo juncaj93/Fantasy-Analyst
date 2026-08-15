@@ -22,7 +22,13 @@ import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
 import { majorInjuryHistory } from '../../core/draft/injury.ts';
 import { DESIGNATION_LABEL, injuryLine, provenanceLine } from '../../core/injury/model.ts';
 import { InjuryService } from './injuryService.ts';
-import { InjuryHistoryRepo, type StoredPlayerHistory } from '../repos/injuryHistory.ts';
+import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
+import { assessHistory, deriveEpisodes } from '../../core/injury/history.ts';
+import {
+  fullSeasonSlate,
+  reconcileHistoricalAvailability,
+  type HistoricalAvailability,
+} from '../../core/injury/availability.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -121,8 +127,10 @@ export interface PlayerDetailView {
    * Last season, never this one. Two sources can produce it and only one is
    * ever shown:
    *
-   *   - the published season report, counted — how many games an injury cost
-   *     and what the source called it. Preferred, because it carries a number;
+   *   - participation reconciled against the published season report — how
+   *     many games he missed, and how much of that an injury explains.
+   *     Preferred, because it carries numbers that agree with the stat line
+   *     directly above it on the card;
    *   - failing that, a diagnosis named in the season outlook, as a label
    *     (`Major injury history: ACL`). Kept for the injuries the report's
    *     vocabulary cannot express — it lists body parts, so a torn ACL appears
@@ -132,6 +140,30 @@ export interface PlayerDetailView {
    * app saying one thing twice in two voices.
    */
   injuryContext: string | null;
+  /**
+   * The reconciliation `injuryContext` was derived from, in numbers.
+   *
+   * The line above is one sentence and this is the working behind it: games
+   * played, games available, total missed, how many of those an injury
+   * explains, and how many it does not. Present so that a summary can be
+   * audited against its own inputs — the defect this replaced was invisible
+   * precisely because the card showed a sentence and never the arithmetic.
+   *
+   * `null` when there was nothing to reconcile.
+   */
+  availability: {
+    season: string;
+    gamesPlayed: number | null;
+    gamesAvailable: number | null;
+    gamesMissedTotal: number | null;
+    injuryAttributedMisses: number;
+    unresolvedMisses: number | null;
+    confidence: string;
+    /** Games tied to each body part, most costly first. */
+    parts: { part: string; games: number; episodes: number }[];
+    /** Whether supported prose independently stated the same total. */
+    corroborated: boolean;
+  } | null;
   /**
    * What is known about his availability right now, and where it came from.
    *
@@ -224,13 +256,17 @@ export class PlayerDetailService {
     const history = majorInjuryHistory(outlook?.fullText ?? null);
 
     /*
-     * And what last season's published report actually recorded.
+     * And what last season's participation and published report, together, say.
      *
-     * This is the stronger of the two when it exists: the outlook names an
-     * injury, and this counts the games it cost. It is history in both cases --
-     * neither line may ever change what the app says about today.
+     * Together is the operative word. The report counts the games an injury was
+     * filed for; Sleeper counts the games he played. Reconciling them is what
+     * stops the card printing `8 GP` above `missed 2 games` — see
+     * `availability.ts` for why those two numbers were never measuring the same
+     * thing.
      */
-    const measured = await this.historyFor(playerId, season).catch(() => null);
+    const measured = await this.availabilityFor(playerId, statsSeason, lastSeason, outlook?.fullText ?? null).catch(
+      () => null,
+    );
 
     /*
      * Current availability, from the shared layer.
@@ -250,9 +286,77 @@ export class PlayerDetailService {
      * saying the same thing twice in two voices, which is the duplication this
      * card was already trying to avoid.
      */
-    const injuryContext = measured?.note ?? history?.line ?? null;
+    const injuryContext = measured?.displaySummary ?? history?.line ?? null;
 
-    return { playerId, lastSeason, outlook, outlookNote: note, injuryContext, injury };
+    return {
+      playerId,
+      lastSeason,
+      outlook,
+      outlookNote: note,
+      injuryContext,
+      availability: measured
+        ? {
+            season: measured.season,
+            gamesPlayed: measured.gamesPlayed,
+            gamesAvailable: measured.gamesAvailable,
+            gamesMissedTotal: measured.gamesMissedTotal,
+            injuryAttributedMisses: measured.injuryAttributedMisses,
+            unresolvedMisses: measured.unresolvedMisses,
+            confidence: measured.confidence,
+            parts: measured.parts,
+            corroborated: measured.corroborated,
+          }
+        : null,
+      injury,
+    };
+  }
+
+  /**
+   * Last season's availability, reconciled.
+   *
+   * Three inputs meet here and nowhere else: Sleeper's games played, the
+   * season's actual length, and the injury report's episodes. The episodes are
+   * re-derived from the stored weekly rows rather than read from the summary
+   * table — the summary was written by a backfill that never saw a games-played
+   * column, and evidence is the thing worth storing anyway.
+   *
+   * `null` when there is nothing worth a line, which is most players.
+   */
+  private async availabilityFor(
+    playerId: string,
+    season: string,
+    lastSeason: SeasonStatsView | null,
+    outlook: string | null,
+  ): Promise<HistoricalAvailability | null> {
+    const rows = (await new InjuryHistoryRepo(this.db).reportsFor([playerId], season)).get(playerId) ?? [];
+    if (rows.length === 0) return null;
+
+    const episodes = deriveEpisodes(rows);
+    const availability = reconcileHistoricalAvailability({
+      season,
+      participation: {
+        gamesPlayed: lastSeason?.gamesPlayed ?? null,
+        gamesAvailable: fullSeasonSlate(await this.repo.gamesPlayedCounts(season)),
+      },
+      evidence: { episodes, corroboration: outlook },
+    });
+
+    /*
+     * The bar for saying anything at all is unchanged, and deliberately.
+     *
+     * Reconciliation corrects a note's numbers and qualifies its wording; it
+     * does not decide that a season was worth mentioning. Letting games missed
+     * alone open that door would put an injury line on every player who sat out
+     * for a reason this app cannot see — a suspension, a holdout, a healthy
+     * scratch — which is the causality-from-participation mistake the whole
+     * design refuses.
+     *
+     * The single exception earns itself: when supported prose independently
+     * states the same missed-game total, the count and the cause both have a
+     * source, and the IR weeks nflverse filed no row for are no longer a guess.
+     */
+    const significant = assessHistory(episodes).significance !== 'none';
+    return significant || availability.corroborated ? availability : null;
   }
 
   /**
@@ -261,20 +365,6 @@ export class PlayerDetailService {
    * `null` when nobody has said anything, so the card renders no section at all
    * rather than a heading over the word "unknown".
    */
-  /**
-   * Last season's injuries, as the published report recorded them.
-   *
-   * Deliberately asks for the season *before* the one the card is about. The
-   * store is keyed by season, so this cannot return a current-season row even
-   * if one exists, and nothing it returns is allowed to reach `injuryFor`.
-   */
-  private async historyFor(playerId: string, season: string): Promise<StoredPlayerHistory | null> {
-    const previous = String(Number(season) - 1);
-    if (!Number.isFinite(Number(season))) return null;
-    const rows = await new InjuryHistoryRepo(this.db).forPlayers([playerId], previous);
-    return rows.get(playerId) ?? null;
-  }
-
   private async injuryFor(playerId: string, name: string | null): Promise<PlayerDetailView['injury']> {
     void name;
     const player = await this.players.getById(playerId);

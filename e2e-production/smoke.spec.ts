@@ -385,6 +385,72 @@ test.describe('the deployed app', () => {
     await expect(page.getByTestId('draft-search-open')).toBeVisible();
   });
 
+  /**
+   * A card may not disagree with itself about last season.
+   *
+   * The defect this guards against shipped, and looked reasonable on the way
+   * out: `8 GP` from Sleeper above `2025: missed 2 games with a toe injury`
+   * from the injury report, two correct sources counting different things. It
+   * survived every local test because both halves were right in isolation.
+   *
+   * So this asserts the relationship rather than any player's numbers, against
+   * whatever the live board happens to hold: total missed is games available
+   * minus games played, injury never explains more absences than there were,
+   * and a note that leaves some of them unexplained does not get to read like a
+   * complete account of the season.
+   */
+  test('never states an injury total that contradicts games played', async ({ page, request }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    const rows = page.getByTestId('recommendation-row');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const ids = (await rows.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-player-id'))))
+      .filter((id): id is string => !!id)
+      .slice(0, 12);
+    expect(ids.length, 'the board should carry players to check').toBeGreaterThan(0);
+
+    let checked = 0;
+    for (const id of ids) {
+      const res = await request.get(`/api/players/${id}/detail`, { failOnStatusCode: false });
+      if (res.status() !== 200) continue;
+      const detail = await res.json();
+      const a = detail.availability;
+      if (!a) continue;
+      checked++;
+
+      if (a.gamesAvailable != null && a.gamesPlayed != null) {
+        expect(a.gamesMissedTotal, `${id}: total missed is not derived from participation`).toBe(
+          a.gamesAvailable - a.gamesPlayed,
+        );
+      }
+      if (a.gamesMissedTotal != null) {
+        expect(a.injuryAttributedMisses, `${id}: injury explains more games than were missed`).toBeLessThanOrEqual(
+          a.gamesMissedTotal,
+        );
+        expect(a.unresolvedMisses).toBe(a.gamesMissedTotal - a.injuryAttributedMisses);
+      }
+
+      // The stat line and the note describe one season, in one set of numbers.
+      if (detail.lastSeason?.gamesPlayed != null) {
+        expect(a.gamesPlayed, `${id}: the note disagrees with the GP shown above it`).toBe(
+          detail.lastSeason.gamesPlayed,
+        );
+      }
+
+      // An unqualified "missed N games" is a claim about the whole season, and
+      // is only available to a note that accounts for the whole season.
+      const claim = /missed (\d+) games? with/.exec(detail.injuryContext ?? '');
+      if (claim) {
+        expect(a.unresolvedMisses, `${id}: "${detail.injuryContext}" leaves absences unexplained`).toBe(0);
+      }
+    }
+
+    // Nothing to check is a real answer in August — the board may be all
+    // rookies and healthy players — but it must not look like a pass.
+    test.skip(checked === 0, 'no player on this board has last-season injury history');
+  });
+
   test('is installable, and still refuses a write from a stranger', async ({ page, request }) => {
     await page.goto('/');
     const manifest = await request.get('/manifest.webmanifest');
