@@ -64,6 +64,17 @@ interface RosterResponse {
 /** How many players may be compared at once. Matched by the server. */
 const MAX_COMPARE = 4;
 
+/**
+ * How deep the comparison picker's list goes.
+ *
+ * The search itself reaches the whole player universe — the server searches
+ * every name and only then cuts to this — so the number is about *browsing*:
+ * how far somebody who has typed nothing can scroll before the list ends. Forty
+ * was the draft board's old cap and it ended silently, looking exactly like the
+ * end of the player pool rather than the end of a page.
+ */
+const PICKER_ROWS = 100;
+
 const ALL_FILTER = 'ALL';
 
 export function TeamScreen({
@@ -538,17 +549,6 @@ function CompareSheet({
     if (startable.size === 0) return [ALL_FILTER];
     return [ALL_FILTER, ...(offersFlexFilter(startable) ? [FLX_FILTER] : []), ...[...startable].sort()];
   }, [rosterPositions]);
-
-  /*
-   * How deep the picker's list goes.
-   *
-   * The search itself reaches the whole player universe — the server searches
-   * every name and only then cuts to this — so the number is about *browsing*:
-   * how far somebody who has not typed anything can scroll before the list ends.
-   * Forty was the draft board's old cap and it ended silently, looking exactly
-   * like the end of the player pool rather than the end of a page.
-   */
-  const PICKER_ROWS = 100;
 
   useEffect(() => {
     let cancelled = false;
