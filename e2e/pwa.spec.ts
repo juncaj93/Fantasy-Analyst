@@ -144,42 +144,56 @@ test.describe('the shell when launched from the Home Screen', () => {
 
   /*
    * The mode the user actually wants: no Safari chrome, so every pixel below
-   * the bar would be the app's fault. There must be none.
+   * the bar is the app's own decision.
+   *
+   * With a floating toolbar that decision is "float this far off the edge", and
+   * the number is `--toolbar-gap`. So the claim is no longer "there is nothing
+   * below the bar" but "what is below the bar is exactly what the design asked
+   * for" — a page that quietly held an extra strip would still fail this.
    */
-  test('has nothing of its own below the bar', async ({ page }) => {
+  test('holds nothing below the toolbar but the gap it floats by', async ({ page }) => {
     const g = await page.evaluate(() => {
       const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
-      return { gap: Math.round(window.innerHeight - nav.bottom), navBottom: Math.round(nav.bottom), viewport: window.innerHeight };
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;visibility:hidden;padding-bottom:var(--toolbar-gap)';
+      document.body.append(probe);
+      const intended = Math.round(Number.parseFloat(getComputedStyle(probe).paddingBottom));
+      probe.remove();
+      return { gap: Math.round(window.innerHeight - nav.bottom), intended, viewport: window.innerHeight };
     });
-    expect(g.gap).toBe(0);
-    expect(g.navBottom).toBe(g.viewport);
+    expect(g.gap).toBe(g.intended);
   });
 
   /*
    * And still clears the home indicator. In standalone mode iOS draws the
-   * indicator over the app, so removing this inset would put the tab labels
+   * indicator over the app, so losing this clearance would put the destinations
    * under it — the opposite mistake to the one this work is about, and just as
    * bad to tap.
+   *
+   * The clearance moved from padding inside a flush bar to distance under a
+   * floating one. The measurement is the same measurement.
    */
-  test('still keeps the buttons off the home indicator', async ({ page }) => {
+  test('still keeps the destinations off the home indicator', async ({ page }) => {
     const clearance = await page.evaluate(() => {
-      const bar = document.querySelector('.tabbar')!;
-      const button = bar.querySelector('button')!.getBoundingClientRect();
-      return Math.round(bar.getBoundingClientRect().bottom - button.bottom);
+      const button = document.querySelector('.tabbar button')!.getBoundingClientRect();
+      return Math.round(window.innerHeight - button.bottom);
     });
     // The indicator is a 5px pill sitting 8px off the bottom edge.
     expect(clearance).toBeGreaterThanOrEqual(13);
     expect(clearance, 'spending the whole 34px inset is what read as a blank strip').toBeLessThan(INSET);
   });
 
-  test('reserves the bar exactly once, as in a tab', async ({ page }) => {
+  test('reserves the bar and its gap exactly once, as in a tab', async ({ page }) => {
     const g = await page.evaluate(() => {
       const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
       const main = getComputedStyle(document.querySelector('.app-main')!);
-      return { navHeight: Math.round(nav.height), reserved: Number.parseFloat(main.paddingBottom) };
+      return {
+        reach: Math.round(window.innerHeight - nav.top),
+        reserved: Number.parseFloat(main.paddingBottom),
+      };
     });
-    expect(g.reserved).toBeGreaterThanOrEqual(g.navHeight);
-    expect(g.reserved - g.navHeight).toBeLessThanOrEqual(10);
+    expect(g.reserved).toBeGreaterThanOrEqual(g.reach);
+    expect(g.reserved - g.reach, 'the reservation is the bar’s reach plus one step of air').toBeLessThanOrEqual(10);
   });
 
   test('claims the viewport height exactly once', async ({ page }) => {
@@ -221,8 +235,10 @@ test.describe('layout diagnostics', () => {
 
     const table = page.getByTestId('layout-diagnostics-table');
     await expect(table).toBeVisible();
-    // The number this whole pass exists to establish.
-    await expect(table).toContainText('nothing (correct)');
+    // The number this whole pass exists to establish: what is under the bar is
+    // the gap it floats by, and the report says so rather than leaving the
+    // reader to work out whether a non-zero number is a bug.
+    await expect(table).toContainText('the gap it floats by (correct)');
     await expect(table).toContainText('browser tab');
   });
 });

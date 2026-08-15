@@ -38,9 +38,20 @@
   --surface-sunken: #e9ebf1;
   --surface-inset: #f5f6fa;
   --nav-surface: #f2f3f7d9;
-  --tabbar-surface: #f8f9fbd9;
   --header-surface: var(--nav-surface);
   --scrim: rgb(17 24 39 / 32%);
+
+  /*
+   * The floating toolbar's own surface.
+   *
+   * A little more opaque than the top bar, because it is a small object sitting
+   * *over* the page rather than a full-width band the page runs under: at the
+   * top bar's transparency a row of players showed through a 300px pill as
+   * unreadable smear, and the destinations have to be more noticeable than the
+   * container they sit in.
+   */
+  --toolbar-surface: #fbfcfeee;
+  --toolbar-border: rgb(17 24 39 / 8%);
 
   /* -- lines ------------------------------------------------------------- */
   /*
@@ -134,6 +145,15 @@
   --shadow-1: 0 1px 1px rgb(17 24 39 / 4%);
   --shadow-2: 0 4px 16px rgb(17 24 39 / 10%);
   --shadow-sheet: 0 -8px 32px rgb(17 24 39 / 18%);
+  /*
+   * The floating toolbar's shadow, and it is the only real one in the design.
+   *
+   * A floating object needs to read as floating or it looks like a mistake, but
+   * a drop shadow under a bar is also the fastest way to make a phone screen
+   * look like a web page. This is wide, soft and dark enough to separate the
+   * pill from a scrolling list passing under it, and no darker.
+   */
+  --shadow-toolbar: 0 6px 20px rgb(17 24 39 / 12%);
   --focus-ring: 0 0 0 3px rgb(42 95 216 / 32%);
 
   /* -- geometry ---------------------------------------------------------- */
@@ -147,6 +167,15 @@
   --radius: 12px;
   --radius-lg: 16px;
   --radius-sheet: 20px;
+  /*
+   * The floating toolbar's corner.
+   *
+   * Deliberately not `--radius-pill`: a fully rounded end on a 56px-tall bar
+   * makes a lozenge, and the two destinations at the ends lose most of their
+   * corner to it. This is the sheet's radius plus the toolbar's own padding, so
+   * the outer curve and the curve a pressed destination draws are concentric.
+   */
+  --radius-toolbar: 25px;
   --tap: 44px;
 
   /*
@@ -173,10 +202,30 @@
   --page-x: 12px;
 
   /*
-   * Replaced at runtime with the bar's measured height (including its safe-area
-   * padding). This value only has to hold for the first frame.
+   * The floating toolbar, in three numbers.
+   *
+   * `--tab-w` is one destination's width, and the bar is however many of those
+   * there are — six today — plus its own padding. Sizing the bar from its
+   * contents rather than from a column count is what stops a seventh
+   * destination wrapping onto a second row, which is a bug this app has had.
+   *
+   * `--toolbar-pad` is the inset between the pill's edge and a destination's
+   * box, and it is what makes the bar 56px tall rather than 44: it is the only
+   * height the container adds.
    */
-  --tabbar-height: 50px;
+  --tab-w: 52px;
+  --toolbar-pad: 5px;
+
+  /*
+   * Replaced at runtime with the toolbar's measured height. This value only has
+   * to hold for the frame before the measurement lands.
+   *
+   * Unlike the flush bar this replaced, the measured height is the pill *only*:
+   * the device inset is no longer padding inside it but distance underneath it,
+   * which is `--toolbar-gap`. Two numbers, added in exactly one place — see
+   * `--content-inset`.
+   */
+  --toolbar-height: 56px;
 
   /*
    * Motion, in three speeds and one curve.
@@ -233,6 +282,43 @@
    * becomes a regression on another.
    */
   --nav-inset: max(0px, min(var(--safe-bottom), calc(var(--home-indicator-reach) + var(--sp-1))));
+
+  /*
+   * How far the floating toolbar sits off the bottom of the screen.
+   *
+   * "As low as safely possible", expressed as a number. On a screen with a home
+   * indicator that is the same clearance the old flush bar spent as padding —
+   * the indicator's reach plus a little air — except that it is now air under a
+   * floating object rather than dead space inside a bar, which is what makes
+   * the same measurement read as intentional instead of as a blank strip. On a
+   * screen without one it is a hairline gap: enough for the pill to read as
+   * floating, and nothing more.
+   */
+  --toolbar-gap: max(6px, var(--nav-inset));
+
+  /*
+   * The one bottom inset every page reserves, and the only place the toolbar's
+   * two numbers are ever added together.
+   *
+   * Toolbar height, the gap under it, and one step of air so the last row does
+   * not graze the pill. Anything that adds a spacer of its own — a per-page
+   * padding, a trailing div, a second `env()` — double-counts, and that is
+   * exactly how this app grew a black strip twice.
+   */
+  --content-inset: calc(var(--toolbar-height) + var(--toolbar-gap) + var(--sp-2));
+}
+
+/*
+ * A narrower phone gets a narrower destination before it gets smaller type.
+ *
+ * At 360px the six labels still have to be readable and the targets still have
+ * to be 44px, so what gives is the width of a destination — 48px is still wider
+ * than a fingertip is asked to be — rather than the size of the word in it.
+ */
+@media (max-width: 374px) {
+  :root {
+    --tab-w: 48px;
+  }
 }
 
 /*
@@ -254,9 +340,16 @@
     --surface-sunken: #10151b;
     --surface-inset: #1a2029;
     --nav-surface: #0c1015d9;
-    --tabbar-surface: #12171ed9;
     --header-surface: var(--nav-surface);
     --scrim: rgb(0 0 0 / 55%);
+
+    /*
+     * Raised, not inverted: the pill is the one surface in Dark that is lighter
+     * than the cards it floats over, which is how it reads as "in front of"
+     * without a shadow doing all the work.
+     */
+    --toolbar-surface: #1e242deb;
+    --toolbar-border: rgb(255 255 255 / 9%);
 
     --separator: #262e39;
     --separator-soft: #1e252e;
@@ -315,6 +408,7 @@
     --shadow-1: none;
     --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
     --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
+    --shadow-toolbar: 0 6px 22px rgb(0 0 0 / 50%);
     --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
   }
 }
@@ -328,9 +422,12 @@
   --surface-sunken: #10151b;
   --surface-inset: #1a2029;
   --nav-surface: #0c1015d9;
-  --tabbar-surface: #12171ed9;
   --header-surface: var(--nav-surface);
   --scrim: rgb(0 0 0 / 55%);
+
+  /* Same values as the media query above, for an explicit Dark choice. */
+  --toolbar-surface: #1e242deb;
+  --toolbar-border: rgb(255 255 255 / 9%);
 
   --separator: #262e39;
   --separator-soft: #1e252e;
@@ -383,6 +480,7 @@
   --shadow-1: none;
   --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
   --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
+  --shadow-toolbar: 0 6px 22px rgb(0 0 0 / 50%);
   --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
 }
 
@@ -416,13 +514,15 @@ body,
 .card,
 .list-group,
 .player-row,
-.tabbar,
 .nav-bar {
   transition:
     background-color var(--dur-fast) ease,
     border-color var(--dur-fast) ease,
     color var(--dur-fast) ease;
 }
+/* The toolbar is not in that list because it declares its own transition for
+   the keyboard, and a second `transition` on the same element replaces rather
+   than extends the first. Its colours are carried in that declaration. */
 
 /*
  * Reduced motion: nothing moves, everything still says what it is.
@@ -450,12 +550,13 @@ body,
  * unexplained strip under the navigation:
  *
  *   `#root`     owns the viewport height. `100dvh` and nothing else does.
- *   `.tabbar`   owns the home-indicator inset. `env()` is read in exactly one
- *               place in this stylesheet — `--safe-bottom` — and consumed in
- *               exactly one rule, the bar's own bottom padding.
- *   `.app-main` owns the reservation for the bar, and reserves the bar's
- *               *measured* height, which already contains that inset. It must
- *               never add the inset itself.
+ *   `.tabbar`   owns the home-indicator inset, as the distance it floats off
+ *               the bottom edge. `env()` is read in exactly one place in this
+ *               stylesheet — `--safe-bottom` — and reaches the layout through
+ *               exactly one token, `--toolbar-gap`.
+ *   `.app-main` owns the reservation, and reserves `--content-inset`: the
+ *               toolbar's measured height plus that gap plus one step of air.
+ *               It must never add the device inset itself.
  *   `.nav-bar`  owns the top inset, because it is the thing that sits under
  *               the status bar when the page is scrolled.
  *
@@ -494,19 +595,18 @@ body,
 .app-main {
   flex: 1;
   /*
-   * The bottom padding clears the fixed tab bar exactly. Once.
+   * The bottom padding clears the floating toolbar exactly. Once.
    *
-   * `--tabbar-height` is measured from the bar itself at runtime (see
-   * useTabbarHeight) and already includes whatever the home indicator reserved
-   * inside it, so the inset must NOT be added again here — doing that was worth
-   * an extra 34px of empty page below the last row on an iPhone, which is the
-   * black strip. The fallback value in :root only has to be sane for the frame
-   * before the measurement lands.
+   * `--content-inset` is the one place the toolbar's measured height, the gap
+   * under it and the device inset are added together — see the token. No page,
+   * no screen and no list may add a spacer of its own on top of it; every time
+   * this app has shown a strip of dead space at the bottom it was because two
+   * elements were both reserving the same pixels.
    *
    * The top inset belongs to the navigation bar, which is the element that
    * actually meets the status bar when the page scrolls.
    */
-  padding: var(--safe-top) var(--page-x) calc(var(--tabbar-height) + var(--sp-2));
+  padding: var(--safe-top) var(--page-x) var(--content-inset);
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -624,52 +724,86 @@ body,
   flex: 0 0 auto;
 }
 
-/* --------------------------------------------------------------- tab bar */
+/* ----------------------------------------------------- floating toolbar */
+/*
+ * One floating pill, and the destinations are what you are meant to see.
+ *
+ * This replaced a full-width band welded to the bottom edge. The band was
+ * correct and it was also the last thing on screen that read as a webpage
+ * footer: an edge-to-edge rule with six items sitting on it, of exactly the
+ * kind a page puts under its content. A compact object floating clear of the
+ * edge reads as a control belonging to the app, which is the whole of what this
+ * change is for — no destination moved, was renamed, or does anything new.
+ *
+ * Sized by its contents rather than by a column count. Each destination is
+ * `--tab-w` wide, so the pill is however many destinations there are; a seventh
+ * would widen the bar until it hit the clamp, and never wrap onto a second row.
+ * Centred with a translate rather than `margin: auto`, because it is fixed and
+ * has no line box to be centred in.
+ */
 .tabbar {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: var(--toolbar-gap);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 30;
   display: grid;
-  /* Column count follows the number of tabs rather than a hardcoded five: a
-     sixth tab used to wrap onto a second row, doubling the bar's height and
-     covering the bottom of the page. */
   grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  background: var(--tabbar-surface);
+  width: max-content;
+  /*
+   * Narrower than the screen, always, but never wider than it. The clamp is
+   * what a very narrow phone or a very large text setting runs into, and it
+   * scrolls nothing and clips nothing: the destinations shrink to fit inside
+   * their own minimum, which is still a full target.
+   */
+  max-width: calc(100% - 2 * var(--sp-3));
+  padding: var(--toolbar-pad);
+  border-radius: var(--radius-toolbar);
+  background: var(--toolbar-surface);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
-  border-top: 1px solid var(--separator);
+  border: 1px solid var(--toolbar-border);
+  box-shadow: var(--shadow-toolbar);
   /*
-   * Flush against the bottom edge, and no taller than it has to be.
+   * Out of the way while the keyboard is up.
    *
-   * The bar itself reaches the physical bottom of the viewport; the clearance
-   * the home indicator needs is added as padding INSIDE it, so the tinted
-   * surface runs all the way down and the buttons sit above the indicator. The
-   * alternative — offsetting the whole bar upwards — leaves a strip of page
-   * showing underneath, which is what made it look like it was floating.
-   *
-   * What that clearance is worth is `--nav-inset`, which is deliberately less
-   * than the full inset: see the token. Nothing else in the page may add the
-   * inset again.
+   * A fixed element sits at the bottom of the *layout* viewport, which iOS does
+   * not shrink for the keyboard — so a floating bar would hover over whatever
+   * the user is typing into, or over the button under it. It leaves downwards
+   * and comes straight back; `visibility` is what takes it out of the tab order
+   * and off the screen reader's map while it is gone, and it is delayed by the
+   * length of the transition so the exit is still seen.
    */
-  padding-bottom: var(--nav-inset);
+  transition:
+    transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
+    visibility 0s,
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.tabbar[data-keyboard='open'] {
+  transform: translateX(-50%) translateY(calc(100% + var(--toolbar-gap)));
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
+    visibility 0s var(--dur);
 }
 
 .tabbar button {
   position: relative;
+  width: var(--tab-w);
+  /* The pill's height is this plus its own padding, and nothing else adds to
+     it — a bar that grows is a bar that starts eating the page. */
   min-height: var(--tap);
-  /*
-   * The bar is exactly one tap target tall plus its hairline, and the icon,
-   * the gap and the label have to add up to less than that — the height is
-   * asserted, because a bar that grows is a bar that starts eating the page.
-   */
-  padding: 3px 1px;
+  padding: 2px 1px;
   background: none;
   border: none;
+  border-radius: calc(var(--radius-toolbar) - var(--toolbar-pad));
   color: var(--text-faint);
-  /* Six tabs at 360px leaves 60px each; the label must not force a wrap. */
+  /* Six labels at 360px; none of them may wrap. */
   font-size: 0.625rem;
   line-height: 1.25;
   white-space: nowrap;
@@ -682,11 +816,38 @@ body,
   /* Tight enough that the icon and its label read as one control. */
   gap: 2px;
   cursor: pointer;
-  transition: color var(--dur-fast) ease;
+  transition:
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
 }
 
+/*
+ * The selected destination: its own colour, a heavier glyph, and a mark two
+ * pixels tall.
+ *
+ * Everything here is a repaint of a fixed box. Nothing changes a width, so the
+ * five destinations either side of the one you tapped do not move — a toolbar
+ * that reflows on every tap is the single loudest thing a bottom bar can do.
+ */
 .tabbar button[aria-current='page'] {
   color: var(--accent-text);
+}
+
+.tabbar button[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  width: 14px;
+  height: 2.5px;
+  margin-left: -7px;
+  border-radius: var(--radius-pill);
+  background: currentcolor;
+  opacity: 0.9;
+}
+
+.tabbar button:active {
+  background: var(--pressed);
 }
 
 .tabbar button:active .tab-glyph {
@@ -1041,13 +1202,43 @@ body,
 }
 
 /* ============================================================= player rows */
-/* The navigation bar is sticky, so anything scrolled to the top of the
-   viewport lands underneath it and cannot be tapped. Reserve its height. */
+/*
+ * Both bars float over the page, so anything scrolled to either edge of the
+ * viewport lands underneath one of them and cannot be tapped. Reserve both.
+ *
+ * The bottom half is what the floating toolbar made necessary. The page as a
+ * whole already reserves the bar's reach, so the *last* thing on a screen
+ * always clears it — but a control scrolled to the bottom edge from the middle
+ * of a long list is a different event, and it was landing squarely under the
+ * pill. `scroll-margin-bottom` is the one-line answer, and it uses the same
+ * shared inset as everything else rather than a second guess at the number.
+ */
 .player-row,
 .card,
 .list-group,
 [data-testid='newsletter-message'] {
   scroll-margin-top: 72px;
+  scroll-margin-bottom: var(--content-inset);
+}
+
+/*
+ * And the same for anything that can be scrolled to because it is a control.
+ *
+ * The browser scrolls a control into view for reasons the page never sees —
+ * keyboard focus moving through a form, find-in-page, an anchor, a script
+ * asking. Its idea of "in view" is the viewport, and it has no notion that two
+ * bars are painted over the ends of it, so without this a control can be
+ * scrolled to and still be underneath one of them. `:where()` so this costs
+ * nothing in specificity and any component can still say otherwise.
+ */
+:where(button, a, input, select, textarea, summary, [tabindex]) {
+  scroll-margin-top: 72px;
+  scroll-margin-bottom: var(--content-inset);
+}
+
+/* The toolbar's own destinations are fixed; they are never scrolled to. */
+.tabbar :where(button) {
+  scroll-margin: 0;
 }
 
 /*
@@ -1837,12 +2028,17 @@ button:disabled {
  * by elevation and tone rather than by a saturated fill, which is what keeps a
  * row of seven from shouting. It scrolls sideways when a league has more
  * positions than fit, and the track scrolls with it rather than clipping it.
+ *
+ * The track has no vertical padding of its own. The segments are 44px tall —
+ * a full target — and the tinted face inside each one is 36px, so the control
+ * *looks* like the compact thing it should be next to a search field while
+ * still being the size of a thumb. Padding the track instead would put dead
+ * pixels between the segments and the edge, which is where a miss lands.
  */
-.segmented,
 .filter-row {
   display: flex;
   gap: 2px;
-  padding: 3px;
+  padding: 0 3px;
   border-radius: var(--radius);
   background: var(--surface-sunken);
   overflow-x: auto;
@@ -1851,24 +2047,16 @@ button:disabled {
   -webkit-overflow-scrolling: touch;
 }
 
-.segmented::-webkit-scrollbar,
 .filter-row::-webkit-scrollbar {
   display: none;
 }
 
-.segmented {
-  width: 100%;
-}
-
-.segmented > button,
 .filter-row > .chip {
   flex: 1 0 auto;
   min-width: 44px;
-  /* Visibly an iOS segment, and still a real target with the track's padding. */
-  min-height: 36px;
-  padding: var(--sp-1) var(--sp-3);
+  min-height: var(--tap);
+  padding: 0;
   border: 0;
-  border-radius: 10px;
   background: none;
   color: var(--text-dim);
   font: inherit;
@@ -1877,24 +2065,39 @@ button:disabled {
   letter-spacing: -0.005em;
   white-space: nowrap;
   cursor: pointer;
+  display: flex;
+  align-items: center;
   transition:
-    background-color var(--dur-fast) ease,
     color var(--dur-fast) ease,
-    box-shadow var(--dur-fast) ease,
     transform var(--dur-fast) var(--ease);
 }
 
-.segmented > button:active,
+/* The part you can see. Everything around it is target. */
+.chip-face {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border-radius: 10px;
+  transition:
+    background-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
 .filter-row > .chip:active {
   transform: scale(0.96);
 }
 
-.segmented > button[aria-pressed='true'],
 .filter-row > .chip[aria-pressed='true'] {
-  background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-1);
   font-weight: 650;
+}
+
+.filter-row > .chip[aria-pressed='true'] .chip-face {
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
 
 /* The queue filter is the user's own list, so it reads as theirs. */
@@ -2008,6 +2211,116 @@ label {
 
 .search-clear:active {
   opacity: 0.4;
+}
+
+/* ------------------------------------------------- search beside the filters */
+/*
+ * One row that is either "search, and the positions" or "search, taking the
+ * room".
+ *
+ * The two states share this row exactly, so opening and closing the field moves
+ * nothing above it and nothing below it: the row keeps its height, the list
+ * keeps its scroll position, and the page does not jump. See SearchFilterRow.
+ */
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /*
+   * The row is one tap target tall in both states, and that is load-bearing.
+   * The filters are 44px and a search field is 36px, so without this the row
+   * shrank by eight pixels the moment the field opened — the whole board
+   * jumped up under the reader's thumb, and back down when they cancelled.
+   */
+  min-height: var(--tap);
+  margin-bottom: var(--sp-2);
+}
+
+/* Both occupants give up their own bottom margin — the row owns it now. */
+.control-row > .filter-row,
+.control-row > .search {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/*
+ * The folded search: a glyph, a quiet recess, and a target the size of a
+ * fingertip.
+ *
+ * The visible control is 38×36 because that is what sits comfortably beside a
+ * segmented control; the `::after` takes the actual hit area out to 44×44
+ * without changing a pixel of the layout, which is the whole trick that lets
+ * this row be shorter than the two rows it replaced and still be tappable.
+ */
+.search-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+
+.search-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -4px -3px;
+}
+
+.search-toggle svg {
+  width: 17px;
+  height: 17px;
+}
+
+.search-toggle:active {
+  opacity: 0.5;
+}
+
+/* The field, inline in the row: same shape as the standalone one, no margin. */
+.search-inline input {
+  min-height: 36px;
+}
+
+/*
+ * Cancel: a word, not a box, in the accent colour — the trailing control iOS
+ * puts beside a search field. It leaves the search *and* empties it, which is
+ * what the word means, and is the only thing in this control that discards a
+ * query.
+ */
+.search-cancel {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.search-cancel::after {
+  content: '';
+  position: absolute;
+  inset: -4px -6px;
+}
+
+.search-cancel:active {
+  opacity: 0.5;
 }
 
 /* ================================================================== badges */
@@ -2434,7 +2747,10 @@ table.compact tr:last-child td {
   align-items: center;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 0 var(--sp-1) var(--sp-2);
+  /* One step, not two: this line and the control row under it were separated
+     by a gap large enough to read as a section break between two things that
+     are the same thing — what is left to fill, and how to filter for it. */
+  padding: 0 var(--sp-1) var(--sp-1);
   font-size: 0.78rem;
   color: var(--text-dim);
   white-space: nowrap;

@@ -10,6 +10,7 @@ import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
+import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
@@ -60,7 +61,6 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const measureTabbar = useTabbarHeight();
 
   const refresh = useCallback(async () => {
     try {
@@ -139,50 +139,102 @@ export function App() {
         ) : null}
       </main>
 
-      <nav className="tabbar" aria-label="Main navigation" ref={measureTabbar}>
-        {TABS.map((t) => {
-          const badge =
-            t.id === 'review' && overview
-              ? overview.pendingEvidence + overview.pendingIdentity
-              : 0;
-          // Where unlocking happens is where "you cannot change anything yet"
-          // belongs. A dot, not a word, because it is a state and not a task.
-          const locked = t.id === 'setup' && viewOnly;
-          return (
-            <button
-              key={t.id}
-              onClick={() => {
-                if (tab === t.id) setResetNonce((n) => n + 1);
-                else setTab(t.id);
-              }}
-              aria-current={tab === t.id ? 'page' : undefined}
-              aria-label={locked ? `${t.label} — view only, unlock to make changes` : undefined}
-              data-testid={`tab-${t.id}`}
-            >
-              <span className="tab-glyph" aria-hidden="true">
-                <t.Icon />
-              </span>
-              {t.label}
-              {badge > 0 ? <span className="tab-badge">{badge}</span> : null}
-              {locked ? <span className="tab-lock" data-testid="view-only" aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
-      </nav>
+      <FloatingToolbar
+        active={tab}
+        onSelect={(id) => {
+          if (tab === id) setResetNonce((n) => n + 1);
+          else setTab(id);
+        }}
+        reviewBadge={overview ? overview.pendingEvidence + overview.pendingIdentity : 0}
+        viewOnly={viewOnly}
+      />
     </div>
   );
 }
 
 /**
- * Reserve exactly the space the tab bar occupies — no more, no less.
+ * The six destinations, in one compact floating control.
+ *
+ * **It holds no state, and that is the point.** Which destination is current is
+ * a fact about the app, passed in; the toolbar renders it and reports taps
+ * back. A bar that remembered its own selection would be a second answer to
+ * "where am I" — and second answers diverge, which is what makes a nested
+ * screen light the wrong tab or a programmatic move light none at all. The app
+ * lands a first-time reader on Setup without anybody having touched this
+ * control, and the toolbar has to be right about that too.
+ *
+ * Nothing about the destinations changed here: same six, same order, same
+ * names, same tap, same screen.
+ */
+function FloatingToolbar({
+  active,
+  onSelect,
+  reviewBadge,
+  viewOnly,
+}: {
+  active: Tab;
+  onSelect: (id: Tab) => void;
+  reviewBadge: number;
+  viewOnly: boolean;
+}) {
+  const measure = useToolbarHeight();
+  const keyboardOpen = useKeyboardOpen();
+
+  return (
+    <nav
+      className="tabbar"
+      aria-label="Main navigation"
+      ref={measure}
+      /*
+       * Out of the way while the keyboard is up — see the stylesheet. The
+       * attribute rather than a class so the state is legible in the inspector
+       * and in a test, which is how the one behaviour nobody can see in a
+       * screenshot gets checked at all.
+       */
+      data-keyboard={keyboardOpen ? 'open' : 'closed'}
+    >
+      {TABS.map((t) => {
+        const badge = t.id === 'review' ? reviewBadge : 0;
+        // Where unlocking happens is where "you cannot change anything yet"
+        // belongs. A dot, not a word, because it is a state and not a task.
+        const locked = t.id === 'setup' && viewOnly;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onSelect(t.id)}
+            aria-current={active === t.id ? 'page' : undefined}
+            aria-label={locked ? `${t.label} — view only, unlock to make changes` : undefined}
+            data-testid={`tab-${t.id}`}
+          >
+            <span className="tab-glyph" aria-hidden="true">
+              <t.Icon />
+            </span>
+            {t.label}
+            {badge > 0 ? <span className="tab-badge">{badge}</span> : null}
+            {locked ? <span className="tab-lock" data-testid="view-only" aria-hidden="true" /> : null}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+/**
+ * Reserve exactly the space the toolbar occupies — no more, no less.
  *
  * The page used to reserve a guessed constant plus the home-indicator inset.
  * A guess is wrong in both directions: too small and the last row hides behind
  * the bar, too large and there is a strip of empty page above it that reads as
- * a black bar at the bottom of the screen. The bar knows its own height,
- * including whatever the safe-area inset added to it, so it is asked — on
- * mount, and again whenever it changes, which is what happens when Safari's
- * chrome collapses and the inset changes with it.
+ * a black bar at the bottom of the screen. The bar knows its own height, so it
+ * is asked — on mount, and again whenever it changes, which is what happens
+ * when the text size changes under it.
+ *
+ * What is written is the pill's height *only*. The distance it floats off the
+ * bottom edge is `--toolbar-gap`, a pure CSS token, and the two are added
+ * together in exactly one place — `--content-inset`. Measuring the whole reach
+ * instead would be measuring a transform: the bar translates itself off screen
+ * when the keyboard opens, and the reservation would collapse with it.
  *
  * **A callback ref, not an effect over a ref object, and that is the whole
  * point.** This was written as `useEffect(..., [ref])`, which runs once after
@@ -197,7 +249,7 @@ export function App() {
  * A callback ref runs when the node actually arrives, which is the event this
  * cares about.
  */
-function useTabbarHeight(): (node: HTMLElement | null) => void {
+function useToolbarHeight(): (node: HTMLElement | null) => void {
   const dispose = useRef<(() => void) | null>(null);
 
   return useCallback((node: HTMLElement | null) => {
@@ -219,7 +271,7 @@ function useTabbarHeight(): (node: HTMLElement | null) => void {
       const height = Math.round(node.getBoundingClientRect().height);
       if (height <= 0 || height === last) return;
       last = height;
-      document.documentElement.style.setProperty('--tabbar-height', `${height}px`);
+      document.documentElement.style.setProperty('--toolbar-height', `${height}px`);
     };
 
     apply();
@@ -233,12 +285,11 @@ function useTabbarHeight(): (node: HTMLElement | null) => void {
      * not.
      *
      * A ResizeObserver watches the *content* box unless told otherwise, and
-     * everything that changes this bar's height changes its padding: the whole
-     * mechanism is `padding-bottom: var(--nav-inset)`. The content box — a row
-     * of 44px buttons — never moves. So the observer sat there, correctly
-     * reporting that nothing had changed, through exactly the event it exists
-     * to catch: Safari's chrome collapsing, the inset going from 0 to 34, and
-     * the bar growing by 17px that the page then failed to reserve.
+     * what this element adds around its content is exactly what has to be
+     * measured: the pill's own padding and its hairline border. The content box
+     * — a row of 44px buttons — never moves, so a default observer would sit
+     * there correctly reporting that nothing had changed through every event
+     * this exists to catch.
      */
     const observer = new ResizeObserver(apply);
     observer.observe(node, { box: 'border-box' });

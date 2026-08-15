@@ -1,0 +1,439 @@
+/**
+ * The floating toolbar, as a contract.
+ *
+ * The bottom bar stopped being a full-width band welded to the edge of the
+ * screen and became a compact pill floating clear of it. That is a presentation
+ * change and nothing else — the same six destinations, the same taps, the same
+ * screens — so most of what is asserted here is that nothing moved: every
+ * destination is still reachable, still named the same thing, still lights up
+ * for the screen that is actually showing.
+ *
+ * The rest is the set of ways a floating bar goes wrong, which is a specific
+ * and short list: it covers the last row of a long page, it wraps its labels on
+ * a narrow phone, it shrinks its targets below a fingertip, it hovers over the
+ * keyboard, it floats on top of a modal, and its selection drifts out of step
+ * with the screen. Each of those is a test.
+ *
+ * Where the app's own geometry is concerned this file asks the page for the
+ * numbers rather than hardcoding them, so it keeps working when the design
+ * changes its mind about a radius or a gap — and keeps failing when the design
+ * loses one of these properties.
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+const DESTINATIONS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
+
+/** The screen each destination is supposed to be showing, once it is tapped. */
+const SCREEN_OF: Record<(typeof DESTINATIONS)[number], string> = {
+  draft: 'draft-nav',
+  team: 'league-card',
+  trades: 'trades-nav',
+  players: 'players-nav',
+  review: 'review-nav',
+  setup: 'setup-step-sleeper',
+};
+
+async function open(page: Page, tab: (typeof DESTINATIONS)[number]) {
+  await page.getByTestId(`tab-${tab}`).click();
+  await page.waitForTimeout(350);
+}
+
+/**
+ * The pill's box, and the numbers the design derives it from.
+ *
+ * Waited for rather than assumed: the app shows a loading state before it knows
+ * whether changes are allowed, and there is no toolbar in the document until
+ * that answer arrives.
+ */
+async function toolbar(page: Page) {
+  await page.locator('.tabbar').waitFor({ state: 'attached' });
+  return page.evaluate(() => {
+    const bar = document.querySelector('.tabbar')!;
+    const box = bar.getBoundingClientRect();
+    return {
+      top: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      left: Math.round(box.left),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      radius: Number.parseFloat(getComputedStyle(bar).borderTopLeftRadius),
+      keyboard: bar.getAttribute('data-keyboard'),
+    };
+  });
+}
+
+test.describe('the destinations', () => {
+  test('all six are there, named what they were, and reach their screen', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      await expect(page.getByTestId(SCREEN_OF[tab]).first(), `${tab} did not open its screen`).toBeVisible();
+    }
+  });
+
+  test('the labels are still words, not glyphs alone', async ({ page }) => {
+    await page.goto('/');
+    const labels = await page.locator('.tabbar button').allInnerTexts();
+    expect(labels.map((l) => l.trim().split('\n')[0])).toEqual([
+      'Draft',
+      'Team',
+      'Trades',
+      'Players',
+      'Review',
+      'Setup',
+    ]);
+  });
+
+  /**
+   * One bar, not two.
+   *
+   * The classic way this change goes wrong is that the old navigation survives
+   * underneath the new one — usually invisible on a desktop and stacked on a
+   * phone. There is exactly one element carrying the destinations.
+   */
+  test('there is only one navigation on screen', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      await expect(page.locator('.tabbar')).toHaveCount(1);
+      await expect(page.getByTestId('tab-draft')).toHaveCount(1);
+      await expect(page.locator('nav[aria-label="Main navigation"]')).toHaveCount(1);
+    }
+  });
+});
+
+/**
+ * Which destination is lit, and where that fact comes from.
+ *
+ * The toolbar holds no selection of its own: it is handed the app's current
+ * destination and draws it. That is not directly observable, so what is checked
+ * is the property it buys — the highlight and the screen can never disagree,
+ * including on a screen the toolbar did not open.
+ */
+test.describe('the active destination', () => {
+  test('is exactly one, and it is the screen that is showing', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      const current = await page.locator('.tabbar button[aria-current="page"]').all();
+      expect(current, `${tab}: exactly one destination may be current`).toHaveLength(1);
+      await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId(SCREEN_OF[tab]).first()).toBeVisible();
+    }
+  });
+
+  /**
+   * A nested screen belongs to the destination that opened it.
+   *
+   * Setup pushes a detail screen over itself. A toolbar keeping its own idea of
+   * where it is would either light nothing here or light whatever was tapped
+   * last, which is the failure this catches.
+   */
+  test('stays on the parent while a nested screen is open', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    await page.getByTestId('setup-step-vegas').click();
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
+
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+
+    await page.getByTestId('back-button').click();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+  });
+
+  /**
+   * The destination the app chose, not the one you tapped.
+   *
+   * This is the test that actually pins "the toolbar holds no selection of its
+   * own". Everywhere else in the app a tap and the current screen change
+   * together, so a toolbar keeping a private copy would look identical — the
+   * copy only drifts when something *other than a tap* moves the app, and there
+   * is exactly one such path: a first-time reader with no league selected is
+   * landed on Setup. The overview is answered with "no league" to reach it.
+   *
+   * A toolbar that remembered where it was would light Draft here, over a Setup
+   * screen.
+   */
+  test('follows the app when the app navigates on its own', async ({ page }) => {
+    await page.route('**/api/overview', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ json: { ...body, selectedLeague: null } });
+    });
+
+    await page.goto('/');
+    await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    await expect(page.getByTestId('tab-draft')).not.toHaveAttribute('aria-current', 'page');
+    await page.unroute('**/api/overview');
+  });
+
+  test('survives tapping the destination you are already on', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    await page.getByTestId('tab-players').click();
+    await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+  });
+
+  /**
+   * The bar must not move when the selection does.
+   *
+   * A selected state that widens its own destination — a filled pill, a grown
+   * label — reflows the other five, and a bottom bar that jiggles on every tap
+   * is the loudest thing on a phone screen.
+   */
+  test('changes nothing about the toolbar’s geometry', async ({ page }) => {
+    await page.goto('/');
+    const shapes = [];
+    const buttons = [];
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      shapes.push(await toolbar(page));
+      buttons.push(
+        await page.evaluate(() =>
+          [...document.querySelectorAll('.tabbar button')].map((b) => Math.round(b.getBoundingClientRect().width)),
+        ),
+      );
+    }
+    for (const shape of shapes) expect(shape).toEqual(shapes[0]);
+    for (const widths of buttons) expect(widths).toEqual(buttons[0]);
+  });
+});
+
+test.describe('shape and reach', () => {
+  test('is a compact floating pill, not a full-width band', async ({ page }) => {
+    await page.goto('/');
+    const bar = await toolbar(page);
+    // Narrower than the screen, with real margin either side — 20px is the
+    // least that reads as floating rather than as a band with a gutter.
+    expect(bar.width, `the bar is ${bar.width}px on a ${bar.viewportWidth}px screen`).toBeLessThanOrEqual(
+      bar.viewportWidth - 40,
+    );
+
+    /*
+     * And it is that width because of what is in it, not because something set
+     * one. A bar stretched to the screen and then inset by a margin looks
+     * similar and is not the same thing: its destinations drift apart as the
+     * phone gets wider, and it stops being sized by its own contents.
+     */
+    const packed = await page.evaluate(() => {
+      const bar = document.querySelector('.tabbar')!;
+      const style = getComputedStyle(bar);
+      const chrome =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth);
+      const buttons = [...bar.querySelectorAll('button')].reduce((sum, b) => sum + b.getBoundingClientRect().width, 0);
+      return Math.round(bar.getBoundingClientRect().width - (buttons + chrome));
+    });
+    expect(packed, 'the pill has slack in it, so it is stretched rather than packed').toBeLessThanOrEqual(2);
+    // Clear of the bottom edge, and only just.
+    expect(bar.bottom).toBeLessThan(bar.viewportHeight);
+    expect(bar.viewportHeight - bar.bottom).toBeLessThanOrEqual(20);
+    // Icon plus label, and nothing spent on chrome around them.
+    expect(bar.height).toBeGreaterThanOrEqual(54);
+    expect(bar.height).toBeLessThanOrEqual(64);
+    expect(bar.radius, 'a floating control is rounded').toBeGreaterThanOrEqual(16);
+  });
+
+  test('every destination is a full target and none of them wraps', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
+      expect(box.height, `${tab} is ${box.height}px tall`).toBeGreaterThanOrEqual(44);
+      expect(box.width, `${tab} is ${box.width}px wide`).toBeGreaterThanOrEqual(44);
+    }
+    // A wrapped label doubles the line count, which is the observable symptom.
+    const lines = await page.evaluate(() =>
+      [...document.querySelectorAll('.tabbar button')].map((b) => {
+        const label = [...b.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+        const range = document.createRange();
+        range.selectNodeContents(label!);
+        return range.getClientRects().length;
+      }),
+    );
+    for (const count of lines) expect(count, 'a label wrapped onto a second line').toBe(1);
+  });
+
+  test('leaves nothing of the page hidden behind it', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of ['draft', 'players', 'trades', 'setup'] as const) {
+      await open(page, tab);
+      // Scroll until the page stops moving: the reservation changes the
+      // document height, so one scroll to a height measured before it lands
+      // stops short of the real bottom.
+      for (let i = 0; i < 6; i++) {
+        const moved = await page.evaluate(() => {
+          const before = window.scrollY;
+          window.scrollTo(0, document.documentElement.scrollHeight);
+          return window.scrollY !== before;
+        });
+        if (!moved) break;
+        await page.waitForTimeout(150);
+      }
+      const clear = await page.evaluate(() => {
+        const bar = document.querySelector('.tabbar')!.getBoundingClientRect();
+        const main = document.querySelector('.app-main')!;
+        const last = main.lastElementChild?.getBoundingClientRect() ?? null;
+        return { barTop: Math.round(bar.top), lastBottom: last ? Math.round(last.bottom) : null };
+      });
+      if (clear.lastBottom !== null) {
+        expect(clear.lastBottom, `${tab}: the last thing on the page sits under the toolbar`).toBeLessThanOrEqual(
+          clear.barTop,
+        );
+      }
+    }
+  });
+});
+
+/**
+ * The keyboard.
+ *
+ * iOS shrinks the *visual* viewport for the keyboard and leaves the layout one
+ * alone, so a bar correctly pinned to the bottom of the page ends up floating
+ * over the field being typed into. Playwright cannot raise a soft keyboard, so
+ * the signal the app actually reads is stood in for: a visual viewport that
+ * reports itself several hundred pixels shorter than the page. Everything
+ * downstream of that signal is real.
+ */
+test.describe('the keyboard', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      /*
+       * Stands in for `window.visualViewport`, which cannot be resized from
+       * outside the browser. It reports the page's own height until a test says
+       * otherwise, so a page with no keyboard reads exactly as it really does.
+       */
+      let hidden = 0;
+      const fake = new EventTarget();
+      Object.defineProperties(fake, {
+        height: { get: () => window.innerHeight - hidden },
+        offsetTop: { get: () => 0 },
+      });
+      Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
+      Object.defineProperty(window, '__keyboard', {
+        configurable: true,
+        value: (px: number) => {
+          hidden = px;
+          fake.dispatchEvent(new Event('resize'));
+        },
+      });
+    });
+  });
+
+  test('the toolbar leaves while it is up, and comes back when it goes', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.tabbar')).toHaveAttribute('data-keyboard', 'closed');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+
+    await page.evaluate(() => (window as unknown as { __keyboard: (px: number) => void }).__keyboard(336));
+    await expect(page.locator('.tabbar')).toHaveAttribute('data-keyboard', 'open');
+    // Gone from the screen and gone from the tab order, not merely faded.
+    await expect(page.getByTestId('tab-draft')).toBeHidden();
+
+    await page.evaluate(() => (window as unknown as { __keyboard: (px: number) => void }).__keyboard(0));
+    await expect(page.locator('.tabbar')).toHaveAttribute('data-keyboard', 'closed');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+  });
+
+  /*
+   * Safari's own chrome collapsing as the page scrolls moves the two viewports
+   * relative to each other by a few tens of pixels. A bar that hid for that
+   * would flicker on every scroll, which is worse than one that never moves.
+   */
+  test('ignores the browser’s own chrome coming and going', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    await page.evaluate(() => (window as unknown as { __keyboard: (px: number) => void }).__keyboard(60));
+    await page.waitForTimeout(200);
+    await expect(page.locator('.tabbar')).toHaveAttribute('data-keyboard', 'closed');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+  });
+
+  test('the Draft search still opens and still filters with it up', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+    await page.getByTestId('draft-search-open').click();
+    await page.evaluate(() => (window as unknown as { __keyboard: (px: number) => void }).__keyboard(336));
+
+    const field = page.getByTestId('draft-search');
+    await expect(field).toBeVisible();
+    await field.fill('sotelo');
+    await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
+    // …and the toolbar is not sitting on top of the field.
+    await expect(page.locator('.tabbar')).toHaveAttribute('data-keyboard', 'open');
+  });
+});
+
+/**
+ * A sheet is in front, and nothing behind it is tappable.
+ *
+ * A floating bar with a shadow is exactly the kind of element that ends up on
+ * top of a modal, because it looks like it should be. It must not be, and its
+ * destinations must not be reachable through the backdrop.
+ */
+test.describe('modal layering', () => {
+  test('the toolbar is behind the sheet and takes no taps through it', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-review').click();
+    await page.getByTestId('scoring-key-open').click();
+    await expect(page.getByTestId('scoring-key')).toBeVisible();
+
+    const order = await page.evaluate(() => ({
+      bar: Number.parseInt(getComputedStyle(document.querySelector('.tabbar')!).zIndex, 10),
+      backdrop: Number.parseInt(getComputedStyle(document.querySelector('.sheet-backdrop')!).zIndex, 10),
+      sheet: Number.parseInt(getComputedStyle(document.querySelector('.sheet')!).zIndex, 10),
+    }));
+    expect(order.bar).toBeLessThan(order.backdrop);
+    expect(order.backdrop).toBeLessThan(order.sheet);
+
+    /*
+     * And the arithmetic is not the claim — what is on top at the pixel is.
+     * A destination is picked and the document asked what is actually there.
+     */
+    const covered = await page.evaluate(() => {
+      const box = document.querySelector('[data-testid="tab-draft"]')!.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit?.closest('.tabbar') === null;
+    });
+    expect(covered, 'a tap where a destination is would reach the toolbar').toBe(true);
+
+    // The sheet is still the thing on screen, and Review is still current.
+    await expect(page.getByTestId('scoring-key')).toBeVisible();
+    await expect(page.getByTestId('tab-review')).toHaveAttribute('aria-current', 'page');
+    await page.getByTestId('sheet-close').click();
+  });
+
+  test('no navigation is duplicated inside the sheet', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-review').click();
+    await page.getByTestId('scoring-key-open').click();
+    await expect(page.getByTestId('scoring-key')).toBeVisible();
+    await expect(page.getByTestId('scoring-key').locator('.tabbar')).toHaveCount(0);
+    await page.getByTestId('sheet-close').click();
+  });
+});
+
+test.describe('reduced motion', () => {
+  test('the toolbar still arrives and leaves, without animating', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    const seconds = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.querySelector('.tabbar')!).transitionDuration),
+    );
+    expect(seconds, 'nothing should be animating under reduced motion').toBeLessThanOrEqual(0.001);
+
+    // …and it is still a working navigation.
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
+  });
+});

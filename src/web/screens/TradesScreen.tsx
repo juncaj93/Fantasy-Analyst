@@ -57,6 +57,7 @@ export function TradesScreen() {
         navigation bar says both, in the height the bar was already taking.
       */}
       <NavBar
+        testId="trades-nav"
         title="Trades"
         subtitle={
           board.league

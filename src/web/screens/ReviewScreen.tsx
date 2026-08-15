@@ -97,6 +97,7 @@ export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
   return (
     <>
       <NavBar
+        testId="review-nav"
         title="Review"
         subtitle={
           evidence.length + identity.length === 0

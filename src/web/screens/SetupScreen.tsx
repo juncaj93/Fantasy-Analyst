@@ -18,7 +18,7 @@ import {
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
-import { ListGroup, ListRow, NavBar, PushScreen } from '../components/native.tsx';
+import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
@@ -210,22 +210,24 @@ function AppearanceCard() {
   return (
     <div data-testid="appearance">
       <div className="section-title">Appearance</div>
-      <div className="segmented" role="group" aria-label="Appearance">
-        {APPEARANCES.map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={mode === option}
-            data-testid={`appearance-${option}`}
-            onClick={() => {
-              storeAppearance(option);
-              setMode(option);
-            }}
-          >
-            {APPEARANCE_LABELS[option]}
-          </button>
-        ))}
-      </div>
+      {/*
+        The same control the board filters use, rather than a second opinion
+        about what a segmented control looks like. It was drawn by hand here,
+        which is how one of the two ended up 42px tall and the other 44.
+      */}
+      <SegmentedControl
+        label="Appearance"
+        value={mode}
+        onChange={(option) => {
+          storeAppearance(option);
+          setMode(option);
+        }}
+        segments={APPEARANCES.map((option) => ({
+          id: option,
+          label: APPEARANCE_LABELS[option],
+          testId: `appearance-${option}`,
+        }))}
+      />
       <div className="faint" style={{ margin: '-2px 4px 14px' }}>
         System follows your phone, and keeps following it when your phone changes at sunset. Light and
         Dark stay exactly as you set them here, on this phone.

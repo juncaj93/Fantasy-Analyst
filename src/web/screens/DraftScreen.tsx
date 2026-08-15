@@ -31,7 +31,7 @@ import {
   formatShortAge,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+import { NavBar, SearchFilterRow, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
 import { matchesQuery } from '../search.ts';
 /*
@@ -113,6 +113,14 @@ export function DraftScreen({
    * searching tells you where he actually sits rather than renumbering him to 1.
    */
   const [query, setQuery] = useState('');
+  /**
+   * Whether the search field is unfolded.
+   *
+   * Presentation, and nothing more: the board does not know or care. It starts
+   * folded so the controls cost one row rather than two, which is worth an
+   * extra player on every phone this app is used on.
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
   const searching = query.trim().length > 0;
   /*
    * Which of the two tier treatments this view gets.
@@ -170,6 +178,7 @@ export function DraftScreen({
   useEffect(() => {
     if (resetNonce === 0) return;
     setQuery('');
+    setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, [resetNonce]);
 
@@ -420,33 +429,39 @@ export function DraftScreen({
         accessible name with a worse one.
       */}
       {/*
-        Search, on the board.
+        Search and the filters, on one row.
 
         During a draft the question is often "where is he" rather than "who is
         best", and the answer used to require scrolling forty rows or knowing to
         star him first. It filters; it does not re-rank, re-score or change who
         is available, and every row keeps its real board rank.
+
+        It is folded into a glyph until it is asked for, because the field was
+        costing a whole row of the one screen where a row is a player. Nothing
+        about what it matches changed with the fold — see SearchFilterRow.
       */}
-      <SearchField
+      <SearchFilterRow
         value={query}
         onChange={setQuery}
+        expanded={searchOpen}
+        onExpandedChange={setSearchOpen}
         placeholder="Search the board"
         label="Search the board"
         testId="draft-search"
-      />
-
-      <SegmentedControl
-        label="Filter by position"
-        value={position}
-        onChange={setPosition}
-        segments={[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => ({
-          id: p,
-          label: p,
-          ...(p === QUEUE_FILTER
-            ? { ariaLabel: 'Show only your queue', className: 'chip-queue', testId: 'queue-filter' }
-            : {}),
-        }))}
-      />
+      >
+        <SegmentedControl
+          label="Filter by position"
+          value={position}
+          onChange={setPosition}
+          segments={[QUEUE_FILTER, ALL_FILTER, ...(board.startablePositions ?? [])].map((p) => ({
+            id: p,
+            label: p,
+            ...(p === QUEUE_FILTER
+              ? { ariaLabel: 'Show only your queue', className: 'chip-queue', testId: 'queue-filter' }
+              : {}),
+          }))}
+        />
+      </SearchFilterRow>
 
       {/*
         No heading over the list.
