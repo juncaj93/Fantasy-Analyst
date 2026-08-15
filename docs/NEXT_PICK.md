@@ -166,7 +166,22 @@ are already carried in the candidate pool.
 | Other candidates have no ADP | Ordered behind the deepest priced player by search rank, with weight damped by half. Never treated as ADP. |
 | A manager's roster unreadable | Falls back to the market; no need is invented. Confidence drops. |
 | Pick ownership unpublished | Simulated on the market baseline. Confidence drops. |
+| **Fewer than three candidates per intervening pick** | The whole board falls back to the conditional ADP estimate, flagged and at low confidence. A simulation takes one player off the board per pick, so a pool barely larger than the interval empties and every player reads 0% — arithmetic about *this pool*, not about the draft. A pool that shallow means the app is missing players, not that twenty-one managers are about to take these exact seventeen. Never reached on a live board; reached on the demo seed and on a league whose player table failed to sync. |
 | Too few picks to read the room | Not a defect — the market alone is the right model of an early board. Confidence stays high. |
+
+## The simulated board is not the drawn board
+
+The pool handed to the simulator is every available, startable player, capped at
+300 by ADP — built independently of the position chip, the queue filter and the
+display limit.
+
+That separation is load-bearing. `candidates` is what gets drawn, so filtering
+to QB makes it quarterbacks; handing *that* to the simulator would give every
+simulated manager nothing but quarterbacks to take, twelve picks in a row, and
+collapse every quarterback on screen toward zero. The numbers would stay
+entirely plausible and would simply answer a question nobody asked. The room
+drafts from the room's board; what the reader has chosen to see is not part of
+it. Pinned in `nextpick.board.test.ts`.
 
 ## Explanations
 

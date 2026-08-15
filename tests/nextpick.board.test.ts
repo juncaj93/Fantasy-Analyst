@@ -47,6 +47,8 @@ interface BoardOptions {
    */
   vegas?: { playerId: string; line: number }[];
   limit?: number;
+  /** Narrow the board the way the position chips do. */
+  position?: string;
 }
 
 async function seed(db: Database): Promise<void> {
@@ -163,7 +165,7 @@ async function board(opts: BoardOptions) {
       })),
     );
   }
-  return new DraftBoardService(db).build('dr', { limit: opts.limit ?? 40 });
+  return new DraftBoardService(db).build('dr', { limit: opts.limit ?? 40, position: opts.position ?? null });
 }
 
 describe('which pick Next is about', () => {
@@ -234,6 +236,35 @@ describe('what Next is not allowed to see', () => {
     // And Next did not notice, for him or for anybody else. My Guy is what you
     // want; Next is what eleven other managers will do.
     expect(survivalsOf(starred)).toEqual(survivalsOf(plain));
+  });
+
+  it('does not move when the reader filters the board to one position', async () => {
+    /*
+     * The room drafts from the room's board, not from the part of it the reader
+     * has chosen to look at.
+     *
+     * This is the failure mode that looks like nothing: tap the QB chip and the
+     * simulated managers have only quarterbacks to take, so they take
+     * quarterbacks, twelve picks in a row, and every quarterback on the screen
+     * collapses toward zero. The numbers stay entirely plausible — they simply
+     * answer a question nobody asked. So the simulation pool is built from the
+     * whole available board and the filter is applied to what gets drawn.
+     */
+    const whole = await board({ picksMade: 52, limit: 60 });
+    const quarterbacksOnly = await board({ picksMade: 52, limit: 60, position: 'QB' });
+
+    const shown = quarterbacksOnly.recommendations;
+    expect(shown.length).toBeGreaterThan(3);
+    expect(shown.every((r) => r.position === 'QB'), 'the filter did narrow the board').toBe(true);
+
+    for (const rec of shown) {
+      const unfiltered = whole.recommendations.find((r) => r.playerId === rec.playerId);
+      if (!unfiltered) continue;
+      expect(rec.survivalProbability, `${rec.playerId} moved when the board was filtered`).toBe(
+        unfiltered.survivalProbability,
+      );
+    }
+    expect(quarterbacksOnly.nextPickModel.picksSimulated).toBe(whole.nextPickModel.picksSimulated);
   });
 
   it('does not move when the betting market changes', async () => {

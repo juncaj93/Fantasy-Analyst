@@ -185,6 +185,7 @@ export interface DraftBoardState {
     positionRuns: Record<string, number>;
     positionBias: Record<string, number>;
     roomNotes: string[];
+    marketOnly: boolean;
     degraded: string[];
     elapsedMs: number;
     cached: boolean;
@@ -482,7 +483,30 @@ export class DraftBoardService {
     const ownerSlotOf = (pick: { rosterId: number | null; draftSlot: number }) =>
       slotForRoster(draft.slotToRosterId, pick.rosterId) ?? pick.draftSlot;
 
-    const simCandidates: SimCandidate[] = candidates.map((player) => ({
+    /*
+     * The whole available board, not the part of it the reader is looking at.
+     *
+     * This deliberately ignores the position chip and the queue filter, and it
+     * has to. `candidates` is what gets drawn — filter to QB and it holds
+     * quarterbacks — and handing that to the simulator would have every
+     * simulated manager drafting quarterbacks, one after another, until the
+     * position ran out. Every quarterback would then read close to zero for the
+     * sole reason that the reader tapped QB, which is both wrong and invisible:
+     * the numbers stay plausible, they just quietly answer a different question.
+     *
+     * The room drafts from the room's board. What the reader has chosen to see
+     * is not part of it.
+     */
+    const simulationPool = allPlayers
+      .filter((player) => player.active && !takenIds.has(player.id) && (startable.size === 0 || startable.has(player.position)))
+      .sort(
+        (a, b) =>
+          (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
+          (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+          a.fullName.localeCompare(b.fullName),
+      )
+      .slice(0, MAX_CANDIDATES);
+    const simCandidates: SimCandidate[] = simulationPool.map((player) => ({
       playerId: player.id,
       position: player.position,
       adp: rankOf(player),
@@ -653,6 +677,9 @@ export class DraftBoardService {
         positionRuns: Object.fromEntries(nextPick.room.runs),
         positionBias: Object.fromEntries(nextPick.room.bias),
         roomNotes: nextPick.room.notes,
+        // True when the board was too thin to simulate, so these percentages
+        // are the ADP model's rather than the simulation's.
+        marketOnly: nextPick.marketOnly,
         degraded: nextPick.degraded,
         elapsedMs: nextPick.elapsedMs,
         cached: nextPick.cached,

@@ -125,6 +125,23 @@ export const SIMULATION = {
   unpricedDamping: 0.5,
   /** Below this many resolvable picks the run/bias reads are ignored entirely. */
   minPicksForRoomEffects: 8,
+  /**
+   * Available candidates per intervening pick below which the board is too thin
+   * to simulate at all.
+   *
+   * The simulation takes one player off the board per pick, so a pool barely
+   * larger than the interval empties: everybody is taken in every run and the
+   * whole board reads 0%. That is arithmetic about *this* pool, not about the
+   * draft — the room picks from the real board, and a pool this shallow is
+   * evidence that the app is missing players rather than that twenty-one
+   * managers are about to take these exact seventeen.
+   *
+   * Reaching this ceiling never happens on a live board (three hundred
+   * candidates against at most a couple of dozen intervening picks). It happens
+   * on a demo seed, on a league whose player table failed to sync, and on
+   * anything else where the honest answer is the market's and a note saying so.
+   */
+  minCandidatesPerPick: 3,
 } as const;
 
 /** A player who could be taken in the simulation. */
@@ -193,6 +210,17 @@ export interface SimulationResult {
    */
   needAhead: Map<string, number>;
   room: RoomBehaviour;
+  /**
+   * How much of the model actually ran.
+   *
+   * Decided here rather than inferred downstream from the wording of the
+   * degraded list — a confidence that depends on which words a message happens
+   * to contain is a confidence that silently changes when somebody improves the
+   * message.
+   */
+  confidence: 'high' | 'medium' | 'low';
+  /** True when the board was too thin to simulate and the market answered. */
+  marketOnly: boolean;
   /** Why any part of this is less trustworthy than usual. Empty is good. */
   degraded: string[];
   /** Milliseconds spent in the simulation loop, for the performance probe. */
@@ -210,6 +238,8 @@ function emptyResult(input: SimulationInput, degraded: string[]): SimulationResu
     byPlayer: new Map(),
     needAhead: new Map(),
     room: input.room ?? NEUTRAL_ROOM,
+    confidence: 'low',
+    marketOnly: false,
     degraded,
     elapsedMs: 0,
     seed: 0,
@@ -275,10 +305,29 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
       byPlayer,
       needAhead,
       room,
+      confidence: 'high',
+      marketOnly: false,
       degraded,
       elapsedMs: 0,
       seed: 0,
     };
+  }
+
+  /*
+   * A board too thin to be simulated is answered by the market, not by the
+   * board.
+   *
+   * Playing out twenty-one picks over seventeen available players empties it,
+   * and every one of them reads 0% — which is a true statement about a pool of
+   * seventeen and a false one about a draft. The room is not choosing from this
+   * app's table; a pool this shallow means the table is short, so the honest
+   * answer is the ADP model's, with a note saying why.
+   */
+  if (candidates.length < interveningPicks.length * SIMULATION.minCandidatesPerPick) {
+    return marketOnly(input, interveningPicks.length, slotsAhead, needAhead, room, [
+      ...degraded,
+      `only ${candidates.length} players are on the board for ${interveningPicks.length} intervening picks, which is too thin to simulate — this is the ADP estimate`,
+    ]);
   }
 
   const startedAt = Date.now();
@@ -357,12 +406,17 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
 
   const ownerOf = interveningPicks.map((p) => input.ownership.ownerAt(p));
   const unknownRosters = input.unknownRosters ?? new Set<number>();
+  /** Things the model could not see. Each one costs a step of confidence. */
+  let blindSpots = 0;
   if (ownerOf.some((s) => s == null)) {
     degraded.push('some intervening picks have no published owner and were simulated on the market baseline');
+    blindSpots++;
   }
   if (slotsAhead.some((slot) => unknownRosters.has(slot) || !input.rosters.has(slot))) {
     degraded.push('a manager picking before you has no readable roster, so their need fell back to the market');
+    blindSpots++;
   }
+  if (input.mySlot == null) blindSpots++;
   if (room.sample < SIMULATION.minPicksForRoomEffects) {
     degraded.push('too few picks so far to read this room, so only the market and roster needs are in play');
   }
@@ -635,9 +689,66 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
     byPlayer,
     needAhead,
     room,
+    /*
+     * Trust is about what the model could see, not about what it said.
+     *
+     * A 4% is not less trustworthy than a 60%; a 60% reached without knowing
+     * three of the rosters ahead is. "Too early to read the room" is not on
+     * this list on purpose — at pick six there is nothing to read, and the
+     * market alone is the right model of an early board rather than a
+     * degraded one.
+     */
+    confidence: blindSpots >= 2 ? 'low' : blindSpots === 1 ? 'medium' : 'high',
+    marketOnly: false,
     degraded,
     elapsedMs: Date.now() - startedAt,
     seed,
+  };
+}
+
+/**
+ * Every player answered by the ADP distribution alone.
+ *
+ * Used when the board cannot support a simulation. The pick sequence, the
+ * managers ahead and their starting-slot gaps are all still reported — they were
+ * measured from the real board and are true whatever answered the question — but
+ * the probabilities are the market's and the result says so.
+ */
+function marketOnly(
+  input: SimulationInput,
+  picksSimulated: number,
+  slotsAhead: number[],
+  needAhead: Map<string, number>,
+  room: RoomBehaviour,
+  degraded: string[],
+): SimulationResult {
+  const byPlayer = new Map<string, PlayerAvailability>();
+  for (const candidate of input.candidates) {
+    const survival =
+      candidate.adp == null || input.targetPick == null
+        ? null
+        : round4(conditionalMarketSurvival(candidate.adp, input.currentPick, input.targetPick, room.dispersion));
+    byPlayer.set(candidate.playerId, {
+      playerId: candidate.playerId,
+      position: candidate.position,
+      probability: survival,
+      marketBaseline: survival,
+      timesTaken: 0,
+    });
+  }
+  return {
+    simulations: 0,
+    targetPick: input.targetPick,
+    picksSimulated,
+    slotsAhead,
+    byPlayer,
+    needAhead,
+    room,
+    confidence: 'low',
+    marketOnly: true,
+    degraded,
+    elapsedMs: 0,
+    seed: 0,
   };
 }
 

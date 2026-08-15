@@ -68,6 +68,9 @@ console.log(`  opposing picks simulated ${model.picksSimulated ?? 0}`);
 console.log(`  managers ahead of you    ${(model.slotsAhead ?? []).join(', ') || '—'}`);
 console.log(`  simulations              ${model.simulations ?? 0}${model.cached ? ' (cached)' : ''}`);
 console.log(`  computed in              ${model.elapsedMs ?? '—'}ms`);
+if (model.marketOnly) {
+  console.log('  !! the board was too thin to simulate — these are ADP estimates, not simulated');
+}
 
 console.log('');
 console.log('Starting-slot gaps among the teams picking before you');
@@ -168,6 +171,11 @@ if (model.targetPick == null) {
   }
 
   check('the board is not uniformly certain', !survivals.every((p) => p === 1), 'every player read 100%');
+  check(
+    'the board was deep enough to simulate',
+    model.marketOnly !== true,
+    'fell back to the ADP estimate — the player table is short',
+  );
   check(
     'Next spreads across the board',
     survivals.length > 3 && new Set(survivals.map((p) => Math.round(p * 100))).size > 3,

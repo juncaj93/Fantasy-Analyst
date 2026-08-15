@@ -73,6 +73,22 @@ export function explainNextPick(input: ExplainInput): NextPickExplanation {
         : `A coin flip to last to pick ${result.targetPick}`,
   );
 
+  /*
+   * When the market answered, only the market may speak.
+   *
+   * The teams ahead and their empty slots were measured from the real board and
+   * are perfectly true — but they did not move this number, and a driver that
+   * explains a calculation which did not happen is exactly the failure this
+   * file exists to prevent. Everything below the headline is therefore skipped,
+   * except the observation about his own price, which is the model that ran.
+   */
+  if (result.marketOnly) {
+    if (input.adp != null && input.currentPick - input.adp >= FALL_THRESHOLD) {
+      drivers.push(`already ${Math.round(input.currentPick - input.adp)} picks past his ADP`);
+    }
+    return { drivers, confidence: result.confidence, degraded };
+  }
+
   // --- who is picking, and what they are short of ---------------------------
   const needing = result.needAhead.get(input.position) ?? 0;
   const ahead = result.slotsAhead.length;
@@ -121,26 +137,10 @@ export function explainNextPick(input: ExplainInput): NextPickExplanation {
 
   return {
     drivers,
-    confidence: confidenceFrom(result, degraded),
+    // Decided by the simulation, which knows what it could and could not see.
+    confidence: result.confidence,
     degraded,
   };
-}
-
-/**
- * Trust, as a function of what the model was missing rather than of the answer.
- *
- * A 4% is not less trustworthy than a 60%; a 60% computed without knowing three
- * managers' rosters is.
- */
-function confidenceFrom(result: SimulationResult, degraded: string[]): 'high' | 'medium' | 'low' {
-  if (result.simulations === 0) return 'low';
-  const serious = degraded.filter(
-    (reason) => reason.includes('roster') || reason.includes('owner') || reason.includes('slot'),
-  ).length;
-  if (serious > 0) return serious >= 2 ? 'low' : 'medium';
-  // "Too few picks to read the room" is not a defect: at pick six there is
-  // nothing to read, and the market alone is the right model of an early board.
-  return 'high';
 }
 
 /**

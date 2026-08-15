@@ -442,6 +442,48 @@ describe('convergence and cost', () => {
 });
 
 describe('missing data', () => {
+  it('answers from the market when the board is too thin to simulate', () => {
+    /*
+     * Fourteen picks against twenty players.
+     *
+     * A simulation takes one player off the board per pick, so a pool barely
+     * larger than the interval empties and every player reads 0% — which is
+     * arithmetic about this pool and a falsehood about the draft. Nobody is
+     * choosing from the app's table; a pool this shallow means the table is
+     * short. The honest answer is the ADP model's, said with a note and low
+     * confidence rather than a confident zero.
+     */
+    const thin = pool([
+      { position: 'RB', from: 52, count: 7, spacing: 8 },
+      { position: 'WR', from: 50, count: 7, spacing: 8 },
+      { position: 'TE', from: 55, count: 3, spacing: 20 },
+      { position: 'QB', from: 58, count: 3, spacing: 20 },
+    ]);
+    expect(thin.length).toBe(20);
+
+    const result = simulateNextPick(buildBoard({ candidates: thin }));
+    expect(result.marketOnly).toBe(true);
+    expect(result.confidence).toBe('low');
+    expect(result.degraded.join(' ')).toContain('too thin to simulate');
+
+    // And it is a real spread rather than a board of zeroes.
+    const survivals = [...result.byPlayer.values()].map((p) => p.probability!);
+    expect(Math.min(...survivals)).toBeLessThan(0.4);
+    expect(Math.max(...survivals)).toBeGreaterThan(0.9);
+    // The pick sequence was still measured from the real board, and is true
+    // whichever model answered.
+    expect(result.picksSimulated).toBe(14);
+    expect(result.slotsAhead.length).toBe(7);
+  });
+
+  it('simulates properly as soon as the board can support it', () => {
+    // The same fixture with a real board behind it: no fallback, no note.
+    const result = simulateNextPick(buildBoard());
+    expect(result.marketOnly).toBe(false);
+    expect(result.degraded.join(' ')).not.toContain('too thin');
+    expect(result.confidence).toBe('high');
+  });
+
   it('falls back to the market rather than inventing need for an unreadable roster', () => {
     const unknown = new Set(allSlots().filter((s) => s !== MY_SLOT));
     const board = buildBoard({ rosters: filledRosters(buildBoard().shape), unknownRosters: unknown });

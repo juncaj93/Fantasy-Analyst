@@ -4,8 +4,8 @@
  * One call, one board state, every candidate answered at once. That last part is
  * the reason this is affordable: a simulation that plays out picks 54 to 67 has,
  * by the time it finishes, decided the fate of every player on the board, so the
- * cost is per *board state* and not per player. Three thousand simulated drafts
- * answer three hundred players in a few milliseconds.
+ * cost is per *board state* and not per player. Five thousand simulated drafts
+ * answer three hundred players in about fifty milliseconds.
  *
  * See `simulate.ts` for the model itself. This file is the seam: it assembles
  * the inputs, caches by draft state so a board polled every three seconds is
@@ -49,6 +49,8 @@ export interface NextPickReport {
   slotsAhead: number[];
   needAhead: Map<string, number>;
   room: RoomBehaviour;
+  /** True when the board was too thin to simulate and the ADP model answered. */
+  marketOnly: boolean;
   degraded: string[];
   elapsedMs: number;
   /** True when this answer came from the cache rather than a fresh run. */
@@ -191,6 +193,7 @@ export function estimateNextPickAvailability(request: NextPickRequest): NextPick
     slotsAhead: result.slotsAhead,
     needAhead: result.needAhead,
     room: result.room,
+    marketOnly: result.marketOnly,
     degraded: result.degraded,
     elapsedMs: result.elapsedMs,
     cached: hit != null,
