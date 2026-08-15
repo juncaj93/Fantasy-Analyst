@@ -23,6 +23,7 @@ import { SleeperSyncService } from '../server/services/sleeperSync.ts';
 import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 import { InjuryService, previousSeason } from '../server/services/injuryService.ts';
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
+import { UsageService } from '../server/services/usageService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 
 export interface WorkerEnv {
@@ -83,7 +84,10 @@ export default {
    *                       history backfill
    *   Sat 23:00 UTC    -> Vegas refresh
    *   Sun 15:00 UTC    -> Vegas refresh
-   *   Daily 09:00 UTC  -> Sleeper player dictionary + last season's statistics
+   *   Daily 09:00 UTC  -> Sleeper player dictionary, last season's statistics,
+   *                       one injury check, and per-game usage (weekly stats
+   *                       settle when a game ends, so a daily check learns
+   *                       everything 288 of them would)
    *
    * The injury check is deliberately the odd one out. Everything else here is a
    * job that costs real work every time it runs, so it runs on a schedule
@@ -176,6 +180,36 @@ export default {
         await new InjuryService(env.DB).refresh();
       } catch (err) {
         console.error('injury report refresh failed', err);
+      }
+      /*
+       * Per-game usage, and this is the honest home for it.
+       *
+       * It was tempting to hang it off the five-minute tick beside the injury
+       * check, since a conditional GET that 304s is nearly free. But cheap is
+       * not the same as warranted: a game's target count is settled the moment
+       * the game ends and never changes again, so 288 checks a day would learn
+       * exactly what one check learns and cost 288 bookkeeping writes to do it.
+       * The two feeds are different kinds of fact — one is news that arrives
+       * ninety minutes before kickoff, the other is a box score — and putting
+       * them on the same clock would be treating them as the same thing.
+       *
+       * 09:00 UTC is about 5am Eastern: after Sunday's late window and Monday
+       * night have finished and after nflverse's own pipeline has run. A game
+       * that lands too late for one morning's tick is picked up by the next,
+       * six days before it could matter to a lineup.
+       *
+       * After the dictionary, like everything else here, because rows are
+       * matched against the players this app knows. Separately caught: usage is
+       * a nudge in a close call, and it must never take down the player sync.
+       */
+      try {
+        const usage = new UsageService(env.DB);
+        const run = await usage.refresh();
+        // And one week of any gap an outage left behind, but never on the same
+        // tick as a real ingest — a catch-up week is history and can wait a day.
+        if (run.rowsWritten === 0) await usage.catchUpOneWeek();
+      } catch (err) {
+        console.error('usage refresh failed', err);
       }
       return;
     }

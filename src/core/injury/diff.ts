@@ -206,7 +206,17 @@ export const ANOMALY = {
   minStored: 50,
 } as const;
 
-export function looksAnomalous(diff: InjuryDiff, storedCount: number): boolean {
+export function looksAnomalous(
+  /*
+   * Structural rather than `InjuryDiff`: the usage pipeline has the same
+   * failure — a parser that reads every field as empty and reports that
+   * everything moved at once — and the arithmetic that catches it is identical.
+   * Sharing the guard is cheaper than maintaining two thresholds that are meant
+   * to be the same number.
+   */
+  diff: { changed: unknown[]; examined: number },
+  storedCount: number,
+): boolean {
   if (storedCount < ANOMALY.minStored) return false;
   if (diff.examined === 0) return false;
   return diff.changed.length / diff.examined > ANOMALY.changedShare;
