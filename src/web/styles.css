@@ -179,6 +179,18 @@
   --tap: 44px;
 
   /*
+   * The team mark beside a position pill.
+   *
+   * One token, because the answer is the same on every screen: a club is a
+   * club, and making it bigger on Trades than on the draft board just because
+   * Trades has the room is how five screens stop looking like one app. 22px is
+   * the largest square that fits inside the line the player's name already
+   * sets, so the mark is recognisable and the row is exactly as tall as it was
+   * when this said `CHI`.
+   */
+  --team-logo: 22px;
+
+  /*
    * The spacing rhythm: 4, 8, 12, 16, 20, 24, with a 2px hairline step for the
    * gaps inside a single line of type. Everything on screen is a multiple of
    * one of these, which is most of what "consistent" means to an eye.
@@ -1500,6 +1512,30 @@ body,
 .team-code {
   color: var(--text-faint);
   letter-spacing: 0.02em;
+}
+
+/*
+ * The club's mark, where its abbreviation used to be.
+ *
+ * A fixed square with the artwork fitted inside it, which does two jobs at
+ * once. The reserved box means an image that has not arrived yet — or never
+ * arrives — moves nothing on the page, and every row on a forty-row board lines
+ * up on the same vertical edge whether the club's mark is a tall horseshoe or a
+ * wide bolt. `contain` keeps each one at its own aspect ratio inside that box;
+ * nothing is stretched to fill it.
+ *
+ * No backing plate and no badge. The marks carry their own light outlines and
+ * were checked against both themes at this size, and the position pill next to
+ * them already supplies as much chrome as this corner of the row can hold.
+ */
+.team-logo {
+  flex: 0 0 auto;
+  width: var(--team-logo);
+  height: var(--team-logo);
+  object-fit: contain;
+  /* Inline images sit on the text baseline and would add a descender's worth of
+     height to the flex line. This is a block in a fixed box, so it does not. */
+  display: block;
 }
 
 /*
