@@ -53,6 +53,7 @@ import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
+import { UsageService } from './services/usageService.ts';
 import { PlayerDetailService } from './services/playerDetailService.ts';
 
 export interface AppEnv extends AuthEnv {
@@ -398,6 +399,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       .statesFor([...players.values()].map((p) => ({ playerId: p.id, status: p.status })))
       .catch(() => new Map());
 
+    /*
+     * Per-game opportunity, for the role trend.
+     *
+     * Absent for a player with fewer than six games stored, which is the
+     * ordinary state in September and is passed through as absent rather than
+     * padded: `assessRole` answers `insufficient_data` for a short series, and
+     * that is the honest answer rather than a trend invented from four games.
+     */
+    const usage = await new UsageService(db)
+      .roleMetricsFor([...players.values()].map((p) => ({ playerId: p.id, position: p.position })))
+      .catch(() => new Map());
+
     const inputs = [];
     for (const id of mine.playerIds) {
       const player = players.get(id);
@@ -415,6 +428,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         signal: signals.get(id) ?? null,
         injuryStatus: player.status,
         injury: injuries.get(id) ?? null,
+        usage: usage.get(id) ?? undefined,
         propsStale: false,
       });
     }
@@ -635,6 +649,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    */
   router.post('/api/injuries/refresh', async (ctx) =>
     jsonResponse(await new InjuryService(ctx.env.db).refresh()),
+  );
+
+  /**
+   * Pull the published weekly usage now.
+   *
+   * The daily 09:00 cron is the real schedule and is right for a file whose
+   * numbers are settled the moment a game ends. This is for the person who has
+   * just watched a Sunday-night game and does not want to wait until Tuesday to
+   * see the target count behind it.
+   *
+   * Returns the counts rather than an ok, for the same reason the injury one
+   * does. `not_published` is a fact about the calendar, not a failure.
+   *
+   * A change, so it needs the passphrase.
+   */
+  router.post('/api/usage/refresh', async (ctx) =>
+    jsonResponse(await new UsageService(ctx.env.db).refresh()),
   );
 
   router.get('/api/players/:id/detail', async (ctx) => {
@@ -1084,6 +1115,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const injuries = await new InjuryService(db)
       .statesFor(compared.map((p) => ({ playerId: p.id, status: p.status })))
       .catch(() => new Map());
+    // The same per-game series the lineup screen reads, so the two screens
+    // cannot disagree about whether a player's role is moving.
+    const usage = await new UsageService(db)
+      .roleMetricsFor(compared.map((p) => ({ playerId: p.id, position: p.position })))
+      .catch(() => new Map());
 
     const inputs = compared.map((player) => ({
       player,
@@ -1093,6 +1129,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       signal: signals.get(player.id) ?? null,
       injuryStatus: player.status,
       injury: injuries.get(player.id) ?? null,
+      usage: usage.get(player.id) ?? undefined,
       propsStale: false,
     }));
 

@@ -795,8 +795,15 @@ export class InjuryService {
   }
 }
 
-interface IdentityIndex {
-  /** Every candidate for a lookup key, ambiguity included. */
+/**
+ * Every candidate for a lookup key, ambiguity included.
+ *
+ * Exported because the usage pipeline resolves the same identifiers against the
+ * same dictionary and must not grow a second way of doing it: one canonical
+ * normalizer, one indexed column, one resolver that declines rather than
+ * guesses.
+ */
+export interface IdentityIndex {
   byName: Map<string, CanonicalPlayer[]>;
 }
 
@@ -810,7 +817,12 @@ interface IdentityIndex {
  * whole reason the identifier is worth having.
  */
 export function resolveToCanonical(
-  row: InjuryReportRow,
+  /*
+   * Structural on purpose: the injury report and the weekly stats file carry
+   * their identity in fields with different names, and the resolution is the
+   * same either way. Two resolvers is how two id spaces start.
+   */
+  row: { fullName: string; gsisId: string | null },
   index: IdentityIndex,
 ): { playerId: string; by: 'id' | 'name' } | null {
   const candidates = index.byName.get(normalizeName(row.fullName)) ?? [];

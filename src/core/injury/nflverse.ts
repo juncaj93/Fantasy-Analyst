@@ -48,6 +48,12 @@
 
 import { parseCsv } from '../adp/import.ts';
 import { normalizePractice, type PracticeStatus } from './model.ts';
+import {
+  conditionalGet,
+  type FetchLike,
+  type FetchOutcome,
+  type SourceFingerprint,
+} from '../source/conditional.ts';
 
 /**
  * Where the file lives. A release asset, so the URL is stable across seasons
@@ -330,25 +336,14 @@ export function normalizeForMatch(name: string): string {
     .trim();
 }
 
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
-
-/** The validators that decide whether anything needs downloading. */
-export interface SourceFingerprint {
-  /** The strong validator. Preferred, and it survives the CDN redirect. */
-  etag: string | null;
-  /** The raw `Last-Modified` header, as sent, for the conditional request. */
-  lastModified: string | null;
-}
-
-export type FetchOutcome =
-  /** The source changed (or we had no fingerprint): `report` is populated. */
-  | 'ok'
-  /** 304. Nothing to do, and nothing was downloaded. The common answer. */
-  | 'not_modified'
-  /** 404 — a season that has not started. A fact about the calendar. */
-  | 'not_published'
-  /** Anything else. Last-good data stays exactly where it is. */
-  | 'failed';
+/*
+ * The conditional GET itself lives in `core/source/conditional.ts`, shared with
+ * the usage feed rather than copied into it: the mechanism, the validators and
+ * the meaning of a 404 are identical for both published files. The types are
+ * re-exported here because every caller in this pipeline has always imported
+ * them from this module.
+ */
+export type { FetchLike, SourceFingerprint, FetchOutcome };
 
 export interface InjuryReportFetch {
   outcome: FetchOutcome;
@@ -373,26 +368,10 @@ export interface InjuryReportFetch {
 /**
  * Ask for the season's report, but only actually receive it if it changed.
  *
- * ## Why one conditional GET rather than HEAD-then-GET
- *
- * Measured against the live endpoint (`scripts/probe-nflverse-conditional.mjs`):
- *
- *   - `HEAD` answers 200 with both `ETag` and `Last-Modified`;
- *   - both validators are **stable across calls**, even though the release
- *     asset 302s to a signed CDN URL whose query string — expiry, signature,
- *     JWT — is different every single time. Fingerprinting the redirect target
- *     would have reported a change on every tick;
- *   - `If-None-Match` returns **304 with no body**;
- *   - a deliberately stale validator returns **200 with the whole file**.
- *
- * That last pair is the point. One request covers both cases: the ordinary
- * five-minute tick costs a round trip and no bytes, and the tick where
- * something actually changed already has the file in hand. A HEAD first would
- * make the common path no cheaper and the interesting path twice as slow.
- *
- * A 404 is the expected answer before a season starts and is reported as such —
- * the difference between "the source is down" and "there are no injury reports
- * yet in August" is the difference between an alarm and a fact.
+ * The conditional GET, and why it is one request rather than HEAD-then-GET, is
+ * documented where it now lives: `core/source/conditional.ts`. What is left
+ * here is what is specific to this file — the bounded parse, and the refusal to
+ * treat an empty file as an update.
  */
 export async function fetchInjuryReport(
   season: string,
@@ -403,76 +382,25 @@ export async function fetchInjuryReport(
     weeks?: { from: number; to: number };
   } = {},
 ): Promise<InjuryReportFetch> {
-  const doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
   const known = opts.fingerprint;
+  const response = await conditionalGet(injuryReportUrl(season), {
+    fetch: opts.fetch,
+    fingerprint: known,
+    describe: `${season} injury reports`,
+  });
 
-  const headers: Record<string, string> = { accept: 'text/csv' };
-  /*
-   * Only one conditional header, and ETag wins where both exist.
-   *
-   * Sending both lets a server that honours only the weaker one answer 200 to a
-   * request the stronger one would have settled, which quietly turns every
-   * check back into a download.
-   */
-  if (known?.etag) headers['if-none-match'] = known.etag;
-  else if (known?.lastModified) headers['if-modified-since'] = known.lastModified;
-
-  let res: Response;
-  try {
-    res = await doFetch(injuryReportUrl(season), { headers });
-  } catch (err) {
+  if (response.outcome !== 'ok' || response.text == null) {
     return {
-      outcome: 'failed',
+      outcome: response.outcome,
       report: null,
-      fingerprint: { etag: known?.etag ?? null, lastModified: known?.lastModified ?? null },
-      publishedAt: null,
-      note: err instanceof Error ? err.message : String(err),
+      fingerprint: response.fingerprint,
+      publishedAt: response.publishedAt,
+      note: response.note,
     };
   }
 
-  // 304: the body was never sent. Keep the fingerprint we asked with — the
-  // response is not obliged to repeat it.
-  if (res.status === 304) {
-    return {
-      outcome: 'not_modified',
-      report: null,
-      fingerprint: {
-        etag: res.headers.get('etag') ?? known?.etag ?? null,
-        lastModified: res.headers.get('last-modified') ?? known?.lastModified ?? null,
-      },
-      publishedAt: toIso(known?.lastModified ?? null),
-      note: null,
-    };
-  }
-
-  if (res.status === 404) {
-    return {
-      outcome: 'not_published',
-      report: null,
-      fingerprint: { etag: null, lastModified: null },
-      publishedAt: null,
-      note: `nflverse has not published ${season} injury reports yet`,
-    };
-  }
-
-  if (!res.ok) {
-    // The old fingerprint is kept deliberately: a 503 is not evidence that the
-    // file changed, and forgetting what we knew would force a needless download
-    // on the next tick.
-    return {
-      outcome: 'failed',
-      report: null,
-      fingerprint: { etag: known?.etag ?? null, lastModified: known?.lastModified ?? null },
-      publishedAt: null,
-      note: `nflverse injuries ${res.status}`,
-    };
-  }
-
-  const fingerprint: SourceFingerprint = {
-    etag: res.headers.get('etag'),
-    lastModified: res.headers.get('last-modified'),
-  };
-  const report = parseInjuryReport(await res.text(), { recentWeeks: opts.recentWeeks, weeks: opts.weeks });
+  const fingerprint = response.fingerprint;
+  const report = parseInjuryReport(response.text, { recentWeeks: opts.recentWeeks, weeks: opts.weeks });
   /*
    * An empty *range* is not an empty file.
    *
@@ -505,13 +433,7 @@ export async function fetchInjuryReport(
     outcome: 'ok',
     report,
     fingerprint,
-    publishedAt: toIso(fingerprint.lastModified),
+    publishedAt: response.publishedAt,
     note: null,
   };
-}
-
-function toIso(httpDate: string | null): string | null {
-  if (!httpDate) return null;
-  const at = Date.parse(httpDate);
-  return Number.isFinite(at) ? new Date(at).toISOString() : null;
 }

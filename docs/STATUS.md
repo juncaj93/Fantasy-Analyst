@@ -474,8 +474,9 @@ The exact next pick comes from the live snake order, and the colour bands
 **Decision quality — weekly.** Locked games (a started player leaves the
 optimisation entirely, and the rest of the lineup is worked out around them),
 late-swap safety, and market movement read from the snapshots already kept. The
-role-change detector is complete and tested but returns "insufficient data":
-no per-game usage source is connected, and inventing one would be fabrication.
+role-change detector was complete and tested but returned "insufficient data",
+because no per-game usage source was connected. One now is — see the milestone
+below.
 
 **Visual pass.** Position colour coding everywhere a position appears, the
 draft stat banner replaced by one line, league settings folded away, denser
@@ -488,15 +489,101 @@ API's real payloads, captured by probe. Not enabled — see docs/VEGAS.md.
 Checks at this milestone: 683 unit/integration tests, 139 Chromium mobile
 browser tests, typecheck, build and `wrangler deploy --dry-run` all green.
 
+## Milestone 13 — per-game usage, and the detector that finally has an input (done)
+
+The role-change detector has been finished since the season brief and had never
+once answered a question: with nothing publishing per-game opportunity, every
+card said "insufficient data" and was right to. `docs/STATUS.md` called it the
+last input the weekly decision layer was missing. It is now connected.
+
+**The source.** nflverse's weekly player stats, the same kind of public GitHub
+release asset as the injury report — no key, no account, no quota, nothing to
+be withdrawn. `stats_player_week_2025.csv`: 8.3MiB, 19,422 rows, 150 columns,
+one row per player per game played, of which 6,321 are at the four positions
+this app carries.
+
+**Why not snap counts.** `snap_counts_2025.csv` carries offensive snaps and
+snap share, which are better role signals in the abstract, and was rejected
+anyway: its only identifier is `pfr_player_id`, an id space this app has never
+seen. The weekly stats file is keyed by GSIS — the same space as the injury
+report's `gsis_id`, already resolving at 98.9% through `resolveToCanonical`. A
+second fuzzy matcher for a second id space is what every brief here has ruled
+out, and one good signal on the proven identity path beats a better signal on a
+new one.
+
+**The trap.** 19,394 of 19,422 lines contain a quoted comma — `f_auto,q_auto`
+inside `headshot_url`, and sometimes a name like `"Kenneth Murray, Jr."`. A
+`split(',')` yields 151 fields where the header has 150, and it is not even
+uniformly wrong: 19,377 lines give 151, seventeen give 152, and twenty-eight
+team rows give 150. A fixed `+1` correction would silently corrupt forty-five
+rows and misread `week` on one line in five hundred. So every field is read
+quote-aware, by a bounded extractor that keeps only the thirteen columns wanted
+— and that extractor is checked against a full RFC4180 parse of every line of
+the real file: **19,422 lines, 252,486 fields, zero mismatches**
+(`scripts/probe-usage-parse.mjs`; a 255-line slice of the real file carrying all
+three line shapes runs the same comparison in CI).
+
+**What it costs, measured honestly.** The file is monotonically non-decreasing
+by week, so the latest week is found by walking backwards from the last line;
+`week` and `position` are read in the same pass, so the full thirteen-column
+extraction runs over the ~350 rows that matter rather than the ~1,070 in the
+week. Against the real file: 4.0ms for a worst-case in-season week (truncated to
+week 18), 4.3ms for an explicit earlier week by seek, against a 10ms Workers
+allowance. The measurement that mattered was the one nearly missed: parsed as
+the file stands today the latest week is a 67-row playoff week and the answer
+looks like 1.6ms — a real regular-season week is sixteen times that, and was
+10.0ms until the position filter moved into the first pass. These are Node
+numbers for the JavaScript alone; they exclude D1, which is I/O on Workers.
+
+**Scheduled daily, not every five minutes, and deliberately.** A conditional GET
+that 304s is nearly free, so the five-minute tick was tempting. But a game's
+target count is settled the moment the game ends and never changes again: 288
+checks a day would learn exactly what one learns and spend 288 bookkeeping
+writes proving it. It rides the 09:00 UTC cron — about 5am Eastern, after the
+late window and Monday night, after nflverse's own pipeline has run.
+
+**What is stored.** `player_usage_weeks`, one row per (player, season, week),
+season-keyed so 2025 and 2026 cannot collide: pass attempts, carries, targets,
+receptions, target share and WOPR, with `season_type` beside them because a
+January playoff week is not part of the population any lineup question is asked
+about. A blank in the source stays null and never becomes a zero, and a player
+who was inactive has no row at all — his absence is a game that did not happen.
+
+**What Start/Sit says now.** For a player with six regular-season games, the
+role trend: targets and target share for a receiver, carries and targets for a
+back, pass attempts and carries for a quarterback — pairs that can genuinely
+disagree, because the detector's confidence rests on agreement and two views of
+the same number agreeing is double counting. Below six games it still says
+"insufficient data", and the Setup panel reports how many players have crossed
+that line rather than only how many have a row.
+
+**Shared rather than copied.** The conditional GET, the compare-and-swap ingest
+lease, the consecutive-failure counter and the daily write ledger were extracted
+out of the injury pipeline (`core/source/conditional.ts`,
+`repos/sourceState.ts`) and are now used by both, against column-for-column
+identical tables and separate ledgers. The injury pipeline's behaviour did not
+change; its tests did not either.
+
+**What cannot be observed yet.** `stats_player_week_2026.csv` is a 404 until the
+season starts, so in production the feed correctly reports `not_published`, and
+the 304 path, a real ingest and the mapped share will first be exercised by the
+first published file of the season.
+
+Checks at this milestone: 1,215 unit/integration tests (48 new), 139 Chromium
+mobile browser tests, seven deliberate mutations each caught by a named test,
+typecheck, build and `wrangler deploy --dry-run` green.
+
 ## Recommended next work
 
 1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written
    and tested against live payloads; what a preseason event could not show is
    whether regular-season games carry `receptions` and anytime-touchdown
    markets, and what a full slate costs against 2,500 objects a month.
-2. **Connect a per-game usage source** (nflverse or similar). The role-change
-   detector is finished and returns "insufficient data" until one exists; it is
-   the last input the weekly decision layer is missing.
+2. **Watch the usage feed through the first real week of the season.** The
+   pipeline is built, tested and deployed, but while `stats_player_week_2026.csv`
+   is a 404 the 304 path and a real ingest cannot run in production. What the
+   first published file will show is the mapped share against the injury feed's
+   98.9%, and the ingest's real CPU cost on Workers rather than in Node.
 3. **After the first real newsletters arrive**, read the coverage report and add
    the missing phrase families. This is the single highest-value improvement to
    tally quality.

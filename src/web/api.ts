@@ -535,6 +535,56 @@ export interface SetupStatus {
       detectedAt: string;
     }[];
   };
+  /**
+   * Per-game usage — the input the role detector reads.
+   *
+   * `playersWithEnoughGames` against `minimumGames` is the number that matters:
+   * every other count here can look healthy while every card still says
+   * "insufficient data", because a trend needs three recent games and three of
+   * baseline before it is a trend rather than a fortnight.
+   */
+  usage: {
+    source: string;
+    season: string;
+    players: number;
+    playersWithEnoughGames: number;
+    minimumGames: number;
+    weeks: number;
+    latestWeek: number | null;
+    rows: number;
+    summary: string;
+    lastRun: {
+      source: string;
+      season: string;
+      week: number | null;
+      latestWeek: number | null;
+      fetchedAt: string;
+      publishedAt: string | null;
+      rowsReturned: number;
+      matchedById: number;
+      matchedByName: number;
+      unmatched: number;
+      rowsWritten: number;
+      outcome: 'ok' | 'not_published' | 'failed';
+      note: string | null;
+    } | null;
+    /** When we last looked. Moves daily, change or no change. */
+    checkedAt: string | null;
+    /** When the file itself last changed. */
+    sourceModifiedAt: string | null;
+    /** When anything was last stored. */
+    ingestedAt: string | null;
+    lastOutcome: string | null;
+    lastNote: string | null;
+    etag: string | null;
+    lastModified: string | null;
+    consecutiveFailures: number;
+    failingSince: string | null;
+    caughtUpThrough: number | null;
+    dataHealth: string;
+    writesToday: number;
+    writeCeiling: number;
+  };
 }
 
 export interface LeagueSummary {

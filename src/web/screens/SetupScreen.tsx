@@ -1265,8 +1265,131 @@ function PlayerDetailPanel({
       </div>
 
         <InjurySourceHealth status={status} unlocked={unlocked} onDone={onDone} />
+        <UsageSourceHealth status={status} unlocked={unlocked} onDone={onDone} />
       </div>
     </details>
+  );
+}
+
+/**
+ * Per-game usage: whether the role detector has anything to read.
+ *
+ * The panel is built around the one number that decides whether this feature
+ * says anything at all — how many players have six games stored. Every other
+ * count here can look healthy while every card still reads "insufficient data",
+ * because the detector needs three recent games and three baseline games before
+ * it will call anything a trend, and it is right to.
+ */
+function UsageSourceHealth({
+  status,
+  unlocked,
+  onDone,
+}: {
+  status: SetupStatus;
+  unlocked: boolean;
+  onDone: () => void;
+}) {
+  const usage = status.usage;
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const run = usage.lastRun;
+
+  const refresh = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await api.post<SetupStatus['usage']['lastRun']>('/api/usage/refresh');
+      setNote(
+        result?.outcome === 'ok'
+          ? `Week ${result.week ?? result.latestWeek}: ${result.matchedById + result.matchedByName} players mapped, ` +
+            `${result.unmatched} not recognised, ${result.rowsWritten} row(s) written.`
+          : (result?.note ?? 'Nothing came back.'),
+      );
+      onDone();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="section-title" style={{ marginTop: 10 }}>
+        Per-game usage
+      </div>
+      <div className="faint" data-testid="usage-health">
+        {usage.summary}
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        Targets, carries, receptions and target share come from <strong>{usage.source}</strong>&rsquo;s published weekly
+        player stats — a free public file, no account and no key. It is what lets Start/Sit say whether a player&rsquo;s
+        role is actually changing instead of only how the market prices him.
+        {run?.outcome === 'ok' ? (
+          <>
+            {' '}Last read {formatAge(run.fetchedAt)}
+            {run.publishedAt ? `, from a file published ${formatAge(run.publishedAt)}` : ''}: {run.rowsReturned} players
+            in the week, {run.matchedById} matched on identifier and {run.matchedByName} on name
+            {run.unmatched > 0 ? `, ${run.unmatched} declined rather than guessed` : ''}.
+          </>
+        ) : null}
+      </div>
+      {/*
+        The three timestamps, kept apart for the same reason the injury panel
+        keeps them apart: "checked" moves every morning whether or not anything
+        arrived, and on its own it would describe a healthy pipeline and a dead
+        one in identical words.
+      */}
+      <div className="faint" style={{ marginTop: 6 }} data-testid="usage-freshness">
+        Checked {usage.checkedAt ? formatAge(usage.checkedAt) : 'not yet'} · the file itself last changed{' '}
+        {usage.sourceModifiedAt ? formatAge(usage.sourceModifiedAt) : 'unknown'}
+        {usage.ingestedAt ? ` · last stored ${formatAge(usage.ingestedAt)}` : ''}.
+      </div>
+      <div
+        className="faint"
+        style={{ marginTop: 6, fontWeight: usage.consecutiveFailures > 0 ? 600 : undefined }}
+        data-testid="usage-data-health"
+      >
+        {usage.dataHealth}
+      </div>
+      {/*
+        The threshold, stated plainly. Six games is not a limitation to
+        apologise for — it is the difference between naming a trend and naming
+        a coincidence — but a user looking at "insufficient data" in October
+        deserves to know it is arithmetic rather than a broken feed.
+      */}
+      <div className="faint" style={{ marginTop: 6 }} data-testid="usage-readiness">
+        A role change is only reported once a player has {usage.minimumGames} games — three recent against three of
+        baseline. {usage.playersWithEnoughGames} player{usage.playersWithEnoughGames === 1 ? ' has' : 's have'} that
+        much so far, out of {usage.players} with any usage at all. Below it the card says so rather than guessing from
+        a short run.
+      </div>
+      <div className="faint" style={{ marginTop: 6 }}>
+        It is checked <strong>once a day</strong>, not every five minutes like the injury report. A game&rsquo;s target
+        count is settled the moment the game ends, so checking more often would learn nothing and write a bookkeeping
+        row each time to prove it.
+        {usage.writesToday > 0 ? ` ${usage.writesToday} of ${usage.writeCeiling} daily writes used.` : ''}
+      </div>
+      {unlocked ? (
+        <>
+          <button
+            className="btn"
+            type="button"
+            data-testid="reload-usage"
+            disabled={busy}
+            onClick={() => void refresh()}
+            style={{ marginTop: 8 }}
+          >
+            {busy ? 'Reading…' : 'Read the usage file again'}
+          </button>
+          {note ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              {note}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </>
   );
 }
 

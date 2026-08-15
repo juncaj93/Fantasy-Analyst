@@ -27,6 +27,7 @@ import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { NewsletterService } from './newsletterService.ts';
 import { PlayerDetailService } from './playerDetailService.ts';
 import { InjuryService, type InjuryHealth } from './injuryService.ts';
+import { UsageService, type UsageHealth } from './usageService.ts';
 import type { SleeperUserSetting } from './sleeperSync.ts';
 
 /** `ok` = done, `warn` = needs you, `todo` = not started, `off` = optional/not enabled. */
@@ -154,6 +155,17 @@ export interface SetupStatus {
    * looks exactly like one that worked, until a card is blank on a Sunday.
    */
   injury: InjuryHealth;
+  /**
+   * Per-game opportunity, and how much of it has accumulated.
+   *
+   * Separate from the injury panel because it answers a different question and
+   * fails differently. The count that matters is not how many players have a
+   * row — it is how many have the six games the role detector needs before it
+   * will say anything, because below that every card correctly says "not
+   * enough data" and a panel boasting about row counts would be no help at all
+   * in working out why.
+   */
+  usage: UsageHealth;
 }
 
 export type PlayerDetailDiagnostics = Awaited<ReturnType<PlayerDetailService['diagnostics']>>;
@@ -339,6 +351,7 @@ export class SetupService {
       },
       playerDetail: await new PlayerDetailService(this.db).diagnostics(),
       injury: await new InjuryService(this.db).health(),
+      usage: await new UsageService(this.db).health(),
     };
   }
 
