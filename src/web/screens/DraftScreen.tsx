@@ -654,14 +654,23 @@ function RecommendationRow({
         </div>
 
         {/*
-          The only tag left is the one that is a genuine warning. Take Now,
-          Risky to Wait and Can Probably Wait were on nearly every row, which
-          made a row of chips that told the reader nothing; the chance he
-          reaches your next pick is a number and does the same job in less
-          space. AVOID stays, because "the research is against him" is not
-          something a percentage can say.
+          The only tag that still costs a row of its own. Take Now, Risky to
+          Wait and Can Probably Wait were on nearly every row, which made a row
+          of chips that told the reader nothing; the chance he reaches your next
+          pick is a number and does the same job in less space. AVOID stays,
+          because "the research is against him" is not something a percentage
+          can say — and it is rare enough that the row it costs is affordable.
+
+          The tier-cliff warning used to sit here too, and did not earn it: it
+          lands on whole runs of the board at once, and every card it touched
+          became a line taller than its neighbours. It has moved into the empty
+          right-hand end of the metrics line below.
         */}
-        <DecisionTags rec={rec} showCliffProximity={showCliffProximity} />
+        {rec.avoid.active ? (
+          <div className="tag-row" data-testid="decision-tags">
+            <AvoidBadge avoid={rec.avoid} />
+          </div>
+        ) : null}
 
         {/*
           Four numbers, four different questions, in the order they are asked.
@@ -683,23 +692,40 @@ function RecommendationRow({
           </div>
         ) : null}
 
-        <div className="player-row-metrics">
-          <span className="metric" data-testid="score-metric">
-            Score{' '}
-            <strong className="score-value" title={`Composite recommendation strength, 0-100 (raw ${rec.total})`}>
-              {rec.score}
-            </strong>
-          </span>
-          <span className="metric">
-            ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
-          </span>
-          <span className="metric">
-            Val{' '}
-            <strong className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}>
-              {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-            </strong>
-          </span>
-          <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
+        {/*
+          The bottom of the card: the four numbers on the left, and whatever
+          warning belongs to the right-hand end of that same line.
+
+          A grid of `1fr auto` rather than a third row. The numbers take the
+          space they need and the chip takes the space it needs, so the two can
+          never land on top of each other — and a card with a warning is exactly
+          as tall as a card without one, which is the whole point. Before this,
+          a tier cliff cost a line, and because cliffs arrive in runs the board
+          gained a stutter wherever a position was thinning out.
+        */}
+        <div className="player-row-bottom">
+          <div className="player-row-metrics">
+            <span className="metric" data-testid="score-metric">
+              Score{' '}
+              <strong className="score-value" title={`Composite recommendation strength, 0-100 (raw ${rec.total})`}>
+                {rec.score}
+              </strong>
+            </span>
+            <span className="metric">
+              ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
+            </span>
+            <span className="metric">
+              Val{' '}
+              <strong
+                className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
+              >
+                {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
+              </strong>
+            </span>
+            <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
+          </div>
+
+          <TierCliffChip rec={rec} enabled={showCliffProximity} />
         </div>
 
         {/*
@@ -1014,36 +1040,54 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
 }
 
 /**
- * The one tag worth a row's space.
+ * His group is nearly gone, said at the end of the line that is already there.
  *
- * Everything else that used to sit here — the tier cliff, and the three wait
- * states — either says what the survival percentage already says, or is
- * reference rather than a decision. Both are still computed, still ranked on,
- * and still explained inside the expanded card; they just stopped being chips
- * on forty rows. Stars are not counted against the budget: they sit beside the
- * name, are the user's own mark, and are how they find who they were looking
- * for.
+ * The warning itself is unchanged — same rule, same threshold, same one-away
+ * and two-away wording, computed by `tierCliffProximity` over the same tier
+ * model. What changed is where it is drawn: it used to open a row of its own
+ * above the metrics, which made every card carrying it a line taller than the
+ * cards either side. Cliffs do not arrive alone — a thinning position tags a
+ * run of consecutive players — so that cost showed up as a stutter in the
+ * board's rhythm exactly where the reader most needs to compare rows.
+ *
+ * It is quiet on purpose. The reader's eye should still land on the name, then
+ * the numbers; this is a note in the margin of a line they are already reading.
+ *
+ * Absent rather than empty when there is no cliff, so the grid column collapses
+ * and an unwarned card spends nothing on it.
  */
-function DecisionTags({ rec, showCliffProximity }: { rec: DraftRecommendation; showCliffProximity: boolean }) {
-  const away = showCliffProximity ? tierCliffProximity(rec.tierCliff) : null;
-  if (!rec.avoid.active && away == null) return null;
+function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: boolean }) {
+  const away = enabled ? tierCliffProximity(rec.tierCliff) : null;
+  if (away == null) return null;
   return (
-    <div className="tag-row" data-testid="decision-tags">
-      {rec.avoid.active ? <AvoidBadge avoid={rec.avoid} /> : null}
-      {away == null ? null : (
-        <span
-          className="tag tag-cliff"
-          data-testid="tier-cliff-tag"
-          data-away={away}
-          title={
-            away === 1
-              ? `The last ${rec.position} left in the best group on the board`
-              : `Two ${rec.position}s left in the best group on the board`
-          }
-        >
-          Tier cliff · {away} away
-        </span>
-      )}
-    </div>
+    <span
+      className="player-row-cliff"
+      data-testid="tier-cliff-tag"
+      data-away={away}
+      /*
+       * The whole sentence, always, for anything that is not counting pixels:
+       * the accessible name does not change with the viewport, so a screen
+       * reader hears "Tier cliff, 2 away" on a 360px phone and on a desktop.
+       */
+      aria-label={`Tier cliff, ${away} away`}
+      title={
+        away === 1
+          ? `The last ${rec.position} left in the best group on the board`
+          : `Two ${rec.position}s left in the best group on the board`
+      }
+    >
+      {/*
+        Two spellings, and the stylesheet picks by width — see `.player-row-cliff`.
+
+        The four numbers beside this are not negotiable: a card that drops
+        `Next` to make room for a warning about `Next` has its priorities
+        backwards. So on the two narrowest phones, where a three-digit ADP and
+        a three-digit Val leave no room for nineteen characters, the warning is
+        what gives. It gives the least it can — the count and the word that
+        makes the colour redundant survive in both.
+      */}
+      <span className="cliff-full">Tier cliff · {away} away</span>
+      <span className="cliff-tight">Cliff · {away}</span>
+    </span>
   );
 }

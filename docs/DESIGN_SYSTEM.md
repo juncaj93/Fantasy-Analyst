@@ -70,6 +70,7 @@ is which.
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
 | `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. |
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
+| Draft card bottom row | `1fr auto`: the four metrics on the left, the tier-cliff warning tucked into the right-hand end of the same line. A warning costs the card no height, so a thinning position no longer puts a stutter in the board's rhythm. The chip has a short spelling below 376px, where four labelled numbers and nineteen characters will not share the line — the full sentence stays in its accessible name at every width. |
 | `Badge` / tags / `Confidence` | Status pills, ranked by how much attention each state deserves. |
 
 ## The bottom of the screen
@@ -105,6 +106,9 @@ blank strip under the navigation twice:
 - `e2e/draft-controls.spec.ts` — the folded search beside the position filters:
   collapsed shape, control-row height, expansion, query semantics, and that the
   filters are untouched by any of it.
+- `e2e/draft-card.spec.ts` — the collapsed player card: where the tier-cliff
+  warning sits, that it costs no height, that the metrics never wrap to make
+  room for it, and that it takes no tap meant for the card.
 - `e2e/shell.spec.ts` — navigation-bar height and stickiness, density per screen,
   touch targets, no sideways scroll in either theme, theme parity, reduced
   motion.

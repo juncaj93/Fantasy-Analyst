@@ -863,16 +863,21 @@ test.describe('draft room', () => {
   });
 
   /**
-   * Two tags is the ceiling, and only because they say unrelated things: the
+   * Two marks is the ceiling, and only because they say unrelated things: the
    * research is against him, and his group is nearly gone. The row's budget
    * exists because it used to hold four.
+   *
+   * Counted across the whole row rather than inside one container: the two live
+   * in different places now — AVOID still costs a row of its own, the tier cliff
+   * sits at the end of the metrics line — and a ceiling that only looked in one
+   * of them would stop being a ceiling.
    */
-  test('shows at most two decision tags on a row', async ({ page }) => {
+  test('shows at most two decision marks on a row', async ({ page }) => {
     const rows = page.getByTestId('recommendation-row');
     const count = await rows.count();
     for (let i = 0; i < Math.min(count, 10); i++) {
-      const tags = rows.nth(i).getByTestId('decision-tags').locator('.tag');
-      expect(await tags.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
+      const marks = rows.nth(i).locator('.tag-row .tag, [data-testid="tier-cliff-tag"]');
+      expect(await marks.count(), 'a row should never become a badge wall').toBeLessThanOrEqual(2);
     }
   });
 
@@ -920,7 +925,16 @@ test.describe('draft room', () => {
 
       // Two tight ends left in the best group at the position; nobody else.
       await expect(tags).toHaveCount(2);
-      for (const text of await tags.allInnerTexts()) expect(text).toMatch(/tier cliff · 2 away/i);
+      /*
+       * Read from the accessible name rather than the printed text. The chip
+       * has a short spelling on the narrow phones — four labelled numbers and
+       * nineteen characters do not share 315px — and what it *means* is the
+       * part that may not change with the viewport.
+       */
+      for (const tag of await tags.all()) {
+        await expect(tag).toHaveAttribute('aria-label', 'Tier cliff, 2 away');
+        await expect(tag).toHaveAttribute('data-away', '2');
+      }
 
       const tagged = await page
         .getByTestId('recommendation-row')

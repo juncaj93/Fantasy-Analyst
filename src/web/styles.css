@@ -1493,6 +1493,98 @@ body,
   color: var(--text-faint);
 }
 
+/*
+ * The bottom of a draft card: the numbers, and whatever qualifies them.
+ *
+ * `1fr auto` — the metrics take what they need and the chip takes what it
+ * needs, which is the whole reason the two can never collide. The alternative
+ * everybody reaches for first is absolute positioning, and it fails on the one
+ * card where the numbers are widest.
+ *
+ * The chip is a child of this row rather than of the metrics line so it cannot
+ * be pushed onto a second line by a metric wrapping; if space really does run
+ * out, the metrics wrap underneath and the chip stays where it is.
+ */
+.player-row-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  margin-top: 3px;
+}
+
+/*
+ * The row owns the gap above it now, so the metrics stop claiming one too —
+ * and they close up a little, because four labelled numbers and a chip have to
+ * share 315px on the narrowest phone this app supports. The order things were
+ * allowed to give in is gaps first, then the chip, then type: nothing here
+ * drops a metric, because a card that hides `Next` to make room for a warning
+ * about `Next` has got its priorities backwards.
+ */
+.player-row-bottom > .player-row-metrics {
+  margin-top: 0;
+  gap: 2px 5px;
+  font-size: 0.72rem;
+}
+
+/*
+ * `Tier cliff · 2 away`, tucked into the end of the metrics line.
+ *
+ * Deliberately smaller and quieter than the numbers it sits beside: it
+ * qualifies the row, it is not one of the four things the row is about. Amber
+ * on its own tint, a small radius rather than a pill — a pill at this size
+ * reads as a button — and no shadow. It never wraps: at the widths this app
+ * supports it is either on the line or the card is too narrow for the board,
+ * and the second has never happened.
+ */
+.player-row-cliff {
+  justify-self: end;
+  white-space: nowrap;
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.5;
+  padding: 0 4px;
+  /* Reaches into the row's own right padding, which is decorative here and is
+     worth three pixels to the line it is sharing. */
+  margin-right: -3px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+/*
+ * Which spelling of the warning this width can afford.
+ *
+ * Measured rather than chosen: the four metrics want up to 244px when a player
+ * has a three-digit ADP and a three-digit Val, and the full nineteen-character
+ * chip is 95px. 390px of phone leaves 345px for the pair and fits; 375px
+ * leaves 330px and does not. Below that the chip drops to `Cliff · 2`, which
+ * is 50px and leaves the numbers room to spare on every board this app draws.
+ *
+ * The sentence is not lost — `aria-label` and `title` carry it at every width,
+ * so nothing that reads rather than looks ever sees the short form.
+ */
+.cliff-tight {
+  display: none;
+}
+
+@media (max-width: 375px) {
+  .cliff-full {
+    display: none;
+  }
+
+  .cliff-tight {
+    display: inline;
+  }
+
+  /* The last pixels, taken from the gaps before anything takes them from the
+     numbers. */
+  .player-row-bottom > .player-row-metrics {
+    gap: 2px 4px;
+  }
+}
+
 .metric strong {
   color: var(--text-dim);
   font-weight: 620;
