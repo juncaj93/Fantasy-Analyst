@@ -4,9 +4,11 @@
  * Two decisions, both easy to get subtly wrong and neither visible in a unit
  * test of `tiers.ts`:
  *
- *   - the mixed-position boards mark the last one or two players of the tier in
- *     play. The failure mode is the one this project has already shipped once —
- *     a warning on every player at a position, which is wallpaper;
+ *   - the boards mark the last one or two players of the group you are actually
+ *     choosing from at a position. Two failure modes, and this project has now
+ *     shipped both: a warning on every player at a position, which is
+ *     wallpaper; and a warning on a group two tiers down while the group above
+ *     it is still there, which points at the wrong card;
  *   - a position-filtered board draws a line where the position breaks. The
  *     failure mode is the list being ordered by the ranking and not by draft
  *     order, so the tiers interleave — first it drew the same boundary several
@@ -16,25 +18,63 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { groupByTier, tierCliffProximity, tierDividerFlags } from '../src/core/draft/tierBoard.ts';
+import {
+  activeTierCliffWarnings,
+  groupByTier,
+  tierCliffWarning,
+  tierDividerFlags,
+  type WarnablePlayer,
+} from '../src/core/draft/tierBoard.ts';
 import { buildPositionTierMap, NO_CLIFF, type TierCliff } from '../src/core/draft/tiers.ts';
 
 /** A tier assessment with only the fields this layer reads set. */
 function tier(over: Partial<TierCliff>): TierCliff {
-  return { ...NO_CLIFF, tierIndex: 0, tierSize: 1, tierEndsAtCliff: true, ...over };
+  return { ...NO_CLIFF, tierIndex: 0, tierSize: 1, tierEndsAtBoundary: true, tierEndsAtCliff: true, ...over };
 }
 
-describe('the tier-cliff proximity tag', () => {
-  it('marks the last player in the tier in play', () => {
-    expect(tierCliffProximity(tier({ tierSize: 1 }))).toBe(1);
+/**
+ * A position, as a ladder of ADPs, read the way the board reads it.
+ *
+ * Availability is the only input that moves: the map is rebuilt from whoever is
+ * left, so "the best tier still available" needs no state of its own and
+ * drafting somebody is just a shorter array.
+ */
+function board(position: string, available: number[], names: Record<number, string> = {}): WarnablePlayer[] {
+  const map = buildPositionTierMap(position, available, { picksUntilNext: 9 });
+  return available.map((adp) => ({
+    playerId: names[adp] ?? `${position}-${adp}`,
+    position,
+    tier: map.at(adp),
+  }));
+}
+
+/** Who is warned, and what their chip says. */
+const warned = (players: WarnablePlayer[]) =>
+  [...activeTierCliffWarnings(players)].map(([id, w]) => `${id}: ${w.label}`);
+
+describe('the tier-cliff warning', () => {
+  it('marks the last player in the active tier', () => {
+    expect(tierCliffWarning(tier({ tierSize: 1 }))?.label).toBe('Tier cliff · last 1');
   });
 
   it('marks both when two are left', () => {
-    expect(tierCliffProximity(tier({ tierSize: 2 }))).toBe(2);
+    expect(tierCliffWarning(tier({ tierSize: 2 }))?.label).toBe('Tier cliff · 2 left');
+  });
+
+  it('counts players remaining, never picks', () => {
+    // The copy this replaced said "2 away" and "1 away", which reads as a
+    // distance to something. The number has always been a headcount.
+    for (const size of [1, 2]) {
+      const warning = tierCliffWarning(tier({ tierSize: size }))!;
+      expect(warning.label).not.toMatch(/away/);
+      expect(warning.remaining).toBe(size);
+      expect(warning.label).toContain(String(size));
+      expect(warning.short).toBe(`Cliff · ${size}`);
+    }
   });
 
   it('says nothing while three are left', () => {
-    expect(tierCliffProximity(tier({ tierSize: 3 }))).toBeNull();
+    expect(tierCliffWarning(tier({ tierSize: 3 }))).toBeNull();
   });
 
   /**
@@ -42,121 +82,287 @@ describe('the tier-cliff proximity tag', () => {
    * tier that eventually has a cliff describes every player in that tier.
    */
   it('says nothing about a tier that is merely large and ends in a cliff', () => {
-    expect(tierCliffProximity(tier({ tierSize: 7 }))).toBeNull();
+    expect(tierCliffWarning(tier({ tierSize: 7 }))).toBeNull();
   });
 
   /**
-   * The rule this replaced only marked tier 0, which made sense when a position
-   * had four or five tiers and tier 0 was most of the board. Granular tiers
-   * turned it into a filter that threw away every useful warning: a real
-   * quarterback board has a dozen tiers, and the two-man group above a 14-pick
-   * hole is tier 1.
+   * The bug that made it wrong the second time, and the one this pass exists
+   * for. A group below the one you are choosing from is not endangered by
+   * anything yet — everything above it has to go first.
    */
-  it('marks a small group wherever it sits at the position', () => {
-    expect(tierCliffProximity(tier({ tierIndex: 1, tierSize: 2 }))).toBe(2);
-    expect(tierCliffProximity(tier({ tierIndex: 3, tierSize: 1 }))).toBe(1);
+  it('says nothing about a tier below the active one, however small', () => {
+    expect(tierCliffWarning(tier({ tierIndex: 1, tierSize: 2 }))).toBeNull();
+    expect(tierCliffWarning(tier({ tierIndex: 3, tierSize: 1 }))).toBeNull();
   });
 
-  it('still says nothing about a large group, wherever it sits', () => {
-    expect(tierCliffProximity(tier({ tierIndex: 1, tierSize: 3 }))).toBeNull();
-    expect(tierCliffProximity(tier({ tierIndex: 5, tierSize: 9 }))).toBeNull();
+  /**
+   * The other half of the repair. `tierEndsAtCliff` also demands an absolute
+   * hole in picks — twelve at quarterback — which is the right bar for
+   * interrupting a reader about a hole and the wrong one for "this group is
+   * down to its last player". The boundary is the test.
+   */
+  it('marks a lone player above an ordinary boundary, not only above an alarm', () => {
+    const ordinary = tier({ tierSize: 1, tierEndsAtBoundary: true, tierEndsAtCliff: false });
+    expect(tierCliffWarning(ordinary)?.label).toBe('Tier cliff · last 1');
   });
 
   it('says nothing when the board ran out rather than the tier', () => {
-    expect(tierCliffProximity(tier({ tierSize: 2, tierEndsAtCliff: false }))).toBeNull();
+    expect(tierCliffWarning(tier({ tierSize: 1, tierEndsAtBoundary: false, tierEndsAtCliff: false }))).toBeNull();
+    expect(tierCliffWarning(tier({ tierSize: 2, tierEndsAtBoundary: false, tierEndsAtCliff: false }))).toBeNull();
   });
 
   it('says nothing about a player with no draft order at all', () => {
-    expect(tierCliffProximity(NO_CLIFF)).toBeNull();
+    expect(tierCliffWarning(NO_CLIFF)).toBeNull();
+  });
+});
+
+/**
+ * The reported board, and the state machine it walks through.
+ *
+ * The live quarterback ladder with the best one already drafted: one player
+ * alone in the top tier above an 8-pick step, then two, then two, then three.
+ * Shipped, the lone player said nothing and the two below him both said
+ * `Tier cliff · 2 away` — pointing at the group you would fall *into* rather
+ * than the one that was about to run out.
+ */
+describe('the reported quarterback board', () => {
+  const NAMES: Record<number, string> = {
+    55.3: 'top', 63.4: 'second-a', 65.8: 'second-b', 79.4: 'third-a', 81: 'third-b',
+    90.2: 'fourth-a', 93.7: 'fourth-b', 97.6: 'fourth-c',
+  };
+  const FULL = [
+    55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6, 105.4, 111.5, 114.5, 116.9, 127.9, 149.3, 151, 164.1, 165.4, 169.4,
+  ];
+  const qb = (available: number[]) => board('QB', available, NAMES);
+
+  it('warns the lone player in the best tier left, and nobody else', () => {
+    expect(warned(qb(FULL))).toEqual(['top: Tier cliff · last 1']);
   });
 
-  /**
-   * Live, against the real model rather than a hand-made shape: the count is of
-   * players still available, so it falls as they are taken and the next group
-   * becomes the one in play when the first is gone.
-   */
-  describe('as the draft takes them', () => {
-    const at = (adps: number[], adp: number) =>
-      buildPositionTierMap('TE', adps, { picksUntilNext: 8 }).at(adp);
-
-    // Three tight ends, then a 28-pick hole, then three more.
-    const FULL = [28, 31, 34, 62, 66, 70];
-
-    it('says nothing while three remain in the tier', () => {
-      for (const adp of [28, 31, 34]) expect(tierCliffProximity(at(FULL, adp))).toBeNull();
-    });
-
-    it('marks both once one has been drafted', () => {
-      const left = [31, 34, 62, 66, 70];
-      expect(tierCliffProximity(at(left, 31))).toBe(2);
-      expect(tierCliffProximity(at(left, 34))).toBe(2);
-    });
-
-    it('marks the last one once another has been drafted', () => {
-      const left = [34, 62, 66, 70];
-      expect(tierCliffProximity(at(left, 34))).toBe(1);
-    });
-
-    /**
-     * Once the tier is exhausted the next one becomes the tier in play — and
-     * with nothing after it, there is no cliff left to be near.
-     */
-    it('promotes the next tier when the first is gone', () => {
-      const left = [62, 66, 70];
-      expect(at(left, 62).tierIndex).toBe(0);
-      expect(tierCliffProximity(at(left, 62))).toBeNull();
-    });
+  it('promotes the next tier once he is drafted, and warns both of them', () => {
+    expect(warned(qb(FULL.slice(1)))).toEqual([
+      'second-a: Tier cliff · 2 left',
+      'second-b: Tier cliff · 2 left',
+    ]);
   });
 
-  /**
-   * The regression this rule was rewritten for, on the board that showed it.
-   *
-   * The live quarterback ladder at pick 55: twelve tiers, and the top one is
-   * two players closed by an 8-pick step — real enough to draw a line, too
-   * small to be worth an alarm. Under the tier-0 rule the whole position went
-   * unmarked, including a two-man group above a 14-pick hole and a one-man
-   * group above a 21-pick one. Those are exactly the two cards a drafting
-   * reader needs marked.
-   */
-  describe('the live board that had no warnings at all', () => {
-    const QB = [
-      53.2, 55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6, 105.4, 111.5, 114.5, 116.9, 127.9, 149.3, 151, 164.1, 165.4,
-      169.4, 178.7, 191.7, 193.7, 195.2, 199.6, 223.9, 231.8, 239.8, 247.9, 249.1, 261.3, 287, 291.8, 305.5, 319.5, 322,
+  it('counts down to the last of that tier', () => {
+    // 63.4 drafted; 65.8 alone at the top of the position.
+    expect(warned(qb(FULL.filter((a) => a !== 55.3 && a !== 63.4)))).toEqual(['second-b: Tier cliff · last 1']);
+  });
+
+  it('promotes again when that tier is exhausted', () => {
+    const left = FULL.filter((a) => a > 70);
+    expect(warned(qb(left))).toEqual(['third-a: Tier cliff · 2 left', 'third-b: Tier cliff · 2 left']);
+  });
+
+  it('says nothing at all while the best tier still has three in it', () => {
+    // Straight to the four-man band: nothing is about to run out.
+    expect(warned(qb(FULL.filter((a) => a >= 90.2)))).toEqual([]);
+  });
+});
+
+/**
+ * The state machine, as a fixture rather than a board. Three tiers, drafted one
+ * player at a time, with the right answer written down at every step.
+ */
+describe('drafting through a position', () => {
+  //  A            | B, C          | D, E
+  const LADDER = [10, 40, 42, 80, 82];
+  const NAMES: Record<number, string> = { 10: 'A', 40: 'B', 42: 'C', 80: 'D', 82: 'E' };
+  const at = (available: number[]) => warned(board('WR', available, NAMES));
+
+  it('starts with the singleton top tier warned alone', () => {
+    expect(board('WR', LADDER).map((p) => p.tier.tierIndex)).toEqual([0, 1, 1, 2, 2]);
+    expect(at(LADDER)).toEqual(['A: Tier cliff · last 1']);
+  });
+
+  it('warns both of the next tier once A is gone', () => {
+    expect(at([40, 42, 80, 82])).toEqual(['B: Tier cliff · 2 left', 'C: Tier cliff · 2 left']);
+  });
+
+  it('warns the survivor once B is gone', () => {
+    expect(at([42, 80, 82])).toEqual(['C: Tier cliff · last 1']);
+  });
+
+  it('promotes the last tier once C is gone — and it has nothing below it', () => {
+    // D and E are now the whole position. Running out of board is not a cliff.
+    expect(at([80, 82])).toEqual([]);
+  });
+});
+
+/**
+ * §29's threshold fixture: a three-player top tier stays quiet until it is not.
+ */
+describe('the three-player threshold', () => {
+  const NAMES: Record<number, string> = { 10: 'A', 12: 'B', 14: 'C' };
+  // Three at the top, then a chasm, then three more — deep enough that taking
+  // the top band apart still leaves the model a ladder to read.
+  const LOWER = [60, 62, 64];
+  const at = (available: number[]) => warned(board('WR', [...available, ...LOWER], NAMES));
+
+  it('says nothing while three remain', () => {
+    expect(at([10, 12, 14])).toEqual([]);
+  });
+
+  it('speaks the moment there are two', () => {
+    expect(at([12, 14])).toEqual(['B: Tier cliff · 2 left', 'C: Tier cliff · 2 left']);
+  });
+
+  it('and again at one', () => {
+    expect(at([14])).toEqual(['C: Tier cliff · last 1']);
+  });
+});
+
+describe('when there is nothing to fall to', () => {
+  it('never warns a position that is all one tier', () => {
+    expect(warned(board('WR', [20, 21, 22]))).toEqual([]);
+    expect(warned(board('WR', [20]))).toEqual([]);
+    expect(warned(board('WR', [20, 21]))).toEqual([]);
+  });
+
+  it('never warns the last player at a position', () => {
+    const players = board('TE', [28, 31, 34, 62, 66, 70]);
+    const last = players.at(-1)!;
+    expect(last.tier.tierIndex).toBeGreaterThan(0);
+    expect(tierCliffWarning(last.tier)).toBeNull();
+  });
+});
+
+/**
+ * §7 and §31. Each position runs out of its own best group on its own
+ * schedule, and the board says so about all of them at once.
+ */
+describe('positions are independent', () => {
+  it('warns each position from its own active tier', () => {
+    const players = [
+      // One quarterback left above a break, then a lower band.
+      ...board('QB', [50, 80, 84, 88], { 50: 'qb-top', 80: 'qb-b1', 84: 'qb-b2', 88: 'qb-b3' }),
+      // Two tight ends, then a chasm.
+      ...board('TE', [30, 33, 90, 94, 98], { 30: 'te-a', 33: 'te-b' }),
+      // Four receivers in the top band: nothing about to run out.
+      ...board('WR', [40, 41, 42, 43, 70, 71], { 40: 'wr-a', 41: 'wr-b', 42: 'wr-c', 43: 'wr-d' }),
     ];
-    const marked = (adps: number[]) => {
-      const map = buildPositionTierMap('QB', adps, { picksUntilNext: 13 });
-      return adps.filter((adp) => tierCliffProximity(map.at(adp)) != null);
-    };
+    expect(warned(players)).toEqual([
+      'qb-top: Tier cliff · last 1',
+      'te-a: Tier cliff · 2 left',
+      'te-b: Tier cliff · 2 left',
+    ]);
+  });
 
-    it('marks the groups that are one or two from a real hole', () => {
-      expect(marked(QB)).toEqual([63.4, 65.8, 127.9]);
-    });
+  /** §23 and §24, asserted over a whole board rather than a shape. */
+  it('never warns a worse tier while a better one at the position survives', () => {
+    const players = [
+      ...board('QB', [55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6, 105.4, 111.5]),
+      ...board('TE', [30, 33, 90, 94, 98]),
+      ...board('RB', [20, 22, 24, 26, 60, 62]),
+    ];
+    const warnings = activeTierCliffWarnings(players);
+    const byPosition = new Map<string, Set<number>>();
+    for (const player of players) {
+      if (!warnings.has(player.playerId)) continue;
+      const seen = byPosition.get(player.position) ?? new Set<number>();
+      seen.add(player.tier.tierIndex!);
+      byPosition.set(player.position, seen);
+      // Nothing below the active tier may warn, ever.
+      expect(player.tier.tierIndex).toBe(0);
+    }
+    // At most one warned tier per position, and never zero-sized.
+    for (const tiers of byPosition.values()) expect(tiers.size).toBe(1);
+  });
+});
 
-    it('does not mark the top group, which is two players above an ordinary step', () => {
-      // 8.1 picks. A boundary — the board does step down — but under the
-      // 12-pick floor a quarterback board needs before it is worth an alarm.
-      const map = buildPositionTierMap('QB', QB, { picksUntilNext: 13 });
-      expect(map.at(53.2).tierSize).toBe(2);
-      expect(map.at(53.2).tierEndsAtBoundary).toBe(true);
-      expect(map.at(53.2).tierEndsAtCliff).toBe(false);
-      expect(tierCliffProximity(map.at(53.2))).toBeNull();
-    });
+/**
+ * §33. The two views draw the chip differently and must agree about who gets
+ * one — eligibility is a fact about the draft, not about the filter.
+ */
+describe('the filtered and mixed views agree', () => {
+  it('picks the same quarterbacks either way', () => {
+    const QB = [55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7];
+    const filtered = board('QB', QB);
+    const mixed = [...board('QB', QB), ...board('WR', [40, 41, 90, 92])];
+    const fromMixed = [...activeTierCliffWarnings(mixed)].filter(([id]) => id.startsWith('QB-'));
+    expect(fromMixed).toEqual([...activeTierCliffWarnings(filtered)]);
+  });
+});
 
-    /**
-     * The property that makes this a warning rather than wallpaper, measured on
-     * a real position rather than asserted about a shape. Cliffs are capped at a
-     * fifth of a position and only the smallest groups behind one are marked, so
-     * the two caps compound.
-     */
-    it('leaves the overwhelming majority of the position unmarked', () => {
-      expect(marked(QB).length).toBeLessThanOrEqual(Math.ceil(QB.length * 0.15));
-    });
+/** §11 and §34. Unknown stays unknown. */
+describe('players the market has not priced', () => {
+  it('gives them no warning and lets them change nobody else\'s', () => {
+    const priced = board('QB', [55.3, 63.4, 65.8, 79.4, 81]);
+    const withUnpriced: WarnablePlayer[] = [...priced, { playerId: 'unpriced', position: 'QB', tier: NO_CLIFF }];
+    expect(activeTierCliffWarnings(withUnpriced).has('unpriced')).toBe(false);
+    expect(warned(withUnpriced)).toEqual(warned(priced));
+  });
+});
 
-    it('keeps marking a one-man group as the board empties above it', () => {
-      // Drafting the top of the position does not disturb a hole ten tiers
-      // down, and the reader who wants that player still needs telling.
-      for (const taken of [0, 4, 8]) expect(marked(QB.slice(taken))).toContain(127.9);
-    });
+/**
+ * §35. Each of these fails under exactly one plausible regression, checked the
+ * only way that proves anything — by making the change and watching it go red.
+ */
+describe('the regressions this rule must not allow back', () => {
+  const QB = [55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6];
+
+  /** Mutation: drop the tier-0 gate. */
+  it('keeps a two-player second tier quiet while one player holds the first', () => {
+    const players = board('QB', QB, { 55.3: 'top', 63.4: 'b', 65.8: 'c' });
+    expect(players.find((p) => p.playerId === 'b')!.tier.tierSize).toBe(2);
+    expect(warned(players)).toEqual(['top: Tier cliff · last 1']);
+  });
+
+  /** Mutation: restore the `away` copy. */
+  it('never says away', () => {
+    for (const size of [1, 2]) {
+      const warning = tierCliffWarning(tier({ tierSize: size }))!;
+      expect(`${warning.label} ${warning.short}`).not.toMatch(/away/i);
+    }
+    expect(tierCliffWarning(tier({ tierSize: 1 }))!.label).toBe('Tier cliff · last 1');
+    expect(tierCliffWarning(tier({ tierSize: 2 }))!.label).toBe('Tier cliff · 2 left');
+  });
+
+  /** Mutation: warn only the first of a two-player tier. */
+  it('warns both members of a two-player active tier, not one', () => {
+    const players = board('QB', QB.slice(1), { 63.4: 'b', 65.8: 'c' });
+    expect(warned(players)).toEqual(['b: Tier cliff · 2 left', 'c: Tier cliff · 2 left']);
+  });
+
+  /** Mutation: raise the threshold to three. */
+  it('never warns a three-player active tier', () => {
+    expect(warned(board('QB', [90.2, 93.7, 97.6, 130, 133]))).toEqual([]);
+  });
+
+  /** Mutation: warn a singleton with nothing under it. */
+  it('never warns the only tier at a position', () => {
+    expect(warned(board('QB', [90]))).toEqual([]);
+  });
+
+  /**
+   * Mutation: let the alarm floor gate the chip again.
+   *
+   * This is the shipped bug in one line. The top quarterback's tier ends at a
+   * real boundary that is under the position's 12-pick alarm floor, so a rule
+   * asking `tierEndsAtCliff` finds nothing to say about the one card that
+   * needed it.
+   */
+  it('warns above a boundary the alarm floor would have swallowed', () => {
+    const top = board('QB', QB, { 55.3: 'top' }).find((p) => p.playerId === 'top')!;
+    expect(top.tier.tierEndsAtBoundary).toBe(true);
+    expect(top.tier.tierEndsAtCliff).toBe(false);
+    expect(tierCliffWarning(top.tier)?.remaining).toBe(1);
+  });
+
+  /**
+   * Mutation: reach for the survival model.
+   *
+   * Warning eligibility and `Next%` answer different questions, and the type
+   * this rule reads has no way to express one. A board where every player is
+   * near-certain to survive warns exactly the same players.
+   */
+  it('takes nothing from the survival model', () => {
+    const players = board('QB', QB);
+    const surviving = players.map((p) => ({ ...p, tier: { ...p.tier, score: 0, survivingTierMates: 99 } }));
+    expect(warned(surviving)).toEqual(warned(players));
+    expect(Object.keys(tierCliffWarning(tier({ tierSize: 2 }))!).sort()).toEqual(['label', 'remaining', 'short']);
   });
 });
 
@@ -206,7 +412,14 @@ describe('drawing a position as bands', () => {
     }
   });
 
-  /** The contradiction the reader spotted: a line said three, a chip said two. */
+  /**
+   * The contradiction the reader spotted: a line said three, a chip said two.
+   *
+   * Both halves are checked. The top band is the one the chips are about, so
+   * every member of it carries the same count and the same chip; the band below
+   * is drawn with its own divider and stays silent, because the group above it
+   * has to go first.
+   */
   it('agrees with the tags drawn beside it', () => {
     const { ordered, flags, m } = drawn();
     const band = (start: number) => {
@@ -214,12 +427,15 @@ describe('drawing a position as bands', () => {
       for (let i = start + 1; i < ordered.length && !flags[i]; i++) out.push(ordered[i]!);
       return out;
     };
+    const first = band(0);
+    expect(first).toEqual([53.2, 55.3]);
+    for (const adp of first) {
+      expect(m.at(adp).tierSize).toBe(first.length);
+      expect(tierCliffWarning(m.at(adp))?.label).toBe('Tier cliff · 2 left');
+    }
     const second = band(ordered.findIndex((_, i) => flags[i]));
     expect(second).toEqual([65.8, 63.4]);
-    for (const adp of second) {
-      expect(m.at(adp).tierSize).toBe(second.length);
-      expect(tierCliffProximity(m.at(adp))).toBe(second.length);
-    }
+    for (const adp of second) expect(tierCliffWarning(m.at(adp))).toBeNull();
   });
 
   it('keeps the ranking inside a band', () => {

@@ -51,7 +51,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
  * both live in core so they can be checked without a browser.
  */
-import { groupByTier, tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 
 /**
@@ -1089,32 +1089,32 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
  * and an unwarned card spends nothing on it.
  */
 function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: boolean }) {
-  const away = enabled ? tierCliffProximity(rec.tierCliff) : null;
-  if (away == null) return null;
+  const warning = enabled ? tierCliffWarning(rec.tierCliff) : null;
+  if (warning == null) return null;
   return (
     <span
       className="player-row-cliff"
       data-testid="tier-cliff-tag"
-      data-away={away}
+      data-remaining={warning.remaining}
       /*
        * The whole sentence, always, for anything that is not counting pixels:
        * the accessible name does not change with the viewport, so a screen
-       * reader hears "Tier cliff, 2 away" on a 360px phone and on a desktop.
+       * reader hears the same thing on a 360px phone and on a desktop.
        */
-      aria-label={`Tier cliff, ${away} away`}
+      aria-label={warning.label.replace(' · ', ', ')}
       /*
-       * His group, not "the best group on the board".
+       * "The best group on the board" is accurate again.
        *
-       * The warning used to be restricted to the top tier at a position, so
-       * naming it that way was accurate. It is not restricted any more — a
-       * two-man group four tiers down with a fourteen-pick hole under it is the
-       * same fact about the same decision — and the old wording would have been
-       * quietly wrong on most of the cards that now carry this.
+       * It was accurate under the original rule, wrong for one release while
+       * the warning was allowed to mark any small group at a position, and
+       * accurate once more now that it marks only the active tier — the group
+       * you are actually choosing from, which is the only group that can be
+       * about to run out.
        */
       title={
-        away === 1
-          ? `The last ${rec.position} before a real drop at the position`
-          : `Two ${rec.position}s left before a real drop at the position`
+        warning.remaining === 1
+          ? `The last ${rec.position} in the best group left on the board`
+          : `Two ${rec.position}s left in the best group on the board`
       }
     >
       {/*
@@ -1126,9 +1126,12 @@ function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: bo
         a three-digit Val leave no room for nineteen characters, the warning is
         what gives. It gives the least it can — the count and the word that
         makes the colour redundant survive in both.
+
+        Both spellings are the same length as the ones they replace, so the
+        widths the stylesheet was measured against still hold.
       */}
-      <span className="cliff-full">Tier cliff · {away} away</span>
-      <span className="cliff-tight">Cliff · {away}</span>
+      <span className="cliff-full">{warning.label}</span>
+      <span className="cliff-tight">{warning.short}</span>
     </span>
   );
 }
