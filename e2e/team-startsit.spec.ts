@@ -298,23 +298,77 @@ test.describe('mode and refresh', () => {
     await expect(page.locator('[data-testid="starter-row"]').first()).toBeVisible();
   });
 
-  test('refreshes every source and reports what each one did', async ({ page }) => {
+  /**
+   * The button, without letting it move the ground under the other tests.
+   *
+   * Pressing it for real is a *write*: it syncs the league from Sleeper,
+   * re-ingests injuries and usage, and asks the odds provider for lines. The
+   * three viewport projects share one dev server and one database, so a real
+   * press in this suite reaches into whatever the other two projects are
+   * reading — which is exactly what happened when this test was first written,
+   * and it took an unrelated draft-room assertion down with it.
+   *
+   * So the response is stubbed here and the server side is left to
+   * `tests/startsit.refresh.test.ts`, which exercises the real orchestrator
+   * against a real database — dedupe, budget refusal, partial failure and all.
+   * What is left for a browser to prove is the part only a browser can: that
+   * the button reports per-source outcomes rather than a bare "done", and that
+   * a partial refresh leaves the page it just refreshed still readable.
+   */
+  const stubRefresh = async (page: Page, sources: { source: string; outcome: string; detail: string }[]) => {
+    await page.route('**/api/startsit/refresh', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          deduped: false,
+          sources: sources.map((s) => ({ ...s, freshAt: null })),
+          headline: sources.some((s) => s.outcome === 'updated') ? 'Updated' : 'Already current',
+          complete: sources.every((s) => s.outcome !== 'unavailable'),
+        }),
+      });
+    });
+  };
+
+  test('reports what each source did, naming the one it has no feed for', async ({ page }) => {
+    await stubRefresh(page, [
+      { source: 'sleeper', outcome: 'updated', detail: '1 roster re-read' },
+      { source: 'injury', outcome: 'current', detail: 'checked 2 min ago' },
+      { source: 'usage', outcome: 'current', detail: 'through week 4' },
+      { source: 'vegas', outcome: 'updated', detail: '2 games re-priced' },
+      { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
+    ]);
+
     const button = page.getByTestId('startsit-refresh');
     await expect(button).toBeVisible();
     await button.click();
 
     const status = page.getByTestId('refresh-status');
     await expect(status).toBeVisible({ timeout: 20_000 });
-    // Whatever happened, the line is a statement about sources rather than a
-    // bare "done" — and weather, which has no feed, is named as such.
-    await expect(status).toContainText(/current|Updated/);
-    await expect(status).toContainText(/weather/);
+    await expect(status).toContainText('Updated');
+    // Weather is named rather than quietly missing from the list.
+    await expect(status).toContainText('weather');
+    await expect(status).toContainText('no forecast source connected');
   });
 
   test('leaves the lineup readable when a source could not be refreshed', async ({ page }) => {
+    await stubRefresh(page, [
+      { source: 'sleeper', outcome: 'updated', detail: '1 roster re-read' },
+      { source: 'injury', outcome: 'unavailable', detail: 'injury source did not answer' },
+      { source: 'usage', outcome: 'current', detail: 'through week 4' },
+      { source: 'vegas', outcome: 'blocked', detail: 'monthly entity ceiling reached' },
+      { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
+    ]);
+
     await page.getByTestId('startsit-refresh').click();
-    await expect(page.getByTestId('refresh-status')).toBeVisible({ timeout: 20_000 });
-    // Last-good data is still on screen: a partial refresh never empties the page.
+    const status = page.getByTestId('refresh-status');
+    await expect(status).toBeVisible({ timeout: 20_000 });
+    // The failures are named, not swallowed...
+    await expect(status).toContainText('injury source did not answer');
+    await expect(status).toContainText('monthly entity ceiling reached');
+    // ...and the last-good recommendation is still on screen.
     await expect(page.getByTestId('starters-title')).toBeVisible();
     await expect(page.locator('[data-testid="starter-row"][data-starter="true"]').first()).toBeVisible();
   });

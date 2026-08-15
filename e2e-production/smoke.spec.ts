@@ -657,3 +657,110 @@ test.describe('the season features', () => {
     }
   });
 });
+
+/**
+ * The decision intelligence, live.
+ *
+ * Read-only like the rest of this file, plus the one write that has to be
+ * refused: the Start/Sit refresh spends provider quota, so an unauthenticated
+ * request for it must come back 401 rather than doing anything.
+ *
+ * Every assertion here is about *shape* rather than about a number — which
+ * components the deployed engine emits, that the caps hold, that a mode change
+ * reaches the server — because the numbers belong to whatever real league and
+ * real week the deployment happens to be serving.
+ */
+test.describe('the decision intelligence', () => {
+  test('the draft board carries the cost of waiting and NFL-team overlap, both bounded', async ({ page }) => {
+    await page.goto('/');
+    const expected = await expectedTabs(page);
+    test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board');
+
+    const board = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const draftId = overview?.selectedLeague?.draftId;
+      if (!draftId) return null;
+      return (await fetch(`/api/drafts/${draftId}/board?limit=25`)).json() as Promise<{
+        recommendations: {
+          components: { key: string; contribution: number }[];
+          opportunity?: { score: number };
+          concentration?: { score: number };
+        }[];
+      }>;
+    });
+    test.skip(!board || board.recommendations.length === 0, 'no draft board on this deployment');
+
+    for (const rec of board!.recommendations) {
+      const by = (key: string) => rec.components.find((c) => c.key === key);
+      const opportunity = by('opportunity');
+      const concentration = by('team_concentration');
+      expect(opportunity, 'the deployed board has no cost-of-waiting component').toBeTruthy();
+      expect(concentration, 'the deployed board has no NFL-team overlap component').toBeTruthy();
+
+      // The caps, checked against the live board rather than against a fixture.
+      expect(opportunity!.contribution).toBeGreaterThanOrEqual(0);
+      expect(opportunity!.contribution).toBeLessThanOrEqual(0.3 + 1e-9);
+      expect(Math.abs(concentration!.contribution)).toBeLessThanOrEqual(0.15 + 1e-9);
+    }
+  });
+
+  test('Start/Sit offers three modes, and asking for one reaches the server', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+
+    const modes = page.getByTestId('mode-row');
+    await expect(modes).toBeVisible();
+    for (const mode of ['balanced', 'floor', 'ceiling']) {
+      await expect(page.getByTestId(`mode-${mode}`)).toBeVisible();
+    }
+    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'true');
+
+    // The mode is a question asked of the server, not a client-side sort.
+    const answered = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const [floor, ceiling] = await Promise.all([
+        (await fetch(`/api/leagues/${id}/lineup?mode=floor`)).json(),
+        (await fetch(`/api/leagues/${id}/lineup?mode=ceiling`)).json(),
+      ]);
+      return { floor: floor?.mode, ceiling: ceiling?.mode };
+    });
+    test.skip(!answered, 'no league selected on this deployment');
+    expect(answered!.floor).toBe('floor');
+    expect(answered!.ceiling).toBe('ceiling');
+  });
+
+  test('the refresh button is there, and refuses a stranger', async ({ page, request }) => {
+    await page.goto('/');
+    await open(page, 'team');
+    await expect(page.getByTestId('startsit-refresh')).toBeVisible();
+
+    // It spends provider quota, so it is a write, and a write from nobody is
+    // refused. This suite never authenticates, so the button is never pressed.
+    const write = await request.post('/api/startsit/refresh', { failOnStatusCode: false });
+    expect([401, 429, 503]).toContain(write.status());
+  });
+
+  test('every Start/Sit component the deployed engine emits is one it can explain', async ({ page }) => {
+    await page.goto('/');
+    const lineup = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      return (await fetch(`/api/leagues/${id}/lineup`)).json() as Promise<{
+        found: boolean;
+        bench: { components: { key: string; label: string; display: string }[]; drivers?: string[] }[];
+      }>;
+    });
+    test.skip(!lineup?.found || (lineup?.bench ?? []).length === 0, 'no scorable roster on this deployment');
+
+    for (const evaluation of lineup!.bench) {
+      for (const component of evaluation.components) {
+        // No bare labels: every component says what it measured, which is the
+        // rule the whole breakdown rests on.
+        expect(component.display.length, `${component.key} has no explanation`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
