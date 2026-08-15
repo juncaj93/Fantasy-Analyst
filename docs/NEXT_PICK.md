@@ -154,7 +154,10 @@ are already carried in the candidate pool.
   seed.
 - **~50ms** for 300 candidates over 14 intervening picks. The cost is per *board
   state*, not per player: one simulation of the interval decides every player's
-  fate at once.
+  fate at once. Measured in `tests/nextpick.simulate.test.ts`, not in
+  production: Cloudflare freezes `Date.now()` for the whole of a synchronous
+  stretch, so `nextPickModel.elapsedMs` always reads 0 on a Worker however long
+  the run took. The probe says so rather than reporting the zero as a pass.
 - **Cached** by a hash of everything that can move the answer, four states deep.
   A draft polled every three seconds computes once per pick that actually lands.
 

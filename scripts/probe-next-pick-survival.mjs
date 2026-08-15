@@ -34,8 +34,22 @@ async function get(path) {
   }
 }
 
-function check(label, ok, detail) {
-  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
+/**
+ * `detail` describes what went wrong, and is printed only when something did.
+ *
+ * The other way round reads as a contradiction — `ok  the board was deep enough
+ * to simulate — fell back to the ADP estimate` says both things at once, and a
+ * reader skimming a green log is entitled to assume every line agrees with the
+ * word in front of it. Pass a fact instead when it is worth seeing either way.
+ */
+function check(label, ok, whenFailed) {
+  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}${!ok && whenFailed ? ` — ${whenFailed}` : ''}`);
+  if (!ok) failures++;
+}
+
+/** The same, for counts worth reading whether or not the check passed. */
+function checkWith(label, ok, always) {
+  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}${always ? ` — ${always}` : ''}`);
   if (!ok) failures++;
 }
 
@@ -45,11 +59,11 @@ console.log(`Checking ${BASE}\n`);
 
 const status = await get('/api/setup/status');
 const draftId = process.env.DRAFT_ID || status.json?.league?.draftId || '';
-check('a league with a draft is configured', !!draftId, draftId || 'none');
+checkWith('a league with a draft is configured', !!draftId, draftId || 'none');
 if (!draftId) process.exit(1);
 
 const board = await get(`/api/drafts/${draftId}/board?limit=60`);
-check('the board answers', board.status === 200, `HTTP ${board.status}`);
+checkWith('the board answers', board.status === 200, `HTTP ${board.status}`);
 if (board.status !== 200) process.exit(1);
 
 const state = board.json ?? {};
@@ -150,7 +164,7 @@ console.log('');
 console.log('Checks');
 
 const survivals = recs.map((r) => r.survivalProbability).filter((p) => p != null);
-check('players were scored', recs.length > 0, `${recs.length} returned`);
+checkWith('players were scored', recs.length > 0, `${recs.length} returned`);
 
 if (model.targetPick == null) {
   check(
@@ -159,7 +173,7 @@ if (model.targetPick == null) {
     `${survivals.length} players carry a percentage`,
   );
 } else {
-  check('Next targets a pick after the one on the clock', model.targetPick > state.currentPick,
+  checkWith('Next targets a pick after the one on the clock', model.targetPick > state.currentPick,
     `target ${model.targetPick}, clock ${state.currentPick}`);
 
   if (state.onTheClock) {
@@ -176,7 +190,7 @@ if (model.targetPick == null) {
     model.marketOnly !== true,
     'fell back to the ADP estimate — the player table is short',
   );
-  check(
+  checkWith(
     'Next spreads across the board',
     survivals.length > 3 && new Set(survivals.map((p) => Math.round(p * 100))).size > 3,
     `${new Set(survivals.map((p) => Math.round(p * 100))).size} distinct values over ${survivals.length} players`,
@@ -186,7 +200,7 @@ if (model.targetPick == null) {
     !(model.slotsAhead ?? []).includes(state.mySlot),
     `slot ${state.mySlot} appears in ${JSON.stringify(model.slotsAhead)}`,
   );
-  check(
+  checkWith(
     'every simulated pick belongs to somebody else',
     (model.picksSimulated ?? 0) <= model.targetPick - state.currentPick,
     `${model.picksSimulated} simulated over ${model.targetPick - state.currentPick} picks`,
@@ -220,12 +234,34 @@ check(
   'Next moved without a pick landing',
 );
 
+/*
+ * Cost is not measurable from here, and saying so beats reporting a zero.
+ *
+ * Cloudflare freezes `Date.now()` for the whole of a synchronous stretch — it
+ * advances only across I/O — so a simulation that runs entirely in one tick
+ * always reports 0ms however long it took. That is a property of the runtime,
+ * not evidence of speed, and a check that read it as "well under budget" would
+ * be the most confidently wrong line in this log.
+ *
+ * The real figure comes from the performance test in
+ * `tests/nextpick.simulate.test.ts`, which runs off-Worker where the clock
+ * moves. What is worth checking here is the thing that *is* observable: the
+ * board answered at all, and the model reported a state consistent with having
+ * run.
+ */
 const budget = 400;
-check(
-  'the model fits in the draft-day budget',
-  (model.elapsedMs ?? 0) < budget,
-  `${model.elapsedMs}ms against a ${budget}ms ceiling`,
-);
+if ((model.elapsedMs ?? 0) > 0) {
+  checkWith(
+    'the model fits in the draft-day budget',
+    model.elapsedMs < budget,
+    `${model.elapsedMs}ms against a ${budget}ms ceiling`,
+  );
+} else {
+  console.log(
+    '      cost not measurable here — Workers freeze the clock inside a single tick; ' +
+      'see the performance test for the real figure',
+  );
+}
 
 console.log('');
 console.log(failures === 0 ? 'All checks passed.' : `${failures} check${failures === 1 ? '' : 's'} failed.`);
