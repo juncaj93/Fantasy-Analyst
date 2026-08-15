@@ -308,13 +308,17 @@ test.describe('the deployed app', () => {
   test('the board can be searched, and the search can be cleared', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
-    const search = page.getByTestId('draft-search');
-    await expect(search).toBeVisible();
 
     const rows = page.getByTestId('recommendation-row');
     const before = await settled(page, 'recommendation-row');
     test.skip(before === 0, 'no draft board on this deployment');
     const name = (await rows.first().locator('.player-name').innerText()).split(' ').pop()!;
+
+    // The field is folded into a glyph until it is asked for. What it then
+    // matches is unchanged, which is what the rest of this test is about.
+    await page.getByTestId('draft-search-open').click();
+    const search = page.getByTestId('draft-search');
+    await expect(search).toBeVisible();
 
     await search.fill(name);
     // Narrowing is what the search is for; the board never grows because of it.
@@ -324,9 +328,15 @@ test.describe('the deployed app', () => {
     // Clearing puts the board back to its own length, and keeps it there: the
     // deeper slice the search fetched must never be what the board shows.
     await page.getByTestId('search-clear').click();
+    await expect(search, 'clearing empties the field; only Cancel closes it').toBeVisible();
     await expect.poll(() => rows.count(), { timeout: 10_000 }).toBe(before);
     await page.waitForTimeout(1200);
     expect(await rows.count(), 'the board settles at its own length').toBe(before);
+
+    // And Cancel folds it away again, leaving the row as it was.
+    await page.getByTestId('draft-search-close').click();
+    await expect(page.getByTestId('draft-search')).toHaveCount(0);
+    await expect(page.getByTestId('draft-search-open')).toBeVisible();
   });
 
   test('is installable, and still refuses a write from a stranger', async ({ page, request }) => {
