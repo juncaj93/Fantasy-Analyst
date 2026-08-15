@@ -5,11 +5,11 @@
  * different kind of test from everything in `e2e/`: it may not write, it may not
  * assume the demo data, and it has to be true of whatever real league and real
  * newsletter happen to be loaded that day. So it asserts the *shell* — that the
- * app arrived, that every screen has its navigation bar, that the tab bar is the
- * height it is supposed to be, that nothing scrolls sideways at any supported
- * width in either theme, and that the numbers a fantasy screen exists to show
- * are on screen — and it asserts them at the three portrait widths from
- * docs/06_UI_AND_QA.md.
+ * app arrived, that every screen has its navigation bar, that the floating
+ * toolbar is the size and in the place it is supposed to be, that nothing
+ * scrolls sideways at any supported width in either theme, and that the numbers
+ * a fantasy screen exists to show are on screen — and it asserts them at the
+ * three portrait widths from docs/06_UI_AND_QA.md.
  *
  * It writes nothing. Every request it makes is a GET the public site already
  * answers to anyone, and the one write it does attempt is the one that must be
@@ -55,19 +55,99 @@ async function settled(page: Page, rowTestId: string): Promise<number> {
 }
 
 test.describe('the deployed app', () => {
-  test('loads, and lands on a tab bar with all six destinations', async ({ page }) => {
+  test('loads, and lands on a floating toolbar with all six destinations', async ({ page }) => {
     await page.goto('/');
     for (const tab of TABS) {
       await expect(page.getByTestId(`tab-${tab}`), `${tab} is missing`).toBeVisible();
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
+      expect(box.width, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
     }
-    // The bar owns the bottom of the screen and nothing sits under it.
-    const gap = await page.evaluate(() => {
+
+    /*
+     * The toolbar floats clear of the bottom edge rather than sitting on it,
+     * so what is below it is a number the design chooses — `--toolbar-gap`,
+     * which on a screen with a home indicator is what keeps the destinations
+     * off it. Anything more than that gap is the page holding space it should
+     * not, which is the bug this has always been watching for.
+     */
+    const bar = await page.evaluate(() => {
       const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
-      return Math.round(window.innerHeight - nav.bottom);
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;visibility:hidden;padding-bottom:var(--toolbar-gap)';
+      document.body.append(probe);
+      const intended = Math.round(Number.parseFloat(getComputedStyle(probe).paddingBottom));
+      probe.remove();
+      return {
+        gap: Math.round(window.innerHeight - nav.bottom),
+        intended,
+        width: Math.round(nav.width),
+        height: Math.round(nav.height),
+        viewportWidth: window.innerWidth,
+      };
     });
-    expect(gap).toBe(0);
+    expect(bar.gap, 'the page owns only the gap the toolbar floats by').toBe(bar.intended);
+    // A compact pill, not a band with a gutter.
+    expect(bar.width, `the bar is ${bar.width}px on a ${bar.viewportWidth}px screen`).toBeLessThanOrEqual(
+      bar.viewportWidth - 40,
+    );
+    expect(bar.height).toBeGreaterThanOrEqual(54);
+    expect(bar.height).toBeLessThanOrEqual(64);
+  });
+
+  /**
+   * The destination that is lit is the screen that is showing.
+   *
+   * The toolbar keeps no selection of its own, and this is the property that
+   * buys: exactly one destination current, and it is the one whose screen is
+   * on — including on a nested screen, which belongs to the destination that
+   * opened it.
+   */
+  test('exactly one destination is current, and it is the screen on show', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of TABS) {
+      await open(page, tab);
+      await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-current', 'page');
+      expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    }
+
+    await open(page, 'setup');
+    await page.getByTestId('setup-step-vegas').click();
+    await expect(page.getByTestId('panel-vegas')).toBeVisible();
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    await page.getByTestId('back-button').click();
+  });
+
+  /**
+   * The Draft controls, compressed.
+   *
+   * A search glyph immediately left of the position filters, on one row, and a
+   * field that unfolds when it is asked for. What it matches is not this
+   * suite's business — production has whatever players it has — but that the
+   * control is there, is one row, and opens is.
+   */
+  test('Draft opens with a search button beside the filters, not a search row', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+
+    const controls = page.getByTestId('draft-search-controls');
+    await expect(controls).toBeVisible();
+    await expect(controls).toHaveAttribute('data-search', 'closed');
+    await expect(page.getByTestId('draft-search')).toHaveCount(0);
+    const row = (await controls.boundingBox())!;
+    expect(row.height, `the control row is ${row.height}px`).toBeLessThanOrEqual(52);
+
+    await page.getByTestId('draft-search-open').click();
+    const field = page.getByTestId('draft-search');
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    // Opening it moves nothing: the row is the same height in both states.
+    expect(Math.abs((await controls.boundingBox())!.height - row.height)).toBeLessThanOrEqual(1);
+
+    await page.getByTestId('draft-search-close').click();
+    await expect(page.getByTestId('draft-search')).toHaveCount(0);
+    await expect(page.getByTestId('draft-search-open')).toBeVisible();
   });
 
   test('every screen has a compact navigation bar, and none is a banner', async ({ page }) => {
@@ -134,10 +214,12 @@ test.describe('the deployed app', () => {
     const first = (await rows.first().boundingBox())!;
     expect(first.y).toBeLessThan(viewport.height * 0.35);
 
+    /* Above the toolbar's own top edge, asked for rather than guessed. */
+    const floor = await page.evaluate(() => document.querySelector('.tabbar')!.getBoundingClientRect().top);
     let visible = 0;
     for (let i = 0; i < count; i++) {
       const box = await rows.nth(i).boundingBox();
-      if (box && box.y + box.height <= viewport.height - 50) visible++;
+      if (box && box.y + box.height <= floor) visible++;
     }
     expect(visible, 'the first screen should be mostly players').toBeGreaterThanOrEqual(5);
   });
