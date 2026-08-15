@@ -1549,8 +1549,27 @@ body,
      worth three pixels to the line it is sharing. */
   margin-right: -3px;
   border-radius: var(--radius-sm);
-  background: var(--warn-tint);
-  color: var(--warn);
+  /*
+   * Slate, and for the same reason the `Q` badge is slate.
+   *
+   * This was amber on an amber tint, which is the mistake this app has now made
+   * twice. Measured, it was worse than it looked: the pale warning tint sat
+   * within 1.1:1 of *every* position card, so the chip's surface was invisible
+   * on all of them and only its text was doing any work — and on a receiver,
+   * washed in almost exactly that hue, the text went too.
+   *
+   * A chip painted in a hue can only ever be as visible as the card it lands
+   * on, and this one lands on six different ones. Slate is the only thing on
+   * this screen that is nobody's colour — not a position, not a semantic state
+   * — and it inverts between the themes, so the chip is dark on the pale tints
+   * and light on the dark ones. See `--status-neutral`.
+   *
+   * The warning is not carried by colour anyway: it says the word and the
+   * count. What the colour has to do is make sure the reader sees it at all.
+   */
+  background: var(--status-neutral);
+  color: var(--on-status-neutral);
+  box-shadow: var(--shadow-1);
 }
 
 /*

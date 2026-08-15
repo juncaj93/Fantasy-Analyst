@@ -181,6 +181,136 @@ test.describe('the numbers keep the line', () => {
 });
 
 /**
+ * It has to be visible on the card it lands on, whichever card that is.
+ *
+ * This is the second time this app has painted a status chip in a hue and put
+ * it on cards washed in six different hues. The first was `Q`, amber on the
+ * amber receiver tint; this was the same mistake, and measurement made it worse
+ * than it looked — the pale warning tint sat within 1.1:1 of *every* position
+ * card, so only the chip's text was doing any work at all, and on a receiver
+ * that went too.
+ *
+ * So the reading taken here is the chip's own surface against the card's, on
+ * all six positions the palette paints — including the two a seeded board never
+ * shows, forced on by swapping the card's position class. A chip that goes back
+ * to being a tint fails this at every position rather than at one, which is the
+ * honest shape of the bug.
+ */
+test.describe('visibility on every card', () => {
+  test('the warning stands off all six position tints, in both themes', async ({ page }) => {
+    await openDraft(page);
+    await expect(cliffRow(page)).toBeVisible();
+
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await page.waitForTimeout(200);
+
+      const readings = await page.evaluate(() => {
+        /*
+         * Resolved by painting rather than by parsing.
+         *
+         * A position card's background is a `color-mix()`, and the engines do
+         * not agree about how to serialise one — Chromium hands back
+         * `oklab(0.96 0.003 0.027)`, which a naive "grab the first three
+         * numbers" reader turns into a near-black and a contrast figure that is
+         * confidently wrong. Filling a canvas and reading the pixel back asks
+         * the engine what colour it actually painted, which is the question.
+         */
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        const paint = (colour: string): number[] => {
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = '#000';
+          context.fillStyle = colour;
+          context.fillRect(0, 0, 1, 1);
+          const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+          return [r!, g!, b!];
+        };
+        const luminance = (rgb: number[]) => {
+          const f = (c: number) => {
+            const v = c / 255;
+            return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
+        };
+        const ratio = (a: string, b: string) => {
+          const [x, y] = [luminance(paint(a)), luminance(paint(b))];
+          return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+        };
+
+        /*
+         * Measured on probes rather than on the board's own rows, because two
+         * of the six positions are not startable in this league and so are
+         * never drawn — and those are exactly the ones a bug would hide in.
+         */
+        const chip = document.createElement('span');
+        chip.className = 'player-row-cliff';
+        chip.textContent = 'Tier cliff · 2 away';
+        document.body.append(chip);
+        const chipStyle = getComputedStyle(chip);
+        const background = chipStyle.backgroundColor;
+        const text = chipStyle.color;
+        chip.remove();
+
+        return ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((position) => {
+          const card = document.createElement('div');
+          card.className = `player-row card-pos card-pos-${position}`;
+          document.body.append(card);
+          const cardBackground = getComputedStyle(card).backgroundColor;
+          card.remove();
+          return {
+            position,
+            chipVsCard: ratio(background, cardBackground),
+            textVsChip: ratio(text, background),
+          };
+        });
+      });
+
+      expect(readings).toHaveLength(6);
+      for (const { position, chipVsCard, textVsChip } of readings) {
+        expect(
+          chipVsCard,
+          `the warning is lost on ${position} in ${theme} (${chipVsCard.toFixed(2)}:1)`,
+        ).toBeGreaterThan(4);
+        expect(textVsChip, `the warning cannot be read in ${theme} (${textVsChip.toFixed(2)}:1)`).toBeGreaterThan(4.5);
+      }
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+
+  /**
+   * …and it is not painted in anybody's colour.
+   *
+   * The position palette is the thing it has to stand off, so it may not be
+   * drawn from it — a chip that happened to match one position's line colour
+   * would be exactly the bug this replaced, arriving from the other direction.
+   */
+  test('is drawn from outside the position palette', async ({ page }) => {
+    await openDraft(page);
+    const drawnFrom = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      const chip = getComputedStyle(document.querySelector('.player-row-cliff')!);
+      const palette = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].flatMap((p) => [
+        root.getPropertyValue(`--pos-${p}-line`).trim(),
+        root.getPropertyValue(`--pos-${p}-tint`).trim(),
+      ]);
+      return { background: chip.backgroundColor, palette, neutral: root.getPropertyValue('--status-neutral').trim() };
+    });
+    expect(drawnFrom.neutral, 'the slate token has gone').not.toBe('');
+    // Compared as rendered colours, since the tokens are hex and this is rgb().
+    const asRgb = (hex: string) => {
+      const n = Number.parseInt(hex.replace('#', '').slice(0, 6), 16);
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+    };
+    for (const colour of drawnFrom.palette) {
+      if (!colour.startsWith('#')) continue;
+      expect(drawnFrom.background, `the warning is painted in a position's own colour`).not.toBe(asRgb(colour));
+    }
+  });
+});
+
+/**
  * The warning says the same thing at every width.
  *
  * Nineteen characters and four labelled numbers do not both fit on the narrow
