@@ -30,6 +30,26 @@ export interface StoredUsageWeek {
   receptions: number | null;
   targetShare: number | null;
   wopr: number | null;
+  /*
+   * The 0018 columns.
+   *
+   * Optional rather than required, and that is a statement about the data
+   * rather than a convenience: rows written before 0018 do not have them, the
+   * source leaves several of them blank for players who had no opportunity, and
+   * a caller that constructs a week without them means "not known" — which is
+   * exactly what a NULL in these columns means. Every read path treats absent
+   * and null identically.
+   */
+  /** The defence faced. */
+  opponent?: string | null;
+  passYards?: number | null;
+  passTds?: number | null;
+  rushYards?: number | null;
+  rushTds?: number | null;
+  recYards?: number | null;
+  recTds?: number | null;
+  receivingAirYards?: number | null;
+  airYardsShare?: number | null;
   gsisId: string | null;
   source: string;
   publishedAt: string | null;
@@ -55,7 +75,7 @@ export interface UsageSourceRun {
 }
 
 /** Bound parameters per row, for D1's cap. */
-const USAGE_COLUMNS = 16;
+const USAGE_COLUMNS = 25;
 
 export class UsageRepo {
   constructor(private readonly db: Database) {}
@@ -70,7 +90,7 @@ export class UsageRepo {
   async saveWeeks(rows: StoredUsageWeek[]): Promise<void> {
     const perStatement = Math.floor(MAX_BOUND_PARAMS / USAGE_COLUMNS);
     for (const batch of chunk(rows, perStatement)) {
-      const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const values = batch.map(() => `(${new Array(USAGE_COLUMNS).fill('?').join(', ')})`).join(', ');
       const binds: (string | number | null)[] = [];
       for (const row of batch) {
         binds.push(
@@ -86,6 +106,15 @@ export class UsageRepo {
           row.receptions,
           row.targetShare,
           row.wopr,
+          row.opponent ?? null,
+          row.passYards ?? null,
+          row.passTds ?? null,
+          row.rushYards ?? null,
+          row.rushTds ?? null,
+          row.recYards ?? null,
+          row.recTds ?? null,
+          row.receivingAirYards ?? null,
+          row.airYardsShare ?? null,
           row.gsisId,
           row.source,
           row.publishedAt,
@@ -96,7 +125,9 @@ export class UsageRepo {
         .prepare(
           `INSERT INTO player_usage_weeks
              (player_id, season, week, season_type, team, position, pass_attempts, carries,
-              targets, receptions, target_share, wopr, gsis_id, source, published_at, fetched_at)
+              targets, receptions, target_share, wopr, opponent, pass_yards, pass_tds,
+              rush_yards, rush_tds, rec_yards, rec_tds, receiving_air_yards, air_yards_share,
+              gsis_id, source, published_at, fetched_at)
            VALUES ${values}
            ON CONFLICT(player_id, season, week) DO UPDATE SET
              season_type = excluded.season_type,
@@ -108,6 +139,15 @@ export class UsageRepo {
              receptions = excluded.receptions,
              target_share = excluded.target_share,
              wopr = excluded.wopr,
+             opponent = excluded.opponent,
+             pass_yards = excluded.pass_yards,
+             pass_tds = excluded.pass_tds,
+             rush_yards = excluded.rush_yards,
+             rush_tds = excluded.rush_tds,
+             rec_yards = excluded.rec_yards,
+             rec_tds = excluded.rec_tds,
+             receiving_air_yards = excluded.receiving_air_yards,
+             air_yards_share = excluded.air_yards_share,
              gsis_id = excluded.gsis_id,
              source = excluded.source,
              published_at = excluded.published_at,
@@ -348,6 +388,15 @@ function toUsageWeek(row: Record<string, unknown>): StoredUsageWeek {
     receptions: numberOrNull(row['receptions']),
     targetShare: numberOrNull(row['target_share']),
     wopr: numberOrNull(row['wopr']),
+    opponent: text('opponent'),
+    passYards: numberOrNull(row['pass_yards']),
+    passTds: numberOrNull(row['pass_tds']),
+    rushYards: numberOrNull(row['rush_yards']),
+    rushTds: numberOrNull(row['rush_tds']),
+    recYards: numberOrNull(row['rec_yards']),
+    recTds: numberOrNull(row['rec_tds']),
+    receivingAirYards: numberOrNull(row['receiving_air_yards']),
+    airYardsShare: numberOrNull(row['air_yards_share']),
     gsisId: text('gsis_id'),
     source: String(row['source']),
     publishedAt: text('published_at'),

@@ -16,6 +16,8 @@
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
+import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
+import type { StartSitMode } from './mode.ts';
 
 export interface LineupSlot {
   /** Slot label as the league defines it: 'QB', 'RB', 'FLEX', 'SUPER_FLEX'. */
@@ -58,20 +60,58 @@ export interface LineupRecommendation {
   confidence: 'high' | 'medium' | 'low';
   warnings: string[];
   notes: string[];
+  /** Which question this lineup answers. */
+  mode: StartSitMode;
+  /**
+   * Availability risks that depend on the bench rather than on the player.
+   *
+   * Listed separately from the warnings because they are a different kind of
+   * statement: a warning says something is wrong now, and these say what would
+   * happen if a coin lands the other way on Sunday morning.
+   */
+  lateSwapRisks: {
+    playerId: string;
+    name: string;
+    verdict: ReplacementAssessment['verdict'];
+    detail: string;
+    starting: boolean;
+  }[];
 }
 
 /** A swap has to be worth this many points before it is worth suggesting. */
 export const MIN_SWAP_GAIN = 0.75;
 
+/**
+ * How much projection a lineup-level preference may spend.
+ *
+ * The whole of the second-order reasoning below — correlation in Ceiling,
+ * diversification in Floor — is only ever allowed to choose between players who
+ * are already within this much of each other. That is what "bounded, and never
+ * overpowering player quality" means in code: below the tolerance the players
+ * are a coin flip and the shape of the lineup is a reasonable way to break the
+ * tie; above it, the better player starts, and no amount of stacking changes
+ * that.
+ */
+export const LINEUP_PREFERENCE_TOLERANCE = 0.6;
+
 export function recommendLineup(
   inputs: StartSitInput[],
   shape: RosterShape,
   profile: ScoringProfile,
-  opts: { currentStarterIds?: string[]; minSwapGain?: number } = {},
+  opts: {
+    currentStarterIds?: string[];
+    minSwapGain?: number;
+    /** Floor, Balanced or Ceiling. Applied to every evaluation. */
+    mode?: StartSitMode;
+    /** Reference time, injected so tests are deterministic. */
+    now?: string | Date;
+  } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
+  const mode = opts.mode ?? 'balanced';
+  const now = opts.now ?? new Date();
   const currentStarters = new Set(opts.currentStarterIds ?? []);
-  const evaluations = inputs.map((i) => evaluatePlayer(i, profile));
+  const evaluations = inputs.map((i) => evaluatePlayer({ ...i, mode: i.mode ?? mode, now: i.now ?? now }, profile));
 
   /*
    * Locked players are removed from the optimisation entirely.
@@ -105,6 +145,8 @@ export function recommendLineup(
       confidence: 'low',
       warnings: ['this league has no starting slots the app understands'],
       notes: [],
+      mode,
+      lateSwapRisks: [],
     };
   }
 
@@ -123,6 +165,18 @@ export function recommendLineup(
   const ruledOut = scored.filter((e) => e.ruledOut);
   const playable = scored.filter((e) => !e.ruledOut);
 
+  /*
+   * Availability risk, priced against the bench that would have to cover it.
+   *
+   * This can only be done here and not in `evaluatePlayer`: whether a
+   * questionable player is a problem depends entirely on who else you own and
+   * when their games start, and a single-player evaluation cannot see either.
+   * Applied before the assignment so the optimiser is choosing between scores
+   * that already contain the risk, rather than choosing a lineup and then being
+   * told about it.
+   */
+  const replacementRisk = applyReplacementRisk(playable, slots, now);
+
   // Locked starters hold their slot first; the optimiser then fills what is
   // left from the players who can still be moved.
   const reserved = reserveLockedSlots(lockedStarters, slots);
@@ -133,6 +187,18 @@ export function recommendLineup(
   for (const [openIndex, player] of openAssignment) {
     assignment.set(openSlots[openIndex]!.index, player);
   }
+
+  /*
+   * Two passes over a lineup that is already chosen, in this order.
+   *
+   * The preference pass may change *who* starts, but only between players
+   * inside {@link LINEUP_PREFERENCE_TOLERANCE} of each other. The placement
+   * pass never changes who starts at all — it only decides which slot each of
+   * them occupies, which is free and is worth real money on a Sunday.
+   */
+  const preferenceNotes = applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
+  const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
+  notes.push(...preferenceNotes, ...placementNotes);
 
   const filled: LineupSlot[] = slots.map((s, index) => {
     const player = assignment.get(index) ?? null;
@@ -220,12 +286,256 @@ export function recommendLineup(
     confidence,
     warnings,
     notes,
+    mode,
+    lateSwapRisks: [...replacementRisk.entries()]
+      .filter(([, risk]) => risk.verdict !== 'no_risk' && risk.verdict !== 'covered')
+      .map(([playerId, risk]) => ({
+        playerId,
+        name: evaluations.find((e) => e.playerId === playerId)?.name ?? playerId,
+        verdict: risk.verdict,
+        detail: risk.display,
+        starting: chosenIds.has(playerId),
+      }))
+      .sort((a, b) => Number(b.starting) - Number(a.starting) || a.name.localeCompare(b.name)),
   };
 }
 
 interface SlotSpec {
   slot: string;
   accepts: string[];
+}
+
+/**
+ * Charge each risky player for the bench that would have to cover him.
+ *
+ * The alternatives considered are the players who could legally take one of his
+ * slots — not the whole roster — because a tight end being questionable is not
+ * made safer by owning four running backs.
+ *
+ * Mutates the evaluations: a component is appended and the score re-summed from
+ * the components, so the invariant that a score is the sum of its parts holds
+ * afterwards exactly as it did before.
+ */
+function applyReplacementRisk(
+  playable: StartSitEvaluation[],
+  slots: SlotSpec[],
+  now: string | Date,
+): Map<string, ReplacementAssessment> {
+  const out = new Map<string, ReplacementAssessment>();
+
+  for (const player of playable) {
+    if (!player.availability.risky) continue;
+    const eligibleSlots = slots.filter((s) => s.accepts.includes(player.position));
+    if (eligibleSlots.length === 0) continue;
+    const accepts = new Set(eligibleSlots.flatMap((s) => s.accepts));
+
+    const alternatives = playable
+      .filter((e) => e.playerId !== player.playerId && accepts.has(e.position))
+      .map((e) => ({ playerId: e.playerId, name: e.name, kickoff: e.lock.kickoff, score: e.score }));
+
+    const assessment = assessReplacement({
+      player: {
+        name: player.name,
+        kickoff: player.lock.kickoff,
+        score: player.score,
+        availability: player.availability.state,
+      },
+      alternatives,
+      now,
+    });
+    out.set(player.playerId, assessment);
+    if (assessment.points === 0) continue;
+
+    player.components.push({
+      key: 'replacement_risk',
+      label: 'Cover if he sits',
+      display: assessment.display,
+      value: assessment.points,
+      baseValue: assessment.points,
+      modeWeight: 1,
+      unknown: false,
+    });
+    player.score = round2(
+      player.components.filter((c) => !c.unknown).reduce((total, c) => total + c.value, 0),
+    );
+    if (assessment.driver) player.drivers = [assessment.driver, ...player.drivers].slice(0, 4);
+  }
+
+  return out;
+}
+
+/**
+ * Lineup-shaped preferences, worth at most a tie.
+ *
+ * Ceiling mode likes correlation: a quarterback and one of his own
+ * pass-catchers double up on the same touchdown, which is what a week you win
+ * by forty looks like. Floor mode likes the opposite — two starters whose
+ * afternoon depends on the same game is one weather delay away from a lost
+ * week.
+ *
+ * Both are expressed as the *same* mechanism: consider swapping a starter for a
+ * bench player who is within {@link LINEUP_PREFERENCE_TOLERANCE} points, and
+ * take the swap only when the shape improves. Nothing here can start a worse
+ * player by any margin that matters, and nothing here forces a stack: with no
+ * near-equal alternative, no swap happens at all.
+ */
+function applyLineupPreferences(
+  assignment: Map<number, StartSitEvaluation>,
+  slots: SlotSpec[],
+  playable: StartSitEvaluation[],
+  mode: StartSitMode,
+  lockedIds: Set<string>,
+): string[] {
+  if (mode === 'balanced') return [];
+  const notes: string[] = [];
+  const started = new Set([...assignment.values()].map((e) => e.playerId));
+  const bench = playable.filter((e) => !started.has(e.playerId) && !lockedIds.has(e.playerId));
+  if (bench.length === 0) return notes;
+
+  for (const [index, current] of [...assignment.entries()]) {
+    if (lockedIds.has(current.playerId)) continue;
+    const spec = slots[index]!;
+    const candidates = bench
+      .filter((e) => spec.accepts.includes(e.position))
+      .filter((e) => (current.score ?? 0) - (e.score ?? 0) <= LINEUP_PREFERENCE_TOLERANCE)
+      .filter((e) => !started.has(e.playerId));
+    if (candidates.length === 0) continue;
+
+    const lineup = [...assignment.values()];
+    const currentShape = shapeScore(lineup, mode);
+    let best: { player: StartSitEvaluation; gain: number } | null = null;
+
+    for (const candidate of candidates) {
+      const swapped = lineup.map((e) => (e.playerId === current.playerId ? candidate : e));
+      // The projection given up, against the shape gained. Both in points, so
+      // the comparison is not between a number and a preference.
+      const cost = (current.score ?? 0) - (candidate.score ?? 0);
+      const gain = shapeScore(swapped, mode) - currentShape - cost;
+      if (gain > 0.01 && (!best || gain > best.gain)) best = { player: candidate, gain: round2(gain) };
+    }
+
+    if (best) {
+      assignment.set(index, best.player);
+      started.delete(current.playerId);
+      started.add(best.player.playerId);
+      notes.push(
+        mode === 'ceiling'
+          ? `Ceiling mode: ${best.player.name} starts over ${current.name}, who projects within ${LINEUP_PREFERENCE_TOLERANCE} points, because his game correlates with the rest of the lineup.`
+          : `Floor mode: ${best.player.name} starts over ${current.name}, who projects within ${LINEUP_PREFERENCE_TOLERANCE} points, to avoid leaning the lineup on one game.`,
+      );
+    }
+  }
+  return notes;
+}
+
+/**
+ * The shape of a lineup, in points, for the mode being asked about.
+ *
+ * Ceiling counts quarterback-to-pass-catcher pairs on the same NFL team, and
+ * pass-catchers on both sides of one game — the two correlations that
+ * genuinely compound. Floor counts the opposite: how concentrated the lineup is
+ * in a single game.
+ *
+ * Deliberately tiny numbers. This is a tie-breaker measured on the same scale
+ * as the projection it is competing with, and it is meant to lose every fair
+ * fight.
+ */
+function shapeScore(lineup: StartSitEvaluation[], mode: StartSitMode): number {
+  if (mode === 'ceiling') {
+    let bonus = 0;
+    const quarterbacks = lineup.filter((e) => e.position === 'QB');
+    for (const qb of quarterbacks) {
+      const catchers = lineup.filter((e) => e.team === qb.team && (e.position === 'WR' || e.position === 'TE'));
+      // The first pairing is the one worth having; a third body from the same
+      // offence is variance without much extra correlation.
+      bonus += Math.min(catchers.length, 2) * 0.25;
+      // A pass-catcher on the other side of the quarterback's own game: the
+      // shootout case, and worth less than owning both ends of a touchdown.
+      const opposing = lineup.filter(
+        (e) => qb.opponent != null && e.team === qb.opponent && (e.position === 'WR' || e.position === 'TE'),
+      );
+      bonus += Math.min(opposing.length, 1) * 0.15;
+    }
+    return round2(bonus);
+  }
+
+  // Floor: a small charge for every starter past the first in one game.
+  const perGame = new Map<string, number>();
+  for (const player of lineup) {
+    const key = gameKey(player);
+    if (!key) continue;
+    perGame.set(key, (perGame.get(key) ?? 0) + 1);
+  }
+  let penalty = 0;
+  for (const count of perGame.values()) if (count > 2) penalty += (count - 2) * 0.2;
+  return round2(-penalty);
+}
+
+/** Both teams in one game, in a stable order, so two players match on it. */
+function gameKey(player: StartSitEvaluation): string | null {
+  if (!player.team || !player.opponent) return null;
+  return [player.team, player.opponent].sort().join('@');
+}
+
+/**
+ * The same starters, in better slots.
+ *
+ * Once the set of starters is fixed, which slot each occupies is free — and it
+ * is not free of consequence. A running back who can only play RB should be in
+ * the RB slot, leaving FLEX for somebody with a later kickoff, because a FLEX
+ * that still has an option in it at four o'clock is worth having and a FLEX
+ * filled by the one o'clock game is not.
+ *
+ * Only swaps that are legal both ways are considered, so the lineup's points
+ * cannot change by a hundredth. Locked players never move.
+ */
+function optimiseSlotPlacement(
+  assignment: Map<number, StartSitEvaluation>,
+  slots: SlotSpec[],
+  lockedIds: Set<string>,
+): string[] {
+  const notes: string[] = [];
+  const indices = [...assignment.keys()].sort((a, b) => a - b);
+
+  for (const a of indices) {
+    for (const b of indices) {
+      if (a >= b) continue;
+      const playerA = assignment.get(a);
+      const playerB = assignment.get(b);
+      if (!playerA || !playerB) continue;
+      if (lockedIds.has(playerA.playerId) || lockedIds.has(playerB.playerId)) continue;
+      const specA = slots[a]!;
+      const specB = slots[b]!;
+      if (!specA.accepts.includes(playerB.position) || !specB.accepts.includes(playerA.position)) continue;
+      // Only ever move optionality from the narrow slot to the wide one.
+      if (specA.accepts.length === specB.accepts.length) continue;
+
+      const wide = specA.accepts.length > specB.accepts.length ? a : b;
+      const narrow = wide === a ? b : a;
+      const inWide = assignment.get(wide)!;
+      const inNarrow = assignment.get(narrow)!;
+      const wideStart = kickoffMs(inWide);
+      const narrowStart = kickoffMs(inNarrow);
+      if (wideStart == null || narrowStart == null) continue;
+      // The later kickoff belongs in the wider slot: that is the one still
+      // worth swapping when the late news lands.
+      if (narrowStart <= wideStart) continue;
+
+      assignment.set(wide, inNarrow);
+      assignment.set(narrow, inWide);
+      notes.push(
+        `${inNarrow.name} is placed in ${slots[wide]!.slot} rather than ${slots[narrow]!.slot}: same lineup, ` +
+          'and it keeps the later kickoff in the slot with the most options.',
+      );
+    }
+  }
+  return notes;
+}
+
+function kickoffMs(player: StartSitEvaluation): number | null {
+  if (!player.lock.kickoff) return null;
+  const value = Date.parse(player.lock.kickoff);
+  return Number.isFinite(value) ? value : null;
 }
 
 /**

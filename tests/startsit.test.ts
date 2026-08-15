@@ -103,7 +103,20 @@ describe('evaluatePlayer', () => {
       HALF_PPR,
     );
     const keys = evaluation.components.map((c) => c.key);
-    expect(keys).toEqual(['vegas', 'news_recent', 'news_raw', 'status', 'uncertainty', 'role_trend']);
+    expect(keys).toEqual([
+      'vegas',
+      'news_recent',
+      'news_raw',
+      'status',
+      'uncertainty',
+      'usage_level',
+      'role_trend',
+      'td_dependency',
+      'game_script',
+      'weather',
+      'matchup_role',
+      'explosiveness',
+    ]);
   });
 
   it('caps the news contribution so it cannot dominate the market', () => {

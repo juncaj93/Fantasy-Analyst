@@ -27,6 +27,16 @@ import {
 import { buildExpectation, type VegasExpectation } from './expectation.ts';
 import { availabilityPenalty, AVAILABLE } from '../injury/startsit.ts';
 import { NO_INJURY_INFORMATION, normalizeDesignation, resolveInjury, type InjuryState } from '../injury/model.ts';
+import type { UsageWeek } from '../usage/role.ts';
+import { availabilityConfidence, type AvailabilityView } from './availabilityConfidence.ts';
+import { assessMatchup, NO_MATCHUP, type DefenseTendencyIndex, type MatchupAssessment } from './defense.ts';
+import { assessGameScript, NO_GAME_SCRIPT, type GameContext, type GameScriptAssessment } from './gameScript.ts';
+import { compareWithMarket, type MarketAgreement } from './market.ts';
+import { modeWeightFor, type StartSitMode } from './mode.ts';
+import { classifyRole, UNCLASSIFIED, type RoleProfile } from './roleProfile.ts';
+import { assessTdDependency, NO_TD_DATA, type TdDependencyAssessment } from './tdDependency.ts';
+import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
+import { assessWeather, type GameWeather, type WeatherAssessment } from './weather.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -55,6 +65,26 @@ export interface StartSitInput {
   previousProps?: PlayerProp[];
   /** Per-game opportunity, when a usage source is connected. */
   usage?: RoleMetric[];
+  /**
+   * The stored weeks the metrics above were built from.
+   *
+   * Passed separately rather than derived from `usage`, because the questions
+   * are different: `RoleMetric[]` is two deliberately-disagreeing series for
+   * change detection, and these are the raw rows the opportunity level, the
+   * role classification and the touchdown-dependency read all need. Absent
+   * means no usage source, and every one of those answers "unknown".
+   */
+  usageWeeks?: UsageWeek[];
+  /** The spread and total for his game, when the market has priced it. */
+  game?: GameContext | null;
+  /** The forecast for his game, when one is available. */
+  weather?: GameWeather | null;
+  /** Opponent tendencies by role, built once for the whole board. */
+  defenseTendencies?: DefenseTendencyIndex;
+  /** The defence he faces this week, when the schedule is known. */
+  opponent?: string | null;
+  /** Floor, Balanced or Ceiling. Defaults to Balanced. */
+  mode?: StartSitMode;
   /** Reference time; defaults to now. Injected so tests are deterministic. */
   now?: string | Date;
 }
@@ -63,8 +93,18 @@ export interface StartSitComponent {
   key: string;
   label: string;
   display: string;
-  /** Points-denominated where possible, so components stay interpretable. */
+  /**
+   * Points-denominated where possible, so components stay interpretable.
+   *
+   * This is the value **after** the mode multiplier, because it is the number
+   * that actually moved the score and a breakdown that shows anything else is
+   * not a breakdown. `baseValue` and `modeWeight` keep the arithmetic visible.
+   */
   value: number;
+  /** The value before the Floor/Ceiling multiplier. */
+  baseValue: number;
+  /** What the mode did to it. 1 in Balanced, and 1 for anything mode-neutral. */
+  modeWeight: number;
   unknown: boolean;
 }
 
@@ -86,10 +126,37 @@ export interface StartSitEvaluation {
   ruledOut: boolean;
   /** Whether this player's game has already kicked off. */
   lock: LockState;
+  /** The defence he faces, when the schedule is known. */
+  opponent: string | null;
   /** How the market has moved since the previous snapshot. */
   movement: MovementSummary;
   /** Whether the player's opportunity is actually changing. */
   role: RoleAssessment;
+  /** Which question the score was answering. */
+  mode: StartSitMode;
+  /** How much opportunity he is getting, recency-weighted. */
+  usage: UsageAssessment;
+  /** What kind of player the usage says he is. */
+  roleProfile: RoleProfile;
+  /** How much of his production needed a touchdown. */
+  tdDependency: TdDependencyAssessment;
+  /** The game he is walking into. */
+  gameScript: GameScriptAssessment;
+  /** The forecast, and what it does to his role. */
+  weather: WeatherAssessment;
+  /** What this defence gives up to his role. */
+  matchup: MatchupAssessment;
+  /** Availability as a state a person can act on. */
+  availability: AvailabilityView;
+  /**
+   * The two to four things that actually decided this, biggest first.
+   *
+   * Derived from the components rather than written beside them, so a driver
+   * can never describe a signal the score did not use.
+   */
+  drivers: string[];
+  /** Where the evidence points different ways, said rather than averaged. */
+  conflicts: string[];
 }
 
 export interface StartSitComparison {
@@ -102,6 +169,10 @@ export interface StartSitComparison {
   warnings: string[];
   /** Whether the preferred player being the later player is a problem. */
   lateSwap: LateSwapAssessment;
+  /** Which question was asked. */
+  mode: StartSitMode;
+  /** Whether the betting market would make the same choice. */
+  market: MarketAgreement;
 }
 
 /** Status penalties in fantasy points. Editable policy, not a projection. */
@@ -121,10 +192,30 @@ export const NEWS_RAW_CAP = 1.2;
 
 export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): StartSitEvaluation {
   const expectation = buildExpectation(input.player.position, input.props, profile);
+  const mode = input.mode ?? 'balanced';
   const components: StartSitComponent[] = [];
   const confidenceReasons: string[] = [];
 
-  components.push({
+  /**
+   * Add a component, with the mode multiplier applied once and recorded.
+   *
+   * Every component goes through here. That is what makes "the mode reweights
+   * one argument rather than running a second engine" a property of the code
+   * rather than a claim in a comment: there is exactly one place a Floor or
+   * Ceiling weight can be applied, and it cannot change a component's sign.
+   */
+  const push = (component: Omit<StartSitComponent, 'baseValue' | 'modeWeight' | 'value'> & { value: number }) => {
+    const weight = component.unknown ? 1 : modeWeightFor(component.key, mode, component.value);
+    components.push({
+      ...component,
+      baseValue: round2(component.value),
+      modeWeight: weight,
+      value: round2(component.value * weight),
+    });
+    return components[components.length - 1]!;
+  };
+
+  push({
     key: 'vegas',
     label: 'Vegas market expectation',
     display: expectation.points == null ? 'unavailable' : `${expectation.points.toFixed(1)} pts`,
@@ -135,7 +226,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
   const recentNet = input.signal?.last30.net ?? 0;
   const recentItems = input.signal?.last30.items ?? 0;
   const recentValue = clamp(recentNet * NEWS_POINTS_PER_UNIT, -NEWS_RECENT_CAP, NEWS_RECENT_CAP);
-  components.push({
+  push({
     key: 'news_recent',
     label: 'Recent news (30d)',
     display: recentItems === 0 ? 'no recent evidence' : `${recentNet > 0 ? '+' : ''}${recentNet} net over ${recentItems} item(s)`,
@@ -146,7 +237,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
   const rawNet = input.signal?.raw.net ?? 0;
   const rawItems = input.signal?.raw.items ?? 0;
   const rawValue = clamp(rawNet * (NEWS_POINTS_PER_UNIT / 2), -NEWS_RAW_CAP, NEWS_RAW_CAP);
-  components.push({
+  push({
     key: 'news_raw',
     label: 'Lifetime news',
     display: rawItems === 0 ? 'no evidence' : `${rawNet > 0 ? '+' : ''}${rawNet} net over ${rawItems} item(s)`,
@@ -165,11 +256,17 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
    */
   const injury = resolveInjuryState(input);
   const availability = availabilityPenalty(injury);
+  const availabilityView = availabilityConfidence(injury);
   const statusPenalty = availability.points;
-  components.push({
+  push({
     key: 'status',
     label: 'Availability',
-    display: availability.display,
+    // The designation, the practice week and the state a person reads, in one
+    // line — all three from the same resolved object, so they cannot disagree.
+    display:
+      availabilityView.state === 'unknown' || availabilityView.state === 'high_confidence_active'
+        ? availability.display
+        : `${availability.display} · ${availabilityView.label.toLowerCase()}`,
     value: statusPenalty,
     unknown: injury.designation === 'unknown',
   });
@@ -196,7 +293,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
       confidenceReasons.push('prop data is stale');
     }
   }
-  components.push({
+  push({
     key: 'uncertainty',
     label: 'Uncertainty penalty',
     display: uncertainty === 0 ? 'none' : `${uncertainty.toFixed(2)} pts`,
@@ -204,19 +301,108 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     unknown: false,
   });
 
-  // --- role trend ----------------------------------------------------------
+  /*
+   * --- opportunity, and the change in it ------------------------------------
+   *
+   * Two components off one source, kept apart because they answer different
+   * questions: `usage_level` is how much of the offence he is getting, and
+   * `role_trend` is whether that is moving. Their sum is capped below, in the
+   * one place interactions are allowed to live, because a player whose targets
+   * doubled scores on both and should not be paid twice for the same month.
+   *
+   * Neither reads a fantasy point. That is the rule the whole section exists
+   * for — see the header of `usageTrend.ts`.
+   */
+  const weeks = input.usageWeeks ?? [];
+  const usage = weeks.length > 0 ? assessUsage(input.player.position, weeks) : NO_USAGE;
+  push({
+    key: 'usage_level',
+    label: 'Opportunity',
+    display: usage.display,
+    value: usage.points,
+    unknown: usage.unknown,
+  });
+
   // A modest nudge, and only in a close call: a rising role is a reason to
   // prefer one of two similar players, never a reason to start a worse one.
   // With no usage source connected this is `insufficient_data` and contributes
   // nothing, which is the honest answer rather than a zero dressed as a signal.
   const role = assessRole(input.usage ?? []);
   const roleValue = rolePoints(role.trend);
-  components.push({
+  push({
     key: 'role_trend',
     label: 'Role trend',
     display: role.trend === 'insufficient_data' ? 'insufficient data' : role.label,
     value: roleValue,
     unknown: role.trend === 'insufficient_data',
+  });
+
+  /*
+   * --- what kind of player he is, and what that meets ------------------------
+   *
+   * The role profile is not scored. It is the key everything below looks itself
+   * up under: the matchup, the weather sensitivity and the game-script
+   * direction all mean different things for a downfield receiver than for an
+   * underneath one, and this is where that distinction is made once.
+   */
+  const roleProfile = weeks.length > 0 ? classifyRole(input.player.position, weeks) : UNCLASSIFIED;
+
+  const td = weeks.length > 0 ? assessTdDependency(weeks) : NO_TD_DATA;
+  push({
+    key: 'td_dependency',
+    label: 'Touchdown dependency',
+    display: td.display,
+    value: td.points,
+    unknown: td.profile === 'insufficient_data',
+  });
+
+  const gameScript = input.game ? assessGameScript(input.player.position, roleProfile.bucket, input.game) : NO_GAME_SCRIPT;
+  push({
+    key: 'game_script',
+    label: 'Game script',
+    display: gameScript.display,
+    value: gameScript.points,
+    unknown: gameScript.unknown,
+  });
+
+  const weather = assessWeather(input.player.position, roleProfile.bucket, input.weather);
+  push({
+    key: 'weather',
+    label: 'Weather',
+    display: weather.display,
+    value: weather.points,
+    unknown: weather.unknown,
+  });
+
+  const matchup = input.defenseTendencies
+    ? assessMatchup(
+        { position: input.player.position, bucket: roleProfile.bucket, defense: input.opponent ?? null },
+        input.defenseTendencies,
+      )
+    : NO_MATCHUP;
+  push({
+    key: 'matchup_role',
+    label: 'Opponent by role',
+    display: matchup.display,
+    value: matchup.points,
+    unknown: matchup.unknown,
+  });
+
+  /*
+   * Explosiveness: the part of a role that only matters when chasing points.
+   *
+   * Small in Balanced, smaller in Floor, and worth half again in Ceiling — a
+   * downfield receiver's week has a wider distribution than a checkdown back's,
+   * and which end of that distribution you want is precisely what the mode
+   * control is asking.
+   */
+  const explosiveness = explosivenessOf(roleProfile);
+  push({
+    key: 'explosiveness',
+    label: 'Explosive role',
+    display: explosiveness.display,
+    value: explosiveness.points,
+    unknown: roleProfile.bucket === 'unclassified',
   });
 
   const movement = compareMarkets(
@@ -231,8 +417,28 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     confidenceReasons.push(`${input.signal.mixedCount} mixed news item(s)`);
   }
 
+  /*
+   * The one place components are allowed to interact.
+   *
+   * Everything above is computed independently, which is what makes each piece
+   * testable — and independence is exactly wrong for two pairs of them:
+   *
+   *   - **opportunity and role trend** are the level and the slope of the same
+   *     series. A receiver whose targets doubled last month has a high level
+   *     *because* the role rose, and paying full price for both is paying twice
+   *     for one month of football.
+   *   - **game script and the market's own number** both price the game
+   *     environment. The prop line already contains the total; the script
+   *     component is only allowed to add the part that is specific to his role.
+   *
+   * Handled by capping each pair rather than by rebalancing the weights,
+   * because a cap leaves the individual components readable in the breakdown.
+   */
+  capPair(components, ['usage_level', 'role_trend'], USAGE_PAIR_CAP);
+  if (expectation.points != null) capPair(components, ['game_script'], GAME_SCRIPT_WITH_MARKET_CAP);
+
   const known = components.filter((c) => !c.unknown);
-  const score = expectation.points == null && recentItems === 0 && rawItems === 0 && statusPenalty === 0
+  const score = expectation.points == null && recentItems === 0 && rawItems === 0 && statusPenalty === 0 && usage.unknown
     ? null
     : round2(known.reduce((a, c) => a + c.value, 0));
 
@@ -240,6 +446,30 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
   if (expectation.points == null) confidence = 'low';
   else if (expectation.coverage < 0.7 || input.propsStale) confidence = 'medium';
   if ((input.signal?.pendingCount ?? 0) > 0 && confidence === 'high') confidence = 'medium';
+  /*
+   * Confidence is about how much is *known*, not about how good the player is.
+   *
+   * A role the data cannot classify means the matchup read is generic and the
+   * weather read is a position average; that is a weaker answer and saying so
+   * is the whole job of this field.
+   */
+  if (roleProfile.bucket === 'unclassified' && !usage.unknown) {
+    confidenceReasons.push('role could not be classified from the usage available');
+    if (confidence === 'high') confidence = 'medium';
+  }
+  if (usage.unknown) confidenceReasons.push('no per-game usage for this player');
+  if (matchup.unknown && input.defenseTendencies) confidenceReasons.push('no opponent tendency for his role yet');
+
+  const drivers = topDrivers(components, {
+    usage,
+    role,
+    td,
+    gameScript,
+    weather,
+    matchup,
+    availability: availabilityView,
+  });
+  const conflicts = findConflicts(components);
 
   return {
     playerId: input.player.id,
@@ -255,9 +485,154 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     injury,
     ruledOut: availability.gate,
     lock: lockState(input.kickoff, input.now ?? new Date()),
+    opponent: input.opponent ?? null,
     movement,
     role,
+    mode,
+    usage,
+    roleProfile,
+    tdDependency: td,
+    gameScript,
+    weather,
+    matchup,
+    availability: availabilityView,
+    drivers,
+    conflicts,
   };
+}
+
+/**
+ * How much a pair of components may contribute between them.
+ *
+ * Applied to the mode-weighted values and scaled proportionally, so the cap
+ * cannot change which of the two was doing the talking — it only decides how
+ * loudly the pair is allowed to talk. Mutates, because it runs on components
+ * that have just been built and nothing else has seen them.
+ */
+function capPair(components: StartSitComponent[], keys: string[], cap: number): void {
+  const group = components.filter((c) => keys.includes(c.key) && !c.unknown);
+  const total = group.reduce((a, c) => a + c.value, 0);
+  if (Math.abs(total) <= cap || total === 0) return;
+  const scale = cap / Math.abs(total);
+  for (const component of group) component.value = round2(component.value * scale);
+}
+
+/** Opportunity and its trend, together, may be worth this much. */
+export const USAGE_PAIR_CAP = 2.5;
+/**
+ * What game script may add once the market's own number is already in the
+ * score. The prop line contains the game total; only the role-specific part of
+ * the script is new information.
+ */
+export const GAME_SCRIPT_WITH_MARKET_CAP = 0.7;
+
+/** A downfield or dual-threat role, as points. Small, and mode-sensitive. */
+function explosivenessOf(profile: RoleProfile): { points: number; display: string } {
+  switch (profile.bucket) {
+    case 'deep_receiver':
+      return { points: 0.5, display: `${profile.detail ?? 'downfield role'}` };
+    case 'rushing_quarterback':
+      return { points: 0.45, display: profile.detail ?? 'runs as well as throws' };
+    case 'receiving_back':
+      return { points: 0.3, display: profile.detail ?? 'catches passes out of the backfield' };
+    case 'intermediate_receiver':
+      return { points: 0.15, display: profile.detail ?? 'intermediate role' };
+    case 'underneath_receiver':
+      return { points: -0.15, display: profile.detail ?? 'underneath role' };
+    case 'rushing_back':
+      return { points: -0.1, display: profile.detail ?? 'ground role' };
+    default:
+      return { points: 0, display: 'role not classified' };
+  }
+}
+
+/**
+ * The two to four sentences worth showing, chosen by what actually moved.
+ *
+ * Every driver is paired with the component it came from, and the ordering is
+ * by the size of that component's contribution — so the card cannot lead with a
+ * signal that changed nothing, and it cannot describe a signal the score did
+ * not use. Availability is the one exception and jumps the queue when it is
+ * risky, because "he might not play" outranks any amount of projection.
+ */
+function topDrivers(
+  components: StartSitComponent[],
+  sources: {
+    usage: UsageAssessment;
+    role: RoleAssessment;
+    td: TdDependencyAssessment;
+    gameScript: GameScriptAssessment;
+    weather: WeatherAssessment;
+    matchup: MatchupAssessment;
+    availability: AvailabilityView;
+  },
+): string[] {
+  const byKey = new Map(components.map((c) => [c.key, c]));
+  const size = (key: string) => Math.abs(byKey.get(key)?.value ?? 0);
+  const candidates: { text: string; weight: number }[] = [];
+
+  const add = (key: string, text: string | null, boost = 0) => {
+    if (!text) return;
+    if (byKey.get(key)?.unknown) return;
+    candidates.push({ text, weight: size(key) + boost });
+  };
+
+  add('usage_level', sources.usage.driver);
+  add(
+    'role_trend',
+    sources.role.trend === 'insufficient_data' || sources.role.trend === 'stable' ? null : sources.role.label,
+  );
+  add('td_dependency', sources.td.driver);
+  add('game_script', sources.gameScript.driver);
+  add('weather', sources.weather.driver);
+  add('matchup_role', sources.matchup.driver);
+  // Availability first when it is a live question, whatever the points say.
+  if (sources.availability.risky && sources.availability.detail) {
+    candidates.push({ text: sources.availability.detail, weight: 100 });
+  }
+
+  return candidates
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 4)
+    .map((c) => c.text);
+}
+
+/**
+ * Where the evidence points different ways.
+ *
+ * Shown rather than averaged, because the disagreement is the useful part: a
+ * player with strong usage into a bad matchup and a soft market is a genuinely
+ * hard call, and a screen that quietly nets those to "medium" has thrown away
+ * the only thing worth telling somebody.
+ */
+function findConflicts(components: StartSitComponent[]): string[] {
+  const value = (key: string) => {
+    const component = components.find((c) => c.key === key);
+    return component && !component.unknown ? component.value : null;
+  };
+  const conflicts: string[] = [];
+
+  const usage = value('usage_level');
+  const matchup = value('matchup_role');
+  const script = value('game_script');
+  if (usage != null && usage >= 0.8 && ((matchup ?? 0) <= -0.4 || (script ?? 0) <= -0.4)) {
+    conflicts.push('Usage strong · matchup and environment disagree');
+  }
+  if (usage != null && usage <= -0.8 && ((matchup ?? 0) >= 0.4 || (script ?? 0) >= 0.4)) {
+    conflicts.push('Favourable spot · the opportunity is not there');
+  }
+
+  const role = value('role_trend');
+  if (usage != null && role != null && Math.sign(usage) !== 0 && Math.sign(role) !== 0 && Math.sign(usage) !== Math.sign(role)) {
+    conflicts.push('Volume and trend point different ways');
+  }
+
+  const weather = value('weather');
+  if (weather != null && weather <= -0.5 && (value('vegas') ?? 0) > 0) {
+    conflicts.push('Market expects volume · the forecast works against his role');
+  }
+
+  return conflicts;
 }
 
 /**
@@ -285,12 +660,30 @@ function resolveInjuryState(input: StartSitInput): InjuryState {
 export function compareStartSit(
   inputs: StartSitInput[],
   profile: ScoringProfile,
-  opts: { minMargin?: number } = {},
+  opts: { minMargin?: number; mode?: StartSitMode } = {},
 ): StartSitComparison {
   const minMargin = opts.minMargin ?? 0.75;
-  const evaluations = inputs.map((i) => evaluatePlayer(i, profile));
+  const mode = opts.mode ?? 'balanced';
+  const evaluations = inputs.map((i) => evaluatePlayer({ ...i, mode: i.mode ?? mode }, profile));
   const warnings: string[] = [];
   const reasons: string[] = [];
+
+  /*
+   * What the market would choose, computed from the same evaluations.
+   *
+   * The market's number is already the largest component of every score, so the
+   * comparison is made with that component subtracted out — otherwise this
+   * would be asking whether the market agrees with itself. It contributes no
+   * points either way; see `market.ts`.
+   */
+  const market = compareWithMarket(
+    evaluations.map((e) => ({
+      playerId: e.playerId,
+      name: e.name,
+      modelScoreExMarket: e.score == null ? null : round2(e.score - (componentValue(e, 'vegas') ?? 0)),
+      marketPoints: e.expectation.points,
+    })),
+  );
 
   const scored = evaluations.filter((e) => e.score != null);
   if (scored.length === 0) {
@@ -308,6 +701,8 @@ export function compareStartSit(
         gapHours: null,
         advantage: null,
       },
+      mode,
+      market,
     };
   }
 
@@ -402,6 +797,24 @@ export function compareStartSit(
   const movingUp = best.movement.headline;
   if (movingUp) reasons.push(`${best.name}: ${lowerFirst(movingUp)} (${best.movement.significant.map((m) => m.display).join('; ')})`);
 
+  /*
+   * The market, said rather than obeyed.
+   *
+   * A disagreement never changes the recommendation — the model has usage,
+   * practice participation and role information the line cannot carry, and
+   * flipping to the market on sight would throw all of it away. What a wide
+   * disagreement does do is lower confidence, which is the honest response to
+   * two independent sources pointing different ways.
+   */
+  if (market.verdict === 'disagrees') {
+    reasons.push(market.detail);
+    if (market.material && confidence === 'high') confidence = 'medium';
+  } else if (market.verdict === 'agrees') {
+    reasons.push(market.detail);
+  }
+
+  for (const conflict of best.conflicts) warnings.push(`${best.name}: ${conflict}`);
+
   return {
     evaluations: sorted.concat(evaluations.filter((e) => e.score == null)),
     recommendedPlayerId: best.playerId,
@@ -410,7 +823,15 @@ export function compareStartSit(
     reasons,
     warnings,
     lateSwap,
+    mode,
+    market,
   };
+}
+
+/** One component's contributed value, or null when it was not known. */
+function componentValue(evaluation: StartSitEvaluation, key: string): number | null {
+  const component = evaluation.components.find((c) => c.key === key);
+  return component && !component.unknown ? component.value : null;
 }
 
 function lowerFirst(sentence: string): string {
