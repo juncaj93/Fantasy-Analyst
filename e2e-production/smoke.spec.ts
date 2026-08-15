@@ -22,9 +22,29 @@ import { expect, test, type Page } from '@playwright/test';
 
 const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
 
+/** The five that are there every day of the year. */
+const YEAR_ROUND = ['team', 'trades', 'players', 'review', 'setup'] as const;
+
 async function open(page: Page, tab: (typeof TABS)[number]) {
   await page.getByTestId(`tab-${tab}`).click();
   await page.waitForTimeout(400);
+}
+
+/**
+ * Which destinations this deployment should be showing today.
+ *
+ * Draft is seasonal, so a suite that hardcoded six would start failing on the
+ * Tuesday of week one — and failing for the reason the feature exists. The
+ * expectation is read from the same answer the app reads: the overview's own
+ * `season` block. A deployment that predates that field says nothing, and the
+ * app keeps the tab, so the fallback is six.
+ */
+async function expectedTabs(page: Page): Promise<readonly (typeof TABS)[number][]> {
+  const overview = await page.evaluate(async () => {
+    const res = await fetch('/api/overview');
+    return res.ok ? ((await res.json()) as { season?: { draftVisible?: boolean } }) : null;
+  });
+  return overview?.season?.draftVisible === false ? YEAR_ROUND : TABS;
 }
 
 /**
@@ -55,14 +75,34 @@ async function settled(page: Page, rowTestId: string): Promise<number> {
 }
 
 test.describe('the deployed app', () => {
-  test('loads, and lands on a floating toolbar with all six destinations', async ({ page }) => {
+  test('loads, and lands on a floating toolbar with every destination the season has', async ({ page }) => {
     await page.goto('/');
-    for (const tab of TABS) {
+    const expected = await expectedTabs(page);
+    for (const tab of expected) {
       await expect(page.getByTestId(`tab-${tab}`), `${tab} is missing`).toBeVisible();
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
       expect(box.width, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
     }
+    // ...and nothing else. Out of season the bar carries five, packed, with no
+    // hole where Draft was.
+    expect(await page.locator('.tabbar button').count()).toBe(expected.length);
+    const packed = await page.evaluate(() => {
+      const bar = document.querySelector('.tabbar')!;
+      const style = getComputedStyle(bar);
+      const chrome =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth);
+      const buttons = [...bar.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+      return {
+        slack: Math.round(bar.getBoundingClientRect().width - (buttons.reduce((s, b) => s + b.width, 0) + chrome)),
+        biggestGap: Math.round(Math.max(...buttons.slice(1).map((b, i) => b.left - buttons[i]!.right))),
+      };
+    });
+    expect(packed.slack, 'the pill is stretched rather than packed').toBeLessThanOrEqual(2);
+    expect(packed.biggestGap, 'an empty destination slot was left behind').toBeLessThanOrEqual(2);
 
     /*
      * The toolbar floats clear of the bottom edge rather than sitting on it,
@@ -105,7 +145,7 @@ test.describe('the deployed app', () => {
    */
   test('exactly one destination is current, and it is the screen on show', async ({ page }) => {
     await page.goto('/');
-    for (const tab of TABS) {
+    for (const tab of await expectedTabs(page)) {
       await open(page, tab);
       await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-current', 'page');
       expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
@@ -152,7 +192,7 @@ test.describe('the deployed app', () => {
 
   test('every screen has a compact navigation bar, and none is a banner', async ({ page }) => {
     await page.goto('/');
-    for (const tab of TABS) {
+    for (const tab of await expectedTabs(page)) {
       await open(page, tab);
       const bar = page.locator('.nav-bar').first();
       await expect(bar, `${tab} has no navigation bar`).toBeVisible();
@@ -163,9 +203,10 @@ test.describe('the deployed app', () => {
 
   test('nothing scrolls sideways, on any screen, in either theme', async ({ page }) => {
     await page.goto('/');
+    const tabs = await expectedTabs(page);
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
-      for (const tab of TABS) {
+      for (const tab of tabs) {
         await open(page, tab);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -461,5 +502,158 @@ test.describe('the deployed app', () => {
     // the suite that is not a GET, and it must be refused.
     const write = await request.post('/api/sleeper/sync-players', { failOnStatusCode: false });
     expect([401, 503]).toContain(write.status());
+  });
+});
+
+/**
+ * The flex view, the recommended lineup and the waiver advice, live.
+ *
+ * These read the real league rather than the demo one, so they assert what has
+ * to be true of *any* roster — the flex view contains only running backs,
+ * receivers and tight ends; the starters are the slots this league starts; the
+ * waiver card never names a player somebody owns — and they skip themselves
+ * honestly when a deployment has nothing loaded, using the same settled-list
+ * wait as the rest of the suite so a slow worker is never mistaken for an
+ * empty one.
+ */
+test.describe('the season features', () => {
+  test('FLX leaves running backs, receivers and tight ends and nobody else', async ({ page }) => {
+    await page.goto('/');
+    const expected = await expectedTabs(page);
+    test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board to filter');
+
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await page.getByTestId('flx-filter').count()) === 0, 'this league starts none of RB, WR or TE');
+
+    await page.getByTestId('flx-filter').click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .getByTestId('recommendation-row')
+            .evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute('data-position')))].sort()),
+        { timeout: 15_000 },
+      )
+      .toEqual(['RB', 'TE', 'WR']);
+  });
+
+  test('Team shows the league title alone, above starters by slot', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+    const header = page.getByTestId('league-card').first();
+    await expect(header).toBeVisible();
+
+    // The metadata that left the header. Checked as words rather than as a
+    // layout, so it stays true whatever the design does next.
+    const text = (await header.innerText()).toLowerCase();
+    for (const gone of ['ppr', 'teams', 'flex slot', 'pt passing']) {
+      expect(text, `the header still prints "${gone}"`).not.toContain(gone);
+    }
+
+    test.skip((await settled(page, 'starter-row')) === 0, 'no roster on this deployment');
+
+    // Every slot drawn is a slot this league actually starts, and every filled
+    // one carries its position tint plus the word.
+    const lineup = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      return (await (await fetch(`/api/leagues/${id}/lineup`)).json()) as {
+        found: boolean;
+        slots: { slot: string; playerId: string | null }[];
+      };
+    });
+    test.skip(!lineup?.found, 'no roster on this deployment');
+
+    const drawn = await page
+      .getByTestId('starter-row')
+      .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-slot')));
+    expect(drawn).toEqual(lineup!.slots.map((s) => s.slot));
+
+    for (const card of await page.locator('[data-testid="starter-row"][data-starter="true"]').all()) {
+      const position = (await card.getAttribute('data-position'))!;
+      await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
+      await expect(card).toContainText('Starter');
+    }
+    // A backup is the same row without the tint, which is the whole visual claim.
+    for (const card of await page.getByTestId('bench-row').all()) {
+      await expect(card).not.toHaveClass(/card-pos/);
+      await expect(card).toContainText('Bench');
+    }
+  });
+
+  test('the comparison picker opens and reaches beyond the roster', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+    test.skip((await page.getByTestId('compare-open').count()) === 0, 'no league on this deployment');
+
+    await page.getByTestId('compare-open').click();
+    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    // Nothing chosen yet is not a comparison.
+    await expect(page.getByTestId('compare-run')).toBeDisabled();
+
+    /*
+     * Waited for directly rather than through `settled`.
+     *
+     * That helper races the rows against the page's own empty state, and the
+     * empty state it would find is the one *behind* the sheet — a screen with
+     * nothing on it is not the same fact as a picker with nobody in it. Here
+     * the rows are the only outcome worth waiting for.
+     */
+    await page
+      .getByTestId('compare-candidate')
+      .first()
+      .waitFor({ state: 'visible', timeout: 20_000 })
+      .catch(() => {});
+    test.skip((await page.getByTestId('compare-candidate').count()) === 0, 'no player list on this deployment');
+
+    // The pool is the league, not the roster: somebody in it is not owned by
+    // the user. (On a real deployment there are thousands who are not.)
+    const labels = await page
+      .getByTestId('compare-candidate')
+      .evaluateAll((rows) => rows.map((r) => r.textContent ?? ''));
+    expect(labels.some((l) => l.includes('Free agent') || l.includes('Rostered elsewhere'))).toBe(true);
+
+    await page.getByTestId('sheet-close').click();
+  });
+
+  test('waiver advice never names a player somebody owns, and promises no transaction', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+
+    const data = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const [waivers, roster] = await Promise.all([
+        (await fetch(`/api/leagues/${id}/waivers`)).json(),
+        (await fetch(`/api/leagues/${id}/roster`)).json(),
+      ]);
+      return { waivers, roster } as {
+        waivers: { found: boolean; upgrades: { candidates: { playerId: string }[] }[]; considered: number };
+        roster: { starters: { playerId: string }[]; bench: { playerId: string }[] };
+      };
+    });
+    test.skip(!data?.waivers?.found, 'no roster on this deployment');
+
+    const mine = new Set([
+      ...data!.roster.starters.map((p) => p.playerId),
+      ...data!.roster.bench.map((p) => p.playerId),
+    ]);
+    for (const upgrade of data!.waivers.upgrades) {
+      for (const candidate of upgrade.candidates) {
+        expect(mine.has(candidate.playerId), 'a player already on the roster was offered as an add').toBe(false);
+      }
+    }
+
+    // Whatever it says, it says it is advice.
+    const card = page.getByTestId('waiver-card');
+    if ((await card.count()) > 0) {
+      const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+      for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
+        expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
+      }
+    }
   });
 });
