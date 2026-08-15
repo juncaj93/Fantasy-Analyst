@@ -227,6 +227,12 @@ export interface Segment<T extends string> {
  * of seven from shouting on a phone. It scrolls sideways when there are more
  * than fit; the choice logic is entirely the caller's — this control decides
  * nothing.
+ *
+ * **The button and the pill you can see are deliberately different sizes.** The
+ * segment is a full 44px tap target; the tinted face inside it is 36px, which
+ * is what a segmented control should look like sitting next to a search field.
+ * Painting the button itself would force the row to be as tall as a thumb, and
+ * that row is on the screen where every pixel is a fraction of a player.
  */
 export function SegmentedControl<T extends string>({
   segments,
@@ -253,7 +259,7 @@ export function SegmentedControl<T extends string>({
           {...(s.testId ? { 'data-testid': s.testId } : {})}
           onClick={() => onChange(s.id)}
         >
-          {s.label}
+          <span className="chip-face">{s.label}</span>
         </button>
       ))}
     </div>
@@ -317,6 +323,113 @@ function ChevronlessSearchIcon() {
       <circle cx="11" cy="11" r="6.25" />
       <path d="m15.6 15.6 4.15 4.15" />
     </svg>
+  );
+}
+
+/**
+ * Search and the filters, on one row, with the search folded away until asked
+ * for.
+ *
+ * A permanently open search field is a whole row of a phone spent on a control
+ * that is used a few times a draft, sitting directly above the list it is
+ * about — and on the one screen where a row is a player, that is the most
+ * expensive row on the page. Collapsed, it is a glyph on the left of the
+ * filters, which is where iOS puts it in a toolbar; expanded, it takes the row
+ * and the filters step aside, which is what iOS does to a list's own search.
+ *
+ * **Presentation only.** What the query matches, how the filters behave and what
+ * either does to the list are entirely the caller's; this component holds the
+ * text and the open/closed state and nothing else. Closing is deliberately the
+ * one thing that also clears — that is what a control labelled Cancel means,
+ * and it is the only way the text can go away, so it can never be dropped
+ * quietly.
+ */
+export function SearchFilterRow({
+  value,
+  onChange,
+  expanded,
+  onExpandedChange,
+  placeholder,
+  label,
+  testId,
+  children,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  expanded: boolean;
+  onExpandedChange: (next: boolean) => void;
+  placeholder: string;
+  /** The accessible name of both the field and the button that opens it. */
+  label: string;
+  testId: string;
+  /** The filters, shown beside the glyph while the search is folded away. */
+  children: ReactNode;
+}) {
+  const close = () => {
+    onChange('');
+    onExpandedChange(false);
+  };
+
+  if (!expanded) {
+    return (
+      <div className="control-row" data-testid={`${testId}-controls`} data-search="closed">
+        <button
+          type="button"
+          className="search-toggle"
+          aria-label={label}
+          aria-expanded={false}
+          data-testid={`${testId}-open`}
+          onClick={() => onExpandedChange(true)}
+        >
+          <ChevronlessSearchIcon />
+        </button>
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div className="control-row" data-testid={`${testId}-controls`} data-search="open">
+      <div className="search search-inline">
+        <ChevronlessSearchIcon />
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') close();
+          }}
+          placeholder={placeholder}
+          aria-label={label}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          /*
+           * Focused on arrival, and by the attribute rather than an effect: React
+           * calls `focus()` during the commit that the tap itself triggered, so
+           * Safari still counts it as user-initiated and actually raises the
+           * keyboard. A focus deferred to a later frame is one iOS ignores.
+           */
+          autoFocus
+          data-testid={testId}
+        />
+        {value ? (
+          <button
+            type="button"
+            className="search-clear"
+            aria-label="Clear search"
+            data-testid="search-clear"
+            /* Empties the field and leaves it open, focused and ready — the
+               way every native list search behaves. Leaving is Cancel's job. */
+            onClick={() => onChange('')}
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
+      <button type="button" className="search-cancel" data-testid={`${testId}-close`} onClick={close}>
+        Cancel
+      </button>
+    </div>
   );
 }
 

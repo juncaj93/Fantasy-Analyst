@@ -69,25 +69,43 @@ test.describe('density', () => {
    * How much of the first screen is the thing the user came for.
    *
    * Stated as a number because "denser" is otherwise an opinion that drifts.
-   * The measurement is rows fully above the tab bar on the smallest supported
-   * phone, and the list has to start in the top third of the page.
+   * The measurement is rows fully above the floating toolbar on the smallest
+   * supported phone — the toolbar's own top edge, asked for rather than
+   * guessed, so the count cannot quietly improve by the bar getting shorter.
    */
   async function rowsOnFirstScreen(page: Page, testId: string) {
-    const viewport = page.viewportSize()!;
+    const floor = await page.evaluate(() => document.querySelector('.tabbar')!.getBoundingClientRect().top);
     const rows = page.getByTestId(testId);
     const count = await rows.count();
     let visible = 0;
     for (let i = 0; i < count; i++) {
       const box = await rows.nth(i).boundingBox();
-      if (box && box.y + box.height <= viewport.height - 50) visible++;
+      if (box && box.y + box.height <= floor) visible++;
     }
     return visible;
   }
 
-  test('the draft board shows at least six players before a scroll', async ({ page }) => {
+  /**
+   * Eight, measured, on all three phones.
+   *
+   * The search field used to hold a row of its own above the position filters,
+   * and the first card started 177px down the page; folded into a glyph beside
+   * them it starts at 129px. That is worth an eighth whole row on the smallest
+   * supported phone — 360×800 fitted seven before — and 31px more of the list
+   * on the other two, where the eighth row already fitted.
+   *
+   * This number is the whole justification for the change, so it is asserted
+   * rather than described: if a later pass spends the space on padding again,
+   * this fails.
+   */
+  test('the draft board shows at least eight players before a scroll', async ({ page }) => {
+    // No tap: Draft is where the app lands, and tapping the destination you are
+    // already on clears the screen — which would measure a reset control rather
+    // than the one a reader actually arrives at.
     await page.goto('/');
-    await open(page, 'draft');
-    expect(await rowsOnFirstScreen(page, 'recommendation-row')).toBeGreaterThanOrEqual(6);
+    await expect(page.getByTestId('board-list')).toBeVisible();
+    await page.waitForTimeout(350);
+    expect(await rowsOnFirstScreen(page, 'recommendation-row')).toBeGreaterThanOrEqual(8);
   });
 
   test('the players list shows at least seven', async ({ page }) => {
@@ -100,9 +118,9 @@ test.describe('density', () => {
   test('Setup shows every step without scrolling', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
-    const viewport = page.viewportSize()!;
+    const floor = await page.evaluate(() => document.querySelector('.tabbar')!.getBoundingClientRect().top);
     const last = (await page.getByTestId('setup-step-vegas').boundingBox())!;
-    expect(last.y + last.height).toBeLessThanOrEqual(viewport.height - 50);
+    expect(last.y + last.height).toBeLessThanOrEqual(floor);
   });
 });
 
@@ -211,11 +229,15 @@ test.describe('the active tab, tapped again', () => {
     await open(page, 'draft');
     // Narrow by position as well, so it is clear which one gets cleared.
     await page.getByRole('button', { name: 'QB', exact: true }).click();
+    await page.getByTestId('draft-search-open').click();
     await page.getByTestId('draft-search').fill('lind');
     await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
 
     await page.getByTestId('tab-draft').click();
-    await expect(page.getByTestId('draft-search')).toHaveValue('');
+    // The query is gone and the field has folded back to its glyph, which is
+    // what "clear the screen" means for a control that starts folded.
+    await expect(page.getByTestId('draft-search')).toHaveCount(0);
+    await expect(page.getByTestId('draft-search-open')).toBeVisible();
     // The position filter is a choice, not a search: it survives.
     await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'ALL', exact: true }).click();

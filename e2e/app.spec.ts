@@ -70,8 +70,17 @@ test.describe('shell', () => {
    * viewport height, one for the inset, one for the reservation — and does it
    * with the inset forced on, because the browser these tests run in reports
    * zero for it and the bug only exists when it does not.
+   *
+   * **What changed with the floating toolbar, and what did not.** The bar no
+   * longer reaches the bottom edge — it is a pill that floats clear of it, so a
+   * gap below it is now correct rather than a bug. What is unchanged is that
+   * the gap is a number the design chooses (`--toolbar-gap`) and the page holds
+   * back exactly the bar plus that gap and no more. The claim is therefore
+   * "the space below the bar is the gap, to the pixel" rather than "there is
+   * none", which is the same claim with a different constant and just as hard
+   * to satisfy by accident.
    */
-  test.describe('the bottom bar', () => {
+  test.describe('the floating toolbar', () => {
     const INSET = 34;
 
     async function geometry(page: Page, inset: number) {
@@ -80,52 +89,76 @@ test.describe('shell', () => {
       await page.addStyleTag({ content: `:root { --safe-bottom: ${inset}px; }` });
       await page.waitForTimeout(300);
       return page.evaluate(() => {
-        const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
+        const bar = document.querySelector('.tabbar')!;
+        const nav = bar.getBoundingClientRect();
         const main = document.querySelector('.app-main')!;
         const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
         const last = rows[rows.length - 1]?.getBoundingClientRect() ?? null;
+        /* `--toolbar-gap` is a max() over an env(), so it has to be resolved by
+           the browser rather than read as a string. */
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:fixed;visibility:hidden;padding-bottom:var(--toolbar-gap)';
+        document.body.append(probe);
+        const gap = Math.round(Number.parseFloat(getComputedStyle(probe).paddingBottom));
+        probe.remove();
         return {
           viewport: window.innerHeight,
+          width: window.innerWidth,
           navTop: Math.round(nav.top),
           navBottom: Math.round(nav.bottom),
           navHeight: Math.round(nav.height),
+          navWidth: Math.round(nav.width),
           gapBelowNav: Math.round(window.innerHeight - nav.bottom),
+          intendedGap: gap,
           reserved: getComputedStyle(main).paddingBottom,
-          measuredBar: getComputedStyle(document.documentElement).getPropertyValue('--tabbar-height').trim(),
+          measuredBar: getComputedStyle(document.documentElement).getPropertyValue('--toolbar-height').trim(),
           documentHeight: document.documentElement.scrollHeight,
           lastRowBottom: last ? Math.round(last.bottom) : null,
         };
       });
     }
 
-    test('sits flush to the bottom with nothing beneath it', async ({ page }) => {
+    test('floats by exactly the gap it says it does, and no more', async ({ page }) => {
       for (const inset of [0, INSET]) {
         const g = await geometry(page, inset);
-        expect(g.gapBelowNav, `inset ${inset}: nothing may show below the bar`).toBe(0);
-        expect(g.navBottom, `inset ${inset}: the bar reaches the viewport bottom`).toBe(g.viewport);
+        expect(g.gapBelowNav, `inset ${inset}: the page owns only the gap it declared`).toBe(g.intendedGap);
+        // And the gap is a hairline on a flat screen, never a strip of page.
+        if (inset === 0) expect(g.gapBelowNav).toBeLessThanOrEqual(8);
       }
     });
 
-    test('spends the indicator inset once, and less of it than the device offers', async ({ page }) => {
+    test('spends the indicator inset once, as clearance under the bar', async ({ page }) => {
       const flat = await geometry(page, 0);
       const inset = await geometry(page, INSET);
-      // A screen with no home indicator gets no padding at all.
-      expect(flat.navHeight, 'no inset, no extra height').toBe(44 + 1);
-      // With one, the bar grows by the clearance and not by the whole inset.
-      const grew = inset.navHeight - flat.navHeight;
-      expect(grew).toBeGreaterThan(0);
-      expect(grew, 'the full 34px inset is what read as a blank strip').toBeLessThan(INSET);
+      // The pill's own height is a property of the pill, not of the device: it
+      // is the same bar on both screens.
+      expect(inset.navHeight, 'the inset must not be padding inside the bar').toBe(flat.navHeight);
+      // 54–64px for an icon and a label, which is what a bottom bar costs.
+      expect(flat.navHeight).toBeGreaterThanOrEqual(54);
+      expect(flat.navHeight).toBeLessThanOrEqual(64);
+      // With an indicator, the bar rises by the clearance and not by the whole
+      // inset — spending all 34px is what used to read as a blank strip.
+      const rose = inset.gapBelowNav - flat.gapBelowNav;
+      expect(rose).toBeGreaterThan(0);
+      expect(inset.gapBelowNav, 'the indicator reaches 13px up the screen').toBeGreaterThanOrEqual(13);
+      expect(inset.gapBelowNav, 'the full 34px inset is what read as a blank strip').toBeLessThan(INSET);
     });
 
-    test('reserves exactly the bar, once', async ({ page }) => {
+    test('is narrower than the screen, and centred on it', async ({ page }) => {
+      const g = await geometry(page, 0);
+      expect(g.navWidth, 'a full-width bar is the webpage footer this replaced').toBeLessThan(g.width - 16);
+      const left = await page.evaluate(() => Math.round(document.querySelector('.tabbar')!.getBoundingClientRect().left));
+      expect(Math.abs(left - (g.width - g.navWidth) / 2), 'the pill is off centre').toBeLessThanOrEqual(1);
+    });
+
+    test('reserves exactly the bar and its gap, once', async ({ page }) => {
       const g = await geometry(page, INSET);
-      // The page reserves the bar's measured height (which already contains the
-      // inset) plus one gap — never the inset a second time.
       const reserved = Number.parseFloat(g.reserved);
       const bar = Number.parseFloat(g.measuredBar);
+      // The measurement is the pill only. The gap is added in exactly one place.
       expect(bar).toBe(g.navHeight);
-      expect(reserved - bar, 'the reservation is the bar plus a hairline gap').toBeLessThanOrEqual(10);
-      expect(reserved).toBeGreaterThanOrEqual(bar);
+      expect(reserved).toBeGreaterThanOrEqual(bar + g.intendedGap);
+      expect(reserved - (bar + g.intendedGap), 'the reservation is bar + gap + one step of air').toBeLessThanOrEqual(10);
     });
 
     test('lets the last row scroll clear of the bar', async ({ page }) => {
@@ -164,7 +197,7 @@ test.describe('shell', () => {
     });
 
     test('is the same geometry in Light and Dark', async ({ page }) => {
-      const heights: number[] = [];
+      const shapes: { height: number; gap: number }[] = [];
       for (const theme of ['light', 'dark'] as const) {
         await page.goto('/');
         await expect(page.getByTestId('tab-draft')).toBeVisible();
@@ -172,20 +205,20 @@ test.describe('shell', () => {
         await page.addStyleTag({ content: `:root { --safe-bottom: ${INSET}px; }` });
         await page.waitForTimeout(300);
         const g = await page.evaluate(() => {
-          const nav = document.querySelector('.tabbar')!.getBoundingClientRect();
+          const bar = document.querySelector('.tabbar')!;
+          const nav = bar.getBoundingClientRect();
           return {
             height: Math.round(nav.height),
             gap: Math.round(window.innerHeight - nav.bottom),
-            // The surface must run to the bottom edge, so the inset is bar and
-            // not page: a transparent strip there is the "grey/black" one.
-            background: getComputedStyle(document.querySelector('.tabbar')!).backgroundColor,
+            // A floating pill has a list scrolling under it, so its surface is
+            // load-bearing: transparent here means unreadable labels.
+            background: getComputedStyle(bar).backgroundColor,
           };
         });
-        expect(g.gap).toBe(0);
         expect(g.background).not.toBe('rgba(0, 0, 0, 0)');
-        heights.push(g.height);
+        shapes.push({ height: g.height, gap: g.gap });
       }
-      expect(heights[0]).toBe(heights[1]);
+      expect(shapes[0]).toEqual(shapes[1]);
     });
 
     /** One owner for the viewport height: a second `100dvh` is a second claim. */
@@ -1106,7 +1139,19 @@ test.describe('draft room', () => {
    * has on the whole board rather than being renumbered to 1 by the filter.
    */
   test.describe('search', () => {
+    /*
+     * The field is folded into a glyph until it is asked for — see
+     * SearchFilterRow. Unfolding it is a presentation change and nothing else,
+     * which is what the rest of this block is about: every claim here predates
+     * the fold and none of them changed.
+     */
+    async function openSearch(page: Page) {
+      await page.getByTestId('draft-search-open').click();
+      await expect(page.getByTestId('draft-search')).toBeVisible();
+    }
+
     test('filters the board to what was typed, keeping real board ranks', async ({ page }) => {
+      await openSearch(page);
       const search = page.getByTestId('draft-search');
       await expect(search).toBeVisible();
 
@@ -1125,6 +1170,7 @@ test.describe('draft room', () => {
     });
 
     test('matches on either name, in any order, ignoring punctuation', async ({ page }) => {
+      await openSearch(page);
       const search = page.getByTestId('draft-search');
       await search.fill('brennan kai');
       await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
@@ -1139,12 +1185,14 @@ test.describe('draft room', () => {
       const deep = board.recommendations[board.recommendations.length - 1] as { name: string };
       expect(board.recommendations.length).toBeGreaterThan(0);
 
+      await openSearch(page);
       await page.getByTestId('draft-search').fill(deep.name);
       await expect(page.getByTestId('recommendation-row').first().locator('.player-name')).toHaveText(deep.name);
       await page.getByTestId('draft-search').fill('');
     });
 
     test('says so plainly when nobody matches, and changes no state', async ({ page }) => {
+      await openSearch(page);
       await page.getByTestId('draft-search').fill('zzzznobody');
       await expect(page.getByTestId('recommendation-row')).toHaveCount(0);
       await expect(page.getByText(/Nobody available matching/)).toBeVisible();
@@ -1155,11 +1203,15 @@ test.describe('draft room', () => {
     test('draws no tier line across a filtered result', async ({ page }) => {
       await page.getByRole('button', { name: 'QB', exact: true }).click();
       await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await openSearch(page);
       await page.getByTestId('draft-search').fill('a');
       // A line between two rows that are not adjacent on the board would be
       // claiming a boundary that is not there.
       await expect(page.getByTestId('tier-divider')).toHaveCount(0);
-      await page.getByTestId('draft-search').fill('');
+      // Cancelling puts the row back exactly as it was, filter and all.
+      await page.getByTestId('draft-search-close').click();
+      await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
       await page.getByRole('button', { name: 'ALL', exact: true }).click();
     });
   });

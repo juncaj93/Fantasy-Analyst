@@ -36,18 +36,28 @@ app is holding space it should not is:
 window.innerHeight - document.querySelector('.tabbar').getBoundingClientRect().bottom
 ```
 
-**Zero means correct.** It means the tab bar's last pixel is the page's last
-pixel, and everything visible below it belongs to Safari or to iOS.
+**That number should equal `--toolbar-gap`, and nothing more.** The navigation
+is a floating pill rather than a band welded to the bottom edge, so it
+deliberately sits clear of the last pixel; the gap is a number the design
+chooses, and on a screen with a home indicator it is what keeps the destinations
+off it. Anything *above* that gap is the page holding space it should not, and
+is a real bug.
 
-That number is currently zero, at a simulated home-indicator inset of both 0px
-and 34px, at 390/375/360 wide, in Light and Dark, in a browser tab and in
-simulated standalone mode. It is asserted by
-[`e2e/app.spec.ts`](../e2e/app.spec.ts) ("the bottom bar") and
+The claim used to be "this number is zero". Read that in older commit messages
+as the same claim with a different constant: the bar spent the indicator's
+clearance as padding inside itself, and now spends it as distance underneath.
+What has never been allowed is a second consumer of the inset.
+
+That equality holds at a simulated home-indicator inset of both 0px and 34px, at
+390/375/360 wide, in Light and Dark, in a browser tab and in simulated
+standalone mode. It is asserted by [`e2e/app.spec.ts`](../e2e/app.spec.ts) ("the
+floating toolbar"), [`e2e/toolbar.spec.ts`](../e2e/toolbar.spec.ts) and
 [`e2e/pwa.spec.ts`](../e2e/pwa.spec.ts), and it can be read off the phone itself
-under **Setup → Install on iPhone → Layout diagnostics**.
+under **Setup → Install on iPhone → Layout diagnostics**, which prints both the
+measurement and the gap it is supposed to be.
 
-So: no page-owned gap exists. Prior passes that changed CSS to close one were
-adjusting a number that was already zero.
+So: no page-owned surplus exists. Prior passes that changed CSS to close one were
+adjusting a number that was already correct.
 
 ## 2. What not to do about Safari's chrome
 
@@ -109,22 +119,27 @@ consumers are individually reasonable and the sum is not.
 | Concern | Owner | Rule |
 | --- | --- | --- |
 | Viewport height | `#root` | `min-height: 100dvh`, and nothing else claims it |
-| Home-indicator clearance | `.tabbar` | `padding-bottom: var(--nav-inset)` |
-| Space reserved for the bar | `.app-main` | `padding-bottom: calc(var(--tabbar-height) + …)` |
+| Home-indicator clearance | `.tabbar` | `bottom: var(--toolbar-gap)` |
+| Space reserved for the bar | `.app-main` | `padding-bottom: var(--content-inset)` |
 | Status bar / notch clearance | `.app-main` | `padding-top: calc(var(--safe-top) + …)` |
 
-Two details worth keeping:
+Three details worth keeping:
 
-- `--tabbar-height` is **measured from the bar at runtime** (see
-  `useTabbarHeight` in [`src/web/App.tsx`](../src/web/App.tsx)) and already
-  includes the bar's own inset padding. The page must never add the inset again
-  on top of it — doing so was worth 34px of blank page, and was one of the bugs
-  mistaken for Safari's toolbar.
-- `--nav-inset` is deliberately **less** than the full inset. iOS offers 34px;
-  the home indicator is a 5px pill sitting 8px off the bottom edge, so 17px
-  clears it. Spending all 34px makes the bar 20px taller than it needs to be,
-  and that surplus is itself a grey strip. The token is capped by the device's
-  inset, so a device without one gets nothing.
+- `--toolbar-height` is **measured from the bar at runtime** (see
+  `useToolbarHeight` in [`src/web/App.tsx`](../src/web/App.tsx)) and is the pill
+  *only*. Measuring its whole reach instead would be measuring a transform: the
+  bar translates itself off screen when the keyboard opens, and the page's
+  reservation would collapse with it.
+- `--content-inset` is **the one place** the bar's height and the gap under it
+  are added together, and `.app-main` is the only thing that spends it. The page
+  must never add the device inset again on top — doing so was worth 34px of
+  blank page, and was one of the bugs mistaken for Safari's toolbar.
+- `--nav-inset`, which `--toolbar-gap` is built from, is deliberately **less**
+  than the full inset. iOS offers 34px; the home indicator is a 5px pill sitting
+  8px off the bottom edge, so 17px clears it. Spending all 34px lifts the bar
+  20px higher than it needs to be, and that surplus is itself a grey strip. The
+  token is capped by the device's inset, so a device without one gets a 6px
+  hairline gap and nothing more.
 
 ## 6. Detecting standalone mode
 
@@ -208,7 +223,7 @@ Screen launch and in a plain tab.
 | The Home Screen icon opens a Safari tab with a URL field | The manifest was not read at install time. Re-add from Safari; check `node scripts/probe-pwa.mjs <url>` passes. |
 | Generic or blank Home Screen icon | `apple-touch-icon.png` did not resolve. Safari caches the failure; delete the icon and re-add. |
 | A grey bar under the nav **in a Safari tab** | Expected. It is Safari's. See §1. |
-| A grey bar under the nav **in standalone mode** | A real bug. Open Setup → Install on iPhone → Layout diagnostics and read "Below the tab bar". |
+| A grey bar under the nav **in standalone mode** | A real bug if it is taller than the gap the toolbar floats by. Open Setup → Install on iPhone → Layout diagnostics and read "Below the toolbar" — it says which it is. |
 | Light-mode flash when launching | The manifest's `background_color` is the dark page colour; a light-theme user sees one dark frame. The alternative is a white flash into a dark app, which is worse. |
 
 `node scripts/probe-pwa.mjs <url>` checks every install prerequisite against a
