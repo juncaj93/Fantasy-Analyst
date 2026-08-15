@@ -191,6 +191,8 @@ if (!league?.id) {
   const lineup = await get(`/api/leagues/${encodeURIComponent(league.id)}/lineup`);
   check('the lineup still answers', lineup.status === 200, `HTTP ${lineup.status}`);
 
+  check('and it found your team in the league', lineup.json?.found !== false, lineup.json?.error ?? 'found');
+
   /*
    * The lineup answers with slots, a bench and the undecidable — the full
    * evaluation lives on the last two, and a slot carries only what the row
@@ -200,17 +202,34 @@ if (!league?.id) {
   const slots = Array.isArray(lineup.json?.slots) ? lineup.json.slots : [];
   const all = [...(lineup.json?.bench ?? []), ...(lineup.json?.undecidable ?? [])];
   const filled = slots.filter((s) => s.playerId);
-  check('and it filled a lineup', filled.length > 0, `${filled.length} of ${slots.length} slot(s) filled`);
-  check('and it evaluated somebody in full', all.length > 0, `${all.length} evaluation(s) beyond the slots`);
+  const roles = all.map((e) => e.role).filter(Boolean);
 
-  const roles = all
-    .map((e) => e.role)
-    .filter(Boolean);
-  check(
-    'every evaluation carries a role verdict',
-    roles.length === all.length,
-    `${roles.length} of ${all.length}`,
-  );
+  line('lineup', `${filled.length} of ${slots.length} slot(s) filled · ${all.length} further evaluation(s)`);
+
+  /*
+   * An empty roster is a preseason state, not a fault.
+   *
+   * Sleeper does not populate a league's rosters until its draft has finished,
+   * so between now and then the lineup correctly answers with a full set of
+   * empty slots and nothing to evaluate. Asserting otherwise would produce a
+   * probe that fails every August — and a check that cries wolf every preseason
+   * is one nobody reads in November.
+   */
+  if (slots.length > 0 && filled.length === 0 && all.length === 0) {
+    console.log('      no players on the roster yet — Sleeper fills these in when the draft finishes');
+  } else {
+    check('and it evaluated somebody in full', all.length > 0, `${all.length} evaluation(s) beyond the slots`);
+    check(
+      'every evaluation carries a role verdict',
+      roles.length === all.length,
+      `${roles.length} of ${all.length}`,
+    );
+    check(
+      'and the lineup is still scored without usage',
+      filled.some((s) => s.score != null),
+      `${filled.filter((s) => s.score != null).length} of ${filled.length} filled slot(s) carry a score`,
+    );
+  }
 
   const counts = {};
   for (const role of roles) counts[role.trend] = (counts[role.trend] ?? 0) + 1;
@@ -219,21 +238,15 @@ if (!league?.id) {
   /*
    * The claim that matters while nothing is stored: an empty usage feed costs
    * the role trend and nothing else. A player with no series must come back as
-   * `insufficient_data` — never as a trend inferred from nothing — and the rest
-   * of his evaluation must be intact.
+   * `insufficient_data` — never as a trend inferred from nothing.
    */
   if ((usage?.players ?? 0) === 0) {
     check(
       'with nothing stored, no role change is claimed for anybody',
       roles.every((r) => r.trend === 'insufficient_data'),
-      Object.keys(counts).join(', ') || 'none',
+      Object.keys(counts).join(', ') || 'nobody to claim anything about yet',
     );
   }
-  check(
-    'and the lineup is still scored without it',
-    filled.some((s) => s.score != null),
-    `${filled.filter((s) => s.score != null).length} of ${filled.length} filled slot(s) carry a score`,
-  );
 }
 
 console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}`);
