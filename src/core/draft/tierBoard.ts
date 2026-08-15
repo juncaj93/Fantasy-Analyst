@@ -58,6 +58,45 @@ export function tierCliffProximity(tier: TierCliff): number | null {
 }
 
 /**
+ * The rows of a position-filtered board, in tier order.
+ *
+ * A divider is a claim about everything above and below it, and that claim is
+ * only true if a tier is contiguous. The board is ordered by the *ranking*,
+ * which is market value plus the news ledger plus My Guy, so it interleaves
+ * tiers routinely — and one interleaving is enough to make the line a lie.
+ *
+ * The reported case, four quarterbacks: ADP 53.2 and 55.3 are one tier, 63.4
+ * and 65.8 are the next, and the second-tier 65.8 outranks the first-tier 55.3.
+ * Drawn in ranking order that reads 53.2, 65.8, 55.3, 63.4 — and the single
+ * divider, correctly placed at the first row that reaches tier 1, lands after
+ * 53.2. The screen then says the top group is one player and the next is three.
+ * Both are false, and the `Tier cliff · 2 away` tags on the two genuine members
+ * of tier 1 sat right beside it saying so.
+ *
+ * So tiers are drawn as bands, and the ranking orders the players inside each
+ * band. Nothing about the ranking is discarded — within a tier it is the whole
+ * order, and a tier is by definition the players who are close enough in market
+ * value to be one decision, which is exactly where a preference belongs. Across
+ * tiers the market decides, because that is what the divider is describing.
+ *
+ * Players with no tier at all — no published ADP — keep to the tail, where the
+ * board already puts them.
+ */
+export function groupByTier<T>(items: T[], tierOf: (item: T) => number | null): T[] {
+  const tiered: { item: T; at: number; tier: number }[] = [];
+  const untiered: T[] = [];
+  items.forEach((item, at) => {
+    const tier = tierOf(item);
+    if (tier == null) untiered.push(item);
+    else tiered.push({ item, at, tier });
+  });
+  // Ties broken by the incoming position, so the ranking survives inside a
+  // band and the same board never draws itself two ways.
+  tiered.sort((a, b) => a.tier - b.tier || a.at - b.at);
+  return [...tiered.map((e) => e.item), ...untiered];
+}
+
+/**
  * Which rows in a position-filtered board have a tier boundary above them.
  *
  * Takes the tier index of each row in the order they are drawn and returns one

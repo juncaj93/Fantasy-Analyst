@@ -8,12 +8,15 @@
  *     play. The failure mode is the one this project has already shipped once —
  *     a warning on every player at a position, which is wallpaper;
  *   - a position-filtered board draws a line where the position breaks. The
- *     failure mode is drawing the same boundary repeatedly, because the list is
- *     ordered by the ranking and not by draft order.
+ *     failure mode is the list being ordered by the ranking and not by draft
+ *     order, so the tiers interleave — first it drew the same boundary several
+ *     times, and once that was stopped it drew one boundary in a place that put
+ *     a player on the wrong side of his own tier. A line across an interleaved
+ *     list is not a line that can be true, so the rows are banded first.
  */
 
 import { describe, expect, it } from 'vitest';
-import { tierCliffProximity, tierDividerFlags } from '../src/core/draft/tierBoard.ts';
+import { groupByTier, tierCliffProximity, tierDividerFlags } from '../src/core/draft/tierBoard.ts';
 import { buildPositionTierMap, NO_CLIFF, type TierCliff } from '../src/core/draft/tiers.ts';
 
 /** A tier assessment with only the fields this layer reads set. */
@@ -154,6 +157,102 @@ describe('the tier-cliff proximity tag', () => {
       // down, and the reader who wants that player still needs telling.
       for (const taken of [0, 4, 8]) expect(marked(QB.slice(taken))).toContain(127.9);
     });
+  });
+});
+
+/**
+ * Tiers are bands, and a divider is a claim about everything either side of it.
+ *
+ * The reported failure, in full: the quarterback tab drew one line after the
+ * first row and the reader concluded — correctly, from what was on screen —
+ * that the top tier had one player in it and the next had three. The model said
+ * neither. It said the first two ADPs are one tier and the next two are the
+ * next, which is what the `Tier cliff · 2 away` tags a few pixels away were
+ * also saying. The list was ordered by the ranking, the ranking interleaves
+ * tiers, and a divider drawn across an interleaved list cannot be true.
+ */
+describe('drawing a position as bands', () => {
+  const QB = [
+    53.2, 55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6, 105.4, 111.5, 114.5, 116.9, 127.9, 149.3, 151, 164.1, 165.4,
+  ];
+  /** The tab exactly as the ranking ordered it: 65.8 outranks 55.3. */
+  const RANKED = [53.2, 65.8, 55.3, 63.4, 81, 79.4, 90.2, 93.7, 97.6];
+
+  const map = () => buildPositionTierMap('QB', QB, { picksUntilNext: 13 });
+  const drawn = () => {
+    const m = map();
+    const ordered = groupByTier(RANKED, (adp) => m.at(adp).tierIndex);
+    const flags = tierDividerFlags(ordered.map((adp) => m.at(adp).tierIndex));
+    return { ordered, flags, m };
+  };
+
+  it('puts a tier-mate back beside his tier rather than across the line', () => {
+    const { ordered } = drawn();
+    // 55.3 belongs with 53.2 and was being drawn below the divider, among the
+    // players it is two picks better than.
+    expect(ordered.slice(0, 4)).toEqual([53.2, 55.3, 65.8, 63.4]);
+  });
+
+  it('draws each break once, between the bands it separates', () => {
+    const { ordered, flags, m } = drawn();
+    const opensAt = ordered.filter((_, i) => flags[i]);
+    expect(opensAt).toEqual([65.8, 81, 90.2]);
+    // And the tier above every line is complete before the line is drawn.
+    for (let i = 1; i < ordered.length; i++) {
+      const above = m.at(ordered[i - 1]!).tierIndex!;
+      const here = m.at(ordered[i]!).tierIndex!;
+      expect(here).toBeGreaterThanOrEqual(above);
+      expect(flags[i]).toBe(here > above);
+    }
+  });
+
+  /** The contradiction the reader spotted: a line said three, a chip said two. */
+  it('agrees with the tags drawn beside it', () => {
+    const { ordered, flags, m } = drawn();
+    const band = (start: number) => {
+      const out = [ordered[start]!];
+      for (let i = start + 1; i < ordered.length && !flags[i]; i++) out.push(ordered[i]!);
+      return out;
+    };
+    const second = band(ordered.findIndex((_, i) => flags[i]));
+    expect(second).toEqual([65.8, 63.4]);
+    for (const adp of second) {
+      expect(m.at(adp).tierSize).toBe(second.length);
+      expect(tierCliffProximity(m.at(adp))).toBe(second.length);
+    }
+  });
+
+  it('keeps the ranking inside a band', () => {
+    // 65.8 still comes before 63.4: they are one decision, and which of them to
+    // prefer is exactly what the ranking is for.
+    const { ordered } = drawn();
+    expect(ordered.indexOf(65.8)).toBeLessThan(ordered.indexOf(63.4));
+    expect(ordered.indexOf(81)).toBeLessThan(ordered.indexOf(79.4));
+  });
+});
+
+describe('grouping rows into bands', () => {
+  const rows = (tiers: (number | null)[]) => tiers.map((tier, i) => ({ tier, id: i }));
+  const tiersOf = (out: { tier: number | null }[]) => out.map((r) => r.tier);
+
+  it('is stable inside a band', () => {
+    const out = groupByTier(rows([0, 1, 0, 1, 2]), (r) => r.tier);
+    expect(tiersOf(out)).toEqual([0, 0, 1, 1, 2]);
+    expect(out.map((r) => r.id)).toEqual([0, 2, 1, 3, 4]);
+  });
+
+  it('leaves an already-ordered board exactly as it was', () => {
+    const before = rows([0, 0, 1, 2, 2]);
+    expect(groupByTier(before, (r) => r.tier)).toEqual(before);
+  });
+
+  it('keeps players with no draft order at the tail', () => {
+    const out = groupByTier(rows([1, null, 0, null]), (r) => r.tier);
+    expect(tiersOf(out)).toEqual([0, 1, null, null]);
+  });
+
+  it('handles an empty board', () => {
+    expect(groupByTier([], () => null)).toEqual([]);
   });
 });
 
