@@ -123,9 +123,11 @@ export interface TierCliff {
   remainingInTier: number;
   /** Every available player in his tier, not only the ones after him. */
   tierSize: number;
-  /** Whether a real cliff closes the tier, rather than the board running out. */
+  /** Whether a gap worth warning about closes the tier, rather than the board running out. */
   tierEndsAtCliff: boolean;
-  /** The cliff gap that opened this tier; null for the best tier left. */
+  /** Whether any tier boundary closes it, warning-grade or not. */
+  tierEndsAtBoundary: boolean;
+  /** The boundary gap that opened this tier; null for the best tier left. */
   tierGapBefore: number | null;
   gapToNextTier: number | null;
   survivingTierMates: number;
