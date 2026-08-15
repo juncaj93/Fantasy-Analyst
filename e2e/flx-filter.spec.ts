@@ -37,13 +37,23 @@ test.describe('the draft board', () => {
     await expect(page.getByTestId('board-list')).toBeVisible();
   });
 
-  test('offers FLX beside ALL, not among the positions', async ({ page }) => {
+  /**
+   * FLX is last, after the positions rather than among them.
+   *
+   * It is a view spanning three positions, not a fourth one, and a chip that
+   * reads like a position sitting between the real ones invites exactly the
+   * confusion this filter must not cause.
+   */
+  test('offers FLX in the last spot, after the positions', async ({ page }) => {
     const chips = await page.getByTestId('flx-filter').textContent();
     expect(chips).toContain('FLX');
     const labels = await page
       .locator('.filter-row .chip')
       .evaluateAll((els) => els.map((e) => e.textContent?.trim() ?? ''));
-    expect(labels.slice(0, 3)).toEqual(['★', 'ALL', 'FLX']);
+    expect(labels.slice(0, 2)).toEqual(['★', 'ALL']);
+    expect(labels.at(-1)).toBe('FLX');
+    // ...and it is the only one there: the positions keep their own order.
+    expect(labels.slice(2, -1)).toEqual(['QB', 'RB', 'WR', 'TE']);
   });
 
   test('leaves exactly RB, WR and TE on the board', async ({ page }) => {

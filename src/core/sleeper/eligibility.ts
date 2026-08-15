@@ -184,6 +184,24 @@ export function resolveComparisonSlot(
   };
 }
 
+/**
+ * The order positions are read in, everywhere they are listed.
+ *
+ * Not alphabetical: this is the order every fantasy site, every draft board and
+ * every roster page has used for decades, and a chip row that puts tight ends
+ * before receivers because T sorts before W reads as a bug to anyone who plays.
+ * Anything the app does not know about follows, sorted, so an unusual league
+ * slot still appears rather than vanishing.
+ */
+export const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+
+export function orderPositions(positions: Iterable<string>): string[] {
+  const set = new Set([...positions].map(normalizePosition));
+  const known = POSITION_ORDER.filter((p) => set.has(p));
+  const rest = [...set].filter((p) => !POSITION_ORDER.includes(p)).sort();
+  return [...known, ...rest];
+}
+
 /** Every distinct slot this league starts, with what each accepts. */
 export function slotsOf(shape: RosterShape): { slot: string; accepts: string[] }[] {
   const out: { slot: string; accepts: string[] }[] = [];

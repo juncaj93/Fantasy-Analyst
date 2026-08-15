@@ -10,8 +10,10 @@ import { describe, expect, it } from 'vitest';
 import {
   FLEX_POSITIONS,
   FLX_FILTER,
+  POSITION_ORDER,
   isFlexEligible,
   offersFlexFilter,
+  orderPositions,
   positionMatchesFilter,
   resolveComparisonSlot,
   slotAccepts,
@@ -96,6 +98,29 @@ describe('the FLX filter', () => {
     expect(offersFlexFilter(startablePositions(ONE_FLEX))).toBe(true);
     expect(offersFlexFilter(startablePositions(NO_FLEX))).toBe(true);
     expect(offersFlexFilter(['QB', 'DEF'])).toBe(false);
+  });
+});
+
+describe('the order positions are read in', () => {
+  /**
+   * Not alphabetical, and shared.
+   *
+   * Sorting puts TE before WR, which reads as a bug to anyone who has used a
+   * fantasy site. This lived privately in the draft board while two other chip
+   * rows sorted their own — same chips, two orders, one app.
+   */
+  it('is the conventional fantasy order, not alphabetical', () => {
+    expect(orderPositions(['TE', 'QB', 'WR', 'RB'])).toEqual(['QB', 'RB', 'WR', 'TE']);
+    expect(orderPositions(['WR', 'TE'])).toEqual(['WR', 'TE']);
+    expect(orderPositions(startablePositions(ONE_FLEX))).toEqual(['QB', 'RB', 'WR', 'TE']);
+  });
+
+  it('keeps a position it has never heard of, rather than dropping it', () => {
+    expect(orderPositions(['DL', 'QB', 'LB'])).toEqual(['QB', 'DL', 'LB']);
+  });
+
+  it('is one list, so no screen can invent a second order', () => {
+    expect(POSITION_ORDER).toEqual(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
   });
 });
 
