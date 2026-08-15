@@ -51,7 +51,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
  * both live in core so they can be checked without a browser.
  */
-import { tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+import { groupByTier, tierCliffProximity, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 /*
  * Staying level with Sleeper without being asked.
@@ -742,10 +742,22 @@ interface BoardItem {
   divider: boolean;
 }
 
-/** The rows, each told whether a tier boundary falls above it. */
+/**
+ * The rows, in tier order, each told whether a tier boundary falls above it.
+ *
+ * The grouping and the flags have to be computed over the same sequence, and
+ * that sequence is not the one the server sent: a divider claims that
+ * everything above it is one tier, which is only true once the tiers are
+ * contiguous. See `groupByTier`.
+ *
+ * Off entirely on the mixed board, where there is no single position for a
+ * boundary to be about — there the ranking is the order, untouched.
+ */
 function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
-  const flags = enabled ? tierDividerFlags(recs.map((rec) => rec.tierCliff.tierIndex)) : [];
-  return recs.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
+  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false }));
+  const ordered = groupByTier(recs, (rec) => rec.tierCliff.tierIndex);
+  const flags = tierDividerFlags(ordered.map((rec) => rec.tierCliff.tierIndex));
+  return ordered.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
 }
 
 /**
