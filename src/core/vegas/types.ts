@@ -109,12 +109,43 @@ export interface RawPropQuote {
   book: string;
 }
 
+/**
+ * The two numbers that describe a game rather than a player.
+ *
+ * They arrive in the same response as the player props and cost nothing extra:
+ * this provider has no way to answer with an event's players and withhold its
+ * game lines, and the bill is one entity per event either way. Discarding them
+ * — which is what happened until Start/Sit needed a game script — was paying
+ * for a number and throwing it away.
+ *
+ * A spread is carried with the team it belongs to rather than as "the home
+ * spread", because "home" is a position in somebody else's payload and the sign
+ * of a spread is the one thing that must not be inferred. A spread whose team
+ * cannot be established is discarded: a game-script model fed a handicap with
+ * the wrong sign is worse than one fed nothing at all.
+ */
+export interface GameLines {
+  /** The over/under on the two teams' combined score. */
+  total: number | null;
+  /** The handicap, from `spreadTeam`'s point of view. Negative = favoured. */
+  spread: number | null;
+  /** Whose handicap it is, as the provider names the team. */
+  spreadTeam: string | null;
+}
+
 export interface RawPropSet {
   provider: string;
   eventId: string;
   gameStart: string;
   fetchedAt: string;
   quotes: RawPropQuote[];
+  /**
+   * The game's own lines, when the provider published them.
+   *
+   * Optional because not every adapter reads them and a provider may simply not
+   * have quoted the game yet. Absent is unknown, never zero.
+   */
+  gameLines?: GameLines;
   /** Untouched provider payload, persisted for audit. */
   raw: unknown;
 }

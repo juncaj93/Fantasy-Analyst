@@ -129,6 +129,23 @@ const COLUMNS = [
   'receptions',
   'target_share',
   'wopr',
+  /*
+   * Everything below here was added for the start/sit intelligence pass, and
+   * every one of them is free: the deepest column already read is `wopr` at
+   * index 64 and all of these sit at or before it, so `extractFields` scans
+   * exactly as far into each line as it did with thirteen columns. Nine more
+   * `Number()` calls on the ~350 rows a week that survive the position filter
+   * is not a measurable cost against a 10ms allowance.
+   */
+  'opponent_team',
+  'passing_yards',
+  'passing_tds',
+  'rushing_yards',
+  'rushing_tds',
+  'receiving_yards',
+  'receiving_tds',
+  'receiving_air_yards',
+  'air_yards_share',
 ] as const;
 
 type Column = (typeof COLUMNS)[number];
@@ -152,6 +169,22 @@ export interface UsageRow {
   targetShare: number | null;
   /** Weighted opportunity rating: 1.5 × target share + 0.7 × air-yards share. */
   wopr: number | null;
+  /**
+   * The defence he faced, as the source spells the team. The half of a matchup
+   * nothing here used to keep.
+   */
+  opponent: string;
+  /** Production, so a stored game can be scored without a second source. */
+  passYards: number | null;
+  passTds: number | null;
+  rushYards: number | null;
+  rushTds: number | null;
+  recYards: number | null;
+  recTds: number | null;
+  /** Air yards on his targets. Divided by targets this is depth of target. */
+  receivingAirYards: number | null;
+  /** His share of the team's air yards, 0–1. */
+  airYardsShare: number | null;
 }
 
 export interface ParsedUsage {
@@ -184,8 +217,19 @@ export interface ParsedUsage {
  * a readable order, which is the only way it was ever going to come back.
  */
 export function extractFields(line: string, indices: readonly number[]): string[] {
+  /*
+   * A column the header does not have is asked for as -1, and is dropped here
+   * rather than searched for.
+   *
+   * It cannot simply be sorted with the rest: -1 sorts first, never matches a
+   * field index, and — because the scan only moves forwards — the cursor would
+   * wait for it forever and return an empty string for *every* column. One
+   * absent column would silently empty the whole row, which is precisely the
+   * class of failure the sort above exists to prevent.
+   */
   const order = indices
     .map((column, position) => ({ column, position }))
+    .filter((entry) => entry.column >= 0)
     .sort((a, b) => a.column - b.column);
   const out: string[] = new Array(indices.length).fill('');
 
@@ -391,6 +435,15 @@ export function parseWeeklyUsage(
       receptions: numberOrNull(cell('receptions')),
       targetShare: numberOrNull(cell('target_share')),
       wopr: numberOrNull(cell('wopr')),
+      opponent: cell('opponent_team').toUpperCase(),
+      passYards: numberOrNull(cell('passing_yards')),
+      passTds: numberOrNull(cell('passing_tds')),
+      rushYards: numberOrNull(cell('rushing_yards')),
+      rushTds: numberOrNull(cell('rushing_tds')),
+      recYards: numberOrNull(cell('receiving_yards')),
+      recTds: numberOrNull(cell('receiving_tds')),
+      receivingAirYards: numberOrNull(cell('receiving_air_yards')),
+      airYardsShare: numberOrNull(cell('air_yards_share')),
     });
   }
 

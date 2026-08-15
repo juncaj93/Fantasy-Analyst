@@ -149,6 +149,10 @@ export class VegasRefreshService {
           spent += 1;
           requests += 1;
           await this.persist(result.snapshot.raw);
+          // The same response carries the game's own total and spread. Stored
+          // here as well as at discovery, because these move during the week
+          // and this is the fetch that happens on a Sunday morning.
+          await this.storeGameLines(result.snapshot.raw);
           await this.usage.record({
             source: opts.manual ? 'manual' : 'weekly',
             eventId: event.eventId,
@@ -313,6 +317,17 @@ export class VegasRefreshService {
           kickoff: row.set.gameStart || null,
           homeTeam: teams[0] ?? null,
           awayTeam: teams[1] ?? null,
+          /*
+           * The game's own lines, out of the response already paid for.
+           *
+           * The spread travels with the team it belongs to, which matters here
+           * specifically: `homeTeam` in this table means "a team we asked
+           * about" and not "the home side", so a spread stored against a column
+           * position would be read backwards for half the slate.
+           */
+          total: row.set.gameLines?.total ?? null,
+          spread: row.set.gameLines?.spread ?? null,
+          spreadTeam: row.set.gameLines?.spreadTeam ?? null,
         })),
       );
 
@@ -342,6 +357,30 @@ export class VegasRefreshService {
       await this.usage.record({ source: 'schedule', entities: 1, requests: 1, outcome: 'failed', reason: message });
       return { entities: 1, requests: 1, events: 0 };
     }
+  }
+
+  /**
+   * Keep the game's own lines beside its event row.
+   *
+   * A no-op when the provider did not quote the game, which leaves whatever was
+   * last known in place — the repo COALESCEs, so a quiet week cannot erase a
+   * spread the app already had.
+   */
+  private async storeGameLines(set: RawPropSet): Promise<void> {
+    const lines = set.gameLines;
+    if (!lines || (lines.total == null && lines.spread == null)) return;
+    await this.events.upsertMany([
+      {
+        eventId: set.eventId,
+        provider: set.provider,
+        kickoff: set.gameStart || null,
+        homeTeam: null,
+        awayTeam: null,
+        total: lines.total,
+        spread: lines.spread,
+        spreadTeam: lines.spreadTeam,
+      },
+    ]);
   }
 
   /** Resolve names to players and store the consensus rows Start/Sit reads. */

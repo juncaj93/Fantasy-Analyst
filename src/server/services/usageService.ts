@@ -44,8 +44,52 @@ import { diffUsage, keyOf, type ComparableUsage } from '../../core/usage/diff.ts
 import { toRoleMetrics } from '../../core/usage/role.ts';
 import { fetchWeeklyUsage, type FetchLike, type UsageRow } from '../../core/usage/nflverse.ts';
 import { WEEKLY_THRESHOLDS, type RoleMetric } from '../../core/startsit/decisions.ts';
+import {
+  DEFENSE,
+  buildDefenseTendencies,
+  type DefenseGame,
+  type DefenseTendencyIndex,
+} from '../../core/startsit/defense.ts';
+import { classifyRole } from '../../core/startsit/roleProfile.ts';
 
 export const USAGE_SOURCE = 'nflverse';
+
+/**
+ * How far back the defensive tendency model looks.
+ *
+ * Eight weeks: long enough that a defence has faced four or five players of a
+ * given role, short enough to be about this version of the defence rather than
+ * about the one that had its cornerback in September. The brief asks for the
+ * current season weighted toward the recent four to six games, and
+ * `buildDefenseTendencies` applies that weighting inside this window.
+ */
+export const TENDENCY_WINDOW_WEEKS = 8;
+
+/**
+ * One game, on a scale that does not depend on a league's settings.
+ *
+ * Half-PPR, because the tendency table is shared by every league and a defence
+ * cannot allow a different amount depending on who is asking. The number is
+ * only ever compared with another number on this same scale — a defence's
+ * allowance against the same players' baselines — so the absolute value never
+ * escapes into a league's own points.
+ *
+ * Null when the row carries no production columns at all, which is every row
+ * written before migration 0018.
+ */
+function neutralFantasyPoints(week: StoredUsageWeek): number | null {
+  const fields = [week.passYards, week.passTds, week.rushYards, week.rushTds, week.recYards, week.recTds];
+  if (fields.every((f) => f == null)) return null;
+  return (
+    (week.passYards ?? 0) / 25 +
+    (week.passTds ?? 0) * 4 +
+    (week.rushYards ?? 0) / 10 +
+    (week.rushTds ?? 0) * 6 +
+    (week.recYards ?? 0) / 10 +
+    (week.recTds ?? 0) * 6 +
+    (week.receptions ?? 0) * 0.5
+  );
+}
 
 /**
  * How long one invocation may own the ingest.
@@ -445,6 +489,15 @@ export class UsageService {
         receptions: row.receptions,
         targetShare: row.targetShare,
         wopr: row.wopr,
+        opponent: row.opponent || null,
+        passYards: row.passYards,
+        passTds: row.passTds,
+        rushYards: row.rushYards,
+        rushTds: row.rushTds,
+        recYards: row.recYards,
+        recTds: row.recTds,
+        receivingAirYards: row.receivingAirYards,
+        airYardsShare: row.airYardsShare,
         gsisId: row.gsisId,
         source: USAGE_SOURCE,
         publishedAt,
@@ -503,6 +556,90 @@ export class UsageService {
       if (metrics.length > 0) out.set(player.playerId, metrics);
     }
     return out;
+  }
+
+  /**
+   * The stored weeks themselves, for the reads that need more than a trend.
+   *
+   * `roleMetricsFor` answers "is his role changing" and deliberately hands back
+   * only the two series that can disagree. Opportunity level, role
+   * classification and touchdown dependency each need the raw rows, and each
+   * asks a different question of them — so they get the rows rather than three
+   * more bespoke projections of the same read.
+   */
+  async weeksFor(
+    playerIds: string[],
+    season = usageSeason(this.now()),
+  ): Promise<Map<string, StoredUsageWeek[]>> {
+    if (playerIds.length === 0) return new Map();
+    return this.repo.weeksFor(playerIds, season).catch(() => new Map<string, StoredUsageWeek[]>());
+  }
+
+  /**
+   * What every defence has given up, by role, over the recent part of a season.
+   *
+   * Built here rather than in a repository because it is a model rather than a
+   * read: every game in the window is bucketed by the *role* of the player who
+   * produced it, scored on one league-neutral scale, and measured against what
+   * that player normally does. See `core/startsit/defense.ts` for why each of
+   * those three steps is there.
+   *
+   * One query, one pass, and an empty index when the usage store is empty —
+   * which is the ordinary state in September and makes the matchup component
+   * say "no opponent tendency" rather than inventing one from four games.
+   */
+  async defenseTendencies(season = usageSeason(this.now())): Promise<DefenseTendencyIndex> {
+    const coverage = await this.repo.coverage(season).catch(() => null);
+    const latest = coverage?.latestWeek ?? null;
+    if (latest == null || latest < DEFENSE.minWeeks) return new Map();
+
+    const rows = await this.repo
+      .leagueWeeksSince(season, Math.max(1, latest - TENDENCY_WINDOW_WEEKS + 1))
+      .catch(() => [] as StoredUsageWeek[]);
+    if (rows.length === 0) return new Map();
+
+    // Each player's own rows, so his role and his baseline come from the same
+    // window the defences are measured over.
+    const byPlayer = new Map<string, StoredUsageWeek[]>();
+    for (const row of rows) {
+      const list = byPlayer.get(row.playerId);
+      if (list) list.push(row);
+      else byPlayer.set(row.playerId, [row]);
+    }
+
+    const games: DefenseGame[] = [];
+    for (const [, weeks] of byPlayer) {
+      const position = weeks.find((w) => w.position)?.position ?? '';
+      if (!position) continue;
+      const bucket = classifyRole(position, weeks).bucket;
+      const scored = weeks.map((w) => ({ week: w, points: neutralFantasyPoints(w) })).filter((g) => g.points != null);
+      if (scored.length === 0) continue;
+      const baseline = scored.reduce((a, g) => a + (g.points ?? 0), 0) / scored.length;
+
+      for (const game of scored) {
+        if (!game.week.opponent) continue;
+        games.push({
+          defense: game.week.opponent.toUpperCase(),
+          week: game.week.week,
+          position: position.toUpperCase(),
+          bucket,
+          points: game.points!,
+          /*
+           * The baseline includes this game.
+           *
+           * Leaving it out would make every residual partly a measure of the
+           * player's own variance around a mean he is not in, and with five to
+           * eight games in the window the correction is a fraction of a point.
+           * Including it is the conservative choice: it shrinks residuals
+           * slightly, so the matchup component understates rather than
+           * overstates.
+           */
+          baseline,
+        });
+      }
+    }
+
+    return buildDefenseTendencies(games, latest);
   }
 
   async health(season = usageSeason(this.now())): Promise<UsageHealth> {

@@ -423,6 +423,16 @@ export class DraftBoardService {
         profile,
         rosterCounts,
         totalPicks: teams * rounds,
+        /*
+         * The same reconstruction `rosterCounts` is derived from, but keeping
+         * the NFL team — which a count per position throws away and the
+         * concentration component needs. Sent only when the roster is actually
+         * known: with no identified roster the component scores nothing rather
+         * than reporting a well-spread team the user has not drafted.
+         */
+        rosterPlayers: myRosterRecord
+          ? live.players.map((p) => ({ position: p.position, team: p.team }))
+          : undefined,
       },
     )
       .slice(0, opts.limit ?? 50);

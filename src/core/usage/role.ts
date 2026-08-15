@@ -21,6 +21,26 @@ export interface UsageWeek {
   receptions: number | null;
   targetShare: number | null;
   wopr: number | null;
+  /*
+   * The 0018 columns, optional because a week stored before that migration does
+   * not carry them and because the source itself leaves several blank. Absent
+   * and null mean the same thing everywhere they are read: not known.
+   *
+   * Deliberately *not* fed to `toRoleMetrics`. The role detector's confidence
+   * rests on metrics that can genuinely disagree, and receiving yards agree
+   * with targets almost by construction — see the note on the metric table
+   * below. These are read by `core/startsit/tdDependency.ts` and
+   * `core/startsit/roleProfile.ts`, which are asking different questions.
+   */
+  opponent?: string | null;
+  passYards?: number | null;
+  passTds?: number | null;
+  rushYards?: number | null;
+  rushTds?: number | null;
+  recYards?: number | null;
+  recTds?: number | null;
+  receivingAirYards?: number | null;
+  airYardsShare?: number | null;
 }
 
 /**

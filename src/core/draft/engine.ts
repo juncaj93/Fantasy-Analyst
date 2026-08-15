@@ -23,7 +23,9 @@ import {
 } from './decisions.ts';
 import { NO_CLIFF, buildPositionTierMap, type PositionTierMap, type TierCliff } from './tiers.ts';
 import { SEPARATION, draftScore, separationScore } from './score.ts';
-import { computeNeed, computeScarcity, type RosterCounts } from './need.ts';
+import { CONCENTRATION, assessConcentration, type ConcentrationResult, type RosteredPlayer } from './concentration.ts';
+import { OPPORTUNITY, evaluateOpportunity, type OpportunityResult } from './opportunity.ts';
+import { computeNeed, computeScarcity, type NeedBreakdown, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
 import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
@@ -178,6 +180,16 @@ export interface DraftContext {
   rosterCounts: RosterCounts;
   /** Total picks in the draft, used to bound value normalisation. */
   totalPicks: number;
+  /**
+   * Who the user has already drafted, with their NFL teams.
+   *
+   * Optional, and absent means the concentration component scores nothing at
+   * all rather than assuming an empty roster — a board built before the live
+   * roster is known should not tell the user their offences are nicely spread.
+   * `rosterCounts` cannot stand in for it: a count per position has no idea
+   * which NFL team anybody plays for.
+   */
+  rosterPlayers?: RosteredPlayer[];
 }
 
 export interface ComponentScore {
@@ -242,10 +254,41 @@ export interface DraftRecommendation {
   myGuy: MyGuyFlag;
   /** Take Now / Can Probably Wait / ... */
   wait: WaitGuidance;
+  /**
+   * What passing on him would cost: scarcity of comparable alternatives, and
+   * the gap to the best one expected to survive to your next pick.
+   */
+  opportunity: OpportunityResult;
+  /** Overlap with the NFL offences already on the user's roster. */
+  concentration: ConcentrationResult;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** Before pass two has run, nothing is known about the cost of waiting. */
+const NO_OPPORTUNITY: OpportunityResult = {
+  score: 0,
+  opportunityScore: 0,
+  replacementScore: 0,
+  expectedComparableSurvivors: null,
+  expectedReplacement: null,
+  replacementValueRaw: null,
+  replacementValueNet: null,
+  confidence: 'low',
+  reason: 'not yet measured',
+  driver: null,
+};
+
+/** What a board with no known roster says about NFL-team overlap: nothing. */
+const NO_CONCENTRATION: ConcentrationResult = {
+  score: 0,
+  skillCount: 0,
+  hasQuarterback: false,
+  isQuarterbackOfOwned: false,
+  display: 'your drafted roster is not known yet',
+  driver: null,
+};
 
 /**
  * Market value = currentPick - ADP (docs/03_DRAFT_ENGINE.md).
@@ -375,6 +418,11 @@ export function rankAvailablePlayers(
     tierMaps.set(position, buildPositionTierMap(position, adps, { picksUntilNext }));
   }
   const teamCount = estimateTeamCount(ctx);
+  // Round and draft length, derived from the same team estimate the rest of the
+  // engine uses, so the concentration ramp cannot disagree with the board about
+  // how late it is.
+  const round = Math.max(1, Math.ceil(ctx.currentPick / teamCount));
+  const totalRounds = Math.max(1, Math.round(ctx.totalPicks / teamCount));
   const needRamp = needUrgency(ctx.currentPick, ctx.totalPicks);
   const needWeight = round3(weights.need * needRamp);
 
@@ -565,6 +613,32 @@ export function rankAvailablePlayers(
       unknown: false,
     });
 
+    /*
+     * Roster texture: one NFL offence, and how much of it you already own.
+     *
+     * Scored in pass one because it depends on the user's roster and not at all
+     * on the rest of the board — unlike separation and opportunity cost below,
+     * which cannot be answered until every other player's composite exists.
+     */
+    const concentration = ctx.rosterPlayers
+      ? assessConcentration({
+          position: player.position,
+          team: player.team,
+          roster: ctx.rosterPlayers,
+          round,
+          totalRounds,
+        })
+      : NO_CONCENTRATION;
+    components.push({
+      key: 'team_concentration',
+      label: 'NFL team overlap',
+      display: ctx.rosterPlayers ? concentration.display : 'your drafted roster is not known yet',
+      score: concentration.score,
+      weight: CONCENTRATION.weight,
+      contribution: round3(concentration.score * CONCENTRATION.weight),
+      unknown: ctx.rosterPlayers == null,
+    });
+
     const wait = assessWait({
       survivalProbability: survival.probability,
       cliff,
@@ -615,10 +689,13 @@ export function rankAvailablePlayers(
       avoid,
       myGuy: flag,
       wait,
+      // Both filled in by the second pass, which needs every base composite.
+      opportunity: NO_OPPORTUNITY,
+      concentration,
     } satisfies DraftRecommendation;
   });
 
-  applySeparation(recommendations);
+  applyBoardComponents(recommendations, { needs, nextPick: ctx.nextPick });
 
   /*
    * Priced players first, then by total, then by ADP, then by name.
@@ -670,10 +747,13 @@ export function rankAvailablePlayers(
  * Mutates in place, because the recommendations are freshly built above and
  * nothing else has seen them yet.
  */
-function applySeparation(recommendations: DraftRecommendation[]): void {
-  const byPosition = new Map<string, { id: string; base: number }[]>();
+function applyBoardComponents(
+  recommendations: DraftRecommendation[],
+  ctx: { needs: Record<string, NeedBreakdown>; nextPick: number | null },
+): void {
+  const byPosition = new Map<string, { id: string; base: number; survival: number | null }[]>();
   for (const rec of recommendations) {
-    const entry = { id: rec.playerId, base: rec.total };
+    const entry = { id: rec.playerId, base: rec.total, survival: rec.survivalProbability };
     const list = byPosition.get(rec.position);
     if (list) list.push(entry);
     else byPosition.set(rec.position, [entry]);
@@ -681,10 +761,11 @@ function applySeparation(recommendations: DraftRecommendation[]): void {
 
   for (const rec of recommendations) {
     const peers = byPosition.get(rec.position) ?? [];
+    const others = peers.filter((p) => p.id !== rec.playerId);
     const separation = separationScore({
       base: rec.total,
       // Himself removed: a player is not one of his own alternatives.
-      positionBases: peers.filter((p) => p.id !== rec.playerId).map((p) => p.base),
+      positionBases: others.map((p) => p.base),
     });
     const component: ComponentScore = {
       key: 'separation',
@@ -695,15 +776,49 @@ function applySeparation(recommendations: DraftRecommendation[]): void {
       contribution: round3(separation.score * SEPARATION.weight),
       unknown: separation.comparedWith === 0,
     };
-    rec.components.push(component);
-    rec.total = round3(rec.total + component.contribution);
+    /*
+     * What waiting would cost, measured from the same settled composites.
+     *
+     * Reads the base — the composite before separation was added — and is told
+     * the separation gap explicitly, so the distance between him and the
+     * players behind him is paid for exactly once. See `opportunity.ts`.
+     */
+    const opportunity = evaluateOpportunity({
+      base: rec.total,
+      alternatives: others.map((p) => ({ base: p.base, survival: p.survival })),
+      separationGap: separation.gap ?? 0,
+      needScore: ctx.needs[rec.position]?.score ?? 0.5,
+      nextPick: ctx.nextPick,
+    });
+    const opportunityComponent: ComponentScore = {
+      key: 'opportunity',
+      label: 'Cost of waiting',
+      display: opportunity.reason,
+      score: opportunity.score,
+      weight: OPPORTUNITY.weight,
+      contribution: round3(opportunity.score * OPPORTUNITY.weight),
+      unknown: opportunity.expectedReplacement == null,
+    };
+
+    rec.components.push(component, opportunityComponent);
+    rec.total = round3(rec.total + component.contribution + opportunityComponent.contribution);
     rec.score = draftScore(rec.total);
+    rec.opportunity = opportunity;
 
     // Worth a sentence only when it is most of the component. Below that it is
     // a tie-breaker, and a bullet saying "0.1 clear of the next three" is the
     // kind of line this card keeps having to delete.
     if (separation.score >= 0.5) {
       rec.reasons.push(`little left like him at ${rec.position}: ${separation.reason}${picksMoved(component.contribution)}`);
+    }
+    if (opportunity.driver) {
+      rec.reasons.push(`${opportunity.driver}${picksMoved(opportunityComponent.contribution)}`);
+    }
+    if (rec.concentration.driver) {
+      const concentrationComponent = rec.components.find((c) => c.key === 'team_concentration');
+      const moved = concentrationComponent ? picksMoved(concentrationComponent.contribution) : '';
+      if (rec.concentration.score < 0) rec.counterpoints.push(`${rec.concentration.driver}${moved}`);
+      else rec.reasons.push(`${rec.concentration.driver}${moved}`);
     }
   }
 }
