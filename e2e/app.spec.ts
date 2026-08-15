@@ -979,8 +979,14 @@ test.describe('draft room', () => {
       expect(tes.length).toBeGreaterThanOrEqual(4);
       expect(tes[0]!.tierCliff).toMatchObject({ tierIndex: 0, tierSize: 2, tierEndsAtCliff: true });
       expect(tes[1]!.tierCliff).toMatchObject({ tierIndex: 0, tierSize: 2, tierEndsAtCliff: true });
-      // The group below is not the group in play and carries no warning.
+      /*
+       * The group below carries no warning — not because it sits below the one
+       * in play, which no longer disqualifies anything, but because it is the
+       * last tier at the position. It ends where the board ends, and running
+       * out of board is not a fact about the position.
+       */
       expect(tes[2]!.tierCliff.tierIndex).toBe(1);
+      expect(tes[2]!.tierCliff.tierEndsAtCliff).toBe(false);
     });
   });
 

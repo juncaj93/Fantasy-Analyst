@@ -196,6 +196,29 @@ for (const [position, players] of [...byPosition].sort()) {
     `${cliffs.length} of ${priced.length}`,
   );
 
+  /*
+   * The `Tier cliff · N away` tags, recomputed here the way the board computes
+   * them — see `tierCliffProximity`.
+   *
+   * Printed because they went missing once and nothing said so: the rule used
+   * to require the group to be tier 0, which granular tiers made almost
+   * impossible to satisfy, and the board quietly stopped warning about
+   * anything. A count of zero across a whole position is the symptom, so it is
+   * a line in this probe rather than something to notice on a phone.
+   */
+  const tagged = priced.filter(
+    (p) => p.tierCliff?.tierEndsAtCliff === true && (p.tierCliff.tierSize === 1 || p.tierCliff.tierSize === 2),
+  );
+  console.log(
+    `   tier-cliff tags: ${tagged.length}` +
+      (tagged.length ? ` — ${tagged.map((p) => `${p.name} (${p.tierCliff.tierSize} away)`).join(', ')}` : ''),
+  );
+  check(
+    `${position}: tags stay a small minority`,
+    tagged.length <= Math.max(2, Math.ceil(priced.length * 0.15)),
+    `${tagged.length} of ${priced.length}`,
+  );
+
   console.log('');
 }
 

@@ -16,27 +16,43 @@ import type { TierCliff } from './tiers.ts';
 /**
  * `Tier cliff · N away`, or nothing at all.
  *
- * Answers one question: is this player among the last one or two of the tier
- * that is actually in play at his position? Three conditions, each earning its
- * place:
+ * Answers one question: is this player among the last one or two of his group,
+ * with a drop worth warning about immediately after it? Two conditions, each
+ * earning its place:
  *
- *   - **his tier is the current one.** Tier 0 is the best group still on the
- *     board. A player in the tier below is not about to run out of anything —
- *     the group above him has to go first, and when it does his becomes tier 0
- *     and the question is asked again.
- *   - **a real cliff closes it.** The last tier at a position ends because the
- *     board ended, not because the position did, and "last group left" is not a
- *     warning about scarcity.
+ *   - **a warning-grade cliff closes his tier.** Not merely a boundary — since
+ *     tiers were recalibrated against local spacing, almost every tier is
+ *     closed by one of those, and a warning true of almost every card is the
+ *     wallpaper this label has already been rescued from once. `tierEndsAtCliff`
+ *     is the strict test: an absolute hole in picks, twice the local spacing,
+ *     confirmed against what follows, capped at a fifth of the position. It is
+ *     also false for the last tier at a position, which ends because the board
+ *     ended rather than because the position did.
  *   - **one or two left.** Not "somewhere in a tier that eventually has a
  *     cliff" — that describes every player in it, which is how a board comes to
  *     stamp the same warning on every tight end on it.
+ *
+ * There used to be a third: his tier had to be tier 0, the best group left. That
+ * made sense when a position had four or five tiers and tier 0 was most of the
+ * board — "the group above has to go first" was nearly always true, and the
+ * group in play was nearly always the one about to run out. It stopped making
+ * sense the moment tiers became granular. A real quarterback board now has a
+ * dozen tiers and tier 0 is its top two players, so the test threw away every
+ * useful warning on the board and kept only the rarest: on the live board it
+ * suppressed a two-man group above a 14-pick hole, a one-man group above a
+ * 21-pick hole, and four more like them, and fired for nothing at all.
+ *
+ * It was also never quite true. This is drawn on the mixed board, which is
+ * ordered by the ranking and not by draft order, so a player in the tier below
+ * routinely sits *above* tier 0 on screen. "The group above him goes first" is
+ * an argument about draft order that the list he is being drawn into does not
+ * make.
  *
  * The count is of the position's tier, not of anything about the list this is
  * rendered into, so it falls the moment one of them is drafted, whoever drafts
  * them and wherever they sat on screen.
  */
 export function tierCliffProximity(tier: TierCliff): number | null {
-  if (tier.tierIndex !== 0) return null;
   if (!tier.tierEndsAtCliff) return null;
   return tier.tierSize === 1 || tier.tierSize === 2 ? tier.tierSize : null;
 }
