@@ -25,6 +25,15 @@
  *   - scoring in one or two weeks out of six, on thin volume, is luck. That is
  *     what the penalty is for.
  *
+ * Both halves are required, and the second is what stops the first from being
+ * fooled. A receiver seeing four targets a game who has scored in four of six
+ * weeks has been *consistent*, and he is still fragile: consistency at
+ * replacement-level opportunity is a run of luck that has not ended yet, not a
+ * job description. So a player only earns the benign reading if his opportunity
+ * is genuinely above what a streamer at his position sees — measured against
+ * the same `OPPORTUNITY_BASELINE` the usage component uses, so the two cannot
+ * disagree about what a real role looks like.
+ *
  * The app has no red-zone or goal-line touch data — no free source keyed to an
  * id space this project already resolves publishes it — so "role" is inferred
  * from **consistency of scoring plus volume** rather than asserted from
@@ -34,6 +43,7 @@
  */
 
 import type { UsageWeek } from '../usage/role.ts';
+import { OPPORTUNITY_BASELINE } from './usageTrend.ts';
 
 export const TD_DEPENDENCY = {
   /** Games below which nothing is claimed. */
@@ -42,7 +52,7 @@ export const TD_DEPENDENCY = {
   dependent: 0.45,
   /** ...and below which it is emphatically not. */
   independent: 0.25,
-  /** Share of games with a touchdown at or above which scoring looks like a role. */
+  /** Share of games with a touchdown at or above which scoring looks repeatable. */
   roleGameShare: 0.5,
   /** Points a fully touchdown-dependent, low-volume profile is docked. */
   penalty: -1.2,
@@ -110,7 +120,12 @@ function touchdownsOf(week: UsageWeek): number | null {
   return (week.rushTds ?? 0) + (week.recTds ?? 0) + (week.passTds ?? 0) * (4 / 6);
 }
 
-export function assessTdDependency(weeks: UsageWeek[], window = 8): TdDependencyAssessment {
+export function assessTdDependency(position: string, weeks: UsageWeek[], window = 8): TdDependencyAssessment {
+  const pos = position.toUpperCase();
+  const regular = weeks
+    .filter((w) => (w.seasonType ?? 'REG').toUpperCase() === 'REG')
+    .sort((a, b) => a.week - b.week)
+    .slice(-window);
   const games = weeks
     .filter((w) => (w.seasonType ?? 'REG').toUpperCase() === 'REG')
     .sort((a, b) => a.week - b.week)
@@ -136,7 +151,16 @@ export function assessTdDependency(weeks: UsageWeek[], window = 8): TdDependency
 
   const share = round3(fromTds / total);
   const yardsPerGame = round1(yardage / games.length);
-  const scoresLikeARole = scoringGames / games.length >= TD_DEPENDENCY.roleGameShare;
+  /*
+   * Repeatable scoring, and enough of a job for it to be repeatable *from*.
+   *
+   * Both, never either. See the header: consistency on replacement-level
+   * opportunity is the exact profile the penalty exists for.
+   */
+  const opportunity = opportunityPerGame(pos, regular);
+  const replacement = OPPORTUNITY_BASELINE[pos]?.replacement ?? 0;
+  const realRole = opportunity != null && opportunity > replacement;
+  const scoresLikeARole = scoringGames / games.length >= TD_DEPENDENCY.roleGameShare && realRole;
 
   /*
    * The four outcomes, and which of them costs anything.
@@ -197,6 +221,31 @@ export function assessTdDependency(weeks: UsageWeek[], window = 8): TdDependency
     display: `${Math.round(share * 100)}% of production from scores`,
     driver: null,
   };
+}
+
+/**
+ * The opportunity behind the scoring, in the position's own units.
+ *
+ * The same quantity `assessUsage` measures, deliberately: this asks whether a
+ * player's touchdowns come from a real job, and "a real job" has to mean the
+ * same thing in both places or the two components will contradict each other on
+ * the same card.
+ */
+function opportunityPerGame(position: string, weeks: UsageWeek[]): number | null {
+  const values = weeks
+    .map((w) => {
+      if (position === 'QB') {
+        if (w.passAttempts == null && w.carries == null) return null;
+        return (w.passAttempts ?? 0) + (w.carries ?? 0) * 2.5;
+      }
+      if (position === 'RB') {
+        if (w.carries == null && w.targets == null) return null;
+        return (w.carries ?? 0) + (w.targets ?? 0);
+      }
+      return w.targets;
+    })
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  return values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
 }
 
 function clamp01(v: number): number {

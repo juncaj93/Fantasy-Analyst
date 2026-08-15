@@ -347,7 +347,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
    */
   const roleProfile = weeks.length > 0 ? classifyRole(input.player.position, weeks) : UNCLASSIFIED;
 
-  const td = weeks.length > 0 ? assessTdDependency(weeks) : NO_TD_DATA;
+  const td = weeks.length > 0 ? assessTdDependency(input.player.position, weeks) : NO_TD_DATA;
   push({
     key: 'td_dependency',
     label: 'Touchdown dependency',

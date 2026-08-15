@@ -268,3 +268,54 @@ test.describe('the comparison tool', () => {
     await expect(row).toContainText(te.score!.toFixed(1));
   });
 });
+
+/**
+ * The two controls the intelligence pass adds, drawn.
+ *
+ * Both are about a real screen rather than about the engine underneath: the
+ * mode chips have to be reachable and exclusive, and the refresh has to say
+ * what it did instead of blinking. The demo deployment has no odds key, so this
+ * also covers the honest-partial case — some sources skipped, and the page
+ * saying so rather than claiming everything is current.
+ */
+test.describe('mode and refresh', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('offers Balanced, Floor and Ceiling, with exactly one chosen', async ({ page }) => {
+    const row = page.getByTestId('mode-row');
+    await expect(row).toBeVisible();
+    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('mode-floor')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('mode-ceiling')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('recomputes when the mode changes, without losing the lineup', async ({ page }) => {
+    await page.getByTestId('mode-floor').click();
+    await expect(page.getByTestId('mode-floor')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'false');
+    // The recommendation is still there, drawn from the new answer.
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.locator('[data-testid="starter-row"]').first()).toBeVisible();
+  });
+
+  test('refreshes every source and reports what each one did', async ({ page }) => {
+    const button = page.getByTestId('startsit-refresh');
+    await expect(button).toBeVisible();
+    await button.click();
+
+    const status = page.getByTestId('refresh-status');
+    await expect(status).toBeVisible({ timeout: 20_000 });
+    // Whatever happened, the line is a statement about sources rather than a
+    // bare "done" — and weather, which has no feed, is named as such.
+    await expect(status).toContainText(/current|Updated/);
+    await expect(status).toContainText(/weather/);
+  });
+
+  test('leaves the lineup readable when a source could not be refreshed', async ({ page }) => {
+    await page.getByTestId('startsit-refresh').click();
+    await expect(page.getByTestId('refresh-status')).toBeVisible({ timeout: 20_000 });
+    // Last-good data is still on screen: a partial refresh never empties the page.
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.locator('[data-testid="starter-row"][data-starter="true"]').first()).toBeVisible();
+  });
+});

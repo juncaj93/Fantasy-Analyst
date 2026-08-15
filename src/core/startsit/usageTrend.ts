@@ -45,7 +45,7 @@ import type { UsageWeek } from '../usage/role.ts';
  * three-game series and an eight-game series are both averages rather than one
  * being a smaller number for having less history.
  */
-export const RECENCY_WEIGHTS = [3, 3, 2, 2, 1] as const;
+export const RECENCY_WEIGHTS = [4, 4, 2, 2, 1] as const;
 const TAIL_WEIGHT = 1;
 
 /**

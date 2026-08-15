@@ -224,7 +224,14 @@ export function assessMatchup(
 
   const score = clamp(chosen.residualPerGame / DEFENSE.fullResidual, -1, 1);
   const points = round2(score * DEFENSE.maxPoints);
-  const specific = chosen === role;
+  /*
+   * "Specific" means the *role* answered, which an unclassified player can
+   * never be — his lookup key is the position bucket, so the entry it finds is
+   * the generic one wearing the role slot. Describing that as a role read would
+   * claim precision the data does not have for exactly the players it has least
+   * of.
+   */
+  const specific = chosen === role && opts.bucket !== 'unclassified';
   const what = specific ? bucketPhrase(opts.bucket) : `${position}s`;
 
   return {
