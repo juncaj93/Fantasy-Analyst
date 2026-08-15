@@ -929,9 +929,8 @@ test.describe('draft room', () => {
     test('marks only the last players of the group in play, and says how many', async ({ page }) => {
       await page.getByRole('button', { name: 'ALL', exact: true }).click();
       const tags = page.getByTestId('tier-cliff-tag');
+      await expect(tags.first()).toBeVisible();
 
-      // Two tight ends left in the best group at the position; nobody else.
-      await expect(tags).toHaveCount(2);
       /*
        * Read from the accessible name rather than the printed text. The chip
        * has a short spelling on the narrow phones — four labelled numbers and
@@ -939,20 +938,45 @@ test.describe('draft room', () => {
        * part that may not change with the viewport.
        */
       for (const tag of await tags.all()) {
-        await expect(tag).toHaveAttribute('aria-label', 'Tier cliff, 2 away');
-        await expect(tag).toHaveAttribute('data-away', '2');
+        await expect(tag).toHaveAttribute('aria-label', /^Tier cliff, (last 1|2 left)$/);
+        await expect(tag).toHaveAttribute('data-remaining', /^[12]$/);
       }
 
+      /*
+       * The two invariants, asserted over the drawn board rather than by
+       * naming the positions the demo happens to warn about.
+       *
+       * At most one tier per position may warn, and a warned tier is down to
+       * one or two, so a position may contribute at most two chips — and the
+       * count of chips per position must equal the number the chips themselves
+       * claim is left. That is the whole rule, checked from the pixels.
+       */
       const tagged = await page
         .getByTestId('recommendation-row')
         .filter({ has: page.getByTestId('tier-cliff-tag') })
-        .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-position')));
-      expect(new Set(tagged)).toEqual(new Set(['TE']));
+        .evaluateAll((nodes) =>
+          nodes.map((n) => ({
+            position: n.getAttribute('data-position'),
+            remaining: n.querySelector('[data-testid="tier-cliff-tag"]')!.getAttribute('data-remaining'),
+          })),
+        );
+      expect(tagged.length).toBeGreaterThan(0);
+      const byPosition = new Map<string, string[]>();
+      for (const row of tagged) {
+        byPosition.set(row.position!, [...(byPosition.get(row.position!) ?? []), row.remaining!]);
+      }
+      for (const [position, remainings] of byPosition) {
+        expect(new Set(remainings), `${position} chips disagree about the count`).toEqual(new Set([remainings[0]]));
+        expect(remainings.length, `${position} drew more chips than its tier has players`).toBe(
+          Number(remainings[0]),
+        );
+      }
 
       // The rest of the board is not carrying the same warning, which is the
       // failure this label has already shipped once.
       const rows = await page.getByTestId('recommendation-row').count();
       expect(rows).toBeGreaterThan(6);
+      expect(tagged.length).toBeLessThan(rows / 2);
     });
 
     test('never marks a group that still has three in it', async ({ page }) => {

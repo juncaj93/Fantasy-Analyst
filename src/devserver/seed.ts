@@ -52,7 +52,7 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
    *   QB — four inside four picks of each other, then a 22-pick hole. One
    *        divider, and a top tier of four: too many to be running out.
    *   TE — two, then a 28-pick hole. The same divider, and a top tier of two,
-   *        which is what `Tier cliff · 2 away` is for.
+   *        which is what `Tier cliff · 2 left` is for.
    *
    * Nothing here is tuned to a threshold: the distribution decides, and the
    * numbers below are ordinary draft spacing for the two positions.

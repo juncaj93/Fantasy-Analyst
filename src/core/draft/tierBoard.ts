@@ -13,48 +13,100 @@
 
 import type { TierCliff } from './tiers.ts';
 
+/** What the chip says, and how many players it is counting. */
+export interface TierCliffWarning {
+  /** Available players left in the active tier. Only ever 1 or 2. */
+  remaining: 1 | 2;
+  /** `Tier cliff · last 1` / `Tier cliff · 2 left`. */
+  label: string;
+  /** `Cliff · 1` / `Cliff · 2`, for phones too narrow for the sentence. */
+  short: string;
+}
+
 /**
- * `Tier cliff · N away`, or nothing at all.
+ * `Tier cliff · last 1`, `Tier cliff · 2 left`, or nothing at all.
  *
- * Answers one question: is this player among the last one or two of his group,
- * with a drop worth warning about immediately after it? Two conditions, each
- * earning its place:
+ * One question, and the wording is the question: **if I want a player from the
+ * best tier still available at this position, how many are left before I drop
+ * into the next one?** Not how many picks away a hole is, not how far off some
+ * other tier is — a count of players in one specific group.
  *
- *   - **a warning-grade cliff closes his tier.** Not merely a boundary — since
- *     tiers were recalibrated against local spacing, almost every tier is
- *     closed by one of those, and a warning true of almost every card is the
- *     wallpaper this label has already been rescued from once. `tierEndsAtCliff`
- *     is the strict test: an absolute hole in picks, twice the local spacing,
- *     confirmed against what follows, capped at a fifth of the position. It is
- *     also false for the last tier at a position, which ends because the board
- *     ended rather than because the position did.
- *   - **one or two left.** Not "somewhere in a tier that eventually has a
- *     cliff" — that describes every player in it, which is how a board comes to
- *     stamp the same warning on every tight end on it.
+ * Three conditions.
  *
- * There used to be a third: his tier had to be tier 0, the best group left. That
- * made sense when a position had four or five tiers and tier 0 was most of the
- * board — "the group above has to go first" was nearly always true, and the
- * group in play was nearly always the one about to run out. It stopped making
- * sense the moment tiers became granular. A real quarterback board now has a
- * dozen tiers and tier 0 is its top two players, so the test threw away every
- * useful warning on the board and kept only the rarest: on the live board it
- * suppressed a two-man group above a 14-pick hole, a one-man group above a
- * 21-pick hole, and four more like them, and fired for nothing at all.
+ *   - **his tier is the active one.** Tier 0 is the best group still available:
+ *     the ladder is rebuilt from the players who are actually left, so the
+ *     moment the group above is drafted his becomes tier 0 and the question is
+ *     asked again. A group two tiers down is not endangered by anything yet —
+ *     everything above it has to go first — and warning about it is the bug this
+ *     rule exists to stop.
+ *   - **a lower tier exists.** The last tier at a position ends because the
+ *     board ended rather than because the position did, and "last one left" is
+ *     not a cliff when there is nothing to fall to.
+ *   - **one or two left.** Three is a group you can still choose from.
  *
- * It was also never quite true. This is drawn on the mixed board, which is
- * ordered by the ranking and not by draft order, so a player in the tier below
- * routinely sits *above* tier 0 on screen. "The group above him goes first" is
- * an argument about draft order that the list he is being drawn into does not
- * make.
+ * The middle test asks the *boundary*, not the alarm. That is the second half of
+ * this repair and it is deliberate: `tierEndsAtCliff` additionally demands an
+ * absolute hole in picks — twelve at quarterback — which is the right bar for
+ * "interrupt the reader about a hole" and the wrong one for "this group is down
+ * to its last player". On the reported board the best quarterback left was alone
+ * above an 8-pick step: a real break, drawn as a real divider, three and a half
+ * times the spacing around it, and under the alarm floor. He was the one card on
+ * the board that needed marking and the one card that said nothing.
  *
- * The count is of the position's tier, not of anything about the list this is
- * rendered into, so it falls the moment one of them is drafted, whoever drafts
- * them and wherever they sat on screen.
+ * Every boundary the model draws has already cleared a ratio bar, a noise floor
+ * scaled to the region of the draft, and a per-position fragmentation cap. "A
+ * lower tier exists" is not a weak test — it is the model's own answer to
+ * whether the board steps down here.
+ *
+ * Restraint comes from the active-tier rule instead, and it is much stronger
+ * than the bar it replaces: at most one tier per position may warn, and only
+ * when it is down to one or two players. A whole board can carry at most two
+ * chips per position, and usually carries none, because a healthy top tier has
+ * three or more in it.
  */
-export function tierCliffProximity(tier: TierCliff): number | null {
-  if (!tier.tierEndsAtCliff) return null;
-  return tier.tierSize === 1 || tier.tierSize === 2 ? tier.tierSize : null;
+export function tierCliffWarning(tier: TierCliff): TierCliffWarning | null {
+  if (tier.tierIndex !== 0) return null;
+  if (!tier.tierEndsAtBoundary) return null;
+  if (tier.tierSize === 1) return { remaining: 1, label: 'Tier cliff · last 1', short: 'Cliff · 1' };
+  if (tier.tierSize === 2) return { remaining: 2, label: 'Tier cliff · 2 left', short: 'Cliff · 2' };
+  return null;
+}
+
+/** A player as this layer needs him: who he is, where he plays, what the model said. */
+export interface WarnablePlayer {
+  playerId: string;
+  position: string;
+  tier: TierCliff;
+}
+
+/**
+ * Every warning a board should draw, keyed by player.
+ *
+ * A fold over `tierCliffWarning` rather than a second rule — the per-player
+ * predicate is the primitive and the screen calls it directly, one row at a
+ * time, because building a map on every render of a live draft would be work
+ * for nothing. This exists for the things that want the whole answer at once:
+ * the read-only probe, and the tests that assert the two invariants a
+ * per-player function cannot state about itself.
+ *
+ *   - no player in a worse tier warns while a better tier at his position still
+ *     has anybody in it;
+ *   - at most one tier per position warns at a time.
+ *
+ * Both fall out of "tier 0 only", but they are the properties that matter and a
+ * regression in either is silent, so they are checked over a whole board.
+ *
+ * Positions are independent. A board may show one quarterback warning, two
+ * tight end warnings and nothing at running back in the same breath, because
+ * each position runs out of its own best group on its own schedule.
+ */
+export function activeTierCliffWarnings(players: WarnablePlayer[]): Map<string, TierCliffWarning> {
+  const out = new Map<string, TierCliffWarning>();
+  for (const player of players) {
+    const warning = tierCliffWarning(player.tier);
+    if (warning) out.set(player.playerId, warning);
+  }
+  return out;
 }
 
 /**

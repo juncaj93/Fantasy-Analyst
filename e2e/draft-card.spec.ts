@@ -246,7 +246,7 @@ test.describe('visibility on every card', () => {
          */
         const chip = document.createElement('span');
         chip.className = 'player-row-cliff';
-        chip.textContent = 'Tier cliff · 2 away';
+        chip.textContent = 'Tier cliff · 2 left';
         document.body.append(chip);
         const chipStyle = getComputedStyle(chip);
         const background = chipStyle.backgroundColor;
@@ -322,13 +322,14 @@ test.describe('what it says', () => {
   test('carries the full sentence whatever it can afford to print', async ({ page }) => {
     await openDraft(page);
     const chip = cliffRow(page).getByTestId('tier-cliff-tag');
-    await expect(chip).toHaveAttribute('aria-label', /^Tier cliff, [12] away$/);
-    await expect(chip).toHaveAttribute('data-away', /^[12]$/);
+    await expect(chip).toHaveAttribute('aria-label', /^Tier cliff, (last 1|2 left)$/);
+    await expect(chip).toHaveAttribute('data-remaining', /^[12]$/);
 
     const printed = (await chip.innerText()).trim();
-    const away = await chip.getAttribute('data-away');
+    const remaining = await chip.getAttribute('data-remaining');
     // Whichever spelling this width gets, the count and the word survive.
-    expect(printed).toMatch(new RegExp(`^(Tier cliff · ${away} away|Cliff · ${away})$`));
+    const full = remaining === '1' ? 'Tier cliff · last 1' : 'Tier cliff · 2 left';
+    expect(printed).toMatch(new RegExp(`^(${full}|Cliff · ${remaining})$`));
   });
 });
 
