@@ -142,6 +142,30 @@ export class PlayerDetailRepo {
     };
   }
 
+  /**
+   * How many players reached each games-played value in a season.
+   *
+   * The input to `fullSeasonSlate`, which turns it into the season's actual
+   * regular-season length. It is read rather than assumed because the alternative
+   * is a hardcoded 17 that would be wrong for a season in progress, and would
+   * stay wrong silently.
+   *
+   * Cheap enough to ask per opened card: one grouped scan of a single season,
+   * returning about twenty rows.
+   */
+  async gamesPlayedCounts(season: string): Promise<{ games: number; players: number }[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT games_played AS games, COUNT(*) AS players
+           FROM player_season_stats
+          WHERE season = ? AND games_played IS NOT NULL
+          GROUP BY games_played`,
+      )
+      .bind(season)
+      .all<{ games: number; players: number }>();
+    return (results ?? []).map((row) => ({ games: Number(row.games), players: Number(row.players) }));
+  }
+
   /** How many players a season actually covers, for the Setup diagnostics. */
   async countSeasonStats(season: string): Promise<number> {
     const row = await this.db

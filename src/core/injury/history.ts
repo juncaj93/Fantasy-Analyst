@@ -26,6 +26,17 @@
  *     real values and are the two that carry their own severity.
  *   - Three descriptors are explicitly not injuries: resting, personal matter,
  *     other. Those are dropped rather than described.
+ *
+ * ## What this file counts, and what it does not
+ *
+ * Everything here is derived from injury-report rows, so every count it
+ * produces is a count of **filed paperwork** and is a lower bound on games
+ * missed. The gap is not small: a player on injured reserve leaves the report
+ * entirely, so his longest absence is the one with the fewest rows behind it.
+ *
+ * Reconciling that against games actually played belongs to `availability.ts`,
+ * which owns the arithmetic and owns the line a card shows. Nothing in this
+ * file may state a season total.
  */
 
 import { normalizeDesignation, normalizePractice, type PracticeStatus } from './model.ts';
@@ -102,10 +113,23 @@ export interface InjuryEpisode {
    * Weeks the player was ruled Out. This is a count of games missed, not an
    * estimate: the file states `Out` per week, and a week he was Out is a game
    * he did not play.
+   *
+   * It is a **lower bound** and never a season total. The file has no IR and no
+   * PUP, so a player who went on injured reserve stops appearing in it
+   * altogether and his longest absence leaves the fewest rows. Reconciling that
+   * against games actually played is `availability.ts`'s job.
    */
   gamesMissed: number;
   /** Weeks in the regular season only, for phrasing that says "games". */
   regularSeasonGamesMissed: number;
+  /**
+   * Which regular-season weeks he was Out, not merely how many.
+   *
+   * Two episodes can name the same week — a player listed with a knee and an
+   * ankle is one Sunday missed, not two — so anything that adds absences up
+   * across episodes has to union weeks rather than sum counts.
+   */
+  outWeeks: number[];
   /** The worst the report ever got during the episode. */
   peak: 'out' | 'doubtful' | 'questionable' | 'none';
   /** Every week the episode covers, kept so a note can be audited. */
@@ -175,6 +199,7 @@ function buildEpisode(part: string, weeks: number[], rows: Map<number, HistoryRo
   let regularSeasonGamesMissed = 0;
   let peakScore = 0;
   let dnpWeeks = 0;
+  const outWeeks: number[] = [];
 
   for (const week of weeks) {
     const row = rows.get(week)!;
@@ -182,7 +207,10 @@ function buildEpisode(part: string, weeks: number[], rows: Map<number, HistoryRo
     if (score > peakScore) peakScore = score;
     if (score === 3) {
       gamesMissed++;
-      if (week <= LAST_REGULAR_WEEK) regularSeasonGamesMissed++;
+      if (week <= LAST_REGULAR_WEEK) {
+        regularSeasonGamesMissed++;
+        outWeeks.push(week);
+      }
     }
     const practice: PracticeStatus = normalizePractice(row.practiceStatus);
     if (practice === 'dnp') dnpWeeks++;
@@ -194,6 +222,7 @@ function buildEpisode(part: string, weeks: number[], rows: Map<number, HistoryRo
     lastWeek: weeks[weeks.length - 1]!,
     gamesMissed,
     regularSeasonGamesMissed,
+    outWeeks,
     peak: peakScore === 3 ? 'out' : peakScore === 2 ? 'doubtful' : peakScore === 1 ? 'questionable' : 'none',
     weeks,
     dnpWeeks,
@@ -286,12 +315,18 @@ export function assessHistory(episodes: InjuryEpisode[]): HistoryAssessment {
 const COUNT_WORDS = ['', '', 'two', 'three', 'four', 'five', 'six'] as const;
 
 /**
- * One short line, or nothing.
+ * One short line summarising the report's own evidence, or nothing.
  *
  * Never a paragraph, never a diagnosis, and never a word the source did not
  * support. "Missed 5 games with a hamstring injury" is a count of `Out` weeks
  * and a body part the file named; "ACL recovery" would be neither, so it is
  * not a sentence this can produce.
+ *
+ * **Not the line a card shows.** This summarises what the injury report filed,
+ * against no denominator, and it is stored beside the episodes so a backfilled
+ * season can be read back and audited. What a card shows is reconciled against
+ * games played first, by `availability.ts` — the two differ exactly when the
+ * report missed an absence, which is the case that mattered.
  */
 export function historyNote(season: string, assessment: HistoryAssessment): string | null {
   const { significance, leading, recurrences } = assessment;
