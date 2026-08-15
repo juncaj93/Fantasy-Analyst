@@ -113,6 +113,7 @@ export function toCanonicalPlayers(
       aliases: defaultAliases(fullName, firstName, lastName),
       externalIds,
       searchRank: searchRank(p),
+      yearsExp: typeof p.years_exp === 'number' && Number.isFinite(p.years_exp) ? p.years_exp : null,
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

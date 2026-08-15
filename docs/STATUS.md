@@ -580,6 +580,87 @@ six-game minimum (2), including playoff weeks in the series (1), turning a
 missing game into a zero (1), and trimming the read window before the season
 type had been read (1).
 
+## Milestone 14 — the league's own history, and what it costs to win a player (done)
+
+The app knew who was on which roster and had never once asked how they got
+there. Sleeper publishes that — `GET /league/<id>/transactions/<week>`, no key,
+documented — and nothing in this codebase had ever called it. Everything in this
+milestone is arithmetic over those rows. See **docs/LEAGUE_INTELLIGENCE.md**.
+
+**What the probe found, before any of it was written.** Against a real ten-team
+league (`scripts/probe-sleeper-transactions.mjs`):
+
+```
+week  1       113  {"waiver/complete":20,"waiver/failed":16,"free_agent/complete":72,"trade/complete":5}
+priced claims 63 (30 winning)
+winning bids  [0 x20, 1, 1, 2, 3, 3, 4, 6, 18, 21, 25]
+```
+
+Four facts came out of it, and each shaped a table or a rule.
+
+**Failed claims are published, with their bids.** Sixteen of thirty-six week-1
+claims lost. Those losing bids are the only evidence of what the *rest* of the
+league would have paid, so they are stored and labelled rather than filtered
+out — a model trained on winners alone learns that every player costs exactly
+what the winner paid.
+
+**A missing bid is not a zero bid.** `settings.waiver_bid` is absent on
+free-agent adds. A `?? 0` would have folded seventy-two free adds into the price
+distribution as $0 claims and dragged every estimate in the league to a dollar.
+
+**Remaining FAAB is a subtraction and both halves can be missing.** It stays
+`null` rather than defaulting to a full wallet: a manager who looks rich when he
+is broke is the one error that talks a user into overbidding.
+
+**There is no FAAB recommendation endpoint.** The suspicion was reasonable —
+league settings do carry a `faab_suggestions` flag — but it toggles a feature
+inside Sleeper's own app. No documented endpoint returns a suggested bid, and
+nothing here went looking for an undocumented one.
+
+**Prices are quantiles of this league's own bids.** That distribution's *mean*
+is a number nobody bid, and a regression on eleven points is a straight line
+through noise. A quantile is always a price somebody in this league actually
+paid. Output is a range (`$8–12 expected`), moved by demand, bounded by the
+deepest rival wallet — you cannot be outbid above money that does not exist —
+and refused entirely below six priced claims.
+
+**Managers are Sleeper user ids, never roster ids.** Seats get reshuffled
+between seasons; joining last year's bids to this year's teams through roster
+ids would attribute one manager's record to another. Ten tendencies, each with
+its sample and a threshold below which it says `unknown`, and the largest effect
+any of them can have on a price is ±25%.
+
+**A bug this caught in its own design.** Recency weighting repeats this season's
+bids in the array the mean is taken over — and the first version tested that
+*weighted* array's length against the sample threshold, so three bids cleared a
+threshold of four. A sample-size rule that can be defeated by its own weighting
+is not a sample-size rule. `tests/league.managers.test.ts` pins it.
+
+**The feed filters before it deduplicates.** Merging first would let three
+immaterial reports of the same nothing combine into one item that then looks
+corroborated. An item needs both a magnitude and an actual decision change, so
+a refresh that found the same numbers produces nothing at all.
+
+**Rank movement cannot be manufactured.** Every decomposition snapshot carries a
+hash of the inputs that produced it, and one whose hash matches the last stored
+is not written — so a same-input refresh has nothing to compare against and
+correctly reports no movement. When the component deltas do not sum to the
+change in the total, the card says `+10 unexplained` rather than quietly
+rescaling the parts until they add up.
+
+**Three inputs are missing and each reports itself.** There is no four-week
+outlook (the weekly engine's contract, so `next4` reads `known: false` and
+contributes nothing), no bye-week source (Sleeper's player dictionary has 49
+fields and no bye, so `/plan` returns no gaps and names the gap), and no
+expected-points model (two of the five trade-timing calls wait on it). None of
+the three is faked.
+
+Advisory throughout. Every request this milestone makes to Sleeper is a GET, and
+a test asserts against the whole source tree that nothing constructs a mutation.
+
+Checks at this milestone: 1,765 unit/integration tests (111 new), typecheck,
+build and `wrangler deploy --dry-run` green.
+
 ## Recommended next work
 
 1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written

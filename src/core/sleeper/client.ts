@@ -5,6 +5,7 @@
  * its own transport. No API key exists for Sleeper's public read endpoints.
  */
 
+import type { SleeperTransaction } from '../league/transactions.ts';
 import type {
   SleeperDraft,
   SleeperDraftPick,
@@ -111,6 +112,25 @@ export class SleeperClient {
 
   getState(): Promise<SleeperState | null> {
     return this.get<SleeperState>('/state/nfl');
+  }
+
+  /**
+   * One week of the league's transaction history.
+   *
+   * Documented, public, and the factual base of every league-specific estimate
+   * this app makes. It returns failed waiver claims alongside successful ones,
+   * which is the only published evidence of what the rest of the league was
+   * willing to pay — see `core/league/transactions.ts`.
+   *
+   * A week nobody transacted in returns `[]`, not an error, so an empty result
+   * is a fact about the league rather than a failure to read it.
+   */
+  async getTransactions(leagueId: string, week: number): Promise<SleeperTransaction[]> {
+    return (
+      (await this.get<SleeperTransaction[]>(
+        `/league/${encodeURIComponent(leagueId)}/transactions/${Math.max(1, Math.trunc(week))}`,
+      )) ?? []
+    );
   }
 
   /**

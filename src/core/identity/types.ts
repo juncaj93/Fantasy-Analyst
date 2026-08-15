@@ -35,6 +35,14 @@ export interface CanonicalPlayer {
    * for search results.
    */
   searchRank?: number | null;
+  /**
+   * Completed NFL seasons, from Sleeper's `years_exp`.
+   *
+   * Null means the dictionary did not say, which is not the same as zero — a
+   * rookie and an unknown are different answers and only one of them belongs in
+   * a "does this manager chase rookies" sample.
+   */
+  yearsExp?: number | null;
 }
 
 export interface PlayerAlias {

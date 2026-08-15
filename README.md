@@ -74,6 +74,20 @@ tell the app which sender to trust. No commands, no jargon. Appearance lives
 here too: **System** (the default, following the phone), **Light** or **Dark**,
 kept on the device and applied before the first paint.
 
+## League intelligence
+
+The app reads your league's own transaction history from Sleeper — every waiver
+claim, **including the ones that lost**, every trade, and what each manager has
+left to spend — walked back through as many seasons as the league has run. From
+that it estimates what a player will actually cost in *your* league (`$8–12
+expected`, never a point estimate), who else needs the position and can afford
+to bid, and which trades both teams have a reason to accept.
+
+Manager tendencies are measured, never assumed: each carries the sample it rests
+on, says `unknown` below its threshold, and can move a price by at most 25%.
+Nothing in this app submits a transaction — every request it makes to Sleeper is
+a read. See [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md).
+
 ## Newsletter, automatically
 
 The FF Newsletter is subscribed directly to an address owned by the app
@@ -102,6 +116,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, identity ladder, engines |
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
+| [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | manager profiles, expected FAAB cost, waiver competition, trade fit |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
 
@@ -109,7 +124,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ```bash
 npm run typecheck
-npm test               # 384 unit + integration tests
+npm test               # 1,765 unit + integration tests
 npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
 npm run e2e:chromium   # same specs, fallback engine
 ```

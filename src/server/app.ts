@@ -13,7 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
-import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
+import { compareStartSit, evaluatePlayer, type StartSitInput } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { normalizeMode, type StartSitMode } from '../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../core/startsit/defense.ts';
@@ -58,6 +58,15 @@ import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
+import { LeagueHistoryService } from './services/leagueHistoryService.ts';
+import { LeagueIntelService } from './services/leagueIntelService.ts';
+import { LeagueHistoryRepo } from './repos/leagueHistory.ts';
+import { DecisionFeedRepo } from './repos/decisionFeed.ts';
+import { beneficiaryOf, type BeneficiaryPlayer } from '../core/league/beneficiary.ts';
+import { buildWaiverBoard, type NeedFit, type WaiverCandidateInput } from '../core/league/waiverBoard.ts';
+import { byeOutlook, playoffEmphasis, playoffWeeks } from '../core/league/planning.ts';
+import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/tradeFit.ts';
+import type { NeedLevel } from '../core/league/competition.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 import { UsageService } from './services/usageService.ts';
@@ -513,6 +522,421 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
     });
+  });
+
+  // ----------------------------------------------------- league intelligence
+
+  /**
+   * Read this league's own transaction history out of Sleeper.
+   *
+   * A write, because it stores what it reads — but every request it makes is a
+   * GET, and there is no code path in this application that submits a waiver
+   * claim, a bid, a drop or a trade. Rate limited alongside the other manual
+   * refreshes: it is one request per league-week and a four-season league is
+   * several dozen of them.
+   */
+  router.post('/api/leagues/:id/history/sync', async (ctx) => {
+    const limit = refreshLimiter.check('league-history');
+    if (!limit.allowed) {
+      return errorResponse(
+        `history sync was run recently — try again in ${limit.retryAfterSeconds}s`,
+        429,
+      );
+    }
+    const service = new LeagueHistoryService(ctx.env.db, ctx.env.sleeper);
+    const state = await new SleeperSyncService(ctx.env.db, ctx.env.sleeper).getNflState();
+    const body = await ctx.json<{ throughWeek?: number }>();
+    try {
+      const report = await service.sync(ctx.params['id']!, {
+        throughWeek: body?.throughWeek ?? state?.week ?? undefined,
+      });
+      return jsonResponse(report);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err.message : String(err), 400);
+    }
+  });
+
+  /** Manager behaviour profiles, and what everybody has left to spend. */
+  router.get('/api/leagues/:id/managers', async (ctx) => {
+    const intel = new LeagueIntelService(ctx.env.db);
+    const context = await intel.context(ctx.params['id']!);
+    if (!context) return errorResponse('league not found', 404);
+
+    const syncs = await new LeagueHistoryRepo(ctx.env.db).listWeekSyncs(
+      context.seasons.length > 0 ? [context.sleeperLeagueId] : [],
+    );
+
+    return jsonResponse({
+      league: { id: context.leagueId, season: context.season },
+      seasons: context.seasons,
+      faabLeague: context.faabLeague,
+      budget: context.budget,
+      leagueMeanBidShare: context.leagueMeanShare,
+      managers: context.profiles,
+      wallets: LeagueIntelService.wallets(context),
+      transactionsOnRecord: context.transactions.length,
+      weeksRead: syncs.length,
+      limits: context.limits,
+    });
+  });
+
+  /**
+   * The waiver board: every available player against six named dimensions.
+   *
+   * Built on top of the same free-agent scan the Team screen's waiver advice
+   * uses, so the two can never disagree about who is available or about how
+   * good he is. What this route adds is everything league-specific — what he
+   * will cost, who else wants him, what kind of add he is, and whether the
+   * honest answer is to stream the position instead.
+   */
+  router.get('/api/leagues/:id/waiver-board', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const rosteredIds = new Set<string>();
+    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    const startable = startablePositions(shape);
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable });
+
+    const [rosterInputs, candidateInputs] = await Promise.all([
+      startSitInputsFor(db, mine?.playerIds ?? []),
+      startSitInputsFor(db, candidateIds),
+    ]);
+
+    const evaluations = candidateInputs.map((c) => evaluatePlayer(c, profile));
+
+    /*
+     * Need fit comes from the lineup optimiser rather than from a fresh opinion.
+     *
+     * The Team screen already decides which slots are unfilled and what an add
+     * would gain; reproducing that judgement here would give the user two
+     * answers to one question. A candidate the optimiser never surfaced is
+     * depth, which is a real answer and not an omission.
+     */
+    const advice =
+      mine && rosterInputs.length > 0
+        ? recommendWaiverUpgrades({
+            roster: rosterInputs,
+            candidates: candidateInputs,
+            shape,
+            profile,
+            rosteredPlayerIds: rosteredIds,
+            currentStarterIds: mine.starterIds,
+          })
+        : null;
+
+    const fitById = new Map<string, { fit: NeedFit; gain: number }>();
+    for (const upgrade of advice?.upgrades ?? []) {
+      for (const candidate of upgrade.candidates) {
+        fitById.set(candidate.playerId, {
+          fit: upgrade.need === 'unfilled' ? 'fills_hole' : 'upgrade',
+          gain: candidate.gain,
+        });
+      }
+    }
+
+    const intel = new LeagueIntelService(db);
+    const context = await intel.context(league.id, {
+      unavailablePlayerIds: evaluations.filter((e) => e.ruledOut).map((e) => e.playerId),
+    });
+    if (!context) return errorResponse('league not found', 404);
+
+    /*
+     * The replacement pool, per position, is what makes streaming advice real.
+     *
+     * It is the scores of the *other* free agents at the same position in this
+     * same scan — the players actually claimable next week — rather than a
+     * general idea of positional depth.
+     */
+    const poolByPosition = new Map<string, number[]>();
+    for (const e of evaluations) {
+      if (e.score == null) continue;
+      const bucket = poolByPosition.get(e.position) ?? [];
+      bucket.push(e.score);
+      poolByPosition.set(e.position, bucket);
+    }
+
+    const allPlayers = await new PlayerRepo(db).listAll();
+    const byClub: BeneficiaryPlayer[] = allPlayers.map((p) => ({
+      playerId: p.id,
+      name: p.fullName,
+      team: p.team,
+      position: p.position,
+      status: p.status,
+    }));
+
+    const candidates: WaiverCandidateInput[] = [];
+    for (const evaluation of evaluations) {
+      if (evaluation.score == null || evaluation.ruledOut) continue;
+      const fit = fitById.get(evaluation.playerId);
+      const beneficiary = beneficiaryOf(
+        { playerId: evaluation.playerId, team: evaluation.team, position: evaluation.position },
+        byClub,
+        rosteredIds,
+      );
+
+      const { cost, competition } = intel.priceAndCompete(context, {
+        position: evaluation.position,
+        shape,
+        demand: {
+          // Value is the candidate's score against the best free agent scored
+          // in this scan, so it is a share of what is actually available rather
+          // than an absolute nobody can calibrate.
+          value: relativeValue(evaluation.score, poolByPosition.get(evaluation.position) ?? []),
+          injuryBeneficiary: beneficiary != null,
+          roleRising: evaluation.role.trend === 'rising_high' || evaluation.role.trend === 'rising_moderate',
+          immediateStarter: fit?.fit === 'fills_hole' || fit?.fit === 'upgrade',
+          scarcePosition: (poolByPosition.get(evaluation.position) ?? []).length <= 2,
+        },
+      });
+
+      candidates.push({
+        playerId: evaluation.playerId,
+        name: evaluation.name,
+        position: evaluation.position,
+        team: evaluation.team,
+        thisWeek: {
+          points: evaluation.score,
+          display: `${evaluation.score.toFixed(1)} pts`,
+          known: true,
+        },
+        /*
+         * The four-week outlook is not computed here.
+         *
+         * A rest-of-season projection is the weekly engine's contract, not this
+         * one's, and inventing a second one would give the app two answers to
+         * the same question. Until one is published, the dimension reports
+         * unknown, which is what it is.
+         */
+        next4: { points: null, display: 'no four-week outlook published', known: false },
+        needFit: fit?.fit ?? 'depth',
+        gain: fit?.gain ?? null,
+        roleTrend: evaluation.role.trend,
+        injuryBeneficiary: beneficiary != null,
+        starterReturnsInWeeks: beneficiary?.returnsInWeeks ?? null,
+        replacementPool: (poolByPosition.get(evaluation.position) ?? []).filter((s) => s !== evaluation.score),
+        expectedCost: cost,
+        competition,
+      });
+    }
+
+    const rows = Math.min(60, Math.max(1, Number(ctx.url.searchParams.get('limit') ?? 25)));
+    const board = buildWaiverBoard(candidates).slice(0, rows);
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name, season: league.season },
+      faabLeague: context.faabLeague,
+      budget: context.budget,
+      myRemainingFaab: context.profiles.find((p) => p.isMine)?.remainingFaab ?? null,
+      board,
+      considered: candidates.length,
+      pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
+      limits: context.limits,
+    });
+  });
+
+  /**
+   * Bilateral trade fits, and the timing calls behind them.
+   *
+   * Values on both sides come from the same weekly engine, so "what they gain"
+   * is measured the same way as "what I gain" — a trade tool whose two sides
+   * are scored differently is just an argument for whatever the author wanted.
+   */
+  router.get('/api/leagues/:id/trade-fit', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine);
+    if (!mine) {
+      return jsonResponse({
+        league: { id: league.id, name: league.name },
+        found: false,
+        ideas: [],
+        notes: ['your own roster is not identified, so there is nobody to trade on behalf of'],
+      });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+
+    const intel = new LeagueIntelService(db);
+    const context = await intel.context(league.id);
+    if (!context) return errorResponse('league not found', 404);
+
+    const teams: TradeTeam[] = [];
+    for (const roster of rosters) {
+      const inputs = await startSitInputsFor(db, roster.playerIds);
+      const evaluated = inputs.map((i) => evaluatePlayer(i, profile)).filter((e) => e.score != null);
+
+      const byPosition = new Map<string, typeof evaluated>();
+      for (const e of evaluated) {
+        const bucket = byPosition.get(e.position) ?? [];
+        bucket.push(e);
+        byPosition.set(e.position, bucket);
+      }
+      for (const bucket of byPosition.values()) bucket.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+      const needs: Record<string, NeedLevel> = {};
+      const assets: TradeAsset[] = [];
+      for (const [position, bucket] of byPosition) {
+        const required = shape.starters[position] ?? 0;
+        const flexEligible = shape.flex.some((f) => f.positions.includes(position));
+        needs[position] =
+          bucket.length < required ? 'urgent' : flexEligible && bucket.length <= required ? 'thin' : 'covered';
+
+        bucket.forEach((e, index) => {
+          assets.push({
+            playerId: e.playerId,
+            name: e.name,
+            position,
+            value: round2(e.score ?? 0),
+            // Surplus means the team can still field the position without him:
+            // anybody beyond the dedicated starting slots.
+            surplus: index >= required,
+            timing: {
+              tdShare: e.tdDependency.share ?? null,
+              roleTrend: e.role.trend,
+            },
+          });
+        });
+      }
+      // A position nobody on the roster plays is a hole, and it will not appear
+      // in the loop above because there is nothing to iterate.
+      for (const position of Object.keys(shape.starters)) {
+        if (!(position in needs) && (shape.starters[position] ?? 0) > 0) needs[position] = 'urgent';
+      }
+
+      const profileForTeam = roster.ownerId ? context.profilesByUser.get(roster.ownerId) : undefined;
+      teams.push({
+        rosterId: roster.rosterId,
+        userId: roster.ownerId,
+        displayName: roster.ownerName ?? `Roster ${roster.rosterId}`,
+        assets,
+        needs,
+        ...(profileForTeam ? { profile: profileForTeam } : {}),
+      });
+    }
+
+    const me = teams.find((t) => t.rosterId === mine.rosterId)!;
+    const partners = teams.filter((t) => t.rosterId !== mine.rosterId);
+    const ideas = findTradeFits(me, partners).slice(0, 12);
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      found: true,
+      ideas,
+      partners: partners.length,
+      notes: context.limits,
+    });
+  });
+
+  /**
+   * Bye-week and playoff planning.
+   *
+   * Quiet by design: it says nothing at all unless a bye inside the lookahead
+   * window actually leaves a slot short, and playoff weeks carry no weight
+   * until the season has said something about whether this team will be there.
+   */
+  router.get('/api/leagues/:id/plan', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const shape = buildRosterShape(league.rosterPositions);
+    const state = await new SleeperSyncService(db, ctx.env.sleeper).getNflState();
+    const currentWeek = state?.week ?? 1;
+
+    const players = mine ? await new PlayerRepo(db).listByIds(mine.playerIds) : new Map();
+    const starters = new Set(mine?.starterIds ?? []);
+    const seats = await new LeagueHistoryRepo(db).listSeats(league.sleeperLeagueId);
+    const mySeat = seats.find((s) => s.isMine && s.season === league.season) ?? null;
+
+    /*
+     * There is no bye-week source connected.
+     *
+     * Sleeper's player dictionary does not carry one — checked against the live
+     * payload, which has forty-nine fields and no bye — and this app stores no
+     * NFL schedule. So the planner runs against `null` byes, correctly finds
+     * nothing, and says which input is missing rather than reporting an all-clear
+     * it has not earned.
+     */
+    const roster = [...players.values()].map((p) => ({
+      playerId: p.id,
+      name: p.fullName,
+      position: p.position,
+      byeWeek: null as number | null,
+      starter: starters.has(p.id),
+    }));
+
+    const byes = byeOutlook({ roster, shape, currentWeek });
+    const playoffStartWeek = Number(league.leagueSettings?.['playoff_week_start'] ?? 15);
+    const playoffTeams = Number(league.leagueSettings?.['playoff_teams'] ?? 6);
+
+    /*
+     * The record comes from the synced seats, not from a guess.
+     *
+     * With no history synced there is no record, and `playoffEmphasis` is given
+     * 0-0 — which its own gate reads as "too few games played" and answers with
+     * zero weight. That is the correct behaviour for an unknown record: playoff
+     * weeks stay out of the ranking until something is actually known.
+     */
+    const emphasis = playoffEmphasis({
+      currentWeek,
+      playoffStartWeek,
+      wins: mySeat?.wins ?? 0,
+      losses: mySeat?.losses ?? 0,
+      playoffTeams,
+      totalTeams: rosters.length || league.totalRosters,
+    });
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      currentWeek,
+      byes: {
+        ...byes,
+        available: false,
+        note: 'no bye-week source is connected, so bye planning reports nothing rather than an all-clear',
+      },
+      playoffs: {
+        startWeek: playoffStartWeek,
+        weeks: playoffWeeks(playoffStartWeek),
+        record: mySeat ? { wins: mySeat.wins ?? null, losses: mySeat.losses ?? null } : null,
+        ...emphasis,
+      },
+    });
+  });
+
+  /** What changed since you last looked. Empty is the ordinary answer. */
+  router.get('/api/leagues/:id/feed', async (ctx) => {
+    const leagueRepo = new LeagueRepo(ctx.env.db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    const events = await new DecisionFeedRepo(ctx.env.db).listOpen(league.sleeperLeagueId);
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      events,
+      unseen: events.filter((e) => e.seenAt == null).length,
+    });
+  });
+
+  router.post('/api/leagues/:id/feed/seen', async (ctx) => {
+    const leagueRepo = new LeagueRepo(ctx.env.db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    return jsonResponse(await new DecisionFeedRepo(ctx.env.db).markSeen(league.sleeperLeagueId));
   });
 
   // ------------------------------------------------------------------ drafts
@@ -1428,6 +1852,27 @@ export async function buildStartSitContext(
  * comfortably past where a startable free agent is ever found, and it keeps the
  * whole scan to a few dozen players — which is what keeps Team quick on a phone.
  */
+/**
+ * A candidate's value as a share of the best thing available at his position.
+ *
+ * Expected FAAB cost needs "how good is he" on a 0–1 scale, and an absolute
+ * fantasy-point total is not that: eighteen points means something different at
+ * quarterback and at tight end, and a league that starts one of each would price
+ * them against the same yardstick. Measured against the pool actually being
+ * scanned, so the best free agent left at a position is a 1 whether that is a
+ * genuine starter in September or the last body in December — which is also
+ * true of what he will cost.
+ */
+function relativeValue(score: number, pool: number[]): number {
+  const best = Math.max(score, ...pool);
+  if (!Number.isFinite(best) || best <= 0) return 0;
+  return Math.min(1, Math.max(0, score / best));
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 const FREE_AGENTS_PER_POSITION = 12;
 
 /**
