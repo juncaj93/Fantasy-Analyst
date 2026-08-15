@@ -327,6 +327,46 @@ jobs:
         env:
           PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
 
+      # Per-game usage, on the same first-run principle as the injury report.
+      #
+      # The daily 09:00 cron keeps it current from here on -- weekly stats
+      # settle when a game ends, so there is nothing a faster cadence would
+      # learn. This read is still worth doing at deploy time for the same reason
+      # the injury one is: it puts a week into a brand-new database immediately
+      # rather than on the next morning's tick, and it reports what happened
+      # here, in this workflow's output, where a broken ingest is noticed --
+      # unlike a cron, whose failures are only visible in the Worker's logs.
+      #
+      # A season with nothing published yet answers `not_published`, and that is
+      # a success rather than a fault: there are no weekly statistics in August
+      # because no games have been played. Only a real failure earns a warning.
+      - name: Read the weekly usage file on first run
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          login=$(curl -s -o /tmp/login4.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies4.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to read the usage file (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/usage.json -w '%{http_code}' -X POST "$url/api/usage/refresh" \
+            -b /tmp/cookies4.txt --max-time 180)
+          echo "weekly usage refresh: $code"
+          head -c 500 /tmp/usage.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::The usage file could not be read (HTTP $code). The daily cron will retry, and Setup can trigger it."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
       - name: Write the summary
         if: always()
         run: |
