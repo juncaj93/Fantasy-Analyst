@@ -33,6 +33,17 @@ export interface LineupSlot {
   alreadyStarting: boolean;
   /** True when this player's game has kicked off and the slot is now fixed. */
   locked: boolean;
+  /**
+   * The two to four things that decided this player, biggest first.
+   *
+   * Carried on the slot rather than left in the evaluation because the Team
+   * screen draws starters from the slots and never sees the evaluations — and a
+   * recommendation whose reasoning is one request away is a recommendation
+   * nobody reads.
+   */
+  drivers: string[];
+  /** Where the evidence points different ways, for the same reason. */
+  conflicts: string[];
 }
 
 export interface LineupSwap {
@@ -211,6 +222,8 @@ export function recommendLineup(
       score: player?.score ?? null,
       alreadyStarting: player ? currentStarters.has(player.playerId) : false,
       locked: player ? lockedIds.has(player.playerId) : false,
+      drivers: player?.drivers ?? [],
+      conflicts: player?.conflicts ?? [],
     };
   });
 

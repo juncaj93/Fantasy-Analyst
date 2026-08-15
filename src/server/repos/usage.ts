@@ -240,6 +240,41 @@ export class UsageRepo {
     return out;
   }
 
+  /**
+   * Every skill-position game in the recent part of a season, league-wide.
+   *
+   * The one read in this file that is not about a handful of players, and the
+   * reason it is bounded to a window rather than to a season: the defensive
+   * tendency model needs both sides of it — what each defence allowed, and what
+   * each of those players normally does — and the second half is only
+   * comparable if it comes from the same window as the first. Eight weeks of
+   * skill-position rows is roughly 2,800 rows, which is one indexed read.
+   *
+   * Columns are named rather than `SELECT *`: this row is wide, most of it is
+   * irrelevant here, and asking for all of it would multiply the transfer for
+   * nothing.
+   */
+  async leagueWeeksSince(
+    season: string,
+    fromWeek: number,
+    positions: string[] = ['QB', 'RB', 'WR', 'TE'],
+  ): Promise<StoredUsageWeek[]> {
+    const holes = positions.map(() => '?').join(', ');
+    const { results } = await this.db
+      .prepare(
+        `SELECT player_id, season, week, season_type, team, position, opponent,
+                pass_attempts, carries, targets, receptions, target_share,
+                pass_yards, pass_tds, rush_yards, rush_tds, rec_yards, rec_tds,
+                receiving_air_yards, air_yards_share, source, fetched_at
+           FROM player_usage_weeks
+          WHERE season = ? AND season_type = 'REG' AND week >= ? AND position IN (${holes})
+       ORDER BY week`,
+      )
+      .bind(season, Math.max(1, fromWeek), ...positions)
+      .all<Record<string, unknown>>();
+    return (results ?? []).map(toUsageWeek);
+  }
+
   /** How many players and weeks the store holds for a season. */
   async coverage(season: string): Promise<{ players: number; weeks: number; latestWeek: number | null; rows: number }> {
     const row = await this.db
@@ -387,6 +422,8 @@ function toUsageWeek(row: Record<string, unknown>): StoredUsageWeek {
     targets: numberOrNull(row['targets']),
     receptions: numberOrNull(row['receptions']),
     targetShare: numberOrNull(row['target_share']),
+    // Absent from the narrow `leagueWeeksSince` projection, and null rather
+    // than missing so one row shape serves both reads.
     wopr: numberOrNull(row['wopr']),
     opponent: text('opponent'),
     passYards: numberOrNull(row['pass_yards']),

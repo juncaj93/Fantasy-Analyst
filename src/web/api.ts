@@ -655,7 +655,16 @@ export interface StartSitEvaluation {
     coverage: number;
     notes: string[];
   };
-  components: { key: string; label: string; display: string; value: number; unknown: boolean }[];
+  components: {
+    key: string;
+    label: string;
+    display: string;
+    value: number;
+    /** The value before the Floor/Ceiling multiplier, on newer deployments. */
+    baseValue?: number;
+    modeWeight?: number;
+    unknown: boolean;
+  }[];
   score: number | null;
   confidence: string;
   confidenceReasons: string[];
@@ -679,7 +688,29 @@ export interface StartSitEvaluation {
     headline: string | null;
   };
   role: { trend: string; label: string; detail: string; games: number };
+  /*
+   * Everything below arrives from the intelligence pass and is optional, so a
+   * screen built against this file keeps rendering against a deployment that
+   * predates it. Absent means the server did not send it, which the UI shows as
+   * nothing rather than as a zero.
+   */
+  mode?: StartSitMode;
+  usage?: { perGame: number | null; unit: string; points: number; games: number; display: string; unknown: boolean };
+  roleProfile?: { bucket: string; label: string; adot: number | null; games: number; confidence: string; detail: string | null };
+  tdDependency?: { profile: string; share: number | null; touchdowns: number; scoringGames: number; games: number; display: string };
+  gameScript?: { points: number; impliedTeamTotal: number | null; favoured: boolean | null; display: string; unknown: boolean };
+  weather?: { points: number; unknown: boolean; indoor: boolean; display: string };
+  matchup?: { points: number; unknown: boolean; rating: string; sample: number; display: string };
+  availability?: { state: string; label: string; detail: string | null; risky: boolean };
+  /** The two to four things that decided it, biggest first. */
+  drivers?: string[];
+  /** Where the evidence points different ways. */
+  conflicts?: string[];
+  opponent?: string | null;
 }
+
+/** Floor, Balanced or Ceiling — which question Start/Sit is answering. */
+export type StartSitMode = 'balanced' | 'floor' | 'ceiling';
 
 /** Which lineup spot a comparison is actually about. */
 export interface ComparisonSlot {
@@ -708,6 +739,15 @@ export interface StartSitComparison {
     gapHours: number | null;
     advantage: number | null;
   };
+  mode?: StartSitMode;
+  /** Whether the betting market would make the same call. Never obeyed. */
+  market?: {
+    verdict: 'agrees' | 'neutral' | 'disagrees' | 'unavailable';
+    label: string;
+    detail: string;
+    marketMargin: number | null;
+    material: boolean;
+  };
 }
 
 export interface LineupSlot {
@@ -719,6 +759,10 @@ export interface LineupSlot {
   score: number | null;
   alreadyStarting: boolean;
   locked: boolean;
+  /** The two to four things that decided this player. Absent on older servers. */
+  drivers?: string[];
+  /** Where the evidence points different ways. */
+  conflicts?: string[];
 }
 
 export interface LineupSwap {
@@ -752,6 +796,24 @@ export interface LineupRecommendation {
   confidence: string;
   warnings: string[];
   notes: string[];
+  mode?: StartSitMode;
+  /** Availability risks that depend on the bench rather than on the player. */
+  lateSwapRisks?: { playerId: string; name: string; verdict: string; detail: string; starting: boolean }[];
+}
+
+/** What one tap of the Start/Sit refresh actually did, per source. */
+export interface StartSitRefreshReport {
+  startedAt: string;
+  finishedAt: string;
+  deduped: boolean;
+  sources: {
+    source: 'sleeper' | 'injury' | 'usage' | 'vegas' | 'weather';
+    outcome: 'updated' | 'current' | 'unavailable' | 'skipped' | 'blocked';
+    detail: string;
+    freshAt: string | null;
+  }[];
+  headline: string;
+  complete: boolean;
 }
 
 

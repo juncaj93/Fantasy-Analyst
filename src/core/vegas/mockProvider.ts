@@ -169,6 +169,21 @@ export class MockVegasProvider implements VegasProvider {
       gameStart: game?.startTime ?? new Date().toISOString(),
       fetchedAt: new Date().toISOString(),
       quotes,
+      /*
+       * A game line, derived from the same seed the props are.
+       *
+       * Deterministic per event, and inside the range a real slate occupies —
+       * totals in the low forties to low fifties, spreads inside a touchdown
+       * and a half — so the development seed exercises the game-script
+       * component instead of leaving it permanently unknown.
+       */
+      gameLines: game
+        ? {
+            total: roundToHalf(45 + jitter(`${eventId}|total`, 6)),
+            spread: roundToHalf(jitter(`${eventId}|spread`, 7)),
+            spreadTeam: game.homeTeam,
+          }
+        : { total: null, spread: null, spreadTeam: null },
       raw: { mock: true, eventId, playerCount: game?.players.length ?? 0 },
     };
   }

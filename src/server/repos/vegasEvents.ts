@@ -21,6 +21,14 @@ export interface VegasEventRow {
   homeTeam: string | null;
   awayTeam: string | null;
   seenAt: string;
+  /** The over/under, when the provider had quoted the game. */
+  total?: number | null;
+  /** The handicap, from `spreadTeam`'s point of view. Negative = favoured. */
+  spread?: number | null;
+  /** Whose handicap it is. Stored so the sign never has to be inferred. */
+  spreadTeam?: string | null;
+  /** When those two were last seen, which is not when the row was last touched. */
+  linesSeenAt?: string | null;
 }
 
 export class VegasEventsRepo {
@@ -34,16 +42,43 @@ export class VegasEventsRepo {
         batch.map((r) =>
           this.db
             .prepare(
-              `INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at)
-               VALUES (?,?,?,?,?,?)
+              /*
+               * COALESCE on every column that can be absent, including the two
+               * new ones. A refresh that comes back without game lines has
+               * learned nothing about them, and writing NULL over a spread the
+               * app already knew would make the game-script component blink out
+               * every time the provider was quiet.
+               *
+               * `lines_seen_at` is only advanced when a line was actually
+               * present, which is what keeps "we have a spread" and "the spread
+               * is current" separable.
+               */
+              `INSERT INTO vegas_events
+                 (event_id, provider, kickoff, home_team, away_team, seen_at, game_total, spread, spread_team, lines_seen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(event_id) DO UPDATE SET
                  provider = excluded.provider,
                  kickoff = COALESCE(excluded.kickoff, vegas_events.kickoff),
                  home_team = COALESCE(excluded.home_team, vegas_events.home_team),
                  away_team = COALESCE(excluded.away_team, vegas_events.away_team),
+                 game_total = COALESCE(excluded.game_total, vegas_events.game_total),
+                 spread = COALESCE(excluded.spread, vegas_events.spread),
+                 spread_team = COALESCE(excluded.spread_team, vegas_events.spread_team),
+                 lines_seen_at = COALESCE(excluded.lines_seen_at, vegas_events.lines_seen_at),
                  seen_at = excluded.seen_at`,
             )
-            .bind(r.eventId, r.provider, r.kickoff, r.homeTeam, r.awayTeam, at),
+            .bind(
+              r.eventId,
+              r.provider,
+              r.kickoff,
+              r.homeTeam,
+              r.awayTeam,
+              at,
+              r.total ?? null,
+              r.spread ?? null,
+              r.spreadTeam ?? null,
+              r.total == null && r.spread == null ? null : at,
+            ),
         ),
       );
     }
@@ -115,5 +150,16 @@ function toRow(r: Record<string, unknown>): VegasEventRow {
     homeTeam: r['home_team'] == null ? null : String(r['home_team']),
     awayTeam: r['away_team'] == null ? null : String(r['away_team']),
     seenAt: String(r['seen_at']),
+    total: numberOrNull(r['game_total']),
+    spread: numberOrNull(r['spread']),
+    spreadTeam: r['spread_team'] == null ? null : String(r['spread_team']),
+    linesSeenAt: r['lines_seen_at'] == null ? null : String(r['lines_seen_at']),
   };
+}
+
+/** A stored NULL is unknown. It is never read as a zero-point game. */
+function numberOrNull(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }

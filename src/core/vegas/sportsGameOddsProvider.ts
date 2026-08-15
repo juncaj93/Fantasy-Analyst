@@ -27,6 +27,7 @@ import {
   MARKET_KEYS,
   SEASON_MARKET_KEYS,
   VegasProviderError,
+  type GameLines,
   type MarketKey,
   type QuotaStatus,
   type RawPropQuote,
@@ -121,6 +122,17 @@ interface SgoOdd {
   marketName?: string;
   bookOverUnder?: string | number | null;
   fairOverUnder?: string | number | null;
+  /*
+   * The handicap fields, read defensively.
+   *
+   * The provider's own schema puts a spread in `bookSpread`, and every adapter
+   * here has learned the same lesson about somebody else's field names: if it
+   * is absent the over/under field is tried, and if that is absent too the
+   * spread is simply unknown and the game-script component says so. A wrong
+   * guess about a field name must degrade to "no line", never to a number.
+   */
+  bookSpread?: string | number | null;
+  fairSpread?: string | number | null;
   bookOdds?: string | number | null;
   fairOdds?: string | number | null;
   cancelled?: boolean;
@@ -264,6 +276,7 @@ export class SportsGameOddsProvider implements VegasProvider {
       gameStart: event.status?.startsAt ?? '',
       fetchedAt: new Date().toISOString(),
       quotes,
+      gameLines: toGameLines(event),
       raw: event,
     };
   }
@@ -465,6 +478,56 @@ function nameOf(player: SgoPlayer | undefined, entityId: string): string | null 
     .filter(Boolean);
   if (parts.length === 0) return null;
   return parts.map((p) => p.charAt(0) + p.slice(1).toLowerCase()).join(' ');
+}
+
+/**
+ * The game's own total and spread, out of the board already paid for.
+ *
+ * Both are read from the same `odds` map the player props come from, filtered
+ * to a *game* entity rather than a player. Two rules keep this honest:
+ *
+ *   - the same period filter as everywhere else. A first-half total is a
+ *     different question from the one a lineup is asking.
+ *   - the home side decides the sign. `side1`/`home` is quoted from the home
+ *     team's point of view, and a spread whose direction cannot be established
+ *     is discarded rather than assumed — a game script model fed a spread with
+ *     the wrong sign is worse than one fed nothing.
+ */
+function toGameLines(event: SgoEvent): GameLines {
+  let total: number | null = null;
+  let spread: number | null = null;
+  let spreadTeam: string | null = null;
+
+  // Whose spread it is, established from the event's own team map before any
+  // number is read. No team, no spread.
+  const teamFor = (entity: string): string | null => {
+    const side = event.teams?.[entity];
+    const id = side?.teamID ?? side?.names?.short ?? null;
+    return id ? id.toUpperCase() : null;
+  };
+
+  for (const odd of Object.values(event.odds ?? {})) {
+    if (odd.cancelled) continue;
+    if (odd.periodID !== 'game') continue;
+    if (odd.statID !== 'points') continue;
+    if (odd.playerID) continue;
+    const entity = odd.statEntityID ?? '';
+
+    if (odd.betTypeID === 'ou' && odd.sideID === 'over' && (entity === 'all' || entity === 'game')) {
+      total ??= toNumber(odd.bookOverUnder ?? odd.fairOverUnder);
+      continue;
+    }
+    if (odd.betTypeID === 'sp' && spread == null) {
+      const team = teamFor(entity);
+      if (!team) continue;
+      const value = toNumber(odd.bookSpread ?? odd.fairSpread ?? odd.bookOverUnder ?? odd.fairOverUnder);
+      if (value == null) continue;
+      spread = value;
+      spreadTeam = team;
+    }
+  }
+
+  return { total, spread, spreadTeam };
 }
 
 /** Lines and prices arrive as strings; anything unparseable is absent, not zero. */

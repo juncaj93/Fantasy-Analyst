@@ -22,9 +22,12 @@ import {
   type LineupSlot,
   type RosterPlayer,
   type StartSitComparison,
+  type StartSitMode,
+  type StartSitRefreshReport,
   type WaiverAdvice,
   type WaiverUpgrade,
 } from '../api.ts';
+import { MODE_DESCRIPTION, MODE_LABEL, START_SIT_MODES } from '../../core/startsit/mode.ts';
 import {
   Badge,
   Confidence,
@@ -90,6 +93,17 @@ export function TeamScreen({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
   const [waivers, setWaivers] = useState<WaiverAdvice | null>(null);
+  /*
+   * Which question the lineup is answering.
+   *
+   * Component state rather than a stored preference: it is a question asked
+   * now, it recomputes in one request, and a remembered mode would mean the
+   * screen quietly answering something other than what the control shows on the
+   * next visit. Changing it reloads the lineup immediately — see `loadLineup`.
+   */
+  const [mode, setMode] = useState<StartSitMode>('balanced');
+  /** What the last all-source refresh did, per source. */
+  const [refresh, setRefresh] = useState<StartSitRefreshReport | null>(null);
   /** Open with the slot it was launched from, and whoever it was launched on. */
   const [compare, setCompare] = useState<{ slot: string | null; seed: string[] } | null>(null);
 
@@ -105,11 +119,11 @@ export function TeamScreen({
   const loadLineup = useCallback(async () => {
     if (!selected) return;
     try {
-      setLineup(await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup`));
+      setLineup(await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup?mode=${mode}`));
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
     }
-  }, [selected]);
+  }, [selected, mode]);
 
   /*
    * The free-agent scan arrives on its own, after the roster.
@@ -233,6 +247,28 @@ export function TeamScreen({
             It opens over the page rather than pushing, because a comparison is
             a question asked *about* this roster and answered back to it.
           */}
+          {/*
+            Two controls and a status line, in the space one button used to
+            take.
+
+            The mode chips reuse the filter row the Draft board already uses,
+            deliberately: this is a filter-shaped decision — same players, same
+            evidence, a different question — and inventing a second control
+            vocabulary for it would be a new thing to learn for no gain.
+          */}
+          <SegmentedControl
+            label="Recommendation mode"
+            testId="mode-row"
+            value={mode}
+            onChange={setMode}
+            segments={START_SIT_MODES.map((option) => ({
+              id: option,
+              label: MODE_LABEL[option],
+              ariaLabel: `${MODE_LABEL[option]} — ${MODE_DESCRIPTION[option]}`,
+              testId: `mode-${option}`,
+            }))}
+          />
+
           <div className="btn-row" style={{ margin: '0 2px 10px' }}>
             <button
               className="btn"
@@ -241,7 +277,37 @@ export function TeamScreen({
             >
               Compare players
             </button>
+            <button
+              className="btn"
+              data-testid="startsit-refresh"
+              disabled={busy != null}
+              onClick={() =>
+                run('startsit-refresh', async () => {
+                  const report = await api.post<StartSitRefreshReport>('/api/startsit/refresh', {});
+                  setRefresh(report);
+                  // Recompute against whatever actually landed. A refresh that
+                  // updates the sources and leaves the screen showing the old
+                  // answer is worse than no button at all.
+                  await Promise.all([loadRoster(), loadLineup(), loadWaivers()]);
+                  return report.deduped ? 'Already refreshing — showing the latest.' : report.headline;
+                })
+              }
+            >
+              {busy === 'startsit-refresh' ? 'Refreshing…' : 'Refresh data'}
+            </button>
           </div>
+
+          {refresh ? (
+            <div className="faint" data-testid="refresh-status" style={{ margin: '0 4px 10px' }}>
+              {refresh.headline}
+              {refresh.sources.some((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped')
+                ? ` — ${refresh.sources
+                    .filter((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped')
+                    .map((s) => `${s.source}: ${s.detail}`)
+                    .join('; ')}`
+                : ''}
+            </div>
+          ) : null}
 
           {!roster ? (
             <SkeletonRows rows={6} testId="roster-skeleton" />
@@ -379,6 +445,26 @@ function StarterCard({
         {!slot.alreadyStarting && !slot.locked ? <Badge tone="warn">not in your Sleeper lineup</Badge> : null}
         {player?.status ? <Badge tone="warn">{player.status}</Badge> : null}
       </div>
+      {/*
+        Why him, in the words the engine used.
+
+        Two lines at most, and only what actually moved the score: the drivers
+        come from the components themselves, so this cannot describe a signal
+        the recommendation did not use. A conflict is shown *beside* the reasons
+        rather than instead of them — disagreement between usage and matchup is
+        the most useful thing a card can say, and averaging it into silence is
+        what a worse screen would do.
+      */}
+      {(slot.drivers ?? []).length > 0 ? (
+        <div className="player-row-metrics" data-testid="starter-drivers">
+          <span className="metric faint">{(slot.drivers ?? []).slice(0, 2).join(' · ')}</span>
+        </div>
+      ) : null}
+      {(slot.conflicts ?? []).length > 0 ? (
+        <div className="player-row-metrics" data-testid="starter-conflict">
+          <span className="metric faint">{(slot.conflicts ?? [])[0]}</span>
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -792,6 +878,23 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
       {lineup.warnings.map((w) => (
         <div className="hint hint-caution" key={w}>
           {w}
+        </div>
+      ))}
+
+      {/*
+        Availability risk that depends on the bench rather than on the player.
+
+        A different statement from the warnings above and shown separately: those
+        say something is wrong now, and these say what happens on Sunday morning
+        if a coin lands the other way. Only the risks that are actually live —
+        an exposed late swap, or a bench with nobody to cover — reach here; a
+        questionable player with a fallback that locks later is covered, and
+        saying so would be noise.
+      */}
+      {(lineup.lateSwapRisks ?? []).map((risk) => (
+        <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk">
+          {risk.starting ? 'Starting: ' : ''}
+          {risk.name} — {risk.detail}
         </div>
       ))}
 
