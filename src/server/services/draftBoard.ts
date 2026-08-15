@@ -20,7 +20,15 @@ import { tierContextLine } from '../../core/draft/tierContext.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
-import { nextPickForSlot, slotForRoster, slotFromPicks, waitHorizonForSlot } from '../../core/sleeper/transform.ts';
+import { nextPickForSlot, slotForRoster, slotFromPicks } from '../../core/sleeper/transform.ts';
+import {
+  buildPickOwnership,
+  estimateNextPickAvailability,
+  type NextPickAvailability,
+  type SimCandidate,
+  type TradedPick,
+} from '../../core/draft/nextpick/index.ts';
+import { buildPositionTierMap, type PositionTierMap } from '../../core/draft/tiers.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -68,6 +76,22 @@ export type BoardRecommendation = DraftRecommendation & {
    * the overwhelming majority, which is what keeps the badge meaning something.
    */
   injuryLine: string | null;
+  /**
+   * The `Next` model's own workings for this player.
+   *
+   * `survivalProbability` on the recommendation is the number the card shows and
+   * is unchanged in shape; this is everything behind it — what the market alone
+   * would have said, which drivers were found, and how much to trust it. Nothing
+   * on screen reads it today. It exists so the probe can print the reasoning and
+   * so a future card can adopt the explanation without another round of wiring.
+   */
+  nextPick: {
+    probability: number | null;
+    marketBaseline: number | null;
+    drivers: string[];
+    confidence: 'high' | 'medium' | 'low';
+    degraded: string[];
+  } | null;
 };
 
 export interface DraftBoardState {
@@ -149,6 +173,23 @@ export interface DraftBoardState {
     byPosition: Record<string, number>;
     cap: number;
   };
+  /** Diagnostics for `Next`. Read by the probe and by nothing on screen. */
+  nextPickModel: {
+    targetPick: number | null;
+    picksSimulated: number;
+    simulations: number;
+    slotsAhead: number[];
+    needAhead: Record<string, number>;
+    roomSample: number;
+    dispersion: number;
+    positionRuns: Record<string, number>;
+    positionBias: Record<string, number>;
+    roomNotes: string[];
+    marketOnly: boolean;
+    degraded: string[];
+    elapsedMs: number;
+    cached: boolean;
+  };
   warnings: string[];
 }
 
@@ -214,9 +255,24 @@ export class DraftBoardService {
      * player available now would still be available now: true of everybody, so
      * the entire board read 100% at the one moment the number was being used to
      * decide something.
+     *
+     * `horizon` comes from the ownership model rather than from snake
+     * arithmetic, because "which pick is mine" and "whose pick is that" are the
+     * same question and answering them in two places is how they drift apart.
+     * Sleeper publishes traded picks in some drafts and not others; a draft
+     * without them behaves exactly as the snake always did, and a draft with
+     * them stops attributing a pick to a manager who no longer owns it.
      */
+    const ownership = buildPickOwnership({
+      teams,
+      rounds,
+      type: draft.type,
+      slotToRosterId: draft.slotToRosterId,
+      tradedPicks: tradedPicksFrom(draft.settings),
+    });
     const next = mySlot == null ? null : nextPickForSlot(mySlot, teams, rounds, draft.type, currentPick);
-    const horizon = mySlot == null ? null : waitHorizonForSlot(mySlot, teams, rounds, draft.type, currentPick);
+    const horizonPick = mySlot == null ? null : ownership.nextOwnedPickAfter(mySlot, currentPick);
+    const horizon = horizonPick == null ? null : { pickNo: horizonPick, picksUntil: horizonPick - currentPick };
     // Without a slot there is no "your next pick", so survival and scarcity are
     // both computed against an unknown horizon. Say so rather than let the board
     // look confident about numbers it could not work out.
@@ -407,6 +463,98 @@ export class DraftBoardService {
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
+    /*
+     * `Next`: how likely the room is to leave each of these players alone.
+     *
+     * Run out here rather than inside the engine because the answer needs live
+     * draft state the engine is deliberately never given — the exact managers
+     * picking before the user's next selection, what each of them is short of,
+     * and what this room has been doing all draft. One simulation of the
+     * interval settles every candidate at once, so this costs once per board
+     * state and not once per player, and repeats of an unchanged state are
+     * served from a cache keyed by that state.
+     *
+     * Nothing user-specific is passed in. `My Guy`, the newsletter tally and the
+     * betting market are all absent from the call by construction: they say
+     * something about whether *you* should want him, and nothing about whether
+     * somebody else will take him.
+     */
+    const positionOf = (id: string) => byId.get(id)?.position ?? null;
+    const ownerSlotOf = (pick: { rosterId: number | null; draftSlot: number }) =>
+      slotForRoster(draft.slotToRosterId, pick.rosterId) ?? pick.draftSlot;
+
+    /*
+     * The whole available board, not the part of it the reader is looking at.
+     *
+     * This deliberately ignores the position chip and the queue filter, and it
+     * has to. `candidates` is what gets drawn — filter to QB and it holds
+     * quarterbacks — and handing that to the simulator would have every
+     * simulated manager drafting quarterbacks, one after another, until the
+     * position ran out. Every quarterback would then read close to zero for the
+     * sole reason that the reader tapped QB, which is both wrong and invisible:
+     * the numbers stay plausible, they just quietly answer a different question.
+     *
+     * The room drafts from the room's board. What the reader has chosen to see
+     * is not part of it.
+     */
+    const simulationPool = allPlayers
+      .filter((player) => player.active && !takenIds.has(player.id) && (startable.size === 0 || startable.has(player.position)))
+      .sort(
+        (a, b) =>
+          (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
+          (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+          a.fullName.localeCompare(b.fullName),
+      )
+      .slice(0, MAX_CANDIDATES);
+    const simCandidates: SimCandidate[] = simulationPool.map((player) => ({
+      playerId: player.id,
+      position: player.position,
+      adp: rankOf(player),
+      order: player.searchRank ?? Number.MAX_SAFE_INTEGER,
+    }));
+
+    // What every manager already holds, from the pick stream — the only roster
+    // that exists mid-draft. Keyed by the slot that will actually pick.
+    const rostersBySlot = new Map<number, Record<string, number>>();
+    for (let slot = 1; slot <= teams; slot++) rostersBySlot.set(slot, {});
+    for (const pick of picks) {
+      if (!pick.playerId) continue;
+      const position = positionOf(pick.playerId);
+      if (!position) continue;
+      const counts = rostersBySlot.get(ownerSlotOf(pick));
+      if (!counts) continue;
+      counts[position] = (counts[position] ?? 0) + 1;
+    }
+
+    const tierMaps = buildTierMaps(simCandidates, currentPick, horizon?.pickNo ?? null);
+    const nextPick = estimateNextPickAvailability({
+      draftId,
+      currentPick,
+      targetPick: horizon?.pickNo ?? null,
+      mySlot,
+      ownership,
+      shape,
+      candidates: simCandidates,
+      rosters: rostersBySlot,
+      totalPicks: teams * rounds,
+      tiers: tierMaps,
+      alternatives: alternativesByPosition(simCandidates, horizon?.pickNo ?? null),
+      completed: picks
+        .filter((pick) => pick.playerId)
+        .map((pick) => ({
+          pickNo: pick.pickNo,
+          slot: ownerSlotOf(pick),
+          position: positionOf(pick.playerId!),
+          adp: importedValues.get(pick.playerId!)?.adp ?? null,
+        })),
+      // The market's own picture of the board, drafted players included — what
+      // the room "should" have been doing, to measure what it did.
+      universe: allPlayers.flatMap((player) => {
+        const adp = rankOf(player);
+        return adp == null ? [] : [{ position: player.position, adp }];
+      }),
+    });
+
     const ranked = rankAvailablePlayers(
       candidates.map((player) => ({
         player,
@@ -415,6 +563,7 @@ export class DraftBoardService {
         signal: signals.get(player.id) ?? null,
         myGuyLevel: flags.get(player.id)?.level ?? 0,
         seasonMarkets: seasonLines.get(player.id) ?? [],
+        nextPickSurvival: survivalFor(nextPick.byPlayer.get(player.id)),
       })),
       {
         currentPick,
@@ -473,6 +622,7 @@ export class DraftBoardService {
       status: designationOf(byId.get(rec.playerId)?.status ?? null),
       tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
       injuryLine: injuryLineFor(injuries.get(rec.playerId)),
+      nextPick: nextPickDetail(nextPick.byPlayer.get(rec.playerId)),
     }));
 
     return {
@@ -518,6 +668,33 @@ export class DraftBoardService {
       startablePositions: orderPositions(startable),
       offersFlex: offersFlexFilter(startable),
       /*
+       * What the `Next` model did, for the probe and for anybody debugging a
+       * number that looks wrong.
+       *
+       * Not read by any screen. `Next` is one percentage on a card and it has
+       * to stay one percentage on a card; this is where the twenty numbers
+       * behind it live, so that "why is he 18%" can be answered from the
+       * response rather than by reading the simulator.
+       */
+      nextPickModel: {
+        targetPick: nextPick.targetPick,
+        picksSimulated: nextPick.picksSimulated,
+        simulations: nextPick.simulations,
+        slotsAhead: nextPick.slotsAhead,
+        needAhead: Object.fromEntries(nextPick.needAhead),
+        roomSample: nextPick.room.sample,
+        dispersion: nextPick.room.dispersion,
+        positionRuns: Object.fromEntries(nextPick.room.runs),
+        positionBias: Object.fromEntries(nextPick.room.bias),
+        roomNotes: nextPick.room.notes,
+        // True when the board was too thin to simulate, so these percentages
+        // are the ADP model's rather than the simulation's.
+        marketOnly: nextPick.marketOnly,
+        degraded: nextPick.degraded,
+        elapsedMs: nextPick.elapsedMs,
+        cached: nextPick.cached,
+      },
+      /*
        * The counts, so a truncated board can never look healthy again.
        *
        * This board once ended near ADP 78 and said nothing about it, because
@@ -546,6 +723,117 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/**
+ * The simulated answer, in the shape the engine's survival component expects.
+ *
+ * The note carries the drivers *after* the headline: the component already says
+ * "18% chance to last to pick 68", so repeating "Unlikely to last to pick 68"
+ * next to it would be the same sentence twice. What is worth appending is the
+ * reasoning — who needs the position, how many are left in the tier, what the
+ * room has been doing.
+ *
+ * Returns undefined when the simulation had nothing to say about this player, so
+ * the engine falls back to its own ADP estimate rather than showing a blank.
+ */
+function survivalFor(availability: NextPickAvailability | undefined):
+  | { probability: number | null; note: string }
+  | undefined {
+  if (!availability) return undefined;
+  if (availability.probability == null && availability.drivers.length === 0) return undefined;
+  return {
+    probability: availability.probability,
+    note: availability.drivers.slice(1).join(' · '),
+  };
+}
+
+/** The same answer, in full, for the wire. */
+function nextPickDetail(availability: NextPickAvailability | undefined): BoardRecommendation['nextPick'] {
+  if (!availability) return null;
+  return {
+    probability: availability.probability,
+    marketBaseline: availability.marketBaseline,
+    drivers: availability.drivers,
+    confidence: availability.confidence,
+    degraded: availability.degraded,
+  };
+}
+
+/**
+ * Tier ladders for the simulator, from the same engine the board's tier chips
+ * use.
+ *
+ * Built here rather than reused from the ranking pass because the two run in
+ * that order — the simulation feeds the ranking — and because this file is the
+ * only place that has both the candidate pool and the horizon. It consumes the
+ * tier engine and does not redefine it: if a position has no usable ladder the
+ * simulator loses a nudge and keeps working.
+ */
+function buildTierMaps(
+  candidates: SimCandidate[],
+  currentPick: number,
+  targetPick: number | null,
+): Map<string, PositionTierMap> {
+  const adpsByPosition = new Map<string, number[]>();
+  for (const candidate of candidates) {
+    if (candidate.adp == null) continue;
+    const list = adpsByPosition.get(candidate.position);
+    if (list) list.push(candidate.adp);
+    else adpsByPosition.set(candidate.position, [candidate.adp]);
+  }
+  const picksUntilNext = targetPick == null ? 0 : Math.max(0, targetPick - currentPick);
+  const out = new Map<string, PositionTierMap>();
+  for (const [position, adps] of adpsByPosition) {
+    out.set(position, buildPositionTierMap(position, adps, { picksUntilNext }));
+  }
+  return out;
+}
+
+/**
+ * How many comparable players are left at each position, for the explanation.
+ *
+ * "Comparable" means within reach of the pick being measured to — a receiver
+ * ninety picks below the board is not an alternative to one going now, and
+ * counting him would turn every position into a deep one. Used only to decide
+ * whether a driver line is worth printing; the model's own supply effect comes
+ * out of the simulation, not out of this count.
+ */
+function alternativesByPosition(candidates: SimCandidate[], targetPick: number | null): Map<string, number> {
+  const out = new Map<string, number>();
+  if (targetPick == null) return out;
+  const reach = targetPick + 30;
+  for (const candidate of candidates) {
+    if (candidate.adp == null || candidate.adp > reach) continue;
+    out.set(candidate.position, (out.get(candidate.position) ?? 0) + 1);
+  }
+  return out;
+}
+
+/**
+ * Traded picks, if this draft's settings carry any.
+ *
+ * Sleeper exposes them on a separate endpoint that this app does not yet sync,
+ * so in practice the list is usually empty and every pick belongs to its seat —
+ * which is what the snake said all along. The path exists because reading them
+ * from the wrong place is worse than not reading them: a pick attributed to the
+ * manager who traded it away invents demand from a roster that is not picking.
+ * Anything malformed is ignored rather than guessed at.
+ */
+function tradedPicksFrom(settings: Record<string, unknown> | null | undefined): TradedPick[] {
+  const raw = settings?.['traded_picks'] ?? settings?.['tradedPicks'];
+  if (!Array.isArray(raw)) return [];
+  const out: TradedPick[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const row = entry as Record<string, unknown>;
+    const round = Number(row['round']);
+    const rosterId = Number(row['roster_id'] ?? row['rosterId']);
+    const ownerRosterId = Number(row['owner_id'] ?? row['ownerId'] ?? row['ownerRosterId']);
+    if (!Number.isFinite(round) || !Number.isFinite(rosterId) || !Number.isFinite(ownerRosterId)) continue;
+    out.push({ round, rosterId, ownerRosterId });
+  }
+  return out;
 }
 
 /**

@@ -55,6 +55,17 @@ export interface SurvivalInput {
   /** The overall pick number currently on the clock. */
   currentPick: number;
   /**
+   * How wide this room's own draft order is running against the market.
+   *
+   * 1 is the published market. Below 1 is a room that has been tracking ADP
+   * tightly, so the distribution narrows and the board becomes more
+   * predictable; above 1 is a room full of reaches, where everything is
+   * likelier to move early and likelier to fall. Measured from the picks
+   * already made — see `readRoom` — and bounded, because a dozen picks is not
+   * enough evidence to rewrite the market.
+   */
+  dispersion?: number;
+  /**
    * The pick he would have to survive to if you passed on him now.
    *
    * **Never the pick on the clock.** On the clock that is the selection being
@@ -81,14 +92,78 @@ export interface SurvivalEstimate {
 }
 
 /**
+ * How far a room may be allowed to disagree with the market.
+ *
+ * A room that has taken twelve players within a pick of their ADP is a more
+ * predictable room than the published market describes, and one that has been
+ * reaching wildly is a less predictable one. Both are real, and neither is
+ * worth more than a modest adjustment: a draft is a few dozen observations of
+ * a distribution built from thousands.
+ */
+export const DISPERSION_BOUNDS = { min: 0.75, max: 1.35 } as const;
+
+/**
  * ADP noise grows with draft position. Round 1 picks go close to ADP; a player
  * with ADP 120 routinely goes 20 picks either side.
+ *
+ * `dispersion` scales the whole curve for a room that is running tighter or
+ * looser than the market. It defaults to 1, which is the market as published.
  */
-export function adpSpread(adp: number): number {
-  return Math.max(4, 3 + 0.22 * adp);
+export function adpSpread(adp: number, dispersion = 1): number {
+  const base = Math.max(4, 3 + 0.22 * adp);
+  return base * clamp(dispersion, DISPERSION_BOUNDS.min, DISPERSION_BOUNDS.max);
 }
 
 const LOGISTIC_SCALE = 1.702; // logistic approximation to the normal CDF
+
+/**
+ * The chance the market has not yet reached him at a given pick, `S(pick)`.
+ *
+ * The single definition of the ADP distribution in this codebase. Everything
+ * that asks a question about where a player goes — the conditional estimate
+ * below, the simulator's per-pick hazard, the diagnostics — goes through this
+ * or through the two functions under it, so there is one curve to tune and one
+ * curve to test.
+ */
+export function marketSurvivalAt(adp: number, pick: number, dispersion = 1): number {
+  return logistic((LOGISTIC_SCALE * (adp - pick)) / adpSpread(adp, dispersion));
+}
+
+/**
+ * `P(lasts to `to` | lasted to `from`)` — the number this file exists for.
+ *
+ * Computed as a difference of logs rather than a ratio of probabilities:
+ * deep in the tail both terms underflow to zero and the ratio becomes 0/0,
+ * which is precisely the case that matters — the player long past his ADP who
+ * is somehow still on the board.
+ */
+export function conditionalMarketSurvival(adp: number, from: number, to: number, dispersion = 1): number {
+  if (!Number.isFinite(adp)) return 0;
+  if (to <= from) return 1;
+  const spread = adpSpread(adp, dispersion);
+  const z = (pick: number) => (LOGISTIC_SCALE * (adp - pick)) / spread;
+  return clamp01(Math.exp(softplus(-z(from)) - softplus(-z(to))));
+}
+
+/**
+ * How ready the market is to take this player at this exact pick, in [0,1).
+ *
+ * The hazard of the same distribution, up to the constant `1/spread` that the
+ * simulator normalises away: `1 - S(pick)`. It is 0.5 at his ADP, small before
+ * it, and it *saturates* rather than growing without bound after it.
+ *
+ * That ceiling is the whole point. A player fifty picks past his ADP is at the
+ * top of what the market can say about him — the room has been declining him
+ * every pick, and a distribution that kept climbing would claim he is more
+ * certain to go than the best player available, which is the opposite of what
+ * the board is showing. It is also why the simulator needs no separate
+ * "falling player" term: he already carries roughly twice the weight of a
+ * player being taken at his own ADP, and no more.
+ */
+export function marketPickWeight(adp: number, pick: number, dispersion = 1): number {
+  if (!Number.isFinite(adp)) return 0;
+  return 1 - marketSurvivalAt(adp, pick, dispersion);
+}
 
 export function estimateSurvival(input: SurvivalInput): SurvivalEstimate {
   /*
@@ -132,19 +207,10 @@ export function estimateSurvival(input: SurvivalInput): SurvivalEstimate {
     };
   }
 
-  const spread = adpSpread(input.adp);
-  const z = (pick: number) => (LOGISTIC_SCALE * (input.adp! - pick)) / spread;
-
-  /*
-   * Computed as a ratio of logs, not of probabilities.
-   *
-   * Deep in the tail both survival terms underflow to zero and the ratio
-   * becomes 0/0 — which is precisely the case this model exists to handle, the
-   * player long past his ADP who is somehow still there.
-   */
-  const logRatio = softplus(-z(input.currentPick)) - softplus(-z(input.nextPick));
-  const probability = clamp01(Math.exp(logRatio));
-  const unconditional = logistic(z(input.nextPick));
+  const dispersion = input.dispersion ?? 1;
+  const spread = adpSpread(input.adp, dispersion);
+  const probability = conditionalMarketSurvival(input.adp, input.currentPick, input.nextPick, dispersion);
+  const unconditional = marketSurvivalAt(input.adp, input.nextPick, dispersion);
 
   return {
     probability: round3(probability),
@@ -166,6 +232,10 @@ function softplus(x: number): number {
 
 function clamp01(v: number): number {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo;
 }
 
 function round3(v: number): number {

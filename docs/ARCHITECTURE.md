@@ -168,9 +168,15 @@ depth), league fit (derived from Sleeper scoring), recent news, lifetime news,
 and survival-to-next-pick. News weights are small and saturating so a big tally
 sways a close call without overturning a large market-value gap.
 
-**Survival** is a logistic model over ADP and pick distance with spread growing
-in ADP. It is an estimate, labelled as such, and returns `null` — not a
-fabricated number — when ADP is unknown.
+**Survival** — the `Next` column — is a deterministic-seeded Monte Carlo
+simulation of the actual picks between now and the user's next owned selection
+(`src/core/draft/nextpick/`, documented in `docs/NEXT_PICK.md`). Each simulated
+pick asks who owns it, what that manager's starting slots still want, and what
+the room has been doing, then samples a position and a player and updates the
+board. The ADP distribution it is built on lives in `src/core/draft/survival.ts`
+and remains the fallback when a draft cannot be simulated. It is an estimate,
+labelled as such, and returns `null` — not a fabricated number — when ADP is
+unknown or the user has no later pick.
 
 **Start/sit** (`src/core/startsit/engine.ts`): Vegas market expectation
 (converted with the league's own scoring settings), recent news, lifetime news,

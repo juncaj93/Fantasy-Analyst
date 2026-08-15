@@ -158,6 +158,22 @@ export interface AvailablePlayerInput {
    * pricing him at zero, and is scored as unknown.
    */
   seasonMarkets?: { market: SeasonMarketKey; line: number | null }[];
+  /**
+   * The chance the room leaves him until your next pick, when the caller has
+   * simulated it.
+   *
+   * The engine's own `estimateSurvival` reads ADP and nothing else, which is all
+   * a pure ranking function can see: who else is picking, what those managers
+   * are short of and what the room has been doing are live draft state that
+   * deliberately never enters this module. The board service does have that
+   * state, so it runs the simulation and hands the answer in here — and when it
+   * cannot (no draft loaded, a unit test, a degraded board) the ADP estimate
+   * still answers, which is why this is optional rather than required.
+   *
+   * `note` carries the drivers behind the number, and is appended to the
+   * component's own sentence rather than replacing it.
+   */
+  nextPickSurvival?: { probability: number | null; note: string };
 }
 
 export interface DraftContext {
@@ -523,13 +539,15 @@ export function rankAvailablePlayers(
     components.push(lifetimeNews, news30, news7);
 
     // --- survival urgency --------------------------------------------------
-    const survival = estimateSurvival({
-      adp,
-      currentPick: ctx.currentPick,
-      // Passed through, null and all. Substituting the current pick here turned
-      // "there is no later pick" into "certain to last", which is its opposite.
-      nextPick: ctx.nextPick,
-    });
+    const survival: { probability: number | null; note: string } =
+      entry.nextPickSurvival ??
+      estimateSurvival({
+        adp,
+        currentPick: ctx.currentPick,
+        // Passed through, null and all. Substituting the current pick here turned
+        // "there is no later pick" into "certain to last", which is its opposite.
+        nextPick: ctx.nextPick,
+      });
     const urgencyScore = survival.probability == null ? 0 : clamp(1 - survival.probability * 2, -1, 1);
     components.push({
       key: 'survival',
@@ -537,7 +555,13 @@ export function rankAvailablePlayers(
       display:
         survival.probability == null
           ? survival.note
-          : `${Math.round(survival.probability * 100)}% chance to last to pick ${ctx.nextPick}`,
+          : // The number, then whatever the model found to say about it. The
+            // drivers arrive already filtered to the ones that actually moved
+            // the simulation, so an empty note means nothing stood out rather
+            // than that nothing was checked.
+            `${Math.round(survival.probability * 100)}% chance to last to pick ${ctx.nextPick}${
+              survival.note ? ` · ${survival.note}` : ''
+            }`,
       score: round3(urgencyScore),
       weight: weights.survivalUrgency,
       contribution: round3(urgencyScore * weights.survivalUrgency),
