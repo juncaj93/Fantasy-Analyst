@@ -224,6 +224,52 @@ test.describe('the deployed app', () => {
     expect(visible, 'the first screen should be mostly players').toBeGreaterThanOrEqual(5);
   });
 
+  /**
+   * The tier-cliff warning, where the live board happens to have one.
+   *
+   * It shares the metrics line rather than opening a row of its own, so a
+   * warned card is exactly as tall as it would be without the warning. Measured
+   * on one card twice, because two live players differ in more than this.
+   */
+  test('a tier-cliff warning costs its card no height', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const warned = page
+      .getByTestId('recommendation-row')
+      .filter({ has: page.getByTestId('tier-cliff-tag') })
+      .first();
+    // A board with no position thinning out has nothing to say here, and that
+    // is a fact about today's pool rather than a failure of this layout.
+    test.skip((await warned.count()) === 0, 'no tier cliff on the board today');
+
+    const measured = await warned.evaluate((el) => {
+      const height = () => Math.round(el.getBoundingClientRect().height);
+      const chip = el.querySelector('[data-testid="tier-cliff-tag"]')!;
+      const metrics = el.querySelector('.player-row-metrics')!.getBoundingClientRect();
+      const box = chip.getBoundingClientRect();
+      const withWarning = height();
+      const parent = chip.parentElement!;
+      chip.remove();
+      const without = height();
+      parent.append(chip);
+      return {
+        withWarning,
+        without,
+        onTheMetricsLine: Math.abs(box.top + box.height / 2 - (metrics.top + metrics.height / 2)) <= 2,
+        clearOfMetrics: box.left >= metrics.right,
+        metricLines: new Set([...el.querySelectorAll('.metric')].map((m) => Math.round(m.getBoundingClientRect().top)))
+          .size,
+      };
+    });
+
+    expect(measured.withWarning, 'the warning makes the card taller').toBe(measured.without);
+    expect(measured.onTheMetricsLine, 'the warning is on a row of its own').toBe(true);
+    expect(measured.clearOfMetrics, 'the warning is sitting on the numbers').toBe(true);
+    expect(measured.metricLines, 'the numbers wrapped to make room for it').toBe(1);
+  });
+
   test('a player card opens in place and closes again', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
