@@ -78,30 +78,43 @@ async function installDraftDouble(page: Page): Promise<DraftDouble> {
 
   await page.route('**/api/drafts/*/board*', async (route) => {
     boards++;
-    const response = await route.fetch();
-    const body = (await response.json()) as {
-      recommendations: { playerId: string; name: string }[];
-      currentPick: number;
-      onTheClock: boolean;
-      picksUntilMyTurn: number | null;
-    };
-    /*
-     * One player gone per pick, exactly like a real draft.
-     *
-     * Drafted players are dropped from the *top* of the ranked list, which is
-     * the case that matters: it is the row the reader is looking at, and its
-     * removal is what moves everything below it.
-     */
-    const drafted = Math.max(0, pick - 53);
-    body.recommendations = body.recommendations.slice(drafted);
-    body.currentPick += drafted;
-    body.onTheClock = onClock;
-    body.picksUntilMyTurn = onClock ? 0 : 3;
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(body),
-    });
+    try {
+      const response = await route.fetch();
+      const body = (await response.json()) as {
+        recommendations: { playerId: string; name: string }[];
+        currentPick: number;
+        onTheClock: boolean;
+        picksUntilMyTurn: number | null;
+      };
+      /*
+       * One player gone per pick, exactly like a real draft.
+       *
+       * Drafted players are dropped from the *top* of the ranked list, which is
+       * the case that matters: it is the row the reader is looking at, and its
+       * removal is what moves everything below it.
+       */
+      const drafted = Math.max(0, pick - 53);
+      body.recommendations = body.recommendations.slice(drafted);
+      body.currentPick += drafted;
+      body.onTheClock = onClock;
+      body.picksUntilMyTurn = onClock ? 0 : 3;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+    } catch {
+      /*
+       * The reader left Draft while this request was still out.
+       *
+       * That is the behaviour under test, not a fault: unmounting the screen
+       * cancels its in-flight board request, and a cancelled request has no
+       * response left for this handler to rewrite. It is counted — the count is
+       * what several assertions read — and then dropped, because there is
+       * nobody on the other end to answer.
+       */
+      await route.abort().catch(() => {});
+    }
   });
 
   return {
