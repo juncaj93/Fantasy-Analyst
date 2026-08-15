@@ -39,8 +39,15 @@ if (!existsSync(bundlePath)) {
   process.exit(1);
 }
 
-const { NodeSqliteDatabase, createApp, SleeperClient, MockVegasProvider, seedDemoData, MOCK_GAMES } =
-  await import(bundlePath);
+const {
+  NodeSqliteDatabase,
+  createApp,
+  SleeperClient,
+  MockVegasProvider,
+  seedDemoData,
+  MOCK_GAMES,
+  withDemoSleeper,
+} = await import(bundlePath);
 
 const db = new NodeSqliteDatabase(dbPath);
 // Apply every migration in order, exactly like `wrangler d1 migrations apply`.
@@ -56,7 +63,13 @@ if (seed) {
 const app = createApp();
 const env = {
   db,
-  sleeper: new SleeperClient(),
+  /*
+   * The seeded league's draft only exists here, so the seeded server answers
+   * for it locally — the Draft screen polls it by itself now, and every one of
+   * those polls would otherwise 404 against the real Sleeper. Anything that is
+   * not the demo draft still goes upstream. See src/devserver/sleeperMock.ts.
+   */
+  sleeper: new SleeperClient(seed ? { fetch: withDemoSleeper() } : {}),
   vegas: new MockVegasProvider(MOCK_GAMES),
   inboundAddress: process.env.NEWSLETTER_ADDRESS ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',

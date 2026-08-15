@@ -194,6 +194,45 @@ describe('SleeperSyncService', () => {
     expect(first.picks).toBe(2);
     expect(second.picks).toBe(2);
     expect(await new LeagueRepo(db).listPicks('D1')).toHaveLength(2);
+    /*
+     * The same draft twice reports the same fingerprint.
+     *
+     * This is what lets the live board poll every five seconds without
+     * rebuilding itself: the client compares this string and only does the
+     * expensive work when it moves. A fingerprint that drifted between two
+     * identical syncs would quietly turn every poll back into a full rebuild.
+     */
+    expect(second.fingerprint).toBe(first.fingerprint);
+  });
+
+  it('reports a new fingerprint once a pick lands', async () => {
+    const draft = {
+      draft_id: 'D2',
+      league_id: 'L2',
+      status: 'drafting',
+      type: 'snake',
+      season: '2026',
+      settings: { rounds: 15, teams: 12 },
+    };
+    const picks = [{ draft_id: 'D2', pick_no: 1, round: 1, draft_slot: 1, player_id: '4046', roster_id: 1 }];
+    await new LeagueRepo(db).upsertLeague({
+      id: 'L2', sleeperLeagueId: 'L2', name: 'L', season: '2026', totalRosters: 12,
+      scoringSettings: {}, rosterPositions: [], leagueSettings: {}, draftId: 'D2', lastSyncedAt: '2026-01-01T00:00:00Z',
+    });
+
+    // Key order matters in `client`: the first key the URL contains wins, so
+    // the longer path has to come first or `/draft/D2` would swallow its picks.
+    const before = await new SleeperSyncService(db, client({ '/draft/D2/picks': picks, '/draft/D2': draft })).syncDraft('D2');
+    const after = await new SleeperSyncService(
+      db,
+      client({
+        '/draft/D2/picks': [...picks, { draft_id: 'D2', pick_no: 2, round: 1, draft_slot: 2, player_id: '8138', roster_id: 2 }],
+        '/draft/D2': draft,
+      }),
+    ).syncDraft('D2');
+
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+    expect(after.lastPickNo).toBe(2);
   });
 
   it('backs off polling once the draft is complete', () => {

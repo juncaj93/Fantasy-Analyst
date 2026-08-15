@@ -184,6 +184,42 @@ availability status and an uncertainty penalty for thin/partial/stale market
 data. Missing markets are reported, never imputed; if nothing is usable the
 recommendation is withheld.
 
+## Live draft refresh
+
+The Draft board keeps itself level with Sleeper. `src/web/draftRefresh.ts` owns
+the whole lifecycle — the screen supplies only "how to sync" and "what to rebuild
+when the answer is new" — and its clock is injected, so the schedule is tested at
+speed rather than waited out (`tests/draftRefresh.test.ts`).
+
+Polling is **browser-side and foreground only**. There is no worker cron, and
+nothing runs while nobody is on the screen: the controller starts when
+`DraftScreen` mounts and stops when it unmounts, so entering Draft by any route
+syncs immediately and leaving it ends the loop.
+
+| condition | cadence |
+| --- | --- |
+| Draft open, visible, live | 5000 ms |
+| user on the clock | 2500 ms |
+| repeated failures | 5s → 10s → 20s → 30s, reset on first success |
+| hidden, offline, off Draft, draft complete | stopped |
+
+Immediate syncs happen on mount, route activation, foreground resume, network
+recovery and a manual tap. iOS fires several signals for one resume, so those are
+coalesced into one request. Requests never overlap: a timer tick that lands
+mid-flight steps aside, an explicit trigger is owed at most one follow-up, and a
+response that arrives after the screen is gone is discarded rather than applied.
+
+**The board is only rebuilt when the draft actually moved.** Every sync returns a
+semantic fingerprint (`src/core/sleeper/draftFingerprint.ts`) over the draft id,
+its status, and the pick sequence with ownership — sorted, and blind to transport
+timestamps and metadata. An unchanged fingerprint updates `lastCheckedAt` and
+stops there: no board request, and therefore no Monte Carlo survival run, no tier
+recomputation and no opportunity-cost work. A changed one calls the screen's
+ordinary board reload, which is the existing path all of those already hang off;
+the refresh layer duplicates none of them. Repeated failures keep the last good
+board and show one compact `Draft sync delayed · retrying` line rather than an
+error page. `window.__draftRefresh()` reports the loop's state on the device.
+
 ## Vegas provider abstraction
 
 Nothing outside `src/core/vegas/` references a vendor field name. Adapters map

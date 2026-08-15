@@ -6,6 +6,7 @@
  */
 
 import type { SleeperClient } from '../../core/sleeper/client.ts';
+import { draftStateFingerprint } from '../../core/sleeper/draftFingerprint.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
 import {
   toCanonicalPlayers,
@@ -144,11 +145,19 @@ export class SleeperSyncService {
   /**
    * Poll draft state. Cheap enough to call on a short interval while a draft is
    * active; callers should back off when `status !== 'drafting'`.
+   *
+   * The `fingerprint` is what makes that short interval affordable. Writing the
+   * picks is cheap and idempotent; *rebuilding the board* on top of them is not
+   * — it is a Monte Carlo run per candidate — and during a live draft most
+   * polls land on a draft where nobody has picked since the last one. Callers
+   * compare this string to the one they already hold and only go on to rebuild
+   * when it moved. See core/sleeper/draftFingerprint.ts for what "moved" means.
    */
   async syncDraft(draftId: string): Promise<{
     status: string;
     picks: number;
     lastPickNo: number;
+    fingerprint: string;
   }> {
     const [draft, picks] = await Promise.all([
       this.client.getDraft(draftId),
@@ -165,6 +174,16 @@ export class SleeperSyncService {
       status: record.status,
       picks: pickRecords.length,
       lastPickNo: pickRecords.length > 0 ? pickRecords[pickRecords.length - 1]!.pickNo : 0,
+      fingerprint: draftStateFingerprint({
+        draftId,
+        status: record.status,
+        picks: pickRecords.map((p) => ({
+          pickNo: p.pickNo,
+          playerId: p.playerId ?? p.sleeperPlayerId ?? null,
+          rosterId: p.rosterId ?? null,
+          pickedBy: p.pickedBy ?? null,
+        })),
+      }),
     };
   }
 
