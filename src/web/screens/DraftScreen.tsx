@@ -456,19 +456,20 @@ export function DraftScreen({
           value={position}
           onChange={setPosition}
           /*
-            The queue, everybody, the flex view, then the positions the league
-            actually starts.
+            The queue, everybody, the positions the league starts, then FLX.
 
-            FLX sits next to ALL rather than among the positions because it is
-            the same kind of thing they are — a view over the board — and not a
-            position a player has. It appears only where it can return
-            something; see `offersFlex`, decided from the league's own slots.
+            FLX goes last rather than among the positions, because it is not one:
+            it is a view spanning three of them, and a chip that reads like a
+            position sitting in the middle of the real ones invites exactly the
+            confusion this filter must not cause. At the end it reads as what it
+            is — the combined view, after the parts. It appears only where it can
+            return something; see `offersFlex`, decided from the league's slots.
           */
           segments={[
             QUEUE_FILTER,
             ALL_FILTER,
-            ...(board.offersFlex ? [FLX_FILTER] : []),
             ...(board.startablePositions ?? []),
+            ...(board.offersFlex ? [FLX_FILTER] : []),
           ].map((p) => ({
             id: p,
             label: p,

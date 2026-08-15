@@ -9,7 +9,7 @@ import { rosterAlerts, type RosterAlert } from '../../core/draft/decisions.ts';
 import { rankAvailablePlayers, type DraftRecommendation } from '../../core/draft/engine.ts';
 import { computeNeed } from '../../core/draft/need.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
-import { offersFlexFilter, positionMatchesFilter } from '../../core/sleeper/eligibility.ts';
+import { offersFlexFilter, orderPositions, positionMatchesFilter } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildLiveRoster } from '../../core/draft/liveRoster.ts';
 import { demandBetweenPicks } from '../../core/draft/demandAhead.ts';
@@ -845,10 +845,3 @@ function designationOf(status: string | null): string | null {
 }
 
 /** Conventional reading order, with anything unexpected kept and put last. */
-const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'DEF'];
-
-function orderPositions(positions: Set<string>): string[] {
-  const known = POSITION_ORDER.filter((p) => positions.has(p));
-  const rest = [...positions].filter((p) => !POSITION_ORDER.includes(p)).sort();
-  return [...known, ...rest];
-}

@@ -37,7 +37,7 @@ import {
   positionCardClass,
 } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
-import { FLX_FILTER, offersFlexFilter, slotAccepts } from '../../core/sleeper/eligibility.ts';
+import { FLX_FILTER, offersFlexFilter, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 
 interface OpenSlot {
@@ -547,7 +547,8 @@ function CompareSheet({
   const segments = useMemo(() => {
     const startable = startablePositions(buildRosterShape(rosterPositions));
     if (startable.size === 0) return [ALL_FILTER];
-    return [ALL_FILTER, ...(offersFlexFilter(startable) ? [FLX_FILTER] : []), ...[...startable].sort()];
+    // FLX last, as everywhere else: a view over three positions, after them.
+    return [ALL_FILTER, ...orderPositions(startable), ...(offersFlexFilter(startable) ? [FLX_FILTER] : [])];
   }, [rosterPositions]);
 
   useEffect(() => {
