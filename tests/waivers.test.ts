@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
+import type { StartSitEvaluation } from '../src/core/startsit/engine.ts';
 import { recommendWaiverUpgrades, MEANINGFUL_UPGRADE_GAIN, upgradeBar } from '../src/core/startsit/waivers.ts';
 import { candidate, signalWithNet } from './helpers/startsit.ts';
 
@@ -271,10 +272,51 @@ describe('the same intelligence as everywhere else', () => {
 });
 
 describe('the threshold itself', () => {
+  const wellCovered = { confidence: 'high' } as StartSitEvaluation;
+  const thin = { confidence: 'low' } as StartSitEvaluation;
+  const partial = { confidence: 'medium' } as StartSitEvaluation;
+
   it('is one number, in one place', () => {
     expect(MEANINGFUL_UPGRADE_GAIN).toBe(2.5);
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, null)).toBe(MEANINGFUL_UPGRADE_GAIN);
-    expect(upgradeBar('unfilled', MEANINGFUL_UPGRADE_GAIN, null)).toBe(0);
+    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, wellCovered)).toBe(MEANINGFUL_UPGRADE_GAIN);
+  });
+
+  /** An empty slot is a need, not a preference: any playable body clears it. */
+  it('does not apply to a slot nobody is starting in', () => {
+    expect(upgradeBar('unfilled', MEANINGFUL_UPGRADE_GAIN, null, thin)).toBe(0);
+  });
+
+  /**
+   * The rule that keeps the card quiet.
+   *
+   * A gap measured against a player the market has not priced is mostly the
+   * missing side showing through, so it has to be bigger before it is worth
+   * saying. Either side being thin is enough — the weaker half is what limits
+   * what the subtraction can be trusted to mean.
+   */
+  it('asks more of a gap measured against thin data, on either side', () => {
+    const solid = upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, wellCovered);
+    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, wellCovered)).toBeGreaterThan(solid);
+    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, thin)).toBeGreaterThan(solid);
+    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, partial, wellCovered)).toBeGreaterThan(solid);
+    // The worse of the two decides, so one thin side is not softened by a
+    // well-covered one.
+    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, wellCovered)).toBe(
+      upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, thin),
+    );
+  });
+
+  it('suppresses an add whose apparent edge is only the missing half', () => {
+    // The incumbent has a market and grades ~9; the free agent has none at all,
+    // so his score comes from news and availability alone.
+    const advice = recommendWaiverUpgrades({
+      roster: healthyRoster(),
+      candidates: [candidate('fa-te', 'Unpriced End', 'TE', null, { signal: signalWithNet(9) })],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS,
+    });
+    expect(advice.upgrades).toEqual([]);
   });
 
   it('can be raised or lowered by a caller without editing the engine', () => {

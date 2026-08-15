@@ -128,7 +128,7 @@ export function recommendWaiverUpgrades(opts: {
     need: 'unfilled' | 'upgrade';
     bar: number;
     current: StartSitEvaluation | null;
-    ranked: { evaluation: StartSitEvaluation; gain: number }[];
+    ranked: { evaluation: StartSitEvaluation; gain: number; bar: number }[];
   }
 
   const considered: Considered[] = [];
@@ -137,16 +137,30 @@ export function recommendWaiverUpgrades(opts: {
     if (slot.locked) continue;
     const current = slot.playerId ? (rosterEvaluations.get(slot.playerId) ?? null) : null;
     const need: 'unfilled' | 'upgrade' = slot.playerId == null ? 'unfilled' : 'upgrade';
-    const bar = upgradeBar(need, base, current);
     const currentScore = current?.score ?? null;
 
+    /*
+     * The bar is per candidate, because thin data is per candidate.
+     *
+     * A gap measured between two well-covered players means what it says; the
+     * same gap measured against somebody with no market at all is mostly an
+     * artefact of the missing side, and asking more of it is the difference
+     * between advice and noise. `bar` on the upgrade is the strictest one that
+     * actually admitted somebody, so the card can show what was cleared.
+     */
     const ranked = playable
       .filter((e) => slot.accepts.includes(e.position))
-      .map((e) => ({ evaluation: e, gain: round2((e.score ?? 0) - (currentScore ?? 0)) }))
-      .filter((c) => c.gain >= bar && (c.evaluation.score ?? 0) > 0)
+      .map((e) => ({
+        evaluation: e,
+        gain: round2((e.score ?? 0) - (currentScore ?? 0)),
+        bar: upgradeBar(need, base, current, e),
+      }))
+      .filter((c) => c.gain >= c.bar && (c.evaluation.score ?? 0) > 0)
       .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name));
 
-    if (ranked.length > 0) considered.push({ slot, need, bar, current, ranked });
+    if (ranked.length > 0) {
+      considered.push({ slot, need, bar: Math.max(...ranked.map((c) => c.bar)), current, ranked });
+    }
   }
 
   /*
@@ -202,25 +216,34 @@ export function recommendWaiverUpgrades(opts: {
 }
 
 /**
- * The bar this particular slot's upgrade has to clear.
+ * How much better this candidate has to be before the add is worth mentioning.
  *
- * One place, deliberately, so "meaningful" means one thing across the app. An
- * empty slot has no bar at all — nobody is starting there, so any playable body
- * is an improvement and calling that noise would be pedantry. Everywhere else
- * the bar is the standing threshold, raised when the candidate's own data is
- * thin, because a two-point edge computed from one book at partial coverage is
- * not a two-point edge.
+ * One place, deliberately, so "meaningful" means one thing across the app.
+ *
+ * An empty slot has no bar at all — nobody is starting there, so any playable
+ * body is an improvement and calling that noise would be pedantry.
+ *
+ * Everywhere else it is the standing threshold, **raised when either side's
+ * data is thin**. A four-point gap between two players the market has priced is
+ * four points; the same gap measured against somebody with no market at all is
+ * mostly the missing side showing through, and treating the two as equally
+ * convincing is how a waiver card fills up with adds nobody should make. The
+ * worse of the two confidences decides, because the weaker half is what limits
+ * what the subtraction can be trusted to say.
  */
 export function upgradeBar(
   need: 'unfilled' | 'upgrade',
   base: number,
   current: StartSitEvaluation | null,
+  candidate?: StartSitEvaluation | null,
 ): number {
   if (need === 'unfilled') return 0;
-  let bar = base;
-  // A starter the app is sure about takes more displacing than one it is not.
-  if (current?.confidence === 'low') bar -= 0.5;
-  return round2(Math.max(0.5, bar));
+  const confidences = [current?.confidence, candidate?.confidence].filter(
+    (c): c is 'high' | 'medium' | 'low' => c != null,
+  );
+  const worst = confidences.includes('low') ? 'low' : confidences.includes('medium') ? 'medium' : 'high';
+  const surcharge = worst === 'low' ? 1.5 : worst === 'medium' ? 0.5 : 0;
+  return round2(base + surcharge);
 }
 
 /**
