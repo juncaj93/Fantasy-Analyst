@@ -74,17 +74,27 @@ test.describe('the destinations', () => {
     }
   });
 
+  /**
+   * Read from the label's own text node, not from the button's rendered text.
+   *
+   * A destination is a glyph, a word, and sometimes a badge or a lock mark, and
+   * the two engines do not agree about what `innerText` makes of that: Chromium
+   * puts the absolutely-positioned badge on a line of its own and WebKit runs it
+   * straight on, so Review reads as `Review` in one and `Review7` in the other.
+   * The word is a text node either way, and that is what this is about.
+   */
   test('the labels are still words, not glyphs alone', async ({ page }) => {
     await page.goto('/');
-    const labels = await page.locator('.tabbar button').allInnerTexts();
-    expect(labels.map((l) => l.trim().split('\n')[0])).toEqual([
-      'Draft',
-      'Team',
-      'Trades',
-      'Players',
-      'Review',
-      'Setup',
-    ]);
+    await page.locator('.tabbar').waitFor({ state: 'attached' });
+    const labels = await page.evaluate(() =>
+      [...document.querySelectorAll('.tabbar button')].map((b) =>
+        [...b.childNodes]
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent?.trim() ?? '')
+          .join(''),
+      ),
+    );
+    expect(labels).toEqual(['Draft', 'Team', 'Trades', 'Players', 'Review', 'Setup']);
   });
 
   /**
