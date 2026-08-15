@@ -157,8 +157,23 @@ describe('reconciling participation against injury evidence', () => {
     });
     expect(a.confidence).toBe('unattributed');
     expect(a.injuryAttributedMisses).toBe(0);
-    expect(a.displaySummary).toBe('2025: played 12 of 17 games');
-    expect(a.displaySummary).not.toMatch(/ankle|injury/i);
+    /*
+     * The card prints `12 GP` directly above this, so there is nothing left to
+     * add — and the one thing that must not be added is a reason.
+     */
+    expect(a.displaySummary).toBeNull();
+  });
+
+  /** §10 — three injuries stop fitting as clauses, so the total is stated once. */
+  it('states one total when too many injuries to itemise', () => {
+    const a = reconcile({
+      rows: [...outRange(2, 4, 'Toe'), ...outRange(8, 9, 'Wrist'), ...outRange(14, 15, 'Knee')],
+      gamesPlayed: 10,
+      gamesAvailable: 17,
+    });
+    expect(a.confidence).toBe('complete');
+    // Most costly first, ties broken alphabetically, so the line is stable.
+    expect(a.displaySummary).toBe('2025: missed 7 games with toe, knee and wrist injuries');
   });
 
   /** §10, §25 — two injuries are two injuries. */
@@ -305,6 +320,24 @@ describe('supported prose closing a gap the report left open', () => {
     expect(a.displaySummary).toBe('2025: played 8 of 17 games; at least 2 absences tied to a toe injury');
   });
 
+  /**
+   * A single-cause claim cannot be laid over a two-cause season. Raising one
+   * part to the whole total would leave the parts summing past the games
+   * actually missed, so the qualified wording stands.
+   */
+  it('will not absorb a one-injury claim into a two-injury season', () => {
+    const a = reconcile({
+      rows: [...outRange(3, 5, 'Wrist'), ...outRange(9, 10, 'Toe')],
+      gamesPlayed: 8,
+      gamesAvailable: 17,
+      outlook: 'He missed nine games last year with a wrist injury.',
+    });
+    expect(a.corroborated).toBe(false);
+    expect(a.injuryAttributedMisses).toBe(5);
+    expect(a.parts.reduce((n, p) => n + p.games, 0)).toBeLessThanOrEqual(a.gamesMissedTotal!);
+    expect(a.displaySummary).toBe('2025: played 8 of 17 games; missed time included wrist and toe injuries');
+  });
+
   it('ignores prose that names a different injury', () => {
     const a = reconcile({
       rows: outRange(11, 12, 'Toe'),
@@ -392,6 +425,13 @@ describe('invariants that hold for every input', () => {
     { rows: outRange(3, 9, 'Foot'), gamesPlayed: 15, gamesAvailable: 17 },
     { rows: [...outRange(2, 4, 'Toe'), ...outRange(9, 11, 'Wrist')], gamesPlayed: 11, gamesAvailable: 17 },
     { rows: [], gamesPlayed: 12, gamesAvailable: 17 },
+    { rows: [...outRange(2, 4, 'Toe'), ...outRange(8, 9, 'Wrist'), ...outRange(14, 15, 'Knee')], gamesPlayed: 10, gamesAvailable: 17 },
+    {
+      rows: [...outRange(3, 5, 'Wrist'), ...outRange(9, 10, 'Toe')],
+      gamesPlayed: 8,
+      gamesAvailable: 17,
+      outlook: 'He missed nine games last year with a wrist injury.',
+    },
     { rows: outRange(4, 6, 'Calf'), gamesPlayed: null, gamesAvailable: 17 },
     { rows: outRange(4, 6, 'Calf'), gamesPlayed: 8, gamesAvailable: null },
   ];
@@ -414,6 +454,8 @@ describe('invariants that hold for every input', () => {
       expect(result.injuryAttributedMisses).toBeLessThanOrEqual(result.gamesMissedTotal);
       expect(result.unresolvedMisses).toBe(result.gamesMissedTotal - result.injuryAttributedMisses);
       expect(result.unresolvedMisses).toBeGreaterThanOrEqual(0);
+      // The per-injury breakdown is the same games, split up — never more.
+      expect(result.parts.reduce((n, p) => n + p.games, 0)).toBeLessThanOrEqual(result.gamesMissedTotal);
     }
   });
 

@@ -274,7 +274,15 @@ export function reconcileHistoricalAvailability(input: AvailabilityInput): Histo
   let injuryAttributedMisses = attributedFromReport;
   let corroborated = false;
   const prose = evidence.corroboration ?? null;
-  if (gamesMissedTotal != null && gamesMissedTotal > attributedFromReport && prose) {
+  /*
+   * One injury only. "He missed nine games with turf toe" attributes a whole
+   * season to a single cause, and a season the report says had two causes
+   * cannot absorb that claim — raising one part to the total would leave the
+   * parts summing past the games actually missed. Two sources disagreeing about
+   * how many things went wrong is a reason to stay with the qualified wording,
+   * not to pick one.
+   */
+  if (gamesMissedTotal != null && gamesMissedTotal > attributedFromReport && prose && parts.length === 1) {
     const claim = readMissedGamesClaim(prose);
     const leading = parts[0];
     if (claim != null && claim === gamesMissedTotal && leading && prosePartMatches(leading.part, prose)) {
@@ -335,9 +343,13 @@ export function describeAvailability(a: HistoricalAvailability): string | null {
   const { season } = a;
 
   if (a.confidence === 'unattributed') {
-    // Games were missed and nothing ties them to an injury. Say the
-    // participation and stop — the reason is not ours to supply.
-    return a.gamesMissedTotal && a.gamesMissedTotal > 0 ? `${season}: ${playedOf(a)}` : null;
+    /*
+     * Games were missed and nothing ties any of them to an injury. The card
+     * already prints the games played immediately above this line, so there is
+     * nothing left to add — and the one thing that must not be added is a
+     * reason, which no source here has supplied.
+     */
+    return null;
   }
 
   if (!leading) return null;
@@ -357,9 +369,17 @@ export function describeAvailability(a: HistoricalAvailability): string | null {
      * Every missed game is accounted for, so this is the one case allowed to
      * read as the whole story.
      */
-    if (a.parts.length >= 2) {
+    if (a.parts.length === 2) {
       const [first, second] = a.parts;
       return `${season}: missed ${games(first!.games)} ${withPart(first!.part)} and ${second!.games} ${withPart(second!.part)}`;
+    }
+    /*
+     * Three or more, and the per-injury breakdown stops fitting on a card. The
+     * total is stated once — splitting it across clauses and then truncating
+     * the list would leave the numbers adding up to less than the season.
+     */
+    if (a.parts.length > 2) {
+      return `${season}: missed ${games(a.gamesMissedTotal!)} with ${list(a.parts.map((p) => p.part))} injuries`;
     }
     /*
      * Recurrence is its own signal: two separate three-game hamstring absences
@@ -378,7 +398,7 @@ export function describeAvailability(a: HistoricalAvailability): string | null {
    * of them describing different seasons.
    */
   if (a.parts.length >= 2) {
-    return `${season}: ${playedOf(a)}; missed time included ${a.parts.slice(0, 2).map((p) => p.part).join(' and ')} injuries`;
+    return `${season}: ${playedOf(a)}; missed time included ${list(a.parts.slice(0, 3).map((p) => p.part))} injuries`;
   }
   return `${season}: ${playedOf(a)}; at least ${absences(leading.games)} tied to ${attributedTo(leading.part)}`;
 }
@@ -394,6 +414,12 @@ function games(n: number): string {
 
 function absences(n: number): string {
   return `${n} ${n === 1 ? 'absence' : 'absences'}`;
+}
+
+/** `toe, wrist and knee` — an ordinary English list. */
+function list(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 const COUNT_WORDS = ['', '', 'two', 'three', 'four', 'five', 'six'] as const;
