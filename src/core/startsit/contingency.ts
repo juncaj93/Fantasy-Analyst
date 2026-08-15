@@ -280,15 +280,23 @@ function planFrom(
   const loss = round2(planA.recommendedPoints - plan.recommendedPoints);
 
   /*
-   * "Feasible" is about the whole lineup, not about one slot.
+   * "Feasible" is about the whole lineup, not about one slot, and it is
+   * measured against Plan A rather than against zero.
    *
    * With a real flex, losing a receiver is often covered by moving somebody
    * across rather than by filling his slot with another receiver — so a slot
-   * that reads empty here can still be a perfectly good lineup. The honest test
-   * is whether every slot the league starts has somebody in it.
+   * that reads empty here can still be a perfectly good lineup. And a roster
+   * too small to fill the league's slots was already short *before* anybody got
+   * hurt: reporting that as "no legal replacement" would blame an injury for a
+   * hole that was there all week. So the test is whether this plan leaves a
+   * slot empty that Plan A had somebody in.
    */
-  const empty = plan.slots.filter((s) => s.playerId == null);
-  const feasible = empty.length === 0;
+  const emptyBefore = countEmptyBySlot(planA);
+  const emptyNow = countEmptyBySlot(plan);
+  const newlyEmpty = [...emptyNow]
+    .filter(([slot, count]) => count > (emptyBefore.get(slot) ?? 0))
+    .map(([slot]) => slot);
+  const feasible = newlyEmpty.length === 0;
 
   return {
     key,
@@ -303,7 +311,7 @@ function planFrom(
       ? replacement
         ? `${replacement.name} takes ${replacement.slot === slotName ? slotName : `${replacement.slot} and the lineup shifts around it`}, giving up ${loss.toFixed(1)} pts.`
         : `The lineup reshuffles around the hole and gives up ${loss.toFixed(1)} pts.`
-      : `No legal starter is left for ${empty.map((s) => s.slot).join(', ')} — that slot sits empty.`,
+      : `No legal starter is left for ${newlyEmpty.join(', ')} — that slot sits empty.`,
   };
 }
 
@@ -347,6 +355,16 @@ function bestWaiverPivot(
     };
   }
   return best;
+}
+
+/** How many slots of each name have nobody in them. */
+function countEmptyBySlot(plan: LineupRecommendation): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const slot of plan.slots) {
+    if (slot.playerId != null) continue;
+    out.set(slot.slot, (out.get(slot.slot) ?? 0) + 1);
+  }
+  return out;
 }
 
 function worstLoss(tree: ReplacementTree): number {

@@ -88,6 +88,18 @@ describe('the three plans', () => {
     expect(late.detail).toMatch(/sits empty/);
   });
 
+  it('does not blame an injury for a hole that was there all week', () => {
+    // One receiver for two WR slots: Plan A is already a slot short, and that
+    // is not something losing him on Sunday morning did.
+    const short = [questionable(candidate('late', 'Late Starter', 'WR', 14, { kickoff: LATE_KICKOFF }))];
+    const tree = replacementTree('late', { roster: short, shape: SHAPE, profile: HALF_PPR, now: NOW })!;
+    const late = tree.plans.find((p) => p.key === 'inactive_late')!;
+    // Losing him empties a slot Plan A had filled, so this is still infeasible —
+    // but only for the slot he was actually in.
+    expect(late.feasible).toBe(false);
+    expect(late.detail.match(/WR/g) ?? []).toHaveLength(1);
+  });
+
   it('folds the late plan into the early one when kickoff is unknown, and says so', () => {
     const noKickoff = [
       questionable(candidate('late', 'Late Starter', 'WR', 14)),
