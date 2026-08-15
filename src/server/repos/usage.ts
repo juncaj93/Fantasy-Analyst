@@ -2,10 +2,10 @@
  * Storage for per-game usage, and for every attempt to fetch it.
  *
  * Two reads, and they answer different questions. `weeksFor` is the one the
- * decision layer uses: a handful of players, their weeks oldest first, bounded
- * to a window — that is the shape `assessRole` needs and nothing else needs it.
- * `coverage` and `missingWeekBefore` are diagnostics: how much is here, and
- * where the holes are.
+ * decision layer uses: a handful of players and their weeks, oldest first, for
+ * `core/usage/role.ts` to turn into a series. `coverage` and
+ * `missingWeekBefore` are diagnostics: how much is here, and where the holes
+ * are.
  *
  * Nothing here interprets. Which metrics a position's role is judged on lives in
  * `core/usage/role.ts`, so every screen reads the same answer rather than
@@ -119,14 +119,20 @@ export class UsageRepo {
   }
 
   /**
-   * The recent weeks for a set of players, oldest first.
+   * Every stored week for a set of players, oldest first.
    *
-   * Bounded by `limit` per player in code rather than in SQL: a per-player
-   * `LIMIT` needs a window function or one query each, and the honest size here
-   * is a lineup — a dozen players and a season of weeks, which is one small
-   * indexed read.
+   * Deliberately not trimmed here, and that is not laziness. The window the
+   * detector reads is a run of *regular-season* games, and only
+   * `core/usage/role.ts` knows which those are. Trimming to the last eight rows
+   * in this layer would, in January, hand back four regular-season games and
+   * four playoff ones — and the caller would then correctly refuse to say
+   * anything about a player who has a full season behind him.
+   *
+   * The cost of not trimming is nothing worth having: a season is at most
+   * twenty-two rows per player and the callers ask about a lineup, so this is
+   * one small indexed read either way.
    */
-  async weeksFor(playerIds: string[], season: string, limit = 8): Promise<Map<string, StoredUsageWeek[]>> {
+  async weeksFor(playerIds: string[], season: string): Promise<Map<string, StoredUsageWeek[]>> {
     const out = new Map<string, StoredUsageWeek[]>();
     if (playerIds.length === 0) return out;
 
@@ -148,9 +154,6 @@ export class UsageRepo {
       }
     }
 
-    for (const [playerId, weeks] of out) {
-      if (weeks.length > limit) out.set(playerId, weeks.slice(-limit));
-    }
     return out;
   }
 

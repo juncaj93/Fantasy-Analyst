@@ -240,6 +240,27 @@ describe('from stored weeks to an answer on the card', () => {
     expect(evaluation.role.detail).toContain('No per-game usage is connected');
   });
 
+  /**
+   * The window is eight *regular-season* games, and in January that is not the
+   * same as the last eight rows. A player with a full season and a playoff run
+   * has four of each in his last eight; trimming before the season type was
+   * read would leave the detector with four games and refuse to say anything
+   * about a player it knows everything about.
+   */
+  it('reads eight regular-season games even when the playoffs are stored on top', async () => {
+    const db = await createTestDb();
+    await store(db, { id: 'p1', name: 'Puka Nacua', position: 'WR' }, [
+      ...Array.from({ length: 18 }, (_, i) => ({ week: i + 1, targets: 4 + (i % 3), targetShare: 0.2 })),
+      ...[19, 20, 21, 22].map((w) => ({ week: w, seasonType: 'POST', targets: 12, targetShare: 0.4 })),
+    ]);
+
+    const metrics = await new UsageService(db).roleMetricsFor([{ playerId: 'p1', position: 'WR' }], SEASON);
+    const targets = metrics.get('p1')!.find((m) => m.key === 'targets')!;
+    expect(targets.perGame).toHaveLength(ROLE_WINDOW_GAMES);
+    // Weeks 11–18, and not one of the four playoff games above them.
+    expect(targets.perGame.every((v) => v < 12)).toBe(true);
+  });
+
   it('cannot see one season in another', async () => {
     const db = await createTestDb();
     await store(db, { id: 'p1', name: 'Puka Nacua', position: 'WR' }, [

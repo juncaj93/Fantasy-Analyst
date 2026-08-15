@@ -41,7 +41,7 @@ import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { looksAnomalous } from '../../core/injury/diff.ts';
 import { resolveToCanonical, type IdentityIndex } from './injuryService.ts';
 import { diffUsage, keyOf, type ComparableUsage } from '../../core/usage/diff.ts';
-import { toRoleMetrics, ROLE_WINDOW_GAMES } from '../../core/usage/role.ts';
+import { toRoleMetrics } from '../../core/usage/role.ts';
 import { fetchWeeklyUsage, type FetchLike, type UsageRow } from '../../core/usage/nflverse.ts';
 import { WEEKLY_THRESHOLDS, type RoleMetric } from '../../core/startsit/decisions.ts';
 
@@ -493,7 +493,7 @@ export class UsageService {
     if (players.length === 0) return out;
 
     const weeks = await this.repo
-      .weeksFor(players.map((p) => p.playerId), season, ROLE_WINDOW_GAMES)
+      .weeksFor(players.map((p) => p.playerId), season)
       .catch(() => new Map<string, StoredUsageWeek[]>());
 
     for (const player of players) {
