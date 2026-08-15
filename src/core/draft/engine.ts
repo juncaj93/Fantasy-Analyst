@@ -282,6 +282,32 @@ export interface DraftRecommendation {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
+/**
+ * Enforce the one contract every component in this file claims to keep:
+ * **unknown contributes nothing.**
+ *
+ * It is written down on `ComponentScore.unknown` — "contribution is then 0" —
+ * and it was quietly false. Positional scarcity returned its no-data default
+ * for a player with no ADP, mapped it onto −0.4 like a real measurement, and
+ * spent −0.08 of composite on him while the same row of the breakdown told the
+ * reader the number was unknown. Every unpriced player on the board carried it.
+ *
+ * A single choke point rather than care at twelve call sites, because the
+ * failure was not carelessness at any one of them: it was that nothing checked.
+ * `contribution` is what moves the ranking, so that is what is corrected, and
+ * `score` follows it so the breakdown cannot show a number the total did not
+ * use. Returns the components it was given, mutated in place — they are freshly
+ * built and nothing else has seen them.
+ */
+export function sealComponents(components: ComponentScore[]): ComponentScore[] {
+  for (const component of components) {
+    if (!component.unknown) continue;
+    component.score = 0;
+    component.contribution = 0;
+  }
+  return components;
+}
+
 /** Before pass two has run, nothing is known about the cost of waiting. */
 const NO_OPPORTUNITY: OpportunityResult = {
   score: 0,
@@ -451,15 +477,18 @@ export function rankAvailablePlayers(
    * here rather than per player.
    */
   const baselines = new Map<string, MarketBaseline>();
-  const poolByPosition = new Map<string, number[]>();
+  const poolByPosition = new Map<string, MarketBaseline[]>();
   for (const entry of available) {
     if (!entry.seasonMarkets || entry.seasonMarkets.length === 0) continue;
     const baseline = seasonBaseline(entry.player.position, entry.seasonMarkets, ctx.profile);
     baselines.set(entry.player.id, baseline);
     if (baseline.points != null) {
+      // Whole baselines, not their totals: the comparison is made market by
+      // market so a player priced on fewer of them is not read as a worse
+      // player. See `marketExpectationScore`.
       const list = poolByPosition.get(entry.player.position);
-      if (list) list.push(baseline.points);
-      else poolByPosition.set(entry.player.position, [baseline.points]);
+      if (list) list.push(baseline);
+      else poolByPosition.set(entry.player.position, [baseline]);
     }
   }
 
@@ -496,19 +525,26 @@ export function rankAvailablePlayers(
     });
 
     // --- positional scarcity ----------------------------------------------
+    // Scarcity is measured from where he sits on the board, so a player the
+    // market has not priced has no scarcity: `computeScarcity` returns its
+    // "insufficient data" 0.3, which maps to −0.4 and used to be spent as a
+    // real −0.08 on a component the breakdown was simultaneously labelling
+    // unknown. An unpriced player is unknown, not slightly bad.
+    const scarcityKnown = adp != null;
     const scarcity = computeScarcity({
       availableAdps: adpsByPosition.get(player.position) ?? [],
       playerAdp: adp,
       picksUntilNext,
     });
+    const scarcityScore = scarcityKnown ? round3(scarcity.score * 2 - 1) : 0;
     components.push({
       key: 'scarcity',
       label: 'Positional scarcity',
       display: scarcity.reason,
-      score: round3(scarcity.score * 2 - 1),
+      score: scarcityScore,
       weight: weights.scarcity,
-      contribution: round3((scarcity.score * 2 - 1) * weights.scarcity),
-      unknown: adp == null,
+      contribution: round3(scarcityScore * weights.scarcity),
+      unknown: !scarcityKnown,
     });
 
     // --- league fit --------------------------------------------------------
@@ -574,9 +610,7 @@ export function rankAvailablePlayers(
     // nothing rather than zero, because "nobody has quoted him" is not "the
     // market expects nothing of him".
     const baseline = baselines.get(player.id) ?? null;
-    const marketScore = baseline
-      ? marketExpectationScore(baseline.points, baseline.coverage, poolByPosition.get(player.position) ?? [])
-      : null;
+    const marketScore = marketExpectationScore(baseline, poolByPosition.get(player.position) ?? []);
     components.push({
       key: 'market_expectation',
       label: 'Season market',
@@ -672,6 +706,7 @@ export function rankAvailablePlayers(
       nextPick: ctx.nextPick,
     });
 
+    sealComponents(components);
     const total = round3(components.reduce((a, c) => a + c.contribution, 0));
     const { reasons, counterpoints } = explain(entry, components, {
       need,
@@ -825,6 +860,7 @@ function applyBoardComponents(
     };
 
     rec.components.push(component, opportunityComponent);
+    sealComponents([component, opportunityComponent]);
     rec.total = round3(rec.total + component.contribution + opportunityComponent.contribution);
     rec.score = draftScore(rec.total);
     rec.opportunity = opportunity;

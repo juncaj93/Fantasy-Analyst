@@ -90,11 +90,53 @@ export interface ConsensusOptions {
 }
 
 /**
+ * One quote per book, from however many that book sent.
+ *
+ * A provider that returns the same book twice for the same market — a retry
+ * that landed, two events covering one game, an alternate-line row that maps to
+ * the same key — must not get two votes. The median is a vote count, so a book
+ * quoted twice pulls the consensus toward itself and, worse, lifts `bookCount`
+ * off 1, which is the number the Start/Sit uncertainty penalty reads to decide
+ * whether a market rests on a single book.
+ *
+ * Collapsed by taking the median of that book's own quotes, so a book that
+ * genuinely moved mid-fetch contributes its middle line rather than whichever
+ * row happened to arrive first. Order-independent by construction.
+ */
+export function oneQuotePerBook(group: RawPropQuote[]): RawPropQuote[] {
+  const byBook = new Map<string, RawPropQuote[]>();
+  for (const q of group) {
+    const key = (q.book ?? '').toLowerCase();
+    const list = byBook.get(key);
+    if (list) list.push(q);
+    else byBook.set(key, [q]);
+  }
+
+  const out: RawPropQuote[] = [];
+  for (const quotes of byBook.values()) {
+    if (quotes.length === 1) {
+      out.push(quotes[0]!);
+      continue;
+    }
+    const first = quotes[0]!;
+    out.push({
+      ...first,
+      line: median(quotes.map((q) => q.line).filter((l): l is number => l != null)),
+      overPrice: median(quotes.map((q) => q.overPrice).filter((p): p is number => p != null)),
+      underPrice: median(quotes.map((q) => q.underPrice).filter((p): p is number => p != null)),
+    });
+  }
+  return out;
+}
+
+/**
  * Collapse per-book quotes into one consensus row per (player, market).
  *
  * Players are resolved through the canonical identity ladder; an unresolved or
  * ambiguous name yields `playerId: null` and the row is retained with its
  * original source name so the review queue can fix it.
+ *
+ * Every book gets exactly one vote — see `oneQuotePerBook`.
  */
 export function buildConsensus(
   quotes: RawPropQuote[],
@@ -111,7 +153,8 @@ export function buildConsensus(
   }
 
   const out: PlayerProp[] = [];
-  for (const group of groups.values()) {
+  for (const raw of groups.values()) {
+    const group = oneQuotePerBook(raw);
     const first = group[0]!;
     const match = resolvePlayer({ name: first.playerName }, index);
 
@@ -127,6 +170,10 @@ export function buildConsensus(
     const overPrice = median(kept.map((g) => g.overPrice).filter((p): p is number => p != null));
     const underPrice = median(kept.map((g) => g.underPrice).filter((p): p is number => p != null));
 
+    // Distinct books, never quote count: `bookCount` and `books` answer the same
+    // question and a reader who compares them must not find them disagreeing.
+    const books = [...new Set(kept.map((g) => g.book))].sort();
+
     out.push({
       playerId: match.status === 'matched' ? match.playerId : null,
       sourcePlayerName: first.playerName,
@@ -134,9 +181,9 @@ export function buildConsensus(
       line,
       overPrice: overPrice == null ? null : Math.round(overPrice),
       underPrice: underPrice == null ? null : Math.round(underPrice),
-      bookCount: kept.length,
-      consensusMethod: kept.length === 0 ? 'none' : kept.length === 1 ? 'single' : 'median',
-      books: [...new Set(kept.map((g) => g.book))].sort(),
+      bookCount: books.length,
+      consensusMethod: books.length === 0 ? 'none' : books.length === 1 ? 'single' : 'median',
+      books,
       impliedProbability:
         first.market === 'anytime_td'
           ? devig(overPrice == null ? null : Math.round(overPrice), underPrice == null ? null : Math.round(underPrice))

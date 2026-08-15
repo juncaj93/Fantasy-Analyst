@@ -107,6 +107,22 @@ export function draftStateKey(request: NextPickRequest): string {
     .map((c) => `${c.playerId}${c.adp ?? 'x'}`)
     .sort()
     .join(',');
+  /*
+   * The picks themselves, not how many there are.
+   *
+   * `readRoom` reads every completed pick — which position went where, and how
+   * far from ADP — so the room's dispersion, its runs and each manager's lean
+   * are all functions of the *content* of this list. Fingerprinting its length
+   * held only while the list could do nothing but grow. It can do more than
+   * that: a Sleeper re-sync that corrects who was taken at pick 41, or a
+   * commissioner reversing a mis-pick, changes a pick without changing the
+   * count, and the count alone would hand back the answer computed from the
+   * wrong player.
+   */
+  const picks = request.completed
+    .map((p) => `${p.pickNo}:${p.slot}:${p.position ?? 'x'}:${p.adp ?? 'x'}`)
+    .sort()
+    .join(',');
   const parts = [
     request.draftId,
     request.currentPick,
@@ -115,6 +131,7 @@ export function draftStateKey(request: NextPickRequest): string {
     request.totalPicks,
     request.simulations ?? SIMULATION.default,
     request.completed.length,
+    picks,
     rosters,
     board,
   ];

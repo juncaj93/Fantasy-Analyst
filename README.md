@@ -103,13 +103,14 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
+| [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
 
 ## Tests
 
 ```bash
 npm run typecheck
-npm test               # 384 unit + integration tests
+npm test               # 1,685 unit + integration tests
 npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
 npm run e2e:chromium   # same specs, fallback engine
 ```
