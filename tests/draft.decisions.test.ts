@@ -179,9 +179,21 @@ describe('the tier labels a real board produces', () => {
       })),
       { ...CTX, currentPick: 32, nextPick: 44, rosterCounts: { QB: 1, RB: 1, WR: 1, TE: 0 } },
     );
+    /*
+     * Two of seven, and both are holes you would feel: 51 -> 67 and 78 -> 99,
+     * either side of a four-man pack spaced one, eight and two picks apart.
+     *
+     * The first of them is new since tiers were recalibrated against local
+     * spacing. It was always there — sixteen picks between tight ends — and the
+     * old yardstick hid it, because it divided every gap by the *whole*
+     * position's median spacing of nine and a half. Judging the top of a board
+     * by the bottom of it is the bug that pass fixed; two real holes out of
+     * seven rungs is still restraint, and the bar this test exists for is
+     * "not most or all of them".
+     */
     const cliffs = ranked.filter((r) => r.tierCliff.severity === 'last_in_tier');
-    expect(cliffs).toHaveLength(1);
-    expect(cliffs[0]!.adp).toBe(78);
+    expect(cliffs.map((r) => r.adp).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([51, 78]);
+    expect(cliffs.length).toBeLessThan(board.length / 2);
     // And the ones that are not cliffs say what was measured instead of nothing.
     const quiet = ranked.find((r) => r.adp === 67)!;
     expect(contributionOf(quiet, 'tier_cliff')).toBe(0);
