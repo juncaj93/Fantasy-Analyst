@@ -266,6 +266,50 @@ Nothing in this path ranks, scores or decides anything, and every step degrades
 to the team abbreviation: an unknown code, a free agent, a missing file and a
 failed request all end at the same `CHI`-style fallback the rows printed before.
 
+## Season as data
+
+Nothing hardcodes a year, and nothing derives one from the calendar if it can
+avoid it. `core/season/context.ts` is the single authority and answers on a
+ladder: Sleeper's `/state/nfl` first, the selected league second, the calendar
+last and marked `assumed`. Four services used to carry the same
+`month >= 2 ? year : year - 1` expression privately; they now delegate to one
+implementation and use it only as a fallback, with callers that can reach the
+database passing the authoritative answer in.
+
+What the resolver deliberately will **not** do is infer the season from stored
+data. That is the rollover failure mode: with no current-season feed published,
+the newest rows in every table belong to last season, and a "newest wins" rule
+would promote them to current truth on the first Sunday of the new year.
+
+Four modules sit on top of it:
+
+- `lifecycle.ts` — eight deterministic states (offseason, preseason, draft-open,
+  draft-live, post-draft, regular season, playoffs, season complete), all read
+  off provider fields rather than dates. A live draft outranks every other
+  witness, because Sleeper flips `season_type` to `regular` before week one and
+  leagues that draft late are still drafting when it does.
+- `keys.ts` — season-first cache keys, so Week 3 2026 and Week 3 2027 are
+  structurally different, and readable back, so a rollover sweep knows what it
+  is deleting and leaves alone what it does not recognise.
+- `rollover.ts` — the carry-forward/reset table (behavioural signals about
+  people decay; anything about *this season* is rebuilt) and successor-league
+  discovery, which takes Sleeper's own `previous_league_id` silently and only
+  ever *proposes* a name/size/scoring match.
+- `readiness.ts` — grades each source against the current season by name, with
+  `waiting` (not published yet, and not expected to be) kept distinct from
+  `stale` (published, wrong season) and `failed`. Served at
+  `GET /api/diagnostics/rollover`.
+
+`core/search/players.ts` is the one player matcher every search field shares,
+built on the identity layer's normalizer so a name means the same thing to the
+search box as to the resolver. Results are ranked — exact, prefix, word-prefix,
+substring, then typo — and the board's own order breaks ties within a tier, so
+search never re-ranks the board by string similarity.
+
+Both are structurally prevented from touching football logic; see
+`tests/infrastructureIsolation.test.ts`, which asserts the import graph in both
+directions.
+
 ## Safety invariants
 
 - No endpoint writes to Sleeper. There is no pick or lineup mutation path, and a
@@ -275,3 +319,9 @@ failed request all end at the same `CHI`-style fallback the rows printed before.
 - Secrets stay server-side; the sportsbook key never reaches the browser.
 - Auth is a passphrase plus an HMAC-signed HttpOnly/Secure/SameSite cookie, with
   constant-time comparison and a login rate limit.
+- The offline board cache is read-only about draft state. It stores what the
+  server sent and hands it back; it never composes a pick, and a cached board is
+  always rendered as a capture with its age. A test asserts the module has no
+  vocabulary for picks, rosters or fetching.
+- Page weight and free-tier resource use are budgeted and enforced in CI. See
+  [docs/BUDGETS.md](BUDGETS.md).
