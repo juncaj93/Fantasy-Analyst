@@ -26,15 +26,27 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 140 kB | 85 kB |
-| app CSS | 20 kB | 7.7 kB |
+| app JavaScript | 140 kB | 105 kB |
+| app CSS | 20 kB | 11 kB |
 | HTML shell | 4 kB | 1.6 kB |
-| everything needed to render | 160 kB | 94 kB |
+| everything needed to render | 160 kB | 117 kB |
+| Demo Mode, fetched only when opened | 108 kB | 92 kB |
 
 The total exists so that splitting one large file into three does not quietly
 pass three budgets. Each file is gzipped **individually** and then summed,
 because that is how a browser fetches them — measuring the concatenation would
 report a compression ratio no client will ever see.
+
+**One thing is excluded from the render-path budgets, and it is capped
+separately.** Demo Mode ships as `assets/demo-*.js` — a name `vite.config.ts`
+assigns deliberately — and no page load can fetch any of it: every path to it is
+a dynamic import behind Settings or an explicit `?demo=`. Counting it against
+"everything the browser must fetch to render" would make that number describe
+something nobody experiences, and the usual reaction to a number like that is to
+raise it until it stops complaining. So `excludeMatch` leaves it out, and the
+row above puts a ceiling on it instead. **Excluding without capping is not
+allowed**: it is how a budget stops meaning anything, which is the failure this
+whole mechanism exists to prevent.
 
 **Raising a number is a deliberate act.** It belongs in the same commit as
 whatever needed the room, with the reason in the commit message. A budget

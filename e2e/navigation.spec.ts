@@ -14,7 +14,7 @@
  * which is the same honest half-simulation pwa.spec.ts uses.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -24,6 +24,23 @@ async function asHomeScreenApp(page: Page) {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, 'standalone', { value: true, configurable: true });
   });
+}
+
+/**
+ * Wait until an element has stopped moving.
+ *
+ * Two consecutive frames in the same place is the definition of "the animation
+ * has finished" that does not require knowing how long the animation is.
+ */
+async function settled(locator: Locator, tries = 20) {
+  let previous = '';
+  for (let i = 0; i < tries; i++) {
+    const box = await locator.boundingBox();
+    const here = box ? `${Math.round(box.x)},${Math.round(box.y)}` : '';
+    if (here && here === previous) return;
+    previous = here;
+    await locator.page().waitForTimeout(50);
+  }
 }
 
 /**
@@ -227,6 +244,22 @@ test.describe('sheets', () => {
     await page.getByTestId('tab-review').click();
     await page.getByTestId('scoring-key-open').click();
     await expect(page.getByTestId('scoring-key')).toBeVisible();
+    /*
+     * Wait for it to finish rising before anything measures it.
+     *
+     * `toBeVisible` passes the moment the sheet is in the document, which is
+     * the start of its entry animation rather than the end. Every test below
+     * takes the grip's position and drags from it, and a position captured
+     * mid-flight is a drag that starts somewhere the grip no longer is — so
+     * this dismissed reliably on a fast machine and intermittently on a busy
+     * one, which is the worst possible failure profile: green locally, red in
+     * CI, and nothing wrong with the app.
+     *
+     * Settling is asked as a question about the element rather than answered
+     * with a fixed sleep, so it stays correct if the animation's duration ever
+     * changes.
+     */
+    await settled(page.getByTestId('sheet-grip'));
   });
 
   test('opens over the screen with a handle and a way out that is not a gesture', async ({ page }) => {
