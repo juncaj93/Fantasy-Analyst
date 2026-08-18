@@ -70,9 +70,25 @@ no polling of its own, and it stays readable as history once the draft is done.
 start/sit comparison built from Vegas market expectation, news signal,
 availability and an uncertainty penalty. It never changes a lineup.
 
+Waiver upgrades carry a price: what the room will probably pay, what the player
+is worth to *your* roster, and the line past which winning is worse than losing
+— three numbers that are frequently far apart, because the most useful thing a
+waiver card can say is *he will go for more than he is worth to you*. The budget
+comes from the league's own settings and is never assumed; a league that
+publishes none, or does not bid at all, is told so instead of being shown an
+invented figure. Beside it, what a bid costs you in leverage
+(`Bid $24 → $41 remaining · still above 6/9 managers`) and what the rest of
+Sleeper is chasing. Nothing here bids, claims, adds or drops: every transaction
+in this app happens in Sleeper, by hand, on purpose.
+
 **Players** — searchable intelligence with tallies by window (7d / 21d / season
 / lifetime), category breakdown, cached prop lines and the full evidence
 timeline. Every original excerpt is preserved.
+
+Each expanded card opens with a **newsletter takeaway**: one sentence saying why
+the tally reads the way it does. It is chosen from evidence the ledger already
+holds, never composed — and it changes no number, because the sentence it quotes
+has already been counted once by the tally it is explaining.
 
 **Review** — anything the classifier was not confident about, plus ambiguous
 player identities and the items already applied. Accept, change, reassign to the
@@ -103,7 +119,14 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 - Ambiguous or mixed newsletter classifications never auto-apply.
 - Vegas access is behind a provider abstraction, cached aggressively, and
   degrades to the last snapshot marked stale.
-- Unknown data is shown as unknown. No value is invented to fill a gap.
+- Unknown data is shown as unknown. No value is invented to fill a gap. A
+  waiver budget the league does not publish stays unpublished.
+- The app advises and never acts. There is no pick, lineup, waiver, bid or trade
+  that this app can make.
+- Market attention is attention, not quality. What the rest of Sleeper is adding
+  prices a bid and raises a question; it never moves a projection.
+- A tendency needs a sample. Manager and room profiles say how many trades or
+  drafts they rest on, and say nothing at all below the threshold.
 
 ## Documentation
 
@@ -120,8 +143,8 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ```bash
 npm run typecheck
-npm test               # 384 unit + integration tests
-npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
+npm test               # 1,814 unit + integration tests
+npm run e2e            # WebKit at 390x844, 375x812, 360x800 (801 checks)
 npm run e2e:chromium   # same specs, fallback engine
 ```
 
