@@ -16,6 +16,7 @@
  *   - the comparison is `compareStartSit`;
  *   - the trade board is `rankTrades` and `groupByVerdict`;
  *   - the player list is ordered by `orderPlayers`;
+ *   - the matchup is `buildMatchupResponse`, distributions and all;
  *   - the lifecycle is `resolveLifecycle` and `resolveSeasonPhase`.
  *
  * So a number on a demo screen is the same number the same code would print
@@ -24,6 +25,7 @@
  */
 
 import { buildDraftBoard } from '../../draft/boardBuilder.ts';
+import { buildMatchupResponse } from '../../matchup/build.ts';
 import { myGuy } from '../../draft/decisions.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../../draft/playerOrder.ts';
 import { buildLiveRoster } from '../../draft/liveRoster.ts';
@@ -48,7 +50,12 @@ import {
 import { resolveSeasonPhase } from '../../sleeper/phase.ts';
 import { resolveLifecycle } from '../../season/lifecycle.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
-import { draftBoardSourcesFrom, startSitInputsFrom, tradeCandidatesFrom } from './sources.ts';
+import {
+  draftBoardSourcesFrom,
+  matchupSourcesFrom,
+  startSitInputsFrom,
+  tradeCandidatesFrom,
+} from './sources.ts';
 import { buildDemoPlayerDetail, buildDemoRollover, buildDemoSetupStatus } from './setup.ts';
 
 export interface DemoRequest {
@@ -140,6 +147,23 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
   }
 
   // --------------------------------------------------------------- a league
+  /*
+   * The matchup, through `buildMatchupResponse` — the same assembly the server
+   * calls, over sources this scenario fills. Separate from the block below only
+   * because it is the one league read that is asynchronous.
+   */
+  const matchup = /^\/api\/leagues\/([^/]+)\/matchup$/.exec(path);
+  if (matchup) {
+    const leagueId = decodeURIComponent(matchup[1]!);
+    if (leagueId !== data.league.id) return fail('league not found', 404);
+    const week = params.get('week');
+    return ok(
+      await buildMatchupResponse(matchupSourcesFrom(data), leagueId, {
+        week: week == null ? null : Number(week),
+      }),
+    );
+  }
+
   const league = /^\/api\/leagues\/([^/]+)\/(roster|lineup|waivers|bench|managers)$/.exec(path);
   if (league) {
     const leagueId = decodeURIComponent(league[1]!);

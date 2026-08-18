@@ -182,6 +182,50 @@ describe('the demo cannot reach live truth even by accident', () => {
     }
   });
 
+  /**
+   * The matchup's sources are reads, and the one outward call does nothing.
+   *
+   * `MatchupSources` is the only injected interface in the app that carries a
+   * write: the live service records both sides of every forecast to the
+   * calibration ledger, because a probability model nobody grades is worth
+   * nothing. §2 forbids a demo from making that write, so the seam is satisfied
+   * with a recorder that returns — and this asserts that it is still the only
+   * write on the interface, so a second one added tomorrow fails here rather
+   * than shipping into a demo.
+   */
+  it('the matchup interface offers exactly one write, and the demo no-ops it', async () => {
+    const build = readFileSync(join(SRC, 'core', 'matchup', 'build.ts'), 'utf8');
+    const start = build.indexOf('export interface MatchupSources {');
+    expect(start, 'MatchupSources is declared').toBeGreaterThan(-1);
+    let depth = 0;
+    let end = build.indexOf('{', start);
+    for (let i = end; i < build.length; i++) {
+      if (build[i] === '{') depth++;
+      else if (build[i] === '}' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    const iface = build.slice(start, end + 1);
+    expect(iface).toContain('startSitInputs');
+    for (const forbidden of ['upsert', 'insert', 'save', 'delete', 'settle']) {
+      expect(iface.toLowerCase(), `MatchupSources must not offer "${forbidden}"`).not.toContain(forbidden);
+    }
+
+    const { loadScenarioData } = await import('../src/core/demo/fixtures/index.ts');
+    const { matchupSourcesFrom } = await import('../src/core/demo/runtime/sources.ts');
+    const data = await loadScenarioData(findScenario('matchup-live-close')!);
+    const sources = matchupSourcesFrom(data);
+    // It resolves, and it resolves to nothing — there is no ledger to write to.
+    await expect(
+      sources.record({
+        leagueId: 'x', season: '2026', week: 6,
+        forecast: {} as never,
+        mineRosterId: 9, theirsRosterId: 2, matchupId: 1, at: '2026-10-11T20:15:00.000Z',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('no production module imports a demo fixture', () => {
     const offenders: string[] = [];
     for (const dir of ['core', 'server', 'worker', 'devserver']) {

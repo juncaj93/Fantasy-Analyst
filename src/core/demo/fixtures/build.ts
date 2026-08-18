@@ -28,6 +28,7 @@ import type {
   DraftRecord,
   LeagueRecord,
   RosterRecord,
+  SleeperMatchup,
 } from '../../sleeper/types.ts';
 import type { NflState } from '../../sleeper/phase.ts';
 import type { Clock } from '../clock.ts';
@@ -91,6 +92,16 @@ export interface ScenarioData {
   freshness: DemoSourceFreshness;
   /** What the Vegas cache holds, for the freshness line every screen prints. */
   vegas: { fetchedAt: string | null; events: number };
+  /**
+   * Sleeper's own matchup rows for the scenario's week, or null when the
+   * scenario is not about a matchup.
+   *
+   * Null is not "no matchup this week" — it is "this league has published no
+   * schedule", which is what the assembly reports and is the correct answer for
+   * every scenario that is about a draft, a wire or an offseason. The matchup
+   * scenarios state two rows and let the model do the rest.
+   */
+  matchups: SleeperMatchup[] | null;
   /** The FAAB world, or null in a league that does not bid. */
   strategy: ScenarioStrategy | null;
   /** Extra sentences the scenario wants surfaced, e.g. an outage explanation. */

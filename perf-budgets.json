@@ -44,8 +44,8 @@
       "name": "Demo Mode, fetched only when a scenario is opened (gzipped)",
       "match": "assets/demo-*.js",
       "excludeSuffix": ".map",
-      "maxGzipBytes": 95000,
-      "why": "Scenario fixtures and the engines that read them. Nothing on a page load can reach these — every path to them is a dynamic import behind Settings or an explicit ?demo= — so they are budgeted apart from the shell rather than against it. Today ~69KB. It has a ceiling all the same: fixtures are the easiest thing in this repository to add carelessly, and the day this fails is the day they should start being loaded per scenario rather than per family."
+      "maxGzipBytes": 108000,
+      "why": "Scenario fixtures and the engines that read them. Nothing on a page load can reach these — every path to them is a dynamic import behind Settings or an explicit ?demo= — so they are budgeted apart from the shell rather than against it. Today ~92KB, up from ~69KB when the Matchup screen landed: the five matchup scenarios pull in the distribution model, the correlation factors and the simulator, which is the cost of rehearsing that screen through the production engine rather than reimplementing it. It has a ceiling all the same: fixtures are the easiest thing in this repository to add carelessly, and the day this fails is the day they should start being loaded per scenario rather than per family."
     }
   ],
   "$flowComment": [

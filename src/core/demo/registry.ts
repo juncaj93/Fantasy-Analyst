@@ -434,27 +434,28 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
 
   // ------------------------------------------------------------------ matchup
   /*
-   * Declared, not wired, and that is the honest answer.
+   * One Sunday, read from five points in it.
    *
-   * §8 asks for five Matchup scenarios "once Matchup exists". There is no
-   * Matchup screen in the product: no tab, no route, no live scoring, no
-   * remaining-distribution model. Wiring these would mean Demo Mode inventing
-   * the very UI §1 forbids it from inventing, and the audit would then be
-   * auditing a screen no user can reach.
+   * Four share a clock and differ only in what has happened on the field, which
+   * is what "close", "ahead" and "behind" actually are — three afternoons at
+   * the same time of day rather than three times of day. The fifth is read on
+   * the Monday, after the night game.
    *
-   * So they are listed with what they are waiting for. The picker shows them,
-   * greys them, and says why — which is worth more to the audit than five
-   * scenarios quietly missing from the list.
+   * They are ordered so the picker's previous/next controls walk a reader from
+   * a game that is still anybody's to one that is over. Nothing about a
+   * scenario states a win probability, a phase or an insight: the clock, the
+   * kickoffs and the scoreboard are the inputs, and `core/matchup` reaches
+   * every conclusion from them.
    */
   ...(
     [
-      ['matchup-live-close', 'Matchup · one point in it', 'A game close enough that the hero insight has to be about what is still to come, not what has happened.'],
-      ['matchup-live-leading', 'Matchup · leading', 'Ahead with players left. The question is which of the opponent’s remaining names can still take it.'],
-      ['matchup-live-trailing', 'Matchup · trailing', 'Behind, with the arithmetic of what would have to happen.'],
-      ['matchup-injury-swing', 'Matchup · an injury swings it', 'A starter leaves the field mid-game and the projection has to move honestly.'],
-      ['matchup-final', 'Matchup · final', 'The week is over. What decided it, and what would have.'],
+      ['matchup-live-close', 'Matchup · one point in it', 'Three games finished, three running and two to come, with the two projected finals less than half a point apart.', '2026-10-11T20:15:00.000Z'],
+      ['matchup-live-leading', 'Matchup · leading', 'Ahead with players left, and the card is about which of the opponent’s remaining names can still take it.', '2026-10-11T20:15:00.000Z'],
+      ['matchup-live-trailing', 'Matchup · trailing', 'Behind, and the card does the arithmetic: how much is needed, from whom, to get back to a real chance.', '2026-10-11T20:15:00.000Z'],
+      ['matchup-injury-swing', 'Matchup · an injury swings it', 'A starter is ruled out of the night game while his slot is still changeable, and the swap is priced in win probability.', '2026-10-11T20:15:00.000Z'],
+      ['matchup-final', 'Matchup · final', 'The week is over. What decided it, and what would have.', '2026-10-12T06:30:00.000Z'],
     ] as const
-  ).map(([id, label, description]): DemoScenario => ({
+  ).map(([id, label, description, asOf], index, all): DemoScenario => ({
     ...base,
     id,
     label,
@@ -462,14 +463,11 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     group: 'matchup',
     lifecycle: 'regular_season',
     week: 6,
-    asOf: '2026-10-11T20:15:00.000Z',
+    asOf,
     freshness: fresh(),
-    surfaces: ['matchup'],
-    awaiting: {
-      surface: 'matchup',
-      reason:
-        'There is no Matchup surface in the product yet — no live score, no remaining-points model. Demo Mode will not invent one.',
-    },
+    surfaces: ['matchup', 'team'],
+    ...(index > 0 ? { previous: all[index - 1]![0] } : {}),
+    ...(index < all.length - 1 ? { next: all[index + 1]![0] } : {}),
     bundle: 'season',
   })),
 ];

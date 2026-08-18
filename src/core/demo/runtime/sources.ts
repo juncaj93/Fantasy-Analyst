@@ -13,6 +13,7 @@
  */
 
 import { UNDERDOG_SOURCE_KEY, type DraftBoardSources } from '../../draft/boardBuilder.ts';
+import type { MatchupResponse, MatchupSources } from '../../matchup/build.ts';
 import type { StartSitInput } from '../../startsit/engine.ts';
 import { toRoleMetrics } from '../../usage/role.ts';
 import type { TradeCandidate, Ownership } from '../../trades/engine.ts';
@@ -176,4 +177,43 @@ export function tradeCandidatesFrom(data: ScenarioData): TradeCandidate[] {
     });
   }
   return out;
+}
+
+/**
+ * The matchup's sources.
+ *
+ * The same interface `MatchupService` satisfies over D1 and Sleeper, satisfied
+ * here from the scenario instead — so the win probability, the hero insight and
+ * the lineup counterfactual on a demo screen were produced by
+ * `buildMatchupResponse` and not by anything resembling it.
+ *
+ * Three of the methods are worth naming. `matchups` hands back Sleeper's own
+ * rows verbatim, because the scoreboard is Sleeper's on a demo Sunday exactly
+ * as it is on a real one. `previousForecast` answers null: a scenario is a
+ * single instant with no history behind it, and inventing "what it said an hour
+ * ago" would be the fixture asserting a change the reader never saw happen.
+ * And `record` does nothing at all — the calibration ledger is a write, and §2
+ * says a demo does not get to make one.
+ *
+ * The cache is per-runtime rather than module state, so two scenarios open at
+ * once cannot serve each other's afternoon.
+ */
+export function matchupSourcesFrom(data: ScenarioData): MatchupSources {
+  let memo: { fingerprint: string; response: MatchupResponse } | null = null;
+  return {
+    leagues: {
+      getLeague: async (id) => (data.league.id === id ? data.league : null),
+      listRosters: async (leagueId) => (data.league.id === leagueId ? data.rosters : []),
+    },
+    matchups: async (league, _week) => (league.id === data.league.id ? (data.matchups ?? []) : []),
+    nflState: async () => data.nflState,
+    startSitInputs: async (playerIds) => startSitInputsFrom(data, playerIds),
+    previousForecast: async () => null,
+    cached: () => memo,
+    remember: (entry) => {
+      memo = entry;
+    },
+    record: async () => undefined,
+    now: () => data.clock.now(),
+  };
 }

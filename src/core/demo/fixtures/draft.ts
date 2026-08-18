@@ -159,6 +159,8 @@ export function buildDraftScenario(scenario: DemoScenario): ScenarioData {
       events: scenario.freshness.vegas === 'unavailable' ? 0 : 16,
     },
     // Nobody bids during a draft, and there is no wire yet to bid on.
+    /* A draft is not a week, so this league has no schedule to read. */
+    matchups: null,
     strategy: null,
     notes: [],
   };

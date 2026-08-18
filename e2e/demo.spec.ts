@@ -166,6 +166,52 @@ test.describe('the scenarios render the production screens', () => {
     await expect(page.locator('body')).toContainText('Thursday Night Regrets');
   });
 
+  /**
+   * The five Matchup scenarios, on the production Matchup screen.
+   *
+   * Nothing here asserts a number. The point is that each scenario reaches the
+   * canonical screen and that the screen renders what the *model* concluded —
+   * a scoreboard, a win split, eight slot rows and a hero card — from a
+   * fixture that states only kickoffs, market lines and Sleeper's points.
+   */
+  for (const [id, name] of [
+    ['matchup-live-close', 'one point in it'],
+    ['matchup-live-leading', 'leading'],
+    ['matchup-live-trailing', 'trailing'],
+    ['matchup-injury-swing', 'an injury swings it'],
+    ['matchup-final', 'final'],
+  ] as const) {
+    test(`${id} draws the real Matchup screen`, async ({ page }) => {
+      await openScenario(page, id);
+      await expect(page.getByTestId('tab-matchup')).toBeVisible();
+      await tab(page, 'matchup');
+
+      await expect(page.getByTestId('matchup-score')).toBeVisible();
+      await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
+      await expect(page.getByTestId('matchup-actual-mine')).toBeVisible();
+      await expect(page.getByTestId('matchup-actual-theirs')).toBeVisible();
+      await expect(page.getByTestId('hero-headline')).toBeVisible();
+      // Every starting slot, both sides, off the league's own roster positions.
+      await expect(page.getByTestId('matchup-row')).toHaveCount(8);
+      await expect(page.getByTestId('demo-scenario')).toContainText(name, { ignoreCase: true });
+    });
+  }
+
+  /**
+   * A live afternoon and a settled one are different screens, not the same one
+   * with a different number.
+   */
+  test('a live matchup prints a win split; a finished one prints the result', async ({ page }) => {
+    await openScenario(page, 'matchup-live-close');
+    await tab(page, 'matchup');
+    await expect(page.getByTestId('matchup-win-mine')).toBeVisible();
+    await expect(page.getByTestId('matchup-proj-mine')).toBeVisible();
+
+    await openScenario(page, 'matchup-final');
+    await tab(page, 'matchup');
+    await expect(page.getByTestId('matchup-result')).toBeVisible();
+  });
+
   test('offline-draft falls back to the captured board and says how old it is', async ({ page }) => {
     await openScenario(page, 'offline-draft');
     await tab(page, 'draft');

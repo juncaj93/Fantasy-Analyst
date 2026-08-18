@@ -32,6 +32,13 @@ import {
   type ScenarioStrategy,
 } from './build.ts';
 import { DEMO_MANAGERS, MY_ROSTER_ID, WORLD_PLAYERS, adpOrder } from './world.ts';
+import {
+  MATCHUP_OPPONENT_ROSTER_ID,
+  OPPONENT_ROSTER,
+  isMatchupScenario,
+  matchupRows,
+  matchupWeek,
+} from './matchup.ts';
 
 /**
  * The team the reader is looking after all season.
@@ -81,11 +88,18 @@ const FREE_AGENTS = ['p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p0
  * Rosters for a season scenario.
  *
  * Mine is the team above. The other eleven are filled from the draft order,
- * skipping mine and skipping the wire, which produces ownership that looks like
- * a real league without anybody having typed a hundred and fifty ids.
+ * skipping mine, the wire and anybody pinned, which produces ownership that
+ * looks like a real league without anybody having typed a hundred and fifty
+ * ids.
+ *
+ * `pinned` is how a roster somebody is going to *read* gets written down. The
+ * matchup opponent is the only one so far, and pinning him is not a special
+ * case: he is held out of the pool exactly as my own roster is, so no player
+ * ends up on two teams.
  */
-function seasonRosters(): Map<number, string[]> {
-  const taken = new Set([...MY_ROSTER, ...FREE_AGENTS]);
+function seasonRosters(pinned?: Map<number, string[]>): Map<number, string[]> {
+  const pinnedIds = [...(pinned?.values() ?? [])].flat();
+  const taken = new Set([...MY_ROSTER, ...FREE_AGENTS, ...pinnedIds]);
   const pool = adpOrder()
     .map((p) => p.id)
     .filter((id) => !taken.has(id));
@@ -94,10 +108,12 @@ function seasonRosters(): Map<number, string[]> {
   out.set(MY_ROSTER_ID, [...MY_ROSTER]);
   const others = DEMO_MANAGERS.filter((m) => !m.isMine);
   for (const manager of others) out.set(manager.rosterId, []);
+  for (const [rosterId, ids] of pinned ?? []) out.set(rosterId, [...ids]);
 
   let i = 0;
   for (let round = 0; round < 14; round++) {
     for (const manager of others) {
+      if (pinned?.has(manager.rosterId)) continue;
       const id = pool[i++];
       if (!id) break;
       out.get(manager.rosterId)!.push(id);
@@ -318,6 +334,20 @@ const LOSING_BIDS =
 // ---------------------------------------------------------------- builder
 
 function weekFor(scenario: DemoScenario): Record<string, DemoWeekSpec> {
+  /*
+   * A matchup scenario prices both rosters, not just mine.
+   *
+   * Built from the slate in `matchup.ts` rather than listed here, because the
+   * kickoff and the line belong to the game and twenty-eight hand-written
+   * copies are twenty-eight chances for the two halves of one game to
+   * contradict each other. It carries `WEEK_SIX`'s usage series through for the
+   * players who have one, since a role read is about the season rather than
+   * about this afternoon.
+   */
+  if (isMatchupScenario(scenario.id)) {
+    return matchupWeek(scenario, WORLD_PLAYERS, WEEK_SIX);
+  }
+
   switch (scenario.id) {
     case 'sunday-pregame':
       return WEEK_SIX;
@@ -452,7 +482,17 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
     injuriesAvailable: scenario.freshness.injuries !== 'unavailable',
   });
 
-  const byRosterId = rollover ? new Map<number, string[]>() : seasonRosters();
+  /*
+   * The opponent is pinned only for the scenarios that put him on screen.
+   *
+   * Elsewhere roster two is dealt from the draft order like the other ten,
+   * because pinning him everywhere would quietly rewrite the league the waiver
+   * and trade scenarios are played in for the sake of a screen they never open.
+   */
+  const matchupWeekend = isMatchupScenario(scenario.id);
+  const byRosterId = rollover
+    ? new Map<number, string[]>()
+    : seasonRosters(matchupWeekend ? new Map([[MATCHUP_OPPONENT_ROSTER_ID, OPPONENT_ROSTER]]) : undefined);
   /* Underdog is a draft-season market; out of season there is nothing current. */
   const dog = makeDog(specs, clock, {
     available: scenario.freshness.dogAdp === 'fresh',
@@ -513,6 +553,13 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
       fetchedAt: scenario.freshness.vegas === 'unavailable' ? null : hoursBefore(clock, scenario.freshness.vegas === 'stale' ? 61 : 2),
       events: scenario.freshness.vegas === 'unavailable' ? 0 : 14,
     },
+    matchups: matchupWeekend
+      ? matchupRows(scenario, {
+          mineRosterId: MY_ROSTER_ID,
+          minePlayers: MY_ROSTER,
+          mineStarters: MY_STARTERS,
+        })
+      : null,
     strategy: rollover ? null : strategyFor(scenario, clock),
     notes: rollover
       ? [

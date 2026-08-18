@@ -15,6 +15,22 @@ import { buildDraftScenario } from '../src/core/demo/fixtures/draft.ts';
 import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
 import { DemoRuntime } from '../src/core/demo/runtime/index.ts';
 import type { DraftBoard, LineupRecommendation, Overview, WaiverAdvice } from '../src/web/api.ts';
+/*
+ * The matchup is typed against `core`'s own response rather than the client's.
+ * The web `MatchupResponse` narrows several fields the screen does not render;
+ * that is right for a client and wrong for a test whose whole subject is what
+ * the model concluded.
+ */
+import type { MatchupResponse } from '../src/core/matchup/build.ts';
+
+/** §8's five, in the order the picker walks them. */
+const MATCHUP_IDS = [
+  'matchup-live-close',
+  'matchup-live-leading',
+  'matchup-live-trailing',
+  'matchup-injury-swing',
+  'matchup-final',
+];
 
 async function runtimeFor(id: string): Promise<DemoRuntime> {
   const scenario = findScenario(id);
@@ -310,6 +326,164 @@ describe('the waiver scenarios price a bid with the real engine', () => {
   });
 });
 
+/**
+ * §8's five Matchup scenarios, through `buildMatchupResponse`.
+ *
+ * Every assertion below is about something the *model* concluded — a phase, a
+ * win probability, a projected final, a hero insight, a priced swap — from a
+ * fixture that states only kickoffs, market lines and Sleeper's scoreboard.
+ * That is the whole point of wiring these through the production assembly
+ * rather than writing five matchup screens: if `core/matchup` changes its mind
+ * about a close game, these change with it, and if a scenario stops being close
+ * this file says so.
+ */
+describe('the matchup scenarios forecast a real afternoon', () => {
+  const matchupFor = async (id: string) => {
+    const runtime = await runtimeFor(id);
+    const res = await runtime.request('GET', '/api/leagues/demo-league-2026/matchup');
+    expect(res.status).toBe(200);
+    return res.body as MatchupResponse;
+  };
+
+  it('all five find a matchup, with both lineups priced', async () => {
+    for (const id of MATCHUP_IDS) {
+      const body = await matchupFor(id);
+      expect(body.found, `${id} found`).toBe(true);
+      const forecast = body.forecast!;
+      expect(forecast.slots.length).toBe(8);
+      for (const row of forecast.slots) {
+        expect(row.mine?.projectedFinal, `${id} ${row.slot} mine`).not.toBeNull();
+        expect(row.theirs?.projectedFinal, `${id} ${row.slot} theirs`).not.toBeNull();
+      }
+      // A card per player in the matchup, both benches included.
+      expect(Object.keys(body.cards).length).toBe(28);
+      /*
+       * With anything left to play, the projected final is ahead of the score.
+       * (Once the week is settled the two are equal by definition, which is
+       * asserted directly below rather than excepted here.)
+       */
+      if (forecast.phase !== 'final') {
+        expect(forecast.teams.mine.projectedFinal!).toBeGreaterThan(forecast.teams.mine.actual);
+        expect(forecast.teams.theirs.projectedFinal!).toBeGreaterThan(forecast.teams.theirs.actual);
+      }
+    }
+  });
+
+  /**
+   * One Sunday in three states at once, and the phases are arithmetic.
+   *
+   * The fixture writes three kickoff times; `resolveClock` decides which of them
+   * has finished, which is running and which has not begun. A slate where every
+   * starter shared a phase would exercise none of the interesting paths, so
+   * this asserts all three are present in a live scenario — and absent from the
+   * settled one.
+   */
+  it('reads finished, running and unstarted games off the clock', async () => {
+    const live = (await matchupFor('matchup-live-close')).forecast!;
+    expect(live.phase).toBe('live');
+    const phases = new Set(live.slots.flatMap((row) => [row.mine?.phase, row.theirs?.phase]));
+    expect(phases.has('final')).toBe(true);
+    expect(phases.has('live')).toBe(true);
+    expect(phases.has('not_started')).toBe(true);
+
+    const done = (await matchupFor('matchup-final')).forecast!;
+    expect(done.phase).toBe('final');
+    expect(done.slots.every((row) => row.mine?.phase === 'final')).toBe(true);
+    // Nothing is left to happen, so the projection is the score.
+    expect(done.teams.mine.projectedFinal).toBe(done.teams.mine.actual);
+  });
+
+  /**
+   * The three live scenarios are the states they are named after.
+   *
+   * Bands rather than exact figures: the numbers come out of a simulation, and
+   * pinning one to four decimal places would be a test of the seed rather than
+   * of the fixture. What matters is that "close" is a coin flip, "leading" is a
+   * lead that is not yet safe and "trailing" is a real deficit that is not yet
+   * lost — and that they are ordered.
+   */
+  it('is close, ahead and behind — as the simulation reads it, not as the fixture claims', async () => {
+    const win = async (id: string) => (await matchupFor(id)).forecast!.teams.mine.winProbability!;
+    const [close, leading, trailing] = [await win('matchup-live-close'), await win('matchup-live-leading'), await win('matchup-live-trailing')];
+
+    expect(close).toBeGreaterThan(0.4);
+    expect(close).toBeLessThan(0.6);
+    expect(leading).toBeGreaterThan(0.6);
+    expect(leading).toBeLessThan(0.95);
+    expect(trailing).toBeGreaterThan(0.05);
+    expect(trailing).toBeLessThan(0.35);
+    expect(trailing).toBeLessThan(close);
+    expect(close).toBeLessThan(leading);
+  });
+
+  /**
+   * The one point in it, stated by the model rather than by the label.
+   *
+   * The scenario is called "one point in it"; this is what makes that a claim
+   * the fixture has to keep rather than a name on a list.
+   */
+  it('matchup-live-close projects the two finals within a point of each other', async () => {
+    const forecast = (await matchupFor('matchup-live-close')).forecast!;
+    const gap = Math.abs(forecast.teams.mine.projectedFinal! - forecast.teams.theirs.projectedFinal!);
+    expect(gap).toBeLessThan(1);
+    // And the scoreboard is not level, so the closeness is a forecast rather
+    // than a restatement of what has already been scored.
+    expect(forecast.teams.mine.actual).not.toBe(forecast.teams.theirs.actual);
+  });
+
+  /**
+   * The injury scenario earns its name in win probability.
+   *
+   * A starter is ruled out of a game that has not kicked off, so his slot is
+   * still changeable — which is what lets the insight engine price the swap
+   * instead of merely reporting the designation. The gain is the decision
+   * module's, computed over the same simulated afternoons.
+   */
+  it('matchup-injury-swing prices the swap that fixes it', async () => {
+    const forecast = (await matchupFor('matchup-injury-swing')).forecast!;
+    const hero = forecast.insights[0]!;
+    expect(hero.kind).toBe('injury');
+    expect(hero.urgency).toBe('act_now');
+    expect(hero.winImpact).toBeGreaterThan(0.05);
+
+    const swap = forecast.decision.options.find((o) => o.outPlayerId === hero.playerId);
+    expect(swap, 'a legal replacement exists for the ruled-out starter').toBeTruthy();
+    expect(swap!.gain).toBeGreaterThan(0);
+
+    // The same Sunday without the designation is a materially different game,
+    // which is what makes this a swing rather than a note.
+    const without = (await matchupFor('matchup-live-close')).forecast!;
+    expect(without.insights[0]!.kind).not.toBe('injury');
+  });
+
+  /** A settled week says what decided it, and what would have. */
+  it('matchup-final explains the result instead of forecasting it', async () => {
+    const forecast = (await matchupFor('matchup-final')).forecast!;
+    const kinds = forecast.insights.map((i) => i.kind);
+    expect(kinds).toContain('what_decided_it');
+    expect(forecast.insights.every((i) => i.urgency !== 'act_now')).toBe(true);
+    // A finished week has one outcome, and the model has to say so.
+    expect([0, 1]).toContain(forecast.teams.mine.winProbability);
+  });
+
+  /**
+   * The demo cannot write to the calibration ledger, and it is not asked to.
+   *
+   * The live service records both sides of every forecast it builds; §2 forbids
+   * a demo from writing anything at all. The seam is the same either way — the
+   * demo's sources supply a recorder that does nothing — so this asserts the
+   * screen is fully served without one, twice, which is where a hidden write
+   * would show up as a second answer.
+   */
+  it('serves the same forecast twice without recording anything', async () => {
+    const runtime = await runtimeFor('matchup-live-close');
+    const first = await runtime.request('GET', '/api/leagues/demo-league-2026/matchup');
+    const second = await runtime.request('GET', '/api/leagues/demo-league-2026/matchup');
+    const strip = (body: unknown) => JSON.stringify(body, (key, value) => (key === 'cached' ? null : value));
+    expect(strip(second.body)).toEqual(strip(first.body));
+  });
+});
+
 describe('degraded scenarios lose data, not screens', () => {
   it('partial-provider-outage still recommends, with the market unknown', async () => {
     const runtime = await runtimeFor('partial-provider-outage');
@@ -398,10 +572,22 @@ describe('the registry itself', () => {
     }
   });
 
-  it('a scenario awaiting its surface refuses to be run', async () => {
-    const matchup = findScenario('matchup-live-close')!;
-    expect(matchup.awaiting?.surface).toBe('matchup');
-    await expect(DemoRuntime.forScenario(matchup)).rejects.toThrow(/declared but not wired/);
+  /**
+   * The escape hatch still works, and nothing is currently using it.
+   *
+   * §18 forbids the merge from pretending missing functionality exists, and the
+   * five Matchup scenarios sat behind this marker until Matchup landed. All
+   * twenty-five are now backed by a production surface, so the assertion is
+   * that the list is empty *and* that the refusal is still armed — a
+   * `selectableScenarios` that had quietly become "every scenario" would let
+   * the next declared-but-unbuilt surface through unnoticed.
+   */
+  it('nothing is declared but unwired, and the refusal still works', async () => {
+    expect(DEMO_SCENARIOS.filter((s) => s.awaiting).map((s) => s.id)).toEqual([]);
+    expect(selectableScenarios().length).toBe(DEMO_SCENARIOS.length);
+
+    const pretend = { ...findScenario('matchup-live-close')!, awaiting: { surface: 'review' as const, reason: 'not built' } };
+    await expect(DemoRuntime.forScenario(pretend)).rejects.toThrow(/declared but not wired/);
   });
 
   it('every scenario declares an as-of instant that parses', () => {
