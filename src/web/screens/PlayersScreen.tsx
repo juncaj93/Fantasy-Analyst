@@ -371,14 +371,27 @@ function PlayerFileView({ playerId, position }: { playerId: string; position: st
       <InjuryDetail detail={detail} />
       <ProfileFlags detail={detail} />
 
-      {file ? <PlayerRecord file={file} /> : <div className="spinner">Reading his file…</div>}
+      {file ? (
+        <PlayerRecord file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />
+      ) : (
+        <div className="spinner">Reading his file…</div>
+      )}
     </div>
   );
 }
 
 /** The tally in four windows, the categories, the market and the evidence. */
-function PlayerRecord({ file }: { file: PlayerFile }) {
+function PlayerRecord({ file, quotedEvidenceIds }: { file: PlayerFile; quotedEvidenceIds: string[] }) {
   const { signal, evidence, props } = file;
+  /*
+   * Which rows the takeaway above was drawn from.
+   *
+   * This is where the takeaway's provenance lives — down in the timeline rather
+   * than beside the sentence, because a sentence followed by two item ids and a
+   * derivation label is no longer a takeaway. A reader who wants to check it
+   * scrolls here and finds the source rows marked.
+   */
+  const quoted = new Set(quotedEvidenceIds);
   return (
     <>
       <DetailLabel>News by window</DetailLabel>
@@ -471,13 +484,13 @@ function PlayerRecord({ file }: { file: PlayerFile }) {
       {evidence.length === 0 ? (
         <div className="muted">No evidence recorded yet.</div>
       ) : (
-        evidence.map((e) => <EvidenceRow key={e.id} item={e} />)
+        evidence.map((e) => <EvidenceRow key={e.id} item={e} quoted={quoted.has(e.id)} />)
       )}
     </>
   );
 }
 
-export function EvidenceRow({ item }: { item: EvidenceItem }) {
+export function EvidenceRow({ item, quoted = false }: { item: EvidenceItem; quoted?: boolean }) {
   const effective = item.userOverride?.polarity ?? item.polarity;
   const cls = effective === 'positive' ? 'pos' : effective === 'negative' ? 'neg' : effective === 'mixed' ? 'mixed' : '';
   const glyph = effective === 'positive' ? '▲' : effective === 'negative' ? '▼' : effective === 'mixed' ? '◆' : '–';
@@ -488,6 +501,7 @@ export function EvidenceRow({ item }: { item: EvidenceItem }) {
           {glyph} {effective}
           {item.userOverride ? ' (yours)' : ''}
         </span>
+        {quoted ? <span data-testid="evidence-quoted">quoted above</span> : null}
         <span>mag {item.userOverride?.magnitude ?? item.magnitude}</span>
         <span>{item.category ?? 'uncategorised'}</span>
         <span>{formatDate(item.sourceDate)}</span>
