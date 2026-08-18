@@ -25,7 +25,7 @@ import type { SeasonLifecycle } from '../season/lifecycle.ts';
  * month and one taken today would both claim to be `waivers-tuesday-active`
  * while showing different bids.
  */
-export const FIXTURE_VERSION = '2026.08.1';
+export const FIXTURE_VERSION = '2026.08.2';
 
 /**
  * The production surfaces a scenario can speak to.

@@ -40,16 +40,13 @@ import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
  * bid and a live one can never be two different numbers.
  */
 import { priceWaiverUpgrades } from '../core/waivers/pricing.ts';
+import { waiverLeagueIntel, withCompetition } from '../core/waivers/intel.ts';
 /* Still used directly by handlers in this file. */
 import { evaluatePlayer } from '../core/startsit/engine.ts';
-import type { RosterShape } from '../core/sleeper/scoring.ts';
-import type { LeagueBudgetState, RosterBudget } from '../core/faab/budget.ts';
-import type { PriceSummary } from '../core/faab/bids.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../core/roster/freeAgents.ts';
 import { buildLadderFor } from '../core/trades/ladderInputs.ts';
 import type { CanonicalPlayer } from '../core/identity/types.ts';
-import type { RosterRecord } from '../core/sleeper/types.ts';
 import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
 import { evaluateBench } from '../core/roster/bench.ts';
 import { buildLadder } from '../core/trades/ladder.ts';
@@ -93,15 +90,8 @@ import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
-import { isRuledOut, normalizeDesignation } from '../core/injury/model.ts';
 import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
-import {
-  COMPETITION_UNKNOWN,
-  assessCompetition,
-  teamNeedsFor,
-  type CompetitionAssessment,
-  type NeedLevel,
-} from '../core/league/competition.ts';
+import type { NeedLevel } from '../core/league/competition.ts';
 import { byeOutlook, playoffEmphasis, playoffWeeks } from '../core/league/planning.ts';
 import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/tradeFit.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
@@ -2442,110 +2432,6 @@ function escapeRegex(input: string): string {
  */
 export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {}): Promise<VegasRefreshReport> {
   return new VegasRefreshService(env.db, env.vegas).refresh(opts);
-}
-
-/**
- * The one league-intelligence field on a waiver row that still has no supplier.
- *
- * `WaiverLeagueIntel` declares three. `core/faab` fills the price and
- * `core/value/multiWeek.ts` now fills the multi-week column, so what is left is
- * competition: how many rivals have a hole at the position and can afford to
- * bid on it.
- *
- * It answers from rosters already loaded — no extra query, no lineup scoring —
- * and hands the same count to the price model, which asks for exactly this
- * number and has been estimating it league-wide.
- */
-function waiverLeagueIntel(opts: {
-  advice: ReturnType<typeof recommendWaiverUpgrades>;
-  rosters: RosterRecord[];
-  players: CanonicalPlayer[];
-  shape: RosterShape;
-  budgets: LeagueBudgetState | null;
-  prices: PriceSummary | null;
-}): { competition: Map<string, CompetitionAssessment> } {
-  const competition = new Map<string, CompetitionAssessment>();
-
-  const teams = opts.rosters.map((r) => ({
-    rosterId: r.rosterId,
-    displayName: r.ownerName ?? `Roster ${r.rosterId}`,
-    isMine: r.isMine,
-    playerIds: r.playerIds,
-  }));
-
-  /*
-   * Availability, through the same reading the rest of the app uses.
-   *
-   * A rival's own players are not evaluated here — that would be the twelve
-   * lineup optimisations this deliberately avoids — so the designation on the
-   * player record is normalized by `core/injury/model.ts` rather than compared
-   * against a private list of status strings. One definition of "ruled out",
-   * everywhere.
-   */
-  const meta = new Map<string, { position: string | null; unavailable?: boolean }>();
-  for (const p of opts.players) {
-    meta.set(p.id, {
-      position: p.position || null,
-      unavailable: isRuledOut(normalizeDesignation(p.status).designation),
-    });
-  }
-
-  const budgetByRoster = new Map<number, RosterBudget>(
-    (opts.budgets?.rosters ?? []).map((r) => [r.rosterId, r] as const),
-  );
-  const bidding = opts.budgets?.rule.usesFaab === true;
-  const needsByPosition = new Map<string, ReturnType<typeof teamNeedsFor>>();
-
-  for (const upgrade of opts.advice.upgrades) {
-    for (const candidate of upgrade.candidates) {
-      if (!needsByPosition.has(candidate.position)) {
-        needsByPosition.set(candidate.position, teamNeedsFor(candidate.position, teams, meta, opts.shape));
-      }
-      const needs = needsByPosition.get(candidate.position)!;
-
-      competition.set(
-        candidate.playerId,
-        needs.length === 0
-          ? COMPETITION_UNKNOWN
-          : assessCompetition({
-              needs,
-              budgets: budgetByRoster,
-              // The 25th percentile of winning bids: what it has taken to win at
-              // the cheap end of this league, and so the floor a rival has to
-              // clear to be in on him at all. Null in an unpriced league, where
-              // nobody is excluded for affordability.
-              expectedLow: opts.prices?.low ?? null,
-              bidding,
-            }),
-      );
-    }
-  }
-
-  return { competition };
-}
-
-/**
- * Attach competition to the rows the board reads, leaving everything else alone.
- *
- * Deliberately a fold over rows another pass already built, rather than a
- * rebuild: multi-week value arrives the same way from its own supplier, and two
- * passes that each reconstructed the candidate list would eventually disagree
- * about who is on it.
- */
-function withCompetition<T extends { candidates: { playerId: string }[] }>(
-  upgrades: T[],
-  competition: Map<string, CompetitionAssessment>,
-): T[] {
-  return upgrades.map((upgrade) => ({
-    ...upgrade,
-    candidates: upgrade.candidates.map((candidate) => {
-      const assessed = competition.get(candidate.playerId);
-      return {
-        ...candidate,
-        competition: assessed ? { level: assessed.level, label: assessed.label, detail: assessed.detail } : null,
-      };
-    }),
-  }));
 }
 
 function round2(v: number): number {

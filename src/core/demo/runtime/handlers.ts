@@ -10,7 +10,9 @@
  *
  *   - the draft board is `buildDraftBoard`, the same function the worker calls;
  *   - the lineup is `recommendLineup`;
- *   - the wire is `recommendWaiverUpgrades` priced by `priceWaiverUpgrades`;
+ *   - the wire is `recommendWaiverUpgrades`, priced by `priceWaiverUpgrades` and
+ *     layered with `waiverMultiWeekFor` and `waiverLeagueIntel`;
+ *   - the lineup's advanced pass is `weeklyIntelligence`;
  *   - the comparison is `compareStartSit`;
  *   - the trade board is `rankTrades` and `groupByVerdict`;
  *   - the player list is ordered by `orderPlayers`;
@@ -27,9 +29,11 @@ import { TALLY_WEIGHT, orderPlayers } from '../../draft/playerOrder.ts';
 import { buildLiveRoster } from '../../draft/liveRoster.ts';
 import { compareStartSit } from '../../startsit/engine.ts';
 import { recommendLineup } from '../../startsit/lineup.ts';
+import { waiverMultiWeekFor, weeklyIntelligence } from '../../contracts/integration.ts';
 import { normalizeMode } from '../../startsit/mode.ts';
 import { recommendWaiverUpgrades } from '../../startsit/waivers.ts';
 import { priceWaiverUpgrades } from '../../waivers/pricing.ts';
+import { waiverLeagueIntel, withCompetition } from '../../waivers/intel.ts';
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
@@ -284,12 +288,32 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
     currentStarterIds: mine.starterIds,
     mode,
   });
+
+  /*
+   * The advanced pass, layered exactly as the live handler layers it.
+   *
+   * `weeklyIntelligence` is one call producing the expected-points read, the
+   * contingency plans, the fragility and the rest, and it is applied to the
+   * same three evaluation lists. Calling it here rather than reproducing any
+   * of it is the whole point: the weekly card a demo shows is the weekly card
+   * the app shows.
+   */
+  const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
+  const withIntelligence = <T extends { playerId: string }>(evaluations: T[]): T[] =>
+    evaluations.map((evaluation) => {
+      const extra = intelligence.get(evaluation.playerId);
+      return extra ? { ...evaluation, ...extra } : evaluation;
+    });
+
   return {
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     found: true,
     dataFreshness: freshness(data),
     rosterShape: shape,
     ...recommendation,
+    starters: withIntelligence(recommendation.starters),
+    bench: withIntelligence(recommendation.bench),
+    undecidable: withIntelligence(recommendation.undecidable),
     notes: [...recommendation.notes, ...data.notes],
   };
 }
@@ -332,14 +356,52 @@ function waivers(data: ScenarioData) {
     lineup: currentLineup,
   });
 
+  /*
+   * The two league-intelligence passes the live handler layers on top, in the
+   * same order and from the same suppliers.
+   *
+   * `multiWeek` says what the add is worth past this Sunday; `competition` says
+   * who else needs him and can pay. Both are scoped to the players who actually
+   * made the board, both fold onto rows the waiver engine already built, and
+   * neither reorders anything — exactly as in `app.ts`. The competition count
+   * also feeds the price model, which is why it is computed before the bids.
+   */
+  const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
+  const multiWeek = waiverMultiWeekFor({
+    playerIds: boardIds,
+    inputs: candidateInputs,
+    scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
+    profile,
+    currentWeek: data.nflState?.week ?? 1,
+  });
+  const upgradesWithValue = advice.upgrades.map((upgrade) => ({
+    ...upgrade,
+    candidates: upgrade.candidates.map((candidate) => {
+      const value = multiWeek.get(candidate.playerId);
+      return value ? { ...candidate, multiWeek: value } : candidate;
+    }),
+  }));
+
   const strategy = data.strategy;
-  const bids = strategy ? priceWaiverUpgrades({ advice, strategy, rosteredIds }) : [];
+  const intel = waiverLeagueIntel({
+    advice,
+    rosters: data.rosters,
+    players: data.players,
+    shape,
+    budgets: strategy?.budget ?? null,
+    prices: strategy?.prices ?? null,
+  });
+
+  const bids = strategy
+    ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
+    : [];
 
   return {
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     found: true,
     dataFreshness: freshness(data),
     ...advice,
+    upgrades: withCompetition(upgradesWithValue, intel.competition),
     notes: [...advice.notes, ...data.notes],
     pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
     faab: strategy
@@ -407,7 +469,8 @@ function managers(data: ScenarioData) {
 
 function playerList(data: ScenarioData, params: URLSearchParams) {
   const q = (params.get('q') ?? '').trim().toLowerCase();
-  const limit = Math.min(Number(params.get('limit') ?? 60) || 60, 200);
+  const limit = Math.min(Math.max(Number(params.get('limit') ?? 100) || 100, 1), 200);
+  const offset = Math.max(Number(params.get('offset') ?? 0) || 0, 0);
   const position = params.get('position');
   const availabilityLeagueId = params.get('leagueId');
 
@@ -423,13 +486,21 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
     }
   }
 
+  /*
+   * The shortlist grows with the offset, exactly as the live handler's does.
+   *
+   * The tally nudge is applied after the market sort, so a player can move a
+   * few places and the window has to be wider than the page for that movement
+   * to be real rather than clipped — and it has to keep being wider on page
+   * five, or a demo would show a differently-ordered tail from the live app.
+   */
   const shortlist = [...filtered]
     .sort(
       (a, b) =>
         (data.adpValues.get(a.id)?.adp ?? Infinity) - (data.adpValues.get(b.id)?.adp ?? Infinity) ||
         (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity),
     )
-    .slice(0, Math.max(limit * 3, 120));
+    .slice(0, offset + Math.max(limit * 3, 120));
 
   const ordered = orderPlayers(
     shortlist.map((p) => ({
@@ -439,12 +510,16 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
       net: data.signals.get(p.id)?.raw.net ?? 0,
       player: p,
     })),
-  ).slice(0, limit);
+  );
+  const page = ordered.slice(offset, offset + limit);
 
   return {
     tallyWeight: TALLY_WEIGHT,
     rankingSource: data.adpSnapshot?.label ?? null,
-    players: ordered.map(({ player: row, draftRank, adjustedRank, movement }) => ({
+    offset,
+    hasMore: filtered.length > offset + page.length,
+    total: filtered.length,
+    players: page.map(({ player: row, draftRank, adjustedRank, movement }) => ({
       id: row.player.id,
       name: row.player.fullName,
       position: row.player.position,

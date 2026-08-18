@@ -234,6 +234,71 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     expect(advice.upgrades.length).toBeGreaterThan(0);
   });
 
+  /**
+   * The two league-intelligence columns, filled by the same suppliers the live
+   * handler uses.
+   *
+   * `main` layers `waiverMultiWeekFor` and `waiverLeagueIntel` on top of the
+   * waiver advice before it leaves `app.ts`. The demo has to layer the same two
+   * passes or its Waivers screen would print two empty columns that work in
+   * production — the exact failure Demo Mode exists to make impossible.
+   *
+   * Asserted through the *contrast* rather than through a value: the tight end
+   * and the receiver on this wire are both real upgrades to the same flex slot,
+   * and the league is thin at one position and deep at the other. So the two
+   * rows must disagree about competition, and that disagreement has to come
+   * from counting rosters — nothing in the fixture states either number.
+   */
+  it('fills the competition and multi-week columns, and they disagree by position', async () => {
+    const runtime = await runtimeFor('waivers-tuesday-active');
+    const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
+
+    const candidates = advice.upgrades.flatMap((u) => u.candidates);
+    expect(candidates.length).toBeGreaterThan(1);
+    expect(candidates.every((c) => c.competition != null)).toBe(true);
+
+    const te = candidates.find((c) => c.position === 'TE');
+    const wr = candidates.find((c) => c.position === 'WR');
+    expect(te, 'a tight end is on the wire').toBeTruthy();
+    expect(wr, 'a receiver is on the wire').toBeTruthy();
+
+    // Three rosters carry one tight end; nobody is short at receiver.
+    expect(te!.competition!.level).toBe('high');
+    expect(wr!.competition!.level).toBe('low');
+    expect(te!.competition!.detail).toMatch(/rivals need the position/);
+
+    // And the multi-week supplier answers for both, off measured usage.
+    for (const c of [te!, wr!]) {
+      expect(c.multiWeek, `${c.name} has a multi-week read`).toBeTruthy();
+      expect(c.multiWeek!.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Competition is not decoration: it reaches the price.
+   *
+   * `priceWaiverUpgrades` takes the assessed bidder count as `rivalsWithNeed`,
+   * which feeds the demand reading, which moves the recommended maximum. The
+   * contested tight end must therefore be recommended above the uncontested
+   * receiver despite a comparable gain — and if a future change stopped passing
+   * the assessment through, both would fall back to the same league-wide
+   * estimate and this would fail.
+   */
+  it('prices the contested add above the uncontested one', async () => {
+    const runtime = await runtimeFor('waivers-tuesday-active');
+    const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
+    const bids = new Map((advice.faab?.bids ?? []).map((b) => [b.playerId, b] as const));
+
+    const contested = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'TE')!;
+    const quiet = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'WR')!;
+
+    const a = bids.get(contested.playerId);
+    const b = bids.get(quiet.playerId);
+    expect(a?.recommended, 'the contested add is priced').not.toBeNull();
+    expect(b?.recommended, 'the quiet add is priced').not.toBeNull();
+    expect(a!.recommended!).toBeGreaterThan(b!.recommended!);
+  });
+
   it('the winning claim has come out of the wallet by Wednesday', async () => {
     const before = (
       await (await runtimeFor('waivers-tuesday-active')).request('GET', '/api/leagues/demo-league-2026/waivers')

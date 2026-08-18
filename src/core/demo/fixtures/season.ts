@@ -67,8 +67,15 @@ const MY_STARTERS = ['p010', 'p001', 'p023', 'p003', 'p009', 'p008', 'p016', 'p0
  * a competing name at the same position, a body nobody has measured at all, and
  * two who are simply not better than what the roster holds — which is the
  * answer a waiver page most often has to give and most often does not.
+ *
+ * `p052` is the last of them and the only tight end, which is the point of him.
+ * Three rivals in this league carry one tight end apiece and are `thin` at the
+ * position by the league-intelligence read, so he is the one add on this wire
+ * that anybody else is competing for. Without a tight end held out, that column
+ * would be honestly computed and uniformly uncontested — a working feature the
+ * demo never actually shows working.
  */
-const FREE_AGENTS = ['p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p027', 'p029', 'p032'];
+const FREE_AGENTS = ['p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p027', 'p029', 'p032', 'p052'];
 
 /**
  * Rosters for a season scenario.
@@ -186,6 +193,16 @@ const WEEK_SIX: Record<string, DemoWeekSpec> = {
   p027: { points: 6.1, kickoffInHours: 1.3, opponent: 'LAC', spread: 2, total: 44, usage: steady(5, 0.12, W6) },
   p029: { points: 5.4, kickoffInHours: 1.3, opponent: 'NO', spread: 1, total: 41, usage: steady(4, 0.1, W6) },
   p032: { points: 4.8, kickoffInHours: 1.3, opponent: 'TB', spread: 5, total: 42, usage: steady(4, 1, W6) },
+  /*
+   * The contested add: a tight end whose role has genuinely moved.
+   *
+   * Worth about four points a week more than the tight end this roster starts,
+   * which is what puts him on the board at all — and three other rosters are
+   * thin at the position, which is what makes the competition read on his card
+   * say something other than "nobody else needs him".
+   */
+  p052: { points: 13.7, previousPoints: 6.2, kickoffInHours: 1.3, opponent: 'GB', spread: -2.5, total: 46,
+    usage: rising(3, 9, 0.09, 0.24, W6) },
 };
 
 /** Ten to eight minutes before kickoff, a starter is downgraded. */
@@ -325,6 +342,7 @@ function strategyFor(scenario: DemoScenario, clock: ReturnType<typeof fixedClock
     { playerId: 'p039', rank: 2, count: 41_500, heat: 0.86, acceleration: 3.4 },
     { playerId: 'p034', rank: 9, count: 14_200, heat: 0.52 },
     { playerId: 'p036', rank: 28, count: 3_100, heat: 0.19, entered: true },
+    { playerId: 'p052', rank: 6, count: 22_800, heat: 0.63, acceleration: 2.1 },
   ]);
 
   switch (scenario.id) {
