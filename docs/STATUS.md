@@ -682,7 +682,7 @@ its own design problem. Manager profiles are served and cached but likewise
 unrendered; the ladder consumes them internally to set its opening discount.
 Both are complete, tested and reachable, and both are honestly one screen short.
 
-Checks at this milestone: 1,774 unit/integration tests (90 new), typecheck,
+Checks at this milestone: 1,776 unit/integration tests (92 new), typecheck,
 build and the browser suite green.
 
 ## Recommended next work

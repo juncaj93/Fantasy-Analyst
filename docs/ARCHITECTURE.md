@@ -419,11 +419,12 @@ is how six start.
 | `GET /api/leagues/:id/bench` | what each bench slot earns, and the drop candidates |
 | `GET /api/leagues/:id/trades/ladder?playerId=` | opening / fair / do-not-exceed for one target, plus the consolidation read |
 
-The two refresh routes are writes and are rate limited beside the Vegas one.
-`strategy/refresh` also rides the 09:00 UTC cron, because the trending list and a
-current week's transactions are the two things in this app that **cannot be
-reconstructed after the fact**: Sleeper keeps no trending history, and its
-transaction endpoint has no all-weeks form.
+The two refresh routes are writes and are rate limited beside the Vegas one. The
+work `strategy/refresh` does also runs on the 09:00 UTC cron for the selected
+league, because the trending list and a current week's transactions are the two
+things in this app that **cannot be reconstructed after the fact**: Sleeper keeps
+no trending history, and its transaction endpoint has no all-weeks form. Manager
+profiles are not on any clock — they change perhaps once a season.
 
 ## Safety invariants
 
