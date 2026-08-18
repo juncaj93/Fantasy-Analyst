@@ -21,6 +21,7 @@
  * before this existed and is still a working one.
  */
 
+import { calendarSeason, priorSeason } from '../../core/season/context.ts';
 import type { Database } from '../db.ts';
 import { InjuryRepo, InjurySourceRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
 import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
@@ -65,12 +66,23 @@ export const INGEST_LEASE_SECONDS = 120;
  */
 export const DAILY_WRITE_CEILING = 5_000;
 
-/** The season injury reports are published for: the one being played. */
+/**
+ * The season injury reports are published for: the one being played.
+ *
+ * **A fallback, not the answer.** This used to carry its own copy of the
+ * league-year arithmetic, as did `usageSeason`, `outlookSeason` and `seasonFor`
+ * — four identical expressions in four files, which is four chances to drift
+ * and no way to tell which one a given number came from. They all delegate to
+ * `calendarSeason` now, so there is one copy.
+ *
+ * More importantly, it is no longer what the app normally uses. Callers that
+ * can reach the database resolve the season from Sleeper's own `/state/nfl`
+ * (see `services/seasonService.ts`) and pass it in; this default is what
+ * answers when nobody did, which on a first run with no network is the only
+ * answer there is.
+ */
 export function injurySeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  // Reports run from the preseason into January, so a January date still
-  // belongs to the previous calendar year's season.
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 /**
@@ -82,7 +94,7 @@ export function injurySeason(now = new Date()): string {
  * "this year" stop agreeing.
  */
 export function previousSeason(now = new Date()): string {
-  return String(Number(injurySeason(now)) - 1);
+  return priorSeason(injurySeason(now));
 }
 
 export interface InjuryHealth {

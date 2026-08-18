@@ -35,7 +35,7 @@ import { NavBar, SearchFilterRow, SegmentedControl, SkeletonRows } from '../comp
 /* One shared answer to "which players does this filter mean". */
 import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
-import { matchesQuery } from '../search.ts';
+import { rankByQuery } from '../search.ts';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
  *
@@ -442,9 +442,23 @@ export function DraftScreen({
    * Removing only the request limit would have left this one quietly doing the
    * same damage.
    */
-  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
-    matchesQuery(item.rec.name, query),
-  );
+  /*
+   * Filtered *and ordered* by the query, once there is one.
+   *
+   * `rankByQuery` drops what does not match and puts the literal hits first, so
+   * typing `will` no longer returns the Wills in whatever order ADP happened to
+   * leave them in. The board's own order survives inside each tier of match —
+   * among two players who matched the query equally literally, the one the
+   * board ranked higher is still first.
+   *
+   * The dividers are built before the search, not after, which is what keeps
+   * the `rank` badge showing where a player sits on the *board* rather than
+   * where he sits in the search results. A player who is the 41st best
+   * available is the 41st best available whether or not you found him by
+   * typing.
+   */
+  const rows = withTierDividers(board.recommendations, isSinglePosition && !searching);
+  const visible = searching ? rankByQuery(rows, query, (item) => item.rec.name) : rows;
 
   /*
    * When the board last moved, and when it was last checked.

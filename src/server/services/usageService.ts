@@ -33,6 +33,7 @@
  * lineup.
  */
 
+import { calendarSeason } from '../../core/season/context.ts';
 import type { Database } from '../db.ts';
 import { UsageRepo, UsageSourceRepo, type StoredUsageWeek, type UsageSourceRun } from '../repos/usage.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -115,12 +116,16 @@ export const DAILY_WRITE_CEILING = 2_000;
 /** The games the detector needs before it will say anything: 3 recent + 3 baseline. */
 export const MINIMUM_GAMES = WEEKLY_THRESHOLDS.role.recentGames + WEEKLY_THRESHOLDS.role.minBaselineGames;
 
-/** The season weekly stats are published for: the one being played. */
+/**
+ * The season weekly stats are published for: the one being played.
+ *
+ * The calendar fallback, shared with every other source rather than spelled out
+ * again here — see `injurySeason` for why four private copies of one expression
+ * was the actual bug. Callers with a database resolve the authoritative season
+ * from Sleeper and pass it in; this answers when nobody did.
+ */
 export function usageSeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  // The file runs from September into February, so a January date still belongs
-  // to the previous calendar year's season.
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 export interface UsageHealth {

@@ -25,6 +25,9 @@ import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/sourc
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../core/sleeper/eligibility.ts';
 import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
+/* The same decision at the resolution draft-shaped features need. */
+import { resolveLifecycle } from '../core/season/lifecycle.ts';
+import { buildRolloverReport } from './services/rolloverService.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
 import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
@@ -59,6 +62,8 @@ import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
+/* Which season it is, from Sleeper's own state rather than from the clock. */
+import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 import { UsageService } from './services/usageService.ts';
 import { PlayerDetailService } from './services/playerDetailService.ts';
@@ -161,11 +166,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
     const draft = selected?.draftId ? await new LeagueRepo(db).getDraft(selected.draftId) : null;
-    const season = resolveSeasonPhase({
+    const lifecycleInput = {
       state,
       league: selected ? { season: selected.season, status: selected.status ?? null } : null,
       draft: draft ? { status: draft.status } : null,
-    });
+    };
+    const season = resolveSeasonPhase(lifecycleInput);
+    /*
+     * The same decision at higher resolution, alongside rather than instead.
+     *
+     * `season` keeps its exact four-state shape so a client running against a
+     * deployment older than this one — or newer, during the minutes a deploy
+     * takes — is never handed a phase it does not recognise. `lifecycle` is the
+     * eight-state answer for anything that needs to tell a draft that is open
+     * from one that is live from one that finished a month ago.
+     */
+    const lifecycle = resolveLifecycle(lifecycleInput);
 
     return jsonResponse({
       players,
@@ -176,6 +192,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       vegas: { ...props, provider: ctx.env.vegas.name, configured: ctx.env.vegas.isConfigured() },
       adpSnapshot: adp,
       season,
+      lifecycle,
     });
   });
 
@@ -184,6 +201,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     new SetupService(ctx.env.db, ctx.env.vegas, ctx.env.inboundAddress ?? null);
 
   router.get('/api/setup/status', async (ctx) => jsonResponse(await setupService(ctx).status()));
+
+  /**
+   * Is the app ready for this season?
+   *
+   * The check that replaces "open it in March and see if it looks right", which
+   * is not a test: a screen full of last season's ADP renders perfectly. Every
+   * source is asked for the *current* season by name and nothing is allowed to
+   * answer with the newest thing it has.
+   *
+   * Read-only, no fetches, one indexed read per source — so it costs nothing to
+   * run and can be run from a phone on a free tier at any time of year.
+   */
+  router.get('/api/diagnostics/rollover', async (ctx) => jsonResponse(await buildRolloverReport(ctx.env.db)));
 
   router.get('/api/setup/newsletter', async (ctx) => {
     const status = await setupService(ctx).newsletterStatus();
@@ -267,7 +297,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!body?.username) return errorResponse('username required', 400);
     const service = new SleeperSyncService(ctx.env.db, ctx.env.sleeper);
     const user = await service.connectUser(body.username);
-    const season = body.season ?? String(new Date().getFullYear());
+    /*
+     * The season to import leagues for, from Sleeper rather than the clock.
+     *
+     * This used to be `String(new Date().getFullYear())`, which is wrong for
+     * two months a year and wrong in the worst possible way: connecting on 1
+     * January 2027 asked Sleeper for the 2027 leagues, a season that does not
+     * exist until March, and got back an empty list. An empty list is
+     * indistinguishable from "you are not in any leagues", so the user's first
+     * experience of the app was it telling them they had no leagues while they
+     * were looking at twelve of them in Sleeper.
+     *
+     * `connectUser` has just run, so `/state/nfl` may not have been read yet on
+     * a first connect — the resolver's calendar fallback covers that, and it at
+     * least uses the *league year* rather than the calendar year, so the
+     * January answer is 2026 rather than 2027.
+     */
+    const season = body.season ?? (await currentSeason(ctx.env.db));
     const { imported } = await service.syncLeagues(season);
     return jsonResponse({ user, season, leaguesImported: imported });
   });
