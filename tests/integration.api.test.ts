@@ -253,6 +253,47 @@ describe('API with seeded data', () => {
     expect(board.startablePositions).not.toContain('K');
   });
 
+  /**
+   * The draft board's own three fields, end to end.
+   *
+   * The board overlay draws from these and fetches nothing of its own, so if
+   * they stop arriving here the board goes blank with no other symptom
+   * anywhere. They are read-only projections of state this response already
+   * carried — the picks, the rosters and the seat mapping — and none of them
+   * touches a ranking.
+   */
+  it('carries the drafting managers and the completed picks for the board', async () => {
+    const board = await json<{
+      teams: number;
+      rounds: number;
+      managers: { slot: number; name: string; isMine: boolean }[];
+      boardPicks: { pickNo: number; playerId: string; name: string; position: string; ownerSlot: number }[];
+      pickOwners: number[] | null;
+    }>(get('/api/drafts/demo-draft/board', cookie));
+
+    // One column per seat, named where Sleeper named them and numbered where
+    // it did not.
+    expect(board.managers).toHaveLength(board.teams);
+    expect(board.managers.map((m) => m.slot)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(board.managers[0]).toEqual({ slot: 1, name: 'You', isMine: true });
+    expect(board.managers[1]).toEqual({ slot: 2, name: 'Rival', isMine: false });
+    expect(board.managers[5]!.name).toBe('Team 6');
+    expect(board.managers.filter((m) => m.isMine)).toHaveLength(1);
+
+    // The two seeded picks, in pick order, each with the manager who made it.
+    expect(board.boardPicks.map((p) => p.pickNo)).toEqual([1, 2]);
+    expect(board.boardPicks[0]!.ownerSlot).toBe(1);
+    expect(board.boardPicks[1]!.ownerSlot).toBe(2);
+    for (const pick of board.boardPicks) {
+      expect(pick.name.length).toBeGreaterThan(0);
+      expect(pick.position).toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
+    }
+
+    // No trade published for this draft, so the snake is the whole answer and
+    // the client is not handed a second one.
+    expect(board.pickOwners).toBeNull();
+  });
+
   it('narrows the board to the queue, and says so when it is empty', async () => {
     const empty = await json<{ recommendations: unknown[]; warnings: string[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),
