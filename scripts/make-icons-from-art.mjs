@@ -280,12 +280,21 @@ function favicon(art) {
  * that margin, so at 1.0 the frame floated visibly inside the tile while the
  * logo it replaced had filled the tile edge to edge.
  *
- * 1.06 is measured, not guessed: it lands the frame 0.6% in from the tile
- * edge, which is where the previous icon's artwork sat, and it stops short of
- * about 1.09, where the squircle starts cutting the frame's own corners off.
- * Re-measure it if the artwork's margin changes.
+ * 1.08 is measured, not guessed, and it is a ceiling rather than a taste. It
+ * brings the frame flush to the tile edge; the green band is only a few
+ * pixels thick at 180, so anything past it crops the band away along the left
+ * and right midpoints — where the squircle is at its widest and hides nothing
+ * — and leaves the frame showing at the corners only. A broken ring reads as
+ * a mistake in a way that a slightly smaller logo does not.
+ *
+ * Going further is therefore not a matter of nudging this number. The next
+ * setting that reads as deliberate is about 1.13, which crops past the frame
+ * altogether for a full-bleed icon like the one this artwork replaced — a
+ * decision about the logo rather than about fit, so it is not made here.
+ *
+ * Re-measure if the artwork's margin changes.
  */
-const ZOOM = 1.06;
+const ZOOM = 1.08;
 
 /** Crops the centre 1/zoom of a square image. */
 function centreCrop(art, zoom) {
