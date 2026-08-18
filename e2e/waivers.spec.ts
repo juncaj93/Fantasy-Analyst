@@ -116,8 +116,13 @@ test.describe('the waivers page', () => {
    * The rule this page exists to keep.
    *
    * Expected cost, likely competition and multi-week value are facts about the
-   * twelve people in your league. Until that pass lands they are dashes with an
-   * explanation attached, and the page says so once at the bottom.
+   * twelve people in your league, and the page shows a dash with an explanation
+   * attached rather than a number nobody could act on.
+   *
+   * Competition and multi-week value now have a pass behind them, so they carry
+   * real values. Expected cost still does not in a league with no bid history,
+   * which is what this test is named for and what it still checks: the two that
+   * were filled must not drag a price along with them.
    */
   test('never invents an expected cost', async ({ page }) => {
     const waivers = await (await page.request.get('/api/leagues/demo-league/waivers')).json();
@@ -139,9 +144,25 @@ test.describe('the waivers page', () => {
     for (const field of ['Expected cost', 'Competition', 'Beyond this week']) {
       await expect(sheet).toContainText(field);
     }
-    // Competition and multi-week value have no pass behind them yet, so both
-    // read as the unknown mark rather than as a number.
-    expect(await sheet.getByTestId('waiver-unknown').count()).toBeGreaterThanOrEqual(2);
+    /*
+     * The two fields the league-intelligence pass owns now say something.
+     *
+     * Asserted as "not the unknown mark" rather than against a particular
+     * sentence: the labels are that pass's to word, and pinning them here would
+     * make this spec fail on a rewording rather than on a regression.
+     */
+    for (const field of ['Competition', 'Beyond this week']) {
+      const line = sheet.locator('.weekly-line').filter({ hasText: field }).first();
+      await expect(line.getByTestId('waiver-unknown')).toHaveCount(0);
+      expect((await line.innerText()).replace(field, '').trim().length).toBeGreaterThan(0);
+    }
+
+    // And the price, which has no history behind it in this league, still reads
+    // as unknown rather than borrowing confidence from the fields beside it.
+    if (!priced.has(playerId)) {
+      const cost = sheet.locator('.weekly-line').filter({ hasText: 'Expected cost' }).first();
+      await expect(cost.getByTestId('waiver-unknown')).toHaveCount(1);
+    }
   });
 
   test('filters by position without offering a chip that empties the list', async ({ page }) => {
