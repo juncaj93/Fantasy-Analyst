@@ -63,6 +63,17 @@ import { survivalBand } from '../../core/draft/survival.ts';
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 /*
+ * The room, as a board.
+ *
+ * A companion to this screen and never a competitor to it: it draws the picks
+ * that already arrived in `board`, so it costs no request, no polling loop and
+ * no recomputation of anything the ranking depends on. It is opened from a
+ * glyph beside the league name and closed again without this screen losing so
+ * much as its scroll position.
+ */
+import { DraftBoardOverlay } from '../components/draftBoard.tsx';
+import { GridIcon } from '../components/icons.tsx';
+/*
  * Staying level with Sleeper without being asked.
  *
  * The lifecycle, the cadence, the deduping and the "did anything actually
@@ -162,6 +173,15 @@ export function DraftScreen({
   const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER && position !== FLX_FILTER;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
+  /**
+   * Whether the draft board is over the screen.
+   *
+   * One boolean, and deliberately nothing else. Everything this screen holds —
+   * the filter, the query, the fold, the expanded card, the queue, the scroll —
+   * is untouched while the board is open, which is what makes closing it return
+   * the reader exactly where they were rather than to a rebuilt Draft page.
+   */
+  const [boardOpen, setBoardOpen] = useState(false);
 
   /** Manual refresh state: in-flight spinner, last success, last complaint. */
   const [refreshing, setRefreshing] = useState(false);
@@ -523,6 +543,16 @@ export function DraftScreen({
   return (
     <>
       {/*
+        The board, over everything, reading the state this screen already has.
+
+        Mounted from here rather than from the app shell so it dies with the
+        Draft screen and can never outlive the refresh loop feeding it. It is
+        handed `board` and nothing else: no fetcher, no controller, no way to
+        ask Sleeper anything.
+      */}
+      {boardOpen ? <DraftBoardOverlay board={board} onClose={() => setBoardOpen(false)} /> : null}
+
+      {/*
         The live state, in the bar that does not scroll away.
 
         The pick number, the round, the roster count and the draft status used
@@ -535,7 +565,33 @@ export function DraftScreen({
       */}
       <NavBar
         testId="draft-nav"
-        title={<span data-testid="board-league-name">{board.league.name}</span>}
+        title={
+          /*
+            The league, and the way into the board.
+
+            The glyph sits *in* the title line rather than in the bar's actions,
+            because it is about this league's draft rather than about this
+            screen, and because the actions end is already the refresh control's.
+            It costs no row and no height: the button is shorter than the line it
+            sits on, so the bar is exactly as tall as it was before this existed.
+          */
+          <span className="nav-title-row">
+            <span className="nav-title-name" data-testid="board-league-name">
+              {board.league.name}
+            </span>
+            <button
+              type="button"
+              className="title-icon-btn"
+              data-testid="draft-board-open"
+              aria-label="Open draft board"
+              aria-haspopup="dialog"
+              aria-expanded={boardOpen}
+              onClick={() => setBoardOpen(true)}
+            >
+              <GridIcon size={15} />
+            </button>
+          </span>
+        }
         subtitle={
           <span className="draft-status" data-testid="draft-status">
             <span className="draft-pick">#{board.currentPick}</span>
