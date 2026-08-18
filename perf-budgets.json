@@ -1,0 +1,57 @@
+{
+  "$comment": [
+    "Performance budgets, measured in CI on every push. See scripts/perf-budget.mjs.",
+    "",
+    "These are ceilings, not targets. A number here should be comfortably above",
+    "today's measurement and comfortably below the point at which a phone on a",
+    "hotel wifi starts to suffer — a budget set to the current value flags every",
+    "commit and gets raised reflexively until it means nothing.",
+    "",
+    "Raising one is a deliberate act with a reason attached, in the same commit",
+    "as whatever needed the room. That is the entire mechanism: not that the",
+    "numbers are perfect, but that growing past them has to be noticed."
+  ],
+  "bundles": [
+    {
+      "name": "app JavaScript (gzipped)",
+      "match": "assets/*.js",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 140000,
+      "why": "The one number a phone on a bad connection actually feels. Today ~85KB; 140KB is roughly a second of 3G and the point at which the shell stops feeling instant."
+    },
+    {
+      "name": "app CSS (gzipped)",
+      "match": "assets/*.css",
+      "maxGzipBytes": 20000,
+      "why": "Render-blocking, so it is worse per byte than the JavaScript. Today ~7.7KB."
+    },
+    {
+      "name": "HTML shell",
+      "match": "index.html",
+      "maxGzipBytes": 4000,
+      "why": "The document itself. Today ~1.6KB; growth here usually means something got inlined that should not have been."
+    },
+    {
+      "name": "everything the browser must fetch to render (gzipped)",
+      "match": "**/*.{js,css,html}",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 160000,
+      "why": "The total, so splitting one large file into three does not quietly pass three budgets."
+    }
+  ],
+  "$flowComment": [
+    "Interaction budgets, enforced by e2e/performance.spec.ts against a real",
+    "WebKit iPhone viewport. Wall-clock in CI is noisy — a shared runner can be",
+    "three times slower than a laptop — so these are deliberately generous and",
+    "exist to catch a flow going from milliseconds to seconds, not to police",
+    "tens of milliseconds."
+  ],
+  "flows": {
+    "shellRenderMs": 4000,
+    "draftTabOpenMs": 5000,
+    "teamTabOpenMs": 5000,
+    "playerSheetOpenMs": 1500,
+    "searchResponseMs": 600,
+    "filterResponseMs": 1200
+  }
+}

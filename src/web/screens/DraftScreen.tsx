@@ -37,6 +37,15 @@ import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
 import { rankByQuery } from '../search.ts';
 /*
+ * The board survives a reload in a dead zone.
+ *
+ * Read-only and last-resort: it is consulted only when the server could not be
+ * reached and there is nothing already on screen, and what it returns is always
+ * rendered as a capture with its age. See offlineCache.ts for why it never
+ * invents a pick.
+ */
+import { describeAge, recallBoard, rememberBoard } from '../offlineCache.ts';
+/*
  * The chance he is still there at your next pick — as a number, in colour.
  *
  * This is the whole urgency interface. Red is "he will not last", amber is "it
@@ -162,6 +171,14 @@ export function DraftScreen({
   const [refreshState, setRefreshState] = useState<DraftRefreshState | null>(null);
   /** Re-renders the freshness cue without touching anything else. */
   const [now, setNow] = useState(() => Date.now());
+  /**
+   * When the board on screen was captured, if it came from the cache.
+   *
+   * Null for every board the server sent, which is almost all of them. Non-null
+   * is the one state the header has to shout about: what is being read is a
+   * photograph of the draft, not the draft.
+   */
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
 
   /**
    * The current board and filter, readable from outside React's render cycle.
@@ -207,6 +224,16 @@ export function DraftScreen({
         );
         setUpdatedAt(Date.now());
         setError(null);
+        setCachedAt(null);
+        /*
+         * Keep the last good board where a reload can find it.
+         *
+         * Only the unfiltered board is worth remembering, and only that one is
+         * remembered: a cache keyed by chip would store six copies of largely
+         * the same rows, and the value of this is "the board exists at all in a
+         * dead zone", not "your RB filter survived".
+         */
+        if (pos === ALL_FILTER) rememberBoard(draftId, next);
       } catch (err) {
         /*
          * A quiet load reports upwards instead of painting a banner.
@@ -221,7 +248,30 @@ export function DraftScreen({
          * "sync delayed" once it has failed enough times to mean it.
          */
         if (options.quiet) throw err;
-        setError(err instanceof Error ? err.message : String(err));
+
+        /*
+         * The tunnel case: nothing on screen, and the server unreachable.
+         *
+         * Falling back to the cached board is only correct when there is
+         * nothing better already showing. A board that is on screen is one the
+         * server actually sent, and replacing it with an older copy of itself
+         * because a later request failed would be a downgrade — the refresh
+         * controller is already marking that situation stale and retrying.
+         *
+         * This is the reload-in-a-dead-zone path, and the only one.
+         */
+        const cached = boardRef.current ? null : recallBoard<DraftBoard>(draftId);
+        if (cached) {
+          boardRef.current = cached.value;
+          setBoard(cached.value);
+          setCachedAt(cached.capturedAt);
+          // Never silently. The banner says the board is a capture and how old
+          // it is, because a stale board rendered as a live one is how somebody
+          // drafts a player who went three picks ago.
+          setError(null);
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!options.quiet) setLoading(false);
       }
@@ -565,10 +615,32 @@ export function DraftScreen({
         Suppressed while a manual complaint is up, so a failed tap gets one
         answer rather than two saying the same thing.
       */}
-      {refreshState?.stale && !refreshNote ? (
+      {refreshState?.stale && !refreshNote && cachedAt == null ? (
         <div className="draft-refresh-note" data-testid="draft-sync-stale" role="status">
           Draft sync delayed · retrying
         </div>
+      ) : null}
+
+      {/*
+        A board that came out of storage says so, permanently and in the loudest
+        tone this screen has.
+
+        Not the quiet "sync delayed" cue above, and not dismissible. That cue is
+        about a board the server *did* send falling behind by seconds; this is a
+        photograph of the draft taken before the tunnel, and every number under
+        it — who is available, the survival percentages, the tier bands — is as
+        old as the timestamp says. Somebody reading this without noticing would
+        take a player who went three picks ago, which is the single most
+        expensive mistake this app can help them make.
+
+        `role="alert"` rather than `status` for the same reason: a screen reader
+        should interrupt for this one.
+      */}
+      {cachedAt != null ? (
+        <Notice tone="error" data-testid="draft-offline-capture" role="alert">
+          Offline — showing the board as it was {describeAge(Math.max(0, now - cachedAt))}. Picks made since then are
+          not in it.
+        </Notice>
       ) : null}
 
       {/*

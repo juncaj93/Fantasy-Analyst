@@ -17,6 +17,8 @@
     "e2e": "playwright test --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360",
     "e2e:chromium": "playwright test --project=chromium-iphone-390 --project=chromium-iphone-375 --project=chromium-small-360",
     "verify": "npm run typecheck && npm run test && npm run e2e",
+    "perf:budget": "node scripts/perf-budget.mjs",
+    "perf:report": "node scripts/perf-budget.mjs --report",
     "worker:dev": "wrangler dev",
     "worker:deploy": "wrangler deploy",
     "d1:migrate:remote": "wrangler d1 migrations apply fantasy_analyst --remote",

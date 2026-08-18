@@ -27,6 +27,12 @@ jobs:
       # the site build to exist because it is served as static assets.
       - run: npm run build
 
+      # Bytes, not milliseconds. A gzipped size is identical on a laptop and on
+      # a loaded shared runner, so a failure here is always a real regression
+      # and never the runner having a bad morning. See docs/BUDGETS.md.
+      - name: Performance budgets
+        run: npm run perf:budget
+
       - name: Verify the worker bundles for Cloudflare
         run: npx wrangler deploy --dry-run --outdir=.wrangler/dry-run
 
