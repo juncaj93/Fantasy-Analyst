@@ -55,6 +55,17 @@ counterpoint; every component score, its weight and its contribution stay one di
 under **Advanced breakdown**. The header's ↻ force-syncs the latest picks from
 Sleeper. It never drafts.
 
+**Draft board** — the ▦ beside the league name opens the room as a board:
+rounds down, managers across, the snake running the way it really runs, with
+the manager header row and the round column frozen so scrolling never costs you
+the context. It opens **compact** — every completed pick is its position in the
+position's own colour, which is what makes a receiver run or somebody hoarding
+backs visible in one glance — and an expand toggle swaps that for `J. Hurts`,
+the position and the club mark, still one cell tall. No score, no ADP, no
+value, no Next%: the board is for reading the room, and the analysis is on the
+card you came from. It draws the picks the Draft screen already has, so it adds
+no polling of its own, and it stays readable as history once the draft is done.
+
 **Team** — Sleeper connection, league selection, ADP import, roster, and
 start/sit comparison built from Vegas market expectation, news signal,
 availability and an uncertainty penalty. It never changes a lineup.
