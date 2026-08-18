@@ -36,6 +36,15 @@ export interface CanonicalPlayer {
    */
   searchRank?: number | null;
   /**
+   * The number on his shirt, when Sleeper records one.
+   *
+   * Identity rather than ranking: it is what a Team row shows once the draft is
+   * over and the pick number has stopped being the interesting fact. Null for
+   * plenty of players, and null is shown as nothing — `#0` is a number real
+   * players wear, so it can never stand in for "unknown".
+   */
+  jerseyNumber?: number | null;
+  /**
    * Physical and experience facts, and the rules for using them.
    *
    * Present so `core/players/profileFlags.ts` can ask a question no position

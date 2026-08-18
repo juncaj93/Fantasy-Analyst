@@ -67,6 +67,32 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+/*
+ * Three ways to read the same board, and one pure function that reorders it.
+ *
+ * The ordering lives in core rather than here for the reason every other
+ * decision on this screen does: it is arithmetic, it has a right answer, and it
+ * can be checked without a browser. What this file supplies is the control and
+ * which mode is selected — see boardSort.ts for the guarantee that switching
+ * modes cannot touch a number on a card.
+ */
+/*
+ * The arithmetic behind the queue's long-press drag, kept out of the DOM.
+ *
+ * Whether a press has become a drag, which index the finger is over, and how
+ * far each row should slide — all three can be wrong and none of them needs a
+ * browser to check. See dragReorder.ts.
+ */
+import { LONG_PRESS_MS, moveItem, pressVerdict, rowOffset, targetIndex } from '../../core/draft/dragReorder.ts';
+import {
+  DEFAULT_SORT_MODE,
+  SORT_DESCRIPTIONS,
+  SORT_LABELS,
+  SORT_MODES,
+  hasDogCoverage,
+  sortBoard,
+  type SortMode,
+} from '../../core/draft/boardSort.ts';
 import { QueueControl } from '../components/decisions.tsx';
 /*
  * The room, as a board.
@@ -149,6 +175,27 @@ export function DraftScreen({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
+  /**
+   * Which ordering is on screen.
+   *
+   * Presentation only, and it never reaches the server: the whole scored board
+   * is already here, so a sort is a reorder of what the reader has rather than
+   * a new request. That is what makes switching instant mid-draft, and it is
+   * also what makes it safe — a mode that cannot ask for anything cannot come
+   * back with different numbers.
+   */
+  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT_MODE);
+  /**
+   * The queue's order while a drag is settling, or null when the server's is
+   * current.
+   *
+   * A drag redraws the list immediately and confirms afterwards, because a
+   * reorder that waited for a round trip before moving would feel broken on a
+   * phone mid-draft. The server's answer replaces this the moment it lands —
+   * and it is the server's ordering that survives a refresh, so an optimistic
+   * list that turned out to be wrong is corrected rather than kept.
+   */
+  const [queueOrder, setQueueOrder] = useState<string[] | null>(null);
   /**
    * Finding one player on a board of hundreds.
    *
@@ -238,6 +285,15 @@ export function DraftScreen({
         const next = await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`);
         boardRef.current = next;
         setBoard(next);
+        /*
+         * The server's order is now the current one.
+         *
+         * Cleared on every load, including a quiet poll: a board rebuilt after
+         * a pick landed carries the stored queue order, so keeping a local
+         * override would pin the list to a sequence from before the drag was
+         * confirmed — and would keep a failed drag on screen indefinitely.
+         */
+        setQueueOrder(null);
         /*
          * A player who has just been drafted cannot stay expanded.
          *
@@ -372,6 +428,31 @@ export function DraftScreen({
   );
 
   /**
+   * Persist a drag, and keep the list where the reader dropped it meanwhile.
+   *
+   * The optimistic sequence goes on screen first and the server's answer
+   * replaces it — which is nearly always the same sequence, and is the
+   * authority when it is not. A failure clears the override rather than
+   * retrying: the reader can see the row snap back, which is honest, and one
+   * more drag is cheaper than a queue that silently disagrees with the stored
+   * one.
+   */
+  const commitQueueOrder = useCallback(
+    async (playerId: string, toIndex: number, optimistic: string[]) => {
+      setQueueOrder(optimistic);
+      try {
+        const res = await api.post<{ order: string[] }>('/api/queue/reorder', { playerId, toIndex });
+        setQueueOrder(res.order);
+        setError(null);
+      } catch (err) {
+        setQueueOrder(null);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
+  );
+
+  /**
    * The automatic loop, alive for exactly as long as this screen is.
    *
    * Mounting *is* the trigger, and that is the whole fix. Draft is rendered only
@@ -480,6 +561,42 @@ export function DraftScreen({
     }
   }, [draftId, load, refreshing]);
 
+  /*
+   * Inside the queue, the reader's order. Everywhere else, the model's.
+   *
+   * Computed here, above the early returns, because the drag hook below is a
+   * hook and hooks cannot be called conditionally. `board` is null on the first
+   * frame and while a filter change is loading, which is what the empty list
+   * covers — the ordering is a pure function of it either way.
+   *
+   * The server already returns the ★ filter in the stored order, so the local
+   * override only applies while a drag is settling. It has to apply, or the row
+   * would snap back to where it was for the length of a round trip.
+   *
+   * The sort control stays live inside the queue: a reader who wants to see
+   * their shortlist by DOG can, and switching back to Score returns them to
+   * their own order rather than to the composite's.
+   */
+  const isQueue = position === QUEUE_FILTER;
+  const recommendations = board?.recommendations ?? [];
+  const queuedRows = isQueue && queueOrder ? reorderByIds(recommendations, queueOrder) : recommendations;
+  const ordered = isQueue && sort === DEFAULT_SORT_MODE ? queuedRows : sortBoard(queuedRows, sort);
+
+  /*
+   * Drag to reorder, inside the queue and nowhere else.
+   *
+   * Disabled while a search is open, because the visible rows are then a subset
+   * and an index into them is not an index into the queue — dropping a player
+   * "third" in a filtered list would move him to the third place of a list the
+   * reader cannot see.
+   */
+  const canReorder = isQueue && !searching && unlocked;
+  const { drag, onPointerDown } = useQueueDrag({
+    enabled: canReorder,
+    ids: ordered.map((rec) => rec.playerId),
+    onCommit: commitQueueOrder,
+  });
+
   if (!selected) {
     return (
       <Empty>
@@ -519,13 +636,18 @@ export function DraftScreen({
    * same damage.
    */
   /*
-   * Filtered *and ordered* by the query, once there is one.
+   * Sort, then group into tiers, then search — in that order, and the order
+   * matters.
    *
-   * `rankByQuery` drops what does not match and puts the literal hits first, so
-   * typing `will` no longer returns the Wills in whatever order ADP happened to
-   * leave them in. The board's own order survives inside each tier of match —
-   * among two players who matched the query equally literally, the one the
-   * board ranked higher is still first.
+   * Tier dividers claim that everything above one is a tier, which is only true
+   * of a contiguous run; drawing them over a board sorted by DOG would be
+   * asserting boundaries in a sequence the tier model never saw. So a market
+   * sort turns them off, exactly as a mixed-position board already does.
+   *
+   * The search runs last, over whatever order the reader chose. `rankByQuery`
+   * drops what does not match and puts the literal hits first, so typing `will`
+   * does not return the Wills in whatever order the board happened to leave
+   * them in; within a tier of match the chosen ordering survives.
    *
    * The dividers are built before the search, not after, which is what keeps
    * the `rank` badge showing where a player sits on the *board* rather than
@@ -533,7 +655,7 @@ export function DraftScreen({
    * available is the 41st best available whether or not you found him by
    * typing.
    */
-  const rows = withTierDividers(board.recommendations, isSinglePosition && !searching);
+  const rows = withTierDividers(ordered, isSinglePosition && !searching && sort === DEFAULT_SORT_MODE);
   const visible = searching ? rankByQuery(rows, query, (item) => item.rec.name) : rows;
 
   /*
@@ -634,27 +756,47 @@ export function DraftScreen({
         }
         trailing={
           /*
-            A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
-            implied the user had to keep a link open; what they actually want is
-            "show me what just happened", so that is what the control says.
+            Two controls sharing the bar's trailing end, and no new row.
+
+            The row a control costs on this screen is a player, so the sort sits
+            beside the refresh glyph rather than above the list. Both are about
+            the board as a whole, which is what the trailing end of the
+            navigation bar is for; the filter chips below stay about which
+            players, which is a different question and keeps its own row.
           */
-          <button
-            type="button"
-            className="icon-btn"
-            data-testid="draft-refresh"
-            aria-label={
-              unlocked
-                ? 'Refresh draft from Sleeper'
-                : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
-            }
-            aria-busy={refreshing}
-            disabled={refreshing}
-            onClick={() => void refreshNow()}
-          >
-            <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
-              ↻
-            </span>
-          </button>
+          <span className="nav-trailing-group">
+            <SortControl
+              value={sort}
+              onChange={setSort}
+              /*
+                The board's own answer, or the rows themselves.
+
+                `dogState` is the better source — it can distinguish "Underdog
+                has not priced these players" from "the file was stale and we
+                dropped it" — but it is absent on an older deployment, and
+                looking at whether any row actually carries a DOG value is the
+                honest fallback rather than assuming either way.
+              */
+              dogAvailable={board.dogState?.available ?? hasDogCoverage(board.recommendations)}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="draft-refresh"
+              aria-label={
+                unlocked
+                  ? 'Refresh draft from Sleeper'
+                  : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
+              }
+              aria-busy={refreshing}
+              disabled={refreshing}
+              onClick={() => void refreshNow()}
+            >
+              <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
+                ↻
+              </span>
+            </button>
+          </span>
         }
       />
 
@@ -799,8 +941,20 @@ export function DraftScreen({
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
+          /*
+            Five numbers rather than four, when this board has a fifth.
+
+            The metrics line was fitted to exactly four labelled values, and DOG
+            is a genuine fifth. The flag goes on the *list* rather than on the
+            rows that happen to carry a DOG value, and that distinction is the
+            whole of it: styling only the DOG rows gave the board two card
+            heights, 57px and 58px, which the rhythm test correctly rejected.
+            One board, one treatment, one height — a row Underdog has not priced
+            simply has four numbers in the same slightly tighter line.
+          */
+          data-dog={board.dogState?.available ? 'yes' : 'no'}
         >
-          {visible.map((item) => (
+          {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
               {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
@@ -813,12 +967,276 @@ export function DraftScreen({
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
                 busy={flagging === item.rec.playerId}
+                /*
+                  The drag, and where this row currently sits because of it.
+
+                  `reorderable` gates the handle; `offset` is how far this row
+                  slides to open the gap. Both are absent everywhere but the
+                  queue, so every other view renders exactly the row it did
+                  before this feature existed.
+                */
+                reorderable={canReorder}
+                onReorderStart={(event) => onPointerDown(event, item.rec.playerId, i)}
+                dragging={drag?.playerId === item.rec.playerId}
+                offset={
+                  drag == null
+                    ? 0
+                    : drag.playerId === item.rec.playerId
+                      ? drag.deltaY
+                      : rowOffset({
+                          index: i,
+                          fromIndex: drag.fromIndex,
+                          toIndex: drag.toIndex,
+                          rowHeight: drag.rowHeight,
+                        })
+                }
               />
             </Fragment>
           ))}
         </div>
       )}
     </>
+  );
+}
+
+/** What a drag is doing right now, or null when nothing is being dragged. */
+interface DragState {
+  playerId: string;
+  fromIndex: number;
+  toIndex: number;
+  /** How far the finger has travelled, in pixels, signed downward. */
+  deltaY: number;
+  rowHeight: number;
+}
+
+/**
+ * Long-press to pick a player up, drag to move him, release to keep it.
+ *
+ * Available inside the ★ filter and nowhere else, and that restriction is the
+ * whole design rather than a limitation. The queue is an explicit preference —
+ * a list the reader built — so an order imposed on it is theirs to change. Every
+ * other view of this board is ranked by the model, and a drag there would be
+ * asking the reader to rearrange a conclusion, which would then be silently
+ * discarded on the next refresh.
+ *
+ * Three properties that took some care:
+ *
+ *  - **Scrolling still wins.** The press has to be held for half a second
+ *    without moving before it becomes a drag. A finger that moves first is
+ *    scrolling and the timer is abandoned — permanently, so a slow scroll
+ *    cannot turn into a drag halfway down.
+ *  - **The order is applied optimistically and confirmed after.** A drag that
+ *    waited for a round trip before redrawing would feel broken on a phone
+ *    mid-draft; a drag whose result the server rejected would be worse. So the
+ *    list moves immediately and the server's answer replaces it, which is
+ *    almost always the same list.
+ *  - **It never touches a ranking.** The gesture produces an index. What that
+ *    index means is decided by `reorderQueue` in core, which operates on ids
+ *    and ranks and has no access to a Score at all.
+ */
+function useQueueDrag({
+  enabled,
+  ids,
+  onCommit,
+}: {
+  enabled: boolean;
+  ids: string[];
+  onCommit: (playerId: string, toIndex: number, optimistic: string[]) => void;
+}) {
+  const [drag, setDrag] = useState<DragState | null>(null);
+  /*
+   * The same drag, readable synchronously.
+   *
+   * `end` needs to know where the row was dropped, and the obvious way to get
+   * it — reading the state inside a `setDrag` updater and committing from
+   * there — is wrong twice over. An updater must be pure, and under StrictMode
+   * React deliberately calls it twice, so the commit would fire two reorder
+   * requests for one drop every time in development. The ref is the honest
+   * version: the updater only ever returns the next state, and the side effect
+   * reads what it needs from outside it.
+   */
+  const dragRef = useRef<DragState | null>(null);
+  /*
+   * The live gesture, readable from event handlers that were registered once.
+   *
+   * Registering `pointermove` on every render would mean re-binding on every
+   * frame of a drag, which drops moves; keeping the state in a ref means the
+   * listeners are bound at the start of a gesture and torn down at the end.
+   */
+  const gesture = useRef<{
+    playerId: string;
+    fromIndex: number;
+    startY: number;
+    rowHeight: number;
+    startedAt: number;
+    timer: number | null;
+    active: boolean;
+    abandoned: boolean;
+  } | null>(null);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+
+  /** Write the drag through both the ref and the state, so they cannot drift. */
+  const applyDrag = useCallback((next: DragState | null) => {
+    dragRef.current = next;
+    setDrag(next);
+  }, []);
+
+  const end = useCallback(
+    (commit: boolean) => {
+      const current = gesture.current;
+      const state = dragRef.current;
+      gesture.current = null;
+      if (current?.timer != null) window.clearTimeout(current.timer);
+      applyDrag(null);
+      if (commit && state && current?.active && state.toIndex !== state.fromIndex) {
+        onCommit(state.playerId, state.toIndex, moveItem(idsRef.current, state.fromIndex, state.toIndex));
+      }
+    },
+    [applyDrag, onCommit],
+  );
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent, playerId: string, index: number) => {
+      if (!enabled) return;
+      // A secondary button, a pinch, or anything that is not a single primary
+      // pointer is not a reorder.
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      const row = (event.currentTarget as HTMLElement).closest('[data-testid="recommendation-row"]');
+      const rowHeight = row instanceof HTMLElement ? row.getBoundingClientRect().height : 0;
+      if (rowHeight <= 0) return;
+
+      const timer = window.setTimeout(() => {
+        const current = gesture.current;
+        if (!current || current.abandoned) return;
+        current.active = true;
+        applyDrag({ playerId, fromIndex: index, toIndex: index, deltaY: 0, rowHeight });
+        // A short tick when the row is picked up, where the platform offers one.
+        navigator.vibrate?.(10);
+      }, LONG_PRESS_MS);
+
+      gesture.current = {
+        playerId,
+        fromIndex: index,
+        startY: event.clientY,
+        rowHeight,
+        startedAt: Date.now(),
+        timer,
+        active: false,
+        abandoned: false,
+      };
+    },
+    [applyDrag, enabled],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onMove = (event: PointerEvent) => {
+      const current = gesture.current;
+      if (!current) return;
+      const deltaY = event.clientY - current.startY;
+
+      if (!current.active) {
+        // Still deciding. Movement before the hold elapses means a scroll, and
+        // that verdict is final.
+        const verdict = pressVerdict({
+          heldMs: Date.now() - current.startedAt,
+          movedPx: Math.abs(deltaY),
+        });
+        if (verdict === 'scroll') {
+          current.abandoned = true;
+          if (current.timer != null) window.clearTimeout(current.timer);
+          gesture.current = null;
+        }
+        return;
+      }
+
+      /*
+       * The drag owns the movement now, so the page must not also scroll with
+       * it. `touch-action: none` on the row is what actually makes this
+       * cancellable — without it the browser has already committed the gesture
+       * to scrolling and this call does nothing but log a warning.
+       */
+      if (event.cancelable) event.preventDefault();
+      const state = dragRef.current;
+      if (state == null) return;
+      applyDrag({
+        ...state,
+        deltaY,
+        toIndex: targetIndex({
+          fromIndex: state.fromIndex,
+          deltaY,
+          rowHeight: state.rowHeight,
+          count: idsRef.current.length,
+        }),
+      });
+    };
+
+    const onUp = () => end(true);
+    const onCancel = () => end(false);
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [applyDrag, enabled, end]);
+
+  return { drag, onPointerDown };
+}
+
+/**
+ * Score / ADP / DOG, in the space a control has beside the refresh glyph.
+ *
+ * Three words, because three words is what the three orderings need and any
+ * fewer would be a puzzle: `S / A / D` saves nine characters and costs the
+ * reader the meaning. It is a radio group rather than a cycle button — a cycle
+ * would hide two of the three states and make "which order am I looking at"
+ * a thing to remember rather than a thing to see.
+ *
+ * The DOG chip stays visible when Underdog has priced nobody, and says so in
+ * its accessible name rather than vanishing. A control that disappears when a
+ * data source is down teaches the reader that the feature is unreliable; one
+ * that explains itself teaches them what is actually wrong.
+ */
+function SortControl({
+  value,
+  onChange,
+  dogAvailable,
+}: {
+  value: SortMode;
+  onChange: (mode: SortMode) => void;
+  dogAvailable: boolean;
+}) {
+  return (
+    <span className="sort-control" role="radiogroup" aria-label="Sort the board" data-testid="draft-sort">
+      {SORT_MODES.map((mode) => {
+        const unavailable = mode === 'dog' && !dogAvailable;
+        return (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            className="sort-chip"
+            aria-checked={value === mode}
+            data-testid={`sort-${mode}`}
+            data-active={value === mode ? 'yes' : 'no'}
+            aria-label={
+              unavailable
+                ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                : SORT_DESCRIPTIONS[mode]
+            }
+            onClick={() => onChange(mode)}
+          >
+            {SORT_LABELS[mode]}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 
@@ -883,6 +1301,22 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   );
 }
 
+/**
+ * Rows in the sequence an id list names, with anything unnamed kept at the end.
+ *
+ * Used for one thing: holding the queue where the reader dropped a player while
+ * the server confirms it. Rows the sequence does not mention keep their
+ * incoming order rather than being dropped — a player queued from another
+ * screen mid-drag is a real possibility, and losing his row would be a much
+ * worse outcome than showing him last for one refresh.
+ */
+function reorderByIds<T extends { playerId: string }>(rows: T[], ids: string[]): T[] {
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return [...rows].sort(
+    (a, b) => (rank.get(a.playerId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.playerId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** A row to draw, and whether a tier boundary falls immediately above it. */
 interface BoardItem {
   rec: DraftRecommendation;
@@ -942,6 +1376,10 @@ function RecommendationRow({
   onToggle,
   onQueue,
   busy,
+  reorderable = false,
+  onReorderStart,
+  dragging = false,
+  offset = 0,
 }: {
   rank: number;
   rec: DraftRecommendation;
@@ -953,6 +1391,12 @@ function RecommendationRow({
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
+  /** True only inside the ★ filter, where the order is the reader's own. */
+  reorderable?: boolean;
+  onReorderStart?: (event: React.PointerEvent) => void;
+  dragging?: boolean;
+  /** How far this row is drawn from where it normally sits, mid-drag. */
+  offset?: number;
 }) {
   const pos = (rec.position ?? '').toUpperCase();
   return (
@@ -961,11 +1405,55 @@ function RecommendationRow({
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
       data-position={pos}
+      data-dragging={dragging ? 'yes' : undefined}
+      /*
+       * Mid-drag the rows are drawn where the gesture puts them.
+       *
+       * A transform rather than a reflow, so moving a row costs the compositor
+       * a paint and costs the layout engine nothing — which is what keeps a
+       * drag at sixty frames on a list of two hundred. The transition is
+       * suppressed on the row under the finger, because that one must track the
+       * finger exactly rather than easing toward it.
+       */
+      style={
+        offset === 0
+          ? undefined
+          : {
+              transform: `translateY(${offset}px)`,
+              transition: dragging ? 'none' : 'transform 160ms ease',
+              zIndex: dragging ? 2 : undefined,
+              position: 'relative',
+            }
+      }
       role="listitem"
     >
       <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
         <div className="player-row-top">
-          <span className="rank">{rank}</span>
+          {/*
+            The grip, inside the queue only.
+
+            It replaces the rank number rather than sitting beside it: on the
+            queue the position in the list *is* the rank, so a separate numeral
+            was saying the same thing twice — and a phone row has no spare
+            column. `touch-action: none` is what actually lets the drag cancel
+            the scroll; without it the browser has already committed the gesture
+            by the time the first move arrives.
+          */}
+          {reorderable ? (
+            <span
+              className="drag-handle"
+              data-testid="queue-drag-handle"
+              aria-hidden="true"
+              style={{ touchAction: 'none' }}
+              onPointerDown={onReorderStart}
+              /* The row underneath is a toggle; picking it up is not opening it. */
+              onClick={(event) => event.stopPropagation()}
+            >
+              ⠿
+            </span>
+          ) : (
+            <span className="rank">{rank}</span>
+          )}
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
           {/*
@@ -1049,6 +1537,21 @@ function RecommendationRow({
             <span className="metric">
               ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
             </span>
+            {/*
+              Underdog's own number, beside Sleeper's rather than instead of it.
+
+              Two markets, two columns, and the reader can see them disagree —
+              which is the whole reason the second one is worth having. It is
+              absent rather than blank when Underdog has not priced him, so a
+              card costs nothing for a player the source does not cover and the
+              line stays the height it always was.
+            */}
+            {rec.dogAdp == null ? null : (
+              <span className="metric" data-testid="dog-metric">
+                DOG{' '}
+                <strong title={rec.marketDisagreement?.note ?? 'Raw Underdog ADP'}>{rec.dogAdp}</strong>
+              </span>
+            )}
             <span className="metric">
               Val{' '}
               <strong

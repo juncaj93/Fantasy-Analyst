@@ -63,6 +63,7 @@ import {
   type PositionCounts,
 } from './demand.ts';
 import { NEUTRAL_ROOM, type RoomBehaviour } from './room.ts';
+import { teamMultiplier, type TeamPriorResult } from './teamPrior.ts';
 import { hashString, mulberry32, sampleIndex } from './rng.ts';
 import type { PickOwnership } from './ownership.ts';
 import type { RosterShape } from '../../sleeper/scoring.ts';
@@ -151,6 +152,15 @@ export interface SimCandidate {
   /** Market ADP as an overall pick number, or null when unpriced. */
   adp: number | null;
   /**
+   * His NFL team, when known.
+   *
+   * Read for one purpose: the room's local appetite — a Detroit-area league
+   * takes Lions earlier than the national market does. It reaches the market
+   * weight below and nothing else, so it can move how likely somebody else is
+   * to take him and cannot move how good he is. See `teamPrior.ts`.
+   */
+  team?: string | null;
+  /**
    * Fallback ordering for unpriced players, ascending — Sleeper's search rank.
    *
    * Never used as ADP. It decides only which unpriced player a simulated
@@ -178,6 +188,15 @@ export interface SimulationInput {
   unknownRosters?: Set<number>;
   totalPicks: number;
   room?: RoomBehaviour;
+  /**
+   * The room's appetite for particular NFL teams, when it has one.
+   *
+   * Optional, and absent means every team is equally in demand — which is what
+   * every board did before this existed and what every board still does unless
+   * a league has named a local team. See `teamPrior.ts` for why this is demand
+   * rather than quality.
+   */
+  teamPrior?: TeamPriorResult;
   /** Tier ladders per position, from the existing tier engine. Optional. */
   tiers?: Map<string, PositionTierMap>;
   simulations?: number;
@@ -211,6 +230,11 @@ export interface SimulationResult {
   needAhead: Map<string, number>;
   room: RoomBehaviour;
   /**
+   * The local-team appetite that was applied, so the effect can be inspected
+   * rather than inferred. Null in every league that has not named one.
+   */
+  teamPrior: TeamPriorResult | null;
+  /**
    * How much of the model actually ran.
    *
    * Decided here rather than inferred downstream from the wording of the
@@ -238,6 +262,7 @@ function emptyResult(input: SimulationInput, degraded: string[]): SimulationResu
     byPlayer: new Map(),
     needAhead: new Map(),
     room: input.room ?? NEUTRAL_ROOM,
+    teamPrior: input.teamPrior ?? null,
     confidence: 'low',
     marketOnly: false,
     degraded,
@@ -305,6 +330,7 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
       byPlayer,
       needAhead,
       room,
+      teamPrior: input.teamPrior ?? null,
       confidence: 'high',
       marketOnly: false,
       degraded,
@@ -366,8 +392,19 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
   const horizon = interveningPicks.length;
   const weightAt = new Float64Array(horizon * count);
   const tierBonus = new Float64Array(count);
+  /*
+   * The room's local appetite, resolved once per candidate.
+   *
+   * It multiplies the hazard that somebody takes him, which is the same channel
+   * a tier premium and the room's positional bias already use — so a Lion in a
+   * Detroit league is treated exactly as a receiver in the middle of a receiver
+   * run is: likelier to be gone, not better. 1 for every player in every league
+   * that has not named a local team, and the multiplication is then a no-op.
+   */
+  const localDemand = new Float64Array(count);
   for (let i = 0; i < count; i++) {
     tierBonus[i] = tierScarcityBonus(candidates[i]!, input.tiers);
+    localDemand[i] = input.teamPrior ? teamMultiplier(input.teamPrior, candidates[i]!.team ?? null) : 1;
   }
   for (let step = 0; step < horizon; step++) {
     const pickNo = interveningPicks[step]!;
@@ -376,7 +413,8 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
       const candidate = candidates[i]!;
       const adp = candidate.adp ?? pseudoAdpOf.get(candidate.playerId)!;
       const damping = candidate.adp == null ? SIMULATION.unpricedDamping : 1;
-      weightAt[base + i] = marketPickWeight(adp, pickNo, room.dispersion) * damping * tierBonus[i]!;
+      weightAt[base + i] =
+        marketPickWeight(adp, pickNo, room.dispersion) * damping * tierBonus[i]! * localDemand[i]!;
     }
   }
 
@@ -689,6 +727,7 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
     byPlayer,
     needAhead,
     room,
+    teamPrior: input.teamPrior ?? null,
     /*
      * Trust is about what the model could see, not about what it said.
      *
@@ -744,6 +783,7 @@ function marketOnly(
     byPlayer,
     needAhead,
     room,
+    teamPrior: input.teamPrior ?? null,
     confidence: 'low',
     marketOnly: true,
     degraded,
