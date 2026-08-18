@@ -1,6 +1,7 @@
 /** Typed API client. All calls are same-origin and credentialed. */
 
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
+import { demoSession } from './demo/session.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -12,7 +13,30 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The one seam Demo Mode substitutes at.
+ *
+ * Every screen in this app talks to the server through `api.get` and
+ * `api.post`, and both of them go through here — so redirecting this one
+ * function is the whole of "render the real product over controlled data".
+ * Nothing above it changes: no screen knows a demo exists, no component takes a
+ * `demo` prop, and a screen written next year inherits the behaviour for free.
+ *
+ * The demo runtime refuses anything that is not a read, and it throws when it
+ * does. That is the refusal below the UI; the server adds another for requests
+ * that never came through here at all.
+ */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const session = demoSession();
+  if (session) {
+    const res = await session.runtime.request(init.method ?? 'GET', path, parseBody(init.body));
+    if (res.status >= 400) {
+      const message = (res.body as { error?: string } | null)?.error ?? `request failed (${res.status})`;
+      throw new ApiError(message, res.status);
+    }
+    return res.body as T;
+  }
+
   const res = await fetch(path, {
     credentials: 'same-origin',
     headers: init.body ? { 'content-type': 'application/json' } : undefined,
@@ -25,6 +49,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(message, res.status);
   }
   return body as T;
+}
+
+function parseBody(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== 'string') return null;
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 export const api = {
