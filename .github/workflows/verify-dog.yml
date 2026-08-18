@@ -1,0 +1,51 @@
+name: Verify DOG in production
+
+# Does the deployed board actually price against two markets?
+#
+# Everything else about this feature is checked offline. The unit suite proves
+# the blend arithmetic, the parsers and the freshness rules; CI proves they
+# survive a browser. None of that can tell you whether the snapshot reached the
+# live database, resolved to real players, was judged fresh, and made it into
+# the ranking rather than being dropped somewhere between the importer and the
+# card — and every one of those failures is silent, because the board keeps
+# working and simply stops mentioning Underdog.
+#
+# So this reads one live board and checks what it says about itself against
+# what it shows. Read-only: it logs in, GETs, and writes nothing.
+#
+# It runs after every Underdog refresh, which is when the answer can change,
+# and on demand.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Refresh Underdog ADP']
+    types: [completed]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+
+      - name: Read the live board and check its claims
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          # pipefail, because `| tee` would otherwise report the exit code of
+          # tee and turn a failed check into a green job.
+          set -eo pipefail
+          node scripts/verify-dog-live.mjs --url "$URL" | tee /tmp/verify.txt
+          {
+            echo '## DOG in production'
+            echo
+            echo '```'
+            cat /tmp/verify.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
