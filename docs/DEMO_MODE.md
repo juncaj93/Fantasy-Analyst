@@ -324,8 +324,10 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 - The DEMO state is conveyed by the word `DEMO`, the scenario's name and its
   clock as a real `<time>` — never by colour alone.
 - The indicator is `role="status"` with `aria-live="polite"`.
-- The running scenario carries `aria-current` and the word "Running"; a waiting
-  one carries the word "Waiting".
+- The running scenario carries `aria-current` and the word "Running". A scenario
+  whose surface has not landed carries the word "Waiting" and the reason; no
+  scenario is in that state today, and the markup stays because the next
+  declared-but-unbuilt surface will need it.
 - Every control is at least 44px tall, asserted in e2e.
 - The indicator owns the status-bar inset so the navigation bar underneath does
   not reserve the same pixels twice — asserted in e2e, because that specific

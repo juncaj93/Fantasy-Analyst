@@ -123,12 +123,13 @@ reprocessing.
 **Demo Mode** — a read-only walk through the states that are hard to reach on
 demand: draft night at four different picks, a best-ball board, the morning
 after, a Sunday twenty minutes before kickoff, an injury eight minutes before
-it, a Tuesday waiver run with a finite wallet, a trade window, a playoff week, a
-rollover in March, and seven ways it degrades — including an Underdog file that
-is missing, three days old, or nine. These are the real screens and the real recommendations,
-computed from versioned fixtures instead of your league — the app cannot tell
-the difference, because there is only one Draft screen and one scoring engine in
-here. Nothing in a demo can change a lineup, a pick, a claim, a bid, a trade or
+it, one head-to-head afternoon read from five points in it, a Tuesday waiver run
+with a finite wallet, a trade window, a playoff week, a rollover in March, and
+seven ways it degrades — including an Underdog file that is missing, three days
+old, or nine. These are the real screens and the real recommendations, computed
+from versioned fixtures instead of your league — the app cannot tell the
+difference, because there is only one Draft screen, one Matchup screen and one
+scoring engine in here. Nothing in a demo can change a lineup, a pick, a claim, a bid, a trade or
 the database, and it is refused twice: in the browser and again at the server.
 It lives under **Settings → Demo Mode**, never in the bottom bar. See
 [docs/DEMO_MODE.md](docs/DEMO_MODE.md).

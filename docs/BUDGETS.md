@@ -26,11 +26,11 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 140 kB | 98 kB |
-| app CSS | 20 kB | 9.4 kB |
+| app JavaScript | 140 kB | 105 kB |
+| app CSS | 20 kB | 11 kB |
 | HTML shell | 4 kB | 1.6 kB |
-| everything needed to render | 160 kB | 109 kB |
-| Demo Mode, fetched only when opened | 95 kB | 69 kB |
+| everything needed to render | 160 kB | 117 kB |
+| Demo Mode, fetched only when opened | 108 kB | 92 kB |
 
 The total exists so that splitting one large file into three does not quietly
 pass three budgets. Each file is gzipped **individually** and then summed,
