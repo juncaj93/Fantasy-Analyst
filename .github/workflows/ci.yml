@@ -42,14 +42,27 @@ jobs:
     # A hung browser is a real failure mode, and without this it is invisible:
     # the job sits at "in progress" for six hours and nobody learns anything.
     #
-    # One viewport per runner, rather than all three in sequence. The three
-    # widths are completely independent -- they share no state, no server and no
-    # order -- so running them one after another only ever bought a longer wall
-    # clock, and the suite eventually grew past this timeout and started being
-    # cancelled two thirds of the way through with nothing failing. Split, each
-    # runner does about a third of the work, so twenty minutes goes back to
-    # meaning "the browser is stuck" rather than "the suite got bigger".
-    timeout-minutes: 20
+    # One viewport per runner, rather than all of them in sequence. The widths
+    # are completely independent -- they share no state, no server and no order
+    # -- so running them one after another only ever bought a longer wall clock,
+    # and the suite eventually grew past this timeout and started being
+    # cancelled part of the way through with nothing failing.
+    #
+    # Raised from 20 to 35 when that happened a second time, and the arithmetic
+    # is why rather than the symptom. This is a *job* timeout, so it pays for
+    # `npm ci` and `playwright install --with-deps webkit` before a single test
+    # runs -- about six minutes of it. The suite itself is now around fourteen
+    # minutes per width on a good runner, and a shared runner can be half again
+    # as slow. Twenty left roughly fourteen minutes for a twenty-minute job, so
+    # the fast widths finished and the slow ones were cut two thirds through:
+    # the number had quietly gone back to policing how big the suite is.
+    #
+    # Thirty-five restores what it is for. A browser that is genuinely stuck
+    # still fails here inside the hour instead of sitting until GitHub's own
+    # six-hour ceiling; a suite that merely grew does not. If this needs raising
+    # again, cache the browser download first -- that is six minutes of pure
+    # setup and the cheapest thing on this list to stop paying for.
+    timeout-minutes: 35
     strategy:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
