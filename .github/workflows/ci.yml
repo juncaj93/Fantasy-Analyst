@@ -27,6 +27,12 @@ jobs:
       # the site build to exist because it is served as static assets.
       - run: npm run build
 
+      # Bytes, not milliseconds. A gzipped size is identical on a laptop and on
+      # a loaded shared runner, so a failure here is always a real regression
+      # and never the runner having a bad morning. See docs/BUDGETS.md.
+      - name: Performance budgets
+        run: npm run perf:budget
+
       - name: Verify the worker bundles for Cloudflare
         run: npx wrangler deploy --dry-run --outdir=.wrangler/dry-run
 
@@ -49,7 +55,11 @@ jobs:
       # fact about 360, and cancelling the other two would hide whether it is.
       fail-fast: false
       matrix:
-        project: [webkit-iphone-390, webkit-iphone-375, webkit-small-360]
+        # 430 is the Pro Max class, and it is here for the opposite reason to
+        # 360: the narrow one catches anything that overflows, and the wide one
+        # catches anything only ever tuned for a narrow screen — a control row
+        # that stretches, a fixed field that stops looking fixed.
+        project: [webkit-iphone-430, webkit-iphone-390, webkit-iphone-375, webkit-small-360]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

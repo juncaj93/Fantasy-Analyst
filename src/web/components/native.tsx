@@ -13,7 +13,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useEdgeSwipeBack, useSheetDrag, useStandaloneMode } from '../gestures.ts';
+import { useEdgeSwipeBack, usePullToRefresh, useSheetDrag, useStandaloneMode } from '../gestures.ts';
 import { BackChevronIcon, ChevronIcon } from './icons.tsx';
 
 /* ---------------------------------------------------------- navigation bar */
@@ -240,15 +240,31 @@ export function SegmentedControl<T extends string>({
   onChange,
   label,
   testId,
+  compact = false,
 }: {
   segments: Segment<T>[];
   value: T;
   onChange: (id: T) => void;
   label: string;
   testId?: string;
+  /**
+   * Tighter type and tighter padding, for a control that has to share its row.
+   *
+   * **The tap target is not what shrinks.** The button stays 44px tall and the
+   * pill inside it loses a few points of horizontal padding, which is the only
+   * part of a segmented control that can be given up without giving up a thumb.
+   * See the stylesheet: `.filter-row-compact` touches padding and type size and
+   * nothing else.
+   */
+  compact?: boolean;
 }) {
   return (
-    <div className="filter-row" role="group" aria-label={label} data-testid={testId}>
+    <div
+      className={compact ? 'filter-row filter-row-compact' : 'filter-row'}
+      role="group"
+      aria-label={label}
+      data-testid={testId}
+    >
       {segments.map((s) => (
         <button
           key={s.id}
@@ -492,6 +508,83 @@ export function Sheet({
       </div>
     </>,
     document.body,
+  );
+}
+
+/* --------------------------------------------------------- pull to refresh */
+
+/**
+ * The screen, with the gesture that reloads it attached to the top of it.
+ *
+ * There is no button here and that is the point. A refresh control in a
+ * navigation bar is a desktop idiom that iPhone apps abandoned years ago: the
+ * gesture is already in the reader's hands, it costs no glass, and it cannot be
+ * tapped by accident while scrolling. Two of them — a bar control *and* a
+ * "Refresh data" button — is what this replaced.
+ *
+ * What is visible: a spinner that arrives with the finger, turns as it is
+ * pulled, and spins while the request runs. What is not: any suggestion that
+ * pulling harder does more, or a second refresh queued behind the first — see
+ * the hook, which is single-flight.
+ *
+ * The keyboard fallback is real but deliberately unobtrusive: a control that is
+ * off screen until it is focused. A pointer gesture must never be the only way
+ * to do something, and on a phone it must never be the thing in the way.
+ */
+export function PullToRefresh({
+  onRefresh,
+  children,
+  label = 'Refresh',
+  testId = 'pull-to-refresh',
+  enabled = true,
+}: {
+  onRefresh: () => Promise<unknown> | unknown;
+  children: ReactNode;
+  label?: string;
+  testId?: string;
+  enabled?: boolean;
+}) {
+  const pull = usePullToRefresh({ onRefresh, enabled });
+  const busy = pull.state === 'refreshing';
+
+  return (
+    <div
+      className="pull-surface"
+      data-testid={testId}
+      data-pull-state={pull.state}
+      {...pull.handlers}
+    >
+      <div
+        className="pull-indicator"
+        data-testid="pull-indicator"
+        aria-hidden={pull.state === 'idle'}
+        style={{ height: `${pull.distance}px`, opacity: pull.distance > 0 ? 1 : 0 }}
+      >
+        <span
+          className={busy ? 'pull-spinner pull-spinner-busy' : 'pull-spinner'}
+          style={busy ? undefined : { transform: `rotate(${pull.distance * 3}deg)` }}
+        />
+      </div>
+      {/*
+        Said once, out loud, for anything that is not looking at the spinner.
+        `polite` because a refresh is never urgent enough to interrupt.
+      */}
+      <div className="visually-hidden" role="status" aria-live="polite">
+        {busy ? `Refreshing ${label.toLowerCase()}…` : ''}
+      </div>
+      <button
+        type="button"
+        className="visually-hidden focusable"
+        data-testid="pull-refresh-fallback"
+        disabled={busy}
+        onClick={pull.refresh}
+      >
+        {label}
+      </button>
+      <div className="pull-content" style={{ transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : '' }}>
+        {children}
+      </div>
+    </div>
   );
 }
 

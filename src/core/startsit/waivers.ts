@@ -18,6 +18,7 @@
  */
 
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
+import type { RoleAssessment } from './decisions.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { recommendLineup, type LineupRecommendation } from './lineup.ts';
 
@@ -46,6 +47,16 @@ export interface WaiverCandidate {
   /** Short phrases, in the order they matter. */
   reasons: string[];
   statusFlag: string | null;
+  /**
+   * The role assessment behind the points, carried rather than described.
+   *
+   * The reasons above are prose for a card, and a caller that needs to *decide*
+   * something from the role — how long the opportunity lasts, how settled it is
+   * — was reduced to string-matching them. That is a coupling nobody declared
+   * and one rewording away from silently changing a bid. `games` is how many
+   * games the trend rests on, and zero means the detector had nothing to read.
+   */
+  role: { trend: RoleAssessment['trend']; games: number };
 }
 
 export interface WaiverUpgrade {
@@ -193,6 +204,7 @@ export function recommendWaiverUpgrades(opts: {
         gain: c.gain,
         reasons: upgradeReasons(c.evaluation, entry.current),
         statusFlag: c.evaluation.statusFlag,
+        role: { trend: c.evaluation.role.trend, games: c.evaluation.role.games },
       })),
     });
   }

@@ -394,9 +394,12 @@ test.describe('draft room', () => {
     for (const gone of ['▲', '▼', 'pos', 'neg']) {
       expect(text, `"${gone}" should be gone from the tally`).not.toContain(gone);
     }
-    // Beside the name, not under it.
-    const row = tally.locator('xpath=..');
-    expect(await row.getAttribute('class')).toContain('player-row-top');
+    // Beside the name, not under it. It sits in the fixed-width field that
+    // keeps the club marks aligned — see `--row-meta` — and that field is part
+    // of the identity row, which is the claim being made here.
+    const field = tally.locator('xpath=..');
+    expect(await field.getAttribute('class')).toContain('player-row-meta');
+    expect(await field.locator('xpath=..').getAttribute('class')).toContain('player-row-top');
 
     // And nowhere in the metrics line.
     const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
@@ -1313,8 +1316,10 @@ test.describe('team, ADP import and start/sit', () => {
   test('shows the league title alone in the header', async ({ page }) => {
     const card = page.getByTestId('league-card').first();
     await expect(card).toContainText('Demo Dynasty');
-    // Choosing a league lives in Setup; Team only refreshes it.
-    await expect(card.getByRole('button', { name: 'Refresh' })).toBeVisible();
+    // And no control at all: choosing a league lives in Setup, and reloading
+    // this one is a pull down the screen rather than a button in the corner
+    // furthest from a thumb.
+    await expect(card.getByRole('button')).toHaveCount(0);
 
     const header = (await card.innerText()).toLowerCase();
     for (const gone of ['half ppr', 'ppr', 'teams', '2026', 'flex slot', 'pt passing']) {

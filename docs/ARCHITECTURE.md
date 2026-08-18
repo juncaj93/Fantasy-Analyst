@@ -13,6 +13,12 @@ src/
     vegas/     provider interface, adapters, market normalization, cache policy
     draft/     draft recommendation components
     startsit/  start/sit components + Vegas -> fantasy-points conversion
+    faab/      waiver budget truth, bid research, bid strategy
+    market/    Sleeper trending as attention, and trend-vs-model disagreement
+    roster/    bench-slot opportunity cost
+    trades/    trade verdicts, offer ladder, consolidation
+    managers/  bounded trade and draft tendencies, from league history
+    players/   physical and age/experience contextual flags
     xfp/       expected points from opportunity, and the gap to what happened
     schedule/  role-specific schedule strength, weeks ahead
     value/     this-week and next-four-week player value
@@ -294,12 +300,220 @@ Nothing in this path ranks, scores or decides anything, and every step degrades
 to the team abbreviation: an unknown code, a free agent, a missing file and a
 failed request all end at the same `CHI`-style fallback the rows printed before.
 
+## Season as data
+
+Nothing hardcodes a year, and nothing derives one from the calendar if it can
+avoid it. `core/season/context.ts` is the single authority and answers on a
+ladder: Sleeper's `/state/nfl` first, the selected league second, the calendar
+last and marked `assumed`. Four services used to carry the same
+`month >= 2 ? year : year - 1` expression privately; they now delegate to one
+implementation and use it only as a fallback, with callers that can reach the
+database passing the authoritative answer in.
+
+What the resolver deliberately will **not** do is infer the season from stored
+data. That is the rollover failure mode: with no current-season feed published,
+the newest rows in every table belong to last season, and a "newest wins" rule
+would promote them to current truth on the first Sunday of the new year.
+
+Four modules sit on top of it:
+
+- `lifecycle.ts` — eight deterministic states (offseason, preseason, draft-open,
+  draft-live, post-draft, regular season, playoffs, season complete), all read
+  off provider fields rather than dates. A live draft outranks every other
+  witness, because Sleeper flips `season_type` to `regular` before week one and
+  leagues that draft late are still drafting when it does.
+- `keys.ts` — season-first cache keys, so Week 3 2026 and Week 3 2027 are
+  structurally different, and readable back, so a rollover sweep knows what it
+  is deleting and leaves alone what it does not recognise.
+- `rollover.ts` — the carry-forward/reset table (behavioural signals about
+  people decay; anything about *this season* is rebuilt) and successor-league
+  discovery, which takes Sleeper's own `previous_league_id` silently and only
+  ever *proposes* a name/size/scoring match.
+- `readiness.ts` — grades each source against the current season by name, with
+  `waiting` (not published yet, and not expected to be) kept distinct from
+  `stale` (published, wrong season) and `failed`. Served at
+  `GET /api/diagnostics/rollover`.
+
+`core/search/players.ts` is the one player matcher every search field shares,
+built on the identity layer's normalizer so a name means the same thing to the
+search box as to the resolver. Results are ranked — exact, prefix, word-prefix,
+substring, then typo — and the board's own order breaks ties within a tier, so
+search never re-ranks the board by string similarity.
+
+Both are structurally prevented from touching football logic; see
+`tests/infrastructureIsolation.test.ts`, which asserts the import graph in both
+directions.
+## League strategy
+
+Five things a manager decides that are not "who do I start": what to bid, what
+to drop, what to offer, whether to consolidate, and who they are negotiating
+with. Every one of them is a pure module in `core/`, and the whole layer holds
+to two rules that are enforced in the types rather than promised in prose.
+
+**Nothing here executes anything.** There is no bid, claim, add, drop or trade
+path anywhere in the app, and this layer adds none. `buildLadder` returns
+`advisory: 'never auto-sent'`; the bid strategy returns three numbers and a
+sentence.
+
+**Nothing here moves a projection.** Market attention, disagreement, physical
+profile and age are *context*, and each carries a field saying so —
+`affects: 'bid_price_and_confidence_only'`, `weight: 'context'`,
+`scoreDelta: 0`. A consumer that wants to turn one of them into a score has to
+delete a field to do it, which is the point.
+
+### FAAB (`core/faab/`)
+
+Three numbers that are deliberately not one number: the **expected market
+price** (a forecast about other people), the **recommended bid** (what he is
+worth to this roster) and the **do-not-exceed ceiling**. The recommendation
+frequently sits below the market band, and that is the advice rather than a bug.
+
+The budget is read from the league's own settings and **never assumed**. Sleeper
+defaults to $100; a $200 league reading $100 calls an ordinary bid reckless, and
+a $50 league reading $100 recommends money that does not exist. A league that
+publishes no budget, or does not bid at all, gets a sentence instead of a dollar
+figure. Spend comes from each roster's `waiver_budget_used`, which already
+accounts for FAAB moved in a trade; transactions are used only to cross-check it
+and never to replace it.
+
+Prices come from the league's own completed waiver claims, by percentile rather
+than mean — FAAB spending is long-tailed and one $71 panic bid drags a mean into
+a range nobody has paid. Below three observed winning bids the expected price is
+an explicit estimate, labelled as one. **Losing bids are reported as a floor**,
+never as a distribution: Sleeper publishes the user's own failed claims and
+other managers' inconsistently, so `losingBidNote` says `unknown` when nothing
+can be reconstructed.
+
+### Market attention (`core/market/`)
+
+Sleeper's global trending list counts what other people are doing, not what
+anybody's model thinks. It is allowed to price a bid and to raise a question; it
+may not touch a projection. Feeding it into one would launder the crowd's
+opinion into the app's own numbers and then present the result as independent
+evidence.
+
+Velocity needs two captures — Sleeper keeps no history, so
+`trending_snapshots` is written down before it can be differenced. Rates from
+different lookback windows are never compared, and an acceleration ratio built
+on fewer than five adds an hour is withheld rather than published as
+`accelerated 6×`.
+
+`detectDisagreement` finds the two populations no single ranking surfaces: the
+market surging while usage is thin (expect to pay for the story), and the model
+strong while the market is quiet (the only cheap edge a waiver wire offers). A
+model with nothing behind it cannot disagree with anybody, which is what stops
+every rookie with one good game becoming a warning.
+
+### Bench, ladder, consolidation
+
+`core/roster/bench.ts` prices a bench slot **across positions**, which is the
+whole point: a mediocre QB2 looks fine next to other QB2s and absurd next to the
+slot he occupies. Slot value is what he would score, plus discounted starter
+insurance, optionality and bye coverage, minus what the wire offers at his
+position. Starters and reserve-slot players are never offered as drops.
+
+`core/trades/ladder.ts` returns an opening offer, a fair zone and a
+do-not-exceed, anchored between what the player costs his current owner and what
+he is worth to you. `ladderIsOrdered` is the invariant, and a trade that creates
+no surplus is reported as blocked rather than dressed up with a band a
+millimetre wide.
+
+`core/trades/consolidation.ts` deliberately has no house view. It measures
+startable depth, existing fragility, the lineup gain and how late it is, and
+returns `consolidate` or `keep_depth` from the same inputs depending on which
+way they point — because a 2-for-1 converts depth into ceiling **and** fragility
+in the same move.
+
+### Manager profiles (`core/managers/`)
+
+The only source in the app that describes people rather than players, and
+correspondingly easy to abuse. Three rules: a sample below the threshold is
+never called a tendency (`confident` is false and the notes say why), recency is
+weighted rather than filtered, and the profile is descriptive — "trades often"
+never means "will accept your offer".
+
+Draft tendencies produce a **bounded room prior** — when the first quarterback
+goes, whether the room reaches past the market, whether runs are real once the
+position mix is subtracted out. It is offered to `core/draft/nextpick/` as
+evidence and **does not modify Next% here**; that module owns its own model, and
+a room prior applied behind its back would be a second, uncalibrated ADP.
+
+Run-following is measured only at room scope. One manager's picks are every
+twelfth pick, not a sequence, and measuring it there would measure his own
+positional streaks under the same name.
+
+### Physical and age flags (`core/players/profileFlags.ts`)
+
+Height, weight, age and years of experience are the most tempting bad inputs in
+the dataset — objective, complete, numeric, and explanatory of very little.
+Migration 0021 stores them (the sync had been discarding them); the module makes
+them nearly unusable on purpose.
+
+A flag fires only where a measurement meets a **role it is in tension with**:
+`Small frame for projected outside role`, not `5'9"`. The same body in the slot
+gets nothing. Age never fires alone — the running-back flag requires *falling
+usage* as well, read through the same `assessRole` the card prints a few pixels
+above, so the two can never disagree. Below the six-game usage minimum the trend
+is `unknown` and the flag stays silent.
+
+`showMeasurements` is false unless a physical flag fired, and the server nulls
+height and weight out at the boundary rather than trusting the browser to hide
+them: a number shown is a number the reader will weigh.
+
+### Newsletter takeaway (`core/evidence/takeaway.ts`)
+
+One sentence explaining what the signed tally already said. It is **selected,
+never written**: the sentence comes from evidence already in the ledger, ranked
+by category relevance, specificity, corroboration and a recency decay, and the
+answer is `null` whenever nothing clears the bar. A long excerpt is declined
+rather than trimmed, because cutting a sentence to fit is the cheapest way to
+change what it says.
+
+It is explanation only. The evidence under it has already been counted once by
+the tally, so the returned object carries `scoreDelta: 0` and no consumer adds
+it to anything. `tests/takeaway.test.ts` pins the headline appearing while the
+aggregate signal is byte-identical before and after.
+
+Every screen renders it through `src/web/components/playerDetail.tsx`, which is
+also where the season outlook, the last-season line and the injury sections now
+live. Draft and Players had grown byte-identical copies of all three; two copies
+is how six start.
+
+### Endpoints
+
+| route | what it does |
+| --- | --- |
+| `GET /api/leagues/:id/waivers` | upgrades, now with the bid, the opportunity cost and the market line per candidate |
+| `POST /api/leagues/:id/strategy/refresh` | fetch missing transaction weeks and capture the trending list; rate limited |
+| `POST /api/leagues/:id/managers/refresh` | walk the previous-league chain and rebuild every manager profile |
+| `GET /api/leagues/:id/managers` | the cached profiles, with their sample sizes |
+| `GET /api/leagues/:id/bench` | what each bench slot earns, and the drop candidates |
+| `GET /api/leagues/:id/trades/ladder?playerId=` | opening / fair / do-not-exceed for one target, plus the consolidation read |
+
+The two refresh routes are writes and are rate limited beside the Vegas one. The
+work `strategy/refresh` does also runs on the 09:00 UTC cron for the selected
+league, because the trending list and a current week's transactions are the two
+things in this app that **cannot be reconstructed after the fact**: Sleeper keeps
+no trending history, and its transaction endpoint has no all-weeks form. Manager
+profiles are not on any clock — they change perhaps once a season.
+
 ## Safety invariants
 
-- No endpoint writes to Sleeper. There is no pick or lineup mutation path, and a
-  test asserts those routes 404.
+- No endpoint writes to Sleeper. There is no pick, lineup, waiver, bid or trade
+  mutation path, and a test asserts those routes 404.
+- The strategy layer advises and never acts. Bids are numbers on a card, trade
+  ladders carry `advisory: 'never auto-sent'`, and every transaction in this app
+  happens in Sleeper, by hand, on purpose.
+- No unpublished budget is ever assumed. A league that does not say what its
+  waiver budget is gets a sentence, not a dollar figure.
 - No paid AI dependency at runtime; the only runtime dependencies are `react`
   and `react-dom`.
 - Secrets stay server-side; the sportsbook key never reaches the browser.
 - Auth is a passphrase plus an HMAC-signed HttpOnly/Secure/SameSite cookie, with
   constant-time comparison and a login rate limit.
+- The offline board cache is read-only about draft state. It stores what the
+  server sent and hands it back; it never composes a pick, and a cached board is
+  always rendered as a capture with its age. A test asserts the module has no
+  vocabulary for picks, rosters or fetching.
+- Page weight and free-tier resource use are budgeted and enforced in CI. See
+  [docs/BUDGETS.md](BUDGETS.md).

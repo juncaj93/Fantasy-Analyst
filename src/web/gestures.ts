@@ -54,6 +54,63 @@ export const COMPLETE_VELOCITY = 0.45;
 export const SHEET_DISMISS_FRACTION = 0.28;
 export const SHEET_DISMISS_VELOCITY = 0.5;
 
+/* ------------------------------------------------------- pull to refresh */
+
+/** How far the finger has to travel before the page reloads. */
+export const PULL_TRIGGER = 68;
+
+/** How far the surface is allowed to follow the finger, however hard it pulls. */
+export const PULL_LIMIT = 96;
+
+/**
+ * How much of the finger's movement the surface actually takes.
+ *
+ * Under one, so the sheet of glass gets heavier the further it is pulled. This
+ * is the whole difference between a control that feels attached to the finger
+ * and one that feels like a `div` with a transform on it — iOS applies the same
+ * damping to every scroll view in the system, and a reader who has never
+ * thought about it will still notice its absence.
+ */
+export const PULL_RESISTANCE = 0.55;
+
+/**
+ * How far the surface has moved, given how far the finger has.
+ *
+ * Damped, and then asymptotic: the last stretch before {@link PULL_LIMIT} is
+ * compressed rather than clipped, so a hard pull slows to a stop instead of
+ * hitting a wall. Never negative — an upward drag is a scroll and belongs to
+ * the page.
+ */
+export function pullDistance(dy: number, limit = PULL_LIMIT, resistance = PULL_RESISTANCE): number {
+  if (dy <= 0) return 0;
+  const damped = dy * resistance;
+  if (damped <= limit * 0.6) return Math.round(damped);
+  // Everything past 60% of the limit shares the remaining 40%, tapering out.
+  const overshoot = damped - limit * 0.6;
+  return Math.round(limit * 0.6 + (limit * 0.4 * overshoot) / (overshoot + limit * 0.4));
+}
+
+/** Whether letting go here refreshes. Distance only: a flick must not fire this. */
+export function pullReleases(distance: number, trigger = PULL_TRIGGER): boolean {
+  return distance >= trigger;
+}
+
+/**
+ * What the indicator should be saying right now.
+ *
+ * Four states and no fifth: nothing is happening, the reader is pulling,
+ * they have pulled far enough, or a refresh is running. The label lives with
+ * the component — this is the state machine, and it is here so it can be
+ * tested without a browser.
+ */
+export type PullState = 'idle' | 'pulling' | 'armed' | 'refreshing';
+
+export function pullState(distance: number, refreshing: boolean, trigger = PULL_TRIGGER): PullState {
+  if (refreshing) return 'refreshing';
+  if (distance <= 0) return 'idle';
+  return pullReleases(distance, trigger) ? 'armed' : 'pulling';
+}
+
 /** Whether a touch began close enough to the leading edge to mean "back". */
 export function startsAtEdge(clientX: number, zone: number = EDGE_ZONE): boolean {
   return clientX >= 0 && clientX <= zone;
@@ -437,5 +494,153 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
       onPointerUp: useCallback((e: ReactPointerEvent) => finish(e, false), [finish]),
       onPointerCancel: useCallback((e: ReactPointerEvent) => finish(e, true), [finish]),
     },
+  };
+}
+
+export interface PullToRefresh {
+  /** Spread onto the element that wraps the screen's scrolling content. */
+  handlers: {
+    onPointerDown: (e: ReactPointerEvent) => void;
+    onPointerMove: (e: ReactPointerEvent) => void;
+    onPointerUp: (e: ReactPointerEvent) => void;
+    onPointerCancel: (e: ReactPointerEvent) => void;
+  };
+  /** How far the surface has been pulled, in pixels. */
+  distance: number;
+  state: PullState;
+  /** The same refresh the gesture runs, for the non-touch fallback control. */
+  refresh: () => void;
+}
+
+/**
+ * Pull down from the top of a screen to reload it.
+ *
+ * The one gesture an iPhone user tries without being told, and the reason both
+ * of this screen's refresh buttons could be deleted. Four rules make it behave
+ * like the system's own rather than like a `div` that moves:
+ *
+ *  1. **The page owns the gesture until the page is at its top.** A drag that
+ *     starts anywhere below `scrollTop: 0` is a scroll and is never taken; a
+ *     drag that starts at the top and goes *up* is a scroll too, and is handed
+ *     back the moment the direction is clear. This is the same rule the sheet
+ *     drag uses, for the same reason: a gesture that competes with scrolling
+ *     loses, and takes the reader's patience with it.
+ *
+ *  2. **One refresh at a time.** A ref, checked before anything is started,
+ *     rather than the state that paints the spinner — state lands a render
+ *     later, and the second pull happens in between. A pull during a refresh
+ *     moves nothing and requests nothing; the spinner already on screen is the
+ *     honest answer to "is it working".
+ *
+ *  3. **It reuses the screen's own reload.** `onRefresh` is whatever the screen
+ *     already does, so there is exactly one refresh path in the app and this
+ *     cannot drift from it. Nothing here polls, schedules or retries.
+ *
+ *  4. **Nothing calls `preventDefault`.** `overscroll-behavior` in the
+ *     stylesheet is what stops the browser bouncing the whole document under
+ *     the gesture; the arbitration stays the browser's.
+ */
+export function usePullToRefresh({
+  onRefresh,
+  enabled = true,
+  scrollTop = () => window.scrollY,
+}: {
+  onRefresh: () => Promise<unknown> | unknown;
+  enabled?: boolean;
+  /** How far the surface under this gesture is scrolled. Injected for tests. */
+  scrollTop?: () => number;
+}): PullToRefresh {
+  const drag = useRef<{ pointerId: number; startY: number; engaged: boolean } | null>(null);
+  const running = useRef(false);
+  const [distance, setDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const run = useCallback(() => {
+    // The guard is the ref, not `refreshing`: two pulls inside one render would
+    // both see the old state and both fire.
+    if (running.current) return;
+    running.current = true;
+    setRefreshing(true);
+    void (async () => {
+      try {
+        await onRefresh();
+      } finally {
+        running.current = false;
+        setRefreshing(false);
+        setDistance(0);
+      }
+    })();
+  }, [onRefresh]);
+
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!enabled || running.current) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (scrollTop() > 0) return;
+      drag.current = { pointerId: e.pointerId, startY: e.clientY, engaged: false };
+    },
+    [enabled, scrollTop],
+  );
+
+  const onPointerMove = useCallback(
+    (e: ReactPointerEvent) => {
+      const state = drag.current;
+      if (!state || state.pointerId !== e.pointerId) return;
+      const dy = e.clientY - state.startY;
+
+      if (!state.engaged) {
+        if (Math.abs(dy) < ENGAGE_DISTANCE) return;
+        // Upwards, or the reader has scrolled away from the top in the
+        // meantime: this was a scroll all along.
+        if (dy < 0 || scrollTop() > 0) {
+          drag.current = null;
+          setDistance(0);
+          return;
+        }
+        state.engaged = true;
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          /* capture is an optimisation; the gesture works without it */
+        }
+      }
+
+      setDistance(pullDistance(dy));
+    },
+    [scrollTop],
+  );
+
+  const finish = useCallback(
+    (e: ReactPointerEvent, cancelled: boolean) => {
+      const state = drag.current;
+      drag.current = null;
+      if (!state || state.pointerId !== e.pointerId || !state.engaged) {
+        setDistance(0);
+        return;
+      }
+      const travelled = pullDistance(e.clientY - state.startY);
+      if (!cancelled && pullReleases(travelled)) {
+        // Held open at the trigger height while the request runs, which is what
+        // makes the spinner look like it is doing something rather than
+        // snapping back and leaving the reader wondering whether it fired.
+        setDistance(PULL_TRIGGER);
+        run();
+        return;
+      }
+      setDistance(0);
+    },
+    [run],
+  );
+
+  return {
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: useCallback((e: ReactPointerEvent) => finish(e, false), [finish]),
+      onPointerCancel: useCallback((e: ReactPointerEvent) => finish(e, true), [finish]),
+    },
+    distance,
+    state: pullState(distance, refreshing),
+    refresh: run,
   };
 }

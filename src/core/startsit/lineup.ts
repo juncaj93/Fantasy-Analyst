@@ -59,6 +59,15 @@ export interface LineupSwap {
 
 export interface LineupRecommendation {
   slots: LineupSlot[];
+  /**
+   * The evaluations behind the slots, in slot order.
+   *
+   * The bench has always travelled as full evaluations; the starters used to
+   * arrive as a name and a score, which meant the one player the reader is most
+   * likely to tap was the one whose weekly card needed a second request to
+   * draw. They were computed anyway — this stops throwing them away.
+   */
+  starters: StartSitEvaluation[];
   /** Players not in the recommended lineup, best first. */
   bench: StartSitEvaluation[];
   /** Players with no usable data — never auto-benched, never auto-started. */
@@ -148,6 +157,9 @@ export function recommendLineup(
   if (slots.length === 0) {
     return {
       slots: [],
+      // A league with no starting slots has no starters to report, which is a
+      // different statement from "we did not work them out".
+      starters: [],
       bench: scored,
       undecidable,
       swaps: [],
@@ -289,8 +301,13 @@ export function recommendLineup(
     );
   }
 
+  const evaluationById = new Map(evaluations.map((e) => [e.playerId, e]));
+
   return {
     slots: filled,
+    starters: filled
+      .map((s) => (s.playerId ? (evaluationById.get(s.playerId) ?? null) : null))
+      .filter((e): e is StartSitEvaluation => e != null),
     bench,
     undecidable,
     swaps,
