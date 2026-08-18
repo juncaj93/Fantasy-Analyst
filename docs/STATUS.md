@@ -463,7 +463,19 @@ suggestions).
    assertion: it waits for the element to stop moving, asked as a question about
    the element rather than answered with a fixed sleep.
 
-11. **The browser suite shares one dev server across all three viewports, and
+11. **A queue-filtered draft board scores differently from the full one.**
+   Found while asserting that the ★ moves no ranking: it does not, but
+   `?queued=1` narrows the *candidate pool*, and the tier-cliff and positional-
+   scarcity components are computed over that pool — so three starred players
+   across three positions have no tier structure to read and their scores move.
+   The `Next%` simulation is already immune: it was deliberately given the whole
+   board rather than the filtered one, and the same argument applies to the tier
+   inputs. **Assigned to the Integrity workstream**; Demo Mode did not change it
+   and `tests/demo.scenarios.test.ts` asserts the star's neutrality by building
+   the same board twice with and without the flags rather than by comparing a
+   filtered board to an unfiltered one.
+
+12. **The browser suite shares one dev server across all three viewports, and
    reuses one across runs.** `reuseExistingServer` is on outside CI, so a server
    left behind by an interrupted run is picked up by the next one with its state
    intact — which is how a 390-width run comes to see a 375-width run's
@@ -471,33 +483,6 @@ suggestions).
    an item to the right player` fail. Both pass on a fresh server, which is what
    CI uses; locally, run with `CI=1` or kill any surviving `dev-server.mjs`
    first. Worth isolating per project if it ever fails in CI.
-
-12. **Demo Mode declares five Matchup scenarios and one DOG scenario it cannot
-   run.** There is no Matchup surface in the product — no tab, no route, no live
-   score, no remaining-points model — and no second ADP source to disagree with
-   Sleeper's. Wiring either would mean the demo inventing UI it is explicitly
-   forbidden from inventing, and an audit would then be auditing a screen no
-   user can reach. They are listed in the picker, greyed, with the reason
-   printed, and the runtime refuses to build them. The DOG seam is prepared:
-   every scenario declares `freshness.dogAdp`, today `not_applicable`, so the
-   day a second source merges the disagreement scenarios need a fixture rather
-   than a registry change. See DEMO_MODE.md §7.
-
-13. **A queue-filtered draft board scores differently from the full one, and
-   that is production behaviour rather than a demo one.** Found while asserting
-   that the ★ moves no ranking: it does not, but `?queued=1` narrows the
-   *candidate pool*, and the tier-cliff and positional-scarcity components are
-   computed over that pool — so three starred players across three positions
-   have no tier structure to read and their scores move. The position chip has
-   the same shape of problem and is much less affected, because filtering to QB
-   leaves the QB ladder intact. The `Next%` simulation is already immune: it was
-   deliberately given the whole board rather than the filtered one, for exactly
-   this reason (see the note in `boardBuilder.ts`), and the same argument
-   applies to the tier inputs. Not fixed here — changing what a score means is
-   not a demo workstream's call — and `tests/demo.scenarios.test.ts` therefore
-   asserts the star's neutrality by building the same board twice with and
-   without the flags, rather than by comparing a filtered board to an
-   unfiltered one.
 
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
@@ -961,15 +946,173 @@ that had been missing it. New specs cover the pull gesture, the weekly card, the
 waiver rows, the seasonal toolbar swap and the mark alignment. Typecheck, build
 and the Cloudflare dry-run green at every width.
 
+## Milestone 17 — the intelligence layer beneath the engines (done)
 
-## Milestone 17 — Demo Mode and audit fixtures (done)
+Eleven new `core/` modules, one versioned contract, and 120 tests. No screen
+changed, and that was the instruction rather than a shortcut: the brief asks for
+reusable outputs, and the parallel Team/Waivers UI work stays mergeable because
+nothing here touches it. Full detail in
+[docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](PLAYER_AND_LINEUP_INTELLIGENCE.md).
+
+**Opportunity, separated from efficiency.** `core/xfp/` converts targets, target
+depth, carries and attempts into expected points under the league's own scoring,
+reconstructs what actually happened from the same rows, and reports the gap. Four
+readings come out of it — touchdown regression risk, production outrunning
+opportunity, a healthy role behind a bad box score, and a thin role behind one —
+and the first two are the difference between a sell and a hold on the same hot
+month. It scores **nothing**: opportunity is already in the lineup score once as
+`usage_level` and the market's number is in it again as `vegas`, so a third count
+off the same carries was the failure mode the whole module was arranged to avoid.
+A test asserts the engine's score is unchanged by everything in the file.
+
+**Who gets the football.** The beneficiary graph reads the games a team has
+already played without a starter rather than a depth chart nobody publishes: with
+him against without him, per teammate, per game. A week with no row for him and
+rows for two teammates is a game he missed; a week with no rows for anybody is
+the bye — derived from the data, because that distinction is the whole
+reliability of the sample. With no absence to read it falls back to depth
+inference, labelled as inference at low confidence, and with neither it says
+`unknown` and names nobody.
+
+**What would change the answer.** For calls inside 2.5 points, the conditions are
+found by re-running the real evaluation with one input moved and bisecting for
+the flip — the market line a challenger would have to reach, the practice report
+that would demote the leader, the wind speed that would end it. Computed against
+the engine rather than against a copy of its arithmetic, so a boundary cannot
+drift away from the recommendation it annotates. Unreachable conditions are
+dropped rather than printed.
+
+**Floor, Balanced or Ceiling, chosen before it is asked.** A substantial
+favourite gets Floor and a substantial underdog gets Ceiling, and the
+circularity that idea invites is closed structurally: `suggestMode` accepts
+market points per player and nothing else, so a mode-weighted score has no field
+to travel in on. Thin coverage or an unknown opponent lands on Balanced with
+`auto: false`, which is how a screen tells a choice from a default.
+
+**Plan B is not Plan C.** Contingency lineups are real `recommendLineup` calls
+with the clock moved to just before the questionable player's kickoff, so slot
+legality, FLEX rules, the Out gate and locked starters all come from the
+optimiser rather than from a second copy of its rules. The bench receiver who
+covers the hole at ten in the morning is unavailable at four, and that is the
+only thing the module exists to say.
+
+**The app grades itself, and is not allowed to act on it.** Every recommendation
+is recorded before kickoff with the model version that produced it and each
+source's own `observedAt`; `lookaheadViolations()` returns every place a record
+contains information from after the decision. Grading is two verdicts kept
+apart: who scored more, and whether the call was defensible on pregame
+information — judged by opportunity, so an alternative who won on a fluky
+seventy-yard score grades as `sound_but_unlucky` and one who won on the better
+opportunity grades as a real miss. The weekly report separates observed
+evidence, counterfactual reasoning, suggested bounded changes and actual model
+changes; the last is always empty, suggestions are capped at 15% and only ever
+reductions, and nothing is proposed at all below twenty graded decisions.
+
+**Consumed through one door.** `core/contracts/channel3.ts` carries a contract
+version and the model version, states absence as `null` rather than zero, keeps
+confidence and freshness inside the payload, and ships a validator that catches a
+`NaN` anywhere in the tree, an unknown confidence level, a source marked missing
+that carries an observation time, and a self-grade claiming it applied something.
+Two payloads are built end to end in the tests — one fully connected, one with
+nothing connected — and both validate.
+
+Checks at this milestone: 1,783 unit/integration tests, typecheck, build and
+`wrangler deploy --dry-run` green.
+
+**Integrated rather than parallel.** Three modules had landed on `main` with
+named holes in them, and this pass fills them without drawing anything: the
+weekly card's `advanced` line and its `whatWouldChange` list, and the waiver
+board's multi-week column — the one this document recorded as having no supplier.
+Every projection targets a type imported from the module that owns it, so a
+rename over there fails the build here rather than quietly going unfilled, and
+the tests feed each adapter into the real consumer rather than into a copy of
+its interface.
+
+The sensitivity pass is affordable on a hot endpoint for one reason: a boundary
+only exists for a close call, and closeness is a subtraction over scores that
+have already been computed. That gate runs first, so a roster of comfortable
+calls never reaches the bisection at all.
+
+One word needed settling. `roster/bench.ts` labels role growth `Optionality`
+and this branch used the same word for how many lineup paths a bench player
+covers. Both are real and they are different quantities, so the assessment now
+carries `kind: 'lineup_coverage'`.
+
+**Not built, deliberately:** no screen, no persistence for the grading ledger,
+no red-zone data — so the expected-points model is opportunity-shaped and says
+so on every number it produces — and no future schedule, so the role-specific
+outlook has no source in the running app and the multi-week value falls back to
+role trend and the expected-points gap.
+
+## Milestone 18 — the last waiver column without a supplier (done)
+
+`core/waivers/board.ts` declares three league-intelligence fields and documents
+how to read an empty one: *present-and-null is a pass that ran and found
+nothing, absent is a deployment without the pass.* Two now have suppliers — the
+price from `core/faab`, multi-week value from the milestone above. This is the
+third.
+
+**Competition, per position rather than per league.** `core/faab/strategy.ts`
+asks for `rivalsWithNeed` — "rosters that plausibly want him and can pay" — and
+the caller supplied every funded rival in the league, with a comment saying a
+finer count would need each rival's lineup scored against each candidate, twelve
+optimisations for a 0–1 input.
+
+That is right about scoring and wrong about need. Whether a roster needs a back
+is a count of the healthy backs it holds against the back slots it has to fill —
+one pass over rosters already in memory, no optimisation, no extra query. It is
+now per position and filtered by what each rival can still spend, so a card says
+*four teams need one, three of them cannot afford the going rate* instead of
+*eleven funded rivals*. Needs are counted honestly and only the bidder list is
+filtered by money; a rival whose budget is unknown stays in it, because "cannot
+be ruled out" is not "cannot afford it".
+
+Availability is read through `normalizeDesignation` and `isRuledOut` rather than
+against a private list of status strings, so "ruled out" means one thing.
+
+**Three questions nothing else answers.** Bilateral trade fits, which choose the
+deal `core/trades/ladder.ts` then prices — what you gain, what the partner
+gains and plausibility scored separately, both sides gaining or it is not
+listed, and plausibility read from the canonical `ManagerTradeProfile` so it
+cannot disagree with the ladder. Bye and playoff planning, silent until a bye
+leaves a slot short and giving playoff weeks zero weight until the season is a
+third old and the record puts the team in the race. And a decision feed needing
+both a magnitude and an actual decision change, filtering before it
+deduplicates — merging first would let three immaterial reports of one nothing
+combine into an item that looks corroborated.
+
+**Two timing calls stopped waiting.** `Buy before usage converts to points` and
+`Buy after temporary box-score dip` need expected points, which did not exist
+when they were written. `assessXfp` now supplies both sides off usage weeks the
+route already loads. A player with no weeks yields `NO_XFP`, whose per-game
+figures are null, and the rules require both sides before they say anything — so
+an unmeasured player still produces no call rather than one built on a default.
+
+**What this milestone deleted, twice.** It was written against a `main` that had
+neither the FAAB layer nor this intelligence layer, and built its own of each.
+Gone in favour of the canonical modules: the transaction normaliser and repo,
+the expected-cost model, the manager profiler, the waiver view-model, the
+injury-beneficiary detector, the multi-week classifier, a duplicate
+`getTransactions`, `SleeperTransaction` and `years_exp` column, three migrations
+and five API routes. What survives is the one field nothing else fills and the
+three surfaces nothing else has.
+
+**Still missing, and each says so.** No bye-week source — neither this work nor
+the intelligence layer has one, Sleeper's dictionary carries no bye and the app
+stores no schedule, so `/plan` returns no gaps and names the gap. Three of the
+five timing calls still rest on signals that exist; the schedule-turn one does
+not, for the same missing input.
+
+Checks at this milestone: 2,018 unit/integration tests plus the browser suite at
+four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green.
+
+## Milestone 19 — Demo Mode and audit fixtures (done)
 
 **A deterministic, read-only view of the real product across states that are
-hard to reach on demand.** Draft night at four picks, the morning after, a
-Sunday twenty minutes before kickoff, an injury eight minutes before it, a
-Tuesday waiver run with $37 left, a trade window, a playoff week, a rollover in
-March, and four ways it degrades. Nineteen scenarios wired; six declared and
-waiting for surfaces that do not exist yet.
+hard to reach on demand.** Draft night at four picks, a best-ball board, the
+morning after, a Sunday twenty minutes before kickoff, an injury eight minutes
+before it, a Tuesday waiver run with $37 left, a trade window, a playoff week, a
+rollover in March, and seven ways it degrades.
 
 **It is a substitution layer, not a second app.** One Draft screen, one Team
 screen, one waiver card, one scoring engine — the demo renders the product's.
@@ -986,46 +1129,43 @@ bounded free-agent scan and the trade ladder inputs moved out of `app.ts` into
 `core` verbatim. A rehearsed bid and a live one are now the same arithmetic by
 construction rather than by care.
 
+**The Underdog market is wired through the production board, not modelled a
+second time.** Every §13 state is a fact about the file, stated as provenance
+and resolved by `resolveDog` and `blendMarketBaseline`: DOG present and fresh,
+an aging file that is used with its age printed, a nine-day-old file that is
+withheld with the reason said out loud, no file at all, a player Sleeper prices
+and Underdog does not, a player Underdog prices and Sleeper does not, a
+believable 29-pick disagreement carried into the blend, and an Underdog price of
+2.4 against a Sleeper 119 that the outlier guard sets aside. The 60/40 and 75/25
+blends are asserted against the same board in a redraft league and in one
+Sleeper flags as best ball — read from the league's own settings by
+`detectBestBall`, never from its name.
+
 **Nothing a demo does can change anything, and it is refused twice.** In the
 browser, `DemoRuntime.request` throws for anything that is not a read — a rule
 about requests rather than a list of buttons, so it covers endpoints that do not
 exist yet. On the server, a session-scoped `fa_demo` cookie makes the router
-refuse every write with a 403, before the passphrase check and regardless of it:
-an unlocked session is not permission to mutate during a demo. Proved against
-every `router.post` path scraped from `app.ts`, against the real router and a
-real database with a valid session attached, and from a hand-written `fetch` in
-the page that goes straight past the UI and the API client.
+refuse every write with a 403, before the passphrase check and regardless of it.
+Proved against every `router.post` path scraped from `app.ts`, against the real
+router and a real database with a valid session attached, and from a
+hand-written `fetch` in the page that goes straight past the UI.
 
-**Time is injected, not replaced.** The app already had the convention —
-everything time-dependent takes a `now` — so Demo Mode supplies a stopped clock
-to the same parameters production supplies the real time to. `Date` is
-untouched, so there is nothing to leak.
-
-**Determinism is real, not incidental.** Whole payloads compare byte-identical
-across separate runtimes, including a 5,000-iteration Monte Carlo, because that
-simulation was already seeded from draft state and the clock is fixed. Two
-diagnostic fields are excluded and named: how long the simulation took, and
-whether it came from the memoisation cache.
+**Time is injected, not replaced.** The app already had the convention, so Demo
+Mode supplies a stopped clock to the same parameters production supplies the
+real time to — including the instant an Underdog file's age is measured from.
+`Date` is untouched, so there is nothing to leak.
 
 **Fixtures state inputs, never outputs.** A market line, a designation, a target
-count, a pick, a spend. Every score, bid, verdict, percentage and sentence on a
-demo screen was computed by the production engine from those. The wallet showing
-$37 is a subtraction from a recorded spend, not a number anybody typed.
+count, a pick, a spend, an ADP. Every score, bid, verdict, blend and percentage
+on a demo screen was computed by the production engine from those.
 
-**Bundle cost is 4.7 kB gzip on the render path** — the indicator, the session
+**Bundle cost is ~7 kB gzip on the render path** — the indicator, the session
 and the API hook. The runtime, the registry, the picker and each fixture family
-are separate dynamic imports totalling 68.5 kB that no page load can reach.
-`vite.config.ts` names every demo chunk `assets/demo-*.js`, which is what lets
-the page-weight budgets exclude them from the render path *and* cap them with a
-budget of their own; excluding without capping is how a budget stops meaning
-anything, so both were done in the same commit.
-
-Checks at this milestone: 2,023 unit/integration tests — 67 of them this
-channel's — and 17 new browser specs at 430, 390, 375 and 360 covering enter,
-choose, navigate, assert, exit and verify-live-restored, the indicator on every
-screen, the progression controls, the offline fallback, and the server refusing
-a hand-made write. Typecheck, build, page-weight budgets and the Cloudflare
-dry-run green.
+are separate dynamic imports that no page load can reach. `vite.config.ts` names
+every demo chunk `assets/demo-*.js`, which is what lets the page-weight budgets
+exclude them from the render path *and* cap them with a budget of their own;
+excluding without capping is how a budget stops meaning anything, so both were
+done together.
 
 Full detail: [DEMO_MODE.md](DEMO_MODE.md).
 

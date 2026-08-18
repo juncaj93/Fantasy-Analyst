@@ -19,6 +19,7 @@ import {
   collectPlayerState,
   makeAdp,
   makeBudget,
+  makeDog,
   makeDraft,
   makeLeague,
   makeNflState,
@@ -434,6 +435,12 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
   });
 
   const byRosterId = rollover ? new Map<number, string[]>() : seasonRosters();
+  /* Underdog is a draft-season market; out of season there is nothing current. */
+  const dog = makeDog(specs, clock, {
+    available: scenario.freshness.dogAdp === 'fresh',
+    ageHours: 6,
+  });
+
   const adp = makeAdp(specs, {
     available: scenario.freshness.adp !== 'unavailable',
     capturedAt: '2026-08-24T06:00:00.000Z',
@@ -453,6 +460,7 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
       season: leagueSeason,
       status: leagueStatusFor(scenario),
       name: scenario.format.name,
+      bestBall: scenario.format.bestBall,
     }),
     rosters: makeRosters({
       byRosterId,
@@ -469,6 +477,8 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
     picks: rollover ? [] : makePicks(DRAFT_TEAMS * 14),
     adpSnapshot: adp.snapshot,
     adpValues: adp.values,
+    dogSnapshot: dog.snapshot,
+    dogValues: dog.values,
     signals,
     flags,
     seasonMarkets,

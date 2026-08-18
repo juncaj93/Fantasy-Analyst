@@ -72,6 +72,16 @@ export interface ScenarioData {
   picks: DraftPickRecord[];
   adpSnapshot: BoardAdpSnapshot | null;
   adpValues: Map<string, BoardAdpValue>;
+  /**
+   * Underdog, filed separately because it is a separate market.
+   *
+   * Null means no Underdog snapshot has been imported at all — one of the four
+   * distinct ways DOG can be absent, and the board says which. The others are
+   * expressed on the snapshot itself: a `sourceType` that is not `raw_adp`, a
+   * `fetchedAt` old enough to be stale, and a snapshot that resolved to nobody.
+   */
+  dogSnapshot: BoardAdpSnapshot | null;
+  dogValues: Map<string, BoardAdpValue>;
   signals: Map<string, PlayerSignal>;
   flags: Map<string, BoardPlayerFlag>;
   seasonMarkets: Map<string, { market: SeasonMarketKey; line: number | null }[]>;
@@ -119,7 +129,19 @@ export function overrideSpecs(
 
 // ------------------------------------------------------------------ league
 
-export function makeLeague(opts: { season: string; status: string; name: string }): LeagueRecord {
+export function makeLeague(opts: {
+  season: string;
+  status: string;
+  name: string;
+  /**
+   * Written into Sleeper's own settings blob, not passed to the board.
+   *
+   * `detectBestBall` reads `best_ball` off the league settings exactly as it
+   * does in production, so a best-ball scenario states the flag a real league
+   * would carry and the blend is the conclusion rather than the input.
+   */
+  bestBall?: boolean;
+}): LeagueRecord {
   return {
     id: DEMO_LEAGUE_ID,
     sleeperLeagueId: 'demo-sleeper-league',
@@ -128,7 +150,7 @@ export function makeLeague(opts: { season: string; status: string; name: string 
     totalRosters: DRAFT_TEAMS,
     scoringSettings: DEMO_SCORING,
     rosterPositions: DEMO_ROSTER_POSITIONS,
-    leagueSettings: DEMO_LEAGUE_SETTINGS,
+    leagueSettings: opts.bestBall ? { ...DEMO_LEAGUE_SETTINGS, best_ball: 1 } : DEMO_LEAGUE_SETTINGS,
     draftId: DEMO_DRAFT_ID,
     status: opts.status,
     lastSyncedAt: '2026-08-30T22:00:00.000Z',
@@ -270,12 +292,72 @@ export function makeAdp(
   const ranked = specs.filter((s) => s.adp != null).sort((a, b) => a.adp! - b.adp!);
   const values = new Map<string, BoardAdpValue>();
   ranked.forEach((spec, i) => values.set(spec.id, { adp: spec.adp!, rank: i + 1 }));
+  const capturedAt = opts.capturedAt ?? '2026-08-24T06:00:00.000Z';
   return {
     snapshot: {
-      id: 1,
+      id: SLEEPER_SNAPSHOT_ID,
       label: opts.label ?? 'Sleeper half-PPR redraft, 1QB',
-      capturedAt: opts.capturedAt ?? '2026-08-24T06:00:00.000Z',
+      capturedAt,
       matchedCount: ranked.length,
+      rowCount: ranked.length,
+      importedAt: capturedAt,
+      provider: 'beatadp',
+      sourceType: 'raw_adp',
+      snapshotAt: capturedAt,
+      fetchedAt: capturedAt,
+    },
+    values,
+  };
+}
+
+/** The two snapshot ids a scenario can hold. Distinct so a lookup cannot alias. */
+export const SLEEPER_SNAPSHOT_ID = 1;
+export const DOG_SNAPSHOT_ID = 2;
+
+/**
+ * The Underdog snapshot, and the several ways it can be unusable.
+ *
+ * Every state is expressed as *provenance on the snapshot* rather than as a
+ * flag the board is told to honour, because that is how the real thing arrives:
+ * the importer writes what it fetched and when, and `resolveDog` decides what
+ * that is worth. A fixture that said "pretend DOG is stale" would be testing
+ * the flag; this makes the board work it out from a timestamp.
+ */
+export function makeDog(
+  specs: DemoPlayerSpec[],
+  clock: Clock,
+  opts: {
+    available: boolean;
+    /** How old the file is at the scenario's clock. Past 168h it is stale. */
+    ageHours?: number;
+    /** `raw_adp` is the only kind that may be shown as DOG. */
+    sourceType?: string;
+    /** Force the "it matched nobody" state, with the rows still counted. */
+    matchesNothing?: boolean;
+    provider?: string;
+  },
+): { snapshot: BoardAdpSnapshot | null; values: Map<string, BoardAdpValue> } {
+  if (!opts.available) return { snapshot: null, values: new Map() };
+
+  const priced = specs.filter((s) => s.dogAdp != null).sort((a, b) => a.dogAdp! - b.dogAdp!);
+  const values = new Map<string, BoardAdpValue>();
+  if (!opts.matchesNothing) {
+    priced.forEach((spec, i) => values.set(spec.id, { adp: spec.dogAdp!, rank: i + 1 }));
+  }
+
+  const at = hoursBefore(clock, opts.ageHours ?? 6);
+  return {
+    snapshot: {
+      id: DOG_SNAPSHOT_ID,
+      label: 'Underdog Big Board',
+      capturedAt: at,
+      matchedCount: values.size,
+      rowCount: priced.length,
+      importedAt: at,
+      provider: opts.provider ?? 'underdog',
+      sourceType: opts.sourceType ?? 'raw_adp',
+      snapshotAt: at,
+      fetchedAt: at,
     },
     values,
   };
@@ -305,7 +387,13 @@ export function collectPlayerState(
     const signal = toSignal(spec, clock);
     if (signal) signals.set(spec.id, signal);
     if (spec.myGuy || spec.queued) {
-      flags.set(spec.id, { level: (spec.myGuy ?? 0) as BoardPlayerFlag['level'], queued: spec.queued ?? false });
+      flags.set(spec.id, {
+        level: (spec.myGuy ?? 0) as BoardPlayerFlag['level'],
+        queued: spec.queued ?? false,
+        // Never hand-ordered, which is what a queue looks like before anybody
+        // has dragged anything: the chip lists it in board order.
+        queueOrder: null,
+      });
     }
     if (spec.seasonMarkets?.length) {
       seasonMarkets.set(

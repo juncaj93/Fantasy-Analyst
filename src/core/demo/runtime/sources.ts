@@ -12,7 +12,7 @@
  * production engines do the rest.
  */
 
-import type { DraftBoardSources } from '../../draft/boardBuilder.ts';
+import { UNDERDOG_SOURCE_KEY, type DraftBoardSources } from '../../draft/boardBuilder.ts';
 import type { StartSitInput } from '../../startsit/engine.ts';
 import { toRoleMetrics } from '../../usage/role.ts';
 import type { TradeCandidate, Ownership } from '../../trades/engine.ts';
@@ -37,10 +37,28 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
       listPicks: async (draftId) => (data.draft?.id === draftId ? data.picks : []),
     },
     players: { listAll: async () => data.players },
+    /*
+     * Two markets, kept apart.
+     *
+     * The board asks for them by name — the platform snapshot for Sleeper, the
+     * `underdog` source for DOG — and gets exactly the one it asked for. They
+     * are keyed on distinct snapshot ids so `valuesByPlayer` can never hand one
+     * market's numbers back for the other's id, which is the single worst thing
+     * that could happen here: a Sleeper column silently labelled DOG.
+     */
     adp: {
-      get: async (id) => (data.adpSnapshot?.id === id ? data.adpSnapshot : null),
-      latest: async () => data.adpSnapshot,
-      valuesByPlayer: async () => data.adpValues,
+      get: async (id) => {
+        if (data.adpSnapshot?.id === id) return data.adpSnapshot;
+        if (data.dogSnapshot?.id === id) return data.dogSnapshot;
+        return null;
+      },
+      latestPlatformSnapshot: async () => data.adpSnapshot,
+      latestForSource: async (source) => (source === UNDERDOG_SOURCE_KEY ? data.dogSnapshot : null),
+      valuesByPlayer: async (snapshotId) => {
+        if (snapshotId === data.dogSnapshot?.id) return data.dogValues;
+        if (snapshotId === data.adpSnapshot?.id) return data.adpValues;
+        return new Map();
+      },
     },
     evidence: {
       getSignals: async (ids) => {
@@ -70,6 +88,12 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
       }
       return out;
     },
+    /*
+     * The scenario's clock, which is what makes a stale-DOG scenario stay
+     * stale. Measured from here, an Underdog file authored as nine days old is
+     * nine days old in March 2027 and in August 2026 alike.
+     */
+    now: () => data.clock.now(),
   };
 }
 

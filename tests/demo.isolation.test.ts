@@ -157,10 +157,26 @@ describe('the demo cannot reach live truth even by accident', () => {
 
   it('the source interface it satisfies has no write on it', () => {
     const board = readFileSync(join(SRC, 'core', 'draft', 'boardBuilder.ts'), 'utf8');
-    const iface = board.slice(
-      board.indexOf('export interface DraftBoardSources {'),
-      board.indexOf('/** The snapshot metadata a board prints.'),
-    );
+    /*
+     * Brace-matched rather than sliced to the next comment: the declaration
+     * after this interface has been renamed once already, and a slice that
+     * silently ran to the end of the file would still pass while checking
+     * something else entirely.
+     */
+    const start = board.indexOf('export interface DraftBoardSources {');
+    expect(start, 'DraftBoardSources is declared').toBeGreaterThan(-1);
+    let depth = 0;
+    let end = board.indexOf('{', start);
+    for (let i = end; i < board.length; i++) {
+      if (board[i] === '{') depth++;
+      else if (board[i] === '}' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    const iface = board.slice(start, end + 1);
+    expect(iface).toContain('injuryStates');
+    expect(iface.length).toBeLessThan(4000);
     for (const forbidden of ['upsert', 'insert', 'save', 'set', 'delete', 'write', 'select']) {
       expect(iface.toLowerCase(), `DraftBoardSources must not offer "${forbidden}"`).not.toContain(forbidden);
     }

@@ -155,7 +155,8 @@ every probability is compared exactly.
 
 ## 6. The scenarios
 
-Nineteen of twenty-five are wired. Six are declared and waiting — see §7.
+Twenty-three of twenty-eight are wired. The five Matchup scenarios are declared
+and waiting — see §7.
 
 | Group | Scenario | What it is for |
 |---|---|---|
@@ -170,6 +171,7 @@ Nineteen of twenty-five are wired. Six are declared and waiting — see §7.
 | | `waivers-thin-data` | A priority league that has never published a bid. Upgrades stand; every price says unknown. |
 | | `waivers-processed` | Wednesday. The claim landed and the wallet moved. |
 | Trades | `trade-window` | Discovery: whose news has moved, who holds them, and which way. |
+| Draft | `draft-best-ball` | The same board in a league Sleeper flags as best ball, so Underdog's share of the baseline widens from 60% to 75%. |
 | Season | `playoff-week` | Week 15. Thin wire, no byes left, one game to plan for. |
 | | `season-complete` | Nothing left to decide, said plainly. |
 | | `rollover-new-season` | March. Last season's league is finished and Sleeper has moved on — which is the gap `resolveSeasonPhase` reads. |
@@ -178,6 +180,9 @@ Nineteen of twenty-five are wired. Six are declared and waiting — see §7.
 | | `sleeper-adp-unavailable` | No ranking has ever been imported. The board still ranks and warns it is a poor substitute. |
 | | `injury-source-stale` | Four days without a report: designations stand, the practice detail does not. |
 | | `partial-provider-outage` | No market and a stale usage file. Two of the four numbers are unknown; the recommendation is still made, with confidence lowered. |
+| | `dog-unavailable` | No Underdog file has ever been imported. The column is absent rather than blank, and Sleeper carries the whole baseline. |
+| | `dog-aging` | Three days old: past the freshness window, inside the trust window. DOG is used, and prints its age. |
+| | `dog-stale` | Nine days old. DOG is withheld, the baseline falls back to Sleeper alone, and the board says why. |
 
 **Progression** (§11) is explicit only: `previous` / `next` buttons walking
 draft → post-draft → Sunday → late pivot → Tuesday waivers → processed → trade
@@ -199,7 +204,50 @@ every score, bid, verdict, percentage and sentence is computed from it.
 
 ---
 
-## 7. What is declared and not wired
+## 7. The Underdog market
+
+DOG landed, so the §13 seams became real coverage. Every state below is stated
+as **provenance on a snapshot** — what a provider served and when — and the
+verdict is `resolveDog` and `blendMarketBaseline` reaching a conclusion, never a
+fixture asserting one.
+
+| §13 asks for | Where it is, and what decides it |
+|---|---|
+| Sleeper ADP | Every draft scenario. The platform snapshot, unchanged. |
+| DOG | `draft-*`. A `raw_adp` Underdog snapshot six hours old, so the column lights and carries its share. |
+| Strong DOG/Sleeper disagreement | `draft-mid`. Underdog has `Emeka Falade` at 12.0 against Sleeper's 41.2 — 29 picks, inside the outlier guard, so it is carried into the blend as information and reported with a leader. |
+| Stale DOG | `dog-stale`. Nine days past its effective time, so `dogFreshness` says stale, `dogIsUsable` says no, and the board warns out loud. |
+| Missing DOG | `dog-unavailable` for the whole file; `Teo Ferreira` and a generated stretch of the depth pool for a single player Underdog has not priced. |
+| Missing Sleeper | A stretch of the depth pool past the end of the Sleeper file that Underdog still ranks — `singleSource`, weights `{dog: 1, sleeper: 0}`. |
+
+And what §13 asks to *verify*:
+
+- **Score / ADP / DOG sorting** — the board's own sort, over a fixture where the
+  three orders genuinely differ.
+- **60/40 and 75/25** — asserted on the same player in `draft-mid` and
+  `draft-best-ball`. The best-ball weighting is `detectBestBall` reading
+  `best_ball: 1` off Sleeper's league settings; the demo states the setting, not
+  the blend.
+- **No source relabelling** — a DOG price is Underdog's own number or absent.
+  With no Underdog file, no recommendation carries a `dogAdp` and no blend lists
+  `dog` as a source.
+- **Provenance and freshness** — `dogState` carries provider, source type,
+  effective time, fetch time, freshness, age and match count, and its `reason`
+  distinguishes the four ways DOG can be absent.
+- **No demo market snapshot writes** — structural: `src/core/demo/**` has no
+  write path at all (§4).
+
+One case is worth naming on its own. `p076` carries an Underdog price of 2.4
+against a Sleeper 119.2. Nobody thinks the hundred-and-nineteenth player off the
+board is the second, and blending that at 60/40 would price him around 48 with
+complete confidence — so `isImplausibleDisagreement` sets the Underdog number
+aside, the blend falls to Sleeper alone, and `suspectDog` says it was set aside
+rather than absent. He was chosen because he is still available in the sixth
+round, which is the only way a reader ever sees the guard work.
+
+---
+
+## 8. What is declared and not wired
 
 Honesty here matters more than a longer list.
 
@@ -211,27 +259,20 @@ UI §1 forbids it from inventing, and the audit would then be auditing a screen
 no user can reach. They are listed in the picker, greyed, with the reason
 printed. `DemoRuntime.forScenario` refuses to run them.
 
-**Underdog / DOG ADP** — `dog-unavailable` is declared and waiting for the same
-reason. The product blends no second draft-order source today, so there is
-nothing for the scenario to degrade. The seam is prepared: every scenario
-declares `freshness.dogAdp`, currently `not_applicable`, and the day a second
-source merges the scenarios that should disagree can say `fresh` and `stale`
-without a registry change. The 60/40 and 75/25 blends, source relabelling and
-market-snapshot rules in §13 of the brief have nothing to verify against yet.
-
 ---
 
-## 8. Bundle impact
+## 9. Bundle impact
 
 Demo Mode is fetched only when somebody opens it. Every path to it is a dynamic
 import: the runtime and engines, the scenario registry, the picker component,
-and each fixture family separately.
+and each fixture family separately. The render-path cost is the indicator, the
+session and the API hook, and nothing else.
 
 | | gzip |
 |---|---|
-| App JavaScript, before | 93.4 kB |
-| App JavaScript, after | 98.1 kB |
-| Demo Mode (never on the render path) | 68.5 kB across 8 chunks |
+| App JavaScript, without Demo Mode | ~94 kB |
+| App JavaScript, with it | 101.0 kB |
+| Demo Mode (never on the render path) | 72.3 kB across 8 chunks |
 
 `vite.config.ts` names every demo chunk `assets/demo-*.js`, which is what lets
 `perf-budgets.json` exclude them from the render-path budgets *and* cap them
@@ -240,7 +281,7 @@ meaning anything, so both were done in the same commit.
 
 ---
 
-## 9. Testing and the audit hook
+## 10. Testing and the audit hook
 
 ```
 tests/demo.scenarios.test.ts   every scenario through the real engines
@@ -265,7 +306,7 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 
 ---
 
-## 10. Accessibility
+## 11. Accessibility
 
 - The DEMO state is conveyed by the word `DEMO`, the scenario's name and its
   clock as a real `<time>` — never by colour alone.
@@ -279,10 +320,10 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 
 ---
 
-## 11. Limitations
+## 12. Limitations
 
-- **Matchup and DOG are declared, not wired** (§7). This is the honest state of
-  the product, not an omission.
+- **Matchup is declared, not wired** (§8). This is the honest state of the
+  product, not an omission.
 - **No newsletter excerpts.** The evidence ledger holds publisher text, and
   inventing plausible excerpts would put words in a publisher's mouth on a
   screen whose premise is that every original excerpt is preserved verbatim. The

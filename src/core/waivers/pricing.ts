@@ -28,6 +28,7 @@ import type { TrendingVelocity } from '../market/trending.ts';
 import { trendingHeadline } from '../market/trending.ts';
 import { detectDisagreement, type Disagreement } from '../market/disagreement.ts';
 import type { WaiverAdvice, WaiverCandidate, WaiverUpgrade } from '../startsit/waivers.ts';
+import type { CompetitionAssessment } from '../league/competition.ts';
 
 /**
  * What pricing needs to know about the league, and nothing more.
@@ -54,6 +55,14 @@ export function priceWaiverUpgrades(opts: {
   advice: WaiverAdvice;
   strategy: WaiverPricingContext;
   rosteredIds: Set<string>;
+  /**
+   * Who actually needs this player and can afford him, per player.
+   *
+   * Absent falls back to the blunt count below. Present, it is strictly better
+   * information — a league where nine rosters are funded but only two are short
+   * at the position is not a league where nine people are bidding.
+   */
+  competition?: Map<string, CompetitionAssessment>;
 }): PricedBid[] {
   const { advice, strategy } = opts;
   const season = { week: strategy.week, finalWeek: strategy.finalWeek };
@@ -66,6 +75,20 @@ export function priceWaiverUpgrades(opts: {
    * twelve times the work for a number that feeds a 0–1 demand input.
    */
   const fundedRivals = strategy.budget.rosters.filter((r) => !r.isMine && (r.remaining ?? 0) > 0).length;
+
+  /**
+   * How many rivals to price against, best available answer first.
+   *
+   * The assessed bidders when the league-intelligence pass has produced them;
+   * the blunt funded-roster count otherwise. Capped at four either way, because
+   * the demand input saturates and a league of twelve is not three times as
+   * contested as a league of four.
+   */
+  const rivalsFor = (playerId: string): number | null => {
+    const assessed = opts.competition?.get(playerId);
+    if (assessed) return assessed.bidders.length > 0 ? Math.min(assessed.bidders.length, 4) : null;
+    return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
+  };
 
   const out: PricedBid[] = [];
 
@@ -122,7 +145,7 @@ export function priceWaiverUpgrades(opts: {
           shelfLife: shelfLifeOf(candidate),
           futureOpportunity: 'normal',
           marketHeat,
-          rivalsWithNeed: fundedRivals > 0 ? Math.min(fundedRivals, 4) : null,
+          rivalsWithNeed: rivalsFor(candidate.playerId),
         },
         budgetState: strategy.budget,
         prices: strategy.prices,

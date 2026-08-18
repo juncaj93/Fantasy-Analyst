@@ -19,6 +19,7 @@ interface PlayerRow {
   aliases_json: string;
   external_ids_json: string;
   draft_rank: number | null;
+  jersey_number?: number | null;
   height_inches: number | null;
   weight_pounds: number | null;
   age: number | null;
@@ -40,6 +41,7 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
     externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
     searchRank: row.draft_rank ?? null,
+    jerseyNumber: row.jersey_number ?? null,
     heightInches: row.height_inches ?? null,
     weightPounds: row.weight_pounds ?? null,
     age: row.age ?? null,
@@ -134,9 +136,9 @@ export class PlayerRepo {
             `INSERT INTO players (
                id, sleeper_player_id, full_name, first_name, last_name, team, position,
                status, active, normalized_name, aliases_json, external_ids_json, draft_rank,
-               height_inches, weight_pounds, age, years_exp,
+               jersey_number, height_inches, weight_pounds, age, years_exp,
                created_at, updated_at
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                sleeper_player_id = excluded.sleeper_player_id,
                full_name         = excluded.full_name,
@@ -150,6 +152,7 @@ export class PlayerRepo {
                aliases_json      = excluded.aliases_json,
                external_ids_json = excluded.external_ids_json,
                draft_rank        = excluded.draft_rank,
+               jersey_number     = excluded.jersey_number,
                -- COALESCE, not a plain overwrite: a sync that could not read a
                -- measurement must not erase the one already stored. Absent is
                -- "not said this time", which is not the same as "not true".
@@ -173,6 +176,7 @@ export class PlayerRepo {
             toJson(p.aliases),
             toJson(p.externalIds ?? {}),
             p.searchRank ?? null,
+            p.jerseyNumber ?? null,
             p.heightInches ?? null,
             p.weightPounds ?? null,
             p.age ?? null,

@@ -16,7 +16,7 @@
  * it, and moving between two players is a tap rather than a round trip.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type EvidenceItem, type LeagueSummary, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
 import {
   InjuryDetail,
@@ -72,7 +72,34 @@ interface PlayerFile {
   myGuy?: MyGuyFlag;
 }
 
+/** One page of the response, plus what it says about the rest of the list. */
+interface PlayersPage {
+  players: PlayerListItem[];
+  /** Absent on an older deployment; the caller falls back to a full page. */
+  hasMore?: boolean;
+  total?: number;
+}
+
 const ALL_FILTER = 'ALL';
+
+/**
+ * How many players arrive per page.
+ *
+ * A hundred rather than the sixty this screen used to fetch and stop at, and
+ * rather than everything: three thousand rows in the DOM is a phone that
+ * stutters on every scroll, and nobody reads past the two hundredth name in one
+ * sitting anyway. Two pages cover the browsable depth the brief asks for and a
+ * third is one scroll away.
+ */
+const PAGE_SIZE = 100;
+
+/**
+ * How far from the bottom the next page starts loading.
+ *
+ * A screen and a half, so the rows are there before the reader arrives at
+ * them — a spinner they actually see is a page that was requested too late.
+ */
+const LOAD_MORE_MARGIN = '600px';
 
 export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const [query, setQuery] = useState('');
@@ -81,6 +108,18 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /**
+   * Whether there is more of the list, and whether it is being fetched.
+   *
+   * This screen used to ask for one page of sixty and stop, which meant Players
+   * ended around the sixtieth name and looked exactly like the end of the
+   * player universe rather than the end of a page — the same failure the draft
+   * board had, and the same fix: keep asking. Two hundred is browsable, six
+   * hundred is browsable, and the DOM never holds more than what has actually
+   * been scrolled to.
+   */
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   /*
    * The chips come from the league, exactly as the draft board's do.
@@ -107,16 +146,29 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     ];
   }, [selected]);
 
+  /** One page of the list. `offset` 0 replaces; anything else appends. */
+  const fetchPage = useCallback(
+    async (offset: number): Promise<PlayersPage> => {
+      const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
+      return api.get<PlayersPage>(
+        `/api/players?q=${encodeURIComponent(query)}${filter}&limit=${PAGE_SIZE}&offset=${offset}`,
+      );
+    },
+    [query, position],
+  );
+
   useEffect(() => {
     let cancelled = false;
     const handle = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
-        const res = await api.get<{ players: PlayerListItem[] }>(
-          `/api/players?q=${encodeURIComponent(query)}${filter}`,
-        );
-        if (!cancelled) setPlayers(res.players);
+        const res = await fetchPage(0);
+        if (cancelled) return;
+        setPlayers(res.players);
+        // Older deployments send neither field; treating a full page as "there
+        // may be more" degrades to one extra request rather than to a truncated
+        // list, which is the right way round.
+        setHasMore(res.hasMore ?? res.players.length >= PAGE_SIZE);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -125,7 +177,36 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, position]);
+  }, [fetchPage]);
+
+  /**
+   * The next page, when the reader reaches the end of this one.
+   *
+   * Guarded on `loadingMore` rather than debounced: the sentinel can report
+   * itself visible several times while one request is in flight, and a second
+   * request for the same offset would append the same players twice.
+   */
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchPage(players.length);
+      setPlayers((current) => {
+        // Belt and braces against a duplicate: a page that arrives after the
+        // filter changed must not splice rows from the old query into the new
+        // list, and an id already on screen is the cheapest way to notice.
+        const seen = new Set(current.map((p) => p.id));
+        return [...current, ...res.players.filter((p) => !seen.has(p.id))];
+      });
+      setHasMore(res.hasMore ?? res.players.length >= PAGE_SIZE);
+    } catch {
+      // A failed page is not a failed screen. The reader keeps everything they
+      // already have, and the sentinel will try again on the next scroll.
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [fetchPage, hasMore, loadingMore, players.length]);
 
   /*
    * Tapping Players while already on Players clears the search.
@@ -212,20 +293,104 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               : `No ${position} players found.`}
         </Empty>
       ) : (
-        <div role="list" aria-label="Players, best first" data-testid="players-list">
-          {players.map((p) => (
-            <PlayerRow
-              key={p.id}
-              player={p}
-              expanded={expanded === p.id}
-              busy={flagging === p.id}
-              onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
-              onMyGuy={(level) => void setMyGuy(p.id, level)}
-            />
-          ))}
-        </div>
+        <>
+          <div role="list" aria-label="Players, best first" data-testid="players-list">
+            {players.map((p) => (
+              <PlayerRow
+                key={p.id}
+                player={p}
+                expanded={expanded === p.id}
+                busy={flagging === p.id}
+                onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
+                onMyGuy={(level) => void setMyGuy(p.id, level)}
+              />
+            ))}
+          </div>
+          {/*
+            The end of the list, or the reason it is not the end.
+
+            A sentinel rather than a "load more" button: on a phone the gesture
+            for "show me more of this list" is scrolling, and a button asks the
+            reader to do something they were already doing. The button is still
+            there underneath for anyone who reaches it without an observer —
+            see LoadMore.
+          */}
+          <LoadMore hasMore={hasMore} loading={loadingMore} onLoad={loadMore} count={players.length} />
+        </>
       )}
     </>
+  );
+}
+
+/**
+ * The end of the list — and, when there is more, the thing that fetches it.
+ *
+ * An `IntersectionObserver` on a marker element, with a real button inside it.
+ * Both are needed and neither is redundant:
+ *
+ *  - the observer is the interface. Scrolling is what "show me more" means on a
+ *    phone, and a reader who has to find and press a control every hundred
+ *    rows will conclude the list ends at a hundred rows;
+ *  - the button is the fallback and the accessible affordance. A browser
+ *    without `IntersectionObserver`, a test environment that does not implement
+ *    it, and anybody navigating by keyboard or screen reader all reach the end
+ *    of the list without ever "scrolling into view", and for them the control
+ *    has to be a control.
+ *
+ * When the list really has ended it says so once, quietly, rather than leaving
+ * the reader to wonder whether it is still loading. That line is the whole
+ * difference from the failure this replaces: a list that stopped at sixty and
+ * said nothing looked exactly like a list that had run out of players.
+ */
+function LoadMore({
+  hasMore,
+  loading,
+  onLoad,
+  count,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+  onLoad: () => void;
+  count: number;
+}) {
+  const marker = useRef<HTMLDivElement | null>(null);
+  /*
+   * The latest `onLoad`, reachable from an observer that is not rebuilt on
+   * every render. Re-creating the observer whenever the callback identity
+   * changed would disconnect and reconnect it mid-scroll, which drops exactly
+   * the intersection it exists to catch.
+   */
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
+
+  useEffect(() => {
+    const el = marker.current;
+    if (!el || !hasMore) return;
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadRef.current();
+      },
+      { rootMargin: LOAD_MORE_MARGIN },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore]);
+
+  if (!hasMore) {
+    return (
+      <div className="list-end" data-testid="players-end">
+        {count === 0 ? null : `${count} player${count === 1 ? '' : 's'} — that is all of them.`}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={marker} className="list-end" data-testid="players-more">
+      <button type="button" className="link-button" disabled={loading} onClick={onLoad}>
+        {loading ? 'Loading more…' : 'Show more players'}
+      </button>
+    </div>
   );
 }
 

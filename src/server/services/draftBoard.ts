@@ -1,10 +1,11 @@
 /**
  * The draft board, sourced from the database.
  *
- * The assembly itself moved to `core/draft/boardBuilder.ts` — it is the
+ * The assembly itself lives in `core/draft/boardBuilder.ts` — it is the
  * product's reasoning and has no business knowing what a table is. What is left
  * here is the half that does: repositories over D1, the injury and repair
- * services, and the season the market snapshot should be read for.
+ * services, the season the market snapshot should be read for, and the real
+ * clock the Underdog file's age is measured from.
  *
  * The public surface is unchanged. `new DraftBoardService(db).build(draftId)`
  * means exactly what it always did, so every caller and every test that names
@@ -25,6 +26,7 @@ import { PlayerRepo } from '../repos/players.ts';
 
 export {
   MAX_CANDIDATES,
+  UNDERDOG_SOURCE_KEY,
   type BoardRecommendation,
   type DraftBoardSources,
   type DraftBoardState,
@@ -33,9 +35,9 @@ export {
 /**
  * The repository-backed sources.
  *
- * Every method is a read. The one piece of judgement is which season's market
- * snapshot to look in, and that is answered by the shared season resolver
- * rather than by arithmetic here.
+ * Every method is a read. Two pieces of judgement live here rather than in the
+ * assembly, and both are about the environment rather than about football:
+ * which season's market snapshot to look in, and what time it is.
  */
 export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
   const leagues = new LeagueRepo(db);
@@ -54,7 +56,8 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
     players: { listAll: () => players.listAll() },
     adp: {
       get: (id) => adp.get(id),
-      latest: () => adp.latest(),
+      latestPlatformSnapshot: () => adp.latestPlatformSnapshot(),
+      latestForSource: (source) => adp.latestForSource(source),
       valuesByPlayer: (snapshotId) => adp.valuesByPlayer(snapshotId),
     },
     evidence: { getSignals: (ids) => evidence.getSignals(ids) },
@@ -62,6 +65,7 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
     seasonMarkets: (ids) => seasonMarkets.latestForPlayers(seasonFor(), ids),
     repairStatus: () => new RepairService(db).status(),
     injuryStates: (list) => new InjuryService(db).statesFor(list),
+    now: () => new Date(),
   };
 }
 

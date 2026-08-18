@@ -503,9 +503,96 @@ function LeaguePanel({ leagues, onDone }: { leagues: LeagueSummary[]; onDone: ()
                 {l.isSelected ? '✓ In use' : 'Use this'}
               </button>
             </div>
+            {/*
+              Which teams this room drafts early — asked only of the league
+              actually in use, because it is a question about the people in it
+              and nobody wants to answer it four times.
+            */}
+            {l.isSelected ? <LocalTeamsField league={l} busy={busy != null} run={run} onDone={onDone} /> : null}
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+/**
+ * The teams this room takes ahead of the market.
+ *
+ * A Detroit-area league drafts Lions early. That is a fact about twelve people
+ * rather than about the Lions, and it has exactly one consequence in this app:
+ * `Next%` — the chance a player is still there when you pick again — drops for
+ * those players, because the model now expects somebody else to take them. It
+ * does not make them better, and the copy says so, because a control that
+ * silently improved a team's players would be the single most misread setting
+ * on this screen.
+ *
+ * Sleeper does not publish this and never will, so it is typed. Codes are
+ * validated against the real team list on the server: an unknown code would
+ * sit here looking effective and match nobody.
+ *
+ * The prior itself is a starting assumption, not a conclusion. As soon as the
+ * draft has enough of this room's own picks to measure, the measurement takes
+ * over and the assumption fades out entirely — see teamPrior.ts.
+ */
+function LocalTeamsField({
+  league,
+  busy,
+  run,
+  onDone,
+}: {
+  league: LeagueSummary;
+  busy: boolean;
+  run: (key: string, fn: () => Promise<string>) => Promise<void>;
+  onDone: () => void;
+}) {
+  const stored = (league.localTeams ?? []).join(', ');
+  const [value, setValue] = useState(stored);
+  const dirty = value.trim().toUpperCase() !== stored;
+
+  return (
+    <div className="local-teams" data-testid="local-teams">
+      <label className="field-label" htmlFor={`local-teams-${league.id}`}>
+        Teams this room drafts early
+      </label>
+      <div className="field-row">
+        <input
+          id={`local-teams-${league.id}`}
+          value={value}
+          placeholder="DET"
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          onChange={(e) => setValue(e.target.value)}
+          data-testid="local-teams-input"
+        />
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={busy || !dirty}
+          data-testid="local-teams-save"
+          onClick={() =>
+            run(`local-teams-${league.id}`, async () => {
+              const teams = value
+                .split(',')
+                .map((t) => t.trim().toUpperCase())
+                .filter(Boolean);
+              const res = await api.post<{ localTeams: string[] }>(`/api/leagues/${league.id}/local-teams`, {
+                teams,
+              });
+              onDone();
+              return res.localTeams.length === 0
+                ? 'No local-team prior for this league.'
+                : `Next% now expects this room to reach for ${res.localTeams.join(', ')}.`;
+            })
+          }
+        >
+          Save
+        </button>
+      </div>
+      <div className="faint">
+        Comma-separated NFL codes. This lowers <strong>Next%</strong> for those players — the room is likelier to
+        take them — and changes nothing about Score, Val or tiers.
+      </div>
     </div>
   );
 }

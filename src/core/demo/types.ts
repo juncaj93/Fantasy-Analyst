@@ -63,13 +63,21 @@ export type DemoGroup =
  * absent data — this is what drives it there rather than a special "degraded"
  * flag the screens would have to learn.
  */
-export type DemoSourceState = 'fresh' | 'stale' | 'unavailable' | 'not_applicable';
+/**
+ * `aging` is not a synonym for `stale`, and the difference is the point.
+ *
+ * The Underdog path distinguishes them: a file past its 36-hour window is
+ * `aging` and is still used, with its age printed; past 168 hours it is `stale`
+ * and is withheld entirely. A demo that collapsed the two could not show the
+ * state where the board is honest about an old number and uses it anyway.
+ */
+export type DemoSourceState = 'fresh' | 'aging' | 'stale' | 'unavailable' | 'not_applicable';
 
 export interface DemoSourceFreshness {
   sleeper: DemoSourceState;
   /** The frozen draft-order snapshot. */
   adp: DemoSourceState;
-  /** Underdog's board, once that work lands. `not_applicable` until then. */
+  /** Underdog's board — a second, independent draft market. */
   dogAdp: DemoSourceState;
   injuries: DemoSourceState;
   usage: DemoSourceState;
@@ -82,7 +90,14 @@ export interface DemoLeagueFormat {
   name: string;
   teams: number;
   scoringLabel: string;
-  /** True for a best-ball league, which changes nothing today and will. */
+  /**
+   * True for a best-ball league.
+   *
+   * It changes the market blend and nothing else: Underdog *is* the best-ball
+   * market, so its share of the baseline widens from 60% to 75%. The board
+   * reads it from Sleeper's own settings, so a scenario states the setting and
+   * lets `detectBestBall` reach the conclusion.
+   */
   bestBall: boolean;
   superflex: boolean;
   /** Whether the league bids for waivers, and for how much. Null means it does not publish one. */

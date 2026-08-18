@@ -14,6 +14,7 @@ import {
   MESSY_REPAIR,
   collectPlayerState,
   makeAdp,
+  makeDog,
   makeDraft,
   makeLeague,
   makeNflState,
@@ -25,6 +26,30 @@ import {
   type ScenarioData,
 } from './build.ts';
 import { WORLD_PLAYERS } from './world.ts';
+
+/**
+ * What the Underdog file looks like in this scenario.
+ *
+ * `freshness.dogAdp` is the scenario's declaration; this turns it into the
+ * provenance a real import would have carried. `stale` is nine days, which is
+ * past the 168-hour window the board stops trusting at — chosen so the number
+ * on screen is unambiguous rather than a borderline case nobody can read.
+ */
+function dogOptionsFor(scenario: DemoScenario): Parameters<typeof makeDog>[2] {
+  switch (scenario.freshness.dogAdp) {
+    case 'unavailable':
+      return { available: false };
+    case 'aging':
+      // Past the 36-hour window and inside the 168-hour one: used, and said.
+      return { available: true, ageHours: 74 };
+    case 'stale':
+      return { available: true, ageHours: 216 };
+    case 'not_applicable':
+      return { available: false };
+    default:
+      return { available: true, ageHours: 6 };
+  }
+}
 
 /** How many picks are in the book at each moment. */
 const PICKS_MADE: Record<string, number> = {
@@ -78,6 +103,17 @@ export function buildDraftScenario(scenario: DemoScenario): ScenarioData {
     injuriesAvailable,
   });
 
+  /*
+   * Underdog, from what the scenario declared about it.
+   *
+   * The four ways DOG can be absent are all expressed as provenance rather
+   * than as a switch: no snapshot at all, a snapshot that is not raw ADP, one
+   * too old to trust, and one that matched nobody. `resolveDog` in the board
+   * decides what each of those is worth — this only writes down what the
+   * importer would have written.
+   */
+  const dog = makeDog(specs, clock, dogOptionsFor(scenario));
+
   const adp = makeAdp(specs, {
     available: adpAvailable,
     /*
@@ -97,12 +133,15 @@ export function buildDraftScenario(scenario: DemoScenario): ScenarioData {
       season: scenario.season,
       status: complete ? 'in_season' : 'drafting',
       name: scenario.format.name,
+      bestBall: scenario.format.bestBall,
     }),
     rosters: makeRosters({ byRosterId }),
     draft,
     picks,
     adpSnapshot: adp.snapshot,
     adpValues: adp.values,
+    dogSnapshot: dog.snapshot,
+    dogValues: dog.values,
     signals,
     flags,
     seasonMarkets,

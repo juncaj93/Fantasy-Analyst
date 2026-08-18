@@ -23,6 +23,7 @@ const stateWord = (state: DemoSourceState): 'ok' | 'warn' | 'todo' | 'off' => {
   switch (state) {
     case 'fresh':
       return 'ok';
+    case 'aging':
     case 'stale':
       return 'warn';
     case 'unavailable':

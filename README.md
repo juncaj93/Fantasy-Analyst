@@ -106,10 +106,11 @@ right player, or ignore. Your corrections are authoritative and survive
 reprocessing.
 
 **Demo Mode** — a read-only walk through the states that are hard to reach on
-demand: draft night at four different picks, the morning after, a Sunday twenty
-minutes before kickoff, an injury eight minutes before it, a Tuesday waiver run
-with a finite wallet, a trade window, a playoff week, a rollover in March, and
-four ways it degrades. These are the real screens and the real recommendations,
+demand: draft night at four different picks, a best-ball board, the morning
+after, a Sunday twenty minutes before kickoff, an injury eight minutes before
+it, a Tuesday waiver run with a finite wallet, a trade window, a playoff week, a
+rollover in March, and seven ways it degrades — including an Underdog file that
+is missing, three days old, or nine. These are the real screens and the real recommendations,
 computed from versioned fixtures instead of your league — the app cannot tell
 the difference, because there is only one Draft screen and one scoring engine in
 here. Nothing in a demo can change a lineup, a pick, a claim, a bid, a trade or
@@ -122,6 +123,25 @@ Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
 here too: **System** (the default, following the phone), **Light** or **Dark**,
 kept on the device and applied before the first paint.
+
+## League intelligence
+
+**Who else wants him.** The rivals whose healthy bodies at a position do not
+cover their starting slots, filtered by what they can still spend — so a card
+says *four teams need one, three of them are broke* rather than counting eleven
+funded rivals as eleven bidders. The same count feeds the bid model, which asks
+for exactly that number.
+
+Beyond the waiver row: bilateral **trade fits** — deals scored separately for
+what you gain, what the partner gains and whether that manager plausibly says
+yes, because a deal that is fair and implausible is a deal nobody sends.
+**Bye and playoff planning**, which stays silent until a bye actually leaves a
+slot short and gives December schedules no weight until the season says the team
+is heading there. And a **decision feed** that reports something only when a
+recommendation actually moved — never when a refresh found the same numbers.
+
+Nothing here submits a transaction; every request it makes to Sleeper is a read.
+See [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md).
 
 ## Newsletter, automatically
 
@@ -158,6 +178,8 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, identity ladder, engines |
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
+| [docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](docs/PLAYER_AND_LINEUP_INTELLIGENCE.md) | expected points, injury beneficiaries, contingency lineups, self-grading |
+| [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | waiver competition, bilateral trade fit, planning, the decision feed |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |

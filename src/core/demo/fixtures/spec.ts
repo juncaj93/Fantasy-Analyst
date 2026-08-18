@@ -46,8 +46,17 @@ export interface DemoPlayerSpec {
   active?: boolean;
   /** Sleeper's search prominence. Never a draft position; only a tie-break. */
   searchRank?: number;
-  /** Where the frozen draft-order snapshot puts him, when it covers him. */
+  /** Where the frozen Sleeper draft-order snapshot puts him, when it covers him. */
   adp?: number;
+  /**
+   * Where Underdog puts him, when Underdog has priced him.
+   *
+   * Deliberately independent of `adp`. Absent means Underdog has no number for
+   * this player, which is a real and common state — the board renormalises the
+   * blend around it and says it did, and a fixture that filled it in from the
+   * Sleeper value would be quietly asserting the two markets always agree.
+   */
+  dogAdp?: number;
   /** The newsletter ledger's verdict, as windows rather than as prose. */
   news?: DemoNewsSpec;
   /** What the season-long market expects of him, for the draft board. */

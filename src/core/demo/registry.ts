@@ -20,15 +20,14 @@ const ALL_FRESH: DemoSourceFreshness = {
   sleeper: 'fresh',
   adp: 'fresh',
   /*
-   * Underdog's board is not in the product yet.
+   * Underdog's board, which is now a real second market.
    *
-   * §13 asks for DOG fixtures "once Draft Usability / DOG lands" and for
-   * compatible seams until then. `not_applicable` is that seam: the field
-   * exists, every scenario declares it, and the day a second ADP source merges
-   * the scenarios that should disagree can say `fresh` and `stale` without a
-   * registry change.
+   * `fresh` means an Underdog file inside its 36-hour window, so the DOG column
+   * is lit and carries 60% of the market baseline (75% in best ball). The
+   * degraded scenarios below move this and nothing else, because every one of
+   * §13's DOG states is a fact about the file rather than about a player.
    */
-  dogAdp: 'not_applicable',
+  dogAdp: 'fresh',
   injuries: 'fresh',
   usage: 'fresh',
   vegas: 'fresh',
@@ -46,6 +45,15 @@ const HOME_LEAGUE = {
   superflex: false,
   faabBudget: 100,
 };
+
+/**
+ * The same room, drafting best ball.
+ *
+ * The only thing that differs is a flag in Sleeper's own settings, which is the
+ * point: the 75/25 blend is not configured anywhere in Demo Mode, it is what
+ * `detectBestBall` concludes and `blendWeights` then applies.
+ */
+const BEST_BALL_LEAGUE = { ...HOME_LEAGUE, name: 'Thursday Night Regrets (best ball)', bestBall: true };
 
 const LEAGUE_ID = 'demo-league-2026';
 
@@ -369,19 +377,59 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     id: 'dog-unavailable',
     label: 'Degraded · no Underdog board',
     description:
-      'Declared and waiting. There is one ADP source in the product today, so a scenario about a second one being absent would be a demonstration of a feature that does not exist.',
+      'No Underdog file has ever been imported. The DOG column is absent rather than blank, the market baseline is Sleeper alone at full weight, and the board says which of those two things happened.',
     group: 'degraded',
     lifecycle: 'draft_live',
     week: null,
     asOf: '2026-08-31T00:04:00.000Z',
     freshness: fresh({ dogAdp: 'unavailable' }),
-    surfaces: ['draft'],
-    awaiting: {
-      surface: 'draft',
-      reason:
-        'Underdog ADP has not merged. The product blends no second draft-order source yet, so there is nothing for this scenario to degrade.',
-    },
+    surfaces: ['draft', 'players', 'setup'],
     bundle: 'degraded',
+  },
+  {
+    ...base,
+    id: 'dog-stale',
+    label: 'Degraded · the Underdog file is nine days old',
+    description:
+      'A snapshot exists and is not trusted. Nine days past its effective time is beyond the week the board will treat as a current market, so DOG is withheld, the baseline falls back to Sleeper alone, and the reason is said out loud rather than left as an empty column.',
+    group: 'degraded',
+    lifecycle: 'draft_live',
+    week: null,
+    asOf: '2026-08-31T00:04:00.000Z',
+    freshness: fresh({ dogAdp: 'stale' }),
+    surfaces: ['draft', 'players', 'setup'],
+    bundle: 'degraded',
+  },
+  {
+    ...base,
+    id: 'dog-aging',
+    label: 'Degraded · the Underdog file is three days old',
+    description:
+      'Past the freshness window and inside the trust window — so DOG is still used, still carries its share of the blend, and prints its age. The state between fresh and stale, which is the one a reader is most likely to meet.',
+    group: 'degraded',
+    lifecycle: 'draft_live',
+    week: null,
+    asOf: '2026-08-31T00:04:00.000Z',
+    freshness: fresh({ dogAdp: 'aging' }),
+    surfaces: ['draft', 'players', 'setup'],
+    bundle: 'degraded',
+  },
+
+  // ---------------------------------------------------------------- best ball
+  {
+    ...base,
+    id: 'draft-best-ball',
+    label: 'Draft · best ball',
+    description:
+      'The same board in a league Sleeper flags as best ball. Underdog is the best-ball market, so its share of the baseline widens from 60% to 75% — read from the league’s own settings, never from its name.',
+    format: BEST_BALL_LEAGUE,
+    group: 'draft',
+    lifecycle: 'draft_live',
+    week: null,
+    asOf: '2026-08-31T00:04:00.000Z',
+    freshness: fresh(),
+    surfaces: ['draft', 'players', 'setup'],
+    bundle: 'draft',
   },
 
   // ------------------------------------------------------------------ matchup

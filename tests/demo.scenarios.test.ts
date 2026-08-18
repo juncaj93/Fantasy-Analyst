@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildDraftBoard } from '../src/core/draft/boardBuilder.ts';
+import { buildDraftBoard, type DraftBoardState } from '../src/core/draft/boardBuilder.ts';
 import { DEMO_SCENARIOS, findScenario, selectableScenarios } from '../src/core/demo/registry.ts';
 import { buildDraftScenario } from '../src/core/demo/fixtures/draft.ts';
 import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
@@ -343,5 +343,168 @@ describe('the registry itself', () => {
     for (const scenario of DEMO_SCENARIOS) {
       expect(Number.isFinite(Date.parse(scenario.asOf)), `${scenario.id}.asOf`).toBe(true);
     }
+  });
+});
+
+/**
+ * §13: the Underdog market, now that it exists in the product.
+ *
+ * Every assertion below is about something the *board* concluded from fixture
+ * provenance — the blend weights, the freshness verdict, the outlier guard,
+ * the renormalisation — never about a number a fixture stated. That is the
+ * whole point of wiring these through `buildDraftBoard` rather than modelling
+ * DOG a second time for the demo.
+ */
+describe('DOG and the market blend', () => {
+  /*
+   * Typed as the board's own state rather than as the web client's view of it.
+   *
+   * `web/api.ts` marks `dogState` and `marketFormat` optional so a browser
+   * running against an older worker degrades rather than breaks, and it does
+   * not model the outlier guard's `suspectDog` at all. Those are the right
+   * choices for a client and the wrong ones for a test asserting on what the
+   * engine produced, which is never partial.
+   */
+  const board = async (id: string, query = '?limit=300') =>
+    (await (await runtimeFor(id)).request('GET', `/api/drafts/demo-draft-2026/board${query}`))
+      .body as DraftBoardState;
+
+  it('lights the DOG column from a fresh Underdog snapshot', async () => {
+    const b = await board('draft-mid');
+    expect(b.dogState.available).toBe(true);
+    expect(b.dogState.provider).toBe('underdog');
+    expect(b.dogState.sourceType).toBe('raw_adp');
+    expect(b.dogState.freshness).toBe('fresh');
+    expect(b.dogState.matched).toBeGreaterThan(50);
+    // And players actually carry a DOG price, distinct from their Sleeper one.
+    const priced = b.recommendations.filter((r) => r.dogAdp != null);
+    expect(priced.length).toBeGreaterThan(20);
+    expect(priced.some((r) => r.dogAdp !== r.adp)).toBe(true);
+  });
+
+  it('blends 60/40 in a redraft league and 75/25 in best ball', async () => {
+    const standard = await board('draft-mid');
+    const bestBall = await board('draft-best-ball');
+
+    expect(standard.marketFormat.format).toBe('standard');
+    expect(standard.marketFormat.weights).toEqual({ dog: 0.6, sleeper: 0.4 });
+    // Not stated by the fixture: Sleeper publishes no flag, so the board says so.
+    expect(standard.marketFormat.confident).toBe(false);
+    expect(standard.marketFormat.basis).toBe('none');
+
+    expect(bestBall.marketFormat.format).toBe('best_ball');
+    expect(bestBall.marketFormat.weights).toEqual({ dog: 0.75, sleeper: 0.25 });
+    // Read off the league's own settings rather than off its name.
+    expect(bestBall.marketFormat.confident).toBe(true);
+    expect(bestBall.marketFormat.basis).toBe('league_settings');
+
+    // The same player, priced by both markets, lands differently under each.
+    const both = standard.recommendations.find(
+      (r) => r.dogAdp != null && r.adp != null && r.dogAdp !== r.adp,
+    )!;
+    const same = bestBall.recommendations.find((r) => r.playerId === both.playerId)!;
+    expect(same.marketBlend.adp).not.toBe(both.marketBlend.adp);
+    expect(both.marketBlend.weights).toEqual({ dog: 0.6, sleeper: 0.4 });
+    expect(same.marketBlend.weights).toEqual({ dog: 0.75, sleeper: 0.25 });
+  });
+
+  it('never relabels one market as the other', async () => {
+    const b = await board('draft-mid');
+    /*
+     * A DOG price is Underdog's own number, not Sleeper's copied across.
+     *
+     * A player the outlier guard set aside is excluded, and deliberately: he
+     * *was* priced by both and one of the prices was not believable, which is a
+     * third state and is asserted on its own below. Folding him in here would
+     * make this test quietly pass for the wrong reason the day the guard broke.
+     */
+    for (const rec of b.recommendations) {
+      if (rec.dogAdp == null || rec.adp == null || rec.marketBlend.suspectDog) continue;
+      expect(rec.marketBlend.sources).toContain('dog');
+      expect(rec.marketBlend.sources).toContain('sleeper');
+    }
+    // And with no Underdog file at all, nothing claims a DOG price.
+    const none = await board('dog-unavailable');
+    expect(none.dogState.available).toBe(false);
+    expect(none.recommendations.every((r) => r.dogAdp == null)).toBe(true);
+    expect(none.recommendations.every((r) => !r.marketBlend.sources.includes('dog'))).toBe(true);
+  });
+
+  it('renormalises the blend around a market that has not priced him', async () => {
+    const b = await board('draft-mid');
+    const sleeperOnly = b.recommendations.find((r) => r.adp != null && r.dogAdp == null);
+    expect(sleeperOnly, 'somebody is priced by Sleeper alone').toBeTruthy();
+    expect(sleeperOnly!.marketBlend.singleSource).toBe(true);
+    expect(sleeperOnly!.marketBlend.weights).toEqual({ dog: 0, sleeper: 1 });
+    // The nominal blend is still reported, so the renormalisation is visible.
+    expect(sleeperOnly!.marketBlend.nominal).toEqual({ dog: 0.6, sleeper: 0.4 });
+    expect(sleeperOnly!.marketBlend.adp).toBe(sleeperOnly!.adp);
+
+    const dogOnly = b.recommendations.find((r) => r.adp == null && r.dogAdp != null);
+    expect(dogOnly, 'somebody is priced by Underdog alone').toBeTruthy();
+    expect(dogOnly!.marketBlend.weights).toEqual({ dog: 1, sleeper: 0 });
+    expect(dogOnly!.marketBlend.adp).toBe(dogOnly!.dogAdp);
+  });
+
+  it('reports a real disagreement as information, in picks and with a leader', async () => {
+    const b = await board('draft-mid');
+    const disagreeing = b.recommendations.filter(
+      (r) => (r.marketDisagreement.picks ?? 0) >= 5 && !r.marketBlend.suspectDog,
+    );
+    expect(disagreeing.length).toBeGreaterThan(0);
+    for (const rec of disagreeing) {
+      expect(['dog', 'sleeper']).toContain(rec.marketDisagreement.leader);
+      expect(rec.marketDisagreement.note).toBeTruthy();
+      // A believable disagreement is context. It never removes a market from
+      // the blend — that only happens past the outlier guard, which is the
+      // next test.
+      expect(rec.marketBlend.sources.length).toBe(2);
+    }
+
+    // And the disagreement is still *reported* for the one the guard caught,
+    // because "these two markets are 117 picks apart" is the most useful thing
+    // anybody could say about him.
+    const suspect = b.recommendations.find((r) => r.marketBlend.suspectDog)!;
+    expect(suspect.marketDisagreement.picks).toBeGreaterThan(100);
+  });
+
+  it('sets aside an Underdog price that cannot be true, and says which', async () => {
+    const b = await board('draft-mid');
+    const suspect = b.recommendations.find((r) => r.marketBlend.suspectDog);
+    expect(suspect, 'the outlier guard has something to catch').toBeTruthy();
+    // Set aside is not the same as absent: Underdog did price him.
+    expect(suspect!.dogAdp).not.toBeNull();
+    expect(suspect!.marketBlend.singleSource).toBe(true);
+    expect(suspect!.marketBlend.weights).toEqual({ dog: 0, sleeper: 1 });
+    expect(suspect!.marketBlend.note).toContain('too far apart');
+  });
+
+  it('withholds a stale Underdog file and explains itself out loud', async () => {
+    const b = await board('dog-stale');
+    expect(b.dogState.available).toBe(false);
+    expect(b.dogState.freshness).toBe('stale');
+    expect(b.dogState.ageHours).toBeGreaterThan(168);
+    expect(b.warnings.join(' ')).toContain('too old to treat as the current market');
+    expect(b.recommendations.every((r) => r.dogAdp == null)).toBe(true);
+    // The board still ranks — losing a market is not losing the screen.
+    expect(b.recommendations.length).toBeGreaterThan(10);
+  });
+
+  it('uses an aging Underdog file and prints its age rather than hiding it', async () => {
+    const b = await board('dog-aging');
+    expect(b.dogState.available).toBe(true);
+    expect(b.dogState.freshness).toBe('aging');
+    expect(b.dogState.reason).toContain('past the 36h window');
+    expect(b.warnings.join(' ')).not.toContain('too old');
+    expect(b.recommendations.some((r) => r.dogAdp != null)).toBe(true);
+  });
+
+  it('says which of the several absences happened, and never just goes blank', async () => {
+    const reasons = await Promise.all(
+      ['dog-unavailable', 'dog-stale'].map(async (id) => (await board(id)).dogState.reason),
+    );
+    expect(reasons[0]).toContain('no Underdog ADP snapshot has been imported');
+    expect(reasons[1]).toContain('too old');
+    expect(reasons[0]).not.toBe(reasons[1]);
   });
 });
