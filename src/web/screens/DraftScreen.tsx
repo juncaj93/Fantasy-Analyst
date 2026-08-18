@@ -74,6 +74,7 @@ import {
   SORT_DESCRIPTIONS,
   SORT_LABELS,
   SORT_MODES,
+  hasDogCoverage,
   sortBoard,
   type SortMode,
 } from '../../core/draft/boardSort.ts';
@@ -705,7 +706,16 @@ export function DraftScreen({
             <SortControl
               value={sort}
               onChange={setSort}
-              dogAvailable={board.dogState?.available !== false}
+              /*
+                The board's own answer, or the rows themselves.
+
+                `dogState` is the better source — it can distinguish "Underdog
+                has not priced these players" from "the file was stale and we
+                dropped it" — but it is absent on an older deployment, and
+                looking at whether any row actually carries a DOG value is the
+                honest fallback rather than assuming either way.
+              */
+              dogAvailable={board.dogState?.available ?? hasDogCoverage(board.recommendations)}
             />
             <button
               type="button"
