@@ -14,7 +14,7 @@ import { toEmailMessage } from '../core/newsletter/source.ts';
 import { buildConsensus } from '../core/vegas/normalize.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import type { Database } from '../server/db.ts';
-import { AdpRepo } from '../server/repos/adp.ts';
+import { AdpRepo, SLEEPER_SOURCE, UNDERDOG_SOURCE } from '../server/repos/adp.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { PlayerRepo } from '../server/repos/players.ts';
 import { PropsRepo } from '../server/repos/props.ts';
@@ -86,6 +86,38 @@ Bo Ashworth,RB,SEA,58.4,16
 Miles Barrowman,TE,CLE,62.0,17
 Teo Ferreira,TE,HOU,66.5,18
 Grant Aldous,TE,WAS,70.1,19
+`;
+
+/**
+ * The second market, so the demo board has a real `DOG` column.
+ *
+ * Deliberately not a copy of the Sleeper numbers with an offset: the whole
+ * point of two markets is that they disagree, and a seed where they agree would
+ * make a board that silently substituted one for the other look completely
+ * correct. Some players Underdog likes more, some less, and three of them it
+ * has not priced at all — which is what exercises the single-source
+ * renormalisation on a real screen.
+ *
+ * Averages, with fractions and repeats, so `validateRawAdp` recognises it as
+ * ADP rather than as a ranking dressed up as one.
+ */
+export const DEMO_UNDERDOG_CSV = `name,position,team,adp,rank
+Marcus Vance,RB,KC,1.8,1
+Devin Okafor,WR,CIN,4.6,2
+Kai Brennan,WR,BUF,6.2,3
+Julian Reyes,RB,MIA,15.4,4
+Owen Fitzgerald,WR,PHI,11.9,5
+Silas Mbeki,RB,GB,21.7,6
+Trey Halloran,QB,SF,29.3,7
+Emil Draeger,QB,MIN,23.1,8
+Andre Sotelo,TE,DAL,31.5,9
+Jonah Priestley,QB,TB,26.4,10
+Casey Lindqvist,QB,DEN,35.8,11
+Nate Kowalski,TE,DET,28.9,12
+Cal Whitfield,WR,NYJ,44.7,13
+Rhys Donnelly,QB,LAR,49.2,14
+Ruben Castellanos,QB,PIT,60.3,15
+Bo Ashworth,RB,SEA,54.1,16
 `;
 
 /** Exercises positive, negative, negation, mixed, and ambiguity paths. */
@@ -203,10 +235,28 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
 
   // --- ADP snapshot ---
   const index = await playerRepo.buildIndex();
-  const adpResult = importAdpSnapshot(DEMO_ADP_CSV, index, { label: 'Demo Sleeper ADP', source: 'demo' });
+  const adpResult = importAdpSnapshot(DEMO_ADP_CSV, index, { label: 'Demo Sleeper ADP', source: SLEEPER_SOURCE });
   const adpRepo = new AdpRepo(db);
   const { snapshot } = await adpRepo.save(adpResult);
   await leagueRepo.setDraftSnapshot('demo-draft', snapshot.id);
+
+  /*
+   * The Underdog market, on its own snapshot, dated now.
+   *
+   * `snapshotAt` is set to the seed time rather than left null because DOG is
+   * only used while it is fresh — a demo whose Underdog column silently aged
+   * out would be a demo that stopped exercising the feature it was added for.
+   */
+  const dogResult = importAdpSnapshot(DEMO_UNDERDOG_CSV, index, {
+    label: 'Demo Underdog ADP',
+    source: UNDERDOG_SOURCE,
+  });
+  await adpRepo.save(dogResult, {
+    provider: 'best_ball_team_builder',
+    sourceType: 'raw_adp',
+    snapshotAt: new Date().toISOString(),
+    fetchedAt: new Date().toISOString(),
+  });
 
   // --- newsletter ingestion ---
   const newsletter = new NewsletterService(db);

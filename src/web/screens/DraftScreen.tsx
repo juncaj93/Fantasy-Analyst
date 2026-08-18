@@ -847,6 +847,18 @@ export function DraftScreen({
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
+          /*
+            Five numbers rather than four, when this board has a fifth.
+
+            The metrics line was fitted to exactly four labelled values, and DOG
+            is a genuine fifth. The flag goes on the *list* rather than on the
+            rows that happen to carry a DOG value, and that distinction is the
+            whole of it: styling only the DOG rows gave the board two card
+            heights, 57px and 58px, which the rhythm test correctly rejected.
+            One board, one treatment, one height — a row Underdog has not priced
+            simply has four numbers in the same slightly tighter line.
+          */
+          data-dog={board.dogState?.available ? 'yes' : 'no'}
         >
           {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */

@@ -91,6 +91,14 @@ describe('the DOG import route refuses anything that is not raw ADP', () => {
   });
 
   it('rejects a ranking dressed as ADP, and stores nothing', async () => {
+    const repo = new AdpRepo(db);
+    // The demo seed ships a genuine Underdog snapshot, so the assertion that
+    // matters is that a refused import does not become the newest one — which
+    // is also the real-world case, since a board is rarely empty when a bad
+    // fetch lands.
+    const before = await repo.latestForSource(UNDERDOG_SOURCE);
+    const countBefore = (await repo.list()).filter((s) => s.source === UNDERDOG_SOURCE).length;
+
     const names = await seededNames(20);
     const rows = names.map((name, i) => ({ name, adp: i + 1 }));
     const res = await app(
@@ -99,7 +107,8 @@ describe('the DOG import route refuses anything that is not raw ADP', () => {
     );
     expect(res.status).toBe(422);
     expect((await res.text()).toLowerCase()).toContain('ranking');
-    expect(await new AdpRepo(db).latestForSource(UNDERDOG_SOURCE)).toBeNull();
+    expect((await repo.latestForSource(UNDERDOG_SOURCE))?.id).toBe(before?.id);
+    expect((await repo.list()).filter((s) => s.source === UNDERDOG_SOURCE)).toHaveLength(countBefore);
   });
 
   it('leaves a previously good snapshot in place when a bad one is refused', async () => {
@@ -129,11 +138,13 @@ describe('the DOG import route refuses anything that is not raw ADP', () => {
     const names = await seededNames(20);
     const content = JSON.stringify(names.map((name, i) => ({ name, adp: Math.round((1.9 + i * 2.1) * 10) / 10 })));
     const body = { content, source: UNDERDOG_SOURCE, provider: 'best_ball_team_builder' };
+    const before = (await new AdpRepo(db).list()).filter((s) => s.source === UNDERDOG_SOURCE).length;
     const first = await app(post('/api/adp/import', body, cookie), env);
     const second = await app(post('/api/adp/import', body, cookie), env);
     expect((await first.json() as { created: boolean }).created).toBe(true);
     expect((await second.json() as { created: boolean }).created).toBe(false);
-    expect((await new AdpRepo(db).list()).filter((s) => s.source === UNDERDOG_SOURCE)).toHaveLength(1);
+    // Exactly one new snapshot, however many times the same file arrives.
+    expect((await new AdpRepo(db).list()).filter((s) => s.source === UNDERDOG_SOURCE)).toHaveLength(before + 1);
   });
 
   it('does not touch the Sleeper snapshot when an Underdog one lands', async () => {
@@ -172,19 +183,43 @@ describe('the board reads the two markets separately', () => {
     return league!.draftId!;
   }
 
-  it('says why DOG is unavailable rather than showing a blank column', async () => {
-    const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 10 });
-    expect(board.dogState.available).toBe(false);
-    expect(board.dogState.reason).toContain('no Underdog ADP snapshot');
-    // Every player falls back to Sleeper alone, single-source and unpenalised.
-    for (const rec of board.recommendations) {
-      expect(rec.dogAdp).toBeNull();
-      if (rec.adp != null) {
-        expect(rec.marketBlend.singleSource).toBe(true);
-        expect(rec.marketBlend.sources).toEqual(['sleeper']);
-        expect(rec.marketBlend.adp).toBe(rec.adp);
-      }
+  it('blends both markets when a fresh Underdog snapshot is present', async () => {
+    const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 20 });
+    expect(board.dogState.available).toBe(true);
+    expect(board.dogState.provider).toBe('best_ball_team_builder');
+    expect(board.dogState.freshness).toBe('fresh');
+
+    const priced = board.recommendations.filter((r) => r.dogAdp != null && r.adp != null);
+    expect(priced.length).toBeGreaterThan(3);
+    for (const rec of priced) {
+      // The blend, at the standard weights, and never either raw number.
+      expect(rec.marketBlend.sources).toEqual(['dog', 'sleeper']);
+      expect(rec.marketBlend.adp).toBeCloseTo(0.6 * rec.dogAdp! + 0.4 * rec.adp!, 1);
+      expect(rec.marketBlend.singleSource).toBe(false);
     }
+  });
+
+  it('renormalises to Sleeper for the players Underdog has not priced', async () => {
+    const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 40 });
+    // The seed deliberately leaves the deepest few players off the Underdog
+    // board, which is what exercises this on a real screen.
+    const unpriced = board.recommendations.filter((r) => r.dogAdp == null && r.adp != null);
+    expect(unpriced.length).toBeGreaterThan(0);
+    for (const rec of unpriced) {
+      expect(rec.marketBlend.singleSource).toBe(true);
+      expect(rec.marketBlend.sources).toEqual(['sleeper']);
+      expect(rec.marketBlend.adp).toBe(rec.adp);
+      // And priced by one market is still priced: not degraded.
+      expect(rec.degraded).toBe(false);
+    }
+  });
+
+  it('keeps the two markets distinct rather than copying one into the other', async () => {
+    const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 20 });
+    const priced = board.recommendations.filter((r) => r.dogAdp != null && r.adp != null);
+    // At least some players must disagree, or a board substituting one column
+    // for the other would pass every other assertion in this file.
+    expect(priced.some((r) => r.dogAdp !== r.adp)).toBe(true);
   });
 
   it('reports the blend in force and where the format came from', async () => {
@@ -199,11 +234,17 @@ describe('the board reads the two markets separately', () => {
   it('never treats a stale Underdog snapshot as fresh', async () => {
     const players = (await new PlayerRepo(db).listAll()).filter((p) => p.active).slice(0, 20);
     const repo = new AdpRepo(db);
+    /*
+     * Captured in the future so it is unambiguously the newest snapshot, while
+     * its *effective* time is months old. That pair is the whole trap: the file
+     * arrived most recently and its numbers describe a market that no longer
+     * exists, and it is the second fact that decides.
+     */
     await repo.save(
       {
         source: UNDERDOG_SOURCE,
         label: 'stale underdog',
-        capturedAt: '2026-01-01T00:00:00.000Z',
+        capturedAt: '2099-01-01T00:00:00.000Z',
         fileHash: 'stale-hash',
         rows: players.map((p, i) => ({
           rowNumber: i + 1,
