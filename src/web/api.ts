@@ -239,6 +239,42 @@ export interface PlayerDetail {
     confidence: string;
     conflict: string | null;
   } | null;
+  /**
+   * One sentence explaining the tally, selected from the evidence ledger.
+   *
+   * It is on this payload — the one shared detail request every screen already
+   * makes — rather than on each screen's own list, so Draft, Team, Waivers,
+   * Trades and Players show the same sentence instead of six renderers each
+   * deciding what the evidence means.
+   *
+   * `scoreDelta` is always 0 and is on the wire deliberately: the takeaway
+   * explains a number the tally already produced from the same evidence, and
+   * anything that counted it again would be counting it twice.
+   */
+  newsletterTakeaway: {
+    text: string;
+    sourceName: string;
+    sourceDate: string;
+    corroboration: number;
+    derivation: 'extracted' | 'templated';
+    evidenceItemIds: string[];
+    scoreDelta: 0;
+  } | null;
+  /**
+   * Physical and age context, and usually none.
+   *
+   * A flag fires only where a measurement is in genuine tension with a role.
+   * Height and weight arrive as null unless a physical flag fired — the server
+   * withholds them rather than trusting the card to hide them — and nothing
+   * here moves a number: `scoreDelta` is always 0.
+   */
+  profile: {
+    flags: { key: string; text: string; kind: 'physical' | 'age'; weight: 'context' }[];
+    showMeasurements: boolean;
+    scoreDelta: 0;
+    heightInches: number | null;
+    weightPounds: number | null;
+  };
 }
 
 export interface RosterAlert {
@@ -870,12 +906,14 @@ export interface WaiverCandidate {
   gain: number;
   reasons: string[];
   statusFlag: string | null;
+  /** The role assessment behind the points, carried rather than described. */
+  role: { trend: string; games: number };
   /*
-   * What your league's own managers imply, once the league-intelligence pass
-   * provides it: what he will cost, who else wants him, and what he is worth
-   * past Sunday. Optional, and absent means unknown — the Waivers page says so
-   * rather than estimating any of them. The shapes are defined once, beside the
-   * view model that reads them, in core/waivers/board.ts.
+   * What your league's own managers imply: what he will cost, who else wants
+   * him, and what he is worth past Sunday. Optional, and absent means unknown —
+   * the Waivers page says so rather than estimating any of them. The shapes are
+   * defined once, beside the view model that reads them, in
+   * core/waivers/board.ts.
    */
   faab?: WaiverLeagueIntel['faab'];
   competition?: WaiverLeagueIntel['competition'];
@@ -905,6 +943,100 @@ export interface WaiverAdvice {
   considered: number;
   threshold?: number;
   pool?: { scanned: number; perPosition: number };
+  /** What each upgrade would cost, or why no price can honestly be quoted. */
+  faab?: FaabAdvice | null;
+}
+
+/** A roster's budget position, in dollars and as a share of the league. */
+export interface RosterBudget {
+  rosterId: number;
+  ownerName: string | null;
+  isMine: boolean;
+  /** Null whenever the league total or this roster's spend is unknown. */
+  remaining: number | null;
+  spent: number | null;
+  share: number | null;
+}
+
+/**
+ * Three numbers that are not the same number: what the room will pay, what he
+ * is worth to you, and the line past which winning is worse than losing.
+ */
+export interface FaabBid {
+  playerId: string;
+  name: string;
+  expected: { low: number; high: number } | null;
+  recommended: number | null;
+  doNotExceed: number | null;
+  /** `Expected $17–22 · Recommended max $19 · Preserve budget for RB depth` */
+  headline: string;
+  reasons: string[];
+  worth: number | null;
+  components: { key: string; label: string; factor: number; note: string }[];
+  confidence: 'none' | 'low' | 'medium' | 'high';
+  /** Set whenever the answer is deliberately not a number. */
+  withheld: string | null;
+  /** `Bid $24 → $41 remaining · still above 6/9 managers`, or nothing. */
+  opportunity: {
+    spend: number;
+    remainingAfter: number;
+    line: string;
+    above: number;
+    comparable: number;
+    droppedBelow: string[];
+  } | null;
+  /** `#2 trending add · still available in your league`, or nothing. */
+  trending: string | null;
+  /** Whether the market and our own read agree, and what that is allowed to change. */
+  disagreement: {
+    kind: 'market_ahead' | 'model_ahead' | 'agreed' | 'quiet' | 'unknown';
+    label: string;
+    line: string | null;
+    confidenceDelta: number;
+    affects: 'bid_price_and_confidence_only';
+  };
+}
+
+export interface FaabAdvice {
+  rule: { total: number | null; usesFaab: boolean; provenance: string };
+  mine: RosterBudget | null;
+  rosters: RosterBudget[];
+  prices: {
+    sample: number;
+    median: number | null;
+    low: number | null;
+    high: number | null;
+    max: number | null;
+    highestLosing: number | null;
+    losingBidsComplete: boolean;
+    confidence: 'none' | 'low' | 'medium' | 'high';
+  };
+  /** One line about what is and is not knowable about losing bids. */
+  losingBids: string;
+  bids: FaabBid[];
+  notes: string[];
+  trendingCapturedAt: string | null;
+}
+
+/** What a bench slot is earning, against what the wire would put in it. */
+export interface BenchAdvice {
+  found: boolean;
+  league?: { id: string; name: string };
+  dropCandidates: BenchSlotValue[];
+  ranked: BenchSlotValue[];
+  notes: string[];
+}
+
+export interface BenchSlotValue {
+  playerId: string;
+  name: string;
+  position: string;
+  slotValue: number;
+  /** Slot value minus what a free agent would give you. The real question. */
+  surplus: number;
+  components: { key: string; label: string; value: number; note: string }[];
+  reasons: string[];
+  protected: string | null;
 }
 
 /** Help My Scores: unresolved names and what they are costing. */

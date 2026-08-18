@@ -3,7 +3,9 @@
  *
  * Three entry surfaces:
  *   fetch()    — the API + static SPA assets
- *   scheduled() — Vegas refresh cadence + nightly Sleeper player sync
+ *   scheduled() — Vegas refresh cadence + nightly Sleeper player sync, and the
+ *                 daily captures nothing can reconstruct later (trending, and
+ *                 the current week's league transactions)
  *   email()    — inbound FF Newsletter delivery (Email Workers)
  *
  * Secrets (APP_PASSPHRASE, SESSION_SECRET, ODDS_API_KEY) live in the worker
@@ -25,6 +27,8 @@ import { InjuryService, previousSeason } from '../server/services/injuryService.
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { UsageService } from '../server/services/usageService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
+import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
+import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
 
 export interface WorkerEnv {
   DB: Database;
@@ -221,6 +225,43 @@ export default {
         if (run.rowsWritten === 0) await usage.catchUpOneWeek();
       } catch (err) {
         console.error('usage refresh failed', err);
+      }
+
+      /*
+       * The league-strategy inputs, on the same daily clock.
+       *
+       * Two feeds with one thing in common: neither can be reconstructed after
+       * the fact. Sleeper's transaction endpoint has no all-weeks form, so a
+       * week nobody read while it was current is read later or not at all; and
+       * the trending list is a rolling window Sleeper keeps no history of, so
+       * `add rate accelerated 6x` exists only for somebody who wrote yesterday's
+       * list down. A daily capture is what makes a day-over-day comparison
+       * possible at all.
+       *
+       * Once a day rather than on the five-minute tick, and for the same reason
+       * usage is: a finished week's transactions never change, and Sleeper's own
+       * trending window is twenty-four hours, so 288 captures a day would
+       * measure the same window 288 times.
+       *
+       * Only the selected league, because that is the only one anything reads,
+       * and separately caught — this is the layer above lineups, and it must
+       * never take a lineup feed down.
+       */
+      try {
+        const strategy = new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper });
+        await strategy.captureTrending();
+        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
+        if (selected) {
+          const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+          await strategy.syncTransactions({
+            leagueId: selected.id,
+            sleeperLeagueId: selected.sleeperLeagueId,
+            season: selected.season,
+            week: state?.week ?? 1,
+          });
+        }
+      } catch (err) {
+        console.error('league strategy refresh failed', err);
       }
       return;
     }

@@ -25,6 +25,7 @@ import {
   type StartSitEvaluation,
   type StartSitMode,
   type StartSitRefreshReport,
+  type FaabAdvice,
   type WaiverAdvice,
 } from '../api.ts';
 import { MODE_DESCRIPTION, MODE_LABEL, START_SIT_MODES } from '../../core/startsit/mode.ts';
@@ -401,7 +402,9 @@ export function TeamScreen({
                 </>
               ) : null}
 
-              {waiverBoard ? <WaiverSection board={waiverBoard} onOpen={setWaiverDetail} /> : null}
+              {waiverBoard ? (
+                <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
+              ) : null}
 
               {lineup?.found ? <LineupCard lineup={lineup} /> : null}
             </>
@@ -591,7 +594,16 @@ function BenchCard({ player, onOpen }: { player: RosterPlayer; onOpen: () => voi
  * Nothing here executes anything — "available" means available in Sleeper, and
  * the add is made there.
  */
-function WaiverSection({ board, onOpen }: { board: WaiverBoard; onOpen: (row: WaiverBoardRow) => void }) {
+function WaiverSection({
+  board,
+  faab,
+  onOpen,
+}: {
+  board: WaiverBoard;
+  /** The league's wallet, which belongs under the rows rather than on one. */
+  faab: FaabAdvice | null;
+  onOpen: (row: WaiverBoardRow) => void;
+}) {
   if (board.rows.length === 0) {
     return (
       <div className="card card-tight" data-testid="waiver-card">
@@ -610,9 +622,17 @@ function WaiverSection({ board, onOpen }: { board: WaiverBoard; onOpen: (row: Wa
       {board.rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
+      {/*
+        The wallet the prices above were quoted from. It belongs to the league
+        rather than to any one row, so it sits under them once — see the note on
+        `BudgetFooter`, which is the league-intelligence pass's own component and
+        is used here unchanged.
+      */}
+      <BudgetFooter faab={faab} />
       <div className="faint" style={{ margin: '2px 4px 12px' }}>
-        {board.considered} available players checked. Advisory only — add or drop in Sleeper.
-        {board.pending.length > 0 ? ` ${capitalise(board.pending.join(', '))} arrives with league intelligence.` : ''}
+        {board.considered} available players checked. Advisory only — add, drop or bid in Sleeper. This app
+        never makes a transaction.
+        {board.pending.length > 0 ? ` ${capitalise(board.pending.join(', '))} is not known yet.` : ''}
       </div>
     </div>
   );
@@ -630,6 +650,37 @@ const TEAM_WAIVER_ROWS = 3;
 
 function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * The budget the advice above was priced against, said out loud.
+ *
+ * A recommendation of $19 means nothing without the wallet it came from, and
+ * the two numbers that make it legible — what is left, and what winning has
+ * cost in this league — are exactly the two a reader would otherwise have to go
+ * to Sleeper to find.
+ */
+function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
+  if (!faab) return null;
+  if (!faab.rule.usesFaab) {
+    return (
+      <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+        {faab.rule.provenance}.
+      </div>
+    );
+  }
+  const mine = faab.mine;
+  return (
+    <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+      {mine?.remaining == null
+        ? 'Your remaining budget is unknown.'
+        : `$${mine.remaining} of $${faab.rule.total} left.`}
+      {faab.prices.sample > 0
+        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
+        : ' No winning bids recorded in this league yet.'}
+      <div>{faab.losingBids}</div>
+    </div>
+  );
 }
 
 /**

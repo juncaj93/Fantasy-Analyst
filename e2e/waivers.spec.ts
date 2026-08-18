@@ -120,9 +120,18 @@ test.describe('the waivers page', () => {
    * explanation attached, and the page says so once at the bottom.
    */
   test('never invents an expected cost', async ({ page }) => {
+    const waivers = await (await page.request.get('/api/leagues/demo-league/waivers')).json();
+    const priced = new Set((waivers.faab?.bids ?? []).filter((b: { expected: unknown }) => b.expected)
+      .map((b: { playerId: string }) => b.playerId));
     const row = page.getByTestId('waiver-row').first();
-    expect(await row.getByTestId('waiver-cost').innerText()).not.toMatch(/\d/);
-    await expect(page.getByTestId('waivers-pending')).toContainText('shown as unknown rather than estimated');
+    const playerId = (await row.getAttribute('data-player-id'))!;
+
+    // A row the pricing pass could not price shows a dash that explains itself
+    // rather than a number somebody could act on.
+    if (!priced.has(playerId)) {
+      expect(await row.getByTestId('waiver-cost').innerText()).not.toMatch(/\d/);
+      await expect(page.getByTestId('waivers-pending')).toContainText('shown as unknown rather than estimated');
+    }
 
     await row.click();
     const sheet = page.getByTestId('waiver-detail');
@@ -130,8 +139,9 @@ test.describe('the waivers page', () => {
     for (const field of ['Expected cost', 'Competition', 'Beyond this week']) {
       await expect(sheet).toContainText(field);
     }
-    // Every one of the three is the unknown mark rather than a number.
-    expect(await sheet.getByTestId('waiver-unknown').count()).toBeGreaterThanOrEqual(3);
+    // Competition and multi-week value have no pass behind them yet, so both
+    // read as the unknown mark rather than as a number.
+    expect(await sheet.getByTestId('waiver-unknown').count()).toBeGreaterThanOrEqual(2);
   });
 
   test('filters by position without offering a chip that empties the list', async ({ page }) => {
@@ -192,7 +202,7 @@ test.describe('the waivers page', () => {
 
   /** Advisory in every sense: there is no control here that transacts. */
   test('offers nothing that would make a claim', async ({ page }) => {
-    await expect(page.locator('body')).toContainText('add or drop in Sleeper');
+    await expect(page.locator('body')).toContainText('add, drop or bid in Sleeper');
     const buttons = (await page.locator('button:visible').allInnerTexts()).join(' ').toLowerCase();
     for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
       expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);

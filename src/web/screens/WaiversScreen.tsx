@@ -136,7 +136,7 @@ export function WaiversScreen({ leagues }: { leagues: LeagueSummary[] }) {
           )}
 
           <div className="faint" style={{ margin: '0 4px 8px' }}>
-            Advisory only — add or drop in Sleeper. This app never makes a transaction.
+            Advisory only — add, drop or bid in Sleeper. This app never makes a transaction.
           </div>
 
           {(board?.notes ?? []).map((note) => (

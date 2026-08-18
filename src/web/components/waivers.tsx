@@ -24,9 +24,11 @@ import { Sheet } from './native.tsx';
  * What an unknown league fact looks like.
  *
  * A dash with a reason attached, never a number. Expected cost, competition and
- * multi-week value all come from the league-intelligence pass, and until it
- * lands the honest rendering is this one — see core/waivers/board.ts for why
- * nothing is estimated in its place.
+ * multi-week value all come from the league-intelligence pass, and this is what
+ * they look like when it has nothing to say — either because it has not run, or
+ * because it deliberately withheld a price: a priority league, an unpublished
+ * budget, a spent wallet. The reason itself is one tap away in the detail
+ * sheet. See core/waivers/board.ts for why nothing is estimated in its place.
  */
 function UnknownField({ what }: { what: string }) {
   return (
@@ -206,6 +208,49 @@ export function WaiverDetailSheet({
           ) : null}
         </dl>
 
+        {/*
+          The priced bid, in the words of the pass that priced it.
+
+          Three separate statements rather than one number, because they answer
+          three different questions and collapsing them loses the most useful
+          thing this sheet can say: *he will go for more than he is worth to
+          you.* Nothing here is recomputed — see `WaiverBidLike`.
+        */}
+        {row.bid && !row.bid.withheld ? (
+          <div className="bid" data-testid="faab-bid" data-player={row.bid.playerId}>
+            <div>
+              <strong>{row.bid.headline}</strong>
+            </div>
+            {row.bid.doNotExceed == null ? null : (
+              <div className="faint">
+                Do not exceed ${row.bid.doNotExceed}
+                {row.bid.confidence === 'low' ? ' · price is an estimate' : ''}
+              </div>
+            )}
+            {row.bid.opportunity ? (
+              <div className="faint" data-testid="faab-opportunity">
+                {row.bid.opportunity.line}
+              </div>
+            ) : null}
+            {row.bid.trending ? (
+              <div className="faint" data-testid="faab-trending">
+                {row.bid.trending}
+              </div>
+            ) : null}
+            {row.bid.disagreement?.line ? (
+              <div className="faint" data-testid="faab-disagreement">
+                {row.bid.disagreement.line}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {row.bid?.withheld ? (
+          <div className="faint" data-testid="faab-withheld">
+            {row.bid.withheld}
+          </div>
+        ) : null}
+
         {row.reasons.length > 0 ? (
           <ul className="reason-list" data-testid="waiver-reasons">
             {row.reasons.map((reason) => (
@@ -214,7 +259,7 @@ export function WaiverDetailSheet({
           </ul>
         ) : null}
 
-        <div className="faint">Advisory only — add or drop in Sleeper. This app never makes a transaction.</div>
+        <div className="faint">Advisory only — add, drop or bid in Sleeper. This app never makes a transaction.</div>
 
         {onCompare ? (
           <div className="btn-row" style={{ margin: '10px 0 0' }}>

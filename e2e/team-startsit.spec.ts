@@ -140,12 +140,24 @@ test.describe('waiver upgrades', () => {
    * league-intelligence pass. Until then the field is a dash — never a number
    * that looks like a bid.
    */
-  test('shows expected cost as unknown rather than estimating it', async ({ page }) => {
+  test('quotes the league\u2019s own price, or no price at all', async ({ page }) => {
+    const waivers = await (await page.request.get('/api/leagues/demo-league/waivers')).json();
     const row = page.locator('[data-testid="waiver-row"]').first();
-    await expect(row.getByTestId('waiver-cost')).toContainText('—');
-    await expect(row.getByTestId('waiver-unknown')).toHaveAttribute('title', /not known yet/);
-    // And no digit anywhere in that field that could be read as a bid.
-    expect(await row.getByTestId('waiver-cost').innerText()).not.toMatch(/\d/);
+    const playerId = (await row.getAttribute('data-player-id'))!;
+    const bid = (waivers.faab?.bids ?? []).find((b: { playerId: string }) => b.playerId === playerId) ?? null;
+    const cost = await row.getByTestId('waiver-cost').innerText();
+
+    if (bid?.expected) {
+      // The number on the row is the number the pricing pass produced, to the
+      // dollar. A row that rounded, averaged or re-derived it would be a second
+      // opinion about somebody else's arithmetic.
+      expect(cost).toContain(`$${bid.expected.low}\u2013${bid.expected.high}`);
+    } else {
+      // No honest figure exists, so the field is a dash that says why, and
+      // carries no digit that could be read as a bid.
+      await expect(row.getByTestId('waiver-unknown')).toHaveAttribute('title', /not known yet/);
+      expect(cost).not.toMatch(/\d/);
+    }
   });
 
   /** Everything the row left out is one tap away, and still not a transaction. */
@@ -156,17 +168,57 @@ test.describe('waiver upgrades', () => {
     await expect(sheet).toContainText('Expected cost');
     await expect(sheet).toContainText('Competition');
     await expect(sheet).toContainText('Beyond this week');
-    await expect(sheet).toContainText('add or drop in Sleeper');
+    await expect(sheet).toContainText('add, drop or bid in Sleeper');
   });
 
   /** Advisory, and it says so. Nothing here executes anything. */
   test('offers no control that would make a transaction', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
-    await expect(card).toContainText('add or drop in Sleeper');
+    // The disclaimer names Sleeper as the only place a transaction happens. The
+    // exact verbs it lists have grown with the card — it now quotes bids as well
+    // as adds — so the assertion is on the invariant rather than the sentence.
+    await expect(card).toContainText('in Sleeper');
+    await expect(card).toContainText('never makes a transaction');
     const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
       expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
     }
+  });
+
+  /**
+   * A price is text, not an action.
+   *
+   * The card now quotes three dollar figures per candidate, and the failure mode
+   * this guards is the obvious one: a recommended bid that acquires a button
+   * beside it stops being advice.
+   */
+  test('quotes a bid without offering to place it', async ({ page }) => {
+    // The three figures live in the detail sheet now: the row has room for the
+    // expected range and nothing else, and the rest opens on tap.
+    await page.locator('[data-testid="waiver-row"]').first().click();
+    await expect(page.getByTestId('waiver-detail')).toBeVisible();
+    const bid = page.getByTestId('faab-bid').first();
+    const withheld = page.getByTestId('faab-withheld').first();
+    // A league with no FAAB says so instead; either is a valid state.
+    if (await withheld.isVisible().catch(() => false)) {
+      await expect(withheld).not.toBeEmpty();
+      return;
+    }
+    await expect(bid).toBeVisible();
+    await expect(bid).toContainText('Expected $');
+    await expect(bid).toContainText('Do not exceed $');
+    expect(await bid.getByRole('button').count(), 'a bid must carry no control at all').toBe(0);
+  });
+
+  /**
+   * The budget quoted is the league's own, and it is never invented.
+   *
+   * The demo league publishes a $100 budget and $35 spent, so the footer has to
+   * read $65 — a card that assumed Sleeper's $100 default would say $100 here
+   * and be wrong in exactly the way this whole layer exists to avoid.
+   */
+  test('states the budget it priced against, from the league settings', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
   });
 
   /**

@@ -92,11 +92,39 @@ export interface WaiverUpgradeLike {
   candidates: WaiverCandidateLike[];
 }
 
+/**
+ * One player's price, as the league-intelligence pass works it out.
+ *
+ * Read here rather than reproduced: this module attaches the number to the row
+ * that shows it and computes none of it. `withheld` is the case that matters —
+ * a priority league, an unpublished budget, a spent wallet — and it is carried
+ * as a reason rather than collapsed into a zero.
+ */
+export interface WaiverBidLike {
+  playerId: string;
+  expected: { low: number; high: number } | null;
+  recommended: number | null;
+  doNotExceed: number | null;
+  headline: string;
+  reasons?: string[];
+  confidence?: 'none' | 'low' | 'medium' | 'high';
+  withheld?: string | null;
+  opportunity?: { line: string } | null;
+  trending?: string | null;
+  disagreement?: { line: string | null } | null;
+}
+
 export interface WaiverAdviceLike {
   upgrades: WaiverUpgradeLike[];
   headline?: string | null;
   notes?: string[];
   considered?: number;
+  /**
+   * What each upgrade would cost. Optional, because the pass that prices them
+   * is a separate one and a deployment may not have it — in which case every
+   * row's cost reads as unknown, which is the honest answer and not a bug.
+   */
+  faab?: { bids?: WaiverBidLike[] } | null;
 }
 
 export type WaiverStrength = 'strong' | 'solid' | 'speculative';
@@ -131,6 +159,15 @@ export interface WaiverBoardRow {
   statusFlag: string | null;
   score: number | null;
   leagueRank: number | null;
+  /**
+   * The priced bid behind `faab`, when one exists: the headline, the ceiling,
+   * what spending it costs, and whether the market is already on him.
+   *
+   * Carried whole so the detail sheet can say what the row has no room for, and
+   * carried *unchanged* — every string here was written by the pass that priced
+   * the bid.
+   */
+  bid: WaiverBidLike | null;
 }
 
 export interface WaiverBoard {
@@ -204,6 +241,31 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
     }
   }
 
+  /*
+   * The prices, attached to the players they are prices for.
+   *
+   * The pass that works them out answers per player, and this board is per
+   * player, so the join is a lookup. A bid that deliberately quotes no number —
+   * `withheld` — leaves the cost unknown and contributes its reason instead: a
+   * blank field would read as "free", which is the opposite of what it means.
+   */
+  const bids = new Map((advice.faab?.bids ?? []).map((b) => [b.playerId, b]));
+  for (const row of byPlayer.values()) {
+    const bid = bids.get(row.playerId);
+    if (!bid) continue;
+    row.bid = bid;
+    if (bid.expected) {
+      row.faab = {
+        low: bid.expected.low,
+        high: bid.expected.high,
+        unit: 'dollar',
+        detail: bid.recommended == null ? null : `Recommended max $${bid.recommended}`,
+      };
+    } else if (bid.withheld) {
+      row.reasons = [...row.reasons, bid.withheld];
+    }
+  }
+
   const rows = [...byPlayer.values()].sort(compareRows);
 
   const pending: string[] = [];
@@ -250,6 +312,7 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
     statusFlag: candidate.statusFlag ?? null,
     score: candidate.score,
     leagueRank: candidate.leagueRank ?? null,
+    bid: null,
   };
 }
 

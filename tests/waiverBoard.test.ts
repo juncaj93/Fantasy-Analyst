@@ -206,6 +206,66 @@ describe('what the board refuses to invent', () => {
     expect(board.pending).toEqual([]);
   });
 
+  /**
+   * The prices the league-intelligence pass produces are joined, not remade.
+   *
+   * Its own figures reach the row untouched, and the recommended maximum comes
+   * with them as the detail — because "expected $17–22" and "bid at most $19"
+   * are two different statements and the row shows the first.
+   */
+  it('joins the priced bids to the rows they price', () => {
+    const board = buildWaiverBoard({
+      ...advice(),
+      faab: {
+        bids: [
+          {
+            playerId: '2001',
+            expected: { low: 17, high: 22 },
+            recommended: 19,
+            doNotExceed: 24,
+            headline: 'Expected $17–22 · Recommended max $19',
+            confidence: 'medium',
+            withheld: null,
+          },
+        ],
+      },
+    });
+    const row = board.rows[0]!;
+    expect(row.faab).toEqual({ low: 17, high: 22, unit: 'dollar', detail: 'Recommended max $19' });
+    expect(row.bid?.doNotExceed).toBe(24);
+    // Priced, so it is no longer outstanding.
+    expect(board.pending).not.toContain('expected cost');
+  });
+
+  /**
+   * A bid that deliberately quotes no number leaves the cost unknown.
+   *
+   * A priority league, an unpublished budget or a spent wallet all mean there is
+   * no honest figure, and the reason is carried into the row's reasons rather
+   * than collapsed into a zero — which would read as "free".
+   */
+  it('keeps the cost unknown when the price is withheld, and says why', () => {
+    const board = buildWaiverBoard({
+      ...advice(),
+      faab: {
+        bids: [
+          {
+            playerId: '2001',
+            expected: null,
+            recommended: null,
+            doNotExceed: null,
+            headline: '',
+            withheld: 'This league uses waiver priority, not FAAB.',
+          },
+        ],
+      },
+    });
+    const row = board.rows[0]!;
+    expect(row.faab).toBeNull();
+    expect(row.reasons).toContain('This league uses waiver priority, not FAAB.');
+    expect(board.pending).toContain('expected cost');
+  });
+
   it('has nothing to say about a board with no rows', () => {
     const board = buildWaiverBoard({ upgrades: [], headline: 'Nothing available beats your roster.' });
     expect(board.rows).toEqual([]);
