@@ -426,7 +426,32 @@ suggestions).
    completed draft as read-only history, but nothing else in the app currently
    routes to it. A second entry point from a league or history context is a
    navigation decision this workstream deliberately did not take on its own.
-9. **The browser suite shares one dev server across all three viewports.** Run
+9. **`adp_snapshots` carries no season, and nothing else can supply one.**
+   Found by the rollover readiness check and deliberately *not* fixed there.
+   Every other season-scoped store keys on an explicit `season` column; ADP is
+   imported from a file the user uploads and the table records only
+   `captured_at`. Nothing in the file says which season it prices.
+
+   The consequence is the one failure the rollover work exists to prevent, and
+   it is invisible from every other angle: a snapshot imported in August 2026 is
+   still `latest()` in 2027, its numbers are plausible, its ranking is
+   plausible, and it is a year old. `GET /api/diagnostics/rollover` therefore
+   infers the snapshot's season from its capture date — a guess, and correct
+   often enough to be useful — and reports it as `stale` once Sleeper has moved
+   on. That surfaces the problem; it does not solve it.
+
+   **The fix belongs to the Draft Usability / DOG ADP workstream**, because
+   solving it properly means a `season` column on `adp_snapshots`, a migration
+   that backfills it from `captured_at`, the importer stamping it from the
+   authoritative season (`services/seasonService.ts` already answers this), and
+   `AdpRepo.latest()` taking a season argument so a prior season's snapshot can
+   never be returned as current. That is a change to ADP ingestion, which this
+   infrastructure pass had no mandate to redesign and which that workstream will
+   be inside anyway. Until then the readiness check is the mitigation: it will
+   say `ADP still has only 2026 data` rather than letting the board quietly
+   serve it.
+
+10. **The browser suite shares one dev server across all three viewports.** Run
    repeatedly against a reused server, accumulated review-queue state can make
    `can reassign an item to the right player` fail; it passes on a fresh server,
    which is what CI uses. Worth isolating per project if it ever fails in CI.
