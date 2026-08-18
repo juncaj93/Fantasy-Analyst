@@ -20,12 +20,19 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+/**
+ * The destinations, in the two shapes the bar has.
+ *
+ * One slot is seasonal and exactly one of Draft and Waivers is ever in it, so
+ * the bar carries six either way: the board while there is still a draft to
+ * read, and the waiver wire once the season is under way.
+ */
 const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
+const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'review', 'setup'] as const;
 
-/** The five that are there every day of the year. */
-const YEAR_ROUND = ['team', 'trades', 'players', 'review', 'setup'] as const;
+type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number];
 
-async function open(page: Page, tab: (typeof TABS)[number]) {
+async function open(page: Page, tab: Tab) {
   await page.getByTestId(`tab-${tab}`).click();
   await page.waitForTimeout(400);
 }
@@ -33,18 +40,18 @@ async function open(page: Page, tab: (typeof TABS)[number]) {
 /**
  * Which destinations this deployment should be showing today.
  *
- * Draft is seasonal, so a suite that hardcoded six would start failing on the
- * Tuesday of week one — and failing for the reason the feature exists. The
- * expectation is read from the same answer the app reads: the overview's own
- * `season` block. A deployment that predates that field says nothing, and the
- * app keeps the tab, so the fallback is six.
+ * The seasonal slot is why this is read rather than hardcoded: a suite that
+ * named Draft would start failing on the Tuesday of week one — and failing for
+ * the reason the feature exists. The expectation comes from the same answer the
+ * app reads, the overview's own `season` block. A deployment that predates that
+ * field says nothing, and the app keeps Draft, so that is the fallback.
  */
-async function expectedTabs(page: Page): Promise<readonly (typeof TABS)[number][]> {
+async function expectedTabs(page: Page): Promise<readonly Tab[]> {
   const overview = await page.evaluate(async () => {
     const res = await fetch('/api/overview');
     return res.ok ? ((await res.json()) as { season?: { draftVisible?: boolean } }) : null;
   });
-  return overview?.season?.draftVisible === false ? YEAR_ROUND : TABS;
+  return overview?.season?.draftVisible === false ? IN_SEASON : TABS;
 }
 
 /**
@@ -84,8 +91,8 @@ test.describe('the deployed app', () => {
       expect(box.height, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
       expect(box.width, `${tab} is not a full target`).toBeGreaterThanOrEqual(44);
     }
-    // ...and nothing else. Out of season the bar carries five, packed, with no
-    // hole where Draft was.
+    // ...and nothing else. The count does not change with the season — Waivers
+    // takes the slot Draft leaves — so a bar with a hole in it fails here.
     expect(await page.locator('.tabbar button').count()).toBe(expected.length);
     const packed = await page.evaluate(() => {
       const bar = document.querySelector('.tabbar')!;
@@ -765,13 +772,28 @@ test.describe('the decision intelligence', () => {
     expect(answered!.ceiling).toBe('ceiling');
   });
 
-  test('the refresh button is there, and refuses a stranger', async ({ page, request }) => {
+  /**
+   * The refresh is a gesture now, and it still refuses a stranger.
+   *
+   * There is no button to look for: Team is pulled down to reload it, and the
+   * two controls that used to do it are gone. What is checked here is what a
+   * deployment can actually go wrong about — that the surface the gesture is
+   * attached to is on the page, that the accessible fallback exists for anything
+   * that cannot make a pointer gesture, and that the write behind both is still
+   * closed to somebody with no session. Whether the gesture *arms* at 68px is
+   * settled in `tests/pullToRefresh.test.ts` and does not need a live site.
+   */
+  test('the refresh is reachable, and refuses a stranger', async ({ page, request }) => {
     await page.goto('/');
     await open(page, 'team');
-    await expect(page.getByTestId('startsit-refresh')).toBeVisible();
+    await expect(page.getByTestId('team-pull')).toBeVisible();
+    await expect(page.getByTestId('pull-refresh-fallback')).toHaveCount(1);
+    // And the controls it replaced did not come back.
+    const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
+    expect(labels).not.toContain('refresh');
 
     // It spends provider quota, so it is a write, and a write from nobody is
-    // refused. This suite never authenticates, so the button is never pressed.
+    // refused. This suite never authenticates, so the refresh is never run.
     const write = await request.post('/api/startsit/refresh', { failOnStatusCode: false });
     expect([401, 429, 503]).toContain(write.status());
   });
