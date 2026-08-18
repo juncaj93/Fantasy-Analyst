@@ -38,9 +38,8 @@ import type { Database } from '../db.ts';
 import { UsageRepo, UsageSourceRepo, type StoredUsageWeek, type UsageSourceRun } from '../repos/usage.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { normalizeName } from '../../core/identity/normalize.ts';
-import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { looksAnomalous } from '../../core/injury/diff.ts';
-import { resolveToCanonical, type IdentityIndex } from './injuryService.ts';
+import { buildIdentityIndex, resolveToCanonical, type IdentityIndex } from './injuryService.ts';
 import { diffUsage, keyOf, type ComparableUsage } from '../../core/usage/diff.ts';
 import { toRoleMetrics } from '../../core/usage/role.ts';
 import { fetchWeeklyUsage, type FetchLike, type UsageRow } from '../../core/usage/nflverse.ts';
@@ -523,16 +522,20 @@ export class UsageService {
    * total.
    */
   private async resolveIdentities(rows: UsageRow[]): Promise<IdentityIndex> {
-    const keys = rows.map((r) => normalizeName(r.fullName));
-    const candidates = await this.players.findByNormalizedNames(keys);
-
-    const byName = new Map<string, CanonicalPlayer[]>();
-    for (const player of candidates) {
-      const list = byName.get(player.normalizedName);
-      if (list) list.push(player);
-      else byName.set(player.normalizedName, [player]);
-    }
-    return { byName };
+    /*
+     * Identifier and name in one round, and the identifier wins.
+     *
+     * Same two indexed lookups as the injury pipeline, through the same shared
+     * builder — see `buildIdentityIndex`. Both files carry a GSIS id per row,
+     * which is exactly why `stats_player_week` was chosen over `snap_counts`
+     * in the first place, and until migration 0020 that id could only break a
+     * tie rather than find anybody.
+     */
+    const [byNameCandidates, byIdCandidates] = await Promise.all([
+      this.players.findByNormalizedNames(rows.map((r) => normalizeName(r.fullName))),
+      this.players.findByExternalGsisIds(rows.map((r) => r.gsisId)),
+    ]);
+    return buildIdentityIndex(byNameCandidates, byIdCandidates);
   }
 
   /**
