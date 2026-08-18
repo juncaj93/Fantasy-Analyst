@@ -282,6 +282,16 @@ export interface DraftBoardState {
       multipliers: Record<string, number>;
       observed: Record<string, { picks: number; meanPicksEarly: number; shrinkage: number }>;
       notes: string[];
+      /**
+       * The measured effect on survival, in percentage points.
+       *
+       * `local` and `others` are each the mean of `simulated - market` for
+       * their group, so the `difference` between them isolates what the prior
+       * contributed — every other term in the model applies to both. Negative
+       * means the room's local players are being taken sooner than the rest of
+       * the board relative to ADP, which is the whole claim.
+       */
+      survivalEffect: { local: number; others: number; difference: number; sample: number } | null;
     } | null;
     marketOnly: boolean;
     degraded: string[];
@@ -1071,6 +1081,24 @@ export class DraftBoardService {
               multipliers: Object.fromEntries(nextPick.teamPrior.multipliers),
               observed: Object.fromEntries(nextPick.teamPrior.observed),
               notes: nextPick.teamPrior.notes,
+              /*
+               * What the prior did to survival, in percentage points.
+               *
+               * Every player carries two numbers: what the market alone says
+               * about his chances, and what the simulation says. The gap
+               * between them is everything the simulation knows that ADP does
+               * not — the room, the rosters ahead, the tiers, and the local
+               * prior. Measured for the favoured teams and for everybody else
+               * on the same board, the *difference between those two gaps* is
+               * the prior's own contribution, because every other term in the
+               * model applies to both groups.
+               *
+               * Not a controlled experiment — a Lions-heavy tier would show up
+               * here too — but it is the honest read of a live board, and it
+               * answers "is this doing anything, and how much" without running
+               * the simulation twice.
+               */
+              survivalEffect: measureSurvivalEffect(recommendations, league.localTeams ?? []),
             }
           : null,
         // True when the board was too thin to simulate, so these percentages
@@ -1109,6 +1137,46 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/**
+ * How far the simulation moved survival away from the market, for the room's
+ * local players against everybody else.
+ *
+ * Both figures are `simulated - market`, in percentage points, so they share
+ * every term of the model except the one being measured. A negative
+ * `difference` means the local players are being taken sooner than the rest of
+ * the board relative to what ADP alone predicted, which is what the prior is
+ * for; a difference near zero means it is not doing anything worth the setting.
+ *
+ * Null when there is nothing to compare — no local teams named, or no priced
+ * player on one side of the line.
+ */
+function measureSurvivalEffect(
+  recommendations: { team: string; survivalProbability: number | null; nextPick: { marketBaseline: number | null } | null }[],
+  localTeams: readonly string[],
+): { local: number; others: number; difference: number; sample: number } | null {
+  const favoured = new Set(localTeams.map((t) => t.trim().toUpperCase()));
+  if (favoured.size === 0) return null;
+
+  const gaps = { local: [] as number[], others: [] as number[] };
+  for (const rec of recommendations) {
+    const simulated = rec.survivalProbability;
+    const market = rec.nextPick?.marketBaseline ?? null;
+    if (simulated == null || market == null) continue;
+    const bucket = favoured.has((rec.team ?? '').toUpperCase()) ? gaps.local : gaps.others;
+    bucket.push((simulated - market) * 100);
+  }
+  if (gaps.local.length === 0 || gaps.others.length === 0) return null;
+
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const local = round1(mean(gaps.local));
+  const others = round1(mean(gaps.others));
+  return { local, others, difference: round1(local - others), sample: gaps.local.length };
+}
+
+function round1(v: number): number {
+  return Math.round(v * 10) / 10;
 }
 
 /**

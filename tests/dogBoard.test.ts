@@ -625,4 +625,34 @@ describe('the local-team prior is set on a league and reaches Next% alone', () =
     // And the board reports what it applied, so the effect can be audited.
     expect(after.nextPickModel.localTeams).toEqual(['DET']);
   });
+
+  it('reports the measured survival effect rather than only the multiplier', async () => {
+    const league = await selectedLeague();
+    await app(post(`/api/leagues/${league.id}/local-teams`, { teams: ['DET'] }, cookie), env);
+    const board = await new DraftBoardService(db).build(league.draftId!, { limit: 60 });
+
+    const prior = board.nextPickModel.teamPrior;
+    expect(prior).not.toBeNull();
+    expect(prior!.multipliers['DET']).toBeGreaterThan(1);
+
+    // The diagnostic the brief asks for: what it actually did to survival, in
+    // percentage points, for the local players against everybody else on the
+    // same board.
+    const effect = prior!.survivalEffect;
+    if (effect) {
+      expect(effect.sample).toBeGreaterThan(0);
+      expect(Number.isFinite(effect.difference)).toBe(true);
+      expect(effect.difference).toBeCloseTo(effect.local - effect.others, 5);
+    }
+  });
+
+  it('reports no prior at all for a league that has named no local team', async () => {
+    const league = await selectedLeague();
+    const board = await new DraftBoardService(db).build(league.draftId!, { limit: 20 });
+    expect(board.nextPickModel.localTeams).toEqual([]);
+    // `readTeamPrior` still runs and still says "nothing to say", which is a
+    // different and more useful answer than not running at all.
+    expect(board.nextPickModel.teamPrior?.basis ?? 'none').toBe('none');
+    expect(board.nextPickModel.teamPrior?.survivalEffect ?? null).toBeNull();
+  });
 });
