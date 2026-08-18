@@ -14,10 +14,22 @@ name: Refresh Underdog ADP
 # from Underdog's staff rankings, or from an aggregator's own consensus would be
 # worse than no column at all, because nothing on screen could tell.
 #
-# Configure at least one of the two source URLs as a repository variable:
+# Configure at least one source. Repository *variables* for the URLs, repository
+# *secrets* for anything that authenticates:
 #
-#   UNDERDOG_ADP_URL        Best Ball Team Builder's board  (primary)
-#   FOUR4_UNDERDOG_ADP_URL  4for4's Underdog ADP export     (validation/fallback)
+#   vars.UNDERDOG_ADP_URL            Best Ball Team Builder's board  (primary)
+#   vars.FOUR4_UNDERDOG_ADP_URL      4for4's Underdog ADP export     (fallback)
+#   secrets.UNDERDOG_ADP_HEADERS     JSON headers for the primary,  e.g.
+#                                    {"cookie":"..."} or {"authorization":"Bearer ..."}
+#   secrets.FOUR4_UNDERDOG_ADP_HEADERS  the same, for the fallback
+#
+# Both realistic sources sit behind a login, so expect at least one of the
+# header secrets to be required. If a source cannot be fetched by a script at
+# all — a hard bot check, or terms that rule out automated access — export the
+# board by hand from a signed-in browser and import that file instead; see
+# `--primary-file` / `--fallback-file` in the script and the manual route in
+# docs/MARKET_BASELINE.md. Nothing downstream can tell the difference: same
+# parser, same raw-ADP validation, same freshness and provenance.
 
 on:
   workflow_dispatch:
@@ -49,6 +61,11 @@ jobs:
         env:
           UNDERDOG_ADP_URL: ${{ vars.UNDERDOG_ADP_URL }}
           FOUR4_UNDERDOG_ADP_URL: ${{ vars.FOUR4_UNDERDOG_ADP_URL }}
+          # Absent unless configured, in which case the request goes out
+          # unauthenticated and a gated source answers 401/403 — which the
+          # script reports as such rather than as a parsing problem.
+          UNDERDOG_ADP_HEADERS: ${{ secrets.UNDERDOG_ADP_HEADERS }}
+          FOUR4_UNDERDOG_ADP_HEADERS: ${{ secrets.FOUR4_UNDERDOG_ADP_HEADERS }}
         run: |
           npx vite-node scripts/fetch-underdog-adp.mjs --out /tmp/dog.json --meta /tmp/dog.meta.json
 

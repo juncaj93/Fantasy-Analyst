@@ -153,18 +153,94 @@ which is only true of a sequence the tier model itself produced.
 ## Getting DOG in
 
 Nothing fetches Underdog at request time. A live draft must never wait on a
-third party, so the path is the same one Sleeper ADP already follows:
+third party, so the path is the same one Sleeper ADP already follows: fetch in
+CI, import a frozen snapshot.
+
+### What the URL has to return
+
+This app cannot tell you which URL is right — it can only tell you what a right
+one returns. Point `--dry-run` at a candidate and it answers in one line:
 
 ```bash
-node scripts/fetch-underdog-adp.mjs --out dog.json --meta dog.meta.json
+npx vite-node scripts/fetch-underdog-adp.mjs --primary <url> --dry-run
 ```
 
-then POST the contents to `/api/adp/import` with `source: "underdog"` and the
+A usable primary returns **JSON**: either a bare array of players, or an object
+with them under `players` / `rows` / `data`. Each entry needs a name
+(`fullName`, `name`, or `firstName`+`lastName`) and an **average draft
+position** under `adp` / `underdogAdp` / `averageDraftPosition` / `avgPick`. An
+`updatedAt` / `asOf` field at the top level is worth having — it is what stops
+a board regenerated overnight from looking nine hours fresher than it is.
+
+A usable fallback returns **CSV** with a player-name column and a column whose
+header names Underdog (`Underdog ADP`, `UD ADP`). A bare `ADP` column is *not*
+accepted there: on a 4for4 export that is their own consensus, and importing it
+as DOG is precisely the substitution this feature exists to prevent.
+
+`--dry-run` will also tell you when a URL returns something that sorts like ADP
+but is not — a ranking is rejected by shape, `1, 2, 3, 4…` and all.
+
+### Where each value goes
+
+| Setting | Kind | Purpose |
+| ------- | ---- | ------- |
+| `UNDERDOG_ADP_URL` | repo **variable** | primary (Best Ball Team Builder) |
+| `FOUR4_UNDERDOG_ADP_URL` | repo **variable** | fallback (4for4) |
+| `UNDERDOG_ADP_HEADERS` | repo **secret** | JSON headers for the primary |
+| `FOUR4_UNDERDOG_ADP_HEADERS` | repo **secret** | JSON headers for the fallback |
+
+Then run **Actions → Refresh Underdog ADP**. It also runs daily at 12:00 UTC,
+an hour after the Sleeper refresh.
+
+### Authentication and access
+
+Expect to need it. Both realistic sources sit behind a login: 4for4 is a paid
+subscription, and Underdog's own API is token-gated. An unauthenticated request
+gets 401 or 403, which the script now reports as an authentication problem
+rather than leaving you to debug the URL.
+
+Headers go in as JSON, from a secret, never the repository:
+
+```
+UNDERDOG_ADP_HEADERS = {"cookie":"session=…"}
+FOUR4_UNDERDOG_ADP_HEADERS = {"authorization":"Bearer …"}
+```
+
+Two constraints worth deciding deliberately rather than discovering:
+
+**A session cookie is a credential with a short life.** It will expire, the
+workflow will start reporting 401, and DOG will age out and drop — visibly, with
+a reason, which is the designed behaviour but still a thing somebody has to go
+and fix. A long-lived API token is much better where one is available.
+
+**Automated access may not be allowed.** Check the source's terms before
+pointing a daily job at it. A subscription that permits personal use does not
+necessarily permit a scheduled scrape, and a hard bot check will defeat the
+fetch regardless.
+
+### The manual route, which needs no URL and no credentials
+
+If a source cannot or should not be fetched by a script, export the board from a
+browser you are already signed in to and hand the file over:
+
+```bash
+npx vite-node scripts/fetch-underdog-adp.mjs \
+  --primary-file ~/Downloads/underdog-board.json \
+  --out dog.json --meta dog.meta.json
+```
+
+Then POST `dog.json` to `/api/adp/import` with `source: "underdog"` and the
 provider, `snapshotAt` and `fetchedAt` from the sidecar.
 
-The script tries Best Ball Team Builder first and 4for4 second — the brief's
-hierarchy — and exits with a distinct code for each way it can fail, because a
-workflow should respond to them differently:
+Nothing downstream can tell the difference: the same parser, the same raw-ADP
+validation, the same freshness rules, the same provenance. It costs a manual
+step per refresh and it is the right answer when the alternative is storing
+somebody's session cookie in CI.
+
+### When a fetch fails
+
+The script exits with a distinct code for each failure, because the right
+response to each is different:
 
 | exit | meaning | what to do |
 | ---- | ------- | ---------- |
@@ -173,4 +249,5 @@ workflow should respond to them differently:
 | 3 | every source is too old | keep the old snapshot |
 
 It will never fall back to Sleeper ADP, to Underdog rankings, or to an
-aggregator's own consensus column. A missing DOG is a missing DOG.
+aggregator's own consensus column. A missing DOG is a missing DOG: the board
+renormalises onto Sleeper alone, marks the baseline single-source, and says why.
