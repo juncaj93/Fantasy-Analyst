@@ -36,12 +36,21 @@ export interface CanonicalPlayer {
    */
   searchRank?: number | null;
   /**
-   * Completed NFL seasons, from Sleeper's `years_exp`.
+   * Physical and experience facts, and the rules for using them.
    *
-   * Null means the dictionary did not say, which is not the same as zero — a
-   * rookie and an unknown are different answers and only one of them belongs in
-   * a "does this manager chase rookies" sample.
+   * Present so `core/players/profileFlags.ts` can ask a question no position
+   * and name can answer — a light frame projected outside, an older back whose
+   * usage is falling. Absent means Sleeper did not say, and absent never
+   * becomes zero: a rookie flag keyed on `yearsExp === 0` must not fire for a
+   * player whose experience is unrecorded.
+   *
+   * Nothing may turn any of these into a ranking penalty. See the module note
+   * on `profileFlags.ts` for why that rule is enforced in the return type
+   * rather than trusted to callers.
    */
+  heightInches?: number | null;
+  weightPounds?: number | null;
+  age?: number | null;
   yearsExp?: number | null;
 }
 

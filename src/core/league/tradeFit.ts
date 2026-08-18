@@ -22,9 +22,9 @@
  * Advisory only. Nothing here contacts a manager or files a trade.
  */
 
+import type { ManagerTradeProfile } from '../managers/tradeProfile.ts';
 import type { RoleTrend } from '../startsit/decisions.ts';
 import type { NeedLevel } from './competition.ts';
-import type { ManagerProfile } from './managers.ts';
 
 /** Timing labels, exactly as the brief specifies them. These are the interface. */
 export type TradeTimingLabel =
@@ -138,7 +138,7 @@ export interface TradeTeam {
   assets: TradeAsset[];
   /** Position → how badly they need one. */
   needs: Record<string, NeedLevel>;
-  profile?: ManagerProfile;
+  profile?: ManagerTradeProfile;
 }
 
 export interface TradeIdea {
@@ -199,16 +199,35 @@ export function plausibilityOf(idea: {
     return { score: 0.05, notes };
   }
 
+  /*
+   * The partner's own record, read through the canonical trade profile.
+   *
+   * `confident` is checked before anything else on it: `buildTradeProfile`
+   * nulls every rate below its sample threshold, and a manager with two trades
+   * on record has a history, not a tendency.
+   */
   const profile = idea.partner.profile;
-  if (profile?.tradesPerSeason.sufficient && (profile.tradesPerSeason.value ?? 0) >= 1.5) {
+  if (profile?.confident && (profile.tradesPerSeason ?? 0) >= 1.5) {
     score += 0.2;
     notes.push('trades often');
-  } else if (profile?.tradesPerSeason.sufficient) {
+  } else if (profile?.confident) {
     score += 0.05;
     notes.push('trades occasionally');
   } else {
     score -= 0.1;
     notes.push('no trade history on record — untested rather than unwilling');
+  }
+
+  /*
+   * A position he has historically acquired is one he will hear an offer on.
+   *
+   * Taken from the profile's own observed counts rather than from a guess about
+   * what his roster needs, which is what `needs` above already covers — these
+   * are two different witnesses and they are kept apart deliberately.
+   */
+  if (profile?.confident && idea.give.some((pl) => profile.acquiresPositions.includes(pl.position))) {
+    score += 0.1;
+    notes.push(`has historically acquired ${idea.give.find((pl) => profile.acquiresPositions.includes(pl.position))!.position}s`);
   }
 
   // Filling their most urgent hole is the single strongest reason to say yes.

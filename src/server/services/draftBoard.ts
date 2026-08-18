@@ -173,6 +173,38 @@ export interface DraftBoardState {
     byPosition: Record<string, number>;
     cap: number;
   };
+  /**
+   * The drafting managers, one per seat, in column order.
+   *
+   * Presentation only, and read by the draft-board overlay alone. Nothing about
+   * a ranking, a score or an availability estimate depends on it — it exists so
+   * a board that already knows every pick can also say whose column each one
+   * belongs to, instead of printing twelve columns called `Team 4`.
+   */
+  managers: { slot: number; name: string; isMine: boolean }[];
+  /**
+   * Every completed pick, in pick order, with the manager who actually made it.
+   *
+   * The same pick stream the rest of this service already read, projected into
+   * the four facts a board cell shows. It travels with the board response
+   * deliberately: the board overlay must never become a second thing polling
+   * Sleeper, so it consumes exactly what the existing live refresh already
+   * rebuilds and adds no request of its own.
+   *
+   * `ownerSlot` is Sleeper's answer, not the snake's — see `ownerSlotOf`.
+   */
+  boardPicks: { pickNo: number; playerId: string; name: string; position: string; team: string; ownerSlot: number }[];
+  /**
+   * Who owns each future pick, indexed from pick 1 — but only in a draft that
+   * has published a trade.
+   *
+   * Null in the overwhelmingly common case, where every seat makes its own
+   * picks and snake arithmetic is the whole answer. Sending it only when it
+   * differs from the snake keeps one ownership model in force: the client
+   * either has Sleeper's word or it has the arithmetic, and never has to choose
+   * between two plausible answers.
+   */
+  pickOwners: number[] | null;
   /** Diagnostics for `Next`. Read by the probe and by nothing on screen. */
   nextPickModel: {
     targetPick: number | null;
@@ -668,6 +700,41 @@ export class DraftBoardService {
       startablePositions: orderPositions(startable),
       offersFlex: offersFlexFilter(startable),
       /*
+       * The board-as-a-board, assembled from what is already in hand.
+       *
+       * Three read-only projections of state this method loaded pages ago: the
+       * rosters it already fetched, the pick stream it already walked, and the
+       * ownership model it already built for the `Next` horizon. No query, no
+       * poll and no second ownership model — see boardGrid.ts for what is done
+       * with them.
+       */
+      managers: managerColumns({
+        teams,
+        slotToRosterId: draft.slotToRosterId,
+        picks,
+        rosters,
+        mySlot,
+        myRosterId: myRosterRecord?.rosterId ?? null,
+      }),
+      boardPicks: picks
+        .filter((pick) => pick.playerId)
+        .map((pick) => {
+          const player = byId.get(pick.playerId!);
+          const fallback = pickMetadata(pick.raw);
+          return {
+            pickNo: pick.pickNo,
+            playerId: pick.playerId!,
+            name: player?.fullName ?? fallback.name ?? 'Unknown player',
+            position: player?.position ?? fallback.position ?? '',
+            team: player?.team ?? fallback.team ?? '',
+            ownerSlot: ownerSlotOf(pick),
+          };
+        })
+        .sort((a, b) => a.pickNo - b.pickNo),
+      pickOwners: ownership.hasTrades
+        ? Array.from({ length: teams * rounds }, (_, i) => ownership.ownerAt(i + 1) ?? ownership.slotAt(i + 1))
+        : null,
+      /*
        * What the `Next` model did, for the probe and for anybody debugging a
        * number that looks wrong.
        *
@@ -808,6 +875,90 @@ function alternativesByPosition(candidates: SimCandidate[], targetPick: number |
     out.set(candidate.position, (out.get(candidate.position) ?? 0) + 1);
   }
   return out;
+}
+
+/**
+ * One named manager per seat, in column order.
+ *
+ * Sleeper publishes `slot_to_roster_id` for most drafts and, occasionally, for
+ * none of them — a league that has not started yet has seats but no mapping. So
+ * the pick stream is read as a second source: a manager who has picked has
+ * proved which seat they are sitting in, which is a fact rather than an
+ * inference. Anything still unresolved is `Team 4`, said plainly, because a
+ * column with a made-up name is worse than a column with a number.
+ *
+ * The seat mapping used here is the same one the pick stream and the `Next`
+ * horizon already use. Nothing new is decided about who owns what.
+ */
+function managerColumns(input: {
+  teams: number;
+  slotToRosterId: Record<string, number>;
+  picks: { draftSlot: number; rosterId: number | null; playerId: string | null }[];
+  rosters: { rosterId: number; ownerName: string | null; isMine: boolean }[];
+  mySlot: number | null;
+  myRosterId: number | null;
+}): { slot: number; name: string; isMine: boolean }[] {
+  const rosterOfSlot = new Map<number, number>();
+  for (const [slot, rosterId] of Object.entries(input.slotToRosterId ?? {})) {
+    const seat = Number(slot);
+    if (Number.isFinite(seat) && Number.isFinite(rosterId)) rosterOfSlot.set(seat, Number(rosterId));
+  }
+  for (const pick of input.picks) {
+    if (pick.rosterId == null || !pick.draftSlot) continue;
+    if (!rosterOfSlot.has(pick.draftSlot)) rosterOfSlot.set(pick.draftSlot, pick.rosterId);
+  }
+
+  const nameOfRoster = new Map<number, string>();
+  for (const roster of input.rosters) {
+    const name = (roster.ownerName ?? '').trim();
+    if (name) nameOfRoster.set(roster.rosterId, name);
+  }
+
+  return Array.from({ length: Math.max(1, input.teams) }, (_, i) => {
+    const slot = i + 1;
+    const rosterId = rosterOfSlot.get(slot) ?? null;
+    return {
+      slot,
+      name: (rosterId == null ? null : nameOfRoster.get(rosterId)) ?? `Team ${slot}`,
+      /*
+       * Two ways of being the reader's seat, and both are needed.
+       *
+       * The roster mapping is the direct answer. `mySlot` is the one the rest
+       * of this service already worked out — including from the reader's own
+       * completed picks — and it is what makes the board emphasise the right
+       * column in a draft Sleeper never published an order for.
+       */
+      isMine: (rosterId != null && rosterId === input.myRosterId) || (input.mySlot != null && input.mySlot === slot),
+    };
+  });
+}
+
+/**
+ * The player a pick names, when the player table does not know him.
+ *
+ * Sleeper stores the drafted player's name on the pick itself, which is the
+ * only description that survives a player disappearing from the canonical
+ * table. Used as a fallback and never in preference: the canonical row is the
+ * one every other screen reads.
+ */
+function pickMetadata(raw: string | null | undefined): { name: string | null; position: string | null; team: string | null } {
+  const empty = { name: null, position: null, team: null };
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as { metadata?: Record<string, unknown> };
+    const meta = parsed?.metadata;
+    if (!meta || typeof meta !== 'object') return empty;
+    const first = typeof meta['first_name'] === 'string' ? (meta['first_name'] as string) : '';
+    const last = typeof meta['last_name'] === 'string' ? (meta['last_name'] as string) : '';
+    const name = `${first} ${last}`.trim();
+    return {
+      name: name || null,
+      position: typeof meta['position'] === 'string' ? (meta['position'] as string) : null,
+      team: typeof meta['team'] === 'string' ? (meta['team'] as string) : null,
+    };
+  } catch {
+    return empty;
+  }
 }
 
 /**

@@ -19,29 +19,29 @@ export interface StoredFeedEvent extends FeedEvent {
 export class DecisionFeedRepo {
   constructor(private readonly db: Database) {}
 
-  async listOpen(sleeperLeagueId: string | null, limit = 40): Promise<StoredFeedEvent[]> {
+  async listOpen(leagueId: string | null, limit = 40): Promise<StoredFeedEvent[]> {
     const rows = await this.db
       .prepare(
         `SELECT * FROM decision_feed_events
-          WHERE (sleeper_league_id IS ? OR ? IS NULL)
+          WHERE (league_id IS ? OR ? IS NULL)
             AND superseded_at IS NULL
           ORDER BY occurred_at DESC, id DESC
           LIMIT ?`,
       )
-      .bind(sleeperLeagueId, sleeperLeagueId, limit)
+      .bind(leagueId, leagueId, limit)
       .all<Record<string, unknown>>();
     return rows.results.map(rowToEvent);
   }
 
-  async insert(sleeperLeagueId: string | null, event: FeedEvent): Promise<void> {
+  async insert(leagueId: string | null, event: FeedEvent): Promise<void> {
     await this.db
       .prepare(
         `INSERT INTO decision_feed_events
-           (sleeper_league_id, dedupe_key, kind, subject_player_id, headline, detail, magnitude, occurred_at)
+           (league_id, dedupe_key, kind, subject_player_id, headline, detail, magnitude, occurred_at)
          VALUES (?,?,?,?,?,?,?,?)`,
       )
       .bind(
-        sleeperLeagueId,
+        leagueId,
         event.dedupeKey,
         event.kind,
         event.playerId ?? null,
@@ -61,13 +61,13 @@ export class DecisionFeedRepo {
   }
 
   /** Mark everything currently open as read. The feed is a delta, not an inbox. */
-  async markSeen(sleeperLeagueId: string | null): Promise<{ marked: number }> {
+  async markSeen(leagueId: string | null): Promise<{ marked: number }> {
     const result = await this.db
       .prepare(
         `UPDATE decision_feed_events SET seen_at = ?
-          WHERE seen_at IS NULL AND superseded_at IS NULL AND (sleeper_league_id IS ? OR ? IS NULL)`,
+          WHERE seen_at IS NULL AND superseded_at IS NULL AND (league_id IS ? OR ? IS NULL)`,
       )
-      .bind(nowIso(), sleeperLeagueId, sleeperLeagueId)
+      .bind(nowIso(), leagueId, leagueId)
       .run();
     return { marked: Number(result.meta?.changes ?? 0) };
   }

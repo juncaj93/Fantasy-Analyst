@@ -16,7 +16,7 @@
  */
 
 import type { ReactNode } from 'react';
-import type { AvoidTag, MyGuyFlag, TierCliff, WaitGuidance } from '../api.ts';
+import type { MyGuyFlag, TierCliff, WaitGuidance } from '../api.ts';
 
 /** Wait guidance, shown only when it is telling the user to move. */
 export function WaitTag({ wait }: { wait: WaitGuidance }) {
@@ -31,15 +31,20 @@ export function WaitTag({ wait }: { wait: WaitGuidance }) {
   );
 }
 
-/** The automatic caution. Deliberately the loudest thing that can appear on a row. */
-export function AvoidBadge({ avoid }: { avoid: AvoidTag }) {
-  if (!avoid.active) return null;
-  return (
-    <span className="tag tag-avoid" title={avoid.trendNote ?? avoid.message} data-testid="avoid-tag">
-      ⚠ {avoid.message}
-    </span>
-  );
-}
+/*
+ * There is no AVOID badge here any more, and that is deliberate.
+ *
+ * It used to be the loudest thing that could appear on a row: `⚠ AVOID —
+ * lifetime tally -5`, filled, costing a line of the card. What it said was
+ * exactly what the signed tally beside the player's name already says, in a
+ * form the reader can weigh for themselves — `-5` is a reading, `AVOID` is a
+ * verdict placed on top of it. The number stays and the label is gone.
+ *
+ * What did **not** change: the tally, the lifetime threshold in
+ * core/draft/decisions.ts, and the bounded penalty the draft engine applies
+ * below it. `AvoidTag` is still computed and still travels on the API, because
+ * the model has not stopped believing it — it has stopped shouting it.
+ */
 
 export function TierCliffTag({ cliff }: { cliff: TierCliff }) {
   if (cliff.severity === 'none' || !cliff.message) return null;
@@ -96,18 +101,16 @@ export function Verdict({
 /**
  * Which conclusion leads an expanded draft player.
  *
- * A caution outranks urgency, and urgency outranks the fact that somebody can
- * wait — the same order the row's tags use, so the tag and the headline never
- * disagree. When the engine has no wait guidance and no caution there is no
- * conclusion to state, and this returns null rather than inventing one.
+ * Urgency outranks the fact that somebody can wait. When the engine has no wait
+ * guidance there is no conclusion to state, and this returns null rather than
+ * inventing one.
+ *
+ * The lifetime-tally caution used to outrank both and is no longer stated as a
+ * conclusion anywhere — see the note where the badge used to be.
  */
 export function draftVerdict(
-  avoid: AvoidTag,
   wait: WaitGuidance,
 ): { tone: 'take' | 'avoid' | 'risky' | 'calm'; label: string; detail: string | null; glyph: string } | null {
-  if (avoid.active) {
-    return { tone: 'avoid', label: avoid.message, detail: avoid.trendNote, glyph: '⚠' };
-  }
   if (wait.state === 'unknown') return null;
   const tone = wait.state === 'take_now' ? 'take' : wait.state === 'risky_to_wait' ? 'risky' : 'calm';
   const glyph = wait.state === 'take_now' ? '!' : wait.state === 'risky_to_wait' ? '~' : '·';

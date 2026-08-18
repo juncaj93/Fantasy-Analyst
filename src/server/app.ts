@@ -13,7 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
-import { compareStartSit, evaluatePlayer, type StartSitInput } from '../core/startsit/engine.ts';
+import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { normalizeMode, type StartSitMode } from '../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../core/startsit/defense.ts';
@@ -25,8 +25,33 @@ import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/sourc
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../core/sleeper/eligibility.ts';
 import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
+/* The same decision at the resolution draft-shaped features need. */
+import { resolveLifecycle } from '../core/season/lifecycle.ts';
+import { buildRolloverReport } from './services/rolloverService.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
-import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
+import { recommendWaiverUpgrades, type WaiverCandidate } from '../core/startsit/waivers.ts';
+import { evaluatePlayer } from '../core/startsit/engine.ts';
+import type { LineupRecommendation } from '../core/startsit/lineup.ts';
+import type { RosterShape, ScoringProfile } from '../core/sleeper/scoring.ts';
+import type { CanonicalPlayer } from '../core/identity/types.ts';
+import type { RosterRecord } from '../core/sleeper/types.ts';
+import type { LeagueBudgetState, RosterBudget } from '../core/faab/budget.ts';
+import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
+import type { PriceSummary } from '../core/faab/bids.ts';
+import {
+  recommendBid,
+  simulateOpportunityCost,
+  type BidRecommendation,
+  type OpportunityCost,
+  type RoleStability,
+  type ShelfLife,
+} from '../core/faab/strategy.ts';
+import { trendingHeadline } from '../core/market/trending.ts';
+import { detectDisagreement, type Disagreement } from '../core/market/disagreement.ts';
+import { evaluateBench, type HeldPlayer } from '../core/roster/bench.ts';
+import { buildLadder, type LadderInputs } from '../core/trades/ladder.ts';
+import { assessConsolidation, type ConsolidationAdvice } from '../core/trades/consolidation.ts';
+import { LeagueStrategyService, type StrategyContext } from './services/leagueStrategyService.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -58,16 +83,20 @@ import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
-import { LeagueHistoryService } from './services/leagueHistoryService.ts';
-import { LeagueIntelService } from './services/leagueIntelService.ts';
-import { LeagueHistoryRepo } from './repos/leagueHistory.ts';
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
-import { beneficiaryOf, type BeneficiaryPlayer } from '../core/league/beneficiary.ts';
-import { buildWaiverBoard, type NeedFit, type WaiverCandidateInput } from '../core/league/waiverBoard.ts';
+import { RULED_OUT_STATUSES, beneficiaryOf } from '../core/league/beneficiary.ts';
+import {
+  COMPETITION_UNKNOWN,
+  assessCompetition,
+  teamNeedsFor,
+  type CompetitionAssessment,
+  type NeedLevel,
+} from '../core/league/competition.ts';
 import { byeOutlook, playoffEmphasis, playoffWeeks } from '../core/league/planning.ts';
 import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/tradeFit.ts';
-import type { NeedLevel } from '../core/league/competition.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
+/* Which season it is, from Sleeper's own state rather than from the clock. */
+import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 import { UsageService } from './services/usageService.ts';
 import { PlayerDetailService } from './services/playerDetailService.ts';
@@ -170,11 +199,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
     const draft = selected?.draftId ? await new LeagueRepo(db).getDraft(selected.draftId) : null;
-    const season = resolveSeasonPhase({
+    const lifecycleInput = {
       state,
       league: selected ? { season: selected.season, status: selected.status ?? null } : null,
       draft: draft ? { status: draft.status } : null,
-    });
+    };
+    const season = resolveSeasonPhase(lifecycleInput);
+    /*
+     * The same decision at higher resolution, alongside rather than instead.
+     *
+     * `season` keeps its exact four-state shape so a client running against a
+     * deployment older than this one — or newer, during the minutes a deploy
+     * takes — is never handed a phase it does not recognise. `lifecycle` is the
+     * eight-state answer for anything that needs to tell a draft that is open
+     * from one that is live from one that finished a month ago.
+     */
+    const lifecycle = resolveLifecycle(lifecycleInput);
 
     return jsonResponse({
       players,
@@ -185,6 +225,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       vegas: { ...props, provider: ctx.env.vegas.name, configured: ctx.env.vegas.isConfigured() },
       adpSnapshot: adp,
       season,
+      lifecycle,
     });
   });
 
@@ -193,6 +234,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     new SetupService(ctx.env.db, ctx.env.vegas, ctx.env.inboundAddress ?? null);
 
   router.get('/api/setup/status', async (ctx) => jsonResponse(await setupService(ctx).status()));
+
+  /**
+   * Is the app ready for this season?
+   *
+   * The check that replaces "open it in March and see if it looks right", which
+   * is not a test: a screen full of last season's ADP renders perfectly. Every
+   * source is asked for the *current* season by name and nothing is allowed to
+   * answer with the newest thing it has.
+   *
+   * Read-only, no fetches, one indexed read per source — so it costs nothing to
+   * run and can be run from a phone on a free tier at any time of year.
+   */
+  router.get('/api/diagnostics/rollover', async (ctx) => jsonResponse(await buildRolloverReport(ctx.env.db)));
 
   router.get('/api/setup/newsletter', async (ctx) => {
     const status = await setupService(ctx).newsletterStatus();
@@ -276,7 +330,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!body?.username) return errorResponse('username required', 400);
     const service = new SleeperSyncService(ctx.env.db, ctx.env.sleeper);
     const user = await service.connectUser(body.username);
-    const season = body.season ?? String(new Date().getFullYear());
+    /*
+     * The season to import leagues for, from Sleeper rather than the clock.
+     *
+     * This used to be `String(new Date().getFullYear())`, which is wrong for
+     * two months a year and wrong in the worst possible way: connecting on 1
+     * January 2027 asked Sleeper for the 2027 leagues, a season that does not
+     * exist until March, and got back an empty list. An empty list is
+     * indistinguishable from "you are not in any leagues", so the user's first
+     * experience of the app was it telling them they had no leagues while they
+     * were looking at twelve of them in Sleeper.
+     *
+     * `connectUser` has just run, so `/state/nfl` may not have been read yet on
+     * a first connect — the resolver's calendar fallback covers that, and it at
+     * least uses the *league year* rather than the calendar year, so the
+     * January answer is 2026 rather than 2027.
+     */
+    const season = body.season ?? (await currentSeason(ctx.env.db));
     const { imported } = await service.syncLeagues(season);
     return jsonResponse({ user, season, leaguesImported: imported });
   });
@@ -514,82 +584,157 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       lineup,
     });
 
+    /*
+     * What each upgrade would cost, and what paying it would cost you.
+     *
+     * Bolted onto the existing advice rather than folded into it: the waiver
+     * engine answers "would he improve the lineup", which is true whether or
+     * not the league bids for players at all. The price is a second question
+     * with its own failure modes — an unpublished budget, a priority league, no
+     * bid history — and every one of them degrades to a sentence rather than
+     * taking the upgrade list with it.
+     */
+    const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
+      .context(league.id, { week: nflState?.week ?? 1, season: league.season })
+      .catch(() => null);
+
+    /*
+     * Who else needs the position, and can afford him.
+     *
+     * The league-intelligence half of the waiver row: `WaiverLeagueIntel` types
+     * `competition` and `multiWeek` as present-and-null when a pass ran and
+     * found nothing, absent when no pass exists. This is that pass. It answers
+     * both from rosters already loaded — no extra query, no lineup scoring —
+     * and it feeds the same count into the price model, which asks for exactly
+     * this number and has been estimating it league-wide.
+     */
+    const intel = waiverLeagueIntel({
+      advice,
+      rosters,
+      players: await new PlayerRepo(db).listAll(),
+      shape,
+      rosteredIds,
+      budgets: strategy?.budget ?? null,
+      prices: strategy?.prices ?? null,
+      candidateInputs,
+    });
+
+    const budgets = strategy
+      ? priceWaiverUpgrades({
+          advice,
+          strategy,
+          rosterInputs,
+          candidateInputs,
+          rosteredIds,
+          competition: intel.competition,
+        })
+      : [];
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: freshness,
       ...advice,
+      upgrades: withLeagueIntel(advice.upgrades, intel),
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
+      faab: strategy
+        ? {
+            rule: strategy.budget.rule,
+            mine: strategy.budget.rosters.find((r) => r.isMine) ?? null,
+            rosters: strategy.budget.rosters,
+            prices: strategy.prices,
+            losingBids: strategy.losingBids,
+            bids: budgets,
+            notes: strategy.notes,
+            trendingCapturedAt: strategy.trendingCapturedAt,
+          }
+        : null,
     });
   });
 
-  // ----------------------------------------------------- league intelligence
-
   /**
-   * Read this league's own transaction history out of Sleeper.
+   * Refresh the league-strategy inputs: transactions and the trending list.
    *
-   * A write, because it stores what it reads — but every request it makes is a
-   * GET, and there is no code path in this application that submits a waiver
-   * claim, a bid, a drop or a trade. Rate limited alongside the other manual
-   * refreshes: it is one request per league-week and a four-season league is
-   * several dozen of them.
+   * A write, and rate limited like every other manual refresh. Bounded to a few
+   * weeks per call by the service itself, so an established league fills its
+   * history over several refreshes rather than making eighteen requests in one.
    */
-  router.post('/api/leagues/:id/history/sync', async (ctx) => {
-    const limit = refreshLimiter.check('league-history');
-    if (!limit.allowed) {
-      return errorResponse(
-        `history sync was run recently — try again in ${limit.retryAfterSeconds}s`,
-        429,
-      );
-    }
-    const service = new LeagueHistoryService(ctx.env.db, ctx.env.sleeper);
-    const state = await new SleeperSyncService(ctx.env.db, ctx.env.sleeper).getNflState();
-    const body = await ctx.json<{ throughWeek?: number }>();
-    try {
-      const report = await service.sync(ctx.params['id']!, {
-        throughWeek: body?.throughWeek ?? state?.week ?? undefined,
-      });
-      return jsonResponse(report);
-    } catch (err) {
-      return errorResponse(err instanceof Error ? err.message : String(err), 400);
-    }
+  router.post('/api/leagues/:id/strategy/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('strategy');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
+
+    const db = ctx.env.db;
+    const league = await new LeagueRepo(db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const service = new LeagueStrategyService(db, { sleeper: ctx.env.sleeper });
+    const transactions = await service.syncTransactions({
+      leagueId: league.id,
+      sleeperLeagueId: league.sleeperLeagueId,
+      season: league.season,
+      week: state?.week ?? 1,
+    });
+    const trending = await service.captureTrending();
+    return jsonResponse({ transactions, trending });
   });
 
-  /** Manager behaviour profiles, and what everybody has left to spend. */
-  router.get('/api/leagues/:id/managers', async (ctx) => {
-    const intel = new LeagueIntelService(ctx.env.db);
-    const context = await intel.context(ctx.params['id']!);
-    if (!context) return errorResponse('league not found', 404);
+  /**
+   * Rebuild the manager profiles from league history.
+   *
+   * Separate from the refresh above and deliberately so: it walks the
+   * previous-league chain and costs dozens of requests to produce a handful of
+   * sentences that change perhaps once a season. Nothing calls it on a page
+   * load.
+   */
+  router.post('/api/leagues/:id/managers/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('managers');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
 
-    const syncs = await new LeagueHistoryRepo(ctx.env.db).listWeekSyncs(
-      context.seasons.length > 0 ? [context.sleeperLeagueId] : [],
-    );
+    const league = await new LeagueRepo(ctx.env.db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    const result = await new LeagueStrategyService(ctx.env.db, { sleeper: ctx.env.sleeper }).refreshProfiles({
+      leagueId: league.id,
+      sleeperLeagueId: league.sleeperLeagueId,
+    });
+    return jsonResponse(result);
+  });
+
+  /** What has been learned about the people in this league. Read-only. */
+  router.get('/api/leagues/:id/managers', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const [rosters, profiles] = await Promise.all([
+      leagueRepo.listRosters(league.id),
+      new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id),
+    ]);
 
     return jsonResponse({
-      league: { id: context.leagueId, season: context.season },
-      seasons: context.seasons,
-      faabLeague: context.faabLeague,
-      budget: context.budget,
-      leagueMeanBidShare: context.leagueMeanShare,
-      managers: context.profiles,
-      wallets: LeagueIntelService.wallets(context),
-      transactionsOnRecord: context.transactions.length,
-      weeksRead: syncs.length,
-      limits: context.limits,
+      league: { id: league.id, name: league.name },
+      room: profiles.room,
+      managers: rosters.map((roster) => ({
+        rosterId: roster.rosterId,
+        ownerName: roster.ownerName,
+        isMine: roster.isMine,
+        trade: profiles.trade.get(roster.rosterId) ?? null,
+        draft: profiles.draft.get(roster.rosterId) ?? null,
+      })),
     });
   });
 
   /**
-   * The waiver board: every available player against six named dimensions.
+   * What each bench slot is earning, and which ones are earning least.
    *
-   * Built on top of the same free-agent scan the Team screen's waiver advice
-   * uses, so the two can never disagree about who is available or about how
-   * good he is. What this route adds is everything league-specific — what he
-   * will cost, who else wants him, what kind of add he is, and whether the
-   * honest answer is to stream the position instead.
+   * Deliberately its own endpoint rather than a field on the roster: it needs
+   * the free-agent pool scored, which is the same bounded scan the waiver
+   * advice does, and a roster view should not pay for it.
    */
-  router.get('/api/leagues/:id/waiver-board', async (ctx) => {
+  router.get('/api/leagues/:id/bench', async (ctx) => {
     const db = ctx.env.db;
     const leagueRepo = new LeagueRepo(db);
     const league = await leagueRepo.getLeague(ctx.params['id']!);
@@ -597,150 +742,37 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const rosters = await leagueRepo.listRosters(league.id);
     const mine = rosters.find((r) => r.isMine) ?? null;
-    const rosteredIds = new Set<string>();
-    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
+    if (!mine) return jsonResponse({ found: false, dropCandidates: [], ranked: [], notes: [] });
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
-    const startable = startablePositions(shape);
-    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable });
+    const rosteredIds = new Set<string>();
+    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable: startablePositions(shape) });
 
     const [rosterInputs, candidateInputs] = await Promise.all([
-      startSitInputsFor(db, mine?.playerIds ?? []),
+      startSitInputsFor(db, mine.playerIds),
       startSitInputsFor(db, candidateIds),
     ]);
 
-    const evaluations = candidateInputs.map((c) => evaluatePlayer(c, profile));
-
-    /*
-     * Need fit comes from the lineup optimiser rather than from a fresh opinion.
-     *
-     * The Team screen already decides which slots are unfilled and what an add
-     * would gain; reproducing that judgement here would give the user two
-     * answers to one question. A candidate the optimiser never surfaced is
-     * depth, which is a real answer and not an omission.
-     */
-    const advice =
-      mine && rosterInputs.length > 0
-        ? recommendWaiverUpgrades({
-            roster: rosterInputs,
-            candidates: candidateInputs,
-            shape,
-            profile,
-            rosteredPlayerIds: rosteredIds,
-            currentStarterIds: mine.starterIds,
-          })
-        : null;
-
-    const fitById = new Map<string, { fit: NeedFit; gain: number }>();
-    for (const upgrade of advice?.upgrades ?? []) {
-      for (const candidate of upgrade.candidates) {
-        fitById.set(candidate.playerId, {
-          fit: upgrade.need === 'unfilled' ? 'fills_hole' : 'upgrade',
-          gain: candidate.gain,
-        });
-      }
-    }
-
-    const intel = new LeagueIntelService(db);
-    const context = await intel.context(league.id, {
-      unavailablePlayerIds: evaluations.filter((e) => e.ruledOut).map((e) => e.playerId),
-    });
-    if (!context) return errorResponse('league not found', 404);
-
-    /*
-     * The replacement pool, per position, is what makes streaming advice real.
-     *
-     * It is the scores of the *other* free agents at the same position in this
-     * same scan — the players actually claimable next week — rather than a
-     * general idea of positional depth.
-     */
-    const poolByPosition = new Map<string, number[]>();
-    for (const e of evaluations) {
-      if (e.score == null) continue;
-      const bucket = poolByPosition.get(e.position) ?? [];
-      bucket.push(e.score);
-      poolByPosition.set(e.position, bucket);
-    }
-
-    const allPlayers = await new PlayerRepo(db).listAll();
-    const byClub: BeneficiaryPlayer[] = allPlayers.map((p) => ({
-      playerId: p.id,
-      name: p.fullName,
-      team: p.team,
-      position: p.position,
-      status: p.status,
-    }));
-
-    const candidates: WaiverCandidateInput[] = [];
-    for (const evaluation of evaluations) {
-      if (evaluation.score == null || evaluation.ruledOut) continue;
-      const fit = fitById.get(evaluation.playerId);
-      const beneficiary = beneficiaryOf(
-        { playerId: evaluation.playerId, team: evaluation.team, position: evaluation.position },
-        byClub,
-        rosteredIds,
-      );
-
-      const { cost, competition } = intel.priceAndCompete(context, {
-        position: evaluation.position,
-        shape,
-        demand: {
-          // Value is the candidate's score against the best free agent scored
-          // in this scan, so it is a share of what is actually available rather
-          // than an absolute nobody can calibrate.
-          value: relativeValue(evaluation.score, poolByPosition.get(evaluation.position) ?? []),
-          injuryBeneficiary: beneficiary != null,
-          roleRising: evaluation.role.trend === 'rising_high' || evaluation.role.trend === 'rising_moderate',
-          immediateStarter: fit?.fit === 'fills_hole' || fit?.fit === 'upgrade',
-          scarcePosition: (poolByPosition.get(evaluation.position) ?? []).length <= 2,
-        },
-      });
-
-      candidates.push({
-        playerId: evaluation.playerId,
-        name: evaluation.name,
-        position: evaluation.position,
-        team: evaluation.team,
-        thisWeek: {
-          points: evaluation.score,
-          display: `${evaluation.score.toFixed(1)} pts`,
-          known: true,
-        },
-        /*
-         * The four-week outlook is not computed here.
-         *
-         * A rest-of-season projection is the weekly engine's contract, not this
-         * one's, and inventing a second one would give the app two answers to
-         * the same question. Until one is published, the dimension reports
-         * unknown, which is what it is.
-         */
-        next4: { points: null, display: 'no four-week outlook published', known: false },
-        needFit: fit?.fit ?? 'depth',
-        gain: fit?.gain ?? null,
-        roleTrend: evaluation.role.trend,
-        injuryBeneficiary: beneficiary != null,
-        starterReturnsInWeeks: beneficiary?.returnsInWeeks ?? null,
-        replacementPool: (poolByPosition.get(evaluation.position) ?? []).filter((s) => s !== evaluation.score),
-        expectedCost: cost,
-        competition,
-      });
-    }
-
-    const rows = Math.min(60, Math.max(1, Number(ctx.url.searchParams.get('limit') ?? 25)));
-    const board = buildWaiverBoard(candidates).slice(0, rows);
+    const lineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
+    const advice = evaluateBench(
+      buildHeldPlayers({ rosterInputs, candidateInputs, lineup, profile, reserveIds: mine.reserveIds }),
+    );
 
     return jsonResponse({
-      league: { id: league.id, name: league.name, season: league.season },
-      faabLeague: context.faabLeague,
-      budget: context.budget,
-      myRemainingFaab: context.profiles.find((p) => p.isMine)?.remainingFaab ?? null,
-      board,
-      considered: candidates.length,
-      pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
-      limits: context.limits,
+      found: true,
+      league: { id: league.id, name: league.name },
+      ...advice,
     });
   });
+
+  // ----------------------------------------------------- league intelligence
+  //
+  // The waiver board, manager profiles and FAAB pricing live above, in the
+  // routes `main` owns. What follows is only what those surfaces do not
+  // already answer: the deals worth proposing, the weeks ahead, and what
+  // changed since you last looked.
 
   /**
    * Bilateral trade fits, and the timing calls behind them.
@@ -769,9 +801,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
-    const intel = new LeagueIntelService(db);
-    const context = await intel.context(league.id);
-    if (!context) return errorResponse('league not found', 404);
+    /*
+     * Partner tendencies come from the canonical trade profiles.
+     *
+     * Cached and keyed by roster id by `ManagerProfileRepo`, built from the
+     * league's own transaction history by `core/managers/tradeProfile.ts`.
+     * There is deliberately no second profile here: plausibility reads the same
+     * record the Trades ladder reads, so the two cannot disagree about whether
+     * somebody trades.
+     */
+    const profiles = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
+      .managerProfiles(league.id)
+      .catch(() => null);
+    const tradeProfiles = new Map<number, ManagerTradeProfile>(
+      [...(profiles?.trade ?? new Map()).entries()].map(([rosterId, cached]) => [rosterId, cached.profile]),
+    );
 
     const teams: TradeTeam[] = [];
     for (const roster of rosters) {
@@ -816,7 +860,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         if (!(position in needs) && (shape.starters[position] ?? 0) > 0) needs[position] = 'urgent';
       }
 
-      const profileForTeam = roster.ownerId ? context.profilesByUser.get(roster.ownerId) : undefined;
+      const profileForTeam = tradeProfiles.get(roster.rosterId);
       teams.push({
         rosterId: roster.rosterId,
         userId: roster.ownerId,
@@ -836,7 +880,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       ideas,
       partners: partners.length,
-      notes: context.limits,
+      notes:
+        tradeProfiles.size === 0
+          ? ['no manager trade history has been synced, so plausibility is untested rather than measured']
+          : [],
     });
   });
 
@@ -861,8 +908,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const players = mine ? await new PlayerRepo(db).listByIds(mine.playerIds) : new Map();
     const starters = new Set(mine?.starterIds ?? []);
-    const seats = await new LeagueHistoryRepo(db).listSeats(league.sleeperLeagueId);
-    const mySeat = seats.find((s) => s.isMine && s.season === league.season) ?? null;
+    /*
+     * The season record, from Sleeper's own roster settings.
+     *
+     * Stored whole on `RosterRecord.settings` by the league sync, so this needs
+     * no second request and no table of its own. Absent means the sync predates
+     * the column, which `playoffEmphasis` reads as too few games played and
+     * answers with zero weight — the correct behaviour for an unknown record.
+     */
+    const mySettings = (mine?.settings ?? null) as Record<string, unknown> | null;
+    const record = {
+      wins: Number(mySettings?.['wins'] ?? 0) || 0,
+      losses: Number(mySettings?.['losses'] ?? 0) || 0,
+    };
 
     /*
      * There is no bye-week source connected.
@@ -896,8 +954,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const emphasis = playoffEmphasis({
       currentWeek,
       playoffStartWeek,
-      wins: mySeat?.wins ?? 0,
-      losses: mySeat?.losses ?? 0,
+      wins: record.wins,
+      losses: record.losses,
       playoffTeams,
       totalTeams: rosters.length || league.totalRosters,
     });
@@ -913,7 +971,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playoffs: {
         startWeek: playoffStartWeek,
         weeks: playoffWeeks(playoffStartWeek),
-        record: mySeat ? { wins: mySeat.wins ?? null, losses: mySeat.losses ?? null } : null,
+        record: mySettings ? record : null,
         ...emphasis,
       },
     });
@@ -924,7 +982,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const leagueRepo = new LeagueRepo(ctx.env.db);
     const league = await leagueRepo.getLeague(ctx.params['id']!);
     if (!league) return errorResponse('league not found', 404);
-    const events = await new DecisionFeedRepo(ctx.env.db).listOpen(league.sleeperLeagueId);
+    const events = await new DecisionFeedRepo(ctx.env.db).listOpen(league.id);
     return jsonResponse({
       league: { id: league.id, name: league.name },
       events,
@@ -936,7 +994,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const leagueRepo = new LeagueRepo(ctx.env.db);
     const league = await leagueRepo.getLeague(ctx.params['id']!);
     if (!league) return errorResponse('league not found', 404);
-    return jsonResponse(await new DecisionFeedRepo(ctx.env.db).markSeen(league.sleeperLeagueId));
+    return jsonResponse(await new DecisionFeedRepo(ctx.env.db).markSeen(league.id));
   });
 
   // ------------------------------------------------------------------ drafts
@@ -1436,6 +1494,77 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await new TradeService(ctx.env.db).build({ limit }));
   });
 
+  /**
+   * What to offer for one specific player, and where to stop.
+   *
+   * A separate request from the trade board on purpose. The board is discovery
+   * — whose news is moving — and this is negotiation, which needs a named
+   * target, both rosters scored, and the partner's own history. Nobody wants
+   * that computed for sixty players they are not pursuing.
+   *
+   * The values are weekly fantasy points from the same optimiser the Team
+   * screen draws, so the ladder is denominated in the one currency this app
+   * already calibrates. There is no separate "trade value" scale to keep in
+   * step with anything.
+   */
+  router.get('/api/leagues/:id/trades/ladder', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const targetId = ctx.url.searchParams.get('playerId');
+    if (!targetId) return errorResponse('playerId is required', 400);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const theirs = rosters.find((r) => !r.isMine && r.playerIds.includes(targetId)) ?? null;
+    if (!mine) return errorResponse('no roster in this league is marked as yours', 409);
+    if (!theirs) {
+      /*
+       * Not an error. A player nobody else holds is a waiver add, and saying so
+       * is more useful than a 404 that leaves the caller guessing which of the
+       * two things went wrong.
+       */
+      return jsonResponse({ found: false, reason: 'Nobody in this league rosters him — this is an add, not a trade.' });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    const [mineInputs, theirsInputs] = await Promise.all([
+      startSitInputsFor(db, mine.playerIds),
+      startSitInputsFor(db, theirs.playerIds),
+    ]);
+
+    const ladder = buildLadderFor({ targetId, mineInputs, theirsInputs, shape, profile });
+    if (!ladder) return errorResponse('player not found on that roster', 404);
+
+    const profiles = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id);
+    const partner = profiles.trade.get(theirs.rosterId) ?? null;
+
+    /*
+     * The partner's tendencies are applied only when the cache has them, and
+     * the ladder itself says how thin the sample is. A profile that has never
+     * been built is null, and a null partner simply means the standard opening
+     * discount rather than a guess about a stranger.
+     */
+    const withPartner = buildLadder({ ...ladder.inputs, partner: partner?.profile ?? null });
+
+    return jsonResponse({
+      found: true,
+      league: { id: league.id, name: league.name },
+      partner: { rosterId: theirs.rosterId, ownerName: theirs.ownerName, profile: partner },
+      target: ladder.target,
+      ladder: withPartner,
+      /*
+       * And whether turning depth into one better player is right for this
+       * roster at all — which is a different question from what he costs, and
+       * one a ladder cannot answer.
+       */
+      consolidation: ladder.consolidation,
+    });
+  });
+
   // ------------------------------------------------------- help my scores ---
   // Names the matcher would not guess at, and the tally they are costing.
   router.get('/api/repair', async (ctx) => jsonResponse(await new RepairService(ctx.env.db).status()));
@@ -1852,27 +1981,6 @@ export async function buildStartSitContext(
  * comfortably past where a startable free agent is ever found, and it keeps the
  * whole scan to a few dozen players — which is what keeps Team quick on a phone.
  */
-/**
- * A candidate's value as a share of the best thing available at his position.
- *
- * Expected FAAB cost needs "how good is he" on a 0–1 scale, and an absolute
- * fantasy-point total is not that: eighteen points means something different at
- * quarterback and at tight end, and a league that starts one of each would price
- * them against the same yardstick. Measured against the pool actually being
- * scanned, so the best free agent left at a position is a 1 whether that is a
- * genuine starter in September or the last body in December — which is also
- * true of what he will cost.
- */
-function relativeValue(score: number, pool: number[]): number {
-  const best = Math.max(score, ...pool);
-  if (!Number.isFinite(best) || best <= 0) return 0;
-  return Math.min(1, Math.max(0, score / best));
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 const FREE_AGENTS_PER_POSITION = 12;
 
 /**
@@ -1977,4 +2085,522 @@ function escapeRegex(input: string): string {
  */
 export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {}): Promise<VegasRefreshReport> {
   return new VegasRefreshService(env.db, env.vegas).refresh(opts);
+}
+
+/**
+ * The league-intelligence half of a waiver row.
+ *
+ * `core/waivers/board.ts` types `WaiverLeagueIntel` with three optional fields
+ * and says what they mean: present-and-null is a pass that ran and found
+ * nothing, absent is a deployment with no pass at all. This is the pass.
+ *
+ * Both answers come out of data the route already holds. Competition is a count
+ * of rivals whose healthy bodies at the position do not cover their starting
+ * slots, filtered by what they can still spend. Multi-week value is the shelf
+ * life of the *reason he is available*: a player holding a job while somebody
+ * is hurt is worth what the absence is worth, not what the production is.
+ */
+function waiverLeagueIntel(opts: {
+  advice: ReturnType<typeof recommendWaiverUpgrades>;
+  rosters: RosterRecord[];
+  players: CanonicalPlayer[];
+  shape: RosterShape;
+  rosteredIds: Set<string>;
+  budgets: LeagueBudgetState | null;
+  prices: PriceSummary | null;
+  candidateInputs: StartSitInput[];
+}): {
+  competition: Map<string, CompetitionAssessment>;
+  multiWeek: Map<string, { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null }>;
+} {
+  const competition = new Map<string, CompetitionAssessment>();
+  const multiWeek = new Map<
+    string,
+    { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null }
+  >();
+
+  const teams = opts.rosters.map((r) => ({
+    rosterId: r.rosterId,
+    displayName: r.ownerName ?? `Roster ${r.rosterId}`,
+    isMine: r.isMine,
+    playerIds: r.playerIds,
+  }));
+
+  /*
+   * Availability comes from the evaluated candidates where it exists.
+   *
+   * A rival's own players are not evaluated here — that would be the twelve
+   * lineup optimisations this deliberately avoids — so their availability is
+   * read from the player dictionary's Sleeper status, which is the same field
+   * the beneficiary detector reads and is enough to know somebody is on IR.
+   */
+  const meta = new Map<string, { position: string | null; unavailable?: boolean }>();
+  const clubmates = opts.players.map((p) => ({
+    playerId: p.id,
+    name: p.fullName,
+    team: p.team,
+    position: p.position,
+    status: p.status,
+  }));
+  for (const p of opts.players) {
+    meta.set(p.id, {
+      position: p.position || null,
+      unavailable: p.status != null && RULED_OUT_STATUSES.has(p.status),
+    });
+  }
+
+  const budgetByRoster = new Map<number, RosterBudget>(
+    (opts.budgets?.rosters ?? []).map((r) => [r.rosterId, r] as const),
+  );
+  const bidding = opts.budgets?.rule.usesFaab === true;
+  const needsByPosition = new Map<string, ReturnType<typeof teamNeedsFor>>();
+  const roleById = new Map(opts.candidateInputs.map((c) => [c.player.id, c]));
+
+  for (const upgrade of opts.advice.upgrades) {
+    for (const candidate of upgrade.candidates) {
+      if (!needsByPosition.has(candidate.position)) {
+        needsByPosition.set(candidate.position, teamNeedsFor(candidate.position, teams, meta, opts.shape));
+      }
+      const needs = needsByPosition.get(candidate.position)!;
+
+      competition.set(
+        candidate.playerId,
+        needs.length === 0
+          ? COMPETITION_UNKNOWN
+          : assessCompetition({
+              needs,
+              budgets: budgetByRoster,
+              // The cheapest thing anybody has won with is the floor a rival has
+              // to clear to be in on him at all. Null in an unpriced league,
+              // where nobody is excluded for affordability.
+              expectedLow: opts.prices?.low ?? null,
+              bidding,
+            }),
+      );
+
+      const beneficiary = beneficiaryOf(
+        { playerId: candidate.playerId, team: candidate.team, position: candidate.position },
+        clubmates,
+        opts.rosteredIds,
+      );
+      multiWeek.set(candidate.playerId, shelfLifeIntel(beneficiary, roleById.get(candidate.playerId) ?? null));
+    }
+  }
+
+  return { competition, multiWeek };
+}
+
+/**
+ * How long this add is worth holding.
+ *
+ * The distinction the waiver board asks for, and it changes the advice
+ * completely: the same player can be a correct $1 claim and an incorrect $25
+ * one. An absence with no published return date is a job; a week-to-week
+ * designation is a loan, and pricing the second like the first is how a quarter
+ * of a season's budget goes on one Sunday.
+ */
+function shelfLifeIntel(
+  beneficiary: ReturnType<typeof beneficiaryOf>,
+  input: StartSitInput | null,
+): { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null } {
+  if (beneficiary) {
+    return beneficiary.returnsInWeeks != null
+      ? { level: 'streamer', label: 'One-week cover', detail: beneficiary.note }
+      : { level: 'multi_week', label: 'Holds the job for now', detail: beneficiary.note };
+  }
+  // Without a usage series there is nothing to say about the weeks ahead, and
+  // saying "season long" because nobody is hurt would be an inference from an
+  // absence.
+  const games = input?.usage?.length ?? 0;
+  if (games === 0) return { level: 'unknown', label: 'Multi-week value not known', detail: null };
+  return { level: 'season_long', label: 'His own job', detail: 'nobody he replaced is due back' };
+}
+
+/** Fold the intel onto the rows the board reads, leaving the shape otherwise alone. */
+function withLeagueIntel(
+  upgrades: ReturnType<typeof recommendWaiverUpgrades>['upgrades'],
+  intel: ReturnType<typeof waiverLeagueIntel>,
+) {
+  return upgrades.map((upgrade) => ({
+    ...upgrade,
+    candidates: upgrade.candidates.map((candidate) => ({
+      ...candidate,
+      competition: intel.competition.get(candidate.playerId)
+        ? {
+            level: intel.competition.get(candidate.playerId)!.level,
+            label: intel.competition.get(candidate.playerId)!.label,
+            detail: intel.competition.get(candidate.playerId)!.detail,
+          }
+        : null,
+      multiWeek: intel.multiWeek.get(candidate.playerId) ?? null,
+    })),
+  }));
+}
+
+/**
+ * Put a price on each waiver upgrade the engine found.
+ *
+ * The translation layer between two vocabularies. The waiver engine speaks in
+ * fantasy points gained over a current starter; the bid strategy speaks in
+ * shares of a budget, shelf life and contested demand. Everything below is that
+ * conversion, and every input it cannot establish is passed through as the
+ * module's own "unknown" rather than as a default that looks like knowledge.
+ */
+function priceWaiverUpgrades(opts: {
+  advice: ReturnType<typeof recommendWaiverUpgrades>;
+  strategy: StrategyContext;
+  rosterInputs: StartSitInput[];
+  candidateInputs: StartSitInput[];
+  rosteredIds: Set<string>;
+  /** Rivals who need the position and can pay, by player id. */
+  competition?: Map<string, CompetitionAssessment>;
+}): (BidRecommendation & { opportunity: OpportunityCost | null; trending: string | null; disagreement: Disagreement })[] {
+  const { advice, strategy } = opts;
+  const season = { week: strategy.week, finalWeek: strategy.finalWeek };
+
+  /*
+   * Rosters that could plausibly want him, for the demand reading.
+   *
+   * This used to be every funded rival in the league, on the reasoning that a
+   * finer count would need each rival's lineup scored against each candidate --
+   * twelve lineup optimisations for a number feeding a 0-1 input.
+   *
+   * That is true of scoring and false of *need*. Whether a roster needs a back
+   * is a count of the healthy backs it holds against the back slots it has to
+   * fill, which is one pass over rosters already in memory. So the count is now
+   * per position and filtered by affordability, and falls back to the blunt
+   * league-wide figure only when positional needs were not supplied.
+   */
+  const fundedRivals = strategy.budget.rosters.filter((r) => !r.isMine && (r.remaining ?? 0) > 0).length;
+
+  const rivalsFor = (playerId: string): number | null => {
+    const assessed = opts.competition?.get(playerId);
+    if (assessed) return assessed.bidders.length > 0 ? Math.min(assessed.bidders.length, 4) : null;
+    return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
+  };
+
+  const out: (BidRecommendation & {
+    opportunity: OpportunityCost | null;
+    trending: string | null;
+    disagreement: Disagreement;
+  })[] = [];
+
+  /*
+   * What the budget still has to buy after this claim.
+   *
+   * The waiver engine has already sorted the upgrades by how badly each slot
+   * needs filling, so every *other* slot on that list is a call on the same
+   * wallet. Naming the biggest one is what turns "recommended max $19" into
+   * "recommended max $19 · preserve budget for RB depth" — the sentence that
+   * explains why the recommendation sits below what he is worth.
+   *
+   * Null when this is the only hole, because there is then nothing to preserve
+   * the money for and saying so would be inventing a rival need.
+   */
+  const otherNeed = (slot: string): string | null => {
+    const next = advice.upgrades.find((u) => u.slot !== slot);
+    if (!next) return null;
+    return `${next.slot} depth`;
+  };
+
+  for (const upgrade of advice.upgrades) {
+    for (const candidate of upgrade.candidates) {
+      const trend = strategy.trending.get(candidate.playerId) ?? null;
+      const marketHeat = trend?.heat ?? null;
+
+      /*
+       * The role assessment does double duty, for two different purposes.
+       *
+       * As `roleStability` it prices the bid — a role that has moved around is
+       * worth less than the same points from a settled one. As `modelObserved`
+       * it decides whether this app has enough of its own read to disagree with
+       * the market at all: a player with no usage series behind him cannot be
+       * evidence that the crowd is wrong, he is just a player nobody has
+       * measured.
+       */
+      const role = roleStabilityOf(candidate);
+      const modelObserved = candidate.score != null && candidate.role.games > 0;
+
+      const rec = recommendBid({
+        inputs: {
+          playerId: candidate.playerId,
+          name: candidate.name,
+          position: candidate.position,
+          weeklyGain: candidate.gain,
+          /*
+           * What the *next* candidate for the same slot would give you. The
+           * list is already sorted best first, so the second name is the
+           * replacement — and when there is no second name, the upgrade is
+           * genuinely exclusive rather than unmeasured.
+           */
+          gainOverReplacement: gainOverNextBest(upgrade, candidate),
+          roleStability: role,
+          shelfLife: shelfLifeOf(candidate),
+          futureOpportunity: 'normal',
+          marketHeat,
+          rivalsWithNeed: rivalsFor(candidate.playerId),
+        },
+        budgetState: strategy.budget,
+        prices: strategy.prices,
+        season,
+        reserveFor: otherNeed(upgrade.slot),
+      });
+
+      out.push({
+        ...rec,
+        opportunity: rec.recommended != null ? simulateOpportunityCost(strategy.budget, rec.recommended) : null,
+        trending: trend ? trendingHeadline(trend, { availableInLeague: !opts.rosteredIds.has(candidate.playerId) }) : null,
+        disagreement: detectDisagreement({
+          marketHeat,
+          modelStrength: candidate.score != null ? Math.max(0, Math.min(1, candidate.gain / 6)) : null,
+          modelObserved,
+        }),
+      });
+    }
+  }
+
+  return out;
+}
+
+/** The gap between this candidate and the next one for the same slot. */
+function gainOverNextBest(
+  upgrade: ReturnType<typeof recommendWaiverUpgrades>['upgrades'][number],
+  candidate: { playerId: string; gain: number },
+): number | null {
+  const others = upgrade.candidates.filter((c) => c.playerId !== candidate.playerId);
+  if (others.length === 0) return null;
+  const best = Math.max(...others.map((c) => c.gain));
+  return Math.round((candidate.gain - best) * 100) / 100;
+}
+
+/**
+ * How settled the role behind the points is.
+ *
+ * Read from the role assessment the waiver candidate carries, not from the prose
+ * it also carries: the reasons are written for a card, and pricing a bid off a
+ * phrase is one rewording away from silently changing a recommendation.
+ *
+ * `spike` is deliberately volatile rather than rising. One enormous week is the
+ * single most common reason a player is on a waiver wire at all, and treating it
+ * as a settled role is how a tool pays starter money for a touchdown.
+ */
+function roleStabilityOf(candidate: WaiverCandidate): RoleStability {
+  const { trend, games } = candidate.role;
+  if (games === 0 || trend === 'insufficient_data') return 'unknown';
+  if (trend === 'rising_high' || trend === 'rising_moderate') return 'rising';
+  if (trend === 'spike' || trend === 'falling_high' || trend === 'falling_moderate') return 'volatile';
+  return candidate.statusFlag ? 'volatile' : 'stable';
+}
+
+/**
+ * How long the reason he is available is likely to last.
+ *
+ * Deliberately conservative. Only a measured, rising role is treated as a
+ * season-long asset; a healthy body filling a slot nobody can start is a
+ * multi-week hold; and anything the app cannot read is `unknown`, which the
+ * strategy module prices as two weeks rather than as optimism.
+ */
+function shelfLifeOf(candidate: WaiverCandidate): ShelfLife {
+  if (candidate.role.games > 0 && (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate')) {
+    return 'season';
+  }
+  if (candidate.reasons.some((r) => r.includes('fills a slot'))) return 'multi_week';
+  return 'unknown';
+}
+
+/**
+ * Turn a roster and a free-agent pool into bench slots to be valued.
+ *
+ * The mapping that makes §7 possible: a bench player's slot value needs what
+ * the wire offers *at his position*, which is a fact about the pool rather than
+ * about him. Computed once here and handed to the pure module, which then never
+ * has to know a free agent exists.
+ */
+function buildHeldPlayers(opts: {
+  rosterInputs: StartSitInput[];
+  candidateInputs: StartSitInput[];
+  lineup: LineupRecommendation;
+  profile: ScoringProfile;
+  reserveIds: string[];
+}): HeldPlayer[] {
+  const starters = new Set(opts.lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const reserve = new Set(opts.reserveIds);
+
+  /* The best freely available score at each position — the replacement level. */
+  const bestFree = new Map<string, number>();
+  for (const candidate of opts.candidateInputs) {
+    const evaluation = evaluatePlayer(candidate, opts.profile);
+    if (evaluation.score == null || evaluation.ruledOut) continue;
+    const current = bestFree.get(evaluation.position) ?? 0;
+    if (evaluation.score > current) bestFree.set(evaluation.position, evaluation.score);
+  }
+
+  return opts.rosterInputs.map((input) => {
+    const evaluation = evaluatePlayer(input, opts.profile);
+    const rising = evaluation.role.trend === 'rising_high' || evaluation.role.trend === 'rising_moderate';
+    return {
+      playerId: evaluation.playerId,
+      name: evaluation.name,
+      position: evaluation.position,
+      role: reserve.has(evaluation.playerId) ? 'reserve' : starters.has(evaluation.playerId) ? 'starter' : 'bench',
+      restOfSeasonValue: evaluation.score,
+      fourWeekValue: evaluation.score,
+      /*
+       * Insurance is left unmeasured rather than guessed.
+       *
+       * Knowing that a back handcuffs a specific starter needs a depth chart
+       * this app does not hold; inventing one would put a confident number
+       * under the single most consequential term in the slot valuation. Zero
+       * here means "no insurance credit claimed", and the module's own comment
+       * explains why an unclaimed credit is safer than an invented one.
+       */
+      insuranceValue: 0,
+      upside: rising ? 'high' : evaluation.role.games >= 6 ? 'none' : 'unknown',
+      coversBye: false,
+      streamingReplacement: bestFree.get(evaluation.position) ?? null,
+    } satisfies HeldPlayer;
+  });
+}
+
+/**
+ * Value one player against two rosters, and assemble the ladder's inputs.
+ *
+ * Three numbers have to come out of this, and they are genuinely different:
+ *
+ *   - **objective value** — what he scores, full stop;
+ *   - **value to me** — what my starting lineup gains by adding him, which is
+ *     zero for a fifth receiver however good he is, and large for the one
+ *     player who fills an empty slot;
+ *   - **cost to his owner** — what *his* lineup loses by giving him up, which
+ *     is what makes a deal possible: a player surplus to their needs costs them
+ *     less than he is worth.
+ *
+ * All three are weekly starting-lineup points from the same optimiser the Team
+ * screen draws, run twice per roster — with and without him. That is four
+ * optimiser passes for one ladder, which is why this is its own endpoint rather
+ * than a field on the trade board.
+ */
+function buildLadderFor(opts: {
+  targetId: string;
+  mineInputs: StartSitInput[];
+  theirsInputs: StartSitInput[];
+  shape: RosterShape;
+  profile: ScoringProfile;
+}): {
+  inputs: LadderInputs;
+  target: { playerId: string; name: string; position: string; value: number };
+  consolidation: ConsolidationAdvice | null;
+} | null {
+  const target = opts.theirsInputs.find((i) => i.player.id === opts.targetId);
+  if (!target) return null;
+
+  const evaluation = evaluatePlayer(target, opts.profile);
+  const objective = Math.max(0, evaluation.score ?? 0);
+
+  const points = (inputs: StartSitInput[]) => recommendLineup(inputs, opts.shape, opts.profile).recommendedPoints;
+
+  const mineNow = points(opts.mineInputs);
+  const mineWith = points([...opts.mineInputs, target]);
+  const theirsNow = points(opts.theirsInputs);
+  const theirsWithout = points(opts.theirsInputs.filter((i) => i.player.id !== opts.targetId));
+
+  const valueToMe = Math.round(Math.max(0, mineWith - mineNow) * 100) / 100;
+  const costToPartner = Math.round(Math.max(0, theirsNow - theirsWithout) * 100) / 100;
+
+  /*
+   * What I would send: my least productive startable players, worst first.
+   *
+   * A placeholder in the honest sense — the user picks the actual package, and
+   * this is what the ladder prices against until they do. Bench players who
+   * would not start are excluded, because sending a player nobody starts is not
+   * an offer.
+   */
+  const offering = opts.mineInputs
+    .filter((i) => i.player.id !== opts.targetId)
+    .map((i) => evaluatePlayer(i, opts.profile))
+    .filter((e) => (e.score ?? 0) > 0)
+    .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
+    .slice(0, 2);
+
+  return {
+    inputs: {
+      targetPlayerId: evaluation.playerId,
+      targetName: evaluation.name,
+      targetValue: objective,
+      targetValueToMe: valueToMe,
+      targetCostToPartner: costToPartner,
+      offering: {
+        value: round2(offering.reduce((sum, e) => sum + (e.score ?? 0), 0)),
+        valueToReceiver: round2(offering.reduce((sum, e) => sum + (e.score ?? 0), 0)),
+        playerIds: offering.map((e) => e.playerId),
+        names: offering.map((e) => e.name),
+      },
+      partner: null,
+    },
+    target: {
+      playerId: evaluation.playerId,
+      name: evaluation.name,
+      position: evaluation.position,
+      value: objective,
+    },
+    consolidation:
+      offering.length >= 2
+        ? assessConsolidation({
+            sending: offering.map((e) => ({
+              playerId: e.playerId,
+              name: e.name,
+              position: e.position,
+              weeklyValue: e.score ?? 0,
+            })),
+            receiving: {
+              playerId: evaluation.playerId,
+              name: evaluation.name,
+              position: evaluation.position,
+              weeklyValue: objective,
+            },
+            startingPointsNow: mineNow,
+            startingPointsAfter: points([
+              ...opts.mineInputs.filter((i) => !offering.some((e) => e.playerId === i.player.id)),
+              target,
+            ]),
+            usableDepth: startableDepth(opts.mineInputs, opts.shape, opts.profile),
+            fragileStarters: opts.mineInputs
+              .map((i) => evaluatePlayer(i, opts.profile))
+              .filter((e) => e.statusFlag != null).length,
+            startingSlots: opts.shape.totalStarters,
+            rosterSize: opts.mineInputs.length,
+            week: 1,
+            finalWeek: 14,
+            uncoveredByes: 0,
+          })
+        : null,
+  };
+}
+
+/**
+ * Bench players who could legally start, by position.
+ *
+ * The "depth" half of the consolidation question. Counted as *startable* rather
+ * than as bodies: two players nobody would ever start are not depth, and
+ * trading them away costs no fragility whatever the roster size says.
+ */
+function startableDepth(
+  inputs: StartSitInput[],
+  shape: RosterShape,
+  profile: ScoringProfile,
+): Record<string, number> {
+  const lineup = recommendLineup(inputs, shape, profile);
+  const starters = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const out: Record<string, number> = {};
+  for (const input of inputs) {
+    if (starters.has(input.player.id)) continue;
+    const evaluation = evaluatePlayer(input, profile);
+    if ((evaluation.score ?? 0) <= 0 || evaluation.ruledOut) continue;
+    out[evaluation.position] = (out[evaluation.position] ?? 0) + 1;
+  }
+  return out;
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }

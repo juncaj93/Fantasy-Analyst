@@ -18,8 +18,8 @@ import {
   type TradeAsset,
   type TradeTeam,
 } from '../src/core/league/tradeFit.ts';
-import { buildManagerProfiles, type ManagerProfile } from '../src/core/league/managers.ts';
-import type { LeagueTransaction } from '../src/core/league/transactions.ts';
+import { buildTradeProfile, collectTrades, type ManagerTradeProfile } from '../src/core/managers/tradeProfile.ts';
+import type { SleeperTransaction } from '../src/core/sleeper/types.ts';
 
 function asset(over: Partial<TradeAsset> & { playerId: string; position: string; value: number }): TradeAsset {
   return { name: over.playerId, surplus: false, ...over };
@@ -35,43 +35,35 @@ function team(over: Partial<TradeTeam> & { rosterId: number }): TradeTeam {
   };
 }
 
-/** A manager with a visible trade record, so plausibility has something to read. */
-function tradingProfile(count: number): ManagerProfile {
-  const trades: LeagueTransaction[] = Array.from({ length: count }, (_, i) => ({
-    sleeperLeagueId: 'L',
-    transactionId: `t${i}`,
-    season: '2026',
-    week: 4,
+/**
+ * A manager with a visible trade record, built by the canonical profiler.
+ *
+ * Deliberately not a hand-written object: plausibility reads `confident` and
+ * `tradesPerSeason`, and those are `buildTradeProfile`'s to decide. A literal
+ * here would let this file assert against a threshold the real profiler does
+ * not apply.
+ */
+function tradingProfile(count: number): ManagerTradeProfile {
+  const transactions: SleeperTransaction[] = Array.from({ length: count }, (_, i) => ({
+    transaction_id: `t${i}`,
     type: 'trade',
     status: 'complete',
-    createdMs: 1,
-    creatorUserId: 'u2',
-    rosterIds: [2],
-    adds: [],
-    drops: [],
-    waiverBid: null,
-    budgetMoves: [],
-    draftPicks: [],
-    note: null,
+    created: 1_700_000_000_000 + i,
+    leg: 4,
+    roster_ids: [2, 3],
+    adds: { [`in${i}`]: 2, [`out${i}`]: 3 },
+    drops: { [`in${i}`]: 3, [`out${i}`]: 2 },
+    creator: 'u2',
+    consenter_ids: [2, 3],
   }));
-  const [profile] = buildManagerProfiles({
-    seats: [
-      {
-        sleeperLeagueId: 'L',
-        season: '2026',
-        rosterId: 2,
-        userId: 'u2',
-        displayName: 'Team 2',
-        waiverBudgetUsed: 0,
-        budget: 100,
-        isMine: false,
-      },
-    ],
-    transactions: trades,
-    playerMeta: new Map(),
-    currentSeason: '2026',
+
+  return buildTradeProfile({
+    rosterId: 2,
+    ownerName: 'Team 2',
+    trades: collectTrades(transactions, '2026', new Map([['u2', 2]])),
+    positionOf: (playerId) => (playerId.startsWith('in') ? 'RB' : 'WR'),
+    latestSeason: '2026',
   });
-  return profile!;
 }
 
 describe('both sides must gain', () => {

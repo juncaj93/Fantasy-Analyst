@@ -1,13 +1,15 @@
 /**
  * The league-intelligence endpoints, over the real router and a real database.
  *
- * These are contract tests. Channel 2's Waivers page, the Trades page and the
- * What Changed feed are built against these payloads, so the shapes are pinned
- * here rather than left to whoever reads them next.
+ * This workstream owns no screens. It fills fields the waiver board already
+ * declares — `WaiverLeagueIntel.competition` and `.multiWeek` — and adds the
+ * three questions nothing else answers: which deals to propose, what the weeks
+ * ahead look like, and what changed since you last looked.
  *
- * One test matters more than the rest: nothing in this app submits a
- * transaction. It is asserted against the whole route table, not against a list
- * somebody remembered to update.
+ * The first test is therefore a contract test against `core/waivers/board.ts`:
+ * if this pass stops filling those fields, or fills them with something the
+ * board cannot read, the Waivers screen silently degrades to "unknown" and
+ * nothing else would notice.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -30,14 +32,24 @@ function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEn
 }
 
 const get = (path: string) => new Request(`https://app.test${path}`);
-const post = (path: string, body?: unknown, cookie?: string) =>
+const post = (path: string, body?: unknown) =>
   new Request(`https://app.test${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+    headers: { 'content-type': 'application/json' },
     body: body == null ? undefined : JSON.stringify(body),
   });
 
-describe('league intelligence endpoints', () => {
+interface WaiverPayload {
+  upgrades: {
+    candidates: {
+      playerId: string;
+      competition: { level: string; label: string; detail: string | null } | null;
+      multiWeek: { level: string; label: string; detail: string | null } | null;
+    }[];
+  }[];
+}
+
+describe('league intelligence fills the waiver board’s own fields', () => {
   let db: NodeSqliteDatabase;
   let env: AppEnv;
   let app: ReturnType<typeof createApp>;
@@ -49,110 +61,107 @@ describe('league intelligence endpoints', () => {
     app = createApp();
   });
 
-  it('reports manager profiles and the limits behind them', async () => {
-    const res = await app(get('/api/leagues/demo-league/managers'), env);
+  it('attaches competition and multi-week value to every candidate', async () => {
+    const res = await app(get('/api/leagues/demo-league/waivers'), env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      managers: unknown[];
-      limits: string[];
-      faabLeague: boolean;
-      transactionsOnRecord: number;
-    };
+    const body = (await res.json()) as WaiverPayload;
 
-    expect(Array.isArray(body.managers)).toBe(true);
-    expect(body.transactionsOnRecord).toBe(0);
-    expect(body.faabLeague).toBe(false);
-    expect(body.limits).toContain('league history has never been synced');
+    const candidates = body.upgrades.flatMap((u) => u.candidates);
+    expect(candidates.length).toBeGreaterThan(0);
+
+    for (const candidate of candidates) {
+      // Present-and-null is a pass that found nothing; absent is no pass at all.
+      // This pass ran, so neither field may be absent.
+      expect(candidate.competition, candidate.playerId).not.toBeUndefined();
+      expect(candidate.multiWeek, candidate.playerId).not.toBeUndefined();
+      expect(['high', 'medium', 'low', 'unknown']).toContain(candidate.competition!.level);
+      expect(['season_long', 'multi_week', 'streamer', 'unknown']).toContain(candidate.multiWeek!.level);
+      expect(candidate.competition!.label).toBeTruthy();
+    }
   });
 
-  it('builds a waiver board with every dimension present', async () => {
-    const res = await app(get('/api/leagues/demo-league/waiver-board?limit=5'), env);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      board: {
-        priority: number;
-        priorityParts: { key: string; label: string; value: number }[];
-        thisWeek: { known: boolean };
-        next4: { known: boolean };
-        needFitLabel: string;
-        horizonLabel: string;
-        expectedCost: { known: boolean; display: string };
-        competition: { label: string };
-      }[];
-      considered: number;
-    };
-
-    expect(body.board.length).toBeGreaterThan(0);
-    for (const row of body.board) {
-      expect(typeof row.priority).toBe('number');
-      expect(row.priorityParts.length).toBeGreaterThan(0);
-      expect(row.needFitLabel).toBeTruthy();
-      expect(row.horizonLabel).toBeTruthy();
-      expect(['Low competition', 'Likely 2–3 bidders', 'High pressure']).toContain(row.competition.label);
-      // With no transaction history, the price is honestly unknown.
-      expect(row.expectedCost.known).toBe(false);
-      // And the four-week outlook is not invented.
-      expect(row.next4.known).toBe(false);
+  it('leaves the rest of the waiver payload exactly as it was', async () => {
+    const body = (await (await app(get('/api/leagues/demo-league/waivers'), env)).json()) as Record<string, unknown>;
+    // The keys the Waivers screen and the board module read.
+    for (const key of ['league', 'found', 'dataFreshness', 'upgrades', 'pool', 'faab', 'notes', 'considered']) {
+      expect(Object.keys(body), key).toContain(key);
     }
   });
 
   it('is stable: the same request twice returns the same order', async () => {
-    const first = (await (await app(get('/api/leagues/demo-league/waiver-board?limit=8'), env)).json()) as {
-      board: { playerId: string }[];
-    };
-    const second = (await (await app(get('/api/leagues/demo-league/waiver-board?limit=8'), env)).json()) as {
-      board: { playerId: string }[];
-    };
-    expect(second.board.map((r) => r.playerId)).toEqual(first.board.map((r) => r.playerId));
+    const first = (await (await app(get('/api/leagues/demo-league/waivers'), env)).json()) as WaiverPayload;
+    const second = (await (await app(get('/api/leagues/demo-league/waivers'), env)).json()) as WaiverPayload;
+    expect(second.upgrades.flatMap((u) => u.candidates.map((c) => c.playerId))).toEqual(
+      first.upgrades.flatMap((u) => u.candidates.map((c) => c.playerId)),
+    );
+  });
+});
+
+describe('the questions nothing else answers', () => {
+  let db: NodeSqliteDatabase;
+  let env: AppEnv;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedDemoData(db);
+    env = makeEnv(db);
+    app = createApp();
   });
 
-  it('offers trade fits, or says why it cannot', async () => {
+  it('offers trade fits where both sides gain, or says why it cannot', async () => {
     const res = await app(get('/api/leagues/demo-league/trade-fit'), env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { found: boolean; ideas: { valueToUser: number; valueToPartner: number }[] };
+    const body = (await res.json()) as {
+      found: boolean;
+      ideas: { valueToUser: number; valueToPartner: number; plausibility: number }[];
+      notes: string[];
+    };
     expect(body.found).toBe(true);
     for (const idea of body.ideas) {
       // The invariant of the whole module: both sides gain, or it is not listed.
       expect(idea.valueToUser).toBeGreaterThan(0);
       expect(idea.valueToPartner).toBeGreaterThan(0);
     }
+    // No profiles synced in the demo database, and it says so rather than
+    // presenting untested plausibility as measured.
+    expect(body.notes.join(' ')).toContain('untested rather than measured');
   });
 
   it('plans quietly, and names the input it does not have', async () => {
-    const res = await app(get('/api/leagues/demo-league/plan'), env);
-    const body = (await res.json()) as {
+    const body = (await (await app(get('/api/leagues/demo-league/plan'), env)).json()) as {
       byes: { gaps: unknown[]; available: boolean; note: string };
       playoffs: { weight: number; weeks: number[] };
     };
     expect(body.byes.gaps).toEqual([]);
     expect(body.byes.available).toBe(false);
     expect(body.byes.note).toContain('no bye-week source');
-    // No record synced, so playoff weeks carry no weight at all.
     expect(body.playoffs.weight).toBe(0);
     expect(body.playoffs.weeks).toEqual([15, 16, 17]);
   });
 
   it('starts the feed empty, which is the ordinary answer', async () => {
-    const res = await app(get('/api/leagues/demo-league/feed'), env);
-    const body = (await res.json()) as { events: unknown[]; unseen: number };
+    const body = (await (await app(get('/api/leagues/demo-league/feed'), env)).json()) as {
+      events: unknown[];
+      unseen: number;
+    };
     expect(body.events).toEqual([]);
     expect(body.unseen).toBe(0);
   });
 
   it('404s for a league that does not exist', async () => {
-    for (const path of ['managers', 'waiver-board', 'trade-fit', 'plan', 'feed']) {
+    for (const path of ['trade-fit', 'plan', 'feed']) {
       expect((await app(get(`/api/leagues/nope/${path}`), env)).status, path).toBe(404);
     }
   });
 
-  it('requires an unlocked session to sync history', async () => {
-    const res = await app(post('/api/leagues/demo-league/history/sync'), env);
-    expect(res.status).toBe(401);
+  it('requires an unlocked session to mark the feed seen', async () => {
+    expect((await app(post('/api/leagues/demo-league/feed/seen'), env)).status).toBe(401);
   });
 });
 
 describe('nothing in this app submits a transaction', () => {
-  it('has no Sleeper write anywhere in the source', async () => {
+  it('reaches Sleeper only to read', async () => {
     const { readFileSync, readdirSync, statSync } = await import('node:fs');
     const { join } = await import('node:path');
 
@@ -169,9 +178,9 @@ describe('nothing in this app submits a transaction', () => {
     /*
      * Every path that reaches Sleeper is a read.
      *
-     * The REST client is GET-only by construction — there is one private `get`
-     * and nothing else issues a request — so the check is against the source:
-     * no PUT, PATCH or DELETE anywhere near Sleeper, and no GraphQL mutation.
+     * The REST client is GET-only by construction — one private `get`, and
+     * nothing else issues a request — so the check is against the source: no
+     * PUT, PATCH or DELETE anywhere near Sleeper, and no GraphQL mutation.
      *
      * The one POST that exists is deliberate and is not a write: Sleeper's
      * GraphQL endpoint takes its *query* in a POST body, which is how the
@@ -191,7 +200,6 @@ describe('nothing in this app submits a transaction', () => {
     });
     expect(offenders).toEqual([]);
 
-    // And the REST client offers no method that could file a transaction.
     const client = readFileSync('src/core/sleeper/client.ts', 'utf8');
     expect(client).not.toMatch(/method:\s*'(POST|PUT|PATCH|DELETE)'/);
     for (const word of ['waiverClaim', 'submitBid', 'proposeTrade', 'setLineup']) {

@@ -1,31 +1,41 @@
 /**
  * Who else wants this player, and can they pay for him.
  *
- * Competition is not a property of the player. It is a property of the eleven
- * other rosters: how many of them have a hole he fills, which of those have
- * money left, and which of those have ever spent money like this. So the work
- * here is mostly about the *other* teams, and the player only decides which
- * position's needs to read.
+ * This exists to sharpen one number that the FAAB layer already asks for and
+ * currently estimates bluntly. `core/faab/strategy.ts` takes `rivalsWithNeed` —
+ * "rosters that plausibly want him and can pay" — and the caller in `app.ts`
+ * supplies *every funded rival in the league*, with a comment saying why:
  *
- * The output is deliberately a label and a named list rather than a
- * probability. "Likely 2–3 bidders, and both of them have $40+" is a sentence
- * the user can act on; "0.62 competition index" is not.
+ *   > A blunt count on purpose: every other funded roster in the league. A finer
+ *   > one would need each rival's lineup scored against each candidate, which is
+ *   > twelve times the work for a number that feeds a 0–1 demand input.
  *
- * A need is measured against the league's own starting slots, never against a
- * fixed idea of a football team, so a superflex league correctly reports every
- * team as quarterback-needy and a tight-end-premium league does not.
+ * That reasoning is right about lineup scoring and wrong about the alternative.
+ * Whether a roster *needs* a running back does not require scoring anybody: it
+ * requires counting the healthy backs it holds against the back slots it must
+ * fill. That is a set membership test over data already in memory, it costs one
+ * pass per position rather than twelve lineup optimisations, and it is the
+ * difference between "eleven rivals could bid" and "two rivals cannot start the
+ * position and both have $40".
+ *
+ * So this module computes needs and affordability, and hands the count back to
+ * the pricing model that asked for it. It prices nothing itself.
+ *
+ * The label is also the human half of the same answer, and it fills
+ * `WaiverLeagueIntel.competition` on the waiver board — the field `main` left
+ * typed, documented and unpopulated for exactly this pass.
  */
 
+import type { RosterBudget } from '../faab/budget.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
-import type { ManagerProfile } from './managers.ts';
 
 export type NeedLevel = 'urgent' | 'thin' | 'covered';
 
-export type CompetitionLabel = 'Low competition' | 'Likely 2–3 bidders' | 'High pressure';
+/** The board's own vocabulary, which this must speak rather than invent. */
+export type CompetitionLevel = 'high' | 'medium' | 'low' | 'unknown';
 
 export interface TeamRoster {
   rosterId: number;
-  userId: string | null;
   displayName: string;
   isMine: boolean;
   playerIds: string[];
@@ -39,14 +49,12 @@ export interface RosterPlayerMeta {
 
 export interface TeamNeed {
   rosterId: number;
-  userId: string | null;
   displayName: string;
   level: NeedLevel;
   /** Bodies who could start there, injuries already taken out. */
   healthy: number;
   /** Dedicated starting slots for the position. */
   required: number;
-  /** True when a flex slot could also take one. */
   flexEligible: boolean;
 }
 
@@ -55,18 +63,18 @@ export interface LikelyBidder {
   displayName: string;
   need: NeedLevel;
   /** Dollars left, or null when the league has no budget or it is unknown. */
-  remainingFaab: number | null;
-  /** Why they are on this list. One short phrase. */
-  reason: string;
+  remaining: number | null;
 }
 
 export interface CompetitionAssessment {
-  label: CompetitionLabel;
+  level: CompetitionLevel;
+  /** The sentence the card shows. */
+  label: string;
+  detail: string | null;
   /** Teams with a real need, before affordability is considered. */
   needyTeams: number;
   /** Teams with a need who can also afford the going rate. */
   bidders: LikelyBidder[];
-  reasons: string[];
 }
 
 /**
@@ -75,8 +83,7 @@ export interface CompetitionAssessment {
  * Flex is counted as eligibility rather than as a required slot. A team with
  * two backs, two receivers and one flex does not *need* a third back; it can
  * *use* one, which is the difference between urgent and thin, and collapsing
- * the two is how every team in the league ends up looking desperate for
- * everything.
+ * the two makes every team in the league look desperate for everything.
  */
 export function teamNeedsFor(
   position: string,
@@ -98,101 +105,87 @@ export function teamNeedsFor(
       const level: NeedLevel =
         healthy < required ? 'urgent' : flexEligible && healthy <= required ? 'thin' : 'covered';
 
-      return {
-        rosterId: r.rosterId,
-        userId: r.userId,
-        displayName: r.displayName,
-        level,
-        healthy,
-        required,
-        flexEligible,
-      };
+      return { rosterId: r.rosterId, displayName: r.displayName, level, healthy, required, flexEligible };
     });
 }
 
 /**
- * Turn needs, wallets and profiles into one label.
+ * Turn needs and wallets into a count, a level and a sentence.
  *
- * The affordability test is the load-bearing part. A team with an urgent hole
- * at running back and $2 left is not a bidder, and counting them as one is how
- * the app would tell the user to spend $30 to beat somebody who cannot spend
- * $3. Needs are counted honestly; only the *bidder list* is filtered by money.
+ * The affordability test is the load-bearing part. A team with an urgent hole at
+ * running back and $2 left is not a bidder, and counting them as one is how a
+ * tool tells you to spend $30 beating somebody who cannot spend $3. Needs are
+ * counted honestly; only the *bidder list* is filtered by money.
+ *
+ * Unknown budgets are kept in, not filtered out — "cannot be ruled out" is not
+ * "cannot afford it", and a manager whose settings failed to sync must not
+ * silently vanish from the list of people about to outbid you.
  */
 export function assessCompetition(opts: {
   needs: TeamNeed[];
-  /** Profiles by user id, for aggression and remaining budget. */
-  profiles: Map<string, ManagerProfile>;
-  /** Bottom of the expected range, in dollars. Null when unpriced. */
+  /** Wallets from `core/faab/budget.ts`, keyed by roster id. */
+  budgets: Map<number, RosterBudget>;
+  /** Bottom of the expected range. Null when the league is unpriced. */
   expectedLow: number | null;
-  /** True when the league genuinely spends FAAB. */
-  faabLeague: boolean;
+  /** False in a priority league, where money is not the constraint. */
+  bidding: boolean;
 }): CompetitionAssessment {
   const needy = opts.needs.filter((n) => n.level !== 'covered');
-  const reasons: string[] = [];
 
   const bidders: LikelyBidder[] = [];
   for (const need of needy) {
-    const profile = need.userId ? opts.profiles.get(need.userId) : undefined;
-    const remaining = profile?.remainingFaab ?? null;
-
-    /*
-     * Affordability is only decidable when there is both a price and a wallet.
-     * Unknown means "cannot be ruled out", not "cannot afford it" — a manager
-     * whose budget failed to sync must not silently vanish from the list of
-     * people about to outbid you.
-     */
-    if (opts.faabLeague && opts.expectedLow != null && remaining != null && remaining < opts.expectedLow) {
-      continue;
-    }
-
-    const aggressive = profile?.aggression.sufficient === true && (profile.aggression.value ?? 0) >= 0.12;
+    const remaining = opts.budgets.get(need.rosterId)?.remaining ?? null;
+    if (opts.bidding && opts.expectedLow != null && remaining != null && remaining < opts.expectedLow) continue;
     bidders.push({
       rosterId: need.rosterId,
       displayName: need.displayName,
       need: need.level,
-      remainingFaab: remaining,
-      reason:
-        need.level === 'urgent'
-          ? aggressive
-            ? 'cannot start the position, and bids big'
-            : 'cannot start the position'
-          : aggressive
-            ? 'could use one, and bids big'
-            : 'could use one',
+      remaining,
     });
   }
 
   bidders.sort(
     (a, b) =>
       Number(b.need === 'urgent') - Number(a.need === 'urgent') ||
-      (b.remainingFaab ?? -1) - (a.remainingFaab ?? -1) ||
+      (b.remaining ?? -1) - (a.remaining ?? -1) ||
       a.displayName.localeCompare(b.displayName),
   );
 
-  const priced = opts.needs.length - needy.length;
-  if (needy.length === 0) reasons.push('nobody else has a hole at the position');
-  else reasons.push(`${needy.length} of ${opts.needs.length} other teams have a need at the position`);
-
-  const excluded = needy.length - bidders.length;
-  if (excluded > 0) reasons.push(`${excluded} of them cannot afford the going rate`);
-  if (priced === opts.needs.length && opts.needs.length > 0) reasons.push('every other roster is already covered here');
+  const priced = needy.length - bidders.length;
+  const detail =
+    opts.needs.length === 0
+      ? null
+      : priced > 0
+        ? `${needy.length} of ${opts.needs.length} rivals need the position; ${priced} cannot afford the going rate`
+        : `${needy.length} of ${opts.needs.length} rivals need the position`;
 
   return {
-    label: labelFor(bidders.length),
+    ...levelFor(bidders.length),
+    detail,
     needyTeams: needy.length,
     bidders,
-    reasons,
   };
 }
 
 /**
- * The three bands, defined once.
+ * The bands, defined once.
  *
- * Named exactly as the brief specifies them, because these strings are the
- * interface: a screen that renders "High pressure" must be able to match on it.
+ * `level` is the board's vocabulary and `label` is the reader's. They are
+ * produced together so a card can never show a label that disagrees with the
+ * level it sorted on.
  */
-export function labelFor(bidders: number): CompetitionLabel {
-  if (bidders <= 1) return 'Low competition';
-  if (bidders <= 3) return 'Likely 2–3 bidders';
-  return 'High pressure';
+export function levelFor(bidders: number): { level: CompetitionLevel; label: string } {
+  if (bidders === 0) return { level: 'low', label: 'Nobody else needs him' };
+  if (bidders === 1) return { level: 'low', label: 'Low competition' };
+  if (bidders <= 3) return { level: 'medium', label: 'Likely 2–3 bidders' };
+  return { level: 'high', label: 'High pressure' };
 }
+
+/** Nothing is known — the honest answer when rosters or positions are missing. */
+export const COMPETITION_UNKNOWN: CompetitionAssessment = {
+  level: 'unknown',
+  label: 'Competition not known',
+  detail: null,
+  needyTeams: 0,
+  bidders: [],
+};

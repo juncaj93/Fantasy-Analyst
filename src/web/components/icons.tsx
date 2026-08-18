@@ -46,6 +46,49 @@ export function BoardIcon({ size = 24, className }: IconProps) {
   );
 }
 
+/**
+ * The draft board itself: a grid of picks.
+ *
+ * Deliberately not {@link BoardIcon}, which is the Draft *tab* and is drawn as a
+ * ranked list. This is the same board a fantasy drafter tapes to a wall —
+ * rounds down, managers across — so the control that opens one looks like one.
+ */
+export function GridIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3.25" y="3.75" width="17.5" height="16.5" rx="3.2" />
+      <path d="M3.25 9.25h17.5M3.25 14.75h17.5M9.25 3.75v16.5M14.75 3.75v16.5" />
+    </svg>
+  );
+}
+
+/** Board: grow the cells to fit a name. Four arrows pushing outwards. */
+export function ExpandIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2}>
+      <path d="M9.5 4.5h-5v5M14.5 19.5h5v-5M19.5 9.5v-5h-5M4.5 14.5v5h5" />
+    </svg>
+  );
+}
+
+/** Board: back to positions only. The same four arrows, pulling in. */
+export function CompressIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2}>
+      <path d="M4.5 9.5h5v-5M19.5 14.5h-5v5M14.5 4.5v5h5M9.5 19.5v-5h-5" />
+    </svg>
+  );
+}
+
+/** Close: the same weight as the other glyphs, rather than a text ✕. */
+export function CloseIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2.2}>
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </svg>
+  );
+}
+
 /** Team: a roster of people. */
 export function RosterIcon({ size = 24, className }: IconProps) {
   return (
@@ -73,6 +116,23 @@ export function SearchIcon({ size = 24, className }: IconProps) {
     <svg {...svgProps(size)} className={className}>
       <circle cx="11" cy="11" r="6.25" />
       <path d="m15.6 15.6 4.15 4.15" />
+    </svg>
+  );
+}
+
+/**
+ * Waivers: a player joining a list.
+ *
+ * Deliberately a *different* shape from Trades, which is two players crossing.
+ * A claim is one-way — somebody comes in off the pool — and at 24px in a row of
+ * six marks the difference between one arrow and two is the whole of what makes
+ * a tab bar readable at a glance.
+ */
+export function WaiverIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M4 6.5h9M4 12h9M4 17.5h6" />
+      <path d="M18 8.5v7M14.75 12h6.5" />
     </svg>
   );
 }

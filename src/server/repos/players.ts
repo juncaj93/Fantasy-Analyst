@@ -19,6 +19,9 @@ interface PlayerRow {
   aliases_json: string;
   external_ids_json: string;
   draft_rank: number | null;
+  height_inches: number | null;
+  weight_pounds: number | null;
+  age: number | null;
   years_exp: number | null;
 }
 
@@ -37,6 +40,9 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
     externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
     searchRank: row.draft_rank ?? null,
+    heightInches: row.height_inches ?? null,
+    weightPounds: row.weight_pounds ?? null,
+    age: row.age ?? null,
     yearsExp: row.years_exp ?? null,
   };
 }
@@ -128,8 +134,9 @@ export class PlayerRepo {
             `INSERT INTO players (
                id, sleeper_player_id, full_name, first_name, last_name, team, position,
                status, active, normalized_name, aliases_json, external_ids_json, draft_rank,
-               years_exp, created_at, updated_at
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               height_inches, weight_pounds, age, years_exp,
+               created_at, updated_at
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                sleeper_player_id = excluded.sleeper_player_id,
                full_name         = excluded.full_name,
@@ -143,7 +150,13 @@ export class PlayerRepo {
                aliases_json      = excluded.aliases_json,
                external_ids_json = excluded.external_ids_json,
                draft_rank        = excluded.draft_rank,
-               years_exp         = excluded.years_exp,
+               -- COALESCE, not a plain overwrite: a sync that could not read a
+               -- measurement must not erase the one already stored. Absent is
+               -- "not said this time", which is not the same as "not true".
+               height_inches     = COALESCE(excluded.height_inches, players.height_inches),
+               weight_pounds     = COALESCE(excluded.weight_pounds, players.weight_pounds),
+               age               = COALESCE(excluded.age, players.age),
+               years_exp         = COALESCE(excluded.years_exp, players.years_exp),
                updated_at        = excluded.updated_at`,
           )
           .bind(
@@ -160,6 +173,9 @@ export class PlayerRepo {
             toJson(p.aliases),
             toJson(p.externalIds ?? {}),
             p.searchRank ?? null,
+            p.heightInches ?? null,
+            p.weightPounds ?? null,
+            p.age ?? null,
             p.yearsExp ?? null,
             now,
             now,
@@ -232,6 +248,30 @@ export class PlayerRepo {
       const holes = batch.map(() => '?').join(', ');
       const { results } = await this.db
         .prepare(`SELECT * FROM players WHERE normalized_name IN (${holes})`)
+        .bind(...batch)
+        .all<PlayerRow>();
+      for (const row of results ?? []) out.push(toPlayer(row));
+    }
+    return out;
+  }
+
+  /**
+   * Players carrying any of these GSIS ids.
+   *
+   * The identifier half of the same lookup `findByNormalizedNames` does for
+   * names, and deliberately the same shape: one indexed `IN (...)` per batch,
+   * bounded by the rows actually being ingested rather than by the size of the
+   * dictionary. That is what makes preferring the identifier affordable inside
+   * a Worker's CPU budget — see migration 0020 for why it was not before.
+   */
+  async findByExternalGsisIds(ids: (string | null | undefined)[]): Promise<CanonicalPlayer[]> {
+    const unique = [...new Set(ids.map((id) => (id ?? '').trim()).filter((id) => id.length > 0))];
+    if (unique.length === 0) return [];
+    const out: CanonicalPlayer[] = [];
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const holes = batch.map(() => '?').join(', ');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM players WHERE gsis_id IN (${holes})`)
         .bind(...batch)
         .all<PlayerRow>();
       for (const row of results ?? []) out.push(toPlayer(row));

@@ -5,7 +5,6 @@
  * its own transport. No API key exists for Sleeper's public read endpoints.
  */
 
-import type { SleeperTransaction } from '../league/transactions.ts';
 import type {
   SleeperDraft,
   SleeperDraftPick,
@@ -13,6 +12,8 @@ import type {
   SleeperPlayer,
   SleeperRoster,
   SleeperState,
+  SleeperTransaction,
+  SleeperTrendingPlayer,
   SleeperUser,
 } from './types.ts';
 
@@ -115,20 +116,41 @@ export class SleeperClient {
   }
 
   /**
-   * One week of the league's transaction history.
+   * One week of a league's transactions — adds, drops, waiver claims, trades.
    *
-   * Documented, public, and the factual base of every league-specific estimate
-   * this app makes. It returns failed waiver claims alongside successful ones,
-   * which is the only published evidence of what the rest of the league was
-   * willing to pay — see `core/league/transactions.ts`.
+   * Sleeper indexes these by `round`, which for an in-season league is the
+   * week. There is no all-weeks endpoint, so a full history is one request per
+   * week and callers are expected to bound the range themselves rather than
+   * walk eighteen weeks on a page load.
    *
-   * A week nobody transacted in returns `[]`, not an error, so an empty result
-   * is a fact about the league rather than a failure to read it.
+   * This is the only supported source of waiver bid amounts and of the FAAB
+   * that changed hands in a trade.
    */
   async getTransactions(leagueId: string, week: number): Promise<SleeperTransaction[]> {
     return (
       (await this.get<SleeperTransaction[]>(
-        `/league/${encodeURIComponent(leagueId)}/transactions/${Math.max(1, Math.trunc(week))}`,
+        `/league/${encodeURIComponent(leagueId)}/transactions/${encodeURIComponent(String(week))}`,
+      )) ?? []
+    );
+  }
+
+  /**
+   * What all of Sleeper is adding or dropping right now.
+   *
+   * A market-attention signal and nothing more: it counts what other people are
+   * doing, not what anybody's model thinks. `lookbackHours` and `limit` are
+   * Sleeper's own bounds; both are capped here so a caller cannot turn one card
+   * into a several-megabyte response.
+   */
+  async getTrendingPlayers(
+    type: 'add' | 'drop',
+    opts: { lookbackHours?: number; limit?: number } = {},
+  ): Promise<SleeperTrendingPlayer[]> {
+    const hours = clamp(opts.lookbackHours ?? 24, 1, 168);
+    const limit = clamp(opts.limit ?? 50, 1, 200);
+    return (
+      (await this.get<SleeperTrendingPlayer[]>(
+        `/players/nfl/trending/${type}?lookback_hours=${hours}&limit=${limit}`,
       )) ?? []
     );
   }
@@ -147,4 +169,9 @@ export class SleeperClient {
       )) ?? {}
     );
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
