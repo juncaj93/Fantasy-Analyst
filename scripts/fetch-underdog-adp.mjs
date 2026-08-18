@@ -45,10 +45,22 @@ function flag(name) {
   return process.argv.includes(`--${name}`);
 }
 
+/**
+ * Where the board is, unless somebody says otherwise.
+ *
+ * Defaults rather than required configuration: both of these are published
+ * pages, and making a repository variable a precondition for the feature meant
+ * DOG shipped dark for anyone who had not read the docs. `UNDERDOG_ADP_URL` and
+ * `FOUR4_UNDERDOG_ADP_URL` still override, which is what you want the day a
+ * site moves its board.
+ */
+const DEFAULT_PRIMARY_URL = 'https://www.bestballteambuilder.com/underdog-best-ball-average-draft-position';
+const DEFAULT_FALLBACK_URL = 'https://www.4for4.com/underdog/adp';
+
 const out = arg('out', 'dog.json');
 const metaOut = arg('meta', 'dog.meta.json');
-const primaryUrl = arg('primary', process.env.UNDERDOG_ADP_URL ?? '');
-const fallbackUrl = arg('fallback', process.env.FOUR4_UNDERDOG_ADP_URL ?? '');
+const primaryUrl = arg('primary', process.env.UNDERDOG_ADP_URL || DEFAULT_PRIMARY_URL);
+const fallbackUrl = arg('fallback', process.env.FOUR4_UNDERDOG_ADP_URL || DEFAULT_FALLBACK_URL);
 
 /**
  * A file already on disk, instead of a URL.
@@ -60,8 +72,8 @@ const fallbackUrl = arg('fallback', process.env.FOUR4_UNDERDOG_ADP_URL ?? '');
  * same provenance sidecar. No credentials are stored anywhere, nothing is
  * scraped, and no site's terms are strained by an automated session.
  *
- * `--primary-file` is parsed as the Best Ball Team Builder JSON shape;
- * `--fallback-file` as the 4for4 CSV export.
+ * `--primary-file` is parsed as Best Ball Team Builder's page or JSON, whichever
+ * the file turns out to be; `--fallback-file` as 4for4's page or CSV export.
  */
 const primaryFile = arg('primary-file', process.env.UNDERDOG_ADP_FILE ?? '');
 const fallbackFile = arg('fallback-file', process.env.FOUR4_UNDERDOG_ADP_FILE ?? '');
@@ -69,10 +81,10 @@ const fallbackFile = arg('fallback-file', process.env.FOUR4_UNDERDOG_ADP_FILE ??
 /**
  * Extra request headers, as JSON: `{"cookie":"...","authorization":"Bearer ..."}`.
  *
- * Needed because a subscription source will not serve its ADP board to an
- * anonymous request, and the script previously sent nothing but a User-Agent —
- * so against 4for4 or a token-gated Underdog endpoint it could only ever have
- * returned HTTP 401/403.
+ * Optional, and expected to stay unset. The primary board is a public page and
+ * an ordinary GET is enough; this exists for the day a source starts refusing
+ * one, which is a thing that will announce itself as an HTTP 401 or 403 rather
+ * than something to configure pre-emptively.
  *
  * Supply it from a CI secret, never from the repository. Malformed JSON is a
  * hard error rather than a silently-ignored header: a fetch that quietly went
@@ -180,8 +192,26 @@ const attempts = [
 
 for (const attempt of attempts) {
   const label = DOG_PROVIDER_LABELS[attempt.provider] ?? attempt.provider;
-  if (attempt.error) console.log(`${label}: unavailable (${attempt.error})`);
-  else console.log(`${label}: ${attempt.snapshot.rows.length} rows`);
+  if (attempt.error) {
+    console.log(`${label}: unavailable (${attempt.error})`);
+    continue;
+  }
+  /*
+   * Which column was read, and what the source says it is dated.
+   *
+   * Both are printed on every run rather than only on a failure, because the
+   * way this feature goes quietly wrong is a page redesign that leaves a table
+   * standing with a different column in it — and a run that says
+   * `ADP` -> `Overall` is the only warning there would be.
+   */
+  const { rows, snapshotAt } = attempt.snapshot;
+  const columns = attempt.headers ? ` via [${attempt.headers.join(' | ')}]` : '';
+  const dated = snapshotAt ? `, dated ${snapshotAt.slice(0, 10)}` : ', undated by the source';
+  console.log(`${label}: ${rows.length} rows${columns}${dated}`);
+  if (rows.length > 0) {
+    const sample = rows.slice(0, 3).map((r) => `${r.name} ${r.adp}`);
+    console.log(`${label}: first rows — ${sample.join(', ')}`);
+  }
 }
 
 const candidates = attempts

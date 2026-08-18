@@ -14,25 +14,38 @@ name: Refresh Underdog ADP
 # from Underdog's staff rankings, or from an aggregator's own consensus would be
 # worse than no column at all, because nothing on screen could tell.
 #
-# Configure at least one source. Repository *variables* for the URLs, repository
-# *secrets* for anything that authenticates:
+# No configuration is required. Both sources are published pages and the script
+# knows where they are:
 #
-#   vars.UNDERDOG_ADP_URL            Best Ball Team Builder's board  (primary)
-#   vars.FOUR4_UNDERDOG_ADP_URL      4for4's Underdog ADP export     (fallback)
-#   secrets.UNDERDOG_ADP_HEADERS     JSON headers for the primary,  e.g.
-#                                    {"cookie":"..."} or {"authorization":"Bearer ..."}
+#   primary   https://www.bestballteambuilder.com/underdog-best-ball-average-draft-position
+#   fallback  https://www.4for4.com/underdog/adp
+#
+# Override either with a repository *variable* the day a site moves its board:
+#
+#   vars.UNDERDOG_ADP_URL            replaces the primary
+#   vars.FOUR4_UNDERDOG_ADP_URL      replaces the fallback
+#
+# Repository *secrets* carry credentials, and are expected to stay unset:
+#
+#   secrets.UNDERDOG_ADP_HEADERS        JSON, e.g. {"cookie":"..."}
 #   secrets.FOUR4_UNDERDOG_ADP_HEADERS  the same, for the fallback
 #
-# Both realistic sources sit behind a login, so expect at least one of the
-# header secrets to be required. If a source cannot be fetched by a script at
-# all — a hard bot check, or terms that rule out automated access — export the
-# board by hand from a signed-in browser and import that file instead; see
+# Set one only if a source actually starts refusing an ordinary GET, which
+# announces itself as an HTTP 401 or 403 in this job's log rather than as
+# something to configure in advance. If a source can never be fetched by a
+# script -- a hard bot check, or terms that rule out automated access -- export
+# the board by hand from a signed-in browser and import that file instead; see
 # `--primary-file` / `--fallback-file` in the script and the manual route in
 # docs/MARKET_BASELINE.md. Nothing downstream can tell the difference: same
 # parser, same raw-ADP validation, same freshness and provenance.
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what the sources return and import nothing'
+        type: boolean
+        default: false
   schedule:
     # An hour after the Sleeper refresh, daily through the draft season. Both
     # markets move on news, and a blend built on last week's Underdog is a blend
@@ -61,13 +74,13 @@ jobs:
         env:
           UNDERDOG_ADP_URL: ${{ vars.UNDERDOG_ADP_URL }}
           FOUR4_UNDERDOG_ADP_URL: ${{ vars.FOUR4_UNDERDOG_ADP_URL }}
-          # Absent unless configured, in which case the request goes out
-          # unauthenticated and a gated source answers 401/403 — which the
-          # script reports as such rather than as a parsing problem.
+          # Expected to be empty. Present so that a source which starts
+          # demanding a session can be given one without a code change.
           UNDERDOG_ADP_HEADERS: ${{ secrets.UNDERDOG_ADP_HEADERS }}
           FOUR4_UNDERDOG_ADP_HEADERS: ${{ secrets.FOUR4_UNDERDOG_ADP_HEADERS }}
         run: |
-          npx vite-node scripts/fetch-underdog-adp.mjs --out /tmp/dog.json --meta /tmp/dog.meta.json
+          npx vite-node scripts/fetch-underdog-adp.mjs --out /tmp/dog.json --meta /tmp/dog.meta.json \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Say what happened, and stop if there is nothing good to import
         if: steps.fetch.outcome != 'success'
@@ -81,6 +94,7 @@ jobs:
           exit 0
 
       - name: Import it
+        if: ${{ !inputs.dry_run }}
         env:
           PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
         run: |
