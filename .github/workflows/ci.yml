@@ -1,8 +1,21 @@
 name: CI
 
+# Once per commit, not twice.
+#
+# `push: ['**']` plus `pull_request` meant every commit on a branch with a PR
+# open ran the whole workflow twice — eight WebKit runners, not four, each of
+# them fetching WebKit's system packages from apt at the same moment. That
+# contention is measurable rather than theoretical: on one afternoon the same
+# `playwright install --with-deps` step ran in 5 minutes on one runner and
+# still had not finished after 28 on another beside it, and three of four
+# widths were cancelled having never started a test.
+#
+# So: `main` is verified on every push, and everything else is verified on its
+# pull request. Nothing loses coverage — a branch is gated before it can merge,
+# and main is gated after — and the apt load halves.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
