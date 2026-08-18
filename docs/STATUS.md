@@ -1020,6 +1020,68 @@ so on every number it produces — and no future schedule, so the role-specific
 outlook has no source in the running app and the multi-week value falls back to
 role trend and the expected-points gap.
 
+## Milestone 18 — the last waiver column without a supplier (done)
+
+`core/waivers/board.ts` declares three league-intelligence fields and documents
+how to read an empty one: *present-and-null is a pass that ran and found
+nothing, absent is a deployment without the pass.* Two now have suppliers — the
+price from `core/faab`, multi-week value from the milestone above. This is the
+third.
+
+**Competition, per position rather than per league.** `core/faab/strategy.ts`
+asks for `rivalsWithNeed` — "rosters that plausibly want him and can pay" — and
+the caller supplied every funded rival in the league, with a comment saying a
+finer count would need each rival's lineup scored against each candidate, twelve
+optimisations for a 0–1 input.
+
+That is right about scoring and wrong about need. Whether a roster needs a back
+is a count of the healthy backs it holds against the back slots it has to fill —
+one pass over rosters already in memory, no optimisation, no extra query. It is
+now per position and filtered by what each rival can still spend, so a card says
+*four teams need one, three of them cannot afford the going rate* instead of
+*eleven funded rivals*. Needs are counted honestly and only the bidder list is
+filtered by money; a rival whose budget is unknown stays in it, because "cannot
+be ruled out" is not "cannot afford it".
+
+Availability is read through `normalizeDesignation` and `isRuledOut` rather than
+against a private list of status strings, so "ruled out" means one thing.
+
+**Three questions nothing else answers.** Bilateral trade fits, which choose the
+deal `core/trades/ladder.ts` then prices — what you gain, what the partner
+gains and plausibility scored separately, both sides gaining or it is not
+listed, and plausibility read from the canonical `ManagerTradeProfile` so it
+cannot disagree with the ladder. Bye and playoff planning, silent until a bye
+leaves a slot short and giving playoff weeks zero weight until the season is a
+third old and the record puts the team in the race. And a decision feed needing
+both a magnitude and an actual decision change, filtering before it
+deduplicates — merging first would let three immaterial reports of one nothing
+combine into an item that looks corroborated.
+
+**Two timing calls stopped waiting.** `Buy before usage converts to points` and
+`Buy after temporary box-score dip` need expected points, which did not exist
+when they were written. `assessXfp` now supplies both sides off usage weeks the
+route already loads. A player with no weeks yields `NO_XFP`, whose per-game
+figures are null, and the rules require both sides before they say anything — so
+an unmeasured player still produces no call rather than one built on a default.
+
+**What this milestone deleted, twice.** It was written against a `main` that had
+neither the FAAB layer nor this intelligence layer, and built its own of each.
+Gone in favour of the canonical modules: the transaction normaliser and repo,
+the expected-cost model, the manager profiler, the waiver view-model, the
+injury-beneficiary detector, the multi-week classifier, a duplicate
+`getTransactions`, `SleeperTransaction` and `years_exp` column, three migrations
+and five API routes. What survives is the one field nothing else fills and the
+three surfaces nothing else has.
+
+**Still missing, and each says so.** No bye-week source — neither this work nor
+the intelligence layer has one, Sleeper's dictionary carries no bye and the app
+stores no schedule, so `/plan` returns no gaps and names the gap. Three of the
+five timing calls still rest on signals that exist; the schedule-turn one does
+not, for the same missing input.
+
+Checks at this milestone: 2,018 unit/integration tests plus the browser suite at
+four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against

@@ -36,6 +36,11 @@ import { recommendWaiverUpgrades, type WaiverCandidate } from '../core/startsit/
 import { evaluatePlayer } from '../core/startsit/engine.ts';
 import type { LineupRecommendation } from '../core/startsit/lineup.ts';
 import type { RosterShape, ScoringProfile } from '../core/sleeper/scoring.ts';
+import type { CanonicalPlayer } from '../core/identity/types.ts';
+import type { RosterRecord } from '../core/sleeper/types.ts';
+import type { LeagueBudgetState, RosterBudget } from '../core/faab/budget.ts';
+import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
+import type { PriceSummary } from '../core/faab/bids.ts';
 import {
   recommendBid,
   simulateOpportunityCost,
@@ -83,6 +88,18 @@ import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
+import { DecisionFeedRepo } from './repos/decisionFeed.ts';
+import { isRuledOut, normalizeDesignation } from '../core/injury/model.ts';
+import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
+import {
+  COMPETITION_UNKNOWN,
+  assessCompetition,
+  teamNeedsFor,
+  type CompetitionAssessment,
+  type NeedLevel,
+} from '../core/league/competition.ts';
+import { byeOutlook, playoffEmphasis, playoffWeeks } from '../core/league/planning.ts';
+import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/tradeFit.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 /* Which season it is, from Sleeper's own state rather than from the clock. */
 import { currentSeason } from './services/seasonService.ts';
@@ -596,7 +613,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
 
     const startable = startablePositions(shape);
-    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable });
+    const allPlayers = await new PlayerRepo(db).listAll();
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable, players: allPlayers });
 
     const [rosterInputs, candidateInputs, freshness] = await Promise.all([
       startSitInputsFor(db, mine.playerIds),
@@ -659,6 +677,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       .context(league.id, { week: nflState?.week ?? 1, season: league.season })
       .catch(() => null);
 
+    /*
+     * Who else needs the position, and can afford him.
+     *
+     * The last of `WaiverLeagueIntel`'s three columns without a supplier: the
+     * price comes from `core/faab` and multi-week value from the pass directly
+     * above. Answered from rosters already loaded — no extra query and no
+     * lineup scoring — and the same count goes into the price model, which asks
+     * for exactly this number and has been estimating it league-wide.
+     */
+    const intel = waiverLeagueIntel({
+      advice,
+      rosters,
+      players: allPlayers,
+      shape,
+      budgets: strategy?.budget ?? null,
+      prices: strategy?.prices ?? null,
+    });
+
     const budgets = strategy
       ? priceWaiverUpgrades({
           advice,
@@ -666,6 +702,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           rosterInputs,
           candidateInputs,
           rosteredIds,
+          competition: intel.competition,
         })
       : [];
 
@@ -674,7 +711,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: freshness,
       ...advice,
-      upgrades: upgradesWithValue,
+      upgrades: withCompetition(upgradesWithValue, intel.competition),
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
@@ -803,6 +840,251 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       league: { id: league.id, name: league.name },
       ...advice,
     });
+  });
+
+  // ----------------------------------------------------- league intelligence
+  //
+  // The waiver board, manager profiles and FAAB pricing live above, in the
+  // routes `main` owns. What follows is only what those surfaces do not
+  // already answer: the deals worth proposing, the weeks ahead, and what
+  // changed since you last looked.
+
+  /**
+   * Bilateral trade fits, and the timing calls behind them.
+   *
+   * Values on both sides come from the same weekly engine, so "what they gain"
+   * is measured the same way as "what I gain" — a trade tool whose two sides
+   * are scored differently is just an argument for whatever the author wanted.
+   */
+  router.get('/api/leagues/:id/trade-fit', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine);
+    if (!mine) {
+      return jsonResponse({
+        league: { id: league.id, name: league.name },
+        found: false,
+        ideas: [],
+        notes: ['your own roster is not identified, so there is nobody to trade on behalf of'],
+      });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+
+    /*
+     * Partner tendencies come from the canonical trade profiles.
+     *
+     * Cached and keyed by roster id by `ManagerProfileRepo`, built from the
+     * league's own transaction history by `core/managers/tradeProfile.ts`.
+     * There is deliberately no second profile here: plausibility reads the same
+     * record the Trades ladder reads, so the two cannot disagree about whether
+     * somebody trades.
+     */
+    const profiles = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
+      .managerProfiles(league.id)
+      .catch(() => null);
+    const tradeProfiles = new Map<number, ManagerTradeProfile>(
+      [...(profiles?.trade ?? new Map()).entries()].map(([rosterId, cached]) => [rosterId, cached.profile]),
+    );
+
+    const teams: TradeTeam[] = [];
+    for (const roster of rosters) {
+      const inputs = await startSitInputsFor(db, roster.playerIds);
+      const evaluated = inputs.map((i) => evaluatePlayer(i, profile)).filter((e) => e.score != null);
+      const weeksById = new Map(inputs.map((i) => [i.player.id, i.usageWeeks ?? []]));
+
+      const byPosition = new Map<string, typeof evaluated>();
+      for (const e of evaluated) {
+        const bucket = byPosition.get(e.position) ?? [];
+        bucket.push(e);
+        byPosition.set(e.position, bucket);
+      }
+      for (const bucket of byPosition.values()) bucket.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+      const needs: Record<string, NeedLevel> = {};
+      const assets: TradeAsset[] = [];
+      for (const [position, bucket] of byPosition) {
+        const required = shape.starters[position] ?? 0;
+        const flexEligible = shape.flex.some((f) => f.positions.includes(position));
+        needs[position] =
+          bucket.length < required ? 'urgent' : flexEligible && bucket.length <= required ? 'thin' : 'covered';
+
+        bucket.forEach((e, index) => {
+          const weeks = weeksById.get(e.playerId) ?? [];
+          const xfp = weeks.length > 0 ? assessXfp(position, weeks, profile) : NO_XFP;
+          assets.push({
+            playerId: e.playerId,
+            name: e.name,
+            position,
+            value: round2(e.score ?? 0),
+            // Surplus means the team can still field the position without him:
+            // anybody beyond the dedicated starting slots.
+            surplus: index >= required,
+            /*
+             * Expected points, from the model Channel 3 published.
+             *
+             * Two of the five timing calls were dormant while nothing measured
+             * opportunity against production; `assessXfp` does, off the usage
+             * weeks this route already loaded. Zero games yields `NO_XFP`, whose
+             * per-game figures are null, and the timing rules require both sides
+             * before they say anything — so an unmeasured player still produces
+             * no call rather than a call built on a default.
+             */
+            timing: {
+              tdShare: e.tdDependency.share ?? null,
+              roleTrend: e.role.trend,
+              xfpPerGame: xfp.xfpPerGame,
+              fpPerGame: xfp.actualPerGame,
+            },
+          });
+        });
+      }
+      // A position nobody on the roster plays is a hole, and it will not appear
+      // in the loop above because there is nothing to iterate.
+      for (const position of Object.keys(shape.starters)) {
+        if (!(position in needs) && (shape.starters[position] ?? 0) > 0) needs[position] = 'urgent';
+      }
+
+      const profileForTeam = tradeProfiles.get(roster.rosterId);
+      teams.push({
+        rosterId: roster.rosterId,
+        userId: roster.ownerId,
+        displayName: roster.ownerName ?? `Roster ${roster.rosterId}`,
+        assets,
+        needs,
+        ...(profileForTeam ? { profile: profileForTeam } : {}),
+      });
+    }
+
+    const me = teams.find((t) => t.rosterId === mine.rosterId)!;
+    const partners = teams.filter((t) => t.rosterId !== mine.rosterId);
+    const ideas = findTradeFits(me, partners).slice(0, 12);
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      found: true,
+      ideas,
+      partners: partners.length,
+      notes:
+        tradeProfiles.size === 0
+          ? ['no manager trade history has been synced, so plausibility is untested rather than measured']
+          : [],
+    });
+  });
+
+  /**
+   * Bye-week and playoff planning.
+   *
+   * Quiet by design: it says nothing at all unless a bye inside the lookahead
+   * window actually leaves a slot short, and playoff weeks carry no weight
+   * until the season has said something about whether this team will be there.
+   */
+  router.get('/api/leagues/:id/plan', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const shape = buildRosterShape(league.rosterPositions);
+    const state = await new SleeperSyncService(db, ctx.env.sleeper).getNflState();
+    const currentWeek = state?.week ?? 1;
+
+    const players = mine ? await new PlayerRepo(db).listByIds(mine.playerIds) : new Map();
+    const starters = new Set(mine?.starterIds ?? []);
+    /*
+     * The season record, from Sleeper's own roster settings.
+     *
+     * Stored whole on `RosterRecord.settings` by the league sync, so this needs
+     * no second request and no table of its own. Absent means the sync predates
+     * the column, which `playoffEmphasis` reads as too few games played and
+     * answers with zero weight — the correct behaviour for an unknown record.
+     */
+    const mySettings = (mine?.settings ?? null) as Record<string, unknown> | null;
+    const record = {
+      wins: Number(mySettings?.['wins'] ?? 0) || 0,
+      losses: Number(mySettings?.['losses'] ?? 0) || 0,
+    };
+
+    /*
+     * There is no bye-week source connected.
+     *
+     * Sleeper's player dictionary does not carry one — checked against the live
+     * payload, which has forty-nine fields and no bye — and this app stores no
+     * NFL schedule. So the planner runs against `null` byes, correctly finds
+     * nothing, and says which input is missing rather than reporting an all-clear
+     * it has not earned.
+     */
+    const roster = [...players.values()].map((p) => ({
+      playerId: p.id,
+      name: p.fullName,
+      position: p.position,
+      byeWeek: null as number | null,
+      starter: starters.has(p.id),
+    }));
+
+    const byes = byeOutlook({ roster, shape, currentWeek });
+    const playoffStartWeek = Number(league.leagueSettings?.['playoff_week_start'] ?? 15);
+    const playoffTeams = Number(league.leagueSettings?.['playoff_teams'] ?? 6);
+
+    /*
+     * The record comes from the synced seats, not from a guess.
+     *
+     * With no history synced there is no record, and `playoffEmphasis` is given
+     * 0-0 — which its own gate reads as "too few games played" and answers with
+     * zero weight. That is the correct behaviour for an unknown record: playoff
+     * weeks stay out of the ranking until something is actually known.
+     */
+    const emphasis = playoffEmphasis({
+      currentWeek,
+      playoffStartWeek,
+      wins: record.wins,
+      losses: record.losses,
+      playoffTeams,
+      totalTeams: rosters.length || league.totalRosters,
+    });
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      currentWeek,
+      byes: {
+        ...byes,
+        available: false,
+        note: 'no bye-week source is connected, so bye planning reports nothing rather than an all-clear',
+      },
+      playoffs: {
+        startWeek: playoffStartWeek,
+        weeks: playoffWeeks(playoffStartWeek),
+        record: mySettings ? record : null,
+        ...emphasis,
+      },
+    });
+  });
+
+  /** What changed since you last looked. Empty is the ordinary answer. */
+  router.get('/api/leagues/:id/feed', async (ctx) => {
+    const leagueRepo = new LeagueRepo(ctx.env.db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    const events = await new DecisionFeedRepo(ctx.env.db).listOpen(league.id);
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      events,
+      unseen: events.filter((e) => e.seenAt == null).length,
+    });
+  });
+
+  router.post('/api/leagues/:id/feed/seen', async (ctx) => {
+    const leagueRepo = new LeagueRepo(ctx.env.db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    return jsonResponse(await new DecisionFeedRepo(ctx.env.db).markSeen(league.id));
   });
 
   // ------------------------------------------------------------------ drafts
@@ -1990,7 +2272,18 @@ const FREE_AGENTS_PER_POSITION = 12;
  */
 async function boundedFreeAgents(
   db: Database,
-  opts: { rosteredIds: Set<string>; startable: Set<string> },
+  opts: {
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+    /**
+     * The player dictionary, when the caller already holds it.
+     *
+     * Reading it is a scan of every non-excluded player, and the waivers route
+     * needs the same list a second time to work out who is hurt behind whom.
+     * Passing it in keeps that one read rather than two.
+     */
+    players?: CanonicalPlayer[];
+  },
 ): Promise<string[]> {
   const adpRepo = new AdpRepo(db);
   // The platform market, for the same reason the players list uses it: one
@@ -1998,7 +2291,7 @@ async function boundedFreeAgents(
   const snapshot = await adpRepo.latestPlatformSnapshot();
   const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
 
-  const available = (await new PlayerRepo(db).listAll()).filter(
+  const available = (opts.players ?? (await new PlayerRepo(db).listAll())).filter(
     (p) =>
       p.active &&
       !opts.rosteredIds.has(p.id) &&
@@ -2131,6 +2424,110 @@ export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {})
 }
 
 /**
+ * The one league-intelligence field on a waiver row that still has no supplier.
+ *
+ * `WaiverLeagueIntel` declares three. `core/faab` fills the price and
+ * `core/value/multiWeek.ts` now fills the multi-week column, so what is left is
+ * competition: how many rivals have a hole at the position and can afford to
+ * bid on it.
+ *
+ * It answers from rosters already loaded — no extra query, no lineup scoring —
+ * and hands the same count to the price model, which asks for exactly this
+ * number and has been estimating it league-wide.
+ */
+function waiverLeagueIntel(opts: {
+  advice: ReturnType<typeof recommendWaiverUpgrades>;
+  rosters: RosterRecord[];
+  players: CanonicalPlayer[];
+  shape: RosterShape;
+  budgets: LeagueBudgetState | null;
+  prices: PriceSummary | null;
+}): { competition: Map<string, CompetitionAssessment> } {
+  const competition = new Map<string, CompetitionAssessment>();
+
+  const teams = opts.rosters.map((r) => ({
+    rosterId: r.rosterId,
+    displayName: r.ownerName ?? `Roster ${r.rosterId}`,
+    isMine: r.isMine,
+    playerIds: r.playerIds,
+  }));
+
+  /*
+   * Availability, through the same reading the rest of the app uses.
+   *
+   * A rival's own players are not evaluated here — that would be the twelve
+   * lineup optimisations this deliberately avoids — so the designation on the
+   * player record is normalized by `core/injury/model.ts` rather than compared
+   * against a private list of status strings. One definition of "ruled out",
+   * everywhere.
+   */
+  const meta = new Map<string, { position: string | null; unavailable?: boolean }>();
+  for (const p of opts.players) {
+    meta.set(p.id, {
+      position: p.position || null,
+      unavailable: isRuledOut(normalizeDesignation(p.status).designation),
+    });
+  }
+
+  const budgetByRoster = new Map<number, RosterBudget>(
+    (opts.budgets?.rosters ?? []).map((r) => [r.rosterId, r] as const),
+  );
+  const bidding = opts.budgets?.rule.usesFaab === true;
+  const needsByPosition = new Map<string, ReturnType<typeof teamNeedsFor>>();
+
+  for (const upgrade of opts.advice.upgrades) {
+    for (const candidate of upgrade.candidates) {
+      if (!needsByPosition.has(candidate.position)) {
+        needsByPosition.set(candidate.position, teamNeedsFor(candidate.position, teams, meta, opts.shape));
+      }
+      const needs = needsByPosition.get(candidate.position)!;
+
+      competition.set(
+        candidate.playerId,
+        needs.length === 0
+          ? COMPETITION_UNKNOWN
+          : assessCompetition({
+              needs,
+              budgets: budgetByRoster,
+              // The 25th percentile of winning bids: what it has taken to win at
+              // the cheap end of this league, and so the floor a rival has to
+              // clear to be in on him at all. Null in an unpriced league, where
+              // nobody is excluded for affordability.
+              expectedLow: opts.prices?.low ?? null,
+              bidding,
+            }),
+      );
+    }
+  }
+
+  return { competition };
+}
+
+/**
+ * Attach competition to the rows the board reads, leaving everything else alone.
+ *
+ * Deliberately a fold over rows another pass already built, rather than a
+ * rebuild: multi-week value arrives the same way from its own supplier, and two
+ * passes that each reconstructed the candidate list would eventually disagree
+ * about who is on it.
+ */
+function withCompetition<T extends { candidates: { playerId: string }[] }>(
+  upgrades: T[],
+  competition: Map<string, CompetitionAssessment>,
+): T[] {
+  return upgrades.map((upgrade) => ({
+    ...upgrade,
+    candidates: upgrade.candidates.map((candidate) => {
+      const assessed = competition.get(candidate.playerId);
+      return {
+        ...candidate,
+        competition: assessed ? { level: assessed.level, label: assessed.label, detail: assessed.detail } : null,
+      };
+    }),
+  }));
+}
+
+/**
  * Put a price on each waiver upgrade the engine found.
  *
  * The translation layer between two vocabularies. The waiver engine speaks in
@@ -2145,6 +2542,8 @@ function priceWaiverUpgrades(opts: {
   rosterInputs: StartSitInput[];
   candidateInputs: StartSitInput[];
   rosteredIds: Set<string>;
+  /** Rivals who need the position and can pay, by player id. */
+  competition?: Map<string, CompetitionAssessment>;
 }): (BidRecommendation & { opportunity: OpportunityCost | null; trending: string | null; disagreement: Disagreement })[] {
   const { advice, strategy } = opts;
   const season = { week: strategy.week, finalWeek: strategy.finalWeek };
@@ -2152,11 +2551,23 @@ function priceWaiverUpgrades(opts: {
   /*
    * Rosters that could plausibly want him, for the demand reading.
    *
-   * A blunt count on purpose: every other funded roster in the league. A finer
-   * one would need each rival's lineup scored against each candidate, which is
-   * twelve times the work for a number that feeds a 0–1 demand input.
+   * This used to be every funded rival in the league, on the reasoning that a
+   * finer count would need each rival's lineup scored against each candidate --
+   * twelve lineup optimisations for a number feeding a 0-1 input.
+   *
+   * That is true of scoring and false of *need*. Whether a roster needs a back
+   * is a count of the healthy backs it holds against the back slots it has to
+   * fill, which is one pass over rosters already in memory. So the count is now
+   * per position and filtered by affordability, and falls back to the blunt
+   * league-wide figure only when positional needs were not supplied.
    */
   const fundedRivals = strategy.budget.rosters.filter((r) => !r.isMine && (r.remaining ?? 0) > 0).length;
+
+  const rivalsFor = (playerId: string): number | null => {
+    const assessed = opts.competition?.get(playerId);
+    if (assessed) return assessed.bidders.length > 0 ? Math.min(assessed.bidders.length, 4) : null;
+    return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
+  };
 
   const out: (BidRecommendation & {
     opportunity: OpportunityCost | null;
@@ -2217,7 +2628,7 @@ function priceWaiverUpgrades(opts: {
           shelfLife: shelfLifeOf(candidate),
           futureOpportunity: 'normal',
           marketHeat,
-          rivalsWithNeed: fundedRivals > 0 ? Math.min(fundedRivals, 4) : null,
+          rivalsWithNeed: rivalsFor(candidate.playerId),
         },
         budgetState: strategy.budget,
         prices: strategy.prices,
