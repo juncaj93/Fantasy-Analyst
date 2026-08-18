@@ -451,6 +451,78 @@ also where the season outlook, the last-season line and the injury sections now
 live. Draft and Players had grown byte-identical copies of all three; two copies
 is how six start.
 
+## Live matchup (`core/matchup/`)
+
+The post-draft head-to-head. One rule shapes the whole module: **Sleeper owns
+the score, and this owns the forecast.**
+
+The section numbers these modules cite in their comments — `§6`, `§8`, `§14`,
+`§33` — are the Matchup brief's, preserved verbatim at
+[docs/brief/09_MATCHUP.md](brief/09_MATCHUP.md).
+
+Sleeper's `/league/{id}/matchups/{week}` is the authority for the pairing, the
+lineups, the slot each starter fills and every points figure, and none of it is
+recomputed. That payload also carries Sleeper's own projection, which is read
+nowhere in this app — a number labelled as Fantasy Analyst's that came from
+Sleeper would be the most misleading thing the feature could do.
+
+Everything else is built from the start/sit engine every other screen uses, with
+exactly one adjustment: the availability component is subtracted out of a
+player's score before it becomes a projection. The engine prices a Questionable
+designation as points off; this model prices the same fact as a branch. Leaving
+both in charges it twice.
+
+| module | what it owns |
+| --- | --- |
+| `distribution.ts` | the shape of what is still to come, per player |
+| `correlation.ts` | who moves with whom, as factor loadings |
+| `simulate.ts` | four thousand afternoons, seeded from the state |
+| `needs.ts` | leverage in win probability, and the thresholds it implies |
+| `decision.ts` | which legal lineup wins *this* matchup |
+| `insights.ts` | the one card that says what matters right now |
+| `fingerprint.ts` | the string that both seeds and caches |
+| `names.ts` | `J. Hurts`, and what to do when two of them are on screen |
+| `model.ts` | the assembly, and the degraded path |
+
+**Three game states, three questions.** Not started carries the full pregame
+distribution. Live carries what is *left*, conditioned on points already banked
+and how much of the game is gone — a blend that leans further on observed pace
+the deeper into the game it is, capped so a quiet first half cannot erase a
+projection. Finished carries nothing at all: actual points are truth, the player
+is never drawn for, and a matchup where everything is final says 100% rather
+than 94%.
+
+**Distributions are lognormal**, parameterised by mean and coefficient of
+variation so the mean is *exactly* the projection the rest of the app shows.
+Fantasy scoring is non-negative, right-skewed and unbounded above; a normal
+puts real probability below zero and none in the tail that matters, and
+truncating one at zero silently inflates every projected total.
+
+**Correlation is a factor model, not a matrix.** Rules written one pair at a
+time do not produce a positive semi-definite matrix, and a matrix that cannot be
+factored cannot be sampled from — the failure is a `NaN` win probability on a
+Sunday afternoon. Loadings on a per-club factor, a per-fixture factor and a
+per-club-and-position competition factor produce a consistent structure by
+construction, and every implied correlation is asserted under 0.45.
+
+**The simulation is seeded from a fingerprint of the matchup state**, and that
+same string is the cache key. A state cannot move one without invalidating the
+other. Every player is drawn — starters and bench alike — and every draw is
+kept, which is what makes a lineup counterfactual an exact difference over the
+same afternoons rather than the difference between two noisy estimates.
+
+**Degraded is a first-class outcome.** If either side has fewer than half its
+starters projectable, there is no honest forecast to print: the scoreboard
+stays, the card says the forecast is unavailable, and nothing is substituted.
+
+**Calibration is written as it goes.** `matchup_forecasts` holds one row per
+roster per week — the first forecast written once and never updated, the latest
+one moving with the afternoon, the outcome filled in when the week settles.
+Keyed by season and week, stamped with the model version. A live win probability
+is a function of a Sunday that stops being obtainable the moment the games end;
+if nobody writes it down at the time, "is 70% actually 70%" is unanswerable
+forever rather than merely hard.
+
 ### Endpoints
 
 | route | what it does |
@@ -461,6 +533,8 @@ is how six start.
 | `GET /api/leagues/:id/managers` | the cached profiles, with their sample sizes |
 | `GET /api/leagues/:id/bench` | what each bench slot earns, and the drop candidates |
 | `GET /api/leagues/:id/trades/ladder?playerId=` | opening / fair / do-not-exceed for one target, plus the consolidation read |
+| `GET /api/leagues/:id/matchup[?week=]` | the week's head-to-head, with the forecast over it |
+| `GET /api/diagnostics/matchup-calibration` | how the win probability has actually held up, in ten-point bands |
 
 The two refresh routes are writes and are rate limited beside the Vegas one. The
 work `strategy/refresh` does also runs on the 09:00 UTC cron for the selected
@@ -473,6 +547,11 @@ profiles are not on any clock — they change perhaps once a season.
 
 - No endpoint writes to Sleeper. There is no pick, lineup, waiver, bid or trade
   mutation path, and a test asserts those routes 404.
+- Matchup advises and never acts. It reports what a lineup change would be
+  worth in win probability and there is no path by which it sets one.
+- Sleeper's own projection is never read. `custom_points` arrives on the
+  matchup payload and is ignored; every projected number on that screen is
+  this app's, or absent.
 - The strategy layer advises and never acts. Bids are numbers on a card, trade
   ladders carry `advisory: 'never auto-sent'`, and every transaction in this app
   happens in Sleeper, by hand, on purpose.

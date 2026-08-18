@@ -56,6 +56,21 @@ export interface LifecycleResolution {
   phase: SeasonPhase;
   /** Whether Draft belongs in primary navigation right now. */
   draftVisible: boolean;
+  /**
+   * Whether Matchup belongs in primary navigation right now.
+   *
+   * The mirror image of `draftVisible`, and deliberately computed here beside
+   * it: a head-to-head has nothing to say until a draft is finished — every
+   * lineup is empty and every projection is zero — and from that moment on it is
+   * the screen an in-season reader opens first. The two facts are one decision
+   * about where the season is, and answering them in two places is how a bar
+   * ends up showing both or neither.
+   *
+   * A *live* draft deliberately does not qualify. Picks are still being made,
+   * the roster is half a roster, and a matchup built from it would be a
+   * projection of a team that does not exist yet.
+   */
+  matchupVisible: boolean;
   /** True while picks are being made — the only state that justifies fast polling. */
   draftLive: boolean;
   /** Which witness decided it, in the user's language. */
@@ -100,6 +115,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: 'draft_live',
       phase: 'preseason',
       draftVisible: true,
+      matchupVisible: false,
       draftLive: true,
       reason: 'your draft is live',
       assumed: false,
@@ -112,6 +128,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: 'offseason',
       phase: phase.phase,
       draftVisible: false,
+      matchupVisible: false,
       draftLive: false,
       reason: phase.reason,
       assumed: phase.assumed,
@@ -133,6 +150,9 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: finished ? 'season_complete' : 'playoffs',
       phase: phase.phase,
       draftVisible: false,
+      // A finished league has no next matchup; a league in the NFL postseason
+      // may still be playing its own, so the screen stays reachable.
+      matchupVisible: !finished,
       draftLive: false,
       reason: finished ? 'this league has finished its season' : phase.reason,
       assumed: phase.assumed,
@@ -144,6 +164,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: 'regular_season',
       phase: phase.phase,
       draftVisible: false,
+      matchupVisible: true,
       draftLive: false,
       reason: phase.reason,
       assumed: phase.assumed,
@@ -156,6 +177,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: 'post_draft',
       phase: phase.phase,
       draftVisible: true,
+      matchupVisible: true,
       draftLive: false,
       reason: 'your draft is done — the season has not started',
       assumed: phase.assumed,
@@ -166,6 +188,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
       lifecycle: 'draft_open',
       phase: phase.phase,
       draftVisible: true,
+      matchupVisible: false,
       draftLive: false,
       reason: 'your draft is set up and has not started',
       assumed: phase.assumed,
@@ -176,6 +199,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
     lifecycle: 'preseason',
     phase: phase.phase,
     draftVisible: true,
+    matchupVisible: false,
     draftLive: false,
     reason: phase.reason,
     assumed: phase.assumed,

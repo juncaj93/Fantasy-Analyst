@@ -116,6 +116,39 @@ export const MOCK_GAMES: MockRoster[] = [
       { name: 'Trey Halloran', position: 'QB', team: 'SF' },
     ],
   },
+  /*
+   * A second game, so both sides of a demo matchup can be projected.
+   *
+   * The first fixture priced five players, which was ample for a draft board
+   * and a four-man roster and is not enough for a head-to-head: a matchup where
+   * one lineup has market coverage and the other does not produces a confident
+   * win probability against a team the app can only see half of, and the
+   * correct behaviour there is to degrade rather than to answer. That behaviour
+   * is real and is tested; what it should not be is the *only* thing the demo
+   * deployment can show.
+   *
+   * Cal Whitfield is deliberately *not* here. The demo needs one rostered
+   * player nobody has priced — it is the state half a dozen tests are about,
+   * and it is a real state on any Sunday — and he has been that player since
+   * the first fixture. One unpriced starter is well inside what the forecast
+   * still answers on; it costs the confidence line one clause, which is exactly
+   * what the confidence line is for.
+   */
+  {
+    eventId: 'demo-game-2',
+    startTime: new Date(Date.now() + 3 * 86_400_000 + 3 * 3_600_000).toISOString(),
+    homeTeam: 'Los Angeles Rams',
+    awayTeam: 'Philadelphia',
+    players: [
+      { name: 'Rhys Donnelly', position: 'QB', team: 'LAR' },
+      { name: 'Owen Fitzgerald', position: 'WR', team: 'PHI' },
+      { name: 'Silas Mbeki', position: 'RB', team: 'GB' },
+      { name: 'Bo Ashworth', position: 'RB', team: 'SEA' },
+      { name: 'Julian Reyes', position: 'RB', team: 'MIA' },
+      { name: 'Miles Barrowman', position: 'TE', team: 'CLE' },
+      { name: 'Grant Aldous', position: 'TE', team: 'WAS' },
+    ],
+  },
 ];
 
 export interface SeedSummary {

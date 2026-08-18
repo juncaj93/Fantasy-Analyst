@@ -21,16 +21,18 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * The destinations, in the two shapes the bar has.
+ * The destinations, in the shapes the bar has.
  *
  * One slot is seasonal and exactly one of Draft and Waivers is ever in it, so
  * the bar carries six either way: the board while there is still a draft to
- * read, and the waiver wire once the season is under way.
+ * read, and the waiver wire once the season is under way. Matchup is the
+ * exception — it arrives the day a draft completes, which is before Draft
+ * leaves, so between those two moments there are seven.
  */
 const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
 const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'review', 'setup'] as const;
 
-type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number];
+type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 
 async function open(page: Page, tab: Tab) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -49,9 +51,20 @@ async function open(page: Page, tab: Tab) {
 async function expectedTabs(page: Page): Promise<readonly Tab[]> {
   const overview = await page.evaluate(async () => {
     const res = await fetch('/api/overview');
-    return res.ok ? ((await res.json()) as { season?: { draftVisible?: boolean } }) : null;
+    return res.ok
+      ? ((await res.json()) as {
+          season?: { draftVisible?: boolean };
+          lifecycle?: { matchupVisible?: boolean };
+        })
+      : null;
   });
-  return overview?.season?.draftVisible === false ? IN_SEASON : TABS;
+  const base = overview?.season?.draftVisible === false ? IN_SEASON : TABS;
+  // Matchup sits immediately after Team, which is the screen it belongs beside.
+  // A deployment that predates the field says nothing and gets no Matchup tab,
+  // which is what the app itself does with the same absence.
+  if (overview?.lifecycle?.matchupVisible !== true) return base;
+  const at = base.indexOf('team') + 1;
+  return [...base.slice(0, at), 'matchup' as const, ...base.slice(at)];
 }
 
 /**

@@ -39,6 +39,47 @@ const DEMO_PICKS = [
   { draft_id: 'demo-draft', pick_no: 2, round: 1, draft_slot: 2, player_id: '1002', picked_by: 'rival', roster_id: 2 },
 ];
 
+/**
+ * A week-one head-to-head between the two demo rosters.
+ *
+ * The lineups here are wider than the rosters `seedDemoData` writes, and that
+ * is deliberate rather than an inconsistency. The seeded rosters are four
+ * players and one player, chosen years ago to exercise the Team screen's
+ * honesty about slots nobody can fill; a matchup drawn from them would be two
+ * lineups of almost nothing, which tests the empty state and nothing else.
+ *
+ * Sleeper is the authority for what a matchup's lineups are — the service reads
+ * `starters` and `players` from this payload and never from the stored roster —
+ * so a fixture that fills both sides is exactly the shape a real league sends,
+ * and it lets the demo deployment show the screen somebody actually built.
+ *
+ * `starters` is positional against the demo league's `roster_positions` with the
+ * bench removed: QB, RB, RB, WR, WR, TE, FLEX. The two lineups share nobody, as
+ * two lineups in one league cannot; the opponent's second running-back slot is
+ * the literal `"0"` Sleeper sends for a slot nobody is filling, which is a real
+ * state and the only way the empty half of a row gets drawn at all.
+ */
+const DEMO_MATCHUPS = [
+  {
+    roster_id: 1,
+    matchup_id: 1,
+    points: 0,
+    starters: ['1003', '1001', '1008', '1002', '1005', '1004', '1012'],
+    players: ['1003', '1001', '1008', '1002', '1005', '1004', '1012', '1009', '1014'],
+    players_points: {},
+    starters_points: [0, 0, 0, 0, 0, 0, 0],
+  },
+  {
+    roster_id: 2,
+    matchup_id: 1,
+    points: 0,
+    starters: ['1010', '1006', '0', '1007', '1011', '1017', '1019'],
+    players: ['1010', '1006', '1007', '1011', '1017', '1019', '1013', '1018'],
+    players_points: {},
+    starters_points: [0, 0, 0, 0, 0, 0, 0],
+  },
+];
+
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -58,6 +99,15 @@ export function withDemoSleeper(underlying: FetchLike = (url, init) => fetch(url
     const path = new URL(url).pathname;
     if (path.endsWith(`/draft/${DEMO_DRAFT.draft_id}`)) return json(DEMO_DRAFT);
     if (path.endsWith(`/draft/${DEMO_DRAFT.draft_id}/picks`)) return json(DEMO_PICKS);
+    /*
+     * Any week of the demo league returns the same head-to-head.
+     *
+     * The alternative — a schedule keyed by week — would be a fixture pretending
+     * to be a season, and the screen under test does not care which week it is
+     * looking at. A week Sleeper has not scheduled is its own state and is
+     * covered by asking for a real league's future week, not by this.
+     */
+    if (/\/league\/demo-league\/matchups\/\d+$/.test(path)) return json(DEMO_MATCHUPS);
     return underlying(url, init);
   };
 }

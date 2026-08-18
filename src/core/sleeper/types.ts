@@ -13,6 +13,7 @@
  *   GET https://api.sleeper.app/v1/draft/<draft_id>/picks
  *   GET https://api.sleeper.app/v1/players/nfl   (large; cache, do not poll)
  *   GET https://api.sleeper.app/v1/state/nfl
+ *   GET https://api.sleeper.app/v1/league/<league_id>/matchups/<week>
  */
 
 export interface SleeperUser {
@@ -149,6 +150,42 @@ export interface SleeperTradedPick {
   roster_id: number;
   previous_owner_id?: number | null;
   owner_id: number;
+}
+
+/**
+ * One roster's side of one week's matchup.
+ *
+ * Sleeper returns every roster in the league for the requested week, and the
+ * two sides of a head-to-head are the two rows sharing a `matchup_id`. A bye,
+ * a league that has not scheduled the week, and a roster left out of the
+ * schedule all arrive as `matchup_id: null`, which is why nothing downstream
+ * may assume a partner exists.
+ *
+ * **This is the authority for what the score actually is.** `points` is the
+ * league's own settled total and `players_points` is the per-player breakdown
+ * under the league's own scoring, both computed by Sleeper. Nothing in this app
+ * recomputes either, and nothing overwrites them with a projection.
+ *
+ * `starters` is ordered to match the league's `roster_positions` with the
+ * bench slots removed, which is the only place the slot a player is filling can
+ * be read from. An empty slot arrives as `"0"`.
+ */
+export interface SleeperMatchup {
+  roster_id: number;
+  /** Null when this roster has no opponent this week. */
+  matchup_id: number | null;
+  /** The league's settled total for this roster, under its own scoring. */
+  points?: number | null;
+  /** Sleeper's own projection, deliberately never read — see docs. */
+  custom_points?: number | null;
+  /** Every player held this week, starters included. */
+  players?: string[] | null;
+  /** In lineup-slot order. `"0"` marks a slot nobody is filling. */
+  starters?: string[] | null;
+  /** Per-player points, under the league's scoring. */
+  players_points?: Record<string, number> | null;
+  /** Per-starter points, in the same order as `starters`. */
+  starters_points?: number[] | null;
 }
 
 /** One row of Sleeper's global trending adds/drops list. */

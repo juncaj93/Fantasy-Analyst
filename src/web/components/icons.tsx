@@ -137,6 +137,26 @@ export function WaiverIcon({ size = 24, className }: IconProps) {
   );
 }
 
+/**
+ * Matchup: two sides of one thing, and a line between them.
+ *
+ * Deliberately not a shield, a trophy or a football. Every other mark in this
+ * bar is a shape rather than a picture, and at 22px a football is a brown oval
+ * that reads as a full stop. Two blocks facing each other across a divider is
+ * the shape of a head-to-head, and it is distinguishable from the roster's
+ * stacked rows and the trade's crossing arrows at a glance — which is the only
+ * job a tab glyph has.
+ */
+export function MatchupIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3.25" y="7" width="6.5" height="10" rx="2" />
+      <rect x="14.25" y="7" width="6.5" height="10" rx="2" />
+      <path d="M12 5.5v13" />
+    </svg>
+  );
+}
+
 /** Review: a queue of decisions, ticked off. */
 export function ReviewIcon({ size = 24, className }: IconProps) {
   return (

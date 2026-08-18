@@ -4221,3 +4221,654 @@ table.compact tr:last-child td {
   white-space: nowrap;
   border: 0;
 }
+
+/* ------------------------------------------------------------- matchup */
+/*
+ * The one screen in this app that is a *comparison* rather than a list.
+ *
+ * Everything below is arranged around one constraint from the brief: the whole
+ * starting lineup, both sides of it, should fit on one iPhone screen under the
+ * score and the insight card. That is roughly 300px of glass for nine rows,
+ * which is 33px a row — so a row is one line, the names truncate rather than
+ * wrap, and the projection lives *under* the score rather than beside it.
+ *
+ * The centre column is fixed width and never moves. It is the spine the eye
+ * runs down, and a position pill that shifted by four pixels between rows
+ * because one name was longer would cost more than the four pixels saved.
+ */
+
+.matchup-score {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.matchup-score-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-2);
+}
+
+.matchup-team {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.matchup-team[data-align='end'] {
+  text-align: right;
+}
+
+/* The fantasy team's name. One line, truncated — a manager's team name is
+   frequently a joke of unbounded length and it must not wrap the card. */
+.matchup-team-name {
+  font-size: 0.86rem;
+  font-weight: 640;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matchup-team-record {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+/* Sleeper's score: the largest thing on the screen, because it is the only
+   number here that is a fact rather than a forecast. */
+.matchup-team-score {
+  font-size: 1.62rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.15;
+  margin-top: 1px;
+}
+
+/* This app's own projection, in the quieter register everything derived uses. */
+.matchup-team-proj {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.matchup-proj-label {
+  font-size: 0.66rem;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+}
+
+.matchup-versus {
+  align-self: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+
+/*
+ * The odds bar.
+ *
+ * Both percentages are printed. The bar is an accelerator and never the carrier
+ * of the meaning — see §38 and the `role="meter"` in the component.
+ */
+.matchup-win {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  margin-top: var(--sp-1);
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+button.matchup-win {
+  cursor: pointer;
+  min-height: var(--tap);
+}
+
+button.matchup-win:active {
+  opacity: 0.6;
+}
+
+.matchup-win-value {
+  font-size: 0.78rem;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.matchup-win-value-end {
+  text-align: right;
+}
+
+.matchup-win-word {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+}
+
+.matchup-win-track {
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.matchup-win-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+/*
+ * How it finished, where the odds bar was.
+ *
+ * A result and a probability are different kinds of statement, so they get
+ * different type rather than the same row with different contents: this is a
+ * fact, and it reads like one.
+ */
+.matchup-result {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: var(--sp-1);
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 660;
+  color: var(--text-dim);
+  text-align: center;
+  cursor: pointer;
+}
+
+div.matchup-result {
+  cursor: default;
+  line-height: var(--tap);
+}
+
+.matchup-result:active {
+  opacity: 0.6;
+}
+
+.matchup-confidence,
+.matchup-degraded {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin-top: var(--sp-1);
+}
+
+.matchup-degraded {
+  color: var(--text-dim);
+}
+
+/* The state of the whole matchup, in the navigation bar. */
+.matchup-state {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.matchup-state-live {
+  color: var(--live);
+}
+
+.matchup-state-final {
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ hero card */
+/*
+ * The differentiator, and the only element on this screen given room to
+ * breathe. It is one card at a time on purpose: three stacked would be a
+ * dashboard, which is exactly what the approved concept is not.
+ */
+.hero-card {
+  background: var(--accent-tint);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* Something the reader can still act on gets the warmer surface. Colour is an
+   accelerator here too — the sentence itself says what it is. */
+.hero-card[data-urgency='act_now'] {
+  background: var(--warn-tint);
+}
+
+.hero-card[data-kind='clinch'],
+.hero-card[data-kind='near_clinch'] {
+  background: var(--pos-tint);
+}
+
+.hero-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.hero-headline {
+  font-size: 1.02rem;
+  font-weight: 660;
+  line-height: 1.28;
+  letter-spacing: -0.012em;
+  color: var(--text);
+}
+
+.hero-detail {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.hero-action {
+  align-self: flex-start;
+  /*
+   * A smaller box than 44px, and deliberately.
+   *
+   * The whole card is about 120px of glass and a full-height target inside it
+   * would spend a third of that on white space above and below eight words.
+   * The padding here still gives a ~36px tall, ~110px wide target — comfortably
+   * inside what a thumb finds — and the pager buttons beside it are the
+   * controls that actually get repeated taps.
+   */
+  min-height: 36px;
+  padding: 6px 0;
+  background: none;
+  border: 0;
+  color: var(--accent-text);
+  font-size: 0.82rem;
+  font-weight: 640;
+  cursor: pointer;
+}
+
+.hero-pager {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+/* The paging controls exist so a gesture is never the only way through. They
+   are quiet, and they are still full tap targets. */
+.hero-step {
+  min-width: var(--tap);
+  min-height: 30px;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hero-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.hero-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  cursor: pointer;
+}
+
+.hero-dot-on {
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------- starter rows */
+.matchup-rows {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-2);
+}
+
+.matchup-rows > * + *,
+.matchup-bench [data-testid='bench-rows'] > * + * {
+  border-top: 1px solid var(--separator-soft);
+}
+
+.matchup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 5px var(--sp-2);
+}
+
+.matchup-half {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 3px 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  /* A full-height target inside a 33px row: the row itself is the target, and
+     making the button taller would push the rows apart again. */
+  min-height: 30px;
+  cursor: pointer;
+}
+
+.matchup-half[data-side='theirs'] {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.matchup-half:active {
+  opacity: 0.55;
+}
+
+.matchup-name-block {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.matchup-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Score above, projection below, both tabular so the columns line up down the
+   whole list — which is what makes nine rows scannable rather than read. */
+.matchup-points {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.matchup-half[data-side='theirs'] .matchup-points {
+  align-items: flex-start;
+}
+
+.matchup-actual {
+  font-size: 0.88rem;
+  font-weight: 660;
+  color: var(--text);
+}
+
+.matchup-player-proj {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+}
+
+/* The spine. Fixed width, so it never moves between rows. */
+.slot-pill {
+  flex: 0 0 auto;
+  min-width: 38px;
+  text-align: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+}
+
+.slot-pill-qb {
+  background: var(--pos-QB-tint);
+  color: var(--pos-QB-line);
+}
+
+.slot-pill-rb {
+  background: var(--pos-RB-tint);
+  color: var(--pos-RB-line);
+}
+
+.slot-pill-wr {
+  background: var(--pos-WR-tint);
+  color: var(--pos-WR-line);
+}
+
+.slot-pill-te {
+  background: var(--pos-TE-tint);
+  color: var(--pos-TE-line);
+}
+
+.slot-pill-flex,
+.slot-pill-superflex,
+.slot-pill-recflex,
+.slot-pill-wrrbflex {
+  background: var(--pos-DEF-tint);
+  color: var(--pos-DEF-line);
+}
+
+.slot-pill-k {
+  background: var(--pos-K-tint);
+  color: var(--pos-K-line);
+}
+
+.slot-pill-def {
+  background: var(--pos-DEF-tint);
+  color: var(--pos-DEF-line);
+}
+
+/* Live: a dot, with the word behind it for anything reading the row aloud. */
+.matchup-live-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--live);
+}
+
+.matchup-status {
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.matchup-status-out {
+  background: var(--neg-tint);
+  color: var(--neg);
+}
+
+/* ------------------------------------------------------------- the bench */
+.matchup-bench {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-2);
+}
+
+.matchup-bench-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 620;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.matchup-bench[data-open='true'] .matchup-bench-toggle {
+  border-bottom: 1px solid var(--separator-soft);
+}
+
+.matchup-bench-chevron {
+  color: var(--text-faint);
+}
+
+/* -------------------------------------------------- behind-the-odds sheet */
+.matchup-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--separator-soft);
+  font-size: 0.84rem;
+}
+
+.matchup-detail-label {
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+
+.matchup-detail-value {
+  color: var(--text);
+  text-align: right;
+}
+
+.matchup-leverage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--separator-soft);
+  font: inherit;
+  font-size: 0.84rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matchup-leverage-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchup-leverage-swing {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.matchup-decision {
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+/*
+ * A narrower phone buys the names their letters back.
+ *
+ * At 360px a row is a logo, a name, two numbers, a pill, two numbers, a name
+ * and a logo inside 336px. Everything except the names is fixed, so the names
+ * are what pays — and `M. Barro…` is a name a reader has to decode. Trimming a
+ * point of type off the numbers and two pixels off the club marks gives about
+ * twenty pixels back to each side, which is three or four letters: the
+ * difference between reading a row and working it out.
+ */
+@media (max-width: 400px) {
+  .matchup-row {
+    --team-logo: 19px;
+    gap: 2px;
+    padding-inline: 6px;
+  }
+
+  .matchup-name {
+    font-size: 0.78rem;
+  }
+
+  .matchup-actual {
+    font-size: 0.83rem;
+  }
+
+  .slot-pill {
+    min-width: 34px;
+    padding-inline: 3px;
+  }
+}
+
+/*
+ * The seventh destination.
+ *
+ * For the stretch between a draft finishing and week one, the bar carries
+ * Draft, Team, Matchup, Trades, Players, Review and Setup. Seven at 360px needs
+ * a narrower destination than six does, and CSS cannot count them — the bar
+ * publishes `data-count`, and this is the only rule that reads it.
+ *
+ * The floor is 44px and it is a hard floor: a destination narrower than a
+ * fingertip is not a destination, and `toolbar.spec.ts` asserts it in both
+ * directions. Seven at 44 plus the pill's own padding is 318px, which fits
+ * inside the 336px a 360px phone leaves — so the count works out without ever
+ * spending the target to get there.
+ */
+@media (max-width: 400px) {
+  .tabbar[data-count='7'] {
+    --tab-w: 45px;
+  }
+}
+
+@media (max-width: 374px) {
+  .tabbar[data-count='7'] {
+    --tab-w: 44px;
+    /*
+     * The pill's own inset, not the destination's.
+     *
+     * At the floor the seven targets are exactly 308px and the bar has to stay
+     * a compact object with a real gutter either side of it on a 360px screen.
+     * Two pixels of the pill's padding is the only thing left that is not a
+     * thumb's problem — the targets are untouched, and the bar keeps its
+     * clearance from both edges.
+     */
+    --toolbar-pad: 3px;
+  }
+}

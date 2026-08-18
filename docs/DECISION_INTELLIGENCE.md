@@ -1,8 +1,8 @@
 # Decision intelligence: what each signal is, and what it is allowed to do
 
-One page for the two questions this app answers — *who do I draft now* and *who
-do I start this week* — written so a number on a card can be traced back to the
-thing that produced it.
+One page for the three questions this app answers — *who do I draft now*, *who
+do I start this week* and *am I going to win this matchup* — written so a number
+on a card can be traced back to the thing that produced it.
 
 Every signal here obeys the same four rules:
 
@@ -173,6 +173,95 @@ calls it and a refusal is reported as `blocked`, never as an update.
 
 ---
 
+## Matchup
+
+The third question is different in kind from the first two: draft and start/sit
+compare *players*, and this compares two *totals*. Everything below therefore
+runs on top of the Start/Sit section rather than beside it — a matchup
+projection is the same per-player numbers, summed, with a shape put around each
+of them.
+
+### Where a projection comes from — `services/matchupService.ts`
+
+The start/sit score, with the availability component subtracted out. That
+subtraction is the only adjustment, and it exists because the same fact would
+otherwise be charged twice: the engine prices a Questionable designation as
+points off, and this model prices it as a probability of not playing.
+
+Sleeper's own projection arrives on the same payload and is never read.
+
+### The shape around it — `core/matchup/distribution.ts`
+
+A lognormal whose mean is exactly the projection and whose coefficient of
+variation is the player's position adjusted by his role: `POSITION_VOLATILITY`
+(QB 0.32 through DEF 0.65) times `ROLE_VOLATILITY` (a deep threat 1.2, a
+possession receiver 0.85), clamped to [0.15, 1.2]. Lognormal because fantasy
+scoring is non-negative, right-skewed and unbounded above, and because a
+distribution whose mean drifted from the projection would make the projected
+total and the win probability two answers to one question.
+
+Three states:
+
+- **not started** — the full pregame distribution;
+- **live** — what is *left*, with the mean blended between the pregame
+  projection and the pace actually observed. The blend weight is
+  `elapsed × PACE_TRUST` (0.6), so a quiet first half moves the projection and
+  cannot erase it, and the spread of what remains scales with the square root of
+  the share still to play — which is why relative uncertainty *rises* as a game
+  runs down;
+- **final** — nothing. Actual points are truth and are never resampled.
+
+### Availability — `AVAILABILITY_MIXTURE`
+
+A mixture over playing / playing limited (× 0.72) / not playing, keyed on the
+existing `AvailabilityConfidence` state so this cannot disagree with the Team
+screen. `uncertain` is 40/30/30. The branch collapses the moment his game
+starts, because the scoreboard has answered the question.
+
+### Correlation — `core/matchup/correlation.ts`
+
+A factor model, not a matrix: rules written pair by pair do not produce
+something that can be factored, and the failure is a `NaN` win probability on a
+Sunday. Each player loads on his club, his fixture and a per-club-and-position
+competition factor with alternating signs — which is what makes two backs in one
+committee negatively correlated. `MAX_IMPLIED_CORRELATION` is 0.45 and the tests
+assert every pair sits under it.
+
+### The simulation — `core/matchup/simulate.ts`
+
+`DEFAULT_DRAWS` = 4,000, which puts the standard error of a win probability at
+0.79 points at its worst — inside the whole number the card shows. Seeded from
+`matchupFingerprint`, so the same state gives the same answer forever; that same
+string is the cache key, so a state cannot move one without invalidating the
+other. Every player is drawn, bench included, and every draw is kept.
+
+### Leverage and thresholds — `core/matchup/needs.ts`
+
+Leverage is measured in **win probability**, not points: the gap between the
+matchup at a player's 10th percentile and at his 90th. That is why a volatile
+quarterback outranks a slightly higher-projected back. A threshold is found by
+bisection over that player's own simulated range against a target he can
+actually reach — `MATERIAL_SWING` is 0.04, and a target outside his range is a
+sentence about a miracle rather than a most-likely path.
+
+### The lineup decision — `core/matchup/decision.ts`
+
+Which legal lineup wins *this* matchup, which is not which has the highest
+median. Computed over the same stored draws, so the difference between two
+lineups carries no sampling noise of its own. `MIN_WIN_PROBABILITY_GAIN` = 0.02
+is what gets *offered*; the model measures smaller effects and reports them in
+`options`. Respects Sleeper's slots, eligibility, locks and ruled-out players,
+and sets nothing.
+
+### The hero card — `core/matchup/insights.ts`
+
+Ranked by urgency (a **tier**, not a weight), then win-probability impact,
+injury severity, movement since the last state, closeness to 50%, and whose side
+it is about. One card per player, one per key, three at most. When nothing is
+material it says so calmly and stops.
+
+---
+
 ## Known limitations, stated plainly
 
 - **No weather feed.** The model in `core/startsit/weather.ts` is complete,
@@ -187,3 +276,13 @@ calls it and a refusal is reported as `blocked`, never as an update.
   quiet — never a number with the wrong sign.
 - **Defensive tendencies are current-season only**, and thin until a defence has
   faced four players of a role.
+- **The matchup clock is wall clock.** With no play-by-play feed, how far into a
+  game a player is comes from how long ago it kicked off; a game nobody has
+  priced has no kickoff, so its clock is inferred and the forecast's confidence
+  says so.
+- **Kickers and defences are not projected**, so in a league that starts them
+  both sides' projected totals are low by the same amount and the confidence
+  line names them. No number is invented to fill the gap.
+- **Matchup win probability is uncalibrated.** The ledger is written from the
+  first request; a band reports no observed rate below twenty settled weeks, and
+  there are none yet.

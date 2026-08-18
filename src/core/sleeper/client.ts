@@ -9,6 +9,7 @@ import type {
   SleeperDraft,
   SleeperDraftPick,
   SleeperLeague,
+  SleeperMatchup,
   SleeperPlayer,
   SleeperRoster,
   SleeperState,
@@ -130,6 +131,26 @@ export class SleeperClient {
     return (
       (await this.get<SleeperTransaction[]>(
         `/league/${encodeURIComponent(leagueId)}/transactions/${encodeURIComponent(String(week))}`,
+      )) ?? []
+    );
+  }
+
+  /**
+   * One week of a league's head-to-head matchups, every roster in one call.
+   *
+   * The authoritative answer to who is playing whom, what the lineups are and
+   * what the score is. It is small — one row per roster — and it is the only
+   * endpoint whose numbers change while games are running, which is why the
+   * scoreboard may be re-read often while everything derived from it is
+   * recomputed only when this actually changes.
+   *
+   * A week the league has not scheduled comes back empty rather than 404, and
+   * an empty list is a fact about the calendar rather than a failure.
+   */
+  async getMatchups(leagueId: string, week: number): Promise<SleeperMatchup[]> {
+    return (
+      (await this.get<SleeperMatchup[]>(
+        `/league/${encodeURIComponent(leagueId)}/matchups/${encodeURIComponent(String(week))}`,
       )) ?? []
     );
   }
