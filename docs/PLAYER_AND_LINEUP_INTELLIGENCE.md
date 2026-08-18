@@ -237,13 +237,53 @@ modules — one fully connected, one with nothing connected — and validates bo
 
 ---
 
+## Where it plugs in — `core/contracts/integration.ts`
+
+Three modules landed on `main` while this was being written, each with a named
+hole in it. This file fills them and does nothing else: every projection targets
+a type **imported from the module that owns it**, so a field renamed over there
+fails the build here instead of quietly going unfilled.
+
+| Hole | Owner | Filled with |
+|---|---|---|
+| `advanced` | `startsit/weekCard.ts` | one expected-points line, the reading in its detail |
+| `whatWouldChange` | `startsit/weekCard.ts` | the boundary sentences, already written |
+| `multiWeek` | `waivers/board.ts` | the four-week verdict, mapped to the board's four levels |
+| `fourWeekValue`, `streamingReplacement` | `roster/bench.ts` | the horizon and the measured replacement level |
+
+Two of those are supplied by the server today. The lineup endpoint attaches
+expected points to every evaluation with stored usage, and the waiver endpoint
+attaches the multi-week level to the players who made the board — the column
+`docs/STATUS.md` recorded as having no supplier. Neither changes an ordering,
+a score or a screen: both are data arriving in slots that were already drawn.
+
+**The sensitivity pass is affordable because it is rare.** A boundary only
+exists for a close call, and closeness is known from scores already computed —
+the gap between a starter and the best bench player his slot accepts. That
+subtraction gates the bisection, so a roster of comfortable calls pays nothing.
+
+### Two things called optionality
+
+`roster/bench.ts` scores a bench *slot* and labels one component `Optionality`,
+meaning **whether the role could still grow**. `startsit/optionality.ts` asks
+**how many of the week's futures a player covers** — slot eligibility, kickoff
+time, positional scarcity. Both are useful, they are not the same quantity, and
+the assessment carries `kind: 'lineup_coverage'` so a consumer holding both
+cannot print one under the other's label.
+
+---
+
 ## What is not built
 
-- **No UI.** Every output is exposed through the contract and nothing is drawn.
-  Team, Waivers, Start/Sit and Setup are untouched, deliberately: the brief asks
-  for reusable outputs rather than screens, and the parallel UI work stays
-  mergeable.
+- **No UI.** Nothing here draws anything. Two endpoints now fill slots that the
+  Weekly and Waivers screens already render, which is the opposite of adding a
+  screen: it is why those slots were declared.
 - **No persistence.** The grading ledger is a type and a set of pure functions;
-  no migration, repository or endpoint writes one yet.
+  no migration, repository or endpoint writes one yet, so the weekly self-grade
+  has no history to run over in production.
 - **No red-zone data**, so the expected-points model is opportunity-shaped and
   says so.
+- **No future schedule**, so the role-specific outlook has no source in the
+  running app and the multi-week value falls back to role trend and the
+  expected-points gap. The component that could not be computed reports itself
+  unknown rather than contributing a zero.

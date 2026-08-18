@@ -995,9 +995,30 @@ nothing connected — and both validate.
 Checks at this milestone: 1,783 unit/integration tests, typecheck, build and
 `wrangler deploy --dry-run` green.
 
-**Not built, deliberately:** no UI, no persistence for the grading ledger, and no
-red-zone data — so the expected-points model is opportunity-shaped and says so on
-every number it produces.
+**Integrated rather than parallel.** Three modules had landed on `main` with
+named holes in them, and this pass fills them without drawing anything: the
+weekly card's `advanced` line and its `whatWouldChange` list, and the waiver
+board's multi-week column — the one this document recorded as having no supplier.
+Every projection targets a type imported from the module that owns it, so a
+rename over there fails the build here rather than quietly going unfilled, and
+the tests feed each adapter into the real consumer rather than into a copy of
+its interface.
+
+The sensitivity pass is affordable on a hot endpoint for one reason: a boundary
+only exists for a close call, and closeness is a subtraction over scores that
+have already been computed. That gate runs first, so a roster of comfortable
+calls never reaches the bisection at all.
+
+One word needed settling. `roster/bench.ts` labels role growth `Optionality`
+and this branch used the same word for how many lineup paths a bench player
+covers. Both are real and they are different quantities, so the assessment now
+carries `kind: 'lineup_coverage'`.
+
+**Not built, deliberately:** no screen, no persistence for the grading ledger,
+no red-zone data — so the expected-points model is opportunity-shaped and says
+so on every number it produces — and no future schedule, so the role-specific
+outlook has no source in the running app and the multi-week value falls back to
+role trend and the expected-points gap.
 
 ## Recommended next work
 

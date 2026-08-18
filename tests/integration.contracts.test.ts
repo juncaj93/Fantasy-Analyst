@@ -17,6 +17,8 @@ import {
   advancedLines,
   benchHorizon,
   waiverMultiWeek,
+  waiverMultiWeekFor,
+  weeklyIntelligence,
   whatWouldChange,
 } from '../src/core/contracts/integration.ts';
 import { assessXfp } from '../src/core/xfp/model.ts';
@@ -25,6 +27,8 @@ import { valueOverWeeks } from '../src/core/value/multiWeek.ts';
 import { assessStreaming } from '../src/core/startsit/streaming.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { valueOfSlot, type HeldPlayer } from '../src/core/roster/bench.ts';
+import { recommendLineup } from '../src/core/startsit/lineup.ts';
+import type { StartSitInput } from '../src/core/startsit/engine.ts';
 import { buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { RosterShape } from '../src/core/sleeper/scoring.ts';
 import type { RoleAssessment } from '../src/core/startsit/decisions.ts';
@@ -241,5 +245,91 @@ describe('the bench slot gets a real horizon', () => {
     const horizon = benchHorizon(null, null);
     expect(horizon.fourWeekValue).toBeNull();
     expect(horizon.streamingReplacement).toBeNull();
+  });
+});
+
+describe('the lineup supplies both weekly slots', () => {
+  const usage = weeks(7, { targets: 9, receptions: 6, recYards: 78, recTds: 0.4, receivingAirYards: 96 });
+
+  /** A roster where one slot is a coin flip and the rest are not. */
+  function roster(): StartSitInput[] {
+    return [
+      { ...candidate('qb1', 'A Quarterback', 'QB', 19), usageWeeks: weeks(7, { passAttempts: 34, carries: 4, passYards: 250, passTds: 1.6 }) },
+      { ...candidate('wr1', 'First Receiver', 'WR', 15), usageWeeks: usage },
+      { ...candidate('wr2', 'Second Receiver', 'WR', 11.4), usageWeeks: usage },
+      { ...candidate('wr3', 'Third Receiver', 'WR', 11.1), usageWeeks: usage },
+      // The bench receiver who makes the flex a genuine coin flip.
+      { ...candidate('wr4', 'Fourth Receiver', 'WR', 10.9), usageWeeks: usage },
+      { ...candidate('te1', 'A Tight End', 'TE', 8), usageWeeks: weeks(7, { targets: 5, receptions: 4, recYards: 42 }) },
+      { ...candidate('te2', 'Backup Tight End', 'TE', 3), usageWeeks: [] },
+    ];
+  }
+
+  it('gives every player with usage an expected-points line', () => {
+    const inputs = roster();
+    const lineup = recommendLineup(inputs, SHAPE, HALF_PPR);
+    const intelligence = weeklyIntelligence({ lineup, inputs, profile: HALF_PPR });
+    expect(intelligence.get('wr1')!.advanced).toHaveLength(1);
+    expect(intelligence.get('qb1')!.advanced[0]!.label).toBe('Expected points');
+    // The one player with no stored usage gets nothing rather than a zero.
+    expect(intelligence.get('te2')).toBeUndefined();
+  });
+
+  it('works out what would change the close call, and only the close one', () => {
+    const inputs = roster();
+    const lineup = recommendLineup(inputs, SHAPE, HALF_PPR);
+    const intelligence = weeklyIntelligence({ lineup, inputs, profile: HALF_PPR });
+
+    // wr2 or wr3 for the last receiver slot is a coin flip; the quarterback is not.
+    const close = [...intelligence.values()].filter((i) => i.whatWouldChange.length > 0);
+    expect(close.length).toBeGreaterThan(0);
+    expect(intelligence.get('qb1')!.whatWouldChange).toEqual([]);
+  });
+
+  it('does not pay for the sensitivity pass on a comfortable roster', () => {
+    const comfortable: StartSitInput[] = [
+      { ...candidate('qb1', 'A Quarterback', 'QB', 19), usageWeeks: usage },
+      { ...candidate('wr1', 'First Receiver', 'WR', 18), usageWeeks: usage },
+      { ...candidate('wr2', 'Second Receiver', 'WR', 17), usageWeeks: usage },
+      { ...candidate('te1', 'A Tight End', 'TE', 14), usageWeeks: usage },
+      { ...candidate('wr3', 'Third Receiver', 'WR', 13), usageWeeks: usage },
+      { ...candidate('te2', 'Backup Tight End', 'TE', 2), usageWeeks: usage },
+    ];
+    const lineup = recommendLineup(comfortable, SHAPE, HALF_PPR);
+    const intelligence = weeklyIntelligence({ lineup, inputs: comfortable, profile: HALF_PPR });
+    expect([...intelligence.values()].every((i) => i.whatWouldChange.length === 0)).toBe(true);
+  });
+});
+
+describe('the waiver board supplies its multi-week column', () => {
+  it('values the players on the board and nobody else', () => {
+    const inputs: StartSitInput[] = [
+      { ...candidate('fa1', 'A Free Agent', 'WR', 11), usageWeeks: weeks(7, { targets: 9, receptions: 6, recYards: 80 }) },
+      { ...candidate('fa2', 'Another Free Agent', 'WR', 9), usageWeeks: weeks(7, { targets: 7, receptions: 5, recYards: 60 }) },
+    ];
+    const value = waiverMultiWeekFor({
+      playerIds: ['fa1'],
+      inputs,
+      scores: new Map([['fa1', 11]]),
+      profile: HALF_PPR,
+      currentWeek: 5,
+    });
+    expect(value.get('fa1')!.level).toBeTruthy();
+    expect(value.has('fa2')).toBe(false);
+  });
+
+  it('says nothing for a player with no stored usage rather than guessing', () => {
+    const inputs: StartSitInput[] = [{ ...candidate('fa1', 'A Free Agent', 'WR', 11), usageWeeks: [] }];
+    const value = waiverMultiWeekFor({
+      playerIds: ['fa1'],
+      inputs,
+      scores: new Map([['fa1', 11]]),
+      profile: HALF_PPR,
+      currentWeek: 5,
+    });
+    // No role, no expected points: every forward-looking component is unknown,
+    // so the only thing to carry forward is this Sunday's score repeated. The
+    // column stays empty and the board keeps reporting it as pending.
+    expect(value.has('fa1')).toBe(false);
   });
 });
