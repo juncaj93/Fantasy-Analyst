@@ -186,7 +186,14 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     totalRosters: 12,
     scoringSettings: { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rush_td: 6, rec_td: 6 },
     rosterPositions: ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'BN', 'BN'],
-    leagueSettings: {},
+    /*
+     * A FAAB league, because that is what the strategy layer has to be
+     * exercised against. The demo represents a fully connected deployment, and
+     * a league with no waiver settings would leave every bid card saying
+     * "Sleeper does not publish this league's waiver budget" — an honest
+     * message about a league that does not exist.
+     */
+    leagueSettings: { waiver_type: 2, waiver_budget: 100, playoff_week_start: 15 },
     draftId: 'demo-draft',
     lastSyncedAt: now,
   });
@@ -201,6 +208,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       starterIds: ['1001', '1004'],
       reserveIds: [],
       isMine: true,
+      settings: { waiver_budget_used: 35 },
     },
     {
       leagueId: 'demo-league',
@@ -211,6 +219,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       starterIds: ['1002'],
       reserveIds: [],
       isMine: false,
+      settings: { waiver_budget_used: 12 },
     },
   ]);
 

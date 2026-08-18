@@ -4,6 +4,7 @@
  * directly against fixtures.
  */
 
+import { parseHeight, parseWeight } from '../players/profileFlags.ts';
 import { normalizeName, normalizePosition, normalizeTeam } from '../identity/normalize.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type {
@@ -129,6 +130,10 @@ export function toCanonicalPlayers(
       externalIds,
       searchRank: searchRank(p),
       jerseyNumber: jerseyNumber(p),
+      heightInches: parseHeight(p.height),
+      weightPounds: parseWeight(p.weight),
+      age: parseWeight(p.age),
+      yearsExp: typeof p.years_exp === 'number' && Number.isFinite(p.years_exp) ? p.years_exp : null,
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -196,6 +201,7 @@ export function toRosterRecords(
       starterIds: (r.starters ?? []).filter((p) => !!p && p !== '0'),
       reserveIds: (r.reserve ?? []).filter(Boolean),
       isMine: !!myUserId && r.owner_id === myUserId,
+      settings: r.settings ?? null,
     };
   });
 }

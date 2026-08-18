@@ -33,13 +33,13 @@
  * lineup.
  */
 
+import { calendarSeason } from '../../core/season/context.ts';
 import type { Database } from '../db.ts';
 import { UsageRepo, UsageSourceRepo, type StoredUsageWeek, type UsageSourceRun } from '../repos/usage.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { normalizeName } from '../../core/identity/normalize.ts';
-import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { looksAnomalous } from '../../core/injury/diff.ts';
-import { resolveToCanonical, type IdentityIndex } from './injuryService.ts';
+import { buildIdentityIndex, resolveToCanonical, type IdentityIndex } from './injuryService.ts';
 import { diffUsage, keyOf, type ComparableUsage } from '../../core/usage/diff.ts';
 import { toRoleMetrics } from '../../core/usage/role.ts';
 import { fetchWeeklyUsage, type FetchLike, type UsageRow } from '../../core/usage/nflverse.ts';
@@ -115,12 +115,16 @@ export const DAILY_WRITE_CEILING = 2_000;
 /** The games the detector needs before it will say anything: 3 recent + 3 baseline. */
 export const MINIMUM_GAMES = WEEKLY_THRESHOLDS.role.recentGames + WEEKLY_THRESHOLDS.role.minBaselineGames;
 
-/** The season weekly stats are published for: the one being played. */
+/**
+ * The season weekly stats are published for: the one being played.
+ *
+ * The calendar fallback, shared with every other source rather than spelled out
+ * again here — see `injurySeason` for why four private copies of one expression
+ * was the actual bug. Callers with a database resolve the authoritative season
+ * from Sleeper and pass it in; this answers when nobody did.
+ */
 export function usageSeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  // The file runs from September into February, so a January date still belongs
-  // to the previous calendar year's season.
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 export interface UsageHealth {
@@ -518,16 +522,20 @@ export class UsageService {
    * total.
    */
   private async resolveIdentities(rows: UsageRow[]): Promise<IdentityIndex> {
-    const keys = rows.map((r) => normalizeName(r.fullName));
-    const candidates = await this.players.findByNormalizedNames(keys);
-
-    const byName = new Map<string, CanonicalPlayer[]>();
-    for (const player of candidates) {
-      const list = byName.get(player.normalizedName);
-      if (list) list.push(player);
-      else byName.set(player.normalizedName, [player]);
-    }
-    return { byName };
+    /*
+     * Identifier and name in one round, and the identifier wins.
+     *
+     * Same two indexed lookups as the injury pipeline, through the same shared
+     * builder — see `buildIdentityIndex`. Both files carry a GSIS id per row,
+     * which is exactly why `stats_player_week` was chosen over `snap_counts`
+     * in the first place, and until migration 0020 that id could only break a
+     * tie rather than find anybody.
+     */
+    const [byNameCandidates, byIdCandidates] = await Promise.all([
+      this.players.findByNormalizedNames(rows.map((r) => normalizeName(r.fullName))),
+      this.players.findByExternalGsisIds(rows.map((r) => r.gsisId)),
+    ]);
+    return buildIdentityIndex(byNameCandidates, byIdCandidates);
   }
 
   /**

@@ -16,6 +16,7 @@
  * the card asks for it separately, after it is open.
  */
 
+import { calendarSeason, priorSeason } from '../../core/season/context.ts';
 import { SleeperClient } from '../../core/sleeper/client.ts';
 import { fetchPlayerOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
 import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
@@ -30,6 +31,11 @@ import {
   type HistoricalAvailability,
 } from '../../core/injury/availability.ts';
 import { buildSeasonStatLines, formatPositionRank, HALF_PPR } from '../../core/sleeper/seasonStats.ts';
+import { selectTakeaway } from '../../core/evidence/takeaway.ts';
+import { profileContext } from '../../core/players/profileFlags.ts';
+import { assessRole } from '../../core/startsit/decisions.ts';
+import { UsageService } from './usageService.ts';
+import { EvidenceRepo } from '../repos/evidence.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import type { Database } from '../db.ts';
@@ -41,16 +47,15 @@ import type { Database } from '../db.ts';
  */
 export function lastCompletedSeason(now = new Date()): string {
   // Sleeper's league seasons roll over in the spring; a draft in August 2026 is
-  // for the 2026 season and looks back at 2025. Before March the current
-  // calendar year's season has not been played yet.
-  const year = now.getUTCFullYear();
-  return String(now.getUTCMonth() >= 2 ? year - 1 : year - 2);
+  // for the 2026 season and looks back at 2025. Expressed as "the season before
+  // the current one" rather than as its own month arithmetic, so it cannot
+  // drift from the current-season answer across the February boundary.
+  return priorSeason(outlookSeason(now));
 }
 
 /** The season an outlook is written about: the one being drafted. */
 export function outlookSeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 /**
@@ -67,6 +72,16 @@ const OUTLOOK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * months is four questions with the same answer.
  */
 const OUTLOOK_MISS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How many of a player's evidence rows the takeaway selection reads.
+ *
+ * The selection halves a candidate's score every three weeks, so an item older
+ * than a season cannot beat anything current; reading a thousand of them to
+ * discard nine hundred is work with a known answer. Newest first, so the bound
+ * cuts the tail rather than the head.
+ */
+const TAKEAWAY_EVIDENCE_LIMIT = 40;
 
 export interface SeasonStatsView {
   season: string;
@@ -182,6 +197,51 @@ export interface PlayerDetailView {
     confidence: string;
     conflict: string | null;
   } | null;
+  /**
+   * One sentence saying why the tally reads the way it does.
+   *
+   * Explanation, never arithmetic. The evidence behind it has already been
+   * counted once by the tally; this is the same evidence said in words, and
+   * `scoreDelta` is 0 on the way out to make that checkable rather than merely
+   * asserted. Null is a normal answer — most players have nothing the ledger
+   * supports saying out loud.
+   *
+   * It lives here, on the one shared detail payload, precisely so that Draft,
+   * Team, Waivers, Trades and Players show the same sentence rather than six
+   * screens each deciding what the evidence means.
+   */
+  newsletterTakeaway: {
+    text: string;
+    sourceName: string;
+    sourceDate: string;
+    /** How many independent issues said it. 1 is normal. */
+    corroboration: number;
+    derivation: 'extracted' | 'templated';
+    /** The rows it came from, for the evidence view rather than the card. */
+    evidenceItemIds: string[];
+    scoreDelta: 0;
+  } | null;
+  /**
+   * Physical and age context, on the rare occasion there is any.
+   *
+   * Usually empty, and that is the design. A flag fires only where a
+   * measurement meets a role it is genuinely in tension with — a light frame
+   * projected outside, an older back whose usage is falling — because a flag
+   * that fires on a third of the league is a column rather than a flag.
+   *
+   * `showMeasurements` is false unless a physical flag fired, and height and
+   * weight are nulled out here rather than left for the browser to remember to
+   * hide: a number shown is a number the reader will weigh whether or not it
+   * means anything. `scoreDelta` is 0 and no consumer may convert a flag into a
+   * penalty.
+   */
+  profile: {
+    flags: { key: string; text: string; kind: 'physical' | 'age'; weight: 'context' }[];
+    showMeasurements: boolean;
+    scoreDelta: 0;
+    heightInches: number | null;
+    weightPounds: number | null;
+  };
 }
 
 export class PlayerDetailService {
@@ -288,6 +348,39 @@ export class PlayerDetailService {
      */
     const injuryContext = measured?.displaySummary ?? history?.line ?? null;
 
+    /*
+     * The newsletter takeaway, from the ledger this app already keeps.
+     *
+     * Bounded to the most recent items rather than the whole history: the
+     * selection weights recency heavily enough that a two-year-old sentence
+     * cannot win, so reading two years of them to discard them is work with a
+     * known answer. A ledger read that fails costs this line and nothing else.
+     */
+    const takeaway = await this.takeawayFor(playerId, now).catch(() => null);
+
+    /*
+     * Physical and age context, from the measurements the sync now keeps.
+     *
+     * The usage trend comes from the injury/role layer already read above
+     * rather than from a second query: the age flag requires *declining usage*
+     * as well as age, and asking a different source for that would let the card
+     * disagree with the role line printed a few pixels away.
+     */
+    const player = await this.players.getById(playerId);
+    const profile = player
+      ? profileContext(
+          {
+            playerId,
+            position: player.position,
+            heightInches: player.heightInches ?? null,
+            weightPounds: player.weightPounds ?? null,
+            age: player.age ?? null,
+            yearsExp: player.yearsExp ?? null,
+          },
+          { usageTrend: await this.usageTrendFor(player.id, player.position).catch(() => 'unknown' as const) },
+        )
+      : { flags: [], showMeasurements: false, scoreDelta: 0 as const };
+
     return {
       playerId,
       lastSeason,
@@ -308,6 +401,64 @@ export class PlayerDetailService {
           }
         : null,
       injury,
+      newsletterTakeaway: takeaway,
+      profile: {
+        flags: profile.flags,
+        showMeasurements: profile.showMeasurements,
+        scoreDelta: 0,
+        // Withheld unless a flag fired — the rule, applied at the boundary
+        // rather than left to the browser to remember.
+        heightInches: profile.showMeasurements ? (player?.heightInches ?? null) : null,
+        weightPounds: profile.showMeasurements ? (player?.weightPounds ?? null) : null,
+      },
+    };
+  }
+
+  /**
+   * Whether his opportunity is going up, down or nowhere.
+   *
+   * Read through the same `assessRole` every other screen uses rather than
+   * measured again here, so the "usage trending down" half of an age flag can
+   * never contradict the role line printed a few pixels above it. Below the
+   * six-game minimum the detector says `insufficient_data`, which maps to
+   * `unknown` — and `unknown` is what stops the age flag firing, which is the
+   * whole point: age alone is a birthday.
+   */
+  private async usageTrendFor(
+    playerId: string,
+    position: string,
+  ): Promise<'rising' | 'flat' | 'falling' | 'unknown'> {
+    const metrics = await new UsageService(this.db).roleMetricsFor([{ playerId, position }]);
+    const forPlayer = metrics.get(playerId);
+    if (!forPlayer || forPlayer.length === 0) return 'unknown';
+    const trend = assessRole(forPlayer).trend;
+    if (trend === 'rising_high' || trend === 'rising_moderate') return 'rising';
+    if (trend === 'falling_high' || trend === 'falling_moderate') return 'falling';
+    if (trend === 'stable') return 'flat';
+    return 'unknown';
+  }
+
+  /**
+   * Select the takeaway, and keep its provenance.
+   *
+   * The whole judgement is in `core/evidence/takeaway.ts`, which has no
+   * database and is tested without one. This is the read and nothing more —
+   * deliberately, because "which sentence best explains this tally" is exactly
+   * the kind of decision that becomes untestable the moment it is written
+   * beside a SQL query.
+   */
+  private async takeawayFor(playerId: string, now: Date): Promise<PlayerDetailView['newsletterTakeaway']> {
+    const items = await new EvidenceRepo(this.db).listForPlayer(playerId, TAKEAWAY_EVIDENCE_LIMIT);
+    const takeaway = selectTakeaway(items, { now, playerId });
+    if (!takeaway) return null;
+    return {
+      text: takeaway.text,
+      sourceName: takeaway.sourceName,
+      sourceDate: takeaway.sourceDate,
+      corroboration: takeaway.corroboration,
+      derivation: takeaway.derivation,
+      evidenceItemIds: takeaway.evidenceItemIds,
+      scoreDelta: 0,
     };
   }
 

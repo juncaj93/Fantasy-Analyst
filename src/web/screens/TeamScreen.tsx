@@ -22,10 +22,11 @@ import {
   type LineupSlot,
   type RosterPlayer,
   type StartSitComparison,
+  type StartSitEvaluation,
   type StartSitMode,
   type StartSitRefreshReport,
+  type FaabAdvice,
   type WaiverAdvice,
-  type WaiverUpgrade,
 } from '../api.ts';
 import { MODE_DESCRIPTION, MODE_LABEL, START_SIT_MODES } from '../../core/startsit/mode.ts';
 import {
@@ -39,7 +40,9 @@ import {
   Unknown,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
+import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
+import { WeeklyCardSheet } from '../components/weekly.tsx';
+import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { FLX_FILTER, offersFlexFilter, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
 /*
  * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
@@ -47,6 +50,8 @@ import { FLX_FILTER, offersFlexFilter, orderPositions, slotAccepts } from '../..
  */
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
+import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
+import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 
 interface OpenSlot {
   slot: string;
@@ -94,7 +99,6 @@ export function TeamScreen({
 }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const [roster, setRoster] = useState<RosterResponse | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
   const [waivers, setWaivers] = useState<WaiverAdvice | null>(null);
@@ -111,6 +115,10 @@ export function TeamScreen({
   const [refresh, setRefresh] = useState<StartSitRefreshReport | null>(null);
   /** Open with the slot it was launched from, and whoever it was launched on. */
   const [compare, setCompare] = useState<{ slot: string | null; seed: string[] } | null>(null);
+  /** Which of your players the weekly card is open on. */
+  const [weekly, setWeekly] = useState<{ playerId: string; context: WeeklyContext } | null>(null);
+  /** Which waiver row's detail is open. */
+  const [waiverDetail, setWaiverDetail] = useState<WaiverBoardRow | null>(null);
 
   const loadRoster = useCallback(async () => {
     if (!selected) return;
@@ -152,17 +160,33 @@ export function TeamScreen({
     void loadWaivers();
   }, [loadRoster, loadLineup, loadWaivers]);
 
-  const run = async (key: string, fn: () => Promise<string>) => {
-    setBusy(key);
+  /**
+   * What a pull down the screen does.
+   *
+   * One request to the existing all-source refresh — the same orchestrator the
+   * "Refresh data" button used to call, with the same dedupe, the same budget
+   * refusal and the same per-source report — and then the three reads this
+   * screen is drawn from. It also subsumes the old bar control: syncing the
+   * league from Sleeper is the refresh's first source, so there is no longer a
+   * reason for two separate ways to ask.
+   *
+   * Concurrency is the gesture's problem and it is already solved: the hook is
+   * single-flight, so a second pull while this is running moves nothing and
+   * requests nothing.
+   */
+  const refreshAll = useCallback(async () => {
     setMessage(null);
     try {
-      setMessage({ tone: 'ok', text: await fn() });
+      const report = await api.post<StartSitRefreshReport>('/api/startsit/refresh', {});
+      setRefresh(report);
+      onLeaguesChanged();
+      // Recompute against whatever actually landed. A refresh that updates the
+      // sources and leaves the screen showing the old answer is worse than none.
+      await Promise.all([loadRoster(), loadLineup(), loadWaivers()]);
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(null);
     }
-  };
+  }, [loadRoster, loadLineup, loadWaivers, onLeaguesChanged]);
 
   /** Every player on the roster, however Sleeper currently has them arranged. */
   const byId = useMemo(() => {
@@ -198,8 +222,55 @@ export function TeamScreen({
 
   const hasRecommendation = Boolean(lineup?.found && (lineup?.slots.length ?? 0) > 0);
 
+  /*
+   * Every evaluation the lineup already computed, by player.
+   *
+   * The weekly card is built from these rather than from a request of its own:
+   * the numbers arrived with the recommendation, they are the numbers the
+   * recommendation was made from, and a card that fetched its own would be a
+   * second opinion waiting to disagree with the row that opened it. It also
+   * means the sheet opens instantly, which is most of why it is worth having.
+   */
+  const evaluations = useMemo(() => {
+    const map = new Map<string, StartSitEvaluation>();
+    for (const e of [...(lineup?.starters ?? []), ...(lineup?.bench ?? []), ...(lineup?.undecidable ?? [])]) {
+      map.set(e.playerId, e);
+    }
+    return map;
+  }, [lineup]);
+
+  /** The waiver advice, turned from slot-shaped comparisons into decisions. */
+  const waiverBoard = useMemo(() => (waivers?.found ? buildWaiverBoard(waivers) : null), [waivers]);
+
+  const weeklyCard = useMemo(() => {
+    if (!weekly) return null;
+    const evaluation = evaluations.get(weekly.playerId);
+    return evaluation ? buildWeeklyCard(evaluation, weekly.context) : null;
+  }, [weekly, evaluations]);
+
+  /**
+   * Open one of your players.
+   *
+   * The concise weekly card when the engine has an evaluation for him, which is
+   * every player it could score. When it could not — a player missing from the
+   * dictionary, a roster spot the lineup never saw — the comparison sheet opens
+   * instead, because a card built from nothing would be a card saying nothing.
+   */
+  const openPlayer = (playerId: string, context: WeeklyContext) => {
+    if (evaluations.has(playerId)) setWeekly({ playerId, context });
+    else setCompare({ slot: context.slot ?? null, seed: [playerId] });
+  };
+
   return (
-    <>
+    /*
+     * The whole screen is the refresh gesture's surface.
+     *
+     * Not the list, and not a strip at the top: the reader pulls the page they
+     * are looking at, which is what every iPhone app does and is why nobody has
+     * to be told about it. It is also why there is no longer a refresh control
+     * anywhere on this screen — see the note on the navigation bar.
+     */
+    <PullToRefresh onRefresh={refreshAll} label="Team" testId="team-pull">
       {/*
         The league is the page's identity, so it is the page's title — and only
         the title.
@@ -213,32 +284,17 @@ export function TeamScreen({
         exactly where they were in the data — Setup shows the league's settings,
         and every recommendation below is computed from them.
       */}
-      {selected ? (
-        <NavBar
-          testId="league-card"
-          title={selected.name}
-          trailing={
-            <button
-              className="btn btn-sm"
-              disabled={busy != null}
-              onClick={() =>
-                run('sync', async () => {
-                  await api.post(`/api/leagues/${selected.id}/sync`);
-                  onLeaguesChanged();
-                  await loadRoster();
-                  await loadLineup();
-                  await loadWaivers();
-                  return 'Roster refreshed from Sleeper.';
-                })
-              }
-            >
-              {busy === 'sync' ? 'Refreshing…' : 'Refresh'}
-            </button>
-          }
-        />
-      ) : (
-        <NavBar title="Team" />
-      )}
+      {/*
+        The league's name, and nothing else in the bar.
+
+        There was a Refresh control on the trailing edge and a "Refresh data"
+        button under it, which between them made three ways of asking the same
+        question — and put the most-tapped control on a phone in the corner
+        hardest for a thumb to reach. Both are gone: pulling the screen down
+        refreshes it, which is the gesture the reader already knows and the one
+        that costs no glass at all. See `PullToRefresh` below.
+      */}
+      {selected ? <NavBar testId="league-card" title={selected.name} /> : <NavBar title="Team" />}
 
       {message ? <Notice tone={message.tone === 'ok' ? 'ok' : message.tone === 'error' ? 'error' : 'warn'}>{message.text}</Notice> : null}
 
@@ -247,58 +303,41 @@ export function TeamScreen({
       ) : (
         <>
           {/*
-            One compact entry point, high on the screen.
+            Four controls on one row of a phone.
 
-            It opens over the page rather than pushing, because a comparison is
-            a question asked *about* this roster and answered back to it.
+            Three of them are the question being asked — same players, same
+            evidence, a different definition of "best" — and they reuse the
+            filter row the Draft board already uses, because it is a
+            filter-shaped decision and a second control vocabulary for it would
+            be a new thing to learn for no gain. The fourth opens the comparison
+            over the page, because a comparison is a question asked *about* this
+            roster and answered back to it.
+
+            They share a row rather than taking two, which is worth an entire
+            player card at 375px. `compact` gives up horizontal padding and a
+            step of type size to do it and gives up no tap target at all — the
+            chips are still 44px tall, and so is the button beside them.
           */}
-          {/*
-            Two controls and a status line, in the space one button used to
-            take.
-
-            The mode chips reuse the filter row the Draft board already uses,
-            deliberately: this is a filter-shaped decision — same players, same
-            evidence, a different question — and inventing a second control
-            vocabulary for it would be a new thing to learn for no gain.
-          */}
-          <SegmentedControl
-            label="Recommendation mode"
-            testId="mode-row"
-            value={mode}
-            onChange={setMode}
-            segments={START_SIT_MODES.map((option) => ({
-              id: option,
-              label: MODE_LABEL[option],
-              ariaLabel: `${MODE_LABEL[option]} — ${MODE_DESCRIPTION[option]}`,
-              testId: `mode-${option}`,
-            }))}
-          />
-
-          <div className="btn-row" style={{ margin: '0 2px 10px' }}>
+          <div className="control-row" data-testid="team-controls">
+            <SegmentedControl
+              label="Recommendation mode"
+              testId="mode-row"
+              compact
+              value={mode}
+              onChange={setMode}
+              segments={START_SIT_MODES.map((option) => ({
+                id: option,
+                label: MODE_LABEL[option],
+                ariaLabel: `${MODE_LABEL[option]} — ${MODE_DESCRIPTION[option]}`,
+                testId: `mode-${option}`,
+              }))}
+            />
             <button
-              className="btn"
+              className="btn btn-compact"
               data-testid="compare-open"
               onClick={() => setCompare({ slot: null, seed: [] })}
             >
-              Compare players
-            </button>
-            <button
-              className="btn"
-              data-testid="startsit-refresh"
-              disabled={busy != null}
-              onClick={() =>
-                run('startsit-refresh', async () => {
-                  const report = await api.post<StartSitRefreshReport>('/api/startsit/refresh', {});
-                  setRefresh(report);
-                  // Recompute against whatever actually landed. A refresh that
-                  // updates the sources and leaves the screen showing the old
-                  // answer is worse than no button at all.
-                  await Promise.all([loadRoster(), loadLineup(), loadWaivers()]);
-                  return report.deduped ? 'Already refreshing — showing the latest.' : report.headline;
-                })
-              }
-            >
-              {busy === 'startsit-refresh' ? 'Refreshing…' : 'Refresh data'}
+              Compare
             </button>
           </div>
 
@@ -338,7 +377,16 @@ export function TeamScreen({
                       key={`${slot.slot}-${i}`}
                       slot={slot}
                       player={slot.playerId ? (byId.get(slot.playerId) ?? null) : null}
-                      onCompare={() => setCompare({ slot: slot.slot, seed: slot.playerId ? [slot.playerId] : [] })}
+                      onOpen={() =>
+                        slot.playerId
+                          ? openPlayer(slot.playerId, {
+                              starting: true,
+                              slot: slot.slot,
+                              alreadyStarting: slot.alreadyStarting,
+                              locked: slot.locked,
+                            })
+                          : setCompare({ slot: slot.slot, seed: [] })
+                      }
                     />
                   ))}
                 </>
@@ -353,22 +401,14 @@ export function TeamScreen({
                     <BenchCard
                       key={p.playerId}
                       player={p}
-                      onCompare={() => setCompare({ slot: null, seed: [p.playerId] })}
+                      onOpen={() => openPlayer(p.playerId, { starting: false })}
                     />
                   ))}
                 </>
               ) : null}
 
-              {waivers?.found ? (
-                <WaiverCard
-                  advice={waivers}
-                  onCompare={(upgrade, candidateId) =>
-                    setCompare({
-                      slot: upgrade.slot,
-                      seed: [upgrade.currentPlayerId, candidateId].filter((id): id is string => id != null),
-                    })
-                  }
-                />
+              {waiverBoard ? (
+                <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
               ) : null}
 
               {lineup?.found ? <LineupCard lineup={lineup} /> : null}
@@ -376,6 +416,39 @@ export function TeamScreen({
           )}
         </>
       )}
+
+      {/*
+        The concise weekly card, and the way out of it.
+
+        Compare is reachable from inside it rather than instead of it: the sheet
+        answers "what about him this week" in one screen, and the reader who
+        wants the whole breakdown says so. Opening the comparison closes this,
+        because two stacked sheets is a place a phone user gets lost in.
+      */}
+      {weeklyCard ? (
+        <WeeklyCardSheet
+          card={weeklyCard}
+          onClose={() => setWeekly(null)}
+          onCompare={() => {
+            const slot = weekly?.context.slot ?? null;
+            const seed = [weeklyCard.playerId];
+            setWeekly(null);
+            setCompare({ slot, seed });
+          }}
+        />
+      ) : null}
+
+      {waiverDetail ? (
+        <WaiverDetailSheet
+          row={waiverDetail}
+          onClose={() => setWaiverDetail(null)}
+          onCompare={() => {
+            const row = waiverDetail;
+            setWaiverDetail(null);
+            setCompare({ slot: row.fit.slot, seed: [row.playerId] });
+          }}
+        />
+      ) : null}
 
       {compare && selected ? (
         <CompareSheet
@@ -387,7 +460,7 @@ export function TeamScreen({
           onClose={() => setCompare(null)}
         />
       ) : null}
-    </>
+    </PullToRefresh>
   );
 }
 
@@ -403,11 +476,12 @@ export function TeamScreen({
 function StarterCard({
   slot,
   player,
-  onCompare,
+  onOpen,
 }: {
   slot: LineupSlot;
   player: RosterPlayer | null;
-  onCompare: () => void;
+  /** Tapping a player opens his week — see `openPlayer`. */
+  onOpen: () => void;
 }) {
   if (!slot.playerId || !slot.name) {
     return (
@@ -433,7 +507,7 @@ function StarterCard({
       data-position={position.toUpperCase()}
       data-player-id={slot.playerId}
       aria-label={`${slot.name}, recommended starter at ${slot.slot}`}
-      onClick={onCompare}
+      onClick={onOpen}
     >
       <div className="player-row-top">
         <span className="slot-label">{slot.slot}</span>
@@ -482,7 +556,7 @@ function StarterCard({
  * badge stays, because "which position is this" is still a fact worth knowing
  * about a bench player.
  */
-function BenchCard({ player, onCompare }: { player: RosterPlayer; onCompare: () => void }) {
+function BenchCard({ player, onOpen }: { player: RosterPlayer; onOpen: () => void }) {
   return (
     <button
       className="player-row"
@@ -491,7 +565,7 @@ function BenchCard({ player, onCompare }: { player: RosterPlayer; onCompare: () 
       data-position={(player.position ?? '').toUpperCase()}
       data-player-id={player.playerId}
       aria-label={`${player.name}, bench`}
-      onClick={onCompare}
+      onClick={onOpen}
     >
       <div className="player-row-top">
         <span className="player-name">{player.name}</span>
@@ -510,80 +584,106 @@ function BenchCard({ player, onCompare }: { player: RosterPlayer; onCompare: () 
 /**
  * Whether anybody unrostered would actually be an improvement.
  *
- * Compact by design and quiet by default: the interesting case is usually that
- * there is nothing to do, and a card that shouts about three marginal adds every
- * week is one the reader stops looking at. Nothing here executes anything —
- * "available" means available in Sleeper, and the add is made there.
+ * Quiet by default: the interesting case is usually that there is nothing to
+ * do, and a section that shouts about three marginal adds every week is one the
+ * reader stops looking at.
+ *
+ * What it shows when there *is* something is one row per player rather than a
+ * paragraph per slot. The old card printed the slot, the current player, his
+ * score, the best available, his position, his team, his score, his gain, every
+ * reason he was picked, a Compare button and a sentence listing the runners-up
+ * — five lines and a control for each of up to three slots, on the screen where
+ * the roster is supposed to be. The row below carries the same decision in
+ * three lines, and everything that was cut is a tap away in the detail sheet.
+ *
+ * Nothing here executes anything — "available" means available in Sleeper, and
+ * the add is made there.
  */
-function WaiverCard({
-  advice,
-  onCompare,
+function WaiverSection({
+  board,
+  faab,
+  onOpen,
 }: {
-  advice: WaiverAdvice;
-  onCompare: (upgrade: WaiverUpgrade, candidateId: string) => void;
+  board: WaiverBoard;
+  /** The league's wallet, which belongs under the rows rather than on one. */
+  faab: FaabAdvice | null;
+  onOpen: (row: WaiverBoardRow) => void;
 }) {
-  if (advice.upgrades.length === 0) {
+  if (board.rows.length === 0) {
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
-          {advice.headline ?? 'No waiver comparison available yet.'}
+          {board.headline ?? 'No waiver comparison available yet.'}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="card" data-testid="waiver-card">
-      <div className="header-row">
-        <strong>Waiver upgrades</strong>
-        <span className="faint">{advice.considered} available players checked</span>
+    <div data-testid="waiver-card">
+      <div className="section-title" data-testid="waiver-title">
+        Waiver upgrades
       </div>
-      {advice.upgrades.map((upgrade) => {
-        const best = upgrade.candidates[0]!;
-        return (
-          <div className="swap" key={upgrade.slot} data-testid="waiver-upgrade" data-slot={upgrade.slot}>
-            <div>
-              <strong>{upgrade.slot} upgrade available</strong>
-            </div>
-            <div className="faint">
-              Current: {upgrade.currentName ?? 'nobody eligible'}
-              {upgrade.currentScore == null ? '' : ` (${upgrade.currentScore.toFixed(1)})`}
-            </div>
-            <div className="faint">
-              Best available: <strong>{best.name}</strong> ({best.position}
-              {best.team ? ` · ${best.team}` : ''}
-              {best.score == null ? '' : ` · ${best.score.toFixed(1)}`}) · +{best.gain} pts
-            </div>
-            <div className="faint">{best.reasons.join(' · ')}</div>
-            <div className="btn-row" style={{ margin: '4px 0 0' }}>
-              <button
-                className="btn btn-sm"
-                data-testid="waiver-compare"
-                onClick={() => onCompare(upgrade, best.playerId)}
-              >
-                Compare
-              </button>
-            </div>
-            {upgrade.candidates.length > 1 ? (
-              <div className="faint" style={{ marginTop: 4 }}>
-                Also available:{' '}
-                {upgrade.candidates
-                  .slice(1)
-                  .map((c) => `${c.name} (+${c.gain})`)
-                  .join(', ')}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-      <div className="faint" style={{ margin: '6px 2px 0' }}>
-        Advisory only — add or drop in Sleeper. This app never makes a transaction.
-      </div>
-      {advice.notes.map((n) => (
-        <div className="faint" key={n}>
-          {n}
-        </div>
+      {board.rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
+        <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
+      {/*
+        The wallet the prices above were quoted from. It belongs to the league
+        rather than to any one row, so it sits under them once — see the note on
+        `BudgetFooter`, which is the league-intelligence pass's own component and
+        is used here unchanged.
+      */}
+      <BudgetFooter faab={faab} />
+      <div className="faint" style={{ margin: '2px 4px 12px' }}>
+        {board.considered} available players checked. Advisory only — add, drop or bid in Sleeper. This app
+        never makes a transaction.
+        {board.pending.length > 0 ? ` ${capitalise(board.pending.join(', '))} is not known yet.` : ''}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How many waiver rows the Team screen shows before it stops.
+ *
+ * Team is a roster screen with a waiver section, not a waiver screen: three is
+ * enough to answer "is there anything I should be doing", and the whole board —
+ * every position, every filter — is one tab away. The cut is stated in the line
+ * under the rows rather than left as a silent truncation.
+ */
+const TEAM_WAIVER_ROWS = 3;
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * The budget the advice above was priced against, said out loud.
+ *
+ * A recommendation of $19 means nothing without the wallet it came from, and
+ * the two numbers that make it legible — what is left, and what winning has
+ * cost in this league — are exactly the two a reader would otherwise have to go
+ * to Sleeper to find.
+ */
+function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
+  if (!faab) return null;
+  if (!faab.rule.usesFaab) {
+    return (
+      <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+        {faab.rule.provenance}.
+      </div>
+    );
+  }
+  const mine = faab.mine;
+  return (
+    <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+      {mine?.remaining == null
+        ? 'Your remaining budget is unknown.'
+        : `$${mine.remaining} of $${faab.rule.total} left.`}
+      {faab.prices.sample > 0
+        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
+        : ' No winning bids recorded in this league yet.'}
+      <div>{faab.losingBids}</div>
     </div>
   );
 }

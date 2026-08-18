@@ -191,6 +191,28 @@
   --team-logo: 22px;
 
   /*
+   * The width reserved for whatever sits between a player's name and his club.
+   *
+   * A signed tally is one, two or three characters wide and an availability tag
+   * is there or it is not, so on a list of forty players the position pill and
+   * the club's mark landed at forty slightly different distances from the right
+   * edge — a ragged trailing column that reads as a rendering fault even to
+   * somebody who could not say what was wrong with it.
+   *
+   * So the strip is a fixed field rather than content that happens to have a
+   * width: everything in it is right-aligned inside exactly this many pixels,
+   * and the mark after it therefore starts at the same x on every row of every
+   * screen. Wide enough for `-12` beside an `OUT`, which is the worst case the
+   * data can actually produce.
+   *
+   * **This is layout, not data.** Nothing is padded to `08`, nothing is
+   * abbreviated, nothing is invented to square a column up: a player with no
+   * tally and no tag contributes an empty field of the same width, which is the
+   * whole trick.
+   */
+  --row-meta: 56px;
+
+  /*
    * The spacing rhythm: 4, 8, 12, 16, 20, 24, with a 2px hairline step for the
    * gaps inside a single line of type. Everything on screen is a multiple of
    * one of these, which is most of what "consistent" means to an eye.
@@ -1152,6 +1174,27 @@ body,
   font-size: 0.78rem;
 }
 
+/*
+ * A bid recommendation: three numbers that are not the same number.
+ *
+ * Inset so the price reads as a block attached to the candidate above it rather
+ * than as another one of the reasons. Deliberately monochrome: an expected
+ * price is neither good news nor bad, and colouring it would make the app look
+ * as though it had an opinion about a fact.
+ */
+.bid {
+  margin: var(--sp-1) 0 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.bid > div + div {
+  margin-top: 1px;
+}
+
 /* ------------------------------------------------------------ metric tiles */
 /*
  * The at-a-glance numbers: a large tabular value with a small quiet label. Used
@@ -1321,11 +1364,22 @@ body,
   gap: var(--sp-2);
 }
 
+/*
+ * The row's place in the list, on the leading edge.
+ *
+ * Fixed width and tabular for the same reason the trailing field is fixed: a
+ * board that runs from `1` to `120` would otherwise start its names at three
+ * different x positions depending on how far down it had been scrolled.
+ * Right-aligned so the digits end on one edge and the names begin on one edge.
+ */
 .rank {
   font-size: 0.7rem;
   color: var(--text-faint);
   font-weight: 620;
-  min-width: 16px;
+  font-variant-numeric: tabular-nums;
+  width: 22px;
+  text-align: right;
+  flex: none;
 }
 
 /*
@@ -1707,6 +1761,32 @@ body,
   font-size: 0.74rem;
   letter-spacing: -0.01em;
   flex: none;
+  /*
+   * Tabular, so `+11` and `+44` are the same width and a re-sorted board does
+   * not shuffle sideways under the reader; right-aligned inside the field so
+   * the sign hangs left and the digits end on one edge.
+   */
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+/*
+ * The fixed field between the name and the club — see `--row-meta`.
+ *
+ * `flex: 0 0` rather than a minimum: a minimum would let a wide occupant push
+ * the club's mark left and put that one row out of line with its neighbours,
+ * which is the exact fault this is here to fix. In the rare case the contents
+ * are wider than the field they overflow into the name's ellipsis instead,
+ * where the reader loses a character rather than the column losing its edge.
+ */
+.player-row-meta {
+  flex: 0 0 var(--row-meta);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  overflow: visible;
 }
 
 .tally-pos {
@@ -1907,6 +1987,26 @@ body,
   font-size: 0.82rem;
   line-height: 1.45;
   color: var(--text-dim);
+}
+
+/*
+ * The newsletter takeaway: one sentence, and it has to read as a conclusion.
+ *
+ * Slightly larger and less dim than the outlook under it, because it is the
+ * app's own strongest supported statement about the player rather than
+ * somebody else's preview — but not a heading, and not coloured by polarity.
+ * The signed tally on the row above already carries the direction; painting the
+ * sentence green as well would say the same thing twice and, worse, would make
+ * a quotation look like a verdict.
+ */
+.takeaway {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  font-weight: 560;
+  color: var(--text);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
 }
 
 /* Who wrote it. Quiet, and never omitted. */
@@ -2140,6 +2240,23 @@ button.btn-sm {
   font-size: 0.8rem;
 }
 
+/*
+ * A button that has to sit in a control row beside a segmented control.
+ *
+ * The opposite trade to `.btn-sm`: this one gets *taller*, not shorter. The row
+ * it lives in is one tap target high because the chips beside it are, so the
+ * button matches them at 44px and gives up horizontal padding instead — which
+ * is the dimension there is a shortage of at 360px, and the one a thumb does
+ * not miss.
+ */
+button.btn-compact {
+  min-height: var(--tap);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: 0.82rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -2345,6 +2462,28 @@ button:disabled {
 .filter-row > .chip[aria-pressed='true'] .chip-face {
   background: var(--surface);
   box-shadow: var(--shadow-1);
+}
+
+/*
+ * A segmented control that has to share its row with something else.
+ *
+ * Three modes and a Compare button do not fit across 360px at full width, and
+ * the honest ways to fix that are to drop a control or to make the controls
+ * smaller. This is the second: type down a step, horizontal padding down to the
+ * minimum that still reads as a pill, and `min-width` on the segment relaxed so
+ * three of them share whatever the row has left.
+ *
+ * **The tap target does not shrink.** `.filter-row > .chip` keeps its 44px
+ * height here exactly as it does everywhere else; only the painted face inside
+ * it gets tighter, which is the one dimension a thumb does not care about.
+ */
+.filter-row-compact > .chip {
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+.filter-row-compact .chip-face {
+  padding: 0 var(--sp-2);
 }
 
 /* The queue filter is the user's own list, so it reads as theirs. */
@@ -3266,6 +3405,213 @@ table.compact tr:last-child td {
 .scroll-x {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================================ weekly card */
+/*
+ * One player, this week, in a sheet the reader can take in standing up.
+ *
+ * The whole design constraint is height: this has to fit a phone screen and a
+ * bit, and every rule below is in service of that. A definition list rather
+ * than cards, hairlines rather than boxes, and a label column narrow enough
+ * that the reading beside it gets the rest of the row.
+ */
+.weekly {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.weekly-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.weekly-lines {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * A label and its reading on one line, divided by a hairline.
+ *
+ * `120px` for the label because the longest of them is "Availability" and a
+ * column that fits the longest label is a column whose readings all start on
+ * the same edge — the same argument as the fixed field on a player row, at a
+ * different scale.
+ */
+.weekly-line {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--separator);
+  font-size: 0.85rem;
+}
+
+.weekly-line:first-child {
+  border-top: 0;
+}
+
+.weekly-line dt {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.weekly-line dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.weekly-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-3);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+/* ============================================================ waiver rows */
+/*
+ * A claim decision as one row.
+ *
+ * It borrows `.player-row` wholesale — same surface, same radius, same name
+ * type — because a player is a player, and a waiver list that looked like a
+ * different app from the draft board would be two things to learn. What it adds
+ * is only what a claim needs: the metrics line wraps to a second line rather
+ * than scrolling, since "what does he cost" must never be the field that fell
+ * off the edge.
+ */
+.waiver-row .player-row-metrics {
+  row-gap: var(--sp-1);
+}
+
+/* The reason, in the quietest type on the row, and never more than two lines. */
+.waiver-row [data-testid='waiver-why'] {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ======================================================== pull to refresh */
+/*
+ * The gesture that replaced two refresh buttons.
+ *
+ * `touch-action: pan-y` for the same reason the push layer has it: the browser
+ * keeps arbitrating, nothing calls `preventDefault` on a scrolling region, and
+ * a drag that turns out to be a scroll simply scrolls. What this surface adds
+ * is `overscroll-behavior-y: contain` — without it the browser rubber-bands the
+ * whole document under the finger, and the reader is dragging two things at
+ * once, only one of which comes back.
+ */
+.pull-surface {
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+}
+
+/*
+ * The spinner's well: zero height until the finger opens it.
+ *
+ * Height rather than a fixed strip with a translate, so an idle screen has no
+ * dead band at the top — the indicator does not exist as space until it exists
+ * as something to look at.
+ */
+.pull-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.pull-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border);
+  /* One quadrant in the accent: the part that reads as a direction of travel. */
+  border-top-color: var(--accent);
+}
+
+.pull-spinner-busy {
+  animation: pull-spin 0.8s linear infinite;
+}
+
+@keyframes pull-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * The content follows the finger, and only while the finger is there.
+ *
+ * No transition while dragging — a smoothed transform is a transform that lags
+ * the thumb — and none is needed on release either: the distance goes to zero
+ * in one commit, and the spinner leaving is what the eye is following.
+ *
+ * **This element has no transform of its own, and that is load-bearing.** Both
+ * `will-change: transform` and a resting `translateZ(0)` would be the obvious
+ * optimisation and both would be a bug: either one makes the element a
+ * containing block for its whole subtree, permanently, and the first thing
+ * inside every one of these surfaces is a `position: sticky` navigation bar
+ * that would then stick to a box that scrolls away with the page. The transform
+ * exists only for the length of a drag, applied inline, which is exactly as
+ * long as the reader is at the top of the page and the bar has nothing to do.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-spinner-busy {
+    /* Still clearly "working", without a thing rotating forever on screen. */
+    animation: pull-fade 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes pull-fade {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/*
+ * Present to a screen reader and to the Tab key, absent to everybody else.
+ *
+ * The pull gesture needs a fallback — a pointer gesture must never be the only
+ * way to do something — but the brief is equally clear that the fallback must
+ * not be part of the mobile UI. Focusing it brings it back into the page rather
+ * than merely making it visible where it was, so it can never be a control
+ * floating over a card.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.visually-hidden.focusable:focus-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  overflow: visible;
+  clip-path: none;
+  min-height: var(--tap);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
 }
 
 /* ============================================================ push layers */

@@ -21,6 +21,7 @@
  * before this existed and is still a working one.
  */
 
+import { calendarSeason, priorSeason } from '../../core/season/context.ts';
 import type { Database } from '../db.ts';
 import { InjuryRepo, InjurySourceRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
 import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
@@ -65,12 +66,23 @@ export const INGEST_LEASE_SECONDS = 120;
  */
 export const DAILY_WRITE_CEILING = 5_000;
 
-/** The season injury reports are published for: the one being played. */
+/**
+ * The season injury reports are published for: the one being played.
+ *
+ * **A fallback, not the answer.** This used to carry its own copy of the
+ * league-year arithmetic, as did `usageSeason`, `outlookSeason` and `seasonFor`
+ * — four identical expressions in four files, which is four chances to drift
+ * and no way to tell which one a given number came from. They all delegate to
+ * `calendarSeason` now, so there is one copy.
+ *
+ * More importantly, it is no longer what the app normally uses. Callers that
+ * can reach the database resolve the season from Sleeper's own `/state/nfl`
+ * (see `services/seasonService.ts`) and pass it in; this default is what
+ * answers when nobody did, which on a first run with no network is the only
+ * answer there is.
+ */
 export function injurySeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  // Reports run from the preseason into January, so a January date still
-  // belongs to the previous calendar year's season.
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 /**
@@ -82,7 +94,7 @@ export function injurySeason(now = new Date()): string {
  * "this year" stop agreeing.
  */
 export function previousSeason(now = new Date()): string {
-  return String(Number(injurySeason(now)) - 1);
+  return priorSeason(injurySeason(now));
 }
 
 export interface InjuryHealth {
@@ -776,23 +788,63 @@ export class InjuryService {
    * a second one living here was a matching stack of its own, which is exactly
    * what the identity layer exists to prevent.
    *
-   * GSIS is still preferred where it decides anything. It is no longer the
-   * first lookup — the name is, because that is what is indexed — but when a
-   * key is ambiguous the identifier breaks the tie, which is strictly better
-   * than the previous behaviour of declining every ambiguous name outright.
+   * **GSIS is now the first lookup, not the tie-break.** It used to be the
+   * other way round, because the name was the only indexed column and finding
+   * a player by identifier meant scanning the dictionary. Migration 0020 makes
+   * `gsis_id` a generated, indexed column, so the identifier lookup is the same
+   * shape and the same cost as the name one — two indexed `IN (...)` queries
+   * over the couple of hundred players this file mentions.
+   *
+   * The order matters more than it sounds. Under name-first, a player the two
+   * sources spell differently — "Cam Ward" against "Cameron Ward", a suffix on
+   * one side only, a dropped hyphen — did not resolve ambiguously. He did not
+   * resolve *at all*, because the name lookup returned nothing and the
+   * identifier sitting in the same row was never consulted.
    */
   private async resolveIdentities(rows: InjuryReportRow[]): Promise<IdentityIndex> {
-    const keys = rows.map((r) => normalizeName(r.fullName));
-    const candidates = await this.players.findByNormalizedNames(keys);
-
-    const byName = new Map<string, CanonicalPlayer[]>();
-    for (const player of candidates) {
-      const list = byName.get(player.normalizedName);
-      if (list) list.push(player);
-      else byName.set(player.normalizedName, [player]);
-    }
-    return { byName };
+    const [byNameCandidates, byIdCandidates] = await Promise.all([
+      this.players.findByNormalizedNames(rows.map((r) => normalizeName(r.fullName))),
+      this.players.findByExternalGsisIds(rows.map((r) => r.gsisId)),
+    ]);
+    return buildIdentityIndex(byNameCandidates, byIdCandidates);
   }
+}
+
+/**
+ * The two lookups, as one index.
+ *
+ * Shared by both published-file pipelines rather than written twice: they
+ * resolve the same identifiers against the same dictionary, and two copies of
+ * this is how two id spaces start.
+ */
+export function buildIdentityIndex(
+  byNameCandidates: readonly CanonicalPlayer[],
+  byIdCandidates: readonly CanonicalPlayer[] = [],
+): IdentityIndex {
+  const byName = new Map<string, CanonicalPlayer[]>();
+  for (const player of byNameCandidates) {
+    const list = byName.get(player.normalizedName);
+    if (list) list.push(player);
+    else byName.set(player.normalizedName, [player]);
+  }
+
+  /*
+   * One player per id, and a collision drops both.
+   *
+   * Two dictionary rows carrying the same GSIS id is a data fault, not a
+   * disambiguation problem — the identifier is supposed to be the thing that
+   * settles questions, so an ambiguous one settles nothing and must not be
+   * allowed to pick. Falling through to the name is the correct behaviour, and
+   * the identity review queue is where the duplicate belongs.
+   */
+  const byGsis = new Map<string, CanonicalPlayer | null>();
+  for (const player of byIdCandidates) {
+    const id = player.externalIds?.['gsis']?.trim();
+    if (!id) continue;
+    byGsis.set(id, byGsis.has(id) ? null : player);
+  }
+
+  return { byName, byGsis };
 }
 
 /**
@@ -805,6 +857,14 @@ export class InjuryService {
  */
 export interface IdentityIndex {
   byName: Map<string, CanonicalPlayer[]>;
+  /**
+   * Players by GSIS id, with a null for any id two players claim.
+   *
+   * Optional so a caller that only has names — or a test — can still build one,
+   * in which case the resolver falls straight through to the name ladder it
+   * always used.
+   */
+  byGsis?: Map<string, CanonicalPlayer | null>;
 }
 
 /**
@@ -825,22 +885,56 @@ export function resolveToCanonical(
   row: { fullName: string; gsisId: string | null },
   index: IdentityIndex,
 ): { playerId: string; by: 'id' | 'name' } | null {
+  /*
+   * The identifier first, whatever the name says.
+   *
+   * A GSIS id is assigned by the league and is the same string in every file
+   * that carries it; a name is a rendering choice two sources make
+   * independently. Preferring the name meant a player spelled differently on
+   * the two sides resolved to nothing at all — not ambiguously, nothing — with
+   * his identifier sitting unread in the same row.
+   *
+   * A null in the map is a *collision*, not a miss: two dictionary rows claim
+   * that id, so it settles nothing and the name ladder below gets its turn.
+   */
+  const gsis = row.gsisId?.trim();
+  if (gsis) {
+    const byId = index.byGsis?.get(gsis);
+    if (byId) return { playerId: byId.id, by: 'id' };
+  }
+
   const candidates = index.byName.get(normalizeName(row.fullName)) ?? [];
   if (candidates.length === 0) return null;
 
   if (candidates.length === 1) {
-    // A matching identifier on an unambiguous name is still worth reporting as
-    // an identifier match: it is the stronger evidence, and the counts in Setup
-    // are how the mapping's health is judged.
+    /*
+     * A matching identifier on an unambiguous name is still worth reporting as
+     * an identifier match: it is the stronger evidence, and the counts in Setup
+     * are how the mapping's health is judged.
+     *
+     * Unless the identifier is one two players claim. Then it is not evidence
+     * of anything — it abstained a few lines above, and this row got here on
+     * the strength of its name alone. Crediting it as an id match would inflate
+     * exactly the number somebody would look at to decide whether the id
+     * mapping is healthy, which is the one number that must not flatter itself.
+     */
     const only = candidates[0]!;
-    const by = row.gsisId && only.externalIds?.['gsis']?.trim() === row.gsisId ? 'id' : 'name';
+    const idIsDecisive = !!gsis && index.byGsis?.get(gsis) !== null;
+    const by = idIsDecisive && only.externalIds?.['gsis']?.trim() === gsis ? 'id' : 'name';
     return { playerId: only.id, by };
   }
 
-  if (row.gsisId) {
-    const exact = candidates.filter((c) => c.externalIds?.['gsis']?.trim() === row.gsisId);
+  if (gsis) {
+    const exact = candidates.filter((c) => c.externalIds?.['gsis']?.trim() === gsis);
     if (exact.length === 1) return { playerId: exact[0]!.id, by: 'id' };
   }
+
+  /*
+   * Two players, one name, and nothing to tell them apart.
+   *
+   * Declined rather than guessed, and the count is what surfaces it: an injury
+   * attached to the wrong player is worse than an injury attached to nobody.
+   */
   return null;
 }
 
