@@ -170,6 +170,35 @@ interrupting them for.
 
 ---
 
+## Asked for, and not applicable
+
+Two sections of the brief had nothing to audit, and saying so is more useful
+than a paragraph implying otherwise.
+
+**Historical backtest integrity (lookahead, survivorship, sample coverage).**
+There is no backtest in this codebase. Nothing replays a past week, so nothing
+can leak a final stat, a post-kickoff injury, a future transaction or a closing
+line into a recommendation that predates it. The audit for this section is a
+check that the surface does not exist, and it does not. If a backtest is ever
+built, this is the section that has to be written first rather than last.
+
+**Probability calibration.** `Next%` is testable for *convergence* — the
+simulation is compared across 1,000 / 2,500 / 5,000 runs and re-run under a
+different seed to measure its own sampling error — and it is not testable for
+*calibration*, because calibration needs outcomes and nothing stores whether the
+player the model gave 18% to was actually still there. The honest statement
+today is that Next% is a well-behaved estimate of a stated model, not a
+frequency-validated probability. Making it calibration-testable means recording
+each board state's predictions and the pick that followed; that is a feature,
+not a fix, and it is not in this pass.
+
+**Component dominance measurement.** Already instrumented rather than newly
+built: `scripts/probe-score-distribution.mjs` reports the observed contribution
+range per component against the live board, which is the measurement §4 asks
+for. What this pass added is the standing invariant — a test that the
+non-market components cannot outvote a large reach even summed at full strength
+and pointed the same way.
+
 ## What was deliberately not done
 
 The brief is explicit that broad speculative retunes must not merge, and none
