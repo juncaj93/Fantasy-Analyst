@@ -2182,9 +2182,10 @@ function waiverLeagueIntel(opts: {
           : assessCompetition({
               needs,
               budgets: budgetByRoster,
-              // The cheapest thing anybody has won with is the floor a rival has
-              // to clear to be in on him at all. Null in an unpriced league,
-              // where nobody is excluded for affordability.
+              // The 25th percentile of winning bids: what it has taken to win
+              // at the cheap end of this league, and so the floor a rival has to
+              // clear to be in on him at all. Null in an unpriced league, where
+              // nobody is excluded for affordability.
               expectedLow: opts.prices?.low ?? null,
               bidding,
             }),
