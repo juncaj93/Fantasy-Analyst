@@ -109,8 +109,26 @@ const rows = [];
 let failed = 0;
 
 for (const budget of budgets.bundles) {
+  /*
+   * `excludeMatch` exists for exactly one thing, and it is not for hiding
+   * weight.
+   *
+   * A budget named "everything the browser must fetch to render" has to mean
+   * it. Once part of the site is genuinely not on the render path — a chunk no
+   * page load can pull in, only a deliberate act can — counting it makes the
+   * number describe something nobody experiences, and the usual reaction to a
+   * number like that is to raise it until it stops complaining.
+   *
+   * So a pattern may be excluded, on one condition, enforced by convention and
+   * by review rather than by code: **the excluded bytes must be covered by a
+   * budget of their own.** Excluding without capping is how a budget stops
+   * meaning anything, which is the failure this whole script exists to prevent.
+   */
   const included = files.filter(
-    (f) => matches(f, budget.match) && !(budget.excludeSuffix && f.endsWith(budget.excludeSuffix)),
+    (f) =>
+      matches(f, budget.match) &&
+      !(budget.excludeSuffix && f.endsWith(budget.excludeSuffix)) &&
+      !(budget.excludeMatch && matches(f, budget.excludeMatch)),
   );
 
   /*

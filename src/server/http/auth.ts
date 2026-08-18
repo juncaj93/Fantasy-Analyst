@@ -107,7 +107,56 @@ export function checkPassphrase(env: AuthEnv, submitted: string): boolean {
 }
 
 /** Routes that never require a session, whatever the method. */
-export const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/logout']);
+export const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/api/auth/login',
+  '/api/auth/status',
+  '/api/auth/logout',
+  // Entering and leaving Demo Mode changes nothing but whether the demo is
+  // running, so it needs no passphrase — and *leaving* must never be able to
+  // fail for want of one.
+  '/api/demo/enter',
+  '/api/demo/exit',
+  '/api/demo/status',
+]);
+
+// ------------------------------------------------------------- demo mode
+
+/**
+ * The marker that says a browser is in Demo Mode.
+ *
+ * Demo Mode's data is served in the browser, from fixtures, so the server
+ * ordinarily never hears about it at all. This cookie is how it hears anyway,
+ * and it exists for exactly one reason: §2 requires that a mutation be refused
+ * *below the UI as well as in it*, and "below the UI" has to include a request
+ * this app's own code did not make — one typed into a console, replayed from a
+ * history, or fired by a screen that forgot to disable a button.
+ *
+ * A cookie rather than a header, because a cookie rides on every same-origin
+ * request automatically. A header can be forgotten; that is the whole failure
+ * this is here to prevent.
+ *
+ * It is not a security boundary and is not pretending to be one — whoever set
+ * it can clear it, and clearing it is exactly what leaving Demo Mode does. It
+ * is a safety interlock for the session that turned the demo on.
+ */
+const DEMO_COOKIE = 'fa_demo';
+
+/** Session-scoped: no `Max-Age`, so closing the browser ends the demo. */
+export function createDemoCookie(env: AuthEnv): string {
+  const secure = env.insecureCookies ? '' : ' Secure;';
+  return `${DEMO_COOKIE}=1;${secure} SameSite=Lax; Path=/`;
+}
+
+export function clearDemoCookie(env: AuthEnv): string {
+  const secure = env.insecureCookies ? '' : ' Secure;';
+  return `${DEMO_COOKIE}=;${secure} SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+export function isDemoRequest(request: Request): boolean {
+  const cookie = request.headers.get('cookie') ?? '';
+  return cookie.split(/;\s*/).some((c) => c === `${DEMO_COOKIE}=1`);
+}
 
 /**
  * Does this request change anything?

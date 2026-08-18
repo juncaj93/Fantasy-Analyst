@@ -451,7 +451,31 @@ suggestions).
    say `ADP still has only 2026 data` rather than letting the board quietly
    serve it.
 
-10. **The browser suite shares one dev server across all three viewports, and
+10. **A sheet's dismiss gesture was measured before the sheet had stopped
+   moving.** Found while running the browser suite for the Demo Mode channel:
+   `sheets › a downward pull dismisses it` failed intermittently at 430 and
+   nowhere else, and passed on every retry — which is the worst failure profile
+   there is, because it is green on a fast machine and red on a busy one with
+   nothing wrong with the app. `toBeVisible` passes the moment a sheet enters
+   the document, which is the *start* of its entry animation; the test then took
+   the grip's position and dragged from it, so on a slow frame the drag began
+   somewhere the grip no longer was. The fix is in the test and weakens no
+   assertion: it waits for the element to stop moving, asked as a question about
+   the element rather than answered with a fixed sleep.
+
+11. **A queue-filtered draft board scores differently from the full one.**
+   Found while asserting that the ★ moves no ranking: it does not, but
+   `?queued=1` narrows the *candidate pool*, and the tier-cliff and positional-
+   scarcity components are computed over that pool — so three starred players
+   across three positions have no tier structure to read and their scores move.
+   The `Next%` simulation is already immune: it was deliberately given the whole
+   board rather than the filtered one, and the same argument applies to the tier
+   inputs. **Assigned to the Integrity workstream**; Demo Mode did not change it
+   and `tests/demo.scenarios.test.ts` asserts the star's neutrality by building
+   the same board twice with and without the flags rather than by comparing a
+   filtered board to an unfiltered one.
+
+12. **The browser suite shares one dev server across all three viewports, and
    reuses one across runs.** `reuseExistingServer` is on outside CI, so a server
    left behind by an interrupted run is picked up by the next one with its state
    intact — which is how a 390-width run comes to see a 375-width run's
@@ -1204,6 +1228,94 @@ against the real endpoint on the seeded server and half against whole-response
 fixtures for the states of a Sunday afternoon that a deterministic seed cannot
 reach.
 
+## Milestone 20 — Demo Mode and audit fixtures (done)
+
+**A deterministic, read-only view of the real product across states that are
+hard to reach on demand.** Draft night at four picks, a best-ball board, the
+morning after, a Sunday twenty minutes before kickoff, an injury eight minutes
+before it, a head-to-head read from five points in one afternoon, a Tuesday
+waiver run with $37 left, a trade window, a playoff week, a rollover in March,
+and seven ways it degrades. Twenty-eight scenarios, all of them wired: nothing
+in the picker is greyed out.
+
+**It is a substitution layer, not a second app.** One Draft screen, one Team
+screen, one Matchup screen, one waiver card, one scoring engine — the demo
+renders the product's. The seam is a single function: `request()` in `web/api.ts`, which every screen
+already goes through. No screen knows a demo exists and no component takes a
+`demo` prop, so a screen written next year inherits the behaviour for free.
+
+**Two assemblies moved so there is one implementation instead of two.** The
+draft board is now `core/draft/boardBuilder.ts` and the matchup is
+`core/matchup/build.ts`, each driven by a sources interface that repositories
+satisfy over D1 and Sleeper and that fixtures satisfy from memory. Both services
+keep their exact public API and every caller is untouched. Alongside them the
+waiver pricing and league-intelligence passes, the bench held-players mapping,
+the bounded free-agent scan and the trade ladder inputs moved out of `app.ts`
+into `core` verbatim. A rehearsed bid and a live one are now the same
+arithmetic, and a rehearsed win probability the same simulation, by construction
+rather than by care.
+
+**The matchup states are the model's readings, not the fixture's claims.** The
+fixture writes three kickoff windows, a market line for every man on both
+rosters, and Sleeper's own `players_points`; `core/matchup` decides which games
+are finished, which are running and which have not begun, and what any of it is
+worth. So "one point in it" is a scenario whose two projected finals come out
+less than a point apart — asserted through the simulation — rather than a label.
+The injury scenario rules a starter out of a game that has not kicked off, which
+is what lets the insight engine price the swap in win probability rather than
+merely report the designation.
+
+**The Underdog market is wired through the production board, not modelled a
+second time.** Every §13 state is a fact about the file, stated as provenance
+and resolved by `resolveDog` and `blendMarketBaseline`: DOG present and fresh,
+an aging file that is used with its age printed, a nine-day-old file that is
+withheld with the reason said out loud, no file at all, a player Sleeper prices
+and Underdog does not, a player Underdog prices and Sleeper does not, a
+believable 29-pick disagreement carried into the blend, and an Underdog price of
+2.4 against a Sleeper 119 that the outlier guard sets aside. The 60/40 and 75/25
+blends are asserted against the same board in a redraft league and in one
+Sleeper flags as best ball — read from the league's own settings by
+`detectBestBall`, never from its name.
+
+**The one write in the app's injected interfaces is inert in a demo.**
+`MatchupSources.record` writes both sides of every forecast to the calibration
+ledger, because a probability model nobody grades is worth nothing. Demo Mode
+satisfies it with a recorder that returns. Two things are asserted rather than
+intended: that the interface has gained no second write, and that the demo's
+recorder does nothing.
+
+**Nothing a demo does can change anything, and it is refused twice.** In the
+browser, `DemoRuntime.request` throws for anything that is not a read — a rule
+about requests rather than a list of buttons, so it covers endpoints that do not
+exist yet. On the server, a session-scoped `fa_demo` cookie makes the router
+refuse every write with a 403, before the passphrase check and regardless of it.
+Proved against every `router.post` path scraped from `app.ts`, against the real
+router and a real database with a valid session attached, and from a
+hand-written `fetch` in the page that goes straight past the UI.
+
+**Time is injected, not replaced.** The app already had the convention, so Demo
+Mode supplies a stopped clock to the same parameters production supplies the
+real time to — including the instant an Underdog file's age is measured from.
+`Date` is untouched, so there is nothing to leak.
+
+**Fixtures state inputs, never outputs.** A market line, a designation, a target
+count, a pick, a spend, an ADP. Every score, bid, verdict, blend and percentage
+on a demo screen was computed by the production engine from those.
+
+**Bundle cost is ~7 kB gzip on the render path** — the indicator, the session
+and the API hook. The runtime, the registry, the picker and each fixture family
+are separate dynamic imports that no page load can reach; they come to 92 kB
+gzip, most of the growth being the matchup distribution model, the correlation
+factors and the simulator arriving when the Matchup scenarios were wired. `vite.config.ts` names
+every demo chunk `assets/demo-*.js`, which is what lets the page-weight budgets
+exclude them from the render path *and* cap them with a budget of their own;
+excluding without capping is how a budget stops meaning anything, so both were
+done together.
+
+Checks at this milestone: 2,600 unit/integration tests plus the browser suite at
+four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green.
+
+Full detail: [DEMO_MODE.md](DEMO_MODE.md).
 
 
 ## Recommended next work
