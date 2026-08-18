@@ -572,10 +572,41 @@ if (leagueId) {
     plan.json?.byes?.available === false && typeof plan.json?.byes?.note === 'string',
     plan.json?.byes?.note ?? 'no note',
   );
+  /*
+   * Playoff weeks, and which of the two answers this is.
+   *
+   * Both are legitimate: the league publishes a usable `playoff_week_start` and
+   * it is used, or it does not and the standard fallback is. What is never
+   * legitimate is *no weeks at all*, which is what this route produced in
+   * production until the setting was read through a reader that validates it.
+   *
+   * So the emptiness is asserted unconditionally, and then the branch actually
+   * taken is asserted for internal consistency — a run can only exercise the
+   * branch this league is in, and a check that silently passed because it was in
+   * the other one would be worth nothing.
+   */
+  const playoffs = plan.json?.playoffs ?? {};
+  const weeks = Array.isArray(playoffs.weeks) ? playoffs.weeks : [];
   check(
-    'playoff weeks come from the league rather than a default',
-    Array.isArray(plan.json?.playoffs?.weeks) && plan.json.playoffs.weeks.length > 0,
-    `weeks ${(plan.json?.playoffs?.weeks ?? []).join(', ')} at weight ${plan.json?.playoffs?.weight}`,
+    'the playoffs have weeks, whichever way the start was decided',
+    weeks.length > 0,
+    `weeks ${weeks.join(', ') || '(none)'} at weight ${playoffs.weight}`,
+  );
+  if (playoffs.startWeekPublished === true) {
+    check(
+      'a published start week is the one used',
+      weeks[0] === playoffs.startWeek,
+      `league published week ${playoffs.startWeek}, board starts at ${weeks[0]}`,
+    );
+  } else {
+    check(
+      'an unusable start week falls back to a real one and says so',
+      weeks.length > 0 && playoffs.startWeek > 1 && playoffs.startWeekPublished === false,
+      `league published nothing usable; using week ${playoffs.startWeek}`,
+    );
+  }
+  console.log(
+    `      playoff start ${playoffs.startWeek} (${playoffs.startWeekPublished ? "the league's" : 'the fallback'})`,
   );
 
   const feed = await get(`/api/leagues/${encodeURIComponent(leagueId)}/feed`);

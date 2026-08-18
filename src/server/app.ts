@@ -55,7 +55,7 @@ import { evaluateBench, type HeldPlayer } from '../core/roster/bench.ts';
 import { buildLadder, type LadderInputs } from '../core/trades/ladder.ts';
 import { assessConsolidation, type ConsolidationAdvice } from '../core/trades/consolidation.ts';
 import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
-import { LeagueStrategyService, type StrategyContext } from './services/leagueStrategyService.ts';
+import { LeagueStrategyService, readFinalWeek, type StrategyContext } from './services/leagueStrategyService.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -1030,7 +1030,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     }));
 
     const byes = byeOutlook({ roster, shape, currentWeek });
-    const playoffStartWeek = Number(league.leagueSettings?.['playoff_week_start'] ?? 15);
+    /*
+     * The first playoff week, read the way the rest of the app reads it.
+     *
+     * `?? 15` was never a default: it fires only when the key is absent or null,
+     * and a real league publishes `playoff_week_start` as a number that is not a
+     * usable week. That value survived the `??`, became the start week, and
+     * produced an empty list of playoff weeks -- which the live probe caught in
+     * production after the seeded database, which publishes 15, had passed.
+     *
+     * `readFinalWeek` is the canonical reader and validates the range before it
+     * trusts the value, so this derives from it rather than parsing the same
+     * setting a second way. It returns the last week a bid can still pay off,
+     * which is the week before the playoffs begin.
+     */
+    const playoffStartWeek = readFinalWeek(league.leagueSettings) + 1;
+    const rawPlayoffStart = Number(league.leagueSettings?.['playoff_week_start']);
+    const playoffWeekPublished = Number.isFinite(rawPlayoffStart) && rawPlayoffStart > 1 && rawPlayoffStart <= 19;
     const playoffTeams = Number(league.leagueSettings?.['playoff_teams'] ?? 6);
 
     /*
@@ -1061,6 +1077,12 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playoffs: {
         startWeek: playoffStartWeek,
         weeks: playoffWeeks(playoffStartWeek),
+        /*
+         * Whether that week came from the league or from the standard fallback.
+         * A reader told the playoffs start in week 15 deserves to know whether
+         * the league said so or the app assumed it.
+         */
+        startWeekPublished: playoffWeekPublished,
         record: mySettings ? record : null,
         ...emphasis,
       },
