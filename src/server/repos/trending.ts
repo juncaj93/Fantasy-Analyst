@@ -12,7 +12,7 @@
  * be free and long enough to see a week's movement.
  */
 
-import { chunk, nowIso, type Database } from '../db.ts';
+import { chunk, type Database } from '../db.ts';
 import type { TrendingSnapshot } from '../../core/market/trending.ts';
 
 /**
@@ -125,10 +125,5 @@ export class TrendingRepo {
       oldest: row?.oldest ?? null,
       newest: row?.newest ?? null,
     };
-  }
-
-  /** The instant a capture should be stamped with. Here so tests can pin it. */
-  static stamp(): string {
-    return nowIso();
   }
 }

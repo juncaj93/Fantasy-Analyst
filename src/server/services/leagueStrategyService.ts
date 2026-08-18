@@ -247,13 +247,19 @@ export class LeagueStrategyService {
       if (!league) break;
       seasons.push(league.season);
 
-      const users = await this.sleeper.getLeagueUsers(sleeperLeagueId);
+      /*
+       * Owner id to roster id, for that season's rosters specifically.
+       *
+       * Sleeper records a trade's creator as a *user* id, and a roster id is
+       * only meaningful within one league. Rebuilding the map per season is
+       * what keeps a manager who changed roster slots between seasons from
+       * having his old trades attributed to whoever holds that slot now.
+       */
       const leagueRosters = await this.sleeper.getRosters(sleeperLeagueId);
       const rosterByUser = new Map<string, number>();
       for (const roster of leagueRosters) {
         if (roster.owner_id) rosterByUser.set(roster.owner_id, roster.roster_id);
       }
-      void users;
 
       /*
        * Trades cluster in the middle of a season and are rare at either end,

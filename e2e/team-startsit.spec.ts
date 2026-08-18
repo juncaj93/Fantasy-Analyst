@@ -122,11 +122,47 @@ test.describe('waiver upgrades', () => {
   /** Advisory, and it says so. Nothing here executes anything. */
   test('offers no control that would make a transaction', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
-    await expect(card).toContainText('add or drop in Sleeper');
+    // The disclaimer names Sleeper as the only place a transaction happens. The
+    // exact verbs it lists have grown with the card — it now quotes bids as well
+    // as adds — so the assertion is on the invariant rather than the sentence.
+    await expect(card).toContainText('in Sleeper');
+    await expect(card).toContainText('never makes a transaction');
     const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
       expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
     }
+  });
+
+  /**
+   * A price is text, not an action.
+   *
+   * The card now quotes three dollar figures per candidate, and the failure mode
+   * this guards is the obvious one: a recommended bid that acquires a button
+   * beside it stops being advice.
+   */
+  test('quotes a bid without offering to place it', async ({ page }) => {
+    const bid = page.getByTestId('faab-bid').first();
+    const withheld = page.getByTestId('faab-withheld').first();
+    // A league with no FAAB says so instead; either is a valid state.
+    if (await withheld.isVisible().catch(() => false)) {
+      await expect(withheld).not.toBeEmpty();
+      return;
+    }
+    await expect(bid).toBeVisible();
+    await expect(bid).toContainText('Expected $');
+    await expect(bid).toContainText('Do not exceed $');
+    expect(await bid.getByRole('button').count(), 'a bid must carry no control at all').toBe(0);
+  });
+
+  /**
+   * The budget quoted is the league's own, and it is never invented.
+   *
+   * The demo league publishes a $100 budget and $35 spent, so the footer has to
+   * read $65 — a card that assumed Sleeper's $100 default would say $100 here
+   * and be wrong in exactly the way this whole layer exists to avoid.
+   */
+  test('states the budget it priced against, from the league settings', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
   });
 
   /**
