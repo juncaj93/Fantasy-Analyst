@@ -67,6 +67,15 @@ test.describe('the seasonal slot in the toolbar', () => {
   test('puts Waivers next to Team', async ({ page }) => {
     await inSeason(page);
     await page.goto('/');
+    /*
+     * Waited for, not read straight after the navigation.
+     *
+     * The bar renders before the overview answers — with Draft in the seasonal
+     * slot, because that is the safe default when the season is unknown — and
+     * reading the row in that frame finds no Waivers at all. The swap is what
+     * this test is about, so it waits for it.
+     */
+    await expect(page.getByTestId('tab-waivers')).toBeVisible();
     const ids = await page.locator('.tabbar button').evaluateAll((nodes) =>
       nodes.map((n) => n.getAttribute('data-testid')),
     );
