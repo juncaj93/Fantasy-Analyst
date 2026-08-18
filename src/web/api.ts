@@ -1,5 +1,7 @@
 /** Typed API client. All calls are same-origin and credentialed. */
 
+import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -709,6 +711,16 @@ export interface StartSitEvaluation {
   /** Where the evidence points different ways. */
   conflicts?: string[];
   opponent?: string | null;
+  /**
+   * Expected points, points over expectation, and anything else the
+   * intelligence pass adds — already labelled and already formatted.
+   *
+   * The weekly card prints these as given and computes none of them. Absent
+   * until that work merges, and absent renders as nothing.
+   */
+  advanced?: { key: string; label: string; value: string; detail?: string | null }[];
+  /** What would move the recommendation, once the sensitivity pass exists. */
+  whatWouldChange?: string[];
 }
 
 /** Floor, Balanced or Ceiling — which question Start/Sit is answering. */
@@ -790,6 +802,11 @@ export interface LineupRecommendation {
     superflex: boolean;
   };
   slots: LineupSlot[];
+  /**
+   * The evaluations behind the slots. Absent on an older deployment, which the
+   * weekly card treats as "no card for a starter yet" rather than as an error.
+   */
+  starters?: StartSitEvaluation[];
   bench: StartSitEvaluation[];
   undecidable: StartSitEvaluation[];
   swaps: LineupSwap[];
@@ -835,6 +852,17 @@ export interface WaiverCandidate {
   gain: number;
   reasons: string[];
   statusFlag: string | null;
+  /*
+   * What your league's own managers imply, once the league-intelligence pass
+   * provides it: what he will cost, who else wants him, and what he is worth
+   * past Sunday. Optional, and absent means unknown — the Waivers page says so
+   * rather than estimating any of them. The shapes are defined once, beside the
+   * view model that reads them, in core/waivers/board.ts.
+   */
+  faab?: WaiverLeagueIntel['faab'];
+  competition?: WaiverLeagueIntel['competition'];
+  multiWeek?: WaiverLeagueIntel['multiWeek'];
+  leagueRank?: number | null;
 }
 
 export interface WaiverUpgrade {

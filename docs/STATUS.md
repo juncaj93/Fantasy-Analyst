@@ -580,6 +580,75 @@ six-game minimum (2), including playoff weeks in the series (1), turning a
 missing game into a zero (1), and trimming the read window before the season
 type had been read (1).
 
+## Milestone 14 — the Team screen as a weekly tool, and the waivers shell (done)
+
+**A label removed, a judgement kept.** The `AVOID — lifetime tally -5` chip is
+gone from player cards. It said out loud what the signed tally beside the name
+already says, in a red chip that cost a line of every card it landed on. The
+tally, the lifetime threshold in `core/draft/decisions.ts`, the bounded penalty
+the draft engine applies below it and every test over them are untouched — the
+API still carries `avoid` and the model still believes it. The reader now
+interprets `-5` directly.
+
+**Pull to refresh.** Both refresh controls have left the Team screen — the one
+in the navigation bar and the `Refresh data` button under it. A downward pull
+from the top of the screen runs the same all-source orchestrator the button
+called, with the same dedupe, the same budget refusal and the same per-source
+report, and then reloads the roster, the lineup and the waiver scan. The
+thresholds are pure functions in `web/gestures.ts` and tested there; the hook is
+single-flight through a ref rather than through the state that paints the
+spinner, because state lands a render later and the second pull happens in
+between. It fires on distance and never on velocity, so a flick back to the top
+of a long list cannot reload the screen underneath the reader. The keyboard
+fallback is a control that is off screen until it is focused.
+
+**Four controls, one row.** Balanced, Floor and Ceiling and the `Compare` button
+now share a single row at every width down to 360px. The segmented control gives
+up horizontal padding and a step of type size; no tap target shrank, and the row
+is still 44px.
+
+**The weekly card.** Tapping one of your own players opens a concise sheet
+rather than the comparison: the lineup's own verdict, the role trend, the
+matchup, what the market expects, availability when it is not the ordinary
+answer, the two drivers that decided the score, and up to three prop lines. It
+is built from `core/startsit/weekCard.ts` — a pure view model — off evaluations
+the lineup had already computed, so it needs no request of its own and cannot
+disagree with the row that opened it. Anything unknown is absent rather than
+printed as a dash, and named once at the bottom. It carries silent slots for
+expected points and for "what would change this", which light up the moment an
+evaluation arrives carrying them.
+
+**Waivers, as decisions.** `core/waivers/board.ts` turns the engine's
+slot-shaped comparisons into one row per player — recommendation strength, the
+slot he fits (and the others he also fits), what he is worth this week, one
+short phrase saying why — and defines the interface the league-intelligence pass
+will fill: expected FAAB range with its unit, likely competition, multi-week
+value and a league-specific rank. Until that pass lands those four read as
+unknown, with the reason attached, and the page says once which ones are
+outstanding. **There is no arithmetic anywhere that turns projected points into
+a bid**, and the tests assert the absence rather than the shape.
+
+The Team screen shows the best three of those rows; the whole board is the new
+Waivers destination, with position filters that only offer chips that would
+leave something on screen, and the same pull-to-refresh.
+
+**The seasonal slot.** One place in the toolbar is seasonal and exactly one of
+Draft and Waivers is ever in it — written as a single filter so the two facts
+cannot disagree. The switch is Sleeper's own season state, as it already was;
+no date arithmetic was added.
+
+**Alignment.** The tally and the availability tag now sit in a fixed-width,
+right-aligned field, so every club mark on every list starts at the same x
+whatever the number beside it is. Nothing is padded to `08` and nothing is
+faked: an empty field is the same width as a full one, which is the whole trick.
+The board rank is fixed-width and tabular for the same reason at the other end
+of the row.
+
+Checks at this milestone: 1,692 unit/integration tests (38 new), the browser
+suite extended to a fourth width — 430, the Pro Max class — plus new specs for
+the pull gesture, the weekly card, the waiver rows, the seasonal toolbar swap
+and the mark alignment. Typecheck and build green.
+
 ## Recommended next work
 
 1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written

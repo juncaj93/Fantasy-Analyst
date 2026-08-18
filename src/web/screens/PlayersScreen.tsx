@@ -264,15 +264,20 @@ function PlayerRow({
           */}
           <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />
           <span className="player-name">{player.name}</span>
-          {/* The same headline tally, in the same place, as on the draft board. */}
-          <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
           {/*
-            And the same availability tag: nothing at all for a healthy player,
-            `Q` for a questionable one. This was a word-length badge reading
-            "Questionable" or "Out", which is the same fact said three times as
-            loudly as the board says it.
+            The same headline tally, in the same place, as on the draft board —
+            and the same availability tag beside it: nothing at all for a healthy
+            player, `Q` for a questionable one. This was a word-length badge
+            reading "Questionable" or "Out", which is the same fact said three
+            times as loudly as the board says it.
+
+            Both sit in the same fixed-width field the board uses, so the club
+            marks line up down this list too. See `--row-meta`.
           */}
-          <InjuryTag status={player.status} />
+          <span className="player-row-meta">
+            <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
+            <InjuryTag status={player.status} />
+          </span>
           <PositionBadge position={player.position} team={player.team} />
         </div>
 

@@ -464,12 +464,20 @@ test.describe('Draft, once the regular season starts', () => {
     expect(await page.locator('.tabbar button').count()).toBe(6);
   });
 
+  /**
+   * Draft leaves and Waivers arrives in the same slot.
+   *
+   * The count is unchanged at six, deliberately: the seasonal slot is one slot,
+   * and a bar that briefly carried both would be seven destinations on a 360px
+   * phone. Where Waivers sits is asserted in `waivers.spec.ts`.
+   */
   test('leaves the bar once the season is under way', async ({ page }) => {
     await inRegularSeason(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-team')).toBeVisible();
     await expect(page.getByTestId('tab-draft')).toHaveCount(0);
-    expect(await page.locator('.tabbar button').count()).toBe(5);
+    await expect(page.getByTestId('tab-waivers')).toBeVisible();
+    expect(await page.locator('.tabbar button').count()).toBe(6);
     // The other five are all still there, named what they were.
     for (const tab of ['team', 'trades', 'players', 'review', 'setup'] as const) {
       await expect(page.getByTestId(`tab-${tab}`)).toBeVisible();
