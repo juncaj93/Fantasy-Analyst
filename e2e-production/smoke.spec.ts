@@ -731,10 +731,22 @@ test.describe('the decision intelligence', () => {
     test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board');
 
     const board = await page.evaluate(async () => {
+      /*
+       * The draft id comes from the league listing, which is where it lives.
+       *
+       * `/api/overview` reports the selected league as id, name and season and
+       * has never carried a draft id, so reading one from it returned undefined
+       * every time and skipped this test on every run since it was written --
+       * green, and checking nothing. The screen itself reads `/api/leagues`.
+       */
       const overview = await (await fetch('/api/overview')).json();
-      const draftId = overview?.selectedLeague?.draftId;
-      if (!draftId) return null;
-      return (await fetch(`/api/drafts/${draftId}/board?limit=25`)).json() as Promise<{
+      const selected = overview?.selectedLeague?.id;
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league =
+        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
+        leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      return (await fetch(`/api/drafts/${league.draftId}/board?limit=25`)).json() as Promise<{
         recommendations: {
           components: { key: string; contribution: number }[];
           opportunity?: { score: number };
@@ -831,5 +843,124 @@ test.describe('the decision intelligence', () => {
         expect(component.display.length, `${component.key} has no explanation`).toBeGreaterThan(0);
       }
     }
+  });
+
+  /**
+   * The two markets, on the deployed board.
+   *
+   * Everything about DOG is provable offline except that it arrived. The
+   * snapshot is fetched in CI, imported over HTTP and read back through the
+   * ranking, and every step in between can fail without anything breaking: the
+   * board keeps working and simply stops mentioning Underdog. That failure has
+   * to be visible from here or it is not visible anywhere.
+   *
+   * Written so that both answers are meaningful. A deployment carrying DOG must
+   * show it and must sort by it; a deployment without it must say so on the
+   * board rather than leaving a blank column and no explanation. Neither branch
+   * is a silent pass, which is the whole point — a test that skipped when the
+   * column was empty would go quiet at exactly the moment it mattered.
+   */
+  test('the board prices against both markets, and says so when it cannot', async ({ page }) => {
+    await page.goto('/');
+    // The app does not land on Draft, and a test that looked for rows without
+    // going there would skip itself on every run and report nothing.
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const dog = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const selected = overview?.selectedLeague?.id;
+      // The draft id lives on the league listing rather than on the overview,
+      // so the board is reached the same way the screen reaches it.
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league =
+        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
+        leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=60`)).json();
+      return {
+        state: board?.dogState ?? null,
+        format: board?.marketFormat ?? null,
+        withDog: (board?.recommendations ?? []).filter((r: { dogAdp: number | null }) => r.dogAdp != null).length,
+      };
+    });
+    test.skip(!dog, 'no league selected on this deployment');
+
+    if (!dog!.state?.available) {
+      // The degraded state is a feature and is allowed — but it must be an
+      // explained one. "DOG is missing" and "DOG is missing because the
+      // snapshot is nine days old" are different products.
+      expect(dog!.state?.reason ?? '', 'an unavailable DOG must say why').not.toBe('');
+      return;
+    }
+
+    // Provenance travels with the numbers, or they are not usable numbers.
+    expect(dog!.state.sourceType).toBe('raw_adp');
+    expect(dog!.state.provider).toBeTruthy();
+    expect(['fresh', 'aging']).toContain(dog!.state.freshness);
+    expect(dog!.withDog).toBeGreaterThan(0);
+
+    // The weights are the format's own, read from Sleeper's settings.
+    expect(dog!.format?.weights).toEqual(
+      dog!.format?.bestBall ? { dog: 0.75, sleeper: 0.25 } : { dog: 0.6, sleeper: 0.4 },
+    );
+
+    // And the column reaches a card rather than stopping at the response.
+    await expect(page.getByTestId('board-list')).toHaveAttribute('data-dog', 'yes');
+    await expect(page.getByTestId('recommendation-row').first().locator('.player-row-metrics')).toContainText('DOG');
+  });
+
+  /**
+   * Three orderings of the same rows, against the real board.
+   *
+   * The guarantee is that switching is a permutation and nothing else: the
+   * order changes and every number on every card stays where it was. That is
+   * unit-tested, but it is a claim about the deployed bundle, and a bundle is
+   * what a user actually gets.
+   */
+  test('Score, ADP and DOG reorder the deployed board without touching a number', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const control = page.getByTestId('draft-sort');
+    await expect(control).toBeVisible();
+    await expect(page.getByTestId('sort-score')).toHaveAttribute('aria-checked', 'true');
+
+    const snapshot = () =>
+      page.evaluate(() => {
+        const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
+        return {
+          order: rows.map((r) => r.getAttribute('data-player-id')!),
+          numbers: Object.fromEntries(
+            rows.map((r) => [
+              r.getAttribute('data-player-id')!,
+              (r.querySelector('.player-row-metrics')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+            ]),
+          ),
+        };
+      });
+
+    const byScore = await snapshot();
+
+    for (const mode of ['adp', 'dog'] as const) {
+      const button = page.getByTestId(`sort-${mode}`);
+      // DOG is only offered when the board has DOG to sort by, which is the
+      // designed behaviour rather than a fault.
+      if ((await button.count()) === 0 || !(await button.isEnabled())) continue;
+
+      await button.click();
+      await expect(button).toHaveAttribute('aria-checked', 'true');
+      const sorted = await snapshot();
+
+      expect(sorted.order.slice().sort(), `${mode} must be the same players`).toEqual(byScore.order.slice().sort());
+      for (const [playerId, metrics] of Object.entries(byScore.numbers)) {
+        expect(sorted.numbers[playerId], `${mode} changed a number on ${playerId}`).toBe(metrics);
+      }
+    }
+
+    await page.getByTestId('sort-score').click();
+    await expect(page.getByTestId('sort-score')).toHaveAttribute('aria-checked', 'true');
+    expect((await snapshot()).order).toEqual(byScore.order);
   });
 });
