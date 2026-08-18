@@ -255,6 +255,30 @@ export class PlayerRepo {
     return out;
   }
 
+  /**
+   * Players carrying any of these GSIS ids.
+   *
+   * The identifier half of the same lookup `findByNormalizedNames` does for
+   * names, and deliberately the same shape: one indexed `IN (...)` per batch,
+   * bounded by the rows actually being ingested rather than by the size of the
+   * dictionary. That is what makes preferring the identifier affordable inside
+   * a Worker's CPU budget — see migration 0020 for why it was not before.
+   */
+  async findByExternalGsisIds(ids: (string | null | undefined)[]): Promise<CanonicalPlayer[]> {
+    const unique = [...new Set(ids.map((id) => (id ?? '').trim()).filter((id) => id.length > 0))];
+    if (unique.length === 0) return [];
+    const out: CanonicalPlayer[] = [];
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const holes = batch.map(() => '?').join(', ');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM players WHERE gsis_id IN (${holes})`)
+        .bind(...batch)
+        .all<PlayerRow>();
+      for (const row of results ?? []) out.push(toPlayer(row));
+    }
+    return out;
+  }
+
   async search(query: string, limit = 40): Promise<CanonicalPlayer[]> {
     const like = `%${query.toLowerCase()}%`;
     const rows = await this.db

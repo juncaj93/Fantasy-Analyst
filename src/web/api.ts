@@ -55,6 +55,63 @@ export interface Overview {
     reason: string;
     assumed: boolean;
   };
+  /**
+   * The same decision at eight-state resolution.
+   *
+   * Optional for the same reason `season` is: a client that arrives during a
+   * deploy, or one pinned to an older worker, must degrade to the four-state
+   * answer rather than to nothing. Anything that only needs "is Draft a
+   * destination" should keep reading `season`; this is for the things that have
+   * to tell an open draft from a live one.
+   */
+  lifecycle?: {
+    lifecycle:
+      | 'offseason'
+      | 'preseason'
+      | 'draft_open'
+      | 'draft_live'
+      | 'post_draft'
+      | 'regular_season'
+      | 'playoffs'
+      | 'season_complete';
+    phase: 'preseason' | 'regular' | 'postseason' | 'offseason';
+    draftVisible: boolean;
+    draftLive: boolean;
+    reason: string;
+    assumed: boolean;
+  };
+}
+
+/**
+ * The annual readiness check — `GET /api/diagnostics/rollover`.
+ *
+ * Not on any screen by default. It is the answer to "is this app ready for the
+ * new season", which is a question asked once a year by somebody who needs a
+ * real answer rather than a rendered page.
+ */
+export interface RolloverReport {
+  season: string;
+  ready: boolean;
+  waitingOn: string | null;
+  checks: {
+    name: string;
+    status: 'ready' | 'waiting' | 'stale' | 'failed' | 'skipped';
+    wanted: string;
+    found: string | null;
+    detail: string;
+    blocking: boolean;
+  }[];
+  policy: { category: string; disposition: string; reason: string }[];
+  summary: string;
+  league: {
+    selected: { id: string; name: string; season: string } | null;
+    succession: {
+      league: { id: string; name: string; season: string } | null;
+      confidence: 'exact' | 'likely' | 'ambiguous' | 'none';
+      autoSelect: boolean;
+      reason: string;
+    } | null;
+  };
 }
 
 export interface ComponentScore {

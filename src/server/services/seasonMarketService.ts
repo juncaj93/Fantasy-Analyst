@@ -12,6 +12,7 @@
  * from a failed request and is shown as such.
  */
 
+import { calendarSeason } from '../../core/season/context.ts';
 import { resolveSeasonMarkets } from '../../core/vegas/season.ts';
 import { canSpend } from '../../core/vegas/budget.ts';
 import type { SeasonMarketSet, VegasProvider } from '../../core/vegas/types.ts';
@@ -55,10 +56,16 @@ export interface SeasonRefreshResult {
   error: string | null;
 }
 
-/** The NFL season a date belongs to: the league year rolls over in March. */
+/**
+ * The NFL season a date belongs to: the league year rolls over in March.
+ *
+ * Delegates to the one shared implementation. Kept as a named export because
+ * call sites and tests reference it, and because "the season a *date* belongs
+ * to" is a question worth being able to ask on its own — it is just no longer
+ * answered by arithmetic private to this file.
+ */
 export function seasonFor(now: Date = new Date()): string {
-  const year = now.getUTCFullYear();
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 export class SeasonMarketService {
