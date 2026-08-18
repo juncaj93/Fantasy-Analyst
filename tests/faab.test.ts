@@ -267,6 +267,34 @@ describe('bid strategy (§1)', () => {
     expect(streamable).toBeLessThan(exclusive * 0.6);
   });
 
+  it('names what the budget is being preserved for, and only when it is', () => {
+    /*
+     * The brief's own headline. It appears only when the recommendation is
+     * genuinely held below the player's value — otherwise nothing is being
+     * preserved and the phrase would be decoration.
+     */
+    // A depleted wallet early in the season is when discipline actually binds:
+    // with a full budget, a player worth 45% of it is exactly what to spend on.
+    const held = recommendBid({
+      inputs: inputs({ weeklyGain: 12, gainOverReplacement: 12, shelfLife: 'season' }),
+      budgetState: budgetState({ mine: 40 }),
+      prices: summarisePrices(collectBids([], [])),
+      season: { week: 1, finalWeek: 14 },
+      reserveFor: 'RB depth',
+    });
+    expect(held.headline).toContain('Preserve budget for RB depth');
+    expect(held.recommended!).toBeLessThan(held.worth!);
+
+    const unheld = recommendBid({
+      inputs: inputs({ weeklyGain: 0.5 }),
+      budgetState: budgetState({ mine: 100 }),
+      prices: summarisePrices(collectBids([], [])),
+      season: { week: 13, finalWeek: 14 },
+      reserveFor: 'RB depth',
+    });
+    expect(unheld.headline).not.toContain('Preserve budget');
+  });
+
   it('loosens the purse as the season runs out', () => {
     expect(spendableNow(100, { week: 1, finalWeek: 14 })).toBeLessThan(spendableNow(100, { week: 13, finalWeek: 14 }));
     expect(spendableNow(100, { week: 14, finalWeek: 14 })).toBe(100);

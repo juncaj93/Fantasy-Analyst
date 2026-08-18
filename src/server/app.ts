@@ -1806,6 +1806,24 @@ function priceWaiverUpgrades(opts: {
     disagreement: Disagreement;
   })[] = [];
 
+  /*
+   * What the budget still has to buy after this claim.
+   *
+   * The waiver engine has already sorted the upgrades by how badly each slot
+   * needs filling, so every *other* slot on that list is a call on the same
+   * wallet. Naming the biggest one is what turns "recommended max $19" into
+   * "recommended max $19 · preserve budget for RB depth" — the sentence that
+   * explains why the recommendation sits below what he is worth.
+   *
+   * Null when this is the only hole, because there is then nothing to preserve
+   * the money for and saying so would be inventing a rival need.
+   */
+  const otherNeed = (slot: string): string | null => {
+    const next = advice.upgrades.find((u) => u.slot !== slot);
+    if (!next) return null;
+    return `${next.slot} depth`;
+  };
+
   for (const upgrade of advice.upgrades) {
     for (const candidate of upgrade.candidates) {
       const trend = strategy.trending.get(candidate.playerId) ?? null;
@@ -1846,6 +1864,7 @@ function priceWaiverUpgrades(opts: {
         budgetState: strategy.budget,
         prices: strategy.prices,
         season,
+        reserveFor: otherNeed(upgrade.slot),
       });
 
       out.push({
