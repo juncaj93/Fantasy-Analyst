@@ -61,6 +61,14 @@ import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draf
  * which mode is selected — see boardSort.ts for the guarantee that switching
  * modes cannot touch a number on a card.
  */
+/*
+ * The arithmetic behind the queue's long-press drag, kept out of the DOM.
+ *
+ * Whether a press has become a drag, which index the finger is over, and how
+ * far each row should slide — all three can be wrong and none of them needs a
+ * browser to check. See dragReorder.ts.
+ */
+import { LONG_PRESS_MS, moveItem, pressVerdict, rowOffset, targetIndex } from '../../core/draft/dragReorder.ts';
 import {
   DEFAULT_SORT_MODE,
   SORT_DESCRIPTIONS,
@@ -162,6 +170,17 @@ export function DraftScreen({
    */
   const [sort, setSort] = useState<SortMode>(DEFAULT_SORT_MODE);
   /**
+   * The queue's order while a drag is settling, or null when the server's is
+   * current.
+   *
+   * A drag redraws the list immediately and confirms afterwards, because a
+   * reorder that waited for a round trip before moving would feel broken on a
+   * phone mid-draft. The server's answer replaces this the moment it lands —
+   * and it is the server's ordering that survives a refresh, so an optimistic
+   * list that turned out to be wrong is corrected rather than kept.
+   */
+  const [queueOrder, setQueueOrder] = useState<string[] | null>(null);
+  /**
    * Finding one player on a board of hundreds.
    *
    * Presentation only, and deliberately so: the board arrives ranked and the
@@ -242,6 +261,15 @@ export function DraftScreen({
         const next = await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`);
         boardRef.current = next;
         setBoard(next);
+        /*
+         * The server's order is now the current one.
+         *
+         * Cleared on every load, including a quiet poll: a board rebuilt after
+         * a pick landed carries the stored queue order, so keeping a local
+         * override would pin the list to a sequence from before the drag was
+         * confirmed — and would keep a failed drag on screen indefinitely.
+         */
+        setQueueOrder(null);
         /*
          * A player who has just been drafted cannot stay expanded.
          *
@@ -340,6 +368,31 @@ export function DraftScreen({
       }
     },
     [load, position, searching],
+  );
+
+  /**
+   * Persist a drag, and keep the list where the reader dropped it meanwhile.
+   *
+   * The optimistic sequence goes on screen first and the server's answer
+   * replaces it — which is nearly always the same sequence, and is the
+   * authority when it is not. A failure clears the override rather than
+   * retrying: the reader can see the row snap back, which is honest, and one
+   * more drag is cheaper than a queue that silently disagrees with the stored
+   * one.
+   */
+  const commitQueueOrder = useCallback(
+    async (playerId: string, toIndex: number, optimistic: string[]) => {
+      setQueueOrder(optimistic);
+      try {
+        const res = await api.post<{ order: string[] }>('/api/queue/reorder', { playerId, toIndex });
+        setQueueOrder(res.order);
+        setError(null);
+      } catch (err) {
+        setQueueOrder(null);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
   );
 
   /**
@@ -451,6 +504,42 @@ export function DraftScreen({
     }
   }, [draftId, load, refreshing]);
 
+  /*
+   * Inside the queue, the reader's order. Everywhere else, the model's.
+   *
+   * Computed here, above the early returns, because the drag hook below is a
+   * hook and hooks cannot be called conditionally. `board` is null on the first
+   * frame and while a filter change is loading, which is what the empty list
+   * covers — the ordering is a pure function of it either way.
+   *
+   * The server already returns the ★ filter in the stored order, so the local
+   * override only applies while a drag is settling. It has to apply, or the row
+   * would snap back to where it was for the length of a round trip.
+   *
+   * The sort control stays live inside the queue: a reader who wants to see
+   * their shortlist by DOG can, and switching back to Score returns them to
+   * their own order rather than to the composite's.
+   */
+  const isQueue = position === QUEUE_FILTER;
+  const recommendations = board?.recommendations ?? [];
+  const queuedRows = isQueue && queueOrder ? reorderByIds(recommendations, queueOrder) : recommendations;
+  const ordered = isQueue && sort === DEFAULT_SORT_MODE ? queuedRows : sortBoard(queuedRows, sort);
+
+  /*
+   * Drag to reorder, inside the queue and nowhere else.
+   *
+   * Disabled while a search is open, because the visible rows are then a subset
+   * and an index into them is not an index into the queue — dropping a player
+   * "third" in a filtered list would move him to the third place of a list the
+   * reader cannot see.
+   */
+  const canReorder = isQueue && !searching && unlocked;
+  const { drag, onPointerDown } = useQueueDrag({
+    enabled: canReorder,
+    ids: ordered.map((rec) => rec.playerId),
+    onCommit: commitQueueOrder,
+  });
+
   if (!selected) {
     return (
       <Empty>
@@ -500,7 +589,7 @@ export function DraftScreen({
    * query filters last, because it is presentation over whatever order the
    * reader chose.
    */
-  const ordered = sortBoard(board.recommendations, sort);
+
   const visible = withTierDividers(
     ordered,
     isSinglePosition && !searching && sort === 'score',
@@ -759,7 +848,7 @@ export function DraftScreen({
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
         >
-          {visible.map((item) => (
+          {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
               {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
@@ -772,6 +861,29 @@ export function DraftScreen({
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
                 busy={flagging === item.rec.playerId}
+                /*
+                  The drag, and where this row currently sits because of it.
+
+                  `reorderable` gates the handle; `offset` is how far this row
+                  slides to open the gap. Both are absent everywhere but the
+                  queue, so every other view renders exactly the row it did
+                  before this feature existed.
+                */
+                reorderable={canReorder}
+                onReorderStart={(event) => onPointerDown(event, item.rec.playerId, i)}
+                dragging={drag?.playerId === item.rec.playerId}
+                offset={
+                  drag == null
+                    ? 0
+                    : drag.playerId === item.rec.playerId
+                      ? drag.deltaY
+                      : rowOffset({
+                          index: i,
+                          fromIndex: drag.fromIndex,
+                          toIndex: drag.toIndex,
+                          rowHeight: drag.rowHeight,
+                        })
+                }
               />
             </Fragment>
           ))}
@@ -779,6 +891,181 @@ export function DraftScreen({
       )}
     </>
   );
+}
+
+/** What a drag is doing right now, or null when nothing is being dragged. */
+interface DragState {
+  playerId: string;
+  fromIndex: number;
+  toIndex: number;
+  /** How far the finger has travelled, in pixels, signed downward. */
+  deltaY: number;
+  rowHeight: number;
+}
+
+/**
+ * Long-press to pick a player up, drag to move him, release to keep it.
+ *
+ * Available inside the ★ filter and nowhere else, and that restriction is the
+ * whole design rather than a limitation. The queue is an explicit preference —
+ * a list the reader built — so an order imposed on it is theirs to change. Every
+ * other view of this board is ranked by the model, and a drag there would be
+ * asking the reader to rearrange a conclusion, which would then be silently
+ * discarded on the next refresh.
+ *
+ * Three properties that took some care:
+ *
+ *  - **Scrolling still wins.** The press has to be held for half a second
+ *    without moving before it becomes a drag. A finger that moves first is
+ *    scrolling and the timer is abandoned — permanently, so a slow scroll
+ *    cannot turn into a drag halfway down.
+ *  - **The order is applied optimistically and confirmed after.** A drag that
+ *    waited for a round trip before redrawing would feel broken on a phone
+ *    mid-draft; a drag whose result the server rejected would be worse. So the
+ *    list moves immediately and the server's answer replaces it, which is
+ *    almost always the same list.
+ *  - **It never touches a ranking.** The gesture produces an index. What that
+ *    index means is decided by `reorderQueue` in core, which operates on ids
+ *    and ranks and has no access to a Score at all.
+ */
+function useQueueDrag({
+  enabled,
+  ids,
+  onCommit,
+}: {
+  enabled: boolean;
+  ids: string[];
+  onCommit: (playerId: string, toIndex: number, optimistic: string[]) => void;
+}) {
+  const [drag, setDrag] = useState<DragState | null>(null);
+  /*
+   * The live gesture, readable from event handlers that were registered once.
+   *
+   * Registering `pointermove` on every render would mean re-binding on every
+   * frame of a drag, which drops moves; keeping the state in a ref means the
+   * listeners are bound at the start of a gesture and torn down at the end.
+   */
+  const gesture = useRef<{
+    playerId: string;
+    fromIndex: number;
+    startY: number;
+    rowHeight: number;
+    startedAt: number;
+    timer: number | null;
+    active: boolean;
+    abandoned: boolean;
+  } | null>(null);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+
+  const end = useCallback(
+    (commit: boolean) => {
+      const current = gesture.current;
+      gesture.current = null;
+      if (current?.timer != null) window.clearTimeout(current.timer);
+      setDrag((state) => {
+        if (commit && state && current?.active && state.toIndex !== state.fromIndex) {
+          onCommit(state.playerId, state.toIndex, moveItem(idsRef.current, state.fromIndex, state.toIndex));
+        }
+        return null;
+      });
+    },
+    [onCommit],
+  );
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent, playerId: string, index: number) => {
+      if (!enabled) return;
+      // A secondary button, a pinch, or anything that is not a single primary
+      // pointer is not a reorder.
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      const row = (event.currentTarget as HTMLElement).closest('[data-testid="recommendation-row"]');
+      const rowHeight = row instanceof HTMLElement ? row.getBoundingClientRect().height : 0;
+      if (rowHeight <= 0) return;
+
+      const timer = window.setTimeout(() => {
+        const current = gesture.current;
+        if (!current || current.abandoned) return;
+        current.active = true;
+        setDrag({ playerId, fromIndex: index, toIndex: index, deltaY: 0, rowHeight });
+        // A short tick when the row is picked up, where the platform offers one.
+        navigator.vibrate?.(10);
+      }, LONG_PRESS_MS);
+
+      gesture.current = {
+        playerId,
+        fromIndex: index,
+        startY: event.clientY,
+        rowHeight,
+        startedAt: Date.now(),
+        timer,
+        active: false,
+        abandoned: false,
+      };
+    },
+    [enabled],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onMove = (event: PointerEvent) => {
+      const current = gesture.current;
+      if (!current) return;
+      const deltaY = event.clientY - current.startY;
+
+      if (!current.active) {
+        // Still deciding. Movement before the hold elapses means a scroll, and
+        // that verdict is final.
+        const verdict = pressVerdict({
+          heldMs: Date.now() - current.startedAt,
+          movedPx: Math.abs(deltaY),
+        });
+        if (verdict === 'scroll') {
+          current.abandoned = true;
+          if (current.timer != null) window.clearTimeout(current.timer);
+          gesture.current = null;
+        }
+        return;
+      }
+
+      /*
+       * The drag owns the movement now, so the page must not also scroll with
+       * it. `touch-action: none` on the row is what actually makes this
+       * cancellable — without it the browser has already committed the gesture
+       * to scrolling and this call does nothing but log a warning.
+       */
+      if (event.cancelable) event.preventDefault();
+      setDrag((state) =>
+        state == null
+          ? state
+          : {
+              ...state,
+              deltaY,
+              toIndex: targetIndex({
+                fromIndex: state.fromIndex,
+                deltaY,
+                rowHeight: state.rowHeight,
+                count: idsRef.current.length,
+              }),
+            },
+      );
+    };
+
+    const onUp = () => end(true);
+    const onCancel = () => end(false);
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [enabled, end]);
+
+  return { drag, onPointerDown };
 }
 
 /**
@@ -893,6 +1180,22 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   );
 }
 
+/**
+ * Rows in the sequence an id list names, with anything unnamed kept at the end.
+ *
+ * Used for one thing: holding the queue where the reader dropped a player while
+ * the server confirms it. Rows the sequence does not mention keep their
+ * incoming order rather than being dropped — a player queued from another
+ * screen mid-drag is a real possibility, and losing his row would be a much
+ * worse outcome than showing him last for one refresh.
+ */
+function reorderByIds<T extends { playerId: string }>(rows: T[], ids: string[]): T[] {
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return [...rows].sort(
+    (a, b) => (rank.get(a.playerId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.playerId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** A row to draw, and whether a tier boundary falls immediately above it. */
 interface BoardItem {
   rec: DraftRecommendation;
@@ -952,6 +1255,10 @@ function RecommendationRow({
   onToggle,
   onQueue,
   busy,
+  reorderable = false,
+  onReorderStart,
+  dragging = false,
+  offset = 0,
 }: {
   rank: number;
   rec: DraftRecommendation;
@@ -963,6 +1270,12 @@ function RecommendationRow({
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
+  /** True only inside the ★ filter, where the order is the reader's own. */
+  reorderable?: boolean;
+  onReorderStart?: (event: React.PointerEvent) => void;
+  dragging?: boolean;
+  /** How far this row is drawn from where it normally sits, mid-drag. */
+  offset?: number;
 }) {
   const pos = (rec.position ?? '').toUpperCase();
   return (
@@ -971,11 +1284,55 @@ function RecommendationRow({
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
       data-position={pos}
+      data-dragging={dragging ? 'yes' : undefined}
+      /*
+       * Mid-drag the rows are drawn where the gesture puts them.
+       *
+       * A transform rather than a reflow, so moving a row costs the compositor
+       * a paint and costs the layout engine nothing — which is what keeps a
+       * drag at sixty frames on a list of two hundred. The transition is
+       * suppressed on the row under the finger, because that one must track the
+       * finger exactly rather than easing toward it.
+       */
+      style={
+        offset === 0
+          ? undefined
+          : {
+              transform: `translateY(${offset}px)`,
+              transition: dragging ? 'none' : 'transform 160ms ease',
+              zIndex: dragging ? 2 : undefined,
+              position: 'relative',
+            }
+      }
       role="listitem"
     >
       <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
         <div className="player-row-top">
-          <span className="rank">{rank}</span>
+          {/*
+            The grip, inside the queue only.
+
+            It replaces the rank number rather than sitting beside it: on the
+            queue the position in the list *is* the rank, so a separate numeral
+            was saying the same thing twice — and a phone row has no spare
+            column. `touch-action: none` is what actually lets the drag cancel
+            the scroll; without it the browser has already committed the gesture
+            by the time the first move arrives.
+          */}
+          {reorderable ? (
+            <span
+              className="drag-handle"
+              data-testid="queue-drag-handle"
+              aria-hidden="true"
+              style={{ touchAction: 'none' }}
+              onPointerDown={onReorderStart}
+              /* The row underneath is a toggle; picking it up is not opening it. */
+              onClick={(event) => event.stopPropagation()}
+            >
+              ⠿
+            </span>
+          ) : (
+            <span className="rank">{rank}</span>
+          )}
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
           {/*

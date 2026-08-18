@@ -867,7 +867,22 @@ export class DraftBoardService {
       .statesFor(ranked.map((rec) => ({ playerId: rec.playerId, status: byId.get(rec.playerId)?.status ?? null })))
       .catch(() => new Map<string, InjuryState>());
 
-    const recommendations = ranked.map((rec) => ({
+    /*
+     * Inside the queue filter, the reader's order wins.
+     *
+     * This is the one list in the app the model does not get to sort. The
+     * ranking is still computed, still on every card, and still what the ★
+     * chip's rows say about each player — what changes is the sequence, which
+     * is the reader's and is stored. Everywhere else on this board the order is
+     * the composite's, untouched.
+     *
+     * Applied after ranking rather than instead of it, so a queued player's
+     * Score, Val, Next and tier are identical whether he is read on the queue
+     * or on the full board. See `queueOrder.ts`.
+     */
+    const orderedRanked = queuedOnly ? applyQueueOrder(ranked, allFlags) : ranked;
+
+    const recommendations = orderedRanked.map((rec) => ({
       ...rec,
       queued: allFlags.get(rec.playerId)?.queued === true,
       status: designationOf(byId.get(rec.playerId)?.status ?? null),
@@ -1018,6 +1033,34 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/**
+ * The queue's rows, in the order the reader put them in.
+ *
+ * A player with no stored rank sorts after every player who has one, in board
+ * order — which is where somebody the reader has never placed belongs, and
+ * which keeps a queue built entirely on an older client behaving exactly as it
+ * did before this existed.
+ *
+ * Deliberately a pure reordering of the array it is handed: no recommendation
+ * is copied or modified, so a queued player's numbers cannot differ from the
+ * same player's numbers on the unfiltered board.
+ */
+function applyQueueOrder<T extends { playerId: string }>(
+  ranked: T[],
+  flags: Map<string, { queueOrder: number | null }>,
+): T[] {
+  const rankOf = (id: string) => flags.get(id)?.queueOrder ?? null;
+  const boardPosition = new Map(ranked.map((rec, i) => [rec.playerId, i]));
+  return [...ranked].sort((a, b) => {
+    const ao = rankOf(a.playerId);
+    const bo = rankOf(b.playerId);
+    if (ao == null && bo == null) return boardPosition.get(a.playerId)! - boardPosition.get(b.playerId)!;
+    if (ao == null) return 1;
+    if (bo == null) return -1;
+    return ao - bo || boardPosition.get(a.playerId)! - boardPosition.get(b.playerId)!;
+  });
 }
 
 /**

@@ -3971,3 +3971,47 @@ table.compact tr:last-child td {
   color: var(--text-faint);
   text-align: center;
 }
+
+/*
+ * The queue's drag handle.
+ *
+ * It stands where the rank numeral does on every other view, because on the
+ * queue the position in the list *is* the rank and a numeral beside a handle
+ * was saying it twice. Quiet — it is an affordance, not a control the reader
+ * is meant to look at — and a full-height target, because a six-pixel grip on
+ * a phone is a grip nobody can grab.
+ *
+ * `touch-action: none` is the load-bearing line. Without it Safari has already
+ * decided the gesture is a scroll by the time the first pointermove arrives,
+ * and `preventDefault` there does nothing at all.
+ */
+.drag-handle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  align-self: stretch;
+  padding: 0 2px;
+  color: var(--text-faint);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * The row under the finger: lifted, and slightly out of the page.
+ *
+ * A shadow and a hair of scale, which is what every native list does and what
+ * makes "this row is in my hand" legible without a colour change that would
+ * fight the position tints the cards already carry.
+ */
+.player-row[data-dragging='yes'],
+[data-testid='recommendation-row'][data-dragging='yes'] {
+  box-shadow: var(--shadow-2, 0 6px 18px rgba(0, 0, 0, 0.18));
+  transform-origin: center;
+  cursor: grabbing;
+}

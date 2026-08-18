@@ -12,6 +12,7 @@
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
+import { queueSequence, reconcileQueue, reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
@@ -935,8 +936,58 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playerId: player.id,
       name: player.fullName,
       queued: stored.queued,
+      queueOrder: stored.queueOrder,
       myGuy: myGuy(stored.level),
     });
+  });
+
+  /**
+   * Move a queued player to a new position in the user's own order.
+   *
+   * The reorder itself is `reorderQueue` in core — pure, tested, and the only
+   * thing that decides what a drag means. This route's whole job is to read the
+   * stored ladder, hand it to that function, and persist the one or two rows it
+   * says moved. It deliberately does not accept a whole ordering from the
+   * client: a client that could post a sequence could post a stale one, and a
+   * queue silently reverting to what it looked like two picks ago is exactly
+   * the corruption this feature must not have.
+   *
+   * The queue is a bookmark. Nothing here touches a Draft Score, and nothing
+   * here can: the module it delegates to operates on ids and ranks and has no
+   * access to a player's ranking at all.
+   */
+  router.post('/api/queue/reorder', async (ctx) => {
+    const body = await ctx.json<{ playerId?: string; toIndex?: number }>();
+    if (!body?.playerId) return errorResponse('playerId required', 400);
+    if (typeof body.toIndex !== 'number' || !Number.isFinite(body.toIndex)) {
+      return errorResponse('toIndex must be a number', 400);
+    }
+
+    const flags = new PlayerFlagsRepo(ctx.env.db);
+    /*
+     * Reconciled before the move, because the stored ladder and the live queue
+     * drift apart in ordinary use: a player queued from the Players screen on
+     * an older client has no rank, and a player drafted since the last drag
+     * still has one. Reconciling first means the indices the client sent are
+     * indices into the list it was actually looking at.
+     */
+    const queuedNow = [...(await flags.all()).entries()]
+      .filter(([, flag]) => flag.queued)
+      .map(([playerId]) => playerId);
+    const reconciled = reconcileQueue(await flags.queueEntries(), queuedNow);
+    const result = reorderQueue(reconciled, body.playerId, body.toIndex);
+    await flags.setQueueOrder(result.writes);
+
+    return jsonResponse({ order: result.sequence, compacted: result.compacted });
+  });
+
+  /** The queue, in the user's own order. */
+  router.get('/api/queue', async (ctx) => {
+    const flags = new PlayerFlagsRepo(ctx.env.db);
+    const queuedNow = [...(await flags.all()).entries()]
+      .filter(([, flag]) => flag.queued)
+      .map(([playerId]) => playerId);
+    return jsonResponse({ order: queueSequence(reconcileQueue(await flags.queueEntries(), queuedNow)) });
   });
 
   // -------------------------------------------------------------- newsletter
