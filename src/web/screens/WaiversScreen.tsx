@@ -126,8 +126,9 @@ export function WaiversScreen({ leagues }: { leagues: LeagueSummary[] }) {
           */}
           {board && board.pending.length > 0 ? (
             <div className="faint" data-testid="waivers-pending" style={{ margin: '4px 4px 8px' }}>
-              {board.considered} available players checked. Expected cost, likely competition and multi-week value
-              arrive with league intelligence — they are shown as unknown rather than estimated.
+              {board.considered} available players checked. {joinFields(board.pending)}{' '}
+              {board.pending.length === 1 ? 'arrives' : 'arrive'} with league intelligence — shown as unknown rather
+              than estimated.
             </div>
           ) : (
             <div className="faint" style={{ margin: '4px 4px 8px' }}>
@@ -150,4 +151,20 @@ export function WaiversScreen({ leagues }: { leagues: LeagueSummary[] }) {
       {open ? <WaiverDetailSheet row={open} onClose={() => setOpen(null)} /> : null}
     </PullToRefresh>
   );
+}
+
+/**
+ * The columns still waiting, in a sentence.
+ *
+ * Read from the board rather than hardcoded, because they arrive separately:
+ * competition and multi-week value land with the league-intelligence pass and
+ * expected cost needs bid history behind it as well. A fixed list of three goes
+ * on claiming a field is missing after it has arrived, which is the one thing
+ * this line must never do — it is the page's own statement about what it knows.
+ */
+function joinFields(pending: string[]): string {
+  const labels = pending.map((p) => (p === 'expected cost' ? 'Expected cost' : p));
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }

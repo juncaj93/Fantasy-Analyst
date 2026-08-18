@@ -232,7 +232,7 @@ function OddsSheet({
         under the row it explains, in the register the app uses for reasons.
       */}
       <div className="faint" style={{ margin: '4px 2px 0' }} data-testid="mode-why">
-        {forecast.suggestedMode.why}
+        {forecast.suggestedMode.detail}
       </div>
       {forecast.freshness.detail ? (
         <DetailRow label="Confidence">

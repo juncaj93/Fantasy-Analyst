@@ -230,25 +230,6 @@ function reasonFor(opts: {
   return `${cost} fewer projected points, but more of the afternoons end with you in front.`;
 }
 
-/**
- * Which question the lineup should be asked, given where the matchup stands.
- *
- * The same three modes the Team screen already offers, chosen from the win
- * probability rather than from a preference: a strong favourite wants his floor,
- * a meaningful underdog wants a ceiling, and the middle wants neither
- * especially. This is a *suggestion* and the user's own choice always wins —
- * see the Team screen, which owns the control.
- */
-export function suggestedMode(winProbability: number): { mode: 'floor' | 'balanced' | 'ceiling'; why: string } {
-  if (winProbability >= 0.66) {
-    return { mode: 'floor', why: 'You are a clear favourite — the safest lineup is the one that wins this.' };
-  }
-  if (winProbability <= 0.36) {
-    return { mode: 'ceiling', why: 'You are a meaningful underdog — you need the top of somebody’s range.' };
-  }
-  return { mode: 'balanced', why: 'This is close enough that neither safety nor upside is obviously right.' };
-}
-
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }

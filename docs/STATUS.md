@@ -945,9 +945,167 @@ that had been missing it. New specs cover the pull gesture, the weekly card, the
 waiver rows, the seasonal toolbar swap and the mark alignment. Typecheck, build
 and the Cloudflare dry-run green at every width.
 
+## Milestone 17 — the intelligence layer beneath the engines (done)
 
+Eleven new `core/` modules, one versioned contract, and 120 tests. No screen
+changed, and that was the instruction rather than a shortcut: the brief asks for
+reusable outputs, and the parallel Team/Waivers UI work stays mergeable because
+nothing here touches it. Full detail in
+[docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](PLAYER_AND_LINEUP_INTELLIGENCE.md).
 
-## Milestone 17 — the Matchup screen (done)
+**Opportunity, separated from efficiency.** `core/xfp/` converts targets, target
+depth, carries and attempts into expected points under the league's own scoring,
+reconstructs what actually happened from the same rows, and reports the gap. Four
+readings come out of it — touchdown regression risk, production outrunning
+opportunity, a healthy role behind a bad box score, and a thin role behind one —
+and the first two are the difference between a sell and a hold on the same hot
+month. It scores **nothing**: opportunity is already in the lineup score once as
+`usage_level` and the market's number is in it again as `vegas`, so a third count
+off the same carries was the failure mode the whole module was arranged to avoid.
+A test asserts the engine's score is unchanged by everything in the file.
+
+**Who gets the football.** The beneficiary graph reads the games a team has
+already played without a starter rather than a depth chart nobody publishes: with
+him against without him, per teammate, per game. A week with no row for him and
+rows for two teammates is a game he missed; a week with no rows for anybody is
+the bye — derived from the data, because that distinction is the whole
+reliability of the sample. With no absence to read it falls back to depth
+inference, labelled as inference at low confidence, and with neither it says
+`unknown` and names nobody.
+
+**What would change the answer.** For calls inside 2.5 points, the conditions are
+found by re-running the real evaluation with one input moved and bisecting for
+the flip — the market line a challenger would have to reach, the practice report
+that would demote the leader, the wind speed that would end it. Computed against
+the engine rather than against a copy of its arithmetic, so a boundary cannot
+drift away from the recommendation it annotates. Unreachable conditions are
+dropped rather than printed.
+
+**Floor, Balanced or Ceiling, chosen before it is asked.** A substantial
+favourite gets Floor and a substantial underdog gets Ceiling, and the
+circularity that idea invites is closed structurally: `suggestMode` accepts
+market points per player and nothing else, so a mode-weighted score has no field
+to travel in on. Thin coverage or an unknown opponent lands on Balanced with
+`auto: false`, which is how a screen tells a choice from a default.
+
+**Plan B is not Plan C.** Contingency lineups are real `recommendLineup` calls
+with the clock moved to just before the questionable player's kickoff, so slot
+legality, FLEX rules, the Out gate and locked starters all come from the
+optimiser rather than from a second copy of its rules. The bench receiver who
+covers the hole at ten in the morning is unavailable at four, and that is the
+only thing the module exists to say.
+
+**The app grades itself, and is not allowed to act on it.** Every recommendation
+is recorded before kickoff with the model version that produced it and each
+source's own `observedAt`; `lookaheadViolations()` returns every place a record
+contains information from after the decision. Grading is two verdicts kept
+apart: who scored more, and whether the call was defensible on pregame
+information — judged by opportunity, so an alternative who won on a fluky
+seventy-yard score grades as `sound_but_unlucky` and one who won on the better
+opportunity grades as a real miss. The weekly report separates observed
+evidence, counterfactual reasoning, suggested bounded changes and actual model
+changes; the last is always empty, suggestions are capped at 15% and only ever
+reductions, and nothing is proposed at all below twenty graded decisions.
+
+**Consumed through one door.** `core/contracts/channel3.ts` carries a contract
+version and the model version, states absence as `null` rather than zero, keeps
+confidence and freshness inside the payload, and ships a validator that catches a
+`NaN` anywhere in the tree, an unknown confidence level, a source marked missing
+that carries an observation time, and a self-grade claiming it applied something.
+Two payloads are built end to end in the tests — one fully connected, one with
+nothing connected — and both validate.
+
+Checks at this milestone: 1,783 unit/integration tests, typecheck, build and
+`wrangler deploy --dry-run` green.
+
+**Integrated rather than parallel.** Three modules had landed on `main` with
+named holes in them, and this pass fills them without drawing anything: the
+weekly card's `advanced` line and its `whatWouldChange` list, and the waiver
+board's multi-week column — the one this document recorded as having no supplier.
+Every projection targets a type imported from the module that owns it, so a
+rename over there fails the build here rather than quietly going unfilled, and
+the tests feed each adapter into the real consumer rather than into a copy of
+its interface.
+
+The sensitivity pass is affordable on a hot endpoint for one reason: a boundary
+only exists for a close call, and closeness is a subtraction over scores that
+have already been computed. That gate runs first, so a roster of comfortable
+calls never reaches the bisection at all.
+
+One word needed settling. `roster/bench.ts` labels role growth `Optionality`
+and this branch used the same word for how many lineup paths a bench player
+covers. Both are real and they are different quantities, so the assessment now
+carries `kind: 'lineup_coverage'`.
+
+**Not built, deliberately:** no screen, no persistence for the grading ledger,
+no red-zone data — so the expected-points model is opportunity-shaped and says
+so on every number it produces — and no future schedule, so the role-specific
+outlook has no source in the running app and the multi-week value falls back to
+role trend and the expected-points gap.
+
+## Milestone 18 — the last waiver column without a supplier (done)
+
+`core/waivers/board.ts` declares three league-intelligence fields and documents
+how to read an empty one: *present-and-null is a pass that ran and found
+nothing, absent is a deployment without the pass.* Two now have suppliers — the
+price from `core/faab`, multi-week value from the milestone above. This is the
+third.
+
+**Competition, per position rather than per league.** `core/faab/strategy.ts`
+asks for `rivalsWithNeed` — "rosters that plausibly want him and can pay" — and
+the caller supplied every funded rival in the league, with a comment saying a
+finer count would need each rival's lineup scored against each candidate, twelve
+optimisations for a 0–1 input.
+
+That is right about scoring and wrong about need. Whether a roster needs a back
+is a count of the healthy backs it holds against the back slots it has to fill —
+one pass over rosters already in memory, no optimisation, no extra query. It is
+now per position and filtered by what each rival can still spend, so a card says
+*four teams need one, three of them cannot afford the going rate* instead of
+*eleven funded rivals*. Needs are counted honestly and only the bidder list is
+filtered by money; a rival whose budget is unknown stays in it, because "cannot
+be ruled out" is not "cannot afford it".
+
+Availability is read through `normalizeDesignation` and `isRuledOut` rather than
+against a private list of status strings, so "ruled out" means one thing.
+
+**Three questions nothing else answers.** Bilateral trade fits, which choose the
+deal `core/trades/ladder.ts` then prices — what you gain, what the partner
+gains and plausibility scored separately, both sides gaining or it is not
+listed, and plausibility read from the canonical `ManagerTradeProfile` so it
+cannot disagree with the ladder. Bye and playoff planning, silent until a bye
+leaves a slot short and giving playoff weeks zero weight until the season is a
+third old and the record puts the team in the race. And a decision feed needing
+both a magnitude and an actual decision change, filtering before it
+deduplicates — merging first would let three immaterial reports of one nothing
+combine into an item that looks corroborated.
+
+**Two timing calls stopped waiting.** `Buy before usage converts to points` and
+`Buy after temporary box-score dip` need expected points, which did not exist
+when they were written. `assessXfp` now supplies both sides off usage weeks the
+route already loads. A player with no weeks yields `NO_XFP`, whose per-game
+figures are null, and the rules require both sides before they say anything — so
+an unmeasured player still produces no call rather than one built on a default.
+
+**What this milestone deleted, twice.** It was written against a `main` that had
+neither the FAAB layer nor this intelligence layer, and built its own of each.
+Gone in favour of the canonical modules: the transaction normaliser and repo,
+the expected-cost model, the manager profiler, the waiver view-model, the
+injury-beneficiary detector, the multi-week classifier, a duplicate
+`getTransactions`, `SleeperTransaction` and `years_exp` column, three migrations
+and five API routes. What survives is the one field nothing else fills and the
+three surfaces nothing else has.
+
+**Still missing, and each says so.** No bye-week source — neither this work nor
+the intelligence layer has one, Sleeper's dictionary carries no bye and the app
+stores no schedule, so `/plan` returns no gaps and names the gap. Three of the
+five timing calls still rest on signals that exist; the schedule-turn one does
+not, for the same missing input.
+
+Checks at this milestone: 2,018 unit/integration tests plus the browser suite at
+four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green.
+
+## Milestone 19 — the Matchup screen (done)
 
 The post-draft head-to-head, and deliberately not a prettier Sleeper.
 
@@ -1030,10 +1188,18 @@ draft completes, which is before Draft leaves, so the bar carries seven between
 those two moments. Verified at 360px: no label wraps and no destination is
 narrower than 44px.
 
-Checks at this milestone: 211 new unit tests across the model, the hero engine,
+**Nothing this screen asks is answered twice.** Floor / Balanced / Ceiling is
+`core/startsit/modeSuggest.ts`'s answer, carried through the forecast rather
+than re-read off the simulated win probability — the matchup model never sees
+the question, which is what keeps that module's circularity guard structural.
+The player sheet is the Team screen's weekly card, carrying the same
+expected-points line, from the same `assessXfp`. Every projection is the
+start/sit engine's.
+
+Checks at this milestone: 113 new unit tests across the model, the hero engine,
 the lineup decision, the names, the service and the calibration ledger, plus a
 mutation file that breaks each of the eight failure modes the brief names and
-proves the assertion catches it. 19 new browser tests across four widths, half
+proves the assertion catches it. 18 new browser tests across four widths, half
 against the real endpoint on the seeded server and half against whole-response
 fixtures for the states of a Sunday afternoon that a deterministic seed cannot
 reach.

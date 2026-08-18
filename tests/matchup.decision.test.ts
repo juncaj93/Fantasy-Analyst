@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assessLineupDecision, suggestedMode, MIN_WIN_PROBABILITY_GAIN } from '../src/core/matchup/decision.ts';
+import { assessLineupDecision, MIN_WIN_PROBABILITY_GAIN } from '../src/core/matchup/decision.ts';
 import { buildDistribution, resolveGameClock } from '../src/core/matchup/distribution.ts';
 import { simulateMatchup } from '../src/core/matchup/simulate.ts';
 import { lineups, player, slots } from './helpers/matchup.ts';
@@ -227,19 +227,5 @@ describe('legality', () => {
     // A one-in-three chance he does not play makes the same swap worth less,
     // and frequently not worth offering at all.
     if (withRisk) expect(withRisk.gain).toBeLessThan(withHealthy!.gain);
-  });
-});
-
-describe('the suggested mode follows the matchup', () => {
-  it('asks a clear favourite for his floor', () => {
-    expect(suggestedMode(0.78).mode).toBe('floor');
-  });
-
-  it('asks a meaningful underdog for a ceiling', () => {
-    expect(suggestedMode(0.22).mode).toBe('ceiling');
-  });
-
-  it('asks a close matchup for neither', () => {
-    expect(suggestedMode(0.51).mode).toBe('balanced');
   });
 });

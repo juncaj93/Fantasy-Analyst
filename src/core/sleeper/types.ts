@@ -91,6 +91,8 @@ export interface SleeperPlayer {
    */
   search_rank?: number | null;
   years_exp?: number | null;
+  /** Jersey number. Sleeper sends it as a number, a string, or not at all. */
+  number?: number | string | null;
   /** Either `"71"` or `"5'11\""` — both shapes appear in the live dictionary. */
   height?: string | number | null;
   weight?: string | number | null;
@@ -213,6 +215,19 @@ export interface LeagueRecord {
    * and absent is read as "not known" rather than as "not in season".
    */
   status?: string | null;
+  /**
+   * NFL teams this league's room is known to draft earlier than the market,
+   * upper-case (`['DET']`).
+   *
+   * A property of the *managers*, not of the players: a Detroit-area league
+   * takes Lions early. It reaches one model — opponent demand, which is what
+   * `Next%` is computed from — and cannot reach a Score, a tier or a `Val`. See
+   * `core/draft/nextpick/teamPrior.ts`.
+   *
+   * Optional and empty by default, because Sleeper does not publish it and
+   * every league that has not been told behaves exactly as it always did.
+   */
+  localTeams?: string[];
   lastSyncedAt: string;
 }
 

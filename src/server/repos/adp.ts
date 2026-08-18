@@ -4,7 +4,21 @@
  */
 
 import type { AdpImportResult } from '../../core/adp/import.ts';
+import type { DogProvider, DogSourceType } from '../../core/adp/underdog.ts';
 import { nowIso, toJson, chunk, type Database } from '../db.ts';
+
+/** The `source` every Sleeper-market snapshot is filed under. */
+export const SLEEPER_SOURCE = 'sleeper';
+
+/**
+ * The `source` every raw Underdog snapshot is filed under.
+ *
+ * One constant, used by the importer, the board and the tests alike, because
+ * the single worst outcome available here is a Sleeper snapshot filed as DOG
+ * or the reverse — and a string literal repeated in four files is exactly how
+ * that happens.
+ */
+export const UNDERDOG_SOURCE = 'underdog';
 
 export interface AdpSnapshotMeta {
   id: number;
@@ -16,6 +30,31 @@ export interface AdpSnapshotMeta {
   rowCount: number;
   matchedCount: number;
   unmatchedCount: number;
+  /** Which provider served it. Null for snapshots imported by hand. */
+  provider: DogProvider | string | null;
+  /**
+   * What kind of number this is. Only `raw_adp` may be shown as DOG.
+   *
+   * Stored rather than assumed, so that a payload which turned out to be a
+   * ranking is recorded as one instead of being silently discarded — the row
+   * is the evidence that the rejection happened.
+   */
+  sourceType: DogSourceType | string;
+  /** When the source says the numbers are effective, if it says. */
+  snapshotAt: string | null;
+  /** When this app fetched them, which is a different question. */
+  fetchedAt: string | null;
+  /** Why this snapshot is less trustworthy than usual. Null is good. */
+  degradedReason: string | null;
+}
+
+/** Everything about a snapshot's origin that the importer can be told. */
+export interface AdpProvenance {
+  provider?: string | null;
+  sourceType?: string | null;
+  snapshotAt?: string | null;
+  fetchedAt?: string | null;
+  degradedReason?: string | null;
 }
 
 export interface AdpValue {
@@ -49,6 +88,14 @@ export class AdpRepo {
     return row ? toMeta(row) : null;
   }
 
+  /**
+   * The newest snapshot of any source.
+   *
+   * Kept as-is for every existing caller, but note what it means now that two
+   * markets exist: "newest of anything", which is the Sleeper board only
+   * because Sleeper is the only source most databases hold. Anything that
+   * needs a specific market must say so — see `latestForSource`.
+   */
   async latest(): Promise<AdpSnapshotMeta | null> {
     const row = await this.db
       .prepare('SELECT * FROM adp_snapshots ORDER BY captured_at DESC, id DESC LIMIT 1')
@@ -56,15 +103,69 @@ export class AdpRepo {
     return row ? toMeta(row) : null;
   }
 
-  /** Persist an import result. Idempotent on (source, file hash). */
-  async save(result: AdpImportResult): Promise<{ snapshot: AdpSnapshotMeta; created: boolean }> {
+  /**
+   * The newest snapshot of one named market.
+   *
+   * Exact on the source string. Used for Underdog, which this app writes under
+   * one constant and nothing else ever writes at all.
+   */
+  async latestForSource(source: string): Promise<AdpSnapshotMeta | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM adp_snapshots WHERE source = ? ORDER BY captured_at DESC, id DESC LIMIT 1')
+      .bind(source)
+      .first<Record<string, unknown>>();
+    return row ? toMeta(row) : null;
+  }
+
+  /**
+   * The newest snapshot of the platform market — everything that is not
+   * Underdog.
+   *
+   * Defined by exclusion, and that is not laziness. The Sleeper-market
+   * snapshots in a real database carry at least four different source strings:
+   * `beatadp:sleeper` from the refresh workflow, `demo` from the seed, whatever
+   * a hand-import was labelled, and any earlier spelling. Matching them by name
+   * would mean maintaining a list, and the day that list falls behind is the
+   * day this returns nothing and the caller falls back to "newest of anything"
+   * — which, once an Underdog snapshot exists, is the Underdog snapshot.
+   *
+   * That failure is the exact substitution the whole two-market design forbids:
+   * Underdog's numbers, shown in the `ADP` column, driving `Val`, the tier
+   * ladders and the survival model, with nothing on screen saying so. So the
+   * rule is inverted. Underdog is the one source this app writes under a
+   * constant it owns; everything else is the platform market by definition, and
+   * a new spelling of it cannot silently disappear.
+   */
+  async latestPlatformSnapshot(): Promise<AdpSnapshotMeta | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM adp_snapshots WHERE source != ? ORDER BY captured_at DESC, id DESC LIMIT 1')
+      .bind(UNDERDOG_SOURCE)
+      .first<Record<string, unknown>>();
+    return row ? toMeta(row) : null;
+  }
+
+  /**
+   * Persist an import result. Idempotent on (source, file hash).
+   *
+   * Idempotency is what makes re-ingesting DOG safe: the nightly workflow can
+   * run twice, or be re-run by hand, and the second run returns the snapshot
+   * the first one wrote rather than a duplicate with the same numbers in it.
+   * The file hash is the identity, so an unchanged Underdog board is the same
+   * snapshot however many times it is fetched.
+   */
+  async save(
+    result: AdpImportResult,
+    provenance: AdpProvenance = {},
+  ): Promise<{ snapshot: AdpSnapshotMeta; created: boolean }> {
     const existing = await this.findByHash(result.source, result.fileHash);
     if (existing) return { snapshot: existing, created: false };
 
     await this.db
       .prepare(
-        `INSERT INTO adp_snapshots (source, label, captured_at, imported_at, raw_file_hash, row_count, matched_count, unmatched_count)
-         VALUES (?,?,?,?,?,?,?,?)`,
+        `INSERT INTO adp_snapshots (
+           source, label, captured_at, imported_at, raw_file_hash, row_count, matched_count, unmatched_count,
+           provider, source_type, snapshot_at, fetched_at, degraded_reason
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .bind(
         result.source,
@@ -75,6 +176,11 @@ export class AdpRepo {
         result.rows.length,
         result.matchedCount,
         result.ambiguousCount + result.unmatchedCount,
+        provenance.provider ?? null,
+        provenance.sourceType ?? 'raw_adp',
+        provenance.snapshotAt ?? null,
+        provenance.fetchedAt ?? null,
+        provenance.degradedReason ?? null,
       )
       .run();
 
@@ -232,5 +338,10 @@ function toMeta(row: Record<string, unknown>): AdpSnapshotMeta {
     rowCount: Number(row['row_count'] ?? 0),
     matchedCount: Number(row['matched_count'] ?? 0),
     unmatchedCount: Number(row['unmatched_count'] ?? 0),
+    provider: (row['provider'] as string | null) ?? null,
+    sourceType: String(row['source_type'] ?? 'raw_adp'),
+    snapshotAt: (row['snapshot_at'] as string | null) ?? null,
+    fetchedAt: (row['fetched_at'] as string | null) ?? null,
+    degradedReason: (row['degraded_reason'] as string | null) ?? null,
   };
 }

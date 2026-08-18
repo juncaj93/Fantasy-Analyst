@@ -23,6 +23,7 @@ import { MATCHUP_MODEL_VERSION } from '../src/core/matchup/types.ts';
 import { buildSlotSpecs, resolveWeek, isWeekSettled, activeProjection } from '../src/server/services/matchupService.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { createTestDb } from './helpers/db.ts';
+import { UsageRepo } from '../src/server/repos/usage.ts';
 
 /** The demo league starts QB, RB, RB, WR, WR, TE, FLEX. */
 const MINE = ['1003', '1001', '1008', '1002', '1005', '1004', '1012'];
@@ -189,6 +190,70 @@ describe('GET /api/leagues/:id/matchup', () => {
     ).json();
     expect(after.cached).toBe(false);
     expect(after.forecast.fingerprint).not.toBe(before.forecast.fingerprint);
+  });
+
+  /**
+   * The same player reads the same on both screens.
+   *
+   * The Team screen's cards gain the expected-points line through
+   * `weeklyIntelligence`; these are built on a different path, and the only
+   * thing stopping the two from drifting is that both ask `assessXfp`.
+   */
+  it('carries the expected-points line the Team screen’s cards carry', async () => {
+    // Seeded here for the same reason the lineup test seeds it: usage arrives
+    // from nflverse in production and the demo league predates it.
+    const season = String(new Date().getUTCFullYear());
+    await new UsageRepo(db).saveWeeks(
+      Array.from({ length: 7 }, (_, i) => ({
+        playerId: '1001',
+        season,
+        week: i + 1,
+        seasonType: 'REG',
+        team: 'KC',
+        position: 'RB',
+        passAttempts: null,
+        carries: 17,
+        targets: 4,
+        receptions: 3,
+        targetShare: 0.1,
+        wopr: 0.3,
+        rushYards: 74,
+        rushTds: 0.5,
+        recYards: 22,
+        recTds: 0,
+        gsisId: 'gsis-1001',
+        source: 'test',
+        publishedAt: '2025-10-01T00:00:00.000Z',
+        fetchedAt: '2025-10-01T00:00:00.000Z',
+      })),
+    );
+
+    const body = await (await app(get('/api/leagues/demo-league/matchup'), env(db, rows()))).json();
+    const cards = body.cards as Record<string, { lines: { key: string; value: string }[]; pending: string[] }>;
+    const line = cards['1001']!.lines.find((l) => l.key === 'xfp');
+    expect(line?.value).toMatch(/pts\/gm$/);
+    // A player with no stored usage says so rather than printing a zero.
+    expect(cards['1002']!.lines.some((l) => l.key === 'xfp')).toBe(false);
+    expect(cards['1002']!.pending).toContain('expected points');
+  });
+
+  /**
+   * The mode suggestion is the app's existing one, carried rather than remade.
+   *
+   * Asserted against `suggestMode`'s own vocabulary — `auto`, `state`, `detail`,
+   * `reasons` — because that is what fails if this screen ever grows a private
+   * reading of the same question off its own win probability.
+   */
+  it('carries the Team screen’s mode suggestion rather than forming its own', async () => {
+    const body = await (await app(get('/api/leagues/demo-league/matchup'), env(db, rows()))).json();
+    const suggestion = body.forecast.suggestedMode;
+    expect(['floor', 'balanced', 'ceiling']).toContain(suggestion.mode);
+    expect(typeof suggestion.auto).toBe('boolean');
+    expect(['substantial_favourite', 'close', 'substantial_underdog', 'unknown']).toContain(suggestion.state);
+    expect(suggestion.detail).toBeTruthy();
+    expect(Array.isArray(suggestion.reasons)).toBe(true);
+    // Balanced-with-a-reason is a refusal, not a choice; the two are distinguishable.
+    if (!suggestion.auto) expect(suggestion.mode).toBe('balanced');
   });
 
   it('is a read that needs no passphrase', async () => {

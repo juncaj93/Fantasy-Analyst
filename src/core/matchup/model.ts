@@ -18,7 +18,8 @@
  * app's name.
  */
 
-import { assessLineupDecision, suggestedMode, type LineupDecision, type SlotSpec } from './decision.ts';
+import { assessLineupDecision, type LineupDecision, type SlotSpec } from './decision.ts';
+import { BALANCED_BY_DEFAULT, type ModeSuggestion } from '../startsit/modeSuggest.ts';
 import {
   buildDistribution,
   effectiveRemaining,
@@ -99,8 +100,16 @@ export interface MatchupForecast {
   /** Every uncertain starter, ranked by how much of the outcome he holds. */
   leverage: PlayerLeverage[];
   decision: LineupDecision;
-  /** Which question the lineup should be asked, given where this stands. */
-  suggestedMode: { mode: 'floor' | 'balanced' | 'ceiling'; why: string };
+  /**
+   * Which question the lineup should be asked this week.
+   *
+   * Not decided here. This is `suggestMode`'s answer, carried through from the
+   * caller so that the Team screen's control and this screen's explanation are
+   * the same sentence produced by the same module — and so the matchup model
+   * never gets to see it, which is what keeps the anti-circularity guard in
+   * `modeSuggest.ts` structural rather than a promise.
+   */
+  suggestedMode: ModeSuggestion;
   clinch: ClinchState;
   freshness: SourceFreshness;
   /** True when no forecast could be produced and only the scoreboard stands. */
@@ -126,6 +135,8 @@ export interface ForecastInput {
   previous?: PreviousInsightState | null;
   /** True when the league week is over, so a game with no schedule is settled. */
   weekSettled?: boolean;
+  /** `suggestMode`'s reading of the week. Balanced-by-default when absent. */
+  modeSuggestion?: ModeSuggestion;
 }
 
 /**
@@ -312,7 +323,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
     insights,
     leverage,
     decision,
-    suggestedMode: suggestedMode(result.winProbability),
+    suggestedMode: input.modeSuggestion ?? BALANCED_BY_DEFAULT,
     clinch,
     freshness: assessFreshness(input.players, distributions),
     degraded,

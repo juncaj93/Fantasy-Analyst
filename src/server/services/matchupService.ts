@@ -35,9 +35,12 @@
 
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { SleeperMatchup } from '../../core/sleeper/types.ts';
-import { buildScoringProfile, FLEX_ELIGIBILITY } from '../../core/sleeper/scoring.ts';
+import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY } from '../../core/sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation } from '../../core/startsit/engine.ts';
 import { buildWeeklyCard, type WeeklyCard } from '../../core/startsit/weekCard.ts';
+import { suggestMode, type SidePlayer } from '../../core/startsit/modeSuggest.ts';
+import { advancedLines } from '../../core/contracts/integration.ts';
+import { assessXfp } from '../../core/xfp/model.ts';
 import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from '../../core/matchup/model.ts';
 import type { SlotSpec } from '../../core/matchup/decision.ts';
 import type { PreviousInsightState } from '../../core/matchup/insights.ts';
@@ -65,8 +68,9 @@ export interface MatchupResponse {
    *
    * Built here rather than fetched on tap, because §34 asks for a player sheet
    * that opens instantly and a card that costs a request does not. It is the
-   * same builder the Team screen uses, from the same evaluations, so the two
-   * screens cannot describe the same player differently.
+   * same builder the Team screen uses, from the same evaluations and carrying
+   * the same expected-points line, so the two screens cannot describe the same
+   * player differently.
    */
   cards: Record<string, WeeklyCard>;
   /** True when the forecast was served from cache rather than recomputed. */
@@ -192,6 +196,23 @@ export class MatchupService {
       slots,
       now,
       weekSettled: isWeekSettled(context.week, week, context.seasonType),
+      /*
+       * The mode suggestion is `suggestMode`'s, not this feature's.
+       *
+       * The Team screen already preselects Floor, Balanced or Ceiling from the
+       * week's market margin, and a second reading of the same question — off
+       * the simulated win probability, say — would be two modules disagreeing
+       * on one screen about which lineup the user should be looking at. So the
+       * matchup carries the existing answer through rather than forming its
+       * own, which also keeps `modeSuggest.ts`'s circularity guard intact: it
+       * is fed market points here, exactly as it is on the Team screen, and
+       * never the forecast this call is about to produce.
+       */
+      modeSuggestion: suggestMode({
+        mine: modeSidePlayers(mineRow, evaluations),
+        opponent: modeSidePlayers(theirsRow, evaluations),
+        shape: buildRosterShape(league.rosterPositions),
+      }),
     };
 
     /*
@@ -219,10 +240,28 @@ export class MatchupService {
      * as a row that does not open — better than a sheet that says nothing.
      */
     const cards: Record<string, WeeklyCard> = {};
+    const inputById = new Map(inputs.map((input) => [input.player.id, input]));
     for (const player of players) {
       const evaluation = evaluations.get(player.playerId);
       if (!evaluation) continue;
-      cards[player.playerId] = buildWeeklyCard(evaluation, {
+      /*
+       * The expected-points line, from the module that owns it.
+       *
+       * The Team screen's cards get this through `weeklyIntelligence`, and a
+       * card that carried it on one screen and not the other would be the app
+       * describing the same player two ways depending on how you reached him.
+       * The xFP half is per-player arithmetic over usage the request already
+       * loaded, so it costs nothing here.
+       *
+       * `whatWouldChange` is deliberately not carried across. It is a bisection
+       * of one lineup's close calls and needs the optimiser's recommendation,
+       * which this request does not build — and the Matchup screen answers the
+       * same question better anyway, in win probability rather than in points.
+       */
+      const usageWeeks = inputById.get(player.playerId)?.usageWeeks ?? [];
+      const advanced =
+        usageWeeks.length === 0 ? [] : advancedLines(assessXfp(evaluation.position, usageWeeks, profile));
+      cards[player.playerId] = buildWeeklyCard(advanced.length > 0 ? { ...evaluation, advanced } : evaluation, {
         starting: player.starting,
         slot: player.slot ? labelOf(player.slot) : null,
         alreadyStarting: player.starting,
@@ -400,6 +439,33 @@ function toPlayers(
   }
 
   return out;
+}
+
+/**
+ * One roster as `suggestMode` is allowed to see it: market points and nothing else.
+ *
+ * The whole roster rather than the starters, because that module fills the
+ * slots itself — it is estimating what each side will put on the board, not
+ * reading what somebody has already set. `marketPoints` is the raw Vegas
+ * expectation, deliberately not {@link activeProjection}: the availability
+ * penalty belongs to the start/sit score, and a ruled-out player is expressed
+ * to that module as `ruledOut` instead.
+ */
+function modeSidePlayers(
+  row: { players?: string[] | null },
+  evaluations: Map<string, StartSitEvaluation>,
+): SidePlayer[] {
+  return (row.players ?? [])
+    .filter((playerId) => playerId !== '0')
+    .map((playerId) => {
+      const evaluation = evaluations.get(playerId);
+      return {
+        playerId,
+        position: evaluation?.position ?? '',
+        marketPoints: evaluation?.expectation.points ?? null,
+        ruledOut: evaluation?.ruledOut ?? false,
+      };
+    });
 }
 
 function toPlayer(

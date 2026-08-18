@@ -149,8 +149,29 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   name: string;
   position: string;
   team: string;
+  /** Sleeper ADP — the market the user is drafting in. */
   adp: number | null;
+  /**
+   * Raw Underdog ADP, or null when no usable snapshot has priced him.
+   *
+   * Never filled in from `adp`. A blank DOG means Underdog has not priced him
+   * or the snapshot is not trusted — `dogState` on the board says which.
+   */
+  dogAdp: number | null;
+  /** How far past **Sleeper's** ADP this pick is. Unchanged by the blend. */
   adpValue: number | null;
+  /** The blended market baseline that priced him, and how it was weighted. */
+  marketBlend: {
+    adp: number | null;
+    weights: { dog: number; sleeper: number };
+    nominal: { dog: number; sleeper: number };
+    sources: ('dog' | 'sleeper')[];
+    singleSource: boolean;
+    unknown: boolean;
+    note: string;
+  };
+  /** How far apart the two markets are. Context, never a second bonus. */
+  marketDisagreement: { picks: number | null; leader: 'dog' | 'sleeper' | null; note: string | null };
   survivalProbability: number | null;
   newsLifetimeNet: number;
   news30Net: number;
@@ -368,6 +389,34 @@ export interface DraftBoard {
   rosterCounts: Record<string, number>;
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
+  /**
+   * Where the DOG column stands, and — when it is absent — why.
+   *
+   * Optional so a client running against an older deployment simply shows no
+   * DOG rather than breaking. The reason string is what stops a blank column
+   * from being ambiguous between "Underdog has not priced him" and "we stopped
+   * trusting the file".
+   */
+  dogState?: {
+    available: boolean;
+    provider: string | null;
+    sourceType: string | null;
+    snapshotAt: string | null;
+    fetchedAt: string | null;
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    ageHours: number | null;
+    matched: number;
+    reason: string;
+  };
+  /** How the market baseline is weighted for this league, and on what basis. */
+  marketFormat?: {
+    format: 'standard' | 'best_ball';
+    bestBall: boolean;
+    confident: boolean;
+    basis: string;
+    weights: { dog: number; sleeper: number };
+    reason: string;
+  };
   recommendations: DraftRecommendation[];
   rosterAlerts: RosterAlert[];
   /** Every starting slot the league has, filled out of required. */
@@ -753,6 +802,13 @@ export interface LeagueSummary {
   notes: string[];
   rosterPositions: string[];
   draftId: string | null;
+  /**
+   * NFL teams this league's room drafts earlier than the market.
+   *
+   * Optional and usually empty. It reaches `Next%` alone — the model's estimate
+   * of what somebody else will do — and never a Score, a tier or a `Val`.
+   */
+  localTeams?: string[];
 }
 
 export interface RosterPlayer {
@@ -761,6 +817,13 @@ export interface RosterPlayer {
   position: string;
   team: string;
   status: string | null;
+  /**
+   * The number on his shirt, when Sleeper records one.
+   *
+   * What a Team row shows once the draft is over. Optional so a client running
+   * against an older deployment falls back to the pick rather than breaking.
+   */
+  jerseyNumber?: number | null;
   newsNet: number;
   recentNet: number;
   pending: number;
@@ -1122,6 +1185,8 @@ export interface RepairStatus {
 
 /** Trade intelligence: what has changed lately, and who holds them. */
 export interface TradeSuggestion {
+  /** Where this league drafted him, when it did. */
+  draft?: DraftProvenance | null;
   playerId: string;
   name: string;
   position: string;
@@ -1151,6 +1216,19 @@ export interface TradeSuggestion {
   confidence: 'high' | 'medium' | 'low';
   reasons: string[];
   counterpoints: string[];
+}
+
+/**
+ * Where a player came from, when this league drafted him.
+ *
+ * `Drafted 1.02 by Joe`. Absent for a waiver pickup and for a league with no
+ * draft attached — both of which are ordinary, and neither of which gets a
+ * made-up pick number.
+ */
+export interface DraftProvenance {
+  pick: string;
+  managerName: string | null;
+  line: string;
 }
 
 export interface TradeBoard {
