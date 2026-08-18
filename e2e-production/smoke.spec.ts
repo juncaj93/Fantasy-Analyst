@@ -718,10 +718,22 @@ test.describe('the decision intelligence', () => {
     test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board');
 
     const board = await page.evaluate(async () => {
+      /*
+       * The draft id comes from the league listing, which is where it lives.
+       *
+       * `/api/overview` reports the selected league as id, name and season and
+       * has never carried a draft id, so reading one from it returned undefined
+       * every time and skipped this test on every run since it was written --
+       * green, and checking nothing. The screen itself reads `/api/leagues`.
+       */
       const overview = await (await fetch('/api/overview')).json();
-      const draftId = overview?.selectedLeague?.draftId;
-      if (!draftId) return null;
-      return (await fetch(`/api/drafts/${draftId}/board?limit=25`)).json() as Promise<{
+      const selected = overview?.selectedLeague?.id;
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league =
+        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
+        leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      return (await fetch(`/api/drafts/${league.draftId}/board?limit=25`)).json() as Promise<{
         recommendations: {
           components: { key: string; contribution: number }[];
           opportunity?: { score: number };
@@ -837,6 +849,9 @@ test.describe('the decision intelligence', () => {
    */
   test('the board prices against both markets, and says so when it cannot', async ({ page }) => {
     await page.goto('/');
+    // The app does not land on Draft, and a test that looked for rows without
+    // going there would skip itself on every run and report nothing.
+    await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const dog = await page.evaluate(async () => {
@@ -845,7 +860,9 @@ test.describe('the decision intelligence', () => {
       // The draft id lives on the league listing rather than on the overview,
       // so the board is reached the same way the screen reaches it.
       const { leagues = [] } = await (await fetch('/api/leagues')).json();
-      const league = leagues.find((l: { id: string }) => l.id === selected) ?? leagues[0];
+      const league =
+        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
+        leagues.find((l: { draftId: string | null }) => l.draftId);
       if (!league?.draftId) return null;
       const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=60`)).json();
       return {
@@ -890,6 +907,7 @@ test.describe('the decision intelligence', () => {
    */
   test('Score, ADP and DOG reorder the deployed board without touching a number', async ({ page }) => {
     await page.goto('/');
+    await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const control = page.getByTestId('draft-sort');
