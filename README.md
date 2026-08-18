@@ -143,8 +143,8 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ```bash
 npm run typecheck
-npm test               # 1,776 unit + integration tests
-npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
+npm test               # 1,814 unit + integration tests
+npm run e2e            # WebKit at 390x844, 375x812, 360x800 (801 checks)
 npm run e2e:chromium   # same specs, fallback engine
 ```
 
