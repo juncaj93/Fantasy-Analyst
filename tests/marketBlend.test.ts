@@ -16,8 +16,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   MARKET_BLEND,
+  OUTLIER_GUARD,
   blendMarketBaseline,
   blendWeights,
+  isImplausibleDisagreement,
   marketDisagreement,
 } from '../src/core/draft/marketBaseline.ts';
 import { detectBestBall, marketFormatOf } from '../src/core/sleeper/bestBall.ts';
@@ -233,5 +235,70 @@ describe('best-ball detection is deterministic and refuses to guess', () => {
     const settings = { leagueSettings: { best_ball: 1 }, draftSettings: { best_ball: 0 } };
     const answers = Array.from({ length: 20 }, () => JSON.stringify(detectBestBall(settings)));
     expect(new Set(answers).size).toBe(1);
+  });
+});
+
+describe('one absurd DOG value cannot reorder the board', () => {
+  /**
+   * The failure this guards, measured before the guard existed: an Underdog
+   * feed error putting a deep player at 1.0 blended to a baseline of 75.8
+   * against his Sleeper price of 188, and moved him from 120th on the board to
+   * 41st — a confident, catastrophic number wearing the authority of two
+   * markets agreeing.
+   */
+  it('sets aside a DOG price that cannot be a view of the same player', () => {
+    const blend = blendMarketBaseline({ dogAdp: 1, sleeperAdp: 188, format: 'standard' });
+    expect(blend.suspectDog).toBe(true);
+    expect(blend.adp).toBe(188);
+    expect(blend.sources).toEqual(['sleeper']);
+    expect(blend.note).toContain('too far apart');
+  });
+
+  it('keeps a large but credible disagreement, which is the whole point of DOG', () => {
+    // The brief's own example: Sleeper 70, Underdog 52.
+    const blend = blendMarketBaseline({ dogAdp: 52, sleeperAdp: 70, format: 'standard' });
+    expect(blend.suspectDog).toBe(false);
+    expect(blend.adp).toBeCloseTo(59.2, 6);
+  });
+
+  it('never fires on an early-board disagreement, however proportionally large', () => {
+    // DOG 2 against Sleeper 20 is a factor of ten and entirely believable at
+    // the top of a draft: the gap is 18 picks, under the floor.
+    expect(isImplausibleDisagreement(2, 20)).toBe(false);
+    expect(blendMarketBaseline({ dogAdp: 2, sleeperAdp: 20, format: 'standard' }).suspectDog).toBe(false);
+  });
+
+  it('never fires on ordinary late-board noise', () => {
+    // Forty picks apart deep in the board is two markets shrugging, not an error.
+    expect(isImplausibleDisagreement(150, 190)).toBe(false);
+  });
+
+  it('needs both conditions, not either', () => {
+    // Over the share, under the floor: not suspect.
+    expect(isImplausibleDisagreement(1, 30)).toBe(false);
+    // Over the floor, under the share: not suspect.
+    expect(isImplausibleDisagreement(120, 180)).toBe(false);
+    // Over both: suspect.
+    expect(isImplausibleDisagreement(1, 188)).toBe(true);
+  });
+
+  it('is symmetric — a bad Sleeper price is caught the same way', () => {
+    expect(isImplausibleDisagreement(188, 1)).toBe(true);
+  });
+
+  it('states its own thresholds rather than hiding them in a comparison', () => {
+    expect(OUTLIER_GUARD.floorPicks).toBeGreaterThan(20);
+    expect(OUTLIER_GUARD.shareOfDeeper).toBeGreaterThan(0.4);
+    expect(OUTLIER_GUARD.shareOfDeeper).toBeLessThan(1);
+  });
+
+  it('distinguishes "set aside as suspect" from "never had a price"', () => {
+    const suspect = blendMarketBaseline({ dogAdp: 1, sleeperAdp: 188, format: 'standard' });
+    const absent = blendMarketBaseline({ dogAdp: null, sleeperAdp: 188, format: 'standard' });
+    // Both fall back to Sleeper alone; only one of them had a number to reject,
+    // and the board is able to say which.
+    expect(suspect.adp).toBe(absent.adp);
+    expect(suspect.suspectDog).toBe(true);
+    expect(absent.suspectDog).toBe(false);
   });
 });

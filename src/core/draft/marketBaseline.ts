@@ -51,6 +51,45 @@ export const MARKET_BLEND = {
 
 export type MarketFormat = 'standard' | 'best_ball';
 
+/**
+ * When a disagreement stops being an opinion and starts being a data error.
+ *
+ * Two markets disagreeing by twenty picks is information and the blend is built
+ * to carry it. Two markets disagreeing by a hundred and eighty is not a
+ * disagreement — nobody thinks the 188th player off the board is the first —
+ * and blending it produces a confident, catastrophic number: at 60/40 a DOG of
+ * 1.0 against a Sleeper of 188 prices him at 75.8, which is wrong by seventy
+ * picks in a way that looks entirely plausible on a card.
+ *
+ * Measured on the deeper of the two prices, because ADP dispersion grows with
+ * depth: the eighth and the twelfth pick are close, and the 180th and the 200th
+ * are the same player as far as any market is concerned. A fixed threshold
+ * would either fire on ordinary late-round noise or never fire at all.
+ *
+ * Both conditions have to hold. The floor stops a fifteen-pick disagreement at
+ * the top of the board from ever tripping it — that is exactly the signal DOG
+ * was added for — and the share stops a forty-pick gap deep in the board, which
+ * is ordinary, from being treated as an error.
+ */
+export const OUTLIER_GUARD = {
+  /** Below this many picks of disagreement, nothing is ever suspect. */
+  floorPicks: 40,
+  /** And it must also exceed this share of the deeper of the two prices. */
+  shareOfDeeper: 0.6,
+} as const;
+
+/**
+ * Is this pair of prices too far apart to be two opinions about one player?
+ *
+ * Pure, and exported so the threshold can be reasoned about rather than
+ * discovered by watching a board misbehave.
+ */
+export function isImplausibleDisagreement(dogAdp: number, sleeperAdp: number): boolean {
+  const gap = Math.abs(dogAdp - sleeperAdp);
+  const deeper = Math.max(dogAdp, sleeperAdp);
+  return gap > OUTLIER_GUARD.floorPicks && gap > deeper * OUTLIER_GUARD.shareOfDeeper;
+}
+
 export interface MarketBaselineInput {
   /** Raw Underdog ADP. Null when unpriced, unusable or stale. */
   dogAdp: number | null;
@@ -75,6 +114,15 @@ export interface MarketBaselineBlend {
   singleSource: boolean;
   /** True when neither did. */
   unknown: boolean;
+  /**
+   * True when the two prices were too far apart to be two opinions about one
+   * player, so the Underdog number was set aside as suspect.
+   *
+   * Distinct from `singleSource`, which means the other market simply had no
+   * price. This means it had one and it was not believable — a different fact,
+   * and one the board should be able to say out loud.
+   */
+  suspectDog: boolean;
   /** Said plainly, for the breakdown and the diagnostics. */
   note: string;
 }
@@ -106,6 +154,7 @@ export function blendMarketBaseline(input: MarketBaselineInput): MarketBaselineB
       sources: [],
       singleSource: false,
       unknown: true,
+      suspectDog: false,
       note: 'neither Underdog nor Sleeper has priced him',
     };
   }
@@ -118,6 +167,7 @@ export function blendMarketBaseline(input: MarketBaselineInput): MarketBaselineB
       sources: ['dog'],
       singleSource: true,
       unknown: false,
+      suspectDog: false,
       note: 'Underdog only — no Sleeper ADP, so DOG carries the whole market baseline',
     };
   }
@@ -130,7 +180,36 @@ export function blendMarketBaseline(input: MarketBaselineInput): MarketBaselineB
       sources: ['sleeper'],
       singleSource: true,
       unknown: false,
+      suspectDog: false,
       note: 'Sleeper only — no usable Underdog ADP, so Sleeper carries the whole market baseline',
+    };
+  }
+
+  /*
+   * The source-quality safeguard, before the two are ever mixed.
+   *
+   * A DOG value that cannot be a view of the same player is not blended at a
+   * reduced weight — it is set aside, and Sleeper carries the baseline alone.
+   * Blending it would be the worst of both: a number wrong by seventy picks,
+   * carrying the authority of two markets agreeing to it.
+   *
+   * Sleeper is the survivor rather than DOG because Sleeper is the market the
+   * user is drafting in, so an error there would be visible on the board they
+   * are looking at, while an error in a fetched third-party file is exactly the
+   * failure that arrives silently.
+   */
+  if (isImplausibleDisagreement(dog!, sleeper!)) {
+    return {
+      adp: round2(sleeper!),
+      weights: { dog: 0, sleeper: 1 },
+      nominal,
+      sources: ['sleeper'],
+      singleSource: true,
+      unknown: false,
+      suspectDog: true,
+      note: `Underdog has him at ${round1(dog!)} against Sleeper's ${round1(
+        sleeper!,
+      )} — too far apart to be the same player, so DOG was set aside`,
     };
   }
 
@@ -150,6 +229,7 @@ export function blendMarketBaseline(input: MarketBaselineInput): MarketBaselineB
     sources: ['dog', 'sleeper'],
     singleSource: false,
     unknown: false,
+    suspectDog: false,
     note: `${Math.round(weights.dog * 100)}% Underdog / ${Math.round(weights.sleeper * 100)}% Sleeper`,
   };
 }
