@@ -1,10 +1,10 @@
 /**
  * The league-intelligence endpoints, over the real router and a real database.
  *
- * This workstream owns no screens. It fills fields the waiver board already
- * declares — `WaiverLeagueIntel.competition` and `.multiWeek` — and adds the
- * three questions nothing else answers: which deals to propose, what the weeks
- * ahead look like, and what changed since you last looked.
+ * This workstream owns no screens. It fills the one field the waiver board
+ * declares and nothing else supplies — `WaiverLeagueIntel.competition` — and
+ * adds the three questions nothing else answers: which deals to propose, what
+ * the weeks ahead look like, and what changed since you last looked.
  *
  * The first test is therefore a contract test against `core/waivers/board.ts`:
  * if this pass stops filling those fields, or fills them with something the
@@ -62,7 +62,7 @@ describe('league intelligence fills the waiver board’s own fields', () => {
     app = createApp();
   });
 
-  it('attaches competition and multi-week value to every candidate', async () => {
+  it('attaches competition to every candidate', async () => {
     const res = await app(get('/api/leagues/demo-league/waivers'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as WaiverPayload;
@@ -72,11 +72,9 @@ describe('league intelligence fills the waiver board’s own fields', () => {
 
     for (const candidate of candidates) {
       // Present-and-null is a pass that found nothing; absent is no pass at all.
-      // This pass ran, so neither field may be absent.
+      // This pass ran, so the field may not be absent.
       expect(candidate.competition, candidate.playerId).not.toBeUndefined();
-      expect(candidate.multiWeek, candidate.playerId).not.toBeUndefined();
       expect(['high', 'medium', 'low', 'unknown']).toContain(candidate.competition!.level);
-      expect(['season_long', 'multi_week', 'streamer', 'unknown']).toContain(candidate.multiWeek!.level);
       expect(candidate.competition!.label).toBeTruthy();
     }
   });
@@ -92,13 +90,19 @@ describe('league intelligence fills the waiver board’s own fields', () => {
   /*
    * The end-to-end proof that the seam is actually closed.
    *
-   * `buildWaiverBoard` names the columns still waiting on this pass in
-   * `pending`, and the screen prints that line. Two of those three names are
-   * this workstream's, so if the pass stops filling them the board goes back to
-   * advertising them as missing — and this test is the only thing that would
-   * notice, because a null field renders as a quiet dash rather than an error.
+   * `buildWaiverBoard` names the columns still waiting on a supplier in
+   * `pending`, and the screen prints that line. If this pass stops filling
+   * competition the board goes back to advertising it as missing — and this
+   * test is the only thing that would notice, because a null field renders as a
+   * quiet dash rather than an error.
+   *
+   * Multi-week value is deliberately *not* asserted. It shares the line, but
+   * its supplier declines when no usage is stored — `waiverMultiWeek` says so
+   * in as many words — and the seeded database stores none. Requiring it here
+   * would pin a behaviour that is correct only when a usage feed has run, and
+   * the point of this test is that competition arrives independently of that.
    */
-  it('stops the board advertising competition and multi-week value as pending', async () => {
+  it('stops the board advertising competition as pending', async () => {
     const advice = (await (await app(get('/api/leagues/demo-league/waivers'), env)).json()) as Parameters<
       typeof buildWaiverBoard
     >[0];
@@ -106,7 +110,6 @@ describe('league intelligence fills the waiver board’s own fields', () => {
 
     expect(board.rows.length).toBeGreaterThan(0);
     expect(board.pending).not.toContain('likely competition');
-    expect(board.pending).not.toContain('multi-week value');
     expect(board.rows.every((r) => r.competition != null)).toBe(true);
   });
 

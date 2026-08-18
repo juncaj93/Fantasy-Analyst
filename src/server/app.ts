@@ -11,6 +11,9 @@
  */
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
+import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
+import { nflTeam } from '../core/nfl/teams.ts';
+import { queueSequence, reconcileQueue, reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
@@ -51,6 +54,7 @@ import { detectDisagreement, type Disagreement } from '../core/market/disagreeme
 import { evaluateBench, type HeldPlayer } from '../core/roster/bench.ts';
 import { buildLadder, type LadderInputs } from '../core/trades/ladder.ts';
 import { assessConsolidation, type ConsolidationAdvice } from '../core/trades/consolidation.ts';
+import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
 import { LeagueStrategyService, type StrategyContext } from './services/leagueStrategyService.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
@@ -67,7 +71,8 @@ import {
   type AuthEnv,
 } from './http/auth.ts';
 import { Router, errorResponse, jsonResponse } from './http/router.ts';
-import { AdpRepo } from './repos/adp.ts';
+import { AdpRepo, UNDERDOG_SOURCE } from './repos/adp.ts';
+import { validateRawAdp } from '../core/adp/underdog.ts';
 import { EvidenceRepo } from './repos/evidence.ts';
 import { LeagueRepo } from './repos/league.ts';
 import { NewsletterRepo } from './repos/newsletter.ts';
@@ -84,7 +89,8 @@ import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
-import { RULED_OUT_STATUSES, beneficiaryOf } from '../core/league/beneficiary.ts';
+import { isRuledOut, normalizeDesignation } from '../core/injury/model.ts';
+import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
 import {
   COMPETITION_UNKNOWN,
   assessCompetition,
@@ -372,6 +378,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           notes: leagueFitNotes(profile, shape),
           rosterPositions: l.rosterPositions,
           draftId: l.draftId,
+          // Which teams this room reaches for. Read by Setup, and by the Next%
+          // model on the server; nothing else on a screen touches it.
+          localTeams: l.localTeams ?? [],
         };
       }),
     });
@@ -413,6 +422,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           position: p?.position ?? '',
           team: p?.team ?? '',
           status: p?.status ?? null,
+          // The number on his shirt, which is what identifies a player on a
+          // team sheet once the draft has stopped being the thing happening.
+          jerseyNumber: p?.jerseyNumber ?? null,
           newsNet: signal?.raw.net ?? 0,
           recentNet: signal?.last30.net ?? 0,
           pending: signal?.pendingCount ?? 0,
@@ -446,10 +458,26 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       // open. Presenting a starters/bench split would invent decisions the user
       // has not made.
       live: liveRoster.live,
+      /*
+       * Which pick he was, and what that is called.
+       *
+       * `pickNo` is kept because it is the raw fact and other things read it;
+       * `draftPick` is the same fact in the unit the room used — `1.04` — and
+       * it is what a row prints. Formatted here rather than on the screen so
+       * the Team page, the player detail and Trades cannot disagree about which
+       * round pick 40 was in.
+       */
       drafted: hydrate(liveRoster.players.map((p) => p.playerId)).map((p, i) => ({
         ...p,
         pickNo: liveRoster.players[i]!.pickNo,
+        draftPick: draftPickLabel(liveRoster.players[i]!.pickNo, draft?.teams ?? league.totalRosters ?? 12),
       })),
+      /*
+       * How many seats the draft had, so a client can format a pick number it
+       * was not handed a label for. Without it `1.04` is unrecoverable from
+       * `40` — the round length is the whole of the conversion.
+       */
+      teams: draft?.teams ?? league.totalRosters ?? 12,
       counts: liveRoster.counts,
       filled: liveRoster.filled,
       remaining: liveRoster.remaining,
@@ -502,6 +530,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       mode,
     });
 
+    /*
+     * The two slots the weekly card has been carrying empty.
+     *
+     * Expected points for everybody who has stored usage, and — only for a slot
+     * whose gap to the best legal alternative is genuinely close — the
+     * conditions that would change the recommendation. Both are attached to the
+     * evaluations that already travel in this response, so the card the Team
+     * screen builds from them lights up without a second request and without
+     * that file changing.
+     */
+    const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
+    const withIntelligence = <T extends { playerId: string }>(evaluations: T[]): T[] =>
+      evaluations.map((evaluation) => {
+        const extra = intelligence.get(evaluation.playerId);
+        return extra ? { ...evaluation, ...extra } : evaluation;
+      });
+
     const unknownPlayers = mine.playerIds.length - inputs.length;
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
@@ -516,6 +561,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
        */
       rosterShape: shape,
       ...recommendation,
+      starters: withIntelligence(recommendation.starters),
+      bench: withIntelligence(recommendation.bench),
+      undecidable: withIntelligence(recommendation.undecidable),
       notes: unknownPlayers > 0
         ? [...recommendation.notes, `${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`]
         : recommendation.notes,
@@ -596,6 +644,35 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * taking the upgrade list with it.
      */
     const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+
+    /*
+     * What each recommended add is worth past this Sunday.
+     *
+     * The board has carried a `multi-week value` column since it was built and
+     * has been reporting it as having no supplier; this is the supplier. Scoped
+     * to the players who actually made the board — a valuation for the other
+     * forty in the scanned pool is work nobody will read.
+     *
+     * It changes no ordering. `compareRows` sorts on strength and gain, and a
+     * level attached here is a sentence on a row that had already earned its
+     * place.
+     */
+    const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
+    const multiWeek = waiverMultiWeekFor({
+      playerIds: boardIds,
+      inputs: candidateInputs,
+      scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
+      profile,
+      currentWeek: nflState?.week ?? 1,
+    });
+    const upgradesWithValue = advice.upgrades.map((upgrade) => ({
+      ...upgrade,
+      candidates: upgrade.candidates.map((candidate) => {
+        const value = multiWeek.get(candidate.playerId);
+        return value ? { ...candidate, multiWeek: value } : candidate;
+      }),
+    }));
+
     const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
       .context(league.id, { week: nflState?.week ?? 1, season: league.season })
       .catch(() => null);
@@ -603,22 +680,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     /*
      * Who else needs the position, and can afford him.
      *
-     * The league-intelligence half of the waiver row: `WaiverLeagueIntel` types
-     * `competition` and `multiWeek` as present-and-null when a pass ran and
-     * found nothing, absent when no pass exists. This is that pass. It answers
-     * both from rosters already loaded — no extra query, no lineup scoring —
-     * and it feeds the same count into the price model, which asks for exactly
-     * this number and has been estimating it league-wide.
+     * The last of `WaiverLeagueIntel`'s three columns without a supplier: the
+     * price comes from `core/faab` and multi-week value from the pass directly
+     * above. Answered from rosters already loaded — no extra query and no
+     * lineup scoring — and the same count goes into the price model, which asks
+     * for exactly this number and has been estimating it league-wide.
      */
     const intel = waiverLeagueIntel({
       advice,
       rosters,
       players: allPlayers,
       shape,
-      rosteredIds,
       budgets: strategy?.budget ?? null,
       prices: strategy?.prices ?? null,
-      candidateInputs,
     });
 
     const budgets = strategy
@@ -637,7 +711,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: freshness,
       ...advice,
-      upgrades: withLeagueIntel(advice.upgrades, intel),
+      upgrades: withCompetition(upgradesWithValue, intel.competition),
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
@@ -822,6 +896,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     for (const roster of rosters) {
       const inputs = await startSitInputsFor(db, roster.playerIds);
       const evaluated = inputs.map((i) => evaluatePlayer(i, profile)).filter((e) => e.score != null);
+      const weeksById = new Map(inputs.map((i) => [i.player.id, i.usageWeeks ?? []]));
 
       const byPosition = new Map<string, typeof evaluated>();
       for (const e of evaluated) {
@@ -840,6 +915,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           bucket.length < required ? 'urgent' : flexEligible && bucket.length <= required ? 'thin' : 'covered';
 
         bucket.forEach((e, index) => {
+          const weeks = weeksById.get(e.playerId) ?? [];
+          const xfp = weeks.length > 0 ? assessXfp(position, weeks, profile) : NO_XFP;
           assets.push({
             playerId: e.playerId,
             name: e.name,
@@ -848,9 +925,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
             // Surplus means the team can still field the position without him:
             // anybody beyond the dedicated starting slots.
             surplus: index >= required,
+            /*
+             * Expected points, from the model Channel 3 published.
+             *
+             * Two of the five timing calls were dormant while nothing measured
+             * opportunity against production; `assessXfp` does, off the usage
+             * weeks this route already loaded. Zero games yields `NO_XFP`, whose
+             * per-game figures are null, and the timing rules require both sides
+             * before they say anything — so an unmeasured player still produces
+             * no call rather than a call built on a default.
+             */
             timing: {
               tdShare: e.tdDependency.share ?? null,
               roleTrend: e.role.trend,
+              xfpPerGame: xfp.xfpPerGame,
+              fpPerGame: xfp.actualPerGame,
             },
           });
         });
@@ -1020,11 +1109,51 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse({ ok: true });
   });
 
+  /**
+   * Which NFL teams this league's room drafts earlier than the market.
+   *
+   * A property of twelve people, not of the players: a Detroit-area league
+   * takes Lions early. It is set by hand because Sleeper does not publish it
+   * and never will, and it is stored on the league rather than globally because
+   * two of the user's leagues can easily have different rooms.
+   *
+   * It reaches exactly one model — opponent demand, which is what `Next%` is
+   * computed from — and it cannot reach a Score, a tier or a `Val`. See
+   * core/draft/nextpick/teamPrior.ts for why, and for the bound.
+   */
+  router.post('/api/leagues/:id/local-teams', async (ctx) => {
+    const body = await ctx.json<{ teams?: unknown }>();
+    if (!Array.isArray(body?.teams)) return errorResponse('teams must be an array of NFL team codes', 400);
+    const leagues = new LeagueRepo(ctx.env.db);
+    const league = await leagues.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    /*
+     * Only real teams. An unknown code would sit in the settings looking
+     * effective and match nobody, which is the most confusing possible
+     * outcome — the board would report a prior that provably does nothing.
+     */
+    const requested = body.teams.map((t) => String(t).trim().toUpperCase()).filter(Boolean);
+    const unknown = requested.filter((code) => nflTeam(code) == null);
+    if (unknown.length > 0) return errorResponse(`unknown NFL team code: ${unknown.join(', ')}`, 400);
+
+    return jsonResponse({ localTeams: await leagues.setLocalTeams(league.id, requested) });
+  });
+
   // --------------------------------------------------------------------- ADP
   router.get('/api/adp/snapshots', async (ctx) => jsonResponse({ snapshots: await new AdpRepo(ctx.env.db).list() }));
 
   router.post('/api/adp/import', async (ctx) => {
-    const body = await ctx.json<{ content?: string; label?: string; capturedAt?: string; source?: string }>();
+    const body = await ctx.json<{
+      content?: string;
+      label?: string;
+      capturedAt?: string;
+      source?: string;
+      /** Underdog provenance, sent by the DOG workflow and by nothing else. */
+      provider?: string;
+      snapshotAt?: string;
+      fetchedAt?: string;
+    }>();
     if (!body?.content) return errorResponse('content required (CSV or JSON text)', 400);
     const index = await new PlayerRepo(ctx.env.db).buildIndex();
     let result;
@@ -1040,8 +1169,43 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (result.rows.length === 0) {
       return errorResponse('no usable rows found — expected columns for player name and ADP or rank', 400);
     }
+
+    /*
+     * The gate that keeps `DOG` meaning one thing.
+     *
+     * An import into the Underdog source has to prove it is raw ADP before it
+     * is written, because once it is written the board has no way of telling a
+     * ranking from an average — both are a column of numbers that sort
+     * plausibly. `validateRawAdp` reads the shape of the values (a dense run of
+     * whole numbers is a ranking, whatever the column was called) and the
+     * import is refused outright rather than stored with a caveat: a rejected
+     * file leaves the previous good snapshot in place, which is the safe
+     * outcome, while a stored bad one silently becomes the market baseline.
+     *
+     * Every other source is unaffected and imports exactly as it always has.
+     */
+    const isUnderdog = (body.source ?? '') === UNDERDOG_SOURCE;
+    if (isUnderdog) {
+      const verdict = validateRawAdp(
+        result.rows.flatMap((row) =>
+          row.adp == null ? [] : [{ name: row.sourceName, team: row.sourceTeam, position: row.sourcePosition, adp: row.adp }],
+        ),
+      );
+      if (!verdict.valid) {
+        return errorResponse(
+          `refusing to store this as Underdog ADP: ${verdict.reason}. Raw Underdog ADP only — rankings, expert ranks and projections cannot be labelled DOG.`,
+          422,
+        );
+      }
+    }
+
     const repo = new AdpRepo(ctx.env.db);
-    const { snapshot, created } = await repo.save(result);
+    const { snapshot, created } = await repo.save(result, {
+      provider: body.provider ?? null,
+      sourceType: 'raw_adp',
+      snapshotAt: body.snapshotAt ?? null,
+      fetchedAt: body.fetchedAt ?? null,
+    });
     // The same file imported twice is normally a no-op, but the matcher may
     // have learned a name since — so give the rows that found nothing another
     // go rather than make the user wait for the source file to change.
@@ -1072,14 +1236,34 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ----------------------------------------------------------------- players
   router.get('/api/players', async (ctx) => {
     const q = ctx.url.searchParams.get('q') ?? '';
-    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
+    /*
+     * How deep the list goes, and where this page starts.
+     *
+     * The default was 60 and the ceiling was 200, which is why Players ended
+     * somewhere around the sixtieth name and looked exactly like the end of the
+     * player universe rather than the end of a page — the same failure the
+     * draft board had. Both numbers move: a page is 100 by default and may be
+     * up to 200, and `offset` means the client can keep asking.
+     *
+     * The cap on one *request* stays, and deliberately. It is not a cap on
+     * coverage now that there is an offset; it is the thing that keeps a single
+     * response small enough to parse on a phone, and it is what makes the
+     * client render a page at a time instead of putting thousands of rows into
+     * the DOM at once.
+     */
+    const limit = Math.min(Math.max(Number(ctx.url.searchParams.get('limit') ?? 100) || 100, 1), 200);
+    const offset = Math.max(Number(ctx.url.searchParams.get('offset') ?? 0) || 0, 0);
     const position = ctx.url.searchParams.get('position');
     const repo = new PlayerRepo(ctx.env.db);
 
     // Draft order comes from an imported ranking. Sleeper's search_rank is NOT
     // one — it ranks by who gets looked up — so when no ranking is imported the
     // list says so and falls back to the tally rather than inventing an order.
-    const snapshot = await new AdpRepo(ctx.env.db).latest();
+    //
+    // The *platform* snapshot, not the newest of anything: this list shows one
+    // ranking and calls it the draft order, and once an Underdog snapshot
+    // exists "the newest" is the Underdog one on any day it was fetched last.
+    const snapshot = await new AdpRepo(ctx.env.db).latestPlatformSnapshot();
     const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
 
     /*
@@ -1090,7 +1274,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * are no more players called that". Asking for more when a filter is on
      * costs nothing when it is off.
      */
-    const pool = q ? await repo.search(q, position ? 400 : 200) : (await repo.listAll()).filter((p) => p.active);
+    /*
+     * The pool a page is cut from has to be deeper than the page.
+     *
+     * A search returns the best N matches for the text and the position filter
+     * then narrows those, so a shallow search pool looks exactly like "there
+     * are no more players called that". It also has to cover the offset: page
+     * three of a filtered search is only reachable if the search returned
+     * enough rows to have a page three.
+     */
+    const searchDepth = Math.max((position ? 400 : 200), offset + limit * 3);
+    const pool = q ? await repo.search(q, searchDepth) : (await repo.listAll()).filter((p) => p.active);
     // `FLX` is a view over RB/WR/TE and is never a position on a player — see
     // core/sleeper/eligibility.ts, which every screen's filter goes through.
     const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
@@ -1112,13 +1306,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
     }
 
+    /*
+     * Scored deep enough to serve this page, then some.
+     *
+     * The shortlist exists because the tally nudge is applied after the market
+     * sort, so a player can move a few places and the window has to be wider
+     * than the page for that movement to be real rather than clipped. It now
+     * grows with the offset, which is what makes page five as honest as page
+     * one — before, every page was cut from the same first 120 names.
+     */
     const shortlist = [...filtered]
       .sort(
         (a, b) =>
           (ranks.get(a.id)?.adp ?? Infinity) - (ranks.get(b.id)?.adp ?? Infinity) ||
           (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity),
       )
-      .slice(0, Math.max(limit * 3, 120));
+      .slice(0, offset + Math.max(limit * 3, 120));
 
     const signals = await new EvidenceRepo(ctx.env.db).getSignals(shortlist.map((p) => p.id));
     const flags = await new PlayerFlagsRepo(ctx.env.db).forPlayers(shortlist.map((p) => p.id));
@@ -1130,12 +1333,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         net: signals.get(p.id)?.raw.net ?? 0,
         player: p,
       })),
-    ).slice(0, limit);
+    );
+    const page = ordered.slice(offset, offset + limit);
 
     return jsonResponse({
       tallyWeight: TALLY_WEIGHT,
       rankingSource: snapshot ? snapshot.label : null,
-      players: ordered.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
+      /*
+       * Whether asking again would return anything.
+       *
+       * Sent rather than inferred from `players.length === limit`, which is
+       * wrong exactly once — on the page that happens to end on the boundary,
+       * where the client would show a spinner for a page that does not exist.
+       */
+      offset,
+      hasMore: filtered.length > offset + page.length,
+      total: filtered.length,
+      players: page.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
         id: row.player.id,
         name: row.player.fullName,
         position: row.player.position,
@@ -1248,7 +1462,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/players/:id/detail', async (ctx) => {
     const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
     if (!player) return errorResponse('player not found', 404);
-    return jsonResponse(await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id));
+    const detail = await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id);
+    /*
+     * Where he came from, kept after it stops being the headline.
+     *
+     * Mid-draft a Team row says `1.04` and the reader needs nothing more. Once
+     * the season starts the row shows his shirt number instead — and "what did
+     * I spend on him" is still a real question in week nine, so the draft
+     * position moves here rather than being dropped.
+     *
+     * Read from Sleeper's own draft history, and only ever attached to a
+     * manager Sleeper names. Attributing a pick to a person is the worst thing
+     * on this card to get wrong, so an unnamed seat produces a line about the
+     * pick alone rather than a guess about who made it.
+     */
+    return jsonResponse({ ...detail, draft: await draftProvenanceFor(ctx.env.db, player.id) });
   });
 
   /**
@@ -1293,8 +1521,58 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playerId: player.id,
       name: player.fullName,
       queued: stored.queued,
+      queueOrder: stored.queueOrder,
       myGuy: myGuy(stored.level),
     });
+  });
+
+  /**
+   * Move a queued player to a new position in the user's own order.
+   *
+   * The reorder itself is `reorderQueue` in core — pure, tested, and the only
+   * thing that decides what a drag means. This route's whole job is to read the
+   * stored ladder, hand it to that function, and persist the one or two rows it
+   * says moved. It deliberately does not accept a whole ordering from the
+   * client: a client that could post a sequence could post a stale one, and a
+   * queue silently reverting to what it looked like two picks ago is exactly
+   * the corruption this feature must not have.
+   *
+   * The queue is a bookmark. Nothing here touches a Draft Score, and nothing
+   * here can: the module it delegates to operates on ids and ranks and has no
+   * access to a player's ranking at all.
+   */
+  router.post('/api/queue/reorder', async (ctx) => {
+    const body = await ctx.json<{ playerId?: string; toIndex?: number }>();
+    if (!body?.playerId) return errorResponse('playerId required', 400);
+    if (typeof body.toIndex !== 'number' || !Number.isFinite(body.toIndex)) {
+      return errorResponse('toIndex must be a number', 400);
+    }
+
+    const flags = new PlayerFlagsRepo(ctx.env.db);
+    /*
+     * Reconciled before the move, because the stored ladder and the live queue
+     * drift apart in ordinary use: a player queued from the Players screen on
+     * an older client has no rank, and a player drafted since the last drag
+     * still has one. Reconciling first means the indices the client sent are
+     * indices into the list it was actually looking at.
+     */
+    const queuedNow = [...(await flags.all()).entries()]
+      .filter(([, flag]) => flag.queued)
+      .map(([playerId]) => playerId);
+    const reconciled = reconcileQueue(await flags.queueEntries(), queuedNow);
+    const result = reorderQueue(reconciled, body.playerId, body.toIndex);
+    await flags.setQueueOrder(result.writes);
+
+    return jsonResponse({ order: result.sequence, compacted: result.compacted });
+  });
+
+  /** The queue, in the user's own order. */
+  router.get('/api/queue', async (ctx) => {
+    const flags = new PlayerFlagsRepo(ctx.env.db);
+    const queuedNow = [...(await flags.all()).entries()]
+      .filter(([, flag]) => flag.queued)
+      .map(([playerId]) => playerId);
+    return jsonResponse({ order: queueSequence(reconcileQueue(await flags.queueEntries(), queuedNow)) });
   });
 
   // -------------------------------------------------------------- newsletter
@@ -2008,7 +2286,9 @@ async function boundedFreeAgents(
   },
 ): Promise<string[]> {
   const adpRepo = new AdpRepo(db);
-  const snapshot = await adpRepo.latest();
+  // The platform market, for the same reason the players list uses it: one
+  // ranking, named, rather than whichever source was imported most recently.
+  const snapshot = await adpRepo.latestPlatformSnapshot();
   const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
 
   const available = (opts.players ?? (await new PlayerRepo(db).listAll())).filter(
@@ -2043,6 +2323,50 @@ async function boundedFreeAgents(
  * Used by both the manual refresh endpoint and the scheduled worker.
  */
 /** Non-empty body text, or null. Used only to report whether one was kept. */
+/**
+ * Which pick a player was, and who made it — from Sleeper's draft history.
+ *
+ * Answered from the selected league, because "drafted 1.02 by Joe" is a fact
+ * about one league rather than about the player: the same man went in the
+ * second round of one draft and the fourth of another, and a card that mixed
+ * them would be worse than a card with no line at all.
+ *
+ * Every part degrades independently. No selected league, no draft, or no pick
+ * for this player returns null and the card shows nothing; a pick whose seat
+ * Sleeper never named still produces the pick, which is most of the value.
+ */
+async function draftProvenanceFor(
+  db: Database,
+  playerId: string,
+): Promise<{ pickNo: number; pick: string; managerName: string | null; season: string | null; line: string } | null> {
+  const leagues = new LeagueRepo(db);
+  const league = (await leagues.listLeagues()).find((l) => l.isSelected) ?? null;
+  if (!league?.draftId) return null;
+
+  const draft = await leagues.getDraft(league.draftId);
+  if (!draft) return null;
+
+  const pick = (await leagues.listPicks(draft.id)).find((p) => p.playerId === playerId);
+  if (!pick) return null;
+
+  // The manager who actually holds the seat, named only if Sleeper named them.
+  const rosters = await leagues.listRosters(league.id);
+  const managerName =
+    (rosters.find((r) => r.rosterId === pick.rosterId)?.ownerName ?? '').trim() || null;
+
+  const teams = draft.teams || league.totalRosters || 12;
+  const label = draftPickLabel(pick.pickNo, teams);
+  if (!label) return null;
+
+  return {
+    pickNo: pick.pickNo,
+    pick: label,
+    managerName,
+    season: draft.season ?? null,
+    line: draftProvenanceLine({ pickNo: pick.pickNo, teams, managerName, season: draft.season }) ?? '',
+  };
+}
+
 function bodyOf(value: string | null | undefined): string | null {
   return value && value.trim() ? value : null;
 }
@@ -2100,36 +2424,26 @@ export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {})
 }
 
 /**
- * The league-intelligence half of a waiver row.
+ * The one league-intelligence field on a waiver row that still has no supplier.
  *
- * `core/waivers/board.ts` types `WaiverLeagueIntel` with three optional fields
- * and says what they mean: present-and-null is a pass that ran and found
- * nothing, absent is a deployment with no pass at all. This is the pass.
+ * `WaiverLeagueIntel` declares three. `core/faab` fills the price and
+ * `core/value/multiWeek.ts` now fills the multi-week column, so what is left is
+ * competition: how many rivals have a hole at the position and can afford to
+ * bid on it.
  *
- * Both answers come out of data the route already holds. Competition is a count
- * of rivals whose healthy bodies at the position do not cover their starting
- * slots, filtered by what they can still spend. Multi-week value is the shelf
- * life of the *reason he is available*: a player holding a job while somebody
- * is hurt is worth what the absence is worth, not what the production is.
+ * It answers from rosters already loaded — no extra query, no lineup scoring —
+ * and hands the same count to the price model, which asks for exactly this
+ * number and has been estimating it league-wide.
  */
 function waiverLeagueIntel(opts: {
   advice: ReturnType<typeof recommendWaiverUpgrades>;
   rosters: RosterRecord[];
   players: CanonicalPlayer[];
   shape: RosterShape;
-  rosteredIds: Set<string>;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
-  candidateInputs: StartSitInput[];
-}): {
-  competition: Map<string, CompetitionAssessment>;
-  multiWeek: Map<string, { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null }>;
-} {
+}): { competition: Map<string, CompetitionAssessment> } {
   const competition = new Map<string, CompetitionAssessment>();
-  const multiWeek = new Map<
-    string,
-    { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null }
-  >();
 
   const teams = opts.rosters.map((r) => ({
     rosterId: r.rosterId,
@@ -2139,25 +2453,19 @@ function waiverLeagueIntel(opts: {
   }));
 
   /*
-   * Availability comes from the evaluated candidates where it exists.
+   * Availability, through the same reading the rest of the app uses.
    *
    * A rival's own players are not evaluated here — that would be the twelve
-   * lineup optimisations this deliberately avoids — so their availability is
-   * read from the player dictionary's Sleeper status, which is the same field
-   * the beneficiary detector reads and is enough to know somebody is on IR.
+   * lineup optimisations this deliberately avoids — so the designation on the
+   * player record is normalized by `core/injury/model.ts` rather than compared
+   * against a private list of status strings. One definition of "ruled out",
+   * everywhere.
    */
   const meta = new Map<string, { position: string | null; unavailable?: boolean }>();
-  const clubmates = opts.players.map((p) => ({
-    playerId: p.id,
-    name: p.fullName,
-    team: p.team,
-    position: p.position,
-    status: p.status,
-  }));
   for (const p of opts.players) {
     meta.set(p.id, {
       position: p.position || null,
-      unavailable: p.status != null && RULED_OUT_STATUSES.has(p.status),
+      unavailable: isRuledOut(normalizeDesignation(p.status).designation),
     });
   }
 
@@ -2166,7 +2474,6 @@ function waiverLeagueIntel(opts: {
   );
   const bidding = opts.budgets?.rule.usesFaab === true;
   const needsByPosition = new Map<string, ReturnType<typeof teamNeedsFor>>();
-  const roleById = new Map(opts.candidateInputs.map((c) => [c.player.id, c]));
 
   for (const upgrade of opts.advice.upgrades) {
     for (const candidate of upgrade.candidates) {
@@ -2182,71 +2489,41 @@ function waiverLeagueIntel(opts: {
           : assessCompetition({
               needs,
               budgets: budgetByRoster,
-              // The 25th percentile of winning bids: what it has taken to win
-              // at the cheap end of this league, and so the floor a rival has to
+              // The 25th percentile of winning bids: what it has taken to win at
+              // the cheap end of this league, and so the floor a rival has to
               // clear to be in on him at all. Null in an unpriced league, where
               // nobody is excluded for affordability.
               expectedLow: opts.prices?.low ?? null,
               bidding,
             }),
       );
-
-      const beneficiary = beneficiaryOf(
-        { playerId: candidate.playerId, team: candidate.team, position: candidate.position },
-        clubmates,
-        opts.rosteredIds,
-      );
-      multiWeek.set(candidate.playerId, shelfLifeIntel(beneficiary, roleById.get(candidate.playerId) ?? null));
     }
   }
 
-  return { competition, multiWeek };
+  return { competition };
 }
 
 /**
- * How long this add is worth holding.
+ * Attach competition to the rows the board reads, leaving everything else alone.
  *
- * The distinction the waiver board asks for, and it changes the advice
- * completely: the same player can be a correct $1 claim and an incorrect $25
- * one. An absence with no published return date is a job; a week-to-week
- * designation is a loan, and pricing the second like the first is how a quarter
- * of a season's budget goes on one Sunday.
+ * Deliberately a fold over rows another pass already built, rather than a
+ * rebuild: multi-week value arrives the same way from its own supplier, and two
+ * passes that each reconstructed the candidate list would eventually disagree
+ * about who is on it.
  */
-function shelfLifeIntel(
-  beneficiary: ReturnType<typeof beneficiaryOf>,
-  input: StartSitInput | null,
-): { level: 'season_long' | 'multi_week' | 'streamer' | 'unknown'; label: string; detail: string | null } {
-  if (beneficiary) {
-    return beneficiary.returnsInWeeks != null
-      ? { level: 'streamer', label: 'One-week cover', detail: beneficiary.note }
-      : { level: 'multi_week', label: 'Holds the job for now', detail: beneficiary.note };
-  }
-  // Without a usage series there is nothing to say about the weeks ahead, and
-  // saying "season long" because nobody is hurt would be an inference from an
-  // absence.
-  const games = input?.usage?.length ?? 0;
-  if (games === 0) return { level: 'unknown', label: 'Multi-week value not known', detail: null };
-  return { level: 'season_long', label: 'His own job', detail: 'nobody he replaced is due back' };
-}
-
-/** Fold the intel onto the rows the board reads, leaving the shape otherwise alone. */
-function withLeagueIntel(
-  upgrades: ReturnType<typeof recommendWaiverUpgrades>['upgrades'],
-  intel: ReturnType<typeof waiverLeagueIntel>,
-) {
+function withCompetition<T extends { candidates: { playerId: string }[] }>(
+  upgrades: T[],
+  competition: Map<string, CompetitionAssessment>,
+): T[] {
   return upgrades.map((upgrade) => ({
     ...upgrade,
-    candidates: upgrade.candidates.map((candidate) => ({
-      ...candidate,
-      competition: intel.competition.get(candidate.playerId)
-        ? {
-            level: intel.competition.get(candidate.playerId)!.level,
-            label: intel.competition.get(candidate.playerId)!.label,
-            detail: intel.competition.get(candidate.playerId)!.detail,
-          }
-        : null,
-      multiWeek: intel.multiWeek.get(candidate.playerId) ?? null,
-    })),
+    candidates: upgrade.candidates.map((candidate) => {
+      const assessed = competition.get(candidate.playerId);
+      return {
+        ...candidate,
+        competition: assessed ? { level: assessed.level, label: assessed.label, detail: assessed.detail } : null,
+      };
+    }),
   }));
 }
 

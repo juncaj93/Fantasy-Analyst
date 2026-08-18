@@ -113,20 +113,18 @@ kept on the device and applied before the first paint.
 
 ## League intelligence
 
-Two fields on every waiver row that would otherwise read as unknown. **Who else
-wants him** is the rivals whose healthy bodies at the position do not cover
-their starting slots, filtered by what they can still spend — so a card can say
-*four teams need one, three of them are broke* rather than counting eleven
+**Who else wants him.** The rivals whose healthy bodies at a position do not
+cover their starting slots, filtered by what they can still spend — so a card
+says *four teams need one, three of them are broke* rather than counting eleven
 funded rivals as eleven bidders. The same count feeds the bid model, which asks
-for exactly that number. **How long he is worth holding** separates a player
-standing in for somebody hurt from a player who has the job.
+for exactly that number.
 
-Beyond the board: bilateral **trade fits** — deals scored separately for what
-you gain, what the partner gains and whether that manager plausibly says yes,
-because a deal that is fair and implausible is a deal nobody sends. **Bye and
-playoff planning**, which stays silent until a bye actually leaves a slot short
-and gives December schedules no weight at all until the season says the team is
-heading there. And a **decision feed** that reports something only when a
+Beyond the waiver row: bilateral **trade fits** — deals scored separately for
+what you gain, what the partner gains and whether that manager plausibly says
+yes, because a deal that is fair and implausible is a deal nobody sends.
+**Bye and playoff planning**, which stays silent until a bye actually leaves a
+slot short and gives December schedules no weight until the season says the team
+is heading there. And a **decision feed** that reports something only when a
 recommendation actually moved — never when a refresh found the same numbers.
 
 Nothing here submits a transaction; every request it makes to Sleeper is a read.
@@ -167,7 +165,8 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, identity ladder, engines |
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
-| [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | manager profiles, expected FAAB cost, waiver competition, trade fit |
+| [docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](docs/PLAYER_AND_LINEUP_INTELLIGENCE.md) | expected points, injury beneficiaries, contingency lineups, self-grading |
+| [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | waiver competition, bilateral trade fit, planning, the decision feed |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |

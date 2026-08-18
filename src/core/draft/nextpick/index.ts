@@ -15,6 +15,7 @@
 import type { PositionTierMap } from '../tiers.ts';
 import { explainNextPick, type NextPickExplanation } from './explain.ts';
 import { readRoom, type CompletedPick, type RoomBehaviour, type UniversePlayer } from './room.ts';
+import { readTeamPrior, type TeamPriorResult } from './teamPrior.ts';
 import { hashString } from './rng.ts';
 import { positionsInPlay } from './demand.ts';
 import { SIMULATION, simulateNextPick, type SimulationInput, type SimulationResult } from './simulate.ts';
@@ -25,6 +26,7 @@ export type { NextPickExplanation } from './explain.ts';
 export { buildPickOwnership, slotAtPick, type PickOwnership, type TradedPick } from './ownership.ts';
 export { positionDemand, positionsInPlay, phaseWeight, DEMAND } from './demand.ts';
 export { readRoom, ROOM, NEUTRAL_ROOM } from './room.ts';
+export { readTeamPrior, teamMultiplier, TEAM_PRIOR, type TeamPriorResult } from './teamPrior.ts';
 export { SIMULATION, simulateNextPick, needShareAt, tierScarcityBonus } from './simulate.ts';
 export { explainNextPick, driverLine } from './explain.ts';
 export { hashString, mulberry32 } from './rng.ts';
@@ -49,6 +51,8 @@ export interface NextPickReport {
   slotsAhead: number[];
   needAhead: Map<string, number>;
   room: RoomBehaviour;
+  /** The local-team appetite that was applied, if any. Diagnostics only. */
+  teamPrior: TeamPriorResult | null;
   /** True when the board was too thin to simulate and the ADP model answered. */
   marketOnly: boolean;
   degraded: string[];
@@ -58,9 +62,23 @@ export interface NextPickReport {
   stateKey: string;
 }
 
-export interface NextPickRequest extends Omit<SimulationInput, 'room' | 'stateKey'> {
-  /** Completed picks in this draft, for reading the room. */
-  completed: CompletedPick[];
+export interface NextPickRequest extends Omit<SimulationInput, 'room' | 'stateKey' | 'teamPrior'> {
+  /**
+   * Completed picks in this draft, for reading the room.
+   *
+   * Carries the NFL team of the player taken as well, which the local-team read
+   * needs and the positional reads ignore.
+   */
+  completed: (CompletedPick & { team?: string | null })[];
+  /**
+   * NFL teams this room is expected to favour, upper-case.
+   *
+   * Empty or absent in every league that has not named one, and the model is
+   * then exactly what it was before this existed.
+   */
+  localTeams?: readonly string[];
+  /** Managers in the league, for scaling "how early is early". */
+  teamsInLeague?: number;
   /** Every priced player, drafted or not — the market's own map of the board. */
   universe: UniversePlayer[];
   tiers?: Map<string, PositionTierMap>;
@@ -115,6 +133,15 @@ export function draftStateKey(request: NextPickRequest): string {
     request.totalPicks,
     request.simulations ?? SIMULATION.default,
     request.completed.length,
+    /*
+     * The local prior belongs in the fingerprint.
+     *
+     * It multiplies the hazard, so two boards identical in every other respect
+     * but differing in which teams the room favours must not share an answer —
+     * this is the one input that could change the numbers without changing a
+     * pick, a roster or a price.
+     */
+    [...(request.localTeams ?? [])].sort().join('+') || 'no-local',
     rosters,
     board,
   ];
@@ -138,6 +165,16 @@ export function estimateNextPickAvailability(request: NextPickRequest): NextPick
         currentPick: request.currentPick,
         positions: positionsInPlay(request.shape),
         universe: request.universe,
+      }),
+      /*
+       * What this room has done with the teams it is local to — measured from
+       * the same pick stream the positional reads use, and falling back to a
+       * bounded assumption only while there is too little of it to measure.
+       */
+      teamPrior: readTeamPrior({
+        teams: request.localTeams ?? [],
+        picks: request.completed.map((pick) => ({ ...pick, team: pick.team ?? null })),
+        teamsInLeague: request.teamsInLeague ?? 12,
       }),
     });
 
@@ -193,6 +230,7 @@ export function estimateNextPickAvailability(request: NextPickRequest): NextPick
     slotsAhead: result.slotsAhead,
     needAhead: result.needAhead,
     room: result.room,
+    teamPrior: result.teamPrior,
     marketOnly: result.marketOnly,
     degraded: result.degraded,
     elapsedMs: result.elapsedMs,

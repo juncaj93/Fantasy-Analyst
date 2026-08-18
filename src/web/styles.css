@@ -2295,6 +2295,80 @@ button:disabled {
   opacity: 0.4;
 }
 
+/*
+ * The sort control and the refresh glyph, sharing the bar's trailing end.
+ *
+ * They are both about the board as a whole, which is what this end of the
+ * navigation bar is for, and putting them together is what keeps the sort from
+ * costing a row — and on this screen a row is a player.
+ */
+.nav-trailing-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/*
+ * Score / ADP / DOG.
+ *
+ * A segmented control at the smallest size that is still a control: three
+ * words, one hairline frame, and the selected one filled. It deliberately does
+ * not look like the filter chips below — those choose which players, this
+ * chooses what order, and two identical-looking rows of chips answering
+ * different questions is how a screen stops being readable at a glance.
+ */
+.sort-control {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.sort-chip {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  /*
+   * Tight, because three of these plus the refresh glyph share one end of the
+   * bar on a 360px phone. The row itself is a full-height tap target, so the
+   * narrow padding costs legibility rather than reachability.
+   */
+  padding: 5px 7px;
+  min-height: 30px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.sort-chip + .sort-chip {
+  border-left: 1px solid var(--hairline);
+}
+
+.sort-chip[data-active='yes'] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.sort-chip:active {
+  opacity: 0.6;
+}
+
+/* The narrowest phones: the words stay, the padding goes. */
+@media (max-width: 375px) {
+  .sort-chip {
+    padding: 5px 5px;
+    font-size: 0.64rem;
+  }
+}
+
 .icon-btn:disabled {
   opacity: 0.5;
   cursor: progress;
@@ -4220,4 +4294,195 @@ table.compact tr:last-child td {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+ * The foot of a paged list: either the control that fetches more, or the line
+ * that says there is no more.
+ *
+ * Quiet and centred. It is the only thing on the screen that is about the list
+ * rather than about a player, so it reads as a footnote — and it is always
+ * present once the list has loaded, because the alternative is a list that
+ * simply stops and leaves the reader unable to tell "no more players" from
+ * "still loading". That ambiguity is the whole reason Players appeared to end
+ * at sixty names.
+ */
+.list-end {
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-3) var(--sp-2);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/*
+ * The queue's drag handle.
+ *
+ * It stands where the rank numeral does on every other view, because on the
+ * queue the position in the list *is* the rank and a numeral beside a handle
+ * was saying it twice. Quiet — it is an affordance, not a control the reader
+ * is meant to look at — and a full-height target, because a six-pixel grip on
+ * a phone is a grip nobody can grab.
+ *
+ * `touch-action: none` is the load-bearing line. Without it Safari has already
+ * decided the gesture is a scroll by the time the first pointermove arrives,
+ * and `preventDefault` there does nothing at all.
+ */
+.drag-handle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  align-self: stretch;
+  padding: 0 2px;
+  color: var(--text-faint);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * The row under the finger: lifted, and slightly out of the page.
+ *
+ * A shadow and a hair of scale, which is what every native list does and what
+ * makes "this row is in my hand" legible without a colour change that would
+ * fight the position tints the cards already carry.
+ */
+.player-row[data-dragging='yes'],
+[data-testid='recommendation-row'][data-dragging='yes'] {
+  box-shadow: var(--shadow-2, 0 6px 18px rgba(0, 0, 0, 0.18));
+  transform-origin: center;
+  cursor: grabbing;
+}
+
+/*
+ * A labelled field with its own action, inside a settings card.
+ *
+ * Used by the local-team prior, where the input and the control that commits it
+ * belong on one line and the explanation belongs under both — the explanation
+ * being the part that matters, since the setting's whole risk is being read as
+ * "make my team's players better".
+ */
+.local-teams {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.field-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 4px;
+}
+
+.field-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * A fifth number on a line measured for four.
+ *
+ * `Score · ADP · Val · Next` was fitted to 360px with nothing to spare — the
+ * labels are already as short as they can be without becoming a puzzle, and
+ * `Value` and `Next pick` were cut to make the fourth column fit at all. `DOG`
+ * is a genuine fifth.
+ *
+ * Three things this must not do, each of which the repo's own tests caught in
+ * turn:
+ *
+ * **It must not drop a metric.** A card that hid `Next` to make room for a
+ * second market number would have its priorities backwards.
+ *
+ * **It must not style only the rows that carry DOG.** That is the obvious
+ * version and it gave the board cards of 57px and 58px, so the rhythm the
+ * reader scans down broke on every player Underdog had not priced. The flag is
+ * on the list, so one board gets one treatment and one height.
+ *
+ * **It must not change the type size.** The metrics line and the tier-cliff
+ * chip are the two things in `.player-row-bottom`, and the row is as tall as
+ * the taller of them. At 0.72rem the metrics measure 14px, exactly the chip's
+ * height, which is why a warned card and an ordinary one have always been the
+ * same height. Shrinking the type to 0.70rem took the metrics to 13px and the
+ * chip stayed at 14 — so every warned card became a pixel taller than its
+ * neighbours, which is the stutter this whole area of the stylesheet exists to
+ * prevent.
+ *
+ * So the space comes out of the gaps, and only the gaps.
+ *
+ * A board with no Underdog snapshot is untouched and looks precisely as it did
+ * before any of this existed.
+ */
+[data-testid='board-list'][data-dog='yes'] .player-row-bottom > .player-row-metrics {
+  gap: 2px 4px;
+  font-size: 0.68rem;
+  /*
+   * Pinned, and this is the load-bearing line.
+   *
+   * The metrics line and the tier-cliff chip are the two things in
+   * `.player-row-bottom`, and the row is as tall as the taller of them. At the
+   * original size the metrics measure exactly the chip's height, which is why a
+   * warned card and an ordinary one have always been the same height. Letting
+   * the type shrink freely took the metrics a pixel under the chip, and every
+   * warned card became a pixel taller than its neighbours — the exact stutter
+   * this part of the stylesheet exists to prevent.
+   *
+   * So the box keeps its height and only the glyphs inside it get smaller.
+   */
+  line-height: 15px;
+}
+
+/*
+ * On a DOG board the warning gives before the numbers do.
+ *
+ * That order is the card's own, written down long before this: gaps first, then
+ * the chip, then type, and nothing ever drops a metric. `Tier cliff · 2 left`
+ * is nineteen characters and `Cliff · 2` is nine, and the ten it saves are
+ * exactly what a fifth number needs on a 390px phone. The full spelling still
+ * appears on anything wider, and the accessible name is the whole sentence at
+ * every width — see `.player-row-cliff`, where that contract lives.
+ */
+@media (max-width: 480px) {
+  [data-testid='board-list'][data-dog='yes'] .cliff-full {
+    display: none;
+  }
+
+  [data-testid='board-list'][data-dog='yes'] .cliff-tight {
+    display: inline;
+  }
+}
+
+@media (max-width: 380px) {
+  [data-testid='board-list'][data-dog='yes'] .player-row-bottom > .player-row-metrics {
+    gap: 2px 3px;
+    font-size: 0.63rem;
+    line-height: 15px;
+    letter-spacing: -0.01em;
+  }
+
+  /*
+   * The line may wrap between metrics; it may never wrap inside one. `DOG` on
+   * one line and `48.2` on the next reads as two different things.
+   */
+  [data-testid='board-list'][data-dog='yes'] .metric {
+    white-space: nowrap;
+  }
 }

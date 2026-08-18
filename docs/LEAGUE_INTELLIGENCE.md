@@ -6,21 +6,23 @@ manager profiles and its FAAB pricing all have canonical homes already —
 `server/repos/transactions.ts`, `server/services/leagueStrategyService.ts`. None
 of it is reimplemented here.
 
-What this pass owns is the part those modules declare and do not fill:
+What this pass owns is the one part those modules declare and still do not
+fill. Multi-week value had no supplier when this was written and now has one —
+`core/value/multiWeek.ts`, via `waiverMultiWeekFor` — so it is no longer here:
 
 ```ts
 // core/waivers/board.ts
 export interface WaiverLeagueIntel {
-  faab?: { … } | null;        // filled by core/faab
+  faab?: { … } | null;        // core/faab
+  multiWeek?: { … } | null;   // core/value/multiWeek
   competition?: { … } | null; // ← this pass
-  multiWeek?: { … } | null;   // ← this pass
   leagueRank?: number | null;
 }
 ```
 
 with a note on the interface saying exactly how to read an empty one:
 *present-and-null is a pass that ran and found nothing; absent is a deployment
-without the pass.* They shipped absent.
+without the pass.* Competition shipped absent and stayed that way.
 
 ---
 
@@ -46,6 +48,10 @@ So the count is now per position:
 | `urgent` | healthy bodies at the position < dedicated starting slots |
 | `thin` | exactly enough, and a flex slot could take another |
 | `covered` | spare |
+
+Availability is read through `normalizeDesignation` and `isRuledOut` from
+`core/injury/model.ts` rather than against a list of status strings kept here,
+so "ruled out" means one thing across the app.
 
 Flex is eligibility, not a required slot. A team with two backs, two receivers
 and one flex does not *need* a third back — it can *use* one, and collapsing
@@ -77,31 +83,13 @@ back to the league-wide figure when positional needs were not supplied.
 
 ---
 
-## Multi-week value — `core/league/beneficiary.ts`
+## Multi-week value — not here
 
-The board asks how long an add is worth holding. The honest answer is the shelf
-life of *the reason he is available*: a back-up with a two-week job and a back-up
-with a season are the same player at wildly different prices.
-
-The inference is deliberately narrow, because a wide one would be wrong most of
-the time. The absent player must play the **same position for the same club**,
-and must be **rostered in this league** — which is the closest available witness
-that he was the starter, and is a fact rather than an opinion about a depth chart
-the app does not have. Without the second condition, every fourth receiver on a
-club with an injured fifth receiver would wear the label and the label would mean
-nothing.
-
-| Sleeper status | Reading |
-| --- | --- |
-| `Out`, `Doubtful` | week-to-week → `streamer`, reassess next week |
-| IR, PUP, NFI, suspended | no published return → `multi_week`, he has the job |
-| nobody absent, usage series exists | `season_long` |
-| nobody absent, no usage series | `unknown` |
-
-That last row is the one worth defending: "season long" inferred from nobody
-being hurt is an inference from an absence, and the app does not make those.
-
----
+Owned by `core/value/multiWeek.ts` and wired by `waiverMultiWeekFor`. An earlier
+version of this workstream carried its own beneficiary detector and shelf-life
+classifier; both were deleted when the intelligence layer landed with better
+ones. The lesson is worth keeping: two passes filling the same declared field
+would have produced a row whose two halves disagreed about the same player.
 
 ## Trade fits — `core/league/tradeFit.ts`
 
@@ -129,7 +117,8 @@ before anything else on it, so it cannot disagree with the Trades ladder about
 whether somebody trades. A manager with no record is marked *untested rather
 than unwilling*, which is the honest version of the same caution.
 
-Timing calls come from opportunity and efficiency signals, and every true call is
+Timing calls come from opportunity and efficiency signals — expected points via
+`assessXfp`, off the usage weeks the route already loads — and every true call is
 returned including the unflattering one:
 
 `Buy before usage converts to points` · `Buy after temporary box-score dip` ·
@@ -208,17 +197,17 @@ routes that already own them: `POST /api/leagues/:id/strategy/refresh`,
 
 ## What is not connected, and why
 
-1. **No four-week outlook.** A rest-of-season projection is the weekly engine's
-   contract. The waiver board's `next 4` column stays unknown until one exists.
-2. **No bye-week source.** Sleeper's player dictionary has 49 fields and none of
+1. **No bye-week source.** Sleeper's player dictionary has 49 fields and none of
    them is a bye — checked against the live payload — and this app stores no NFL
    schedule. `/plan` returns no gaps and names the missing input rather than
-   reporting an all-clear it has not earned.
-3. **No expected-points model.** Two of the five timing calls wait on xFP; the
-   touchdown-dependency and role signals drive the other three today.
+   reporting an all-clear it has not earned. The intelligence layer takes a
+   `byeWeek` input for the same reason and has no supplier for it either.
+2. **`Sell before schedule turns` has no schedule.** The other four timing calls
+   rest on signals that exist; this one waits on the same missing input as the
+   bye planner, and produces nothing rather than guessing.
 
-One signal is available and deliberately unused: Sleeper publishes
-`depth_chart_order` and `depth_chart_position`. They would sharpen the
-beneficiary detector, and they belong to the role layer rather than this one — a
-second opinion about who the starter is, living in the pricing code, is the kind
-of duplicated judgement this app avoids.
+One signal is available and deliberately unused here: Sleeper publishes
+`depth_chart_order` and `depth_chart_position`. They belong to the role layer,
+which is where `core/injury/beneficiaries.ts` now lives — a second opinion about
+who the starter is, living in the pricing code, is the kind of duplicated
+judgement this app avoids.

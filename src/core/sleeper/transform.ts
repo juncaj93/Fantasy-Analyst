@@ -56,6 +56,21 @@ export function isExcludedPosition(position: string | null | undefined): boolean
  * sentinel far outside any draft. Treat that sentinel as "not ranked" rather
  * than letting a rank of 9999999 look like a real, very late pick.
  */
+/**
+ * The number on his shirt, if Sleeper knows it.
+ *
+ * Sent as a number in most rows and as a string in a long tail of them, so both
+ * are read. Zero is kept: it is a number real players wear, and dropping it
+ * would be this function deciding that a player has no jersey because his is
+ * the one that looks like an absence.
+ */
+function jerseyNumber(p: SleeperPlayer): number | null {
+  const raw = p.number;
+  if (raw == null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  return Number.isFinite(n) && n >= 0 && n < 100 ? Math.trunc(n) : null;
+}
+
 function searchRank(p: SleeperPlayer): number | null {
   const raw = p.search_rank;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
@@ -114,6 +129,7 @@ export function toCanonicalPlayers(
       aliases: defaultAliases(fullName, firstName, lastName),
       externalIds,
       searchRank: searchRank(p),
+      jerseyNumber: jerseyNumber(p),
       heightInches: parseHeight(p.height),
       weightPounds: parseWeight(p.weight),
       age: parseWeight(p.age),

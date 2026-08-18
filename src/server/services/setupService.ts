@@ -212,7 +212,9 @@ export class SetupService {
       this.players.count(),
       this.players.countRanked(),
       this.leagues.getSelectedLeague(),
-      this.adp.latest(),
+      // The platform snapshot: Setup reports the draft order the board actually
+      // uses, and that is never the Underdog one.
+      this.adp.latestPlatformSnapshot(),
       this.newsletterStatus(),
       this.props.freshness(),
     ]);
