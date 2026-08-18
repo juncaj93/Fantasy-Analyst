@@ -565,7 +565,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
 
     const startable = startablePositions(shape);
-    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable });
+    const allPlayers = await new PlayerRepo(db).listAll();
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable, players: allPlayers });
 
     const [rosterInputs, candidateInputs, freshness] = await Promise.all([
       startSitInputsFor(db, mine.playerIds),
@@ -612,7 +613,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const intel = waiverLeagueIntel({
       advice,
       rosters,
-      players: await new PlayerRepo(db).listAll(),
+      players: allPlayers,
       shape,
       rosteredIds,
       budgets: strategy?.budget ?? null,
@@ -1993,13 +1994,24 @@ const FREE_AGENTS_PER_POSITION = 12;
  */
 async function boundedFreeAgents(
   db: Database,
-  opts: { rosteredIds: Set<string>; startable: Set<string> },
+  opts: {
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+    /**
+     * The player dictionary, when the caller already holds it.
+     *
+     * Reading it is a scan of every non-excluded player, and the waivers route
+     * needs the same list a second time to work out who is hurt behind whom.
+     * Passing it in keeps that one read rather than two.
+     */
+    players?: CanonicalPlayer[];
+  },
 ): Promise<string[]> {
   const adpRepo = new AdpRepo(db);
   const snapshot = await adpRepo.latest();
   const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
 
-  const available = (await new PlayerRepo(db).listAll()).filter(
+  const available = (opts.players ?? (await new PlayerRepo(db).listAll())).filter(
     (p) =>
       p.active &&
       !opts.rosteredIds.has(p.id) &&
