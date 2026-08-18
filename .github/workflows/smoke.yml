@@ -27,7 +27,16 @@ jobs:
     # A deploy that failed has nothing worth smoke-testing.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Enough wall clock for a bad apt day, with the real budget on the step
+    # below that can actually hang.
+    #
+    # Twenty at the job level was being spent before a single check ran:
+    # `playwright install --with-deps webkit` fetches WebKit's system packages,
+    # and on one run here it took sixteen of the twenty minutes, leaving under
+    # four for a suite that needs about ten. The run was cancelled mid-check
+    # with nothing failing — which reads exactly like a broken site and is not
+    # one. The same correction was made to `ci.yml` for the same reason.
+    timeout-minutes: 45
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
     steps:
@@ -40,6 +49,9 @@ jobs:
       - run: npx playwright install --with-deps webkit
 
       - name: Check the live site on an iPhone
+        # The one step that can hang: twenty minutes of checking a live site is
+        # a stuck browser or a site that stopped answering, whichever apt did.
+        timeout-minutes: 20
         run: |
           npx playwright test --config playwright.production.config.ts \
             --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360
