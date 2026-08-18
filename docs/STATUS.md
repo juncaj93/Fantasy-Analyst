@@ -420,10 +420,14 @@ suggestions).
    nominates until it finishes or a sync fails. Syncing is a write, so a
    view-only reader's refresh rebuilds the board from stored state and never
    starts a background write loop.
-8. **The browser suite shares one dev server across all three viewports.** Run
-   repeatedly against a reused server, accumulated review-queue state can make
-   `can reassign an item to the right player` fail; it passes on a fresh server,
-   which is what CI uses. Worth isolating per project if it ever fails in CI.
+8. **The browser suite shares one dev server across all three viewports, and
+   reuses one across runs.** `reuseExistingServer` is on outside CI, so a server
+   left behind by an interrupted run is picked up by the next one with its state
+   intact — which is how a 390-width run comes to see a 375-width run's
+   newsletter sender, and how accumulated review-queue state makes `can reassign
+   an item to the right player` fail. Both pass on a fresh server, which is what
+   CI uses; locally, run with `CI=1` or kill any surviving `dev-server.mjs`
+   first. Worth isolating per project if it ever fails in CI. Worth isolating per project if it ever fails in CI.
 
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
@@ -682,8 +686,15 @@ its own design problem. Manager profiles are served and cached but likewise
 unrendered; the ladder consumes them internally to set its opening discount.
 Both are complete, tested and reachable, and both are honestly one screen short.
 
-Checks at this milestone: 1,776 unit/integration tests (92 new), typecheck,
-build and the browser suite green.
+Checks at this milestone: 1,776 unit/integration tests (92 new), 751 Chromium
+mobile browser checks, typecheck and build all green.
+
+One note on running the browser suite locally, because it cost time here.
+`reuseExistingServer` is on outside CI, so a dev server left behind by an
+interrupted run is silently reused by the next one — with the previous run's
+state still in it. That is the mechanism behind limitation 8, and it presents as
+a viewport seeing another viewport's data. `CI=1` forces a fresh server; failing
+that, kill any surviving `dev-server.mjs` before re-running.
 
 ## Recommended next work
 
