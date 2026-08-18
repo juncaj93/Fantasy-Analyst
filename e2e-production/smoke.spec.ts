@@ -765,13 +765,29 @@ test.describe('the decision intelligence', () => {
     expect(answered!.ceiling).toBe('ceiling');
   });
 
-  test('the refresh button is there, and refuses a stranger', async ({ page, request }) => {
+  /*
+   * Renamed and re-pointed, because the control it named stopped existing.
+   *
+   * Team used to carry an explicit "Refresh data" button (`startsit-refresh`).
+   * The weekly-tool pass replaced it with a pull-to-refresh gesture plus a
+   * visually-hidden focusable fallback, updated `e2e/team-startsit.spec.ts`
+   * accordingly, and did not update this file — which only runs after a deploy,
+   * so nothing in that change's own CI could have caught it. Production smoke
+   * went red on the deploy of that commit and stayed red.
+   *
+   * The assertion is now on the surface that exists: the pull container is the
+   * refresh affordance, and the hidden button is how anyone not making a
+   * gesture reaches it. `toBeAttached` rather than `toBeVisible` for the
+   * fallback — being off-screen is the entire point of it.
+   */
+  test('the refresh affordance is there, and refuses a stranger', async ({ page, request }) => {
     await page.goto('/');
     await open(page, 'team');
-    await expect(page.getByTestId('startsit-refresh')).toBeVisible();
+    await expect(page.getByTestId('team-pull')).toBeVisible();
+    await expect(page.getByTestId('pull-refresh-fallback')).toBeAttached();
 
     // It spends provider quota, so it is a write, and a write from nobody is
-    // refused. This suite never authenticates, so the button is never pressed.
+    // refused. This suite never authenticates, so the refresh is never fired.
     const write = await request.post('/api/startsit/refresh', { failOnStatusCode: false });
     expect([401, 429, 503]).toContain(write.status());
   });
