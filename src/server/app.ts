@@ -46,6 +46,7 @@ import { detectDisagreement, type Disagreement } from '../core/market/disagreeme
 import { evaluateBench, type HeldPlayer } from '../core/roster/bench.ts';
 import { buildLadder, type LadderInputs } from '../core/trades/ladder.ts';
 import { assessConsolidation, type ConsolidationAdvice } from '../core/trades/consolidation.ts';
+import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
 import { LeagueStrategyService, type StrategyContext } from './services/leagueStrategyService.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
@@ -486,6 +487,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       mode,
     });
 
+    /*
+     * The two slots the weekly card has been carrying empty.
+     *
+     * Expected points for everybody who has stored usage, and — only for a slot
+     * whose gap to the best legal alternative is genuinely close — the
+     * conditions that would change the recommendation. Both are attached to the
+     * evaluations that already travel in this response, so the card the Team
+     * screen builds from them lights up without a second request and without
+     * that file changing.
+     */
+    const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
+    const withIntelligence = <T extends { playerId: string }>(evaluations: T[]): T[] =>
+      evaluations.map((evaluation) => {
+        const extra = intelligence.get(evaluation.playerId);
+        return extra ? { ...evaluation, ...extra } : evaluation;
+      });
+
     const unknownPlayers = mine.playerIds.length - inputs.length;
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
@@ -500,6 +518,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
        */
       rosterShape: shape,
       ...recommendation,
+      starters: withIntelligence(recommendation.starters),
+      bench: withIntelligence(recommendation.bench),
+      undecidable: withIntelligence(recommendation.undecidable),
       notes: unknownPlayers > 0
         ? [...recommendation.notes, `${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`]
         : recommendation.notes,
@@ -579,6 +600,35 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * taking the upgrade list with it.
      */
     const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+
+    /*
+     * What each recommended add is worth past this Sunday.
+     *
+     * The board has carried a `multi-week value` column since it was built and
+     * has been reporting it as having no supplier; this is the supplier. Scoped
+     * to the players who actually made the board — a valuation for the other
+     * forty in the scanned pool is work nobody will read.
+     *
+     * It changes no ordering. `compareRows` sorts on strength and gain, and a
+     * level attached here is a sentence on a row that had already earned its
+     * place.
+     */
+    const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
+    const multiWeek = waiverMultiWeekFor({
+      playerIds: boardIds,
+      inputs: candidateInputs,
+      scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
+      profile,
+      currentWeek: nflState?.week ?? 1,
+    });
+    const upgradesWithValue = advice.upgrades.map((upgrade) => ({
+      ...upgrade,
+      candidates: upgrade.candidates.map((candidate) => {
+        const value = multiWeek.get(candidate.playerId);
+        return value ? { ...candidate, multiWeek: value } : candidate;
+      }),
+    }));
+
     const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
       .context(league.id, { week: nflState?.week ?? 1, season: league.season })
       .catch(() => null);
@@ -598,6 +648,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: freshness,
       ...advice,
+      upgrades: upgradesWithValue,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
