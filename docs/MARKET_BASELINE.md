@@ -114,6 +114,28 @@ separately, on the market-value component's own breakdown and in `marketBlend`.
 Positional scarcity, the tier ladders and the survival model also still read
 Sleeper's own number. The blend reaches `marketValueComponent` and nothing else.
 
+## The card
+
+`Score 88 · ADP 7.8 · DOG 6.2 · Val -4.8 · Next 0%` — five numbers on a line
+that was fitted to exactly four.
+
+The card's own priority order, written down before DOG existed, is **gaps first,
+then the chip, then type, and nothing ever drops a metric**. That order is what
+the fifth number is paid for out of. On a board carrying DOG the tier-cliff
+warning uses its short spelling (`Cliff · 2` rather than `Tier cliff · 2 left`)
+at phone widths, the metric gaps close up, and the type shrinks a little — with
+its **line-height pinned**, which is the part that is easy to get wrong: the row
+is as tall as the taller of the metrics line and the chip, so letting the type
+shrink freely makes every warned card a pixel taller than its neighbours and the
+board loses the rhythm a reader scans down.
+
+The flag goes on the **list**, not on the rows that happen to have a DOG value.
+Styling only those rows is the obvious version and it gives the board two card
+heights, one for players Underdog has priced and one for players it has not.
+
+A board with no Underdog snapshot is untouched and renders exactly as it did
+before any of this existed.
+
 ## Sorting
 
 The board offers three orderings — `Score` (default), `ADP` (Sleeper ascending)
