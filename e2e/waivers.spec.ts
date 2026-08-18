@@ -145,17 +145,21 @@ test.describe('the waivers page', () => {
       await expect(sheet).toContainText(field);
     }
     /*
-     * The two fields the league-intelligence pass owns now say something.
+     * Competition has a supplier now, so it says something.
      *
      * Asserted as "not the unknown mark" rather than against a particular
-     * sentence: the labels are that pass's to word, and pinning them here would
-     * make this spec fail on a rewording rather than on a regression.
+     * sentence: the label is that pass's to word, and pinning it here would make
+     * this spec fail on a rewording rather than on a regression.
+     *
+     * Its two neighbours are deliberately not asserted, because both are
+     * legitimately unknown against seeded data: the price needs bid history in
+     * the league, and multi-week value needs stored usage — `waiverMultiWeek`
+     * declines without it and says so. Requiring them would pin behaviour that
+     * is only correct once two separate feeds have run.
      */
-    for (const field of ['Competition', 'Beyond this week']) {
-      const line = sheet.locator('.weekly-line').filter({ hasText: field }).first();
-      await expect(line.getByTestId('waiver-unknown')).toHaveCount(0);
-      expect((await line.innerText()).replace(field, '').trim().length).toBeGreaterThan(0);
-    }
+    const competition = sheet.locator('.weekly-line').filter({ hasText: 'Competition' }).first();
+    await expect(competition.getByTestId('waiver-unknown')).toHaveCount(0);
+    expect((await competition.innerText()).replace('Competition', '').trim().length).toBeGreaterThan(0);
 
     // And the price, which has no history behind it in this league, still reads
     // as unknown rather than borrowing confidence from the fields beside it.
