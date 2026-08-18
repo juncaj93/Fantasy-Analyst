@@ -156,67 +156,97 @@ Nothing fetches Underdog at request time. A live draft must never wait on a
 third party, so the path is the same one Sleeper ADP already follows: fetch in
 CI, import a frozen snapshot.
 
-### What the URL has to return
+### The sources, which need no configuration
 
-This app cannot tell you which URL is right — it can only tell you what a right
-one returns. Point `--dry-run` at a candidate and it answers in one line:
+Both are published pages and the script knows where they are:
+
+| | |
+| --- | --- |
+| primary | `https://www.bestballteambuilder.com/underdog-best-ball-average-draft-position` |
+| fallback | `https://www.4for4.com/underdog/adp` |
+
+Run **Actions → Refresh Underdog ADP**. It also runs daily at 12:00 UTC, an
+hour after the Sleeper refresh. Tick **dry run** on a manual run to see what
+each source returns without importing anything.
+
+### Reading a board off a page
+
+The primary publishes its Big Board as an ordinary HTML table —
+`Player | Position | Team | Round | Overall | ADP | …` — and three of those
+columns sort exactly like ADP without being it. The column is therefore chosen
+by what its heading *means*, never by position: `ADP`, `Underdog ADP`, `UD ADP`
+and `Average Draft Position` name one; `Overall`, `Round`, `Rank`, `Tier` and
+any projection are refused by name before the values are even read.
+
+`Overall` is the one that would do real damage. It is a dense 1..500 run, so a
+board imported from it looks entirely plausible and is a ranking — which is why
+the shape check runs afterwards regardless of how convincing the heading was.
+
+The page's own **Last updated** date becomes `snapshotAt`. It resolves to
+midnight UTC, which errs towards calling a board *older* than it is — the safe
+direction for a freshness check. A page that publishes no date reports none
+rather than borrowing the fetch time.
+
+JSON still works. The parser sniffs the payload, so the source moving between a
+page and an endpoint is something this survives rather than something that
+silently empties the column.
+
+**What it refuses.** A page with no table carrying both a player column and an
+ADP column throws, listing every header it did find. So does an empty React
+shell that renders its board in the browser, and so does an ADP column that
+holds no numbers. The failure this is written against is not a crash — it is a
+redesign, after which a parser that shrugs and takes the nearest table would
+fill `DOG` from something that is not Underdog's ADP, with nothing on screen
+able to say so.
+
+On the 4for4 fallback the Underdog-named column is preferred as ever. A lone
+`ADP` column there is accepted **only** when the page itself names Underdog,
+and never when a second ADP column is present — with two, the unnamed one could
+be their consensus, which is precisely the substitution this feature exists to
+prevent. The CSV export keeps the strict rule: a file has no page context to
+vouch for it, so the column must be named.
+
+### Checking a candidate URL
+
+`--dry-run` reports whether the payload parsed, which column was read, how fresh
+it is and how many players it carries — and writes nothing:
 
 ```bash
 npx vite-node scripts/fetch-underdog-adp.mjs --primary <url> --dry-run
 ```
 
-A usable primary returns **JSON**: either a bare array of players, or an object
-with them under `players` / `rows` / `data`. Each entry needs a name
-(`fullName`, `name`, or `firstName`+`lastName`) and an **average draft
-position** under `adp` / `underdogAdp` / `averageDraftPosition` / `avgPick`. An
-`updatedAt` / `asOf` field at the top level is worth having — it is what stops
-a board regenerated overnight from looking nine hours fresher than it is.
-
-A usable fallback returns **CSV** with a player-name column and a column whose
-header names Underdog (`Underdog ADP`, `UD ADP`). A bare `ADP` column is *not*
-accepted there: on a 4for4 export that is their own consensus, and importing it
-as DOG is precisely the substitution this feature exists to prevent.
-
-`--dry-run` will also tell you when a URL returns something that sorts like ADP
-but is not — a ranking is rejected by shape, `1, 2, 3, 4…` and all.
-
-### Where each value goes
+### Overrides, for the day a site moves its board
 
 | Setting | Kind | Purpose |
 | ------- | ---- | ------- |
-| `UNDERDOG_ADP_URL` | repo **variable** | primary (Best Ball Team Builder) |
-| `FOUR4_UNDERDOG_ADP_URL` | repo **variable** | fallback (4for4) |
+| `UNDERDOG_ADP_URL` | repo **variable** | replaces the primary |
+| `FOUR4_UNDERDOG_ADP_URL` | repo **variable** | replaces the fallback |
 | `UNDERDOG_ADP_HEADERS` | repo **secret** | JSON headers for the primary |
 | `FOUR4_UNDERDOG_ADP_HEADERS` | repo **secret** | JSON headers for the fallback |
 
-Then run **Actions → Refresh Underdog ADP**. It also runs daily at 12:00 UTC,
-an hour after the Sleeper refresh.
+### Authentication, which is not currently needed
 
-### Authentication and access
+The header secrets are expected to stay unset. Do not configure one
+pre-emptively: a source that wants credentials says so as an HTTP 401 or 403 in
+the workflow log, which the script reports as an authentication problem rather
+than leaving you to debug the URL.
 
-Expect to need it. Both realistic sources sit behind a login: 4for4 is a paid
-subscription, and Underdog's own API is token-gated. An unauthenticated request
-gets 401 or 403, which the script now reports as an authentication problem
-rather than leaving you to debug the URL.
-
-Headers go in as JSON, from a secret, never the repository:
+If that day comes, headers go in as JSON, from a secret, never the repository:
 
 ```
 UNDERDOG_ADP_HEADERS = {"cookie":"session=…"}
-FOUR4_UNDERDOG_ADP_HEADERS = {"authorization":"Bearer …"}
 ```
 
-Two constraints worth deciding deliberately rather than discovering:
+Two things worth deciding deliberately rather than discovering:
 
 **A session cookie is a credential with a short life.** It will expire, the
 workflow will start reporting 401, and DOG will age out and drop — visibly, with
 a reason, which is the designed behaviour but still a thing somebody has to go
 and fix. A long-lived API token is much better where one is available.
 
-**Automated access may not be allowed.** Check the source's terms before
-pointing a daily job at it. A subscription that permits personal use does not
-necessarily permit a scheduled scrape, and a hard bot check will defeat the
-fetch regardless.
+**Automated access may not be allowed.** Check a source's terms before pointing
+a daily job at it. A subscription that permits personal use does not necessarily
+permit a scheduled scrape, and a hard bot check will defeat the fetch regardless.
 
 ### The manual route, which needs no URL and no credentials
 

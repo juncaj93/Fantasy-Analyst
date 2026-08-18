@@ -19,6 +19,7 @@ import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { buildWaiverBoard } from '../src/core/waivers/board.ts';
+import { LeagueRepo } from '../src/server/repos/league.ts';
 import { createTestDb } from './helpers/db.ts';
 
 function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEnv {
@@ -172,6 +173,37 @@ describe('the questions nothing else answers', () => {
     };
     expect(body.events).toEqual([]);
     expect(body.unseen).toBe(0);
+  });
+
+  /*
+   * The production bug, pinned.
+   *
+   * `playoff_week_start` was read with `?? 15`, which fires only when the key is
+   * absent or null. A real league publishes a number that is not a usable week:
+   * it survived the `??`, produced an empty week list, and the live probe caught
+   * it in production after the seeded database — which publishes 15 — had passed
+   * every local check.
+   */
+  it('falls back to a real week when the league publishes an unusable one', async () => {
+    const leagues = new LeagueRepo(db);
+    const league = (await leagues.getLeague('demo-league'))!;
+    await leagues.upsertLeague({ ...league, leagueSettings: { ...league.leagueSettings, playoff_week_start: 0 } });
+
+    const body = (await (await app(get('/api/leagues/demo-league/plan'), env)).json()) as {
+      playoffs: { startWeek: number; weeks: number[]; startWeekPublished: boolean };
+    };
+    expect(body.playoffs.weeks.length).toBeGreaterThan(0);
+    expect(body.playoffs.startWeek).toBeGreaterThan(1);
+    // And it says the week is the app's fallback rather than the league's word.
+    expect(body.playoffs.startWeekPublished).toBe(false);
+  });
+
+  it('says so when the league does publish a usable one', async () => {
+    const body = (await (await app(get('/api/leagues/demo-league/plan'), env)).json()) as {
+      playoffs: { weeks: number[]; startWeekPublished: boolean };
+    };
+    expect(body.playoffs.weeks).toEqual([15, 16, 17]);
+    expect(body.playoffs.startWeekPublished).toBe(true);
   });
 
   it('404s for a league that does not exist', async () => {
