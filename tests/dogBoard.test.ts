@@ -214,6 +214,47 @@ describe('the board reads the two markets separately', () => {
     }
   });
 
+  it('treats a snapshot that matched nobody as unavailable, with the reason', async () => {
+    const repo = new AdpRepo(db);
+    await repo.save(
+      {
+        source: UNDERDOG_SOURCE,
+        label: 'unmatched underdog',
+        // Newest, so it is the one the board reads.
+        capturedAt: '2099-06-01T00:00:00.000Z',
+        fileHash: 'unmatched-hash',
+        rows: Array.from({ length: 20 }, (_, i) => ({
+          rowNumber: i + 1,
+          sourceName: `Nobody Atall ${i}`,
+          sourceTeam: null,
+          sourcePosition: null,
+          adp: 1.5 + i * 2.4,
+          rank: i + 1,
+          raw: {},
+          match: { status: 'unmatched' as const, method: null, reason: 'nobody', playerId: null, confidence: 0, candidates: [] },
+          // The case this guards: a real, fresh, raw-ADP file that prices
+          // nobody because every name failed to resolve.
+          playerId: null,
+        })),
+        matchedCount: 0,
+        ambiguousCount: 0,
+        unmatchedCount: 20,
+        skipped: [],
+      },
+      { provider: '4for4', sourceType: 'raw_adp', snapshotAt: new Date().toISOString() },
+    );
+
+    const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 10 });
+    expect(board.dogState.available).toBe(false);
+    expect(board.dogState.matched).toBe(0);
+    expect(board.dogState.reason).toContain('none of them resolved');
+    expect(board.recommendations.every((r) => r.dogAdp === null)).toBe(true);
+    // And the board falls back cleanly rather than half-using it.
+    for (const rec of board.recommendations) {
+      if (rec.adp != null) expect(rec.marketBlend.sources).toEqual(['sleeper']);
+    }
+  });
+
   it('keeps the two markets distinct rather than copying one into the other', async () => {
     const board = await new DraftBoardService(db).build(await firstDraftId(), { limit: 20 });
     const priced = board.recommendations.filter((r) => r.dogAdp != null && r.adp != null);

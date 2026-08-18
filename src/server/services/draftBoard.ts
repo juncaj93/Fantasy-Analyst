@@ -405,6 +405,37 @@ export class DraftBoardService {
     }
 
     const values = await this.adp.valuesByPlayer(meta.id);
+
+    /*
+     * A snapshot that resolved to nobody is not a usable market.
+     *
+     * It happens: a provider changes its name format, or the file arrives for a
+     * season the player table has not synced yet, and every row fails to match.
+     * The snapshot is real, raw and fresh, and it prices exactly zero players —
+     * so calling DOG "available" would light the column, tighten the card
+     * layout to make room for it and offer a DOG sort that puts the entire
+     * board in the unpriced tail. Reported as unavailable, with the count, so
+     * the reason is a matching problem rather than a mystery.
+     */
+    if (values.size === 0) {
+      return {
+        values: new Map(),
+        state: {
+          available: false,
+          provider: meta.provider,
+          sourceType: meta.sourceType,
+          snapshotAt: meta.snapshotAt,
+          fetchedAt: meta.fetchedAt,
+          freshness: freshness.state,
+          ageHours: freshness.ageHours,
+          matched: 0,
+          reason: `the Underdog snapshot has ${meta.rowCount} rows but none of them resolved to a known player`,
+        },
+        warning:
+          'the Underdog ADP file did not match any players, so DOG is unavailable — check the unresolved rows in Setup',
+      };
+    }
+
     return {
       values,
       state: {
