@@ -264,6 +264,51 @@ test.describe('the deployed app', () => {
     await expect(page.getByTestId('draft-status')).toBeVisible();
   });
 
+  /**
+   * The ★ queue, in the order somebody put it in — read-only.
+   *
+   * This is the one regression whose whole symptom was that a *previously
+   * selected* sort re-ordered the queue: a reader on Score never saw it, and a
+   * reader on ADP or DOG lost their drop on the next render. So the check is
+   * exactly that — cycle the control and assert the rows never move.
+   *
+   * Nothing here stars, unstars or drags. A production smoke does not write to
+   * somebody's real queue, and it does not need to: the fault was in what the
+   * *sort* did to an existing order, not in the drag, and the drag itself is
+   * covered at every canonical width in `e2e/draft-queue-order.spec.ts`.
+   *
+   * Skips honestly when the deployment has fewer than two queued players,
+   * because with nothing to reorder there is nothing this could prove — and a
+   * silently passing test would read exactly like a verified one.
+   */
+  test('the queue keeps its own order under every sort', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const queueFilter = page.getByTestId('queue-filter');
+    test.skip((await queueFilter.count()) === 0, 'no queue filter on this deployment');
+    await queueFilter.click();
+    await page.waitForTimeout(400);
+
+    const ids = () =>
+      page.$$eval('[data-testid="recommendation-row"]', (rows) =>
+        rows.map((row) => row.getAttribute('data-player-id') ?? ''),
+      );
+    const before = await ids();
+    test.skip(before.length < 2, 'fewer than two players queued on this deployment');
+
+    // The control is still there and still remembers the mode, and says plainly
+    // that it is not the thing ordering these rows.
+    await expect(page.getByTestId('draft-sort')).toHaveAttribute('data-inactive', 'yes');
+
+    for (const mode of ['sort-adp', 'sort-dog', 'sort-score']) {
+      await page.getByTestId(mode).click();
+      await page.waitForTimeout(300);
+      expect(await ids(), `${mode} re-ordered the queue`).toEqual(before);
+    }
+  });
+
   test('the board starts high on the page and shows several players', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
