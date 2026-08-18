@@ -109,6 +109,14 @@ export interface Overview {
       | 'season_complete';
     phase: 'preseason' | 'regular' | 'postseason' | 'offseason';
     draftVisible: boolean;
+    /**
+     * Whether Matchup is a destination yet.
+     *
+     * Optional inside an already-optional field: a client talking to a worker
+     * that predates Matchup gets `undefined` and simply does not show the tab,
+     * which is the correct behaviour rather than a tab leading to a 404.
+     */
+    matchupVisible?: boolean;
     draftLive: boolean;
     reason: string;
     assumed: boolean;
@@ -1262,4 +1270,38 @@ export interface TradeBoard {
   suggestions: TradeSuggestion[];
   considered: number;
   warnings: string[];
+}
+
+/**
+ * `GET /api/leagues/:id/matchup` — this week's head-to-head.
+ *
+ * The forecast's own shapes are imported from core rather than restated here.
+ * They are computed by a pure module that both sides of the wire already
+ * compile, and a second hand-written copy of a nine-field player row is a copy
+ * that drifts the first time a field is added.
+ */
+export type {
+  MatchupForecast,
+  MatchupPlayerView,
+  MatchupSlotRow,
+  MatchupTeamView,
+} from '../core/matchup/model.ts';
+export type { HeroInsight, MatchupPhase } from '../core/matchup/insights.ts';
+export type { PlayerLeverage } from '../core/matchup/needs.ts';
+
+import type { MatchupForecast } from '../core/matchup/model.ts';
+import type { WeeklyCard } from '../core/startsit/weekCard.ts';
+
+export interface MatchupResponse {
+  league: { id: string; name: string; season: string; scoringLabel: string };
+  week: number;
+  season: string;
+  /** False when this league has no matchup scheduled for this week. */
+  found: boolean;
+  /** The plain-language why, when it is not found. */
+  reason: string | null;
+  forecast: MatchupForecast | null;
+  /** The shared player sheet's contents, by player id, so a tap costs nothing. */
+  cards: Record<string, WeeklyCard>;
+  cached: boolean;
 }

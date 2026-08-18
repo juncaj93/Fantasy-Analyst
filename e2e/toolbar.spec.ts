@@ -591,3 +591,86 @@ test.describe('reduced motion', () => {
     await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
   });
 });
+
+/**
+ * Matchup, once the draft is finished.
+ *
+ * The third seasonal destination, and the one that makes the bar carry seven
+ * for the only stretch of the year it ever does — between a draft finishing and
+ * week one, when Draft has not left yet and Matchup has already arrived.
+ *
+ * Seven is the number this bar was explicitly built not to wrap at, so the two
+ * things asserted here are the ones that would break: no label goes to a second
+ * line, and no destination shrinks below a fingertip. Both are checked at
+ * whichever width the project is running, which is the point of running the
+ * suite at four of them.
+ */
+test.describe('Matchup, once the draft is finished', () => {
+  /** Answer the overview as if the draft were complete and week one pending. */
+  async function postDraft(page: Page) {
+    await page.route('**/api/overview', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        json: {
+          ...body,
+          lifecycle: {
+            ...(body.lifecycle ?? {}),
+            lifecycle: 'post_draft',
+            draftVisible: true,
+            matchupVisible: true,
+          },
+        },
+      });
+    });
+  }
+
+  test('is absent while the draft is still running', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    await expect(page.getByTestId('tab-matchup')).toHaveCount(0);
+  });
+
+  test('arrives beside Team once the draft is complete', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+    expect(await page.locator('.tabbar button').count()).toBe(7);
+
+    const labels = await page.evaluate(() =>
+      [...document.querySelectorAll('.tabbar button')].map((b) =>
+        [...b.childNodes]
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent?.trim() ?? '')
+          .join(''),
+      ),
+    );
+    expect(labels).toEqual(['Draft', 'Team', 'Matchup', 'Trades', 'Players', 'Review', 'Setup']);
+  });
+
+  test('carries seven without wrapping a label or shrinking a target', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    for (const tab of ['draft', 'team', 'matchup', 'trades', 'players', 'review', 'setup'] as const) {
+      const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
+      expect(box.height, `${tab} is ${box.height}px tall`).toBeGreaterThanOrEqual(44);
+      expect(box.width, `${tab} is ${box.width}px wide`).toBeGreaterThanOrEqual(44);
+    }
+
+    const lines = await page.evaluate(() =>
+      [...document.querySelectorAll('.tabbar button')].map((b) => {
+        const label = [...b.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+        const range = document.createRange();
+        range.selectNodeContents(label!);
+        return range.getClientRects().length;
+      }),
+    );
+    for (const count of lines) expect(count, 'a label wrapped onto a second line').toBe(1);
+
+    const bar = await toolbar(page);
+    expect(bar.width, 'the bar has outgrown the screen').toBeLessThanOrEqual(bar.viewportWidth - 16);
+    expect(bar.left, 'the bar is no longer centred').toBeGreaterThan(0);
+  });
+});

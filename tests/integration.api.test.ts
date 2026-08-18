@@ -837,9 +837,16 @@ describe('API with seeded data', () => {
   });
 
   it('reports missing Vegas data instead of inventing it', async () => {
-    // Player 1012 has no props in the mock game.
+    /*
+     * Player 1013 is in no mock game, so nothing has priced him.
+     *
+     * It used to be 1012, who acquired props when a second demo game was added
+     * to give the Matchup screen two projectable lineups. The property under
+     * test is unchanged — an unpriced player is reported rather than imputed —
+     * and the fixture simply had to name somebody who is still unpriced.
+     */
     const body = await json<{ warnings: string[]; evaluations: { expectation: { points: number | null } }[] }>(
-      post('/api/startsit/compare', { playerIds: ['1001', '1012'] }, cookie),
+      post('/api/startsit/compare', { playerIds: ['1001', '1013'] }, cookie),
     );
     expect(body.warnings.join(' ')).toContain('no Vegas data');
     const missing = body.evaluations.find((e) => e.expectation.points == null);

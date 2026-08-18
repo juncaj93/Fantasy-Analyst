@@ -8,11 +8,21 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
-import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon, WaiverIcon } from './components/icons.tsx';
+import {
+  BoardIcon,
+  GearIcon,
+  MatchupIcon,
+  ReviewIcon,
+  RosterIcon,
+  SearchIcon,
+  TradeIcon,
+  WaiverIcon,
+} from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
 import { DemoIndicator, useDemoWorld } from './demo/DemoIndicator.tsx';
 import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
+import { MatchupScreen } from './screens/MatchupScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
 import { ReviewScreen } from './screens/ReviewScreen.tsx';
 import { SetupScreen } from './screens/SetupScreen.tsx';
@@ -20,7 +30,7 @@ import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 
-type Tab = 'draft' | 'team' | 'waivers' | 'trades' | 'players' | 'review' | 'setup';
+type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 'review' | 'setup';
 
 /*
  * The destinations.
@@ -45,10 +55,19 @@ type Tab = 'draft' | 'team' | 'waivers' | 'trades' | 'players' | 'review' | 'set
  * touched: Draft still renders when the app is on it, which is what keeps the
  * route reachable. See core/sleeper/phase.ts for when "under way" begins, and
  * why a completed draft is emphatically not the answer.
+ *
+ * Matchup is the third seasonal destination and it arrives at a different
+ * moment from the other two: the day the draft *finishes*, which is before the
+ * season starts and therefore before Draft leaves. For that stretch the bar
+ * carries seven, which is the most it ever carries and is why the stylesheet
+ * has a rule for exactly that count at narrow widths — see `.tabbar[data-count]`.
+ * A head-to-head before a draft is finished would be a projection of a team
+ * that does not exist yet, which is why it is not simply always there.
  */
 const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
   { id: 'draft', label: 'Draft', Icon: BoardIcon },
   { id: 'team', label: 'Team', Icon: RosterIcon },
+  { id: 'matchup', label: 'Matchup', Icon: MatchupIcon },
   { id: 'waivers', label: 'Waivers', Icon: WaiverIcon },
   { id: 'trades', label: 'Trades', Icon: TradeIcon },
   { id: 'players', label: 'Players', Icon: SearchIcon },
@@ -152,14 +171,24 @@ export function App() {
    */
   const draftVisible = overview?.season?.draftVisible ?? true;
   /*
-   * One seasonal slot, filled by exactly one of the two.
-   *
-   * Written as a single filter rather than two, because "Draft is showing" and
-   * "Waivers is showing" are one fact and must never be able to disagree: the
-   * bar carries six destinations before the season starts and six after it, and
-   * there is no state in which it carries five or seven.
+   * Whether the draft has finished, which is when a head-to-head starts to mean
+   * anything. Absent on a deployment older than Matchup, and absent is read as
+   * "no" — a tab leading to an endpoint that does not exist is worse than a tab
+   * that arrives a deploy later.
    */
-  const tabs = TABS.filter((t) => (t.id === 'draft' ? draftVisible : t.id === 'waivers' ? !draftVisible : true));
+  const matchupVisible = overview?.lifecycle?.matchupVisible ?? false;
+  /*
+   * The seasonal slots, decided in one place.
+   *
+   * Written as a single filter rather than three, because "Draft is showing",
+   * "Waivers is showing" and "Matchup is showing" are one fact about where the
+   * season is and must never be able to disagree. Draft and Waivers share a
+   * slot exactly as they always did; Matchup adds one, and only from the moment
+   * a draft is complete.
+   */
+  const tabs = TABS.filter((t) =>
+    t.id === 'draft' ? draftVisible : t.id === 'waivers' ? !draftVisible : t.id === 'matchup' ? matchupVisible : true,
+  );
 
   /*
    * In season, the app opens on Team instead.
@@ -215,6 +244,7 @@ export function App() {
         <InstallPrompt />
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
+        {tab === 'matchup' ? <MatchupScreen leagues={leagues} /> : null}
         {tab === 'waivers' ? <WaiversScreen leagues={leagues} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
@@ -286,6 +316,14 @@ function FloatingToolbar({
       className="tabbar"
       aria-label="Main navigation"
       ref={measure}
+      /*
+       * How many destinations there are, for the stylesheet.
+       *
+       * The one thing CSS cannot count. Seven labels at 360px need a narrower
+       * destination than six do, and the rule that provides it has to be able to
+       * ask how many there are.
+       */
+      data-count={tabs.length}
       /*
        * Out of the way while the keyboard is up — see the stylesheet. The
        * attribute rather than a class so the state is legible in the inspector

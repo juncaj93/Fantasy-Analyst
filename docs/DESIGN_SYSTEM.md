@@ -72,6 +72,11 @@ is which.
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
 | Draft card bottom row | `1fr auto`: the four metrics on the left, the tier-cliff warning tucked into the right-hand end of the same line. A warning costs the card no height, so a thinning position no longer puts a stutter in the board's rhythm. The chip has a short spelling below 376px, where four labelled numbers and nineteen characters will not share the line — the full sentence stays in its accessible name at every width. |
 | `Badge` / tags / `Confidence` | Status pills, ranked by how much attention each state deserves. |
+| `ScoreCard` | The head-to-head, in one card. Sleeper's score is the largest type on the screen; the projection sits under it in the quieter weight everything derived uses, and carries the word `proj` every time it appears — an unlabelled number that size beside a real score reads as another real score. Once the matchup is settled the projection and the odds both go and a result line takes their place: a probability shown for a finished game is a forecast presented as a fact. |
+| `WinBar` | Both percentages printed, and a `role="meter"` between them. The bar is an accelerator and never the carrier of the meaning. |
+| `HeroCarousel` | One live insight at a time: auto-advancing slowly, pausing the instant it is touched, swipeable, and pageable by a button because a gesture is never the only way through. A single insight renders as a card with no pager at all — a carousel with one slide is a control that lies about having more to say. |
+| `SlotRow` | Both sides of one lineup slot on one line, around a fixed-width position pill that never moves between rows. Names truncate rather than wrap; below 400px the numbers and the club marks each give up a point so the names get their letters back. |
+| `BenchSection` | Collapsed on arrival, always. The bench is hindsight, and hindsight belongs behind a tap. |
 
 ## The bottom of the screen
 
@@ -90,7 +95,12 @@ blank strip under the navigation twice:
   own. `scroll-margin-bottom` uses the same number, so a control scrolled to the
   bottom edge mid-page also clears the pill.
 - **The pill is sized by its contents**: `--tab-w` per destination, so a seventh
-  would widen the bar rather than wrap onto a second row.
+  widens the bar rather than wrapping onto a second row. Seven is what the bar
+  carries between a draft completing and week one, when Matchup has arrived and
+  Draft has not left; the bar publishes `data-count` and one rule narrows the
+  destination below 400px. The floor is 44px and it is hard — a destination
+  narrower than a fingertip is not a destination, and `toolbar.spec.ts` asserts
+  it at every width.
 - **It holds no state.** The current destination is passed in from the app, so
   the highlight and the screen can never disagree — including on a nested screen
   or a destination the app chose on its own.
