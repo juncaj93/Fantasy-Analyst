@@ -42,7 +42,8 @@ import {
   type AuthEnv,
 } from './http/auth.ts';
 import { Router, errorResponse, jsonResponse } from './http/router.ts';
-import { AdpRepo } from './repos/adp.ts';
+import { AdpRepo, UNDERDOG_SOURCE } from './repos/adp.ts';
+import { validateRawAdp } from '../core/adp/underdog.ts';
 import { EvidenceRepo } from './repos/evidence.ts';
 import { LeagueRepo } from './repos/league.ts';
 import { NewsletterRepo } from './repos/newsletter.ts';
@@ -541,7 +542,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/adp/snapshots', async (ctx) => jsonResponse({ snapshots: await new AdpRepo(ctx.env.db).list() }));
 
   router.post('/api/adp/import', async (ctx) => {
-    const body = await ctx.json<{ content?: string; label?: string; capturedAt?: string; source?: string }>();
+    const body = await ctx.json<{
+      content?: string;
+      label?: string;
+      capturedAt?: string;
+      source?: string;
+      /** Underdog provenance, sent by the DOG workflow and by nothing else. */
+      provider?: string;
+      snapshotAt?: string;
+      fetchedAt?: string;
+    }>();
     if (!body?.content) return errorResponse('content required (CSV or JSON text)', 400);
     const index = await new PlayerRepo(ctx.env.db).buildIndex();
     let result;
@@ -557,8 +567,43 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (result.rows.length === 0) {
       return errorResponse('no usable rows found — expected columns for player name and ADP or rank', 400);
     }
+
+    /*
+     * The gate that keeps `DOG` meaning one thing.
+     *
+     * An import into the Underdog source has to prove it is raw ADP before it
+     * is written, because once it is written the board has no way of telling a
+     * ranking from an average — both are a column of numbers that sort
+     * plausibly. `validateRawAdp` reads the shape of the values (a dense run of
+     * whole numbers is a ranking, whatever the column was called) and the
+     * import is refused outright rather than stored with a caveat: a rejected
+     * file leaves the previous good snapshot in place, which is the safe
+     * outcome, while a stored bad one silently becomes the market baseline.
+     *
+     * Every other source is unaffected and imports exactly as it always has.
+     */
+    const isUnderdog = (body.source ?? '') === UNDERDOG_SOURCE;
+    if (isUnderdog) {
+      const verdict = validateRawAdp(
+        result.rows.flatMap((row) =>
+          row.adp == null ? [] : [{ name: row.sourceName, team: row.sourceTeam, position: row.sourcePosition, adp: row.adp }],
+        ),
+      );
+      if (!verdict.valid) {
+        return errorResponse(
+          `refusing to store this as Underdog ADP: ${verdict.reason}. Raw Underdog ADP only — rankings, expert ranks and projections cannot be labelled DOG.`,
+          422,
+        );
+      }
+    }
+
     const repo = new AdpRepo(ctx.env.db);
-    const { snapshot, created } = await repo.save(result);
+    const { snapshot, created } = await repo.save(result, {
+      provider: body.provider ?? null,
+      sourceType: 'raw_adp',
+      snapshotAt: body.snapshotAt ?? null,
+      fetchedAt: body.fetchedAt ?? null,
+    });
     // The same file imported twice is normally a no-op, but the matcher may
     // have learned a name since — so give the rows that found nothing another
     // go rather than make the user wait for the source file to change.

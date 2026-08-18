@@ -27,6 +27,12 @@ import { CONCENTRATION, assessConcentration, type ConcentrationResult, type Rost
 import { OPPORTUNITY, evaluateOpportunity, type OpportunityResult } from './opportunity.ts';
 import { computeNeed, computeScarcity, type NeedBreakdown, type RosterCounts } from './need.ts';
 import { estimateSurvival } from './survival.ts';
+import {
+  blendMarketBaseline,
+  marketDisagreement,
+  type MarketBaselineBlend,
+  type MarketFormat,
+} from './marketBaseline.ts';
 import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 
@@ -145,7 +151,24 @@ export const NEWS_CONFLICT_DAMPING = 0.5;
 
 export interface AvailablePlayerInput {
   player: CanonicalPlayer;
+  /**
+   * Sleeper ADP — the market the user is drafting in.
+   *
+   * Still the number the card shows, still what `Val` is measured from, still
+   * what scarcity, the tier ladders and the survival model read. It is one of
+   * two inputs to the market baseline rather than the baseline itself; see
+   * `dogAdp` below and `marketBaseline.ts`.
+   */
   adp: number | null;
+  /**
+   * Raw Underdog ADP, when a usable snapshot has priced him.
+   *
+   * Absent, null or stale means the market baseline falls back to Sleeper alone
+   * and reports itself single-source. It is never derived from `adp`: an
+   * Underdog number this app invented would be indistinguishable from one
+   * Underdog published, which is the whole reason DOG is worth having.
+   */
+  dogAdp?: number | null;
   /** ADP rank within the snapshot, when present. */
   adpRank: number | null;
   signal: PlayerSignal | null;
@@ -206,6 +229,15 @@ export interface DraftContext {
    * which NFL team anybody plays for.
    */
   rosterPlayers?: RosteredPlayer[];
+  /**
+   * Which blend the market baseline uses — `standard` (60/40) or `best_ball`
+   * (75/25).
+   *
+   * Read from Sleeper's own league settings by `detectBestBall`, never guessed
+   * from a name or a date. Absent means `standard`, which is also what an
+   * unconfident detection resolves to.
+   */
+  marketFormat?: MarketFormat;
 }
 
 export interface ComponentScore {
@@ -233,7 +265,36 @@ export interface DraftRecommendation {
   position: string;
   team: string;
   adp: number | null;
+  /**
+   * Raw Underdog ADP, or null when no usable snapshot priced him.
+   *
+   * Carried through untouched so the card can print it beside Sleeper's number
+   * and the `DOG` sort can order by it. Never filled in from Sleeper.
+   */
+  dogAdp: number | null;
+  /**
+   * `Val`: how far past **Sleeper's** ADP this pick is, unchanged.
+   *
+   * Deliberately not the blend. `Val` has always meant "what this player is
+   * worth in the room I am drafting in", and quietly turning it into a
+   * DOG-versus-Sleeper composite would change what a number on screen means
+   * without changing its label. The blended baseline is reported separately, on
+   * the market-value component and in `marketBlend` below.
+   */
   adpValue: number | null;
+  /**
+   * The market baseline that actually priced him: the blend, its weights, which
+   * markets contributed, and whether it was single-source.
+   */
+  marketBlend: MarketBaselineBlend;
+  /**
+   * How far apart the two markets are, as context and never as a second bonus.
+   *
+   * The blend has already paid for the disagreement. This exists so a card can
+   * say "Underdog takes him 18 picks earlier than Sleeper" without anything in
+   * the ranking counting those eighteen picks twice.
+   */
+  marketDisagreement: ReturnType<typeof marketDisagreement>;
   survivalProbability: number | null;
   /** Net tally per window, so the UI never has to re-derive them. */
   newsLifetimeNet: number;
@@ -307,15 +368,35 @@ const NO_CONCENTRATION: ConcentrationResult = {
 };
 
 /**
- * Market value = currentPick - ADP (docs/03_DRAFT_ENGINE.md).
+ * Market value = currentPick - market baseline (docs/03_DRAFT_ENGINE.md).
  *
- * Positive means the player has FALLEN past their ADP and is a bargain at this
- * pick. Negative means taking them here is a reach, which is damped rather than
- * fully penalised — survival probability separately handles "he won't last".
+ * Positive means the player has FALLEN past their market price and is a bargain
+ * at this pick. Negative means taking them here is a reach, which is damped
+ * rather than fully penalised — survival probability separately handles "he
+ * won't last".
+ *
+ * **The baseline is not Sleeper's ADP alone.** It is the blend of raw Underdog
+ * ADP and Sleeper ADP defined in `marketBaseline.ts` — 60/40, or 75/25 in a
+ * best-ball league — collapsing to whichever single market answered when the
+ * other has not priced him. This is the *only* component the blend reaches: the
+ * ADP shown on the card, the `Val` beside it, positional scarcity, the tier
+ * ladders and the survival model all still read Sleeper's own number, which is
+ * the market the user is drafting in. See `blendMarketBaseline`.
+ *
+ * `blend` is optional so that every existing caller — the tests, the probes, a
+ * board built before DOG was ever imported — keeps the behaviour it had, with
+ * Sleeper's ADP as the whole baseline.
  */
-export function marketValueComponent(adp: number | null, currentPick: number, teams: number): ComponentScore {
+export function marketValueComponent(
+  adp: number | null,
+  currentPick: number,
+  teams: number,
+  blend?: MarketBaselineBlend | null,
+): ComponentScore {
   const weight = DEFAULT_WEIGHTS.marketValue;
-  if (adp == null) {
+  // The blend when there is one, Sleeper's own number when there is not.
+  const baseline = blend ? blend.adp : adp;
+  if (baseline == null) {
     return {
       key: 'market_value',
       label: 'ADP value',
@@ -326,7 +407,7 @@ export function marketValueComponent(adp: number | null, currentPick: number, te
       unknown: true,
     };
   }
-  const delta = currentPick - adp; // positive = fell past ADP to you
+  const delta = currentPick - baseline; // positive = fell past the market to you
   const scale = Math.max(6, teams || 12);
   // Asymmetric: falling value counts fully, reaching is damped by half.
   const raw = delta >= 0 ? delta / scale : delta / (scale * 2);
@@ -339,10 +420,16 @@ export function marketValueComponent(adp: number | null, currentPick: number, te
   // identical. That is what let a quarterback with an ADP of 202 reach the top
   // ten of the board at pick 38, on roster need alone.
   const score = Math.min(raw, 1);
+  /*
+   * The number, and — when two markets made it — which markets and in what
+   * proportion. A blended baseline that printed only its own answer would be
+   * the one line of the breakdown nobody could check against the card.
+   */
+  const provenance = blend && blend.sources.length > 0 ? ` · baseline ${blend.adp} (${blend.note})` : '';
   return {
     key: 'market_value',
     label: 'ADP value',
-    display: delta >= 0 ? `+${round1(delta)} picks of value` : `${round1(delta)} picks (a reach)`,
+    display: `${delta >= 0 ? `+${round1(delta)} picks of value` : `${round1(delta)} picks (a reach)`}${provenance}`,
     score: round3(score),
     weight,
     contribution: round3(score * weight),
@@ -474,7 +561,21 @@ export function rankAvailablePlayers(
     const { player, adp, signal } = entry;
     const components: ComponentScore[] = [];
 
-    const market = marketValueComponent(adp, ctx.currentPick, teamCount);
+    /*
+     * The price the board holds him at, from whichever markets have one.
+     *
+     * Computed per player rather than per board because the renormalisation is
+     * per player: a board can perfectly well hold one player Underdog has
+     * priced and Sleeper has not, and another the other way round, and neither
+     * should be penalised for the gap in the other's coverage.
+     */
+    const blend = blendMarketBaseline({
+      dogAdp: entry.dogAdp ?? null,
+      sleeperAdp: adp,
+      format: ctx.marketFormat ?? 'standard',
+    });
+
+    const market = marketValueComponent(adp, ctx.currentPick, teamCount, blend);
     market.weight = weights.marketValue;
     market.contribution = round3(market.score * weights.marketValue);
     components.push(market);
@@ -692,7 +793,11 @@ export function rankAvailablePlayers(
       position: player.position,
       team: player.team,
       adp,
+      dogAdp: entry.dogAdp ?? null,
+      // Sleeper's own value, unchanged — see the field's own note.
       adpValue: adp == null ? null : round1(ctx.currentPick - adp),
+      marketBlend: blend,
+      marketDisagreement: marketDisagreement(entry.dogAdp ?? null, adp),
       survivalProbability: survival.probability,
       newsLifetimeNet: lifetimeNet,
       news30Net: net30,
@@ -702,7 +807,15 @@ export function rankAvailablePlayers(
       total,
       reasons,
       counterpoints,
-      degraded: adp == null,
+      /*
+       * Degraded means "no market has priced him", not "Sleeper has not".
+       *
+       * A player Underdog prices and Sleeper does not is priced — that is the
+       * whole point of having two markets — and marking him degraded would be
+       * penalising him for a hole in one source's coverage, which the brief
+       * rules out in as many words.
+       */
+      degraded: blend.unknown,
       // Filled in by the second pass, once every base composite exists.
       score: 0,
       marketBaseline: baseline,
@@ -739,11 +852,20 @@ export function rankAvailablePlayers(
    * the players we can. He keeps his real score, shows `ADP —`, and is marked
    * degraded; what he does not get is a place he earned only by being unknown.
    */
+  /*
+   * "Priced" now means priced by *either* market.
+   *
+   * The policy is unchanged — a player nobody has priced ranks after every
+   * player somebody has — but the question it asks moved from "does Sleeper
+   * rank him" to "does any market rank him", which is what stops a player
+   * Underdog has priced and Sleeper has not from being sorted to the tail for
+   * a reason that has nothing to do with him.
+   */
   return recommendations.sort(
     (a, b) =>
-      Number(a.adp == null) - Number(b.adp == null) ||
+      Number(a.marketBlend.adp == null) - Number(b.marketBlend.adp == null) ||
       b.total - a.total ||
-      (a.adp ?? Number.MAX_SAFE_INTEGER) - (b.adp ?? Number.MAX_SAFE_INTEGER) ||
+      (a.marketBlend.adp ?? Number.MAX_SAFE_INTEGER) - (b.marketBlend.adp ?? Number.MAX_SAFE_INTEGER) ||
       a.name.localeCompare(b.name),
   );
 }
