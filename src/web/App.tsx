@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
-import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon } from './components/icons.tsx';
+import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon, WaiverIcon } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
 import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
@@ -17,8 +17,9 @@ import { ReviewScreen } from './screens/ReviewScreen.tsx';
 import { SetupScreen } from './screens/SetupScreen.tsx';
 import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
+import { WaiversScreen } from './screens/WaiversScreen.tsx';
 
-type Tab = 'draft' | 'team' | 'trades' | 'players' | 'review' | 'setup';
+type Tab = 'draft' | 'team' | 'waivers' | 'trades' | 'players' | 'review' | 'setup';
 
 /*
  * The destinations.
@@ -28,18 +29,26 @@ type Tab = 'draft' | 'team' | 'trades' | 'players' | 'review' | 'setup';
  * phone, which put a blue gear and a green tick in a row of grey marks at a
  * size and weight no stylesheet could reach.
  *
- * Draft is seasonal, and it is the only one that is. Once the regular season is
- * under way it leaves the bar — the board it opens is about a draft that
- * finished weeks ago, and a sixth of the most valuable strip of glass in the app
- * is too much to spend on a museum. It is dropped from this list rather than
- * disabled or blanked, so the bar repacks around five and nothing is left
- * holding an empty slot; the screen itself is untouched and still renders when
- * the app is on it. See core/sleeper/phase.ts for when "under way" begins, and
+ * Two of these are seasonal, and they are the same slot.
+ *
+ * Draft is the most useful thing in the app for two weeks a year and a museum
+ * for the other fifty: once the regular season is under way it leaves the bar,
+ * because a sixth of the most valuable strip of glass in the app is too much to
+ * spend on a board about picks made in August. Waivers is its opposite — it
+ * cannot say anything before a draft has finished, and it is where the season's
+ * decisions actually get made — so it arrives at the moment Draft leaves, in
+ * the position immediately after Team, which is the screen it belongs beside.
+ *
+ * Both are dropped from the list rather than disabled or blanked, so the bar
+ * repacks and nothing is left holding an empty slot. Neither *screen* is
+ * touched: Draft still renders when the app is on it, which is what keeps the
+ * route reachable. See core/sleeper/phase.ts for when "under way" begins, and
  * why a completed draft is emphatically not the answer.
  */
 const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
   { id: 'draft', label: 'Draft', Icon: BoardIcon },
   { id: 'team', label: 'Team', Icon: RosterIcon },
+  { id: 'waivers', label: 'Waivers', Icon: WaiverIcon },
   { id: 'trades', label: 'Trades', Icon: TradeIcon },
   { id: 'players', label: 'Players', Icon: SearchIcon },
   { id: 'review', label: 'Review', Icon: ReviewIcon },
@@ -124,7 +133,15 @@ export function App() {
    * worst possible failure mode for a seasonal tab.
    */
   const draftVisible = overview?.season?.draftVisible ?? true;
-  const tabs = draftVisible ? TABS : TABS.filter((t) => t.id !== 'draft');
+  /*
+   * One seasonal slot, filled by exactly one of the two.
+   *
+   * Written as a single filter rather than two, because "Draft is showing" and
+   * "Waivers is showing" are one fact and must never be able to disagree: the
+   * bar carries six destinations before the season starts and six after it, and
+   * there is no state in which it carries five or seven.
+   */
+  const tabs = TABS.filter((t) => (t.id === 'draft' ? draftVisible : t.id === 'waivers' ? !draftVisible : true));
 
   /*
    * In season, the app opens on Team instead.
@@ -164,6 +181,7 @@ export function App() {
         <InstallPrompt />
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}
         {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
+        {tab === 'waivers' ? <WaiversScreen leagues={leagues} /> : null}
         {tab === 'trades' ? <TradesScreen /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}

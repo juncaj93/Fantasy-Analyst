@@ -48,6 +48,25 @@ export class LeagueRepo {
       .run();
   }
 
+  /**
+   * Set which NFL teams this room drafts early.
+   *
+   * Deliberately not part of `upsertLeague`. Sleeper does not publish this and
+   * never will, so folding it into the sync would mean every sync overwriting a
+   * user's answer with an empty one — the classic way a stored preference
+   * disappears overnight.
+   */
+  async setLocalTeams(leagueId: string, teams: readonly string[]): Promise<string[]> {
+    const normalised = [
+      ...new Set(teams.map((t) => t.trim().toUpperCase()).filter((t) => /^[A-Z]{2,3}$/.test(t))),
+    ];
+    await this.db
+      .prepare('UPDATE leagues SET local_teams = ? WHERE id = ?')
+      .bind(normalised.join(','), leagueId)
+      .run();
+    return normalised;
+  }
+
   async listLeagues(): Promise<(LeagueRecord & { isSelected: boolean })[]> {
     const rows = await this.db
       .prepare('SELECT * FROM leagues ORDER BY season DESC, name ASC')
@@ -80,8 +99,8 @@ export class LeagueRepo {
         batch.map((r) =>
           this.db
             .prepare(
-              `INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, reserve_json, is_mine, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?)`,
+              `INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, reserve_json, is_mine, settings_json, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)`,
             )
             .bind(
               leagueId,
@@ -92,6 +111,7 @@ export class LeagueRepo {
               toJson(r.starterIds),
               toJson(r.reserveIds),
               r.isMine ? 1 : 0,
+              toJson(r.settings ?? {}),
               now,
             ),
         ),
@@ -113,6 +133,7 @@ export class LeagueRepo {
       starterIds: parseJson<string[]>(r['starters_json'], []),
       reserveIds: parseJson<string[]>(r['reserve_json'], []),
       isMine: Number(r['is_mine'] ?? 0) === 1,
+      settings: parseJson<Record<string, unknown>>(r['settings_json'], {}),
     }));
   }
 
@@ -254,5 +275,27 @@ function rowToLeague(row: Record<string, unknown>): LeagueRecord & { isSelected:
     status: (row['status'] as string | null) ?? null,
     lastSyncedAt: String(row['last_synced_at'] ?? ''),
     isSelected: Number(row['is_selected'] ?? 0) === 1,
+    localTeams: parseTeamList(row['local_teams']),
   };
+}
+
+/**
+ * NFL teams this league's room drafts early, from the stored list.
+ *
+ * Stored as a comma-separated string rather than JSON because that is all it
+ * is — a handful of three-letter codes — and a JSON column would invite it to
+ * grow into a settings object. Normalised on read so that `det, DET , ` and
+ * `DET` are the same list, and so a malformed value degrades to no prior
+ * rather than to a prior on a team that does not exist.
+ */
+function parseTeamList(raw: unknown): string[] {
+  if (typeof raw !== 'string' || raw.trim() === '') return [];
+  return [
+    ...new Set(
+      raw
+        .split(',')
+        .map((t) => t.trim().toUpperCase())
+        .filter((t) => /^[A-Z]{2,3}$/.test(t)),
+    ),
+  ];
 }

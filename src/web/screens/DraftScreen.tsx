@@ -12,16 +12,22 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  InjuryDetail,
+  LastSeasonLine,
+  NewsletterTakeaway,
+  ProfileFlags,
+  SeasonOutlook,
+  usePlayerDetail,
+} from '../components/playerDetail.tsx';
+import {
   api,
   type DraftBoard,
   type DraftRecommendation,
   type LeagueSummary,
-  type PlayerDetail,
   type SlotProgress,
 } from '../api.ts';
 import {
   CompactTally,
-  DetailLabel,
   Disclose,
   Empty,
   InjuryTag,
@@ -35,7 +41,16 @@ import { NavBar, SearchFilterRow, SegmentedControl, SkeletonRows } from '../comp
 /* One shared answer to "which players does this filter mean". */
 import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
-import { matchesQuery } from '../search.ts';
+import { rankByQuery } from '../search.ts';
+/*
+ * The board survives a reload in a dead zone.
+ *
+ * Read-only and last-resort: it is consulted only when the server could not be
+ * reached and there is nothing already on screen, and what it returns is always
+ * rendered as a capture with its age. See offlineCache.ts for why it never
+ * invents a pick.
+ */
+import { describeAge, recallBoard, rememberBoardSoon } from '../offlineCache.ts';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
  *
@@ -52,7 +67,44 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
-import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
+/*
+ * Three ways to read the same board, and one pure function that reorders it.
+ *
+ * The ordering lives in core rather than here for the reason every other
+ * decision on this screen does: it is arithmetic, it has a right answer, and it
+ * can be checked without a browser. What this file supplies is the control and
+ * which mode is selected — see boardSort.ts for the guarantee that switching
+ * modes cannot touch a number on a card.
+ */
+/*
+ * The arithmetic behind the queue's long-press drag, kept out of the DOM.
+ *
+ * Whether a press has become a drag, which index the finger is over, and how
+ * far each row should slide — all three can be wrong and none of them needs a
+ * browser to check. See dragReorder.ts.
+ */
+import { LONG_PRESS_MS, moveItem, pressVerdict, rowOffset, targetIndex } from '../../core/draft/dragReorder.ts';
+import {
+  DEFAULT_SORT_MODE,
+  SORT_DESCRIPTIONS,
+  SORT_LABELS,
+  SORT_MODES,
+  hasDogCoverage,
+  sortBoard,
+  type SortMode,
+} from '../../core/draft/boardSort.ts';
+import { QueueControl } from '../components/decisions.tsx';
+/*
+ * The room, as a board.
+ *
+ * A companion to this screen and never a competitor to it: it draws the picks
+ * that already arrived in `board`, so it costs no request, no polling loop and
+ * no recomputation of anything the ranking depends on. It is opened from a
+ * glyph beside the league name and closed again without this screen losing so
+ * much as its scroll position.
+ */
+import { DraftBoardOverlay } from '../components/draftBoard.tsx';
+import { GridIcon } from '../components/icons.tsx';
 /*
  * Staying level with Sleeper without being asked.
  *
@@ -124,6 +176,27 @@ export function DraftScreen({
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
   /**
+   * Which ordering is on screen.
+   *
+   * Presentation only, and it never reaches the server: the whole scored board
+   * is already here, so a sort is a reorder of what the reader has rather than
+   * a new request. That is what makes switching instant mid-draft, and it is
+   * also what makes it safe — a mode that cannot ask for anything cannot come
+   * back with different numbers.
+   */
+  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT_MODE);
+  /**
+   * The queue's order while a drag is settling, or null when the server's is
+   * current.
+   *
+   * A drag redraws the list immediately and confirms afterwards, because a
+   * reorder that waited for a round trip before moving would feel broken on a
+   * phone mid-draft. The server's answer replaces this the moment it lands —
+   * and it is the server's ordering that survives a refresh, so an optimistic
+   * list that turned out to be wrong is corrected rather than kept.
+   */
+  const [queueOrder, setQueueOrder] = useState<string[] | null>(null);
+  /**
    * Finding one player on a board of hundreds.
    *
    * Presentation only, and deliberately so: the board arrives ranked and the
@@ -153,6 +226,15 @@ export function DraftScreen({
   const isSinglePosition = position !== ALL_FILTER && position !== QUEUE_FILTER && position !== FLX_FILTER;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
+  /**
+   * Whether the draft board is over the screen.
+   *
+   * One boolean, and deliberately nothing else. Everything this screen holds —
+   * the filter, the query, the fold, the expanded card, the queue, the scroll —
+   * is untouched while the board is open, which is what makes closing it return
+   * the reader exactly where they were rather than to a rebuilt Draft page.
+   */
+  const [boardOpen, setBoardOpen] = useState(false);
 
   /** Manual refresh state: in-flight spinner, last success, last complaint. */
   const [refreshing, setRefreshing] = useState(false);
@@ -162,6 +244,14 @@ export function DraftScreen({
   const [refreshState, setRefreshState] = useState<DraftRefreshState | null>(null);
   /** Re-renders the freshness cue without touching anything else. */
   const [now, setNow] = useState(() => Date.now());
+  /**
+   * When the board on screen was captured, if it came from the cache.
+   *
+   * Null for every board the server sent, which is almost all of them. Non-null
+   * is the one state the header has to shout about: what is being read is a
+   * photograph of the draft, not the draft.
+   */
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
 
   /**
    * The current board and filter, readable from outside React's render cycle.
@@ -196,6 +286,15 @@ export function DraftScreen({
         boardRef.current = next;
         setBoard(next);
         /*
+         * The server's order is now the current one.
+         *
+         * Cleared on every load, including a quiet poll: a board rebuilt after
+         * a pick landed carries the stored queue order, so keeping a local
+         * override would pin the list to a sequence from before the drag was
+         * confirmed — and would keep a failed drag on screen indefinitely.
+         */
+        setQueueOrder(null);
+        /*
          * A player who has just been drafted cannot stay expanded.
          *
          * Everything else the reader has set up — the filter, the search, the
@@ -207,6 +306,16 @@ export function DraftScreen({
         );
         setUpdatedAt(Date.now());
         setError(null);
+        setCachedAt(null);
+        /*
+         * Keep the last good board where a reload can find it.
+         *
+         * Only the unfiltered board is worth remembering, and only that one is
+         * remembered: a cache keyed by chip would store six copies of largely
+         * the same rows, and the value of this is "the board exists at all in a
+         * dead zone", not "your RB filter survived".
+         */
+        if (pos === ALL_FILTER) rememberBoardSoon(draftId, next);
       } catch (err) {
         /*
          * A quiet load reports upwards instead of painting a banner.
@@ -221,7 +330,30 @@ export function DraftScreen({
          * "sync delayed" once it has failed enough times to mean it.
          */
         if (options.quiet) throw err;
-        setError(err instanceof Error ? err.message : String(err));
+
+        /*
+         * The tunnel case: nothing on screen, and the server unreachable.
+         *
+         * Falling back to the cached board is only correct when there is
+         * nothing better already showing. A board that is on screen is one the
+         * server actually sent, and replacing it with an older copy of itself
+         * because a later request failed would be a downgrade — the refresh
+         * controller is already marking that situation stale and retrying.
+         *
+         * This is the reload-in-a-dead-zone path, and the only one.
+         */
+        const cached = boardRef.current ? null : recallBoard<DraftBoard>(draftId);
+        if (cached) {
+          boardRef.current = cached.value;
+          setBoard(cached.value);
+          setCachedAt(cached.capturedAt);
+          // Never silently. The banner says the board is a capture and how old
+          // it is, because a stale board rendered as a live one is how somebody
+          // drafts a player who went three picks ago.
+          setError(null);
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!options.quiet) setLoading(false);
       }
@@ -293,6 +425,31 @@ export function DraftScreen({
       }
     },
     [load, position, searching],
+  );
+
+  /**
+   * Persist a drag, and keep the list where the reader dropped it meanwhile.
+   *
+   * The optimistic sequence goes on screen first and the server's answer
+   * replaces it — which is nearly always the same sequence, and is the
+   * authority when it is not. A failure clears the override rather than
+   * retrying: the reader can see the row snap back, which is honest, and one
+   * more drag is cheaper than a queue that silently disagrees with the stored
+   * one.
+   */
+  const commitQueueOrder = useCallback(
+    async (playerId: string, toIndex: number, optimistic: string[]) => {
+      setQueueOrder(optimistic);
+      try {
+        const res = await api.post<{ order: string[] }>('/api/queue/reorder', { playerId, toIndex });
+        setQueueOrder(res.order);
+        setError(null);
+      } catch (err) {
+        setQueueOrder(null);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
   );
 
   /**
@@ -404,6 +561,42 @@ export function DraftScreen({
     }
   }, [draftId, load, refreshing]);
 
+  /*
+   * Inside the queue, the reader's order. Everywhere else, the model's.
+   *
+   * Computed here, above the early returns, because the drag hook below is a
+   * hook and hooks cannot be called conditionally. `board` is null on the first
+   * frame and while a filter change is loading, which is what the empty list
+   * covers — the ordering is a pure function of it either way.
+   *
+   * The server already returns the ★ filter in the stored order, so the local
+   * override only applies while a drag is settling. It has to apply, or the row
+   * would snap back to where it was for the length of a round trip.
+   *
+   * The sort control stays live inside the queue: a reader who wants to see
+   * their shortlist by DOG can, and switching back to Score returns them to
+   * their own order rather than to the composite's.
+   */
+  const isQueue = position === QUEUE_FILTER;
+  const recommendations = board?.recommendations ?? [];
+  const queuedRows = isQueue && queueOrder ? reorderByIds(recommendations, queueOrder) : recommendations;
+  const ordered = isQueue && sort === DEFAULT_SORT_MODE ? queuedRows : sortBoard(queuedRows, sort);
+
+  /*
+   * Drag to reorder, inside the queue and nowhere else.
+   *
+   * Disabled while a search is open, because the visible rows are then a subset
+   * and an index into them is not an index into the queue — dropping a player
+   * "third" in a filtered list would move him to the third place of a list the
+   * reader cannot see.
+   */
+  const canReorder = isQueue && !searching && unlocked;
+  const { drag, onPointerDown } = useQueueDrag({
+    enabled: canReorder,
+    ids: ordered.map((rec) => rec.playerId),
+    onCommit: commitQueueOrder,
+  });
+
   if (!selected) {
     return (
       <Empty>
@@ -442,9 +635,28 @@ export function DraftScreen({
    * Removing only the request limit would have left this one quietly doing the
    * same damage.
    */
-  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
-    matchesQuery(item.rec.name, query),
-  );
+  /*
+   * Sort, then group into tiers, then search — in that order, and the order
+   * matters.
+   *
+   * Tier dividers claim that everything above one is a tier, which is only true
+   * of a contiguous run; drawing them over a board sorted by DOG would be
+   * asserting boundaries in a sequence the tier model never saw. So a market
+   * sort turns them off, exactly as a mixed-position board already does.
+   *
+   * The search runs last, over whatever order the reader chose. `rankByQuery`
+   * drops what does not match and puts the literal hits first, so typing `will`
+   * does not return the Wills in whatever order the board happened to leave
+   * them in; within a tier of match the chosen ordering survives.
+   *
+   * The dividers are built before the search, not after, which is what keeps
+   * the `rank` badge showing where a player sits on the *board* rather than
+   * where he sits in the search results. A player who is the 41st best
+   * available is the 41st best available whether or not you found him by
+   * typing.
+   */
+  const rows = withTierDividers(ordered, isSinglePosition && !searching && sort === DEFAULT_SORT_MODE);
+  const visible = searching ? rankByQuery(rows, query, (item) => item.rec.name) : rows;
 
   /*
    * When the board last moved, and when it was last checked.
@@ -459,6 +671,16 @@ export function DraftScreen({
   return (
     <>
       {/*
+        The board, over everything, reading the state this screen already has.
+
+        Mounted from here rather than from the app shell so it dies with the
+        Draft screen and can never outlive the refresh loop feeding it. It is
+        handed `board` and nothing else: no fetcher, no controller, no way to
+        ask Sleeper anything.
+      */}
+      {boardOpen ? <DraftBoardOverlay board={board} onClose={() => setBoardOpen(false)} /> : null}
+
+      {/*
         The live state, in the bar that does not scroll away.
 
         The pick number, the round, the roster count and the draft status used
@@ -471,7 +693,33 @@ export function DraftScreen({
       */}
       <NavBar
         testId="draft-nav"
-        title={<span data-testid="board-league-name">{board.league.name}</span>}
+        title={
+          /*
+            The league, and the way into the board.
+
+            The glyph sits *in* the title line rather than in the bar's actions,
+            because it is about this league's draft rather than about this
+            screen, and because the actions end is already the refresh control's.
+            It costs no row and no height: the button is shorter than the line it
+            sits on, so the bar is exactly as tall as it was before this existed.
+          */
+          <span className="nav-title-row">
+            <span className="nav-title-name" data-testid="board-league-name">
+              {board.league.name}
+            </span>
+            <button
+              type="button"
+              className="title-icon-btn"
+              data-testid="draft-board-open"
+              aria-label="Open draft board"
+              aria-haspopup="dialog"
+              aria-expanded={boardOpen}
+              onClick={() => setBoardOpen(true)}
+            >
+              <GridIcon size={15} />
+            </button>
+          </span>
+        }
         subtitle={
           <span className="draft-status" data-testid="draft-status">
             <span className="draft-pick">#{board.currentPick}</span>
@@ -508,27 +756,47 @@ export function DraftScreen({
         }
         trailing={
           /*
-            A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
-            implied the user had to keep a link open; what they actually want is
-            "show me what just happened", so that is what the control says.
+            Two controls sharing the bar's trailing end, and no new row.
+
+            The row a control costs on this screen is a player, so the sort sits
+            beside the refresh glyph rather than above the list. Both are about
+            the board as a whole, which is what the trailing end of the
+            navigation bar is for; the filter chips below stay about which
+            players, which is a different question and keeps its own row.
           */
-          <button
-            type="button"
-            className="icon-btn"
-            data-testid="draft-refresh"
-            aria-label={
-              unlocked
-                ? 'Refresh draft from Sleeper'
-                : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
-            }
-            aria-busy={refreshing}
-            disabled={refreshing}
-            onClick={() => void refreshNow()}
-          >
-            <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
-              ↻
-            </span>
-          </button>
+          <span className="nav-trailing-group">
+            <SortControl
+              value={sort}
+              onChange={setSort}
+              /*
+                The board's own answer, or the rows themselves.
+
+                `dogState` is the better source — it can distinguish "Underdog
+                has not priced these players" from "the file was stale and we
+                dropped it" — but it is absent on an older deployment, and
+                looking at whether any row actually carries a DOG value is the
+                honest fallback rather than assuming either way.
+              */
+              dogAvailable={board.dogState?.available ?? hasDogCoverage(board.recommendations)}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="draft-refresh"
+              aria-label={
+                unlocked
+                  ? 'Refresh draft from Sleeper'
+                  : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
+              }
+              aria-busy={refreshing}
+              disabled={refreshing}
+              onClick={() => void refreshNow()}
+            >
+              <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
+                ↻
+              </span>
+            </button>
+          </span>
         }
       />
 
@@ -551,10 +819,32 @@ export function DraftScreen({
         Suppressed while a manual complaint is up, so a failed tap gets one
         answer rather than two saying the same thing.
       */}
-      {refreshState?.stale && !refreshNote ? (
+      {refreshState?.stale && !refreshNote && cachedAt == null ? (
         <div className="draft-refresh-note" data-testid="draft-sync-stale" role="status">
           Draft sync delayed · retrying
         </div>
+      ) : null}
+
+      {/*
+        A board that came out of storage says so, permanently and in the loudest
+        tone this screen has.
+
+        Not the quiet "sync delayed" cue above, and not dismissible. That cue is
+        about a board the server *did* send falling behind by seconds; this is a
+        photograph of the draft taken before the tunnel, and every number under
+        it — who is available, the survival percentages, the tier bands — is as
+        old as the timestamp says. Somebody reading this without noticing would
+        take a player who went three picks ago, which is the single most
+        expensive mistake this app can help them make.
+
+        `role="alert"` rather than `status` for the same reason: a screen reader
+        should interrupt for this one.
+      */}
+      {cachedAt != null ? (
+        <Notice tone="error" data-testid="draft-offline-capture" role="alert">
+          Offline — showing the board as it was {describeAge(Math.max(0, now - cachedAt))}. Picks made since then are
+          not in it.
+        </Notice>
       ) : null}
 
       {/*
@@ -651,8 +941,20 @@ export function DraftScreen({
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
+          /*
+            Five numbers rather than four, when this board has a fifth.
+
+            The metrics line was fitted to exactly four labelled values, and DOG
+            is a genuine fifth. The flag goes on the *list* rather than on the
+            rows that happen to carry a DOG value, and that distinction is the
+            whole of it: styling only the DOG rows gave the board two card
+            heights, 57px and 58px, which the rhythm test correctly rejected.
+            One board, one treatment, one height — a row Underdog has not priced
+            simply has four numbers in the same slightly tighter line.
+          */
+          data-dog={board.dogState?.available ? 'yes' : 'no'}
         >
-          {visible.map((item) => (
+          {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
               {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
@@ -665,12 +967,276 @@ export function DraftScreen({
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
                 busy={flagging === item.rec.playerId}
+                /*
+                  The drag, and where this row currently sits because of it.
+
+                  `reorderable` gates the handle; `offset` is how far this row
+                  slides to open the gap. Both are absent everywhere but the
+                  queue, so every other view renders exactly the row it did
+                  before this feature existed.
+                */
+                reorderable={canReorder}
+                onReorderStart={(event) => onPointerDown(event, item.rec.playerId, i)}
+                dragging={drag?.playerId === item.rec.playerId}
+                offset={
+                  drag == null
+                    ? 0
+                    : drag.playerId === item.rec.playerId
+                      ? drag.deltaY
+                      : rowOffset({
+                          index: i,
+                          fromIndex: drag.fromIndex,
+                          toIndex: drag.toIndex,
+                          rowHeight: drag.rowHeight,
+                        })
+                }
               />
             </Fragment>
           ))}
         </div>
       )}
     </>
+  );
+}
+
+/** What a drag is doing right now, or null when nothing is being dragged. */
+interface DragState {
+  playerId: string;
+  fromIndex: number;
+  toIndex: number;
+  /** How far the finger has travelled, in pixels, signed downward. */
+  deltaY: number;
+  rowHeight: number;
+}
+
+/**
+ * Long-press to pick a player up, drag to move him, release to keep it.
+ *
+ * Available inside the ★ filter and nowhere else, and that restriction is the
+ * whole design rather than a limitation. The queue is an explicit preference —
+ * a list the reader built — so an order imposed on it is theirs to change. Every
+ * other view of this board is ranked by the model, and a drag there would be
+ * asking the reader to rearrange a conclusion, which would then be silently
+ * discarded on the next refresh.
+ *
+ * Three properties that took some care:
+ *
+ *  - **Scrolling still wins.** The press has to be held for half a second
+ *    without moving before it becomes a drag. A finger that moves first is
+ *    scrolling and the timer is abandoned — permanently, so a slow scroll
+ *    cannot turn into a drag halfway down.
+ *  - **The order is applied optimistically and confirmed after.** A drag that
+ *    waited for a round trip before redrawing would feel broken on a phone
+ *    mid-draft; a drag whose result the server rejected would be worse. So the
+ *    list moves immediately and the server's answer replaces it, which is
+ *    almost always the same list.
+ *  - **It never touches a ranking.** The gesture produces an index. What that
+ *    index means is decided by `reorderQueue` in core, which operates on ids
+ *    and ranks and has no access to a Score at all.
+ */
+function useQueueDrag({
+  enabled,
+  ids,
+  onCommit,
+}: {
+  enabled: boolean;
+  ids: string[];
+  onCommit: (playerId: string, toIndex: number, optimistic: string[]) => void;
+}) {
+  const [drag, setDrag] = useState<DragState | null>(null);
+  /*
+   * The same drag, readable synchronously.
+   *
+   * `end` needs to know where the row was dropped, and the obvious way to get
+   * it — reading the state inside a `setDrag` updater and committing from
+   * there — is wrong twice over. An updater must be pure, and under StrictMode
+   * React deliberately calls it twice, so the commit would fire two reorder
+   * requests for one drop every time in development. The ref is the honest
+   * version: the updater only ever returns the next state, and the side effect
+   * reads what it needs from outside it.
+   */
+  const dragRef = useRef<DragState | null>(null);
+  /*
+   * The live gesture, readable from event handlers that were registered once.
+   *
+   * Registering `pointermove` on every render would mean re-binding on every
+   * frame of a drag, which drops moves; keeping the state in a ref means the
+   * listeners are bound at the start of a gesture and torn down at the end.
+   */
+  const gesture = useRef<{
+    playerId: string;
+    fromIndex: number;
+    startY: number;
+    rowHeight: number;
+    startedAt: number;
+    timer: number | null;
+    active: boolean;
+    abandoned: boolean;
+  } | null>(null);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+
+  /** Write the drag through both the ref and the state, so they cannot drift. */
+  const applyDrag = useCallback((next: DragState | null) => {
+    dragRef.current = next;
+    setDrag(next);
+  }, []);
+
+  const end = useCallback(
+    (commit: boolean) => {
+      const current = gesture.current;
+      const state = dragRef.current;
+      gesture.current = null;
+      if (current?.timer != null) window.clearTimeout(current.timer);
+      applyDrag(null);
+      if (commit && state && current?.active && state.toIndex !== state.fromIndex) {
+        onCommit(state.playerId, state.toIndex, moveItem(idsRef.current, state.fromIndex, state.toIndex));
+      }
+    },
+    [applyDrag, onCommit],
+  );
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent, playerId: string, index: number) => {
+      if (!enabled) return;
+      // A secondary button, a pinch, or anything that is not a single primary
+      // pointer is not a reorder.
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      const row = (event.currentTarget as HTMLElement).closest('[data-testid="recommendation-row"]');
+      const rowHeight = row instanceof HTMLElement ? row.getBoundingClientRect().height : 0;
+      if (rowHeight <= 0) return;
+
+      const timer = window.setTimeout(() => {
+        const current = gesture.current;
+        if (!current || current.abandoned) return;
+        current.active = true;
+        applyDrag({ playerId, fromIndex: index, toIndex: index, deltaY: 0, rowHeight });
+        // A short tick when the row is picked up, where the platform offers one.
+        navigator.vibrate?.(10);
+      }, LONG_PRESS_MS);
+
+      gesture.current = {
+        playerId,
+        fromIndex: index,
+        startY: event.clientY,
+        rowHeight,
+        startedAt: Date.now(),
+        timer,
+        active: false,
+        abandoned: false,
+      };
+    },
+    [applyDrag, enabled],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onMove = (event: PointerEvent) => {
+      const current = gesture.current;
+      if (!current) return;
+      const deltaY = event.clientY - current.startY;
+
+      if (!current.active) {
+        // Still deciding. Movement before the hold elapses means a scroll, and
+        // that verdict is final.
+        const verdict = pressVerdict({
+          heldMs: Date.now() - current.startedAt,
+          movedPx: Math.abs(deltaY),
+        });
+        if (verdict === 'scroll') {
+          current.abandoned = true;
+          if (current.timer != null) window.clearTimeout(current.timer);
+          gesture.current = null;
+        }
+        return;
+      }
+
+      /*
+       * The drag owns the movement now, so the page must not also scroll with
+       * it. `touch-action: none` on the row is what actually makes this
+       * cancellable — without it the browser has already committed the gesture
+       * to scrolling and this call does nothing but log a warning.
+       */
+      if (event.cancelable) event.preventDefault();
+      const state = dragRef.current;
+      if (state == null) return;
+      applyDrag({
+        ...state,
+        deltaY,
+        toIndex: targetIndex({
+          fromIndex: state.fromIndex,
+          deltaY,
+          rowHeight: state.rowHeight,
+          count: idsRef.current.length,
+        }),
+      });
+    };
+
+    const onUp = () => end(true);
+    const onCancel = () => end(false);
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [applyDrag, enabled, end]);
+
+  return { drag, onPointerDown };
+}
+
+/**
+ * Score / ADP / DOG, in the space a control has beside the refresh glyph.
+ *
+ * Three words, because three words is what the three orderings need and any
+ * fewer would be a puzzle: `S / A / D` saves nine characters and costs the
+ * reader the meaning. It is a radio group rather than a cycle button — a cycle
+ * would hide two of the three states and make "which order am I looking at"
+ * a thing to remember rather than a thing to see.
+ *
+ * The DOG chip stays visible when Underdog has priced nobody, and says so in
+ * its accessible name rather than vanishing. A control that disappears when a
+ * data source is down teaches the reader that the feature is unreliable; one
+ * that explains itself teaches them what is actually wrong.
+ */
+function SortControl({
+  value,
+  onChange,
+  dogAvailable,
+}: {
+  value: SortMode;
+  onChange: (mode: SortMode) => void;
+  dogAvailable: boolean;
+}) {
+  return (
+    <span className="sort-control" role="radiogroup" aria-label="Sort the board" data-testid="draft-sort">
+      {SORT_MODES.map((mode) => {
+        const unavailable = mode === 'dog' && !dogAvailable;
+        return (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            className="sort-chip"
+            aria-checked={value === mode}
+            data-testid={`sort-${mode}`}
+            data-active={value === mode ? 'yes' : 'no'}
+            aria-label={
+              unavailable
+                ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                : SORT_DESCRIPTIONS[mode]
+            }
+            onClick={() => onChange(mode)}
+          >
+            {SORT_LABELS[mode]}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 
@@ -735,6 +1301,22 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
   );
 }
 
+/**
+ * Rows in the sequence an id list names, with anything unnamed kept at the end.
+ *
+ * Used for one thing: holding the queue where the reader dropped a player while
+ * the server confirms it. Rows the sequence does not mention keep their
+ * incoming order rather than being dropped — a player queued from another
+ * screen mid-drag is a real possibility, and losing his row would be a much
+ * worse outcome than showing him last for one refresh.
+ */
+function reorderByIds<T extends { playerId: string }>(rows: T[], ids: string[]): T[] {
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return [...rows].sort(
+    (a, b) => (rank.get(a.playerId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.playerId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** A row to draw, and whether a tier boundary falls immediately above it. */
 interface BoardItem {
   rec: DraftRecommendation;
@@ -794,6 +1376,10 @@ function RecommendationRow({
   onToggle,
   onQueue,
   busy,
+  reorderable = false,
+  onReorderStart,
+  dragging = false,
+  offset = 0,
 }: {
   rank: number;
   rec: DraftRecommendation;
@@ -805,6 +1391,12 @@ function RecommendationRow({
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
+  /** True only inside the ★ filter, where the order is the reader's own. */
+  reorderable?: boolean;
+  onReorderStart?: (event: React.PointerEvent) => void;
+  dragging?: boolean;
+  /** How far this row is drawn from where it normally sits, mid-drag. */
+  offset?: number;
 }) {
   const pos = (rec.position ?? '').toUpperCase();
   return (
@@ -813,11 +1405,55 @@ function RecommendationRow({
       data-testid="recommendation-row"
       data-player-id={rec.playerId}
       data-position={pos}
+      data-dragging={dragging ? 'yes' : undefined}
+      /*
+       * Mid-drag the rows are drawn where the gesture puts them.
+       *
+       * A transform rather than a reflow, so moving a row costs the compositor
+       * a paint and costs the layout engine nothing — which is what keeps a
+       * drag at sixty frames on a list of two hundred. The transition is
+       * suppressed on the row under the finger, because that one must track the
+       * finger exactly rather than easing toward it.
+       */
+      style={
+        offset === 0
+          ? undefined
+          : {
+              transform: `translateY(${offset}px)`,
+              transition: dragging ? 'none' : 'transform 160ms ease',
+              zIndex: dragging ? 2 : undefined,
+              position: 'relative',
+            }
+      }
       role="listitem"
     >
       <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
         <div className="player-row-top">
-          <span className="rank">{rank}</span>
+          {/*
+            The grip, inside the queue only.
+
+            It replaces the rank number rather than sitting beside it: on the
+            queue the position in the list *is* the rank, so a separate numeral
+            was saying the same thing twice — and a phone row has no spare
+            column. `touch-action: none` is what actually lets the drag cancel
+            the scroll; without it the browser has already committed the gesture
+            by the time the first move arrives.
+          */}
+          {reorderable ? (
+            <span
+              className="drag-handle"
+              data-testid="queue-drag-handle"
+              aria-hidden="true"
+              style={{ touchAction: 'none' }}
+              onPointerDown={onReorderStart}
+              /* The row underneath is a toggle; picking it up is not opening it. */
+              onClick={(event) => event.stopPropagation()}
+            >
+              ⠿
+            </span>
+          ) : (
+            <span className="rank">{rank}</span>
+          )}
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
           <span className="player-name">{rec.name}</span>
           {/*
@@ -828,29 +1464,36 @@ function RecommendationRow({
             here it is one token attached to the player, and the row below is
             free for the four numbers that describe the decision.
           */}
-          <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
-          <InjuryTag status={rec.status} />
+          {/*
+            The tally and the availability tag share one fixed-width field, so
+            the club's mark after them lands on the same edge on every row —
+            see `--row-meta`. Both are still exactly what they were; only the
+            box around them is new.
+          */}
+          <span className="player-row-meta">
+            <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
+            <InjuryTag status={rec.status} />
+          </span>
           <PositionBadge position={rec.position} team={rec.team} />
         </div>
 
         {/*
-          The only tag that still costs a row of its own. Take Now, Risky to
-          Wait and Can Probably Wait were on nearly every row, which made a row
-          of chips that told the reader nothing; the chance he reaches your next
-          pick is a number and does the same job in less space. AVOID stays,
-          because "the research is against him" is not something a percentage
-          can say — and it is rare enough that the row it costs is affordable.
+          No tag row at all any more.
 
-          The tier-cliff warning used to sit here too, and did not earn it: it
-          lands on whole runs of the board at once, and every card it touched
-          became a line taller than its neighbours. It has moved into the empty
-          right-hand end of the metrics line below.
+          Take Now, Risky to Wait and Can Probably Wait went first: they were on
+          nearly every card, which made a row of chips that told the reader
+          nothing, and the chance he reaches your next pick is a number that does
+          the same job in less space. AVOID has now followed them, and for a
+          related reason — it said out loud what the signed tally beside the name
+          already says. `-5` is the reading; `⚠ AVOID — lifetime tally -5` was
+          the same reading, in a red chip, costing a line of every card it landed
+          on. The reader interprets the number directly.
+
+          **Nothing about the recommendation changed.** The tally is still
+          computed and still shown, the lifetime threshold still exists, and the
+          bounded penalty the engine applies below it is untouched — see
+          core/draft/decisions.ts. This removed a label, not a judgement.
         */}
-        {rec.avoid.active ? (
-          <div className="tag-row" data-testid="decision-tags">
-            <AvoidBadge avoid={rec.avoid} />
-          </div>
-        ) : null}
 
         {/*
           Four numbers, four different questions, in the order they are asked.
@@ -894,6 +1537,21 @@ function RecommendationRow({
             <span className="metric">
               ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
             </span>
+            {/*
+              Underdog's own number, beside Sleeper's rather than instead of it.
+
+              Two markets, two columns, and the reader can see them disagree —
+              which is the whole reason the second one is worth having. It is
+              absent rather than blank when Underdog has not priced him, so a
+              card costs nothing for a player the source does not cover and the
+              line stays the height it always was.
+            */}
+            {rec.dogAdp == null ? null : (
+              <span className="metric" data-testid="dog-metric">
+                DOG{' '}
+                <strong title={rec.marketDisagreement?.note ?? 'Raw Underdog ADP'}>{rec.dogAdp}</strong>
+              </span>
+            )}
             <span className="metric">
               Val{' '}
               <strong
@@ -939,38 +1597,6 @@ function RecommendationRow({
 }
 
 /**
- * Last season and this season's outlook, fetched when the card opens.
- *
- * Not part of the board response on purpose. The board is what a live draft
- * waits on and it must never wait on a third party; this is asked for after the
- * user has already decided to look at one player, and a failure to answer costs
- * that one section and nothing else.
- */
-function usePlayerDetail(playerId: string) {
-  const [detail, setDetail] = useState<PlayerDetail | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setDetail(null);
-    setFailed(false);
-    api
-      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId]);
-
-  return { detail, failed };
-}
-
-/**
  * The expanded player: four things, and nothing that explains the ranking.
  *
  * It has been cut twice now, and this is the cut that changes what it is for.
@@ -982,8 +1608,14 @@ function usePlayerDetail(playerId: string) {
  * him". A live draft is thirty seconds long.
  *
  * What is left is a fantasy snapshot: where his position is breaking and who
- * ahead of you still needs one, what is expected of him this season, what he
- * did last season, and whether he is coming back from something.
+ * ahead of you still needs one, what the newsletter ledger's strongest
+ * supported fact about him is, what is expected of him this season, what he did
+ * last season, and whether he is coming back from something.
+ *
+ * Every part of that snapshot below the tier line is drawn by
+ * `components/playerDetail.tsx`, which every other screen also uses — the
+ * sections used to be copied here and in Players, and two copies is how six
+ * start.
  *
  * The rationale is not deleted from the system — the board response still
  * carries every reason, counterpoint, component, weight and contribution, and
@@ -1007,179 +1639,18 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
         </div>
       ) : null}
 
+      {/*
+        Why the tally reads the way it does, before the outlook rather than
+        after it: the tally is the number on the row the reader just tapped, and
+        the sentence explaining it should not be below a paragraph of somebody
+        else's prose.
+      */}
+      <NewsletterTakeaway detail={detail} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
-
-      {/*
-        A label, not a retelling. The outlook above has already explained the
-        injury in the words of somebody who knows; saying it again in the app's
-        own words would be duplication at best and paraphrase at worst.
-      */}
-      {detail?.injuryContext ? (
-        <>
-          <DetailLabel>Injury context</DetailLabel>
-          <div className="muted" data-testid="injury-context">
-            {detail.injuryContext}
-          </div>
-        </>
-      ) : null}
-
-      {/*
-        What is wrong with him now, as against what he came back from above.
-        Two different facts under two different headings, because a player
-        returning from an ACL and a player with a sore hamstring on Friday are
-        not the same situation and must not read as one.
-      */}
-      {detail?.injury ? (
-        <>
-          <DetailLabel>{detail.injury.label}</DetailLabel>
-          <div className="muted" data-testid="injury-current">
-            {detail.injury.line ?? detail.injury.label}
-            {detail.injury.provenance ? (
-              <span className="faint"> — {detail.injury.provenance}</span>
-            ) : null}
-          </div>
-          {/*
-            Disagreement is shown, never averaged away. Two sources saying
-            different things is a real state of the world and the reader is the
-            one who should decide what to do about it.
-          */}
-          {detail.injury.conflict ? (
-            <div className="muted" data-testid="injury-conflict">
-              Sources disagree — {detail.injury.conflict}
-            </div>
-          ) : null}
-        </>
-      ) : null}
+      <InjuryDetail detail={detail} />
+      <ProfileFlags detail={detail} />
     </div>
-  );
-}
-
-/**
- * What is expected of him this season, in the words of whoever wrote it.
- *
- * Sleeper serves this through a public endpoint, and it is editorial writing
- * rather than anything Sleeper or this app generated — so it carries its
- * author. Two or three sentences: the full text runs past a thousand
- * characters, and a wall of prose in a live draft is scrolled past rather than
- * read, taking whatever is under it off the screen.
- */
-function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
-  if (failed) return null;
-  if (!detail) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-pending">
-          Looking it up…
-        </div>
-      </>
-    );
-  }
-  if (!detail.outlook) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-none">
-          {detail.outlookNote ?? 'No outlook published for him.'}
-        </div>
-      </>
-    );
-  }
-  return <OutlookBody outlook={detail.outlook} />;
-}
-
-/**
- * The outlook, short by default and whole on request.
- *
- * What is printed is always the provider's own sentences in their own order —
- * the shortening is a selection, never a rewrite. But a quotation that has been
- * cut and does not say so is a misquotation, so when sentences were dropped the
- * card says how many and offers them, and the control is the only way this
- * component differs from showing the paragraph outright.
- */
-function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
-  const [whole, setWhole] = useState(false);
-  const attribution = outlook.source ? (
-    <span className="outlook-source"> — {outlook.source}, via Sleeper</span>
-  ) : null;
-
-  return (
-    <>
-      <DetailLabel>{outlook.title}</DetailLabel>
-      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
-        {whole ? outlook.fullText : outlook.text}
-        {attribution}
-      </div>
-      {outlook.summarised ? (
-        <button
-          type="button"
-          className="link-button"
-          data-testid="outlook-toggle"
-          onClick={(e) => {
-            // The row underneath is a toggle; expanding the text is not
-            // "collapse this player".
-            e.stopPropagation();
-            setWhole((v) => !v);
-          }}
-        >
-          {whole ? 'Show the short version' : 'Read the full outlook'}
-        </button>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * `16 GP · WR7 half-PPR`.
- *
- * Two numbers, one line, and neither is guessed. A player who did not appear
- * last season has no games and no finish, and gets a dash: Sleeper will happily
- * report him as the 1,240th receiver, which looks like a result and is really
- * his place in a directory.
- */
-function LastSeasonLine({
-  detail,
-  failed,
-  position,
-}: {
-  detail: PlayerDetail | null;
-  failed: boolean;
-  position: string | null;
-}) {
-  if (failed || !detail) return null;
-  const season = detail.lastSeason?.season;
-  const games = detail.lastSeason?.gamesPlayed;
-  const rank = detail.lastSeason?.positionRank;
-  if (!season) return null;
-  return (
-    <>
-      <DetailLabel>{season}</DetailLabel>
-      <div className="season-line" data-testid="last-season">
-        <span className="metric">
-          {games == null ? (
-            <>
-              GP <Unknown what={`${season} games played`} />
-            </>
-          ) : (
-            <>
-              <strong>{games}</strong> GP
-            </>
-          )}
-        </span>
-        <span className="metric" title={detail.lastSeason?.scoring}>
-          {rank == null ? (
-            <>
-              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
-            </>
-          ) : (
-            <>
-              <strong>{rank}</strong> half-PPR
-            </>
-          )}
-        </span>
-      </div>
-    </>
   );
 }
 

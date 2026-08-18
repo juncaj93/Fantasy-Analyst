@@ -9,6 +9,7 @@ import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
 import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
+import { UsageRepo } from '../src/server/repos/usage.ts';
 import { createTestDb } from './helpers/db.ts';
 
 function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEnv {
@@ -251,6 +252,47 @@ describe('API with seeded data', () => {
     expect(board.startablePositions).toEqual(['QB', 'RB', 'WR', 'TE']);
     expect(board.startablePositions).not.toContain('DEF');
     expect(board.startablePositions).not.toContain('K');
+  });
+
+  /**
+   * The draft board's own three fields, end to end.
+   *
+   * The board overlay draws from these and fetches nothing of its own, so if
+   * they stop arriving here the board goes blank with no other symptom
+   * anywhere. They are read-only projections of state this response already
+   * carried — the picks, the rosters and the seat mapping — and none of them
+   * touches a ranking.
+   */
+  it('carries the drafting managers and the completed picks for the board', async () => {
+    const board = await json<{
+      teams: number;
+      rounds: number;
+      managers: { slot: number; name: string; isMine: boolean }[];
+      boardPicks: { pickNo: number; playerId: string; name: string; position: string; ownerSlot: number }[];
+      pickOwners: number[] | null;
+    }>(get('/api/drafts/demo-draft/board', cookie));
+
+    // One column per seat, named where Sleeper named them and numbered where
+    // it did not.
+    expect(board.managers).toHaveLength(board.teams);
+    expect(board.managers.map((m) => m.slot)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(board.managers[0]).toEqual({ slot: 1, name: 'You', isMine: true });
+    expect(board.managers[1]).toEqual({ slot: 2, name: 'Rival', isMine: false });
+    expect(board.managers[5]!.name).toBe('Team 6');
+    expect(board.managers.filter((m) => m.isMine)).toHaveLength(1);
+
+    // The two seeded picks, in pick order, each with the manager who made it.
+    expect(board.boardPicks.map((p) => p.pickNo)).toEqual([1, 2]);
+    expect(board.boardPicks[0]!.ownerSlot).toBe(1);
+    expect(board.boardPicks[1]!.ownerSlot).toBe(2);
+    for (const pick of board.boardPicks) {
+      expect(pick.name.length).toBeGreaterThan(0);
+      expect(pick.position).toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
+    }
+
+    // No trade published for this draft, so the snake is the whole answer and
+    // the client is not handed a second one.
+    expect(board.pickOwners).toBeNull();
   });
 
   it('narrows the board to the queue, and says so when it is empty', async () => {
@@ -641,6 +683,56 @@ describe('API with seeded data', () => {
       expect(swap.inPlayerId).not.toBe(swap.outPlayerId);
       expect(swap.gain).toBeGreaterThan(0);
     }
+  });
+
+  it('carries expected points on the lineup once usage exists for a player', async () => {
+    /*
+     * The weekly card's `advanced` slot, end to end.
+     *
+     * Seeded here rather than in the demo data because usage arrives from
+     * nflverse in production and the demo league predates it: what is being
+     * asserted is that the endpoint reads what is stored and attaches it, which
+     * needs a player who has some.
+     */
+    const season = String(new Date().getUTCFullYear());
+    await new UsageRepo(db).saveWeeks(
+      Array.from({ length: 7 }, (_, i) => ({
+        playerId: '1001',
+        season,
+        week: i + 1,
+        seasonType: 'REG',
+        team: 'KC',
+        position: 'RB',
+        passAttempts: null,
+        carries: 17,
+        targets: 4,
+        receptions: 3,
+        targetShare: 0.1,
+        wopr: 0.3,
+        rushYards: 74,
+        rushTds: 0.5,
+        recYards: 22,
+        recTds: 0,
+        gsisId: `gsis-1001`,
+        source: 'test',
+        publishedAt: '2025-10-01T00:00:00.000Z',
+        fetchedAt: '2025-10-01T00:00:00.000Z',
+      })),
+    );
+
+    const body = await json<{
+      starters: { playerId: string; advanced?: { key: string; label: string; value: string }[] }[];
+      bench: { playerId: string; advanced?: { key: string; label: string; value: string }[] }[];
+    }>(get('/api/leagues/demo-league/lineup', cookie));
+
+    const seeded = [...body.starters, ...body.bench].find((e) => e.playerId === '1001');
+    expect(seeded).toBeDefined();
+    expect(seeded!.advanced?.[0]?.label).toBe('Expected points');
+    expect(seeded!.advanced?.[0]?.value).toMatch(/pts\/gm$/);
+
+    // And a player with no stored usage carries nothing rather than a zero.
+    const untouched = [...body.starters, ...body.bench].find((e) => e.playerId !== '1001');
+    expect(untouched?.advanced ?? []).toEqual([]);
   });
 
   it('serves the lineup without a session, but still refuses writes', async () => {

@@ -1,5 +1,7 @@
 /** Typed API client. All calls are same-origin and credentialed. */
 
+import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -53,6 +55,63 @@ export interface Overview {
     reason: string;
     assumed: boolean;
   };
+  /**
+   * The same decision at eight-state resolution.
+   *
+   * Optional for the same reason `season` is: a client that arrives during a
+   * deploy, or one pinned to an older worker, must degrade to the four-state
+   * answer rather than to nothing. Anything that only needs "is Draft a
+   * destination" should keep reading `season`; this is for the things that have
+   * to tell an open draft from a live one.
+   */
+  lifecycle?: {
+    lifecycle:
+      | 'offseason'
+      | 'preseason'
+      | 'draft_open'
+      | 'draft_live'
+      | 'post_draft'
+      | 'regular_season'
+      | 'playoffs'
+      | 'season_complete';
+    phase: 'preseason' | 'regular' | 'postseason' | 'offseason';
+    draftVisible: boolean;
+    draftLive: boolean;
+    reason: string;
+    assumed: boolean;
+  };
+}
+
+/**
+ * The annual readiness check — `GET /api/diagnostics/rollover`.
+ *
+ * Not on any screen by default. It is the answer to "is this app ready for the
+ * new season", which is a question asked once a year by somebody who needs a
+ * real answer rather than a rendered page.
+ */
+export interface RolloverReport {
+  season: string;
+  ready: boolean;
+  waitingOn: string | null;
+  checks: {
+    name: string;
+    status: 'ready' | 'waiting' | 'stale' | 'failed' | 'skipped';
+    wanted: string;
+    found: string | null;
+    detail: string;
+    blocking: boolean;
+  }[];
+  policy: { category: string; disposition: string; reason: string }[];
+  summary: string;
+  league: {
+    selected: { id: string; name: string; season: string } | null;
+    succession: {
+      league: { id: string; name: string; season: string } | null;
+      confidence: 'exact' | 'likely' | 'ambiguous' | 'none';
+      autoSelect: boolean;
+      reason: string;
+    } | null;
+  };
 }
 
 export interface ComponentScore {
@@ -82,8 +141,29 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   name: string;
   position: string;
   team: string;
+  /** Sleeper ADP — the market the user is drafting in. */
   adp: number | null;
+  /**
+   * Raw Underdog ADP, or null when no usable snapshot has priced him.
+   *
+   * Never filled in from `adp`. A blank DOG means Underdog has not priced him
+   * or the snapshot is not trusted — `dogState` on the board says which.
+   */
+  dogAdp: number | null;
+  /** How far past **Sleeper's** ADP this pick is. Unchanged by the blend. */
   adpValue: number | null;
+  /** The blended market baseline that priced him, and how it was weighted. */
+  marketBlend: {
+    adp: number | null;
+    weights: { dog: number; sleeper: number };
+    nominal: { dog: number; sleeper: number };
+    sources: ('dog' | 'sleeper')[];
+    singleSource: boolean;
+    unknown: boolean;
+    note: string;
+  };
+  /** How far apart the two markets are. Context, never a second bonus. */
+  marketDisagreement: { picks: number | null; leader: 'dog' | 'sleeper' | null; note: string | null };
   survivalProbability: number | null;
   newsLifetimeNet: number;
   news30Net: number;
@@ -237,6 +317,42 @@ export interface PlayerDetail {
     confidence: string;
     conflict: string | null;
   } | null;
+  /**
+   * One sentence explaining the tally, selected from the evidence ledger.
+   *
+   * It is on this payload — the one shared detail request every screen already
+   * makes — rather than on each screen's own list, so Draft, Team, Waivers,
+   * Trades and Players show the same sentence instead of six renderers each
+   * deciding what the evidence means.
+   *
+   * `scoreDelta` is always 0 and is on the wire deliberately: the takeaway
+   * explains a number the tally already produced from the same evidence, and
+   * anything that counted it again would be counting it twice.
+   */
+  newsletterTakeaway: {
+    text: string;
+    sourceName: string;
+    sourceDate: string;
+    corroboration: number;
+    derivation: 'extracted' | 'templated';
+    evidenceItemIds: string[];
+    scoreDelta: 0;
+  } | null;
+  /**
+   * Physical and age context, and usually none.
+   *
+   * A flag fires only where a measurement is in genuine tension with a role.
+   * Height and weight arrive as null unless a physical flag fired — the server
+   * withholds them rather than trusting the card to hide them — and nothing
+   * here moves a number: `scoreDelta` is always 0.
+   */
+  profile: {
+    flags: { key: string; text: string; kind: 'physical' | 'age'; weight: 'context' }[];
+    showMeasurements: boolean;
+    scoreDelta: 0;
+    heightInches: number | null;
+    weightPounds: number | null;
+  };
 }
 
 export interface RosterAlert {
@@ -265,6 +381,34 @@ export interface DraftBoard {
   rosterCounts: Record<string, number>;
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
+  /**
+   * Where the DOG column stands, and — when it is absent — why.
+   *
+   * Optional so a client running against an older deployment simply shows no
+   * DOG rather than breaking. The reason string is what stops a blank column
+   * from being ambiguous between "Underdog has not priced him" and "we stopped
+   * trusting the file".
+   */
+  dogState?: {
+    available: boolean;
+    provider: string | null;
+    sourceType: string | null;
+    snapshotAt: string | null;
+    fetchedAt: string | null;
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    ageHours: number | null;
+    matched: number;
+    reason: string;
+  };
+  /** How the market baseline is weighted for this league, and on what basis. */
+  marketFormat?: {
+    format: 'standard' | 'best_ball';
+    bestBall: boolean;
+    confident: boolean;
+    basis: string;
+    weights: { dog: number; sleeper: number };
+    reason: string;
+  };
   recommendations: DraftRecommendation[];
   rosterAlerts: RosterAlert[];
   /** Every starting slot the league has, filled out of required. */
@@ -273,6 +417,24 @@ export interface DraftBoard {
   startablePositions: string[];
   /** Whether the W/R/T flex view is worth a chip in this league. */
   offersFlex?: boolean;
+  /**
+   * The drafting managers, one per seat, in column order.
+   *
+   * Read by the draft-board overlay and by nothing else. Optional so a client
+   * running against an older deployment simply gets `Team 4` columns rather
+   * than a broken board.
+   */
+  managers?: { slot: number; name: string; isMine: boolean }[];
+  /**
+   * Every completed pick, with the manager who actually made it.
+   *
+   * This is why the board overlay needs no request of its own: the picks travel
+   * with the board the live refresh already rebuilds, so a new pick reaches the
+   * grid through exactly the sync that was already running.
+   */
+  boardPicks?: { pickNo: number; playerId: string; name: string; position: string; team: string; ownerSlot: number }[];
+  /** Owner slot per pick, only in a draft where Sleeper published a trade. */
+  pickOwners?: number[] | null;
   /**
    * How many players survived each stage that can lose one.
    *
@@ -632,6 +794,13 @@ export interface LeagueSummary {
   notes: string[];
   rosterPositions: string[];
   draftId: string | null;
+  /**
+   * NFL teams this league's room drafts earlier than the market.
+   *
+   * Optional and usually empty. It reaches `Next%` alone — the model's estimate
+   * of what somebody else will do — and never a Score, a tier or a `Val`.
+   */
+  localTeams?: string[];
 }
 
 export interface RosterPlayer {
@@ -640,6 +809,13 @@ export interface RosterPlayer {
   position: string;
   team: string;
   status: string | null;
+  /**
+   * The number on his shirt, when Sleeper records one.
+   *
+   * What a Team row shows once the draft is over. Optional so a client running
+   * against an older deployment falls back to the pick rather than breaking.
+   */
+  jerseyNumber?: number | null;
   newsNet: number;
   recentNet: number;
   pending: number;
@@ -709,6 +885,16 @@ export interface StartSitEvaluation {
   /** Where the evidence points different ways. */
   conflicts?: string[];
   opponent?: string | null;
+  /**
+   * Expected points, points over expectation, and anything else the
+   * intelligence pass adds — already labelled and already formatted.
+   *
+   * The weekly card prints these as given and computes none of them. Absent
+   * until that work merges, and absent renders as nothing.
+   */
+  advanced?: { key: string; label: string; value: string; detail?: string | null }[];
+  /** What would move the recommendation, once the sensitivity pass exists. */
+  whatWouldChange?: string[];
 }
 
 /** Floor, Balanced or Ceiling — which question Start/Sit is answering. */
@@ -790,6 +976,11 @@ export interface LineupRecommendation {
     superflex: boolean;
   };
   slots: LineupSlot[];
+  /**
+   * The evaluations behind the slots. Absent on an older deployment, which the
+   * weekly card treats as "no card for a starter yet" rather than as an error.
+   */
+  starters?: StartSitEvaluation[];
   bench: StartSitEvaluation[];
   undecidable: StartSitEvaluation[];
   swaps: LineupSwap[];
@@ -835,6 +1026,19 @@ export interface WaiverCandidate {
   gain: number;
   reasons: string[];
   statusFlag: string | null;
+  /** The role assessment behind the points, carried rather than described. */
+  role: { trend: string; games: number };
+  /*
+   * What your league's own managers imply: what he will cost, who else wants
+   * him, and what he is worth past Sunday. Optional, and absent means unknown —
+   * the Waivers page says so rather than estimating any of them. The shapes are
+   * defined once, beside the view model that reads them, in
+   * core/waivers/board.ts.
+   */
+  faab?: WaiverLeagueIntel['faab'];
+  competition?: WaiverLeagueIntel['competition'];
+  multiWeek?: WaiverLeagueIntel['multiWeek'];
+  leagueRank?: number | null;
 }
 
 export interface WaiverUpgrade {
@@ -859,6 +1063,100 @@ export interface WaiverAdvice {
   considered: number;
   threshold?: number;
   pool?: { scanned: number; perPosition: number };
+  /** What each upgrade would cost, or why no price can honestly be quoted. */
+  faab?: FaabAdvice | null;
+}
+
+/** A roster's budget position, in dollars and as a share of the league. */
+export interface RosterBudget {
+  rosterId: number;
+  ownerName: string | null;
+  isMine: boolean;
+  /** Null whenever the league total or this roster's spend is unknown. */
+  remaining: number | null;
+  spent: number | null;
+  share: number | null;
+}
+
+/**
+ * Three numbers that are not the same number: what the room will pay, what he
+ * is worth to you, and the line past which winning is worse than losing.
+ */
+export interface FaabBid {
+  playerId: string;
+  name: string;
+  expected: { low: number; high: number } | null;
+  recommended: number | null;
+  doNotExceed: number | null;
+  /** `Expected $17–22 · Recommended max $19 · Preserve budget for RB depth` */
+  headline: string;
+  reasons: string[];
+  worth: number | null;
+  components: { key: string; label: string; factor: number; note: string }[];
+  confidence: 'none' | 'low' | 'medium' | 'high';
+  /** Set whenever the answer is deliberately not a number. */
+  withheld: string | null;
+  /** `Bid $24 → $41 remaining · still above 6/9 managers`, or nothing. */
+  opportunity: {
+    spend: number;
+    remainingAfter: number;
+    line: string;
+    above: number;
+    comparable: number;
+    droppedBelow: string[];
+  } | null;
+  /** `#2 trending add · still available in your league`, or nothing. */
+  trending: string | null;
+  /** Whether the market and our own read agree, and what that is allowed to change. */
+  disagreement: {
+    kind: 'market_ahead' | 'model_ahead' | 'agreed' | 'quiet' | 'unknown';
+    label: string;
+    line: string | null;
+    confidenceDelta: number;
+    affects: 'bid_price_and_confidence_only';
+  };
+}
+
+export interface FaabAdvice {
+  rule: { total: number | null; usesFaab: boolean; provenance: string };
+  mine: RosterBudget | null;
+  rosters: RosterBudget[];
+  prices: {
+    sample: number;
+    median: number | null;
+    low: number | null;
+    high: number | null;
+    max: number | null;
+    highestLosing: number | null;
+    losingBidsComplete: boolean;
+    confidence: 'none' | 'low' | 'medium' | 'high';
+  };
+  /** One line about what is and is not knowable about losing bids. */
+  losingBids: string;
+  bids: FaabBid[];
+  notes: string[];
+  trendingCapturedAt: string | null;
+}
+
+/** What a bench slot is earning, against what the wire would put in it. */
+export interface BenchAdvice {
+  found: boolean;
+  league?: { id: string; name: string };
+  dropCandidates: BenchSlotValue[];
+  ranked: BenchSlotValue[];
+  notes: string[];
+}
+
+export interface BenchSlotValue {
+  playerId: string;
+  name: string;
+  position: string;
+  slotValue: number;
+  /** Slot value minus what a free agent would give you. The real question. */
+  surplus: number;
+  components: { key: string; label: string; value: number; note: string }[];
+  reasons: string[];
+  protected: string | null;
 }
 
 /** Help My Scores: unresolved names and what they are costing. */
@@ -879,6 +1177,8 @@ export interface RepairStatus {
 
 /** Trade intelligence: what has changed lately, and who holds them. */
 export interface TradeSuggestion {
+  /** Where this league drafted him, when it did. */
+  draft?: DraftProvenance | null;
   playerId: string;
   name: string;
   position: string;
@@ -908,6 +1208,19 @@ export interface TradeSuggestion {
   confidence: 'high' | 'medium' | 'low';
   reasons: string[];
   counterpoints: string[];
+}
+
+/**
+ * Where a player came from, when this league drafted him.
+ *
+ * `Drafted 1.02 by Joe`. Absent for a waiver pickup and for a league with no
+ * draft attached — both of which are ordinary, and neither of which gets a
+ * made-up pick number.
+ */
+export interface DraftProvenance {
+  pick: string;
+  managerName: string | null;
+  line: string;
 }
 
 export interface TradeBoard {

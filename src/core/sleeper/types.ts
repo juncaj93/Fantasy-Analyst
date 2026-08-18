@@ -90,6 +90,12 @@ export interface SleeperPlayer {
    */
   search_rank?: number | null;
   years_exp?: number | null;
+  /** Jersey number. Sleeper sends it as a number, a string, or not at all. */
+  number?: number | string | null;
+  /** Either `"71"` or `"5'11\""` — both shapes appear in the live dictionary. */
+  height?: string | number | null;
+  weight?: string | number | null;
+  age?: number | string | null;
   gsis_id?: string | null;
   espn_id?: number | string | null;
   yahoo_id?: number | string | null;
@@ -102,6 +108,56 @@ export interface SleeperState {
   display_week?: number;
   /** Sleeper's own week counter across the whole season. */
   leg?: number;
+}
+
+/**
+ * One completed or failed league transaction.
+ *
+ * The supported, documented shape only. `waiver_budget` is the FAAB *traded*
+ * between rosters, which is a different thing from the FAAB *spent* on a waiver
+ * claim — that lives in `settings.waiver_bid`, and only on a waiver row. The two
+ * are conflated often enough in the wild that they are named apart here.
+ *
+ * A failed claim carries a bid too, which is the only supported way this app
+ * ever learns what somebody else was willing to pay. Sleeper publishes the
+ * user's own failed claims reliably and other managers' inconsistently, which
+ * is why nothing downstream is allowed to assume the losing side is complete.
+ */
+export interface SleeperTransaction {
+  transaction_id: string;
+  type: string;
+  status: string;
+  /** Epoch milliseconds. */
+  created?: number | null;
+  status_updated?: number | null;
+  leg?: number | null;
+  roster_ids?: number[] | null;
+  /** player id -> roster id receiving them. */
+  adds?: Record<string, number> | null;
+  drops?: Record<string, number> | null;
+  draft_picks?: SleeperTradedPick[] | null;
+  /** FAAB moved between rosters as part of a trade. */
+  waiver_budget?: { sender: number; receiver: number; amount: number }[] | null;
+  /** `waiver_bid` lives here on waiver rows. */
+  settings?: Record<string, number> | null;
+  creator?: string | null;
+  consenter_ids?: number[] | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface SleeperTradedPick {
+  season: string;
+  round: number;
+  roster_id: number;
+  previous_owner_id?: number | null;
+  owner_id: number;
+}
+
+/** One row of Sleeper's global trending adds/drops list. */
+export interface SleeperTrendingPlayer {
+  player_id: string;
+  /** Adds (or drops) counted across all of Sleeper in the lookback window. */
+  count: number;
 }
 
 /** Normalized league record persisted in D1. */
@@ -122,6 +178,19 @@ export interface LeagueRecord {
    * and absent is read as "not known" rather than as "not in season".
    */
   status?: string | null;
+  /**
+   * NFL teams this league's room is known to draft earlier than the market,
+   * upper-case (`['DET']`).
+   *
+   * A property of the *managers*, not of the players: a Detroit-area league
+   * takes Lions early. It reaches one model — opponent demand, which is what
+   * `Next%` is computed from — and cannot reach a Score, a tier or a `Val`. See
+   * `core/draft/nextpick/teamPrior.ts`.
+   *
+   * Optional and empty by default, because Sleeper does not publish it and
+   * every league that has not been told behaves exactly as it always did.
+   */
+  localTeams?: string[];
   lastSyncedAt: string;
 }
 
@@ -134,6 +203,15 @@ export interface RosterRecord {
   starterIds: string[];
   reserveIds: string[];
   isMine: boolean;
+  /**
+   * Sleeper's own roster settings blob, kept whole.
+   *
+   * `waiver_budget_used` lives here, and it is the authoritative FAAB spend —
+   * it already accounts for budget that moved in a trade, which no
+   * reconstruction from transactions does. Absent means the sync predates the
+   * column, which is "not known" rather than "nothing spent".
+   */
+  settings?: Record<string, unknown> | null;
 }
 
 export interface DraftRecord {

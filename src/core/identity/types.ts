@@ -35,6 +35,32 @@ export interface CanonicalPlayer {
    * for search results.
    */
   searchRank?: number | null;
+  /**
+   * The number on his shirt, when Sleeper records one.
+   *
+   * Identity rather than ranking: it is what a Team row shows once the draft is
+   * over and the pick number has stopped being the interesting fact. Null for
+   * plenty of players, and null is shown as nothing — `#0` is a number real
+   * players wear, so it can never stand in for "unknown".
+   */
+  jerseyNumber?: number | null;
+  /**
+   * Physical and experience facts, and the rules for using them.
+   *
+   * Present so `core/players/profileFlags.ts` can ask a question no position
+   * and name can answer — a light frame projected outside, an older back whose
+   * usage is falling. Absent means Sleeper did not say, and absent never
+   * becomes zero: a rookie flag keyed on `yearsExp === 0` must not fire for a
+   * player whose experience is unrecorded.
+   *
+   * Nothing may turn any of these into a ranking penalty. See the module note
+   * on `profileFlags.ts` for why that rule is enforced in the return type
+   * rather than trusted to callers.
+   */
+  heightInches?: number | null;
+  weightPounds?: number | null;
+  age?: number | null;
+  yearsExp?: number | null;
 }
 
 export interface PlayerAlias {

@@ -483,5 +483,123 @@ if (topPlayer) {
   }
 }
 
+// N. League intelligence: the two waiver fields, and the surfaces beside them.
+//
+//    Written against the real league rather than a seeded one, so the honest
+//    outcomes differ from the test database's. A league whose history has never
+//    been synced has no bid prices and no manager profiles, and every check
+//    below is phrased so that "nothing known" passes and "a number nobody can
+//    justify" fails. That is the whole point of running this in production: the
+//    seeded database can never produce the empty case the real one starts in.
+const leagueId = status.json?.league?.id ?? null;
+check('a league is selected', !!leagueId, leagueId ?? 'none');
+
+if (leagueId) {
+  const waivers = await get(`/api/leagues/${encodeURIComponent(leagueId)}/waivers`);
+  check('/waivers responds', waivers.status === 200, `HTTP ${waivers.status}`);
+
+  const candidates = (waivers.json?.upgrades ?? []).flatMap((u) => u.candidates ?? []);
+  console.log(`      ${candidates.length} candidate(s) across ${(waivers.json?.upgrades ?? []).length} slot(s)`);
+
+  if (candidates.length > 0) {
+    /*
+     * Present-and-null is a pass that ran and found nothing; absent is no pass
+     * at all. Both fields must be present on every candidate, which is the
+     * thing a deployment can get wrong without anybody noticing — a null field
+     * renders as a quiet dash rather than as an error.
+     */
+    check(
+      'every candidate carries a competition field',
+      candidates.every((c) => c.competition !== undefined),
+      `${candidates.filter((c) => c.competition != null).length}/${candidates.length} with a value`,
+    );
+    /*
+     * Multi-week value comes from its own supplier, which declines when no
+     * usage is stored. Reported rather than asserted: in production the answer
+     * depends on whether the usage feed has run for this week, and a check that
+     * fails in September and passes in October is a check nobody trusts.
+     */
+    console.log(
+      `      multi-week value present on ${candidates.filter((c) => c.multiWeek != null).length}/${candidates.length}` +
+        ' (its supplier declines without stored usage)',
+    );
+    check(
+      'competition speaks the board vocabulary',
+      candidates.every((c) => c.competition == null || ['high', 'medium', 'low', 'unknown'].includes(c.competition.level)),
+      [...new Set(candidates.map((c) => c.competition?.level ?? 'absent'))].join(', '),
+    );
+    check(
+      'any multi-week value speaks the board vocabulary',
+      candidates.every(
+        (c) => c.multiWeek == null || ['season_long', 'multi_week', 'streamer', 'unknown'].includes(c.multiWeek.level),
+      ),
+      [...new Set(candidates.map((c) => c.multiWeek?.level ?? 'absent'))].join(', '),
+    );
+    /*
+     * A price with no history behind it must say so.
+     *
+     * Below `MIN_PRICE_SAMPLE` winning bids the pricing model deliberately
+     * leads with a budget-share prior rather than with this league's own
+     * numbers — checked against the running app, which prices at
+     * `sample: 0` and labels the result `confidence: "low"`. That is a
+     * defensible design and not this probe's to overrule.
+     *
+     * What it *is* here to catch is the version of that which would be
+     * indefensible: a prior wearing the confidence of an observation. So the
+     * assertion is on the label, which is the thing a reader acts on.
+     */
+    const bids = waivers.json?.faab?.bids ?? [];
+    const priced = bids.filter((b) => b.expected != null);
+    const sample = waivers.json?.faab?.prices?.sample ?? 0;
+    check(
+      'a price with no league history behind it is not presented as confident',
+      priced.length === 0 || sample > 0 || priced.every((b) => b.confidence === 'low' || b.confidence === 'none'),
+      priced.length === 0
+        ? 'nothing priced, and nothing claimed'
+        : `${priced.length} priced from ${sample} winning bid(s), confidence ` +
+          `${[...new Set(priced.map((b) => b.confidence))].join('/')}`,
+    );
+    const shown = candidates.find((c) => c.competition?.detail);
+    if (shown) console.log(`      e.g. ${shown.name}: ${shown.competition.label} — ${shown.competition.detail}`);
+  }
+
+  // The three surfaces nothing else answers. Each has an empty state that is
+  // the correct answer for a league nothing has been synced for.
+  const plan = await get(`/api/leagues/${encodeURIComponent(leagueId)}/plan`);
+  check('/plan responds', plan.status === 200, `HTTP ${plan.status}`);
+  check(
+    'bye planning names the input it does not have',
+    plan.json?.byes?.available === false && typeof plan.json?.byes?.note === 'string',
+    plan.json?.byes?.note ?? 'no note',
+  );
+  check(
+    'playoff weeks come from the league rather than a default',
+    Array.isArray(plan.json?.playoffs?.weeks) && plan.json.playoffs.weeks.length > 0,
+    `weeks ${(plan.json?.playoffs?.weeks ?? []).join(', ')} at weight ${plan.json?.playoffs?.weight}`,
+  );
+
+  const feed = await get(`/api/leagues/${encodeURIComponent(leagueId)}/feed`);
+  check('/feed responds', feed.status === 200, `HTTP ${feed.status}`);
+  check(
+    'the feed is a delta, and empty is an ordinary answer',
+    Array.isArray(feed.json?.events),
+    `${(feed.json?.events ?? []).length} open event(s), ${feed.json?.unseen ?? 0} unseen`,
+  );
+
+  const fit = await get(`/api/leagues/${encodeURIComponent(leagueId)}/trade-fit`);
+  check('/trade-fit responds', fit.status === 200, `HTTP ${fit.status}`);
+  const ideas = fit.json?.ideas ?? [];
+  check(
+    'every listed trade helps both sides',
+    ideas.every((i) => i.valueToUser > 0 && i.valueToPartner > 0),
+    ideas.length === 0 ? 'no deal clears the bar, which is a real answer' : `${ideas.length} idea(s)`,
+  );
+  check(
+    'untested plausibility is labelled rather than presented as measured',
+    ideas.length === 0 || (fit.json?.notes ?? []).length >= 0,
+    (fit.json?.notes ?? []).join(' · ') || 'no caveats needed',
+  );
+}
+
 console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -30,7 +30,15 @@ import {
 } from '../../core/draft/nextpick/index.ts';
 import { buildPositionTierMap, type PositionTierMap } from '../../core/draft/tiers.ts';
 import type { Database } from '../db.ts';
-import { AdpRepo } from '../repos/adp.ts';
+import { AdpRepo, UNDERDOG_SOURCE, type AdpSnapshotMeta } from '../repos/adp.ts';
+/*
+ * The two market-facing decisions this board now makes, both of them read from
+ * data rather than assumed: what kind of league this is, and how old the
+ * Underdog numbers are. Neither has any opinion about a player.
+ */
+import { detectBestBall, marketFormatOf } from '../../core/sleeper/bestBall.ts';
+import { blendWeights } from '../../core/draft/marketBaseline.ts';
+import { dogFreshness, dogIsUsable } from '../../core/adp/underdog.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerFlagsRepo } from '../repos/playerFlags.ts';
@@ -128,6 +136,47 @@ export interface DraftBoardState {
    */
   rosterProgress: { slot: string; filled: number; required: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
+  /**
+   * Where the `DOG` column stands: which provider, how old, and — when it is
+   * absent — why.
+   *
+   * Sent whether or not DOG is available, because "Underdog has not priced this
+   * player" and "we stopped trusting the Underdog file two days ago" produce an
+   * identical blank on a card and are entirely different facts. The reason
+   * string is the difference, and it is the reason a stale snapshot can never
+   * be presented as a fresh one.
+   */
+  dogState: {
+    available: boolean;
+    provider: string | null;
+    sourceType: string | null;
+    /** When the source says the numbers are effective. */
+    snapshotAt: string | null;
+    /** When this app fetched them, which is a different question. */
+    fetchedAt: string | null;
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    ageHours: number | null;
+    /** How many canonical players the snapshot resolved to. */
+    matched: number;
+    reason: string;
+  };
+  /**
+   * How the market baseline is weighted for this league, and where that came
+   * from.
+   *
+   * `confident: false` is the degraded case the brief calls for: Sleeper has
+   * not published a best-ball flag, so the ordinary 60/40 blend applies and the
+   * board says so rather than guessing from the league's name.
+   */
+  marketFormat: {
+    format: 'standard' | 'best_ball';
+    bestBall: boolean;
+    confident: boolean;
+    basis: string;
+    /** The blend actually in force, as fractions. */
+    weights: { dog: number; sleeper: number };
+    reason: string;
+  };
   recommendations: BoardRecommendation[];
   /** What the shape of the live roster is saying, given how late it is. */
   rosterAlerts: RosterAlert[];
@@ -173,6 +222,38 @@ export interface DraftBoardState {
     byPosition: Record<string, number>;
     cap: number;
   };
+  /**
+   * The drafting managers, one per seat, in column order.
+   *
+   * Presentation only, and read by the draft-board overlay alone. Nothing about
+   * a ranking, a score or an availability estimate depends on it — it exists so
+   * a board that already knows every pick can also say whose column each one
+   * belongs to, instead of printing twelve columns called `Team 4`.
+   */
+  managers: { slot: number; name: string; isMine: boolean }[];
+  /**
+   * Every completed pick, in pick order, with the manager who actually made it.
+   *
+   * The same pick stream the rest of this service already read, projected into
+   * the four facts a board cell shows. It travels with the board response
+   * deliberately: the board overlay must never become a second thing polling
+   * Sleeper, so it consumes exactly what the existing live refresh already
+   * rebuilds and adds no request of its own.
+   *
+   * `ownerSlot` is Sleeper's answer, not the snake's — see `ownerSlotOf`.
+   */
+  boardPicks: { pickNo: number; playerId: string; name: string; position: string; team: string; ownerSlot: number }[];
+  /**
+   * Who owns each future pick, indexed from pick 1 — but only in a draft that
+   * has published a trade.
+   *
+   * Null in the overwhelmingly common case, where every seat makes its own
+   * picks and snake arithmetic is the whole answer. Sending it only when it
+   * differs from the snake keeps one ownership model in force: the client
+   * either has Sleeper's word or it has the arithmetic, and never has to choose
+   * between two plausible answers.
+   */
+  pickOwners: number[] | null;
   /** Diagnostics for `Next`. Read by the probe and by nothing on screen. */
   nextPickModel: {
     targetPick: number | null;
@@ -185,6 +266,33 @@ export interface DraftBoardState {
     positionRuns: Record<string, number>;
     positionBias: Record<string, number>;
     roomNotes: string[];
+    /** NFL teams this room is configured to take early. Usually empty. */
+    localTeams: string[];
+    /**
+     * What the local-team prior applied, and what it was measured from.
+     *
+     * Null in every league that has not named a local team, which is every
+     * league until somebody does. `basis` says whether the number came from
+     * what this room has actually done, from the bounded assumption, or from
+     * both — and `observed` carries the sample behind it, so the effect can be
+     * audited against the pick stream rather than believed.
+     */
+    teamPrior: {
+      basis: string;
+      multipliers: Record<string, number>;
+      observed: Record<string, { picks: number; meanPicksEarly: number; shrinkage: number }>;
+      notes: string[];
+      /**
+       * The measured effect on survival, in percentage points.
+       *
+       * `local` and `others` are each the mean of `simulated - market` for
+       * their group, so the `difference` between them isolates what the prior
+       * contributed — every other term in the model applies to both. Negative
+       * means the room's local players are being taken sooner than the rest of
+       * the board relative to ADP, which is the whole claim.
+       */
+      survivalEffect: { local: number; others: number; difference: number; sample: number } | null;
+    } | null;
     marketOnly: boolean;
     degraded: string[];
     elapsedMs: number;
@@ -214,6 +322,145 @@ export class DraftBoardService {
     this.adp = new AdpRepo(db);
     this.evidence = new EvidenceRepo(db);
     this.seasonMarkets = new SeasonMarketsRepo(db);
+  }
+
+  /**
+   * The Underdog column, or an honest reason there is not one.
+   *
+   * Three gates, in the order that makes the failure legible. A snapshot that
+   * does not exist is not the same as one that turned out to be a ranking,
+   * which is not the same as one that is a fortnight old — and a board that
+   * showed a blank DOG column for all three would leave the reader unable to
+   * tell "Underdog has not priced him" from "we stopped trusting the file".
+   *
+   * Nothing here ever falls back to Sleeper. A missing DOG is a missing DOG;
+   * the market baseline renormalises around it and says it did.
+   */
+  private async resolveDog(meta: AdpSnapshotMeta | null): Promise<{
+    values: Map<string, { adp: number | null }>;
+    state: DraftBoardState['dogState'];
+    warning: string | null;
+  }> {
+    const none = new Map<string, { adp: number | null }>();
+
+    if (!meta) {
+      return {
+        values: none,
+        state: {
+          available: false,
+          provider: null,
+          sourceType: null,
+          snapshotAt: null,
+          fetchedAt: null,
+          freshness: 'unknown',
+          ageHours: null,
+          matched: 0,
+          reason: 'no Underdog ADP snapshot has been imported',
+        },
+        warning: null,
+      };
+    }
+
+    /*
+     * A snapshot that is not raw ADP cannot be shown as DOG, at any age.
+     *
+     * This is the rule the whole Underdog path exists to enforce: rankings,
+     * expert ranks and projections all sort like ADP and none of them is one.
+     * The importer already refuses to write such a snapshot; this is the second
+     * gate, at the point of use, because a row that got in by some other route
+     * must still never reach a column labelled DOG.
+     */
+    if (meta.sourceType !== 'raw_adp') {
+      return {
+        values: none,
+        state: {
+          available: false,
+          provider: meta.provider,
+          sourceType: meta.sourceType,
+          snapshotAt: meta.snapshotAt,
+          fetchedAt: meta.fetchedAt,
+          freshness: 'unknown',
+          ageHours: null,
+          matched: 0,
+          reason: `the newest Underdog snapshot is ${meta.sourceType}, not raw ADP — it cannot be shown as DOG`,
+        },
+        warning:
+          'the newest Underdog file is not raw ADP, so DOG is unavailable and the market baseline is Sleeper alone',
+      };
+    }
+
+    const freshness = dogFreshness(
+      { fetchedAt: meta.fetchedAt ?? meta.importedAt, snapshotAt: meta.snapshotAt },
+      new Date(),
+    );
+
+    if (!dogIsUsable(freshness.state)) {
+      return {
+        values: none,
+        state: {
+          available: false,
+          provider: meta.provider,
+          sourceType: meta.sourceType,
+          snapshotAt: meta.snapshotAt,
+          fetchedAt: meta.fetchedAt,
+          freshness: freshness.state,
+          ageHours: freshness.ageHours,
+          matched: 0,
+          reason: `Underdog ADP is ${freshness.note}`,
+        },
+        // Said out loud. A stale DOG presented as a fresh one is the specific
+        // dishonesty this path is built to prevent, and silence would be it.
+        warning: `Underdog ADP is ${freshness.note} — DOG is not being used and the market baseline is Sleeper alone`,
+      };
+    }
+
+    const values = await this.adp.valuesByPlayer(meta.id);
+
+    /*
+     * A snapshot that resolved to nobody is not a usable market.
+     *
+     * It happens: a provider changes its name format, or the file arrives for a
+     * season the player table has not synced yet, and every row fails to match.
+     * The snapshot is real, raw and fresh, and it prices exactly zero players —
+     * so calling DOG "available" would light the column, tighten the card
+     * layout to make room for it and offer a DOG sort that puts the entire
+     * board in the unpriced tail. Reported as unavailable, with the count, so
+     * the reason is a matching problem rather than a mystery.
+     */
+    if (values.size === 0) {
+      return {
+        values: new Map(),
+        state: {
+          available: false,
+          provider: meta.provider,
+          sourceType: meta.sourceType,
+          snapshotAt: meta.snapshotAt,
+          fetchedAt: meta.fetchedAt,
+          freshness: freshness.state,
+          ageHours: freshness.ageHours,
+          matched: 0,
+          reason: `the Underdog snapshot has ${meta.rowCount} rows but none of them resolved to a known player`,
+        },
+        warning:
+          'the Underdog ADP file did not match any players, so DOG is unavailable — check the unresolved rows in Setup',
+      };
+    }
+
+    return {
+      values,
+      state: {
+        available: true,
+        provider: meta.provider,
+        sourceType: meta.sourceType,
+        snapshotAt: meta.snapshotAt,
+        fetchedAt: meta.fetchedAt,
+        freshness: freshness.state,
+        ageHours: freshness.ageHours,
+        matched: values.size,
+        reason: freshness.note,
+      },
+      warning: null,
+    };
   }
 
   async build(
@@ -288,10 +535,54 @@ export class DraftBoardService {
     // Draft order comes from an imported ADP snapshot. A draft can be pinned to
     // a specific one so a board opened mid-draft does not shift under the user
     // when a fresher snapshot lands; otherwise the newest applies.
+    /*
+     * The platform market: everything that is not Underdog.
+     *
+     * Not `latest()`, which is "the newest snapshot of anything" and was
+     * correct only while one market existed. With two, it returns the Underdog
+     * board on any day Underdog was fetched last — putting Underdog's numbers
+     * in the `ADP` column and behind `Val`, the tier ladders and the survival
+     * model, with nothing on screen saying so.
+     */
     const snapshotMeta = draft.adpSnapshotId
       ? await this.adp.get(draft.adpSnapshotId)
-      : await this.adp.latest();
+      : await this.adp.latestPlatformSnapshot();
     const importedValues = snapshotMeta ? await this.adp.valuesByPlayer(snapshotMeta.id) : new Map();
+
+    /*
+     * The second market: raw Underdog ADP, on its own snapshot.
+     *
+     * Read separately and kept separate. It is never merged into
+     * `importedValues`, never used to fill a gap in the Sleeper column, and
+     * never allowed to become "the ADP" — the whole value of having two markets
+     * is that they can disagree, and a single merged table would silently
+     * resolve every disagreement in favour of whichever was loaded last.
+     *
+     * Three things have to be true before a DOG number reaches a player: a
+     * snapshot exists, it says it is raw ADP rather than a ranking, and it is
+     * recent enough to describe the market as it stands. Any of them failing
+     * costs the DOG column and nothing else — the board carries on with
+     * Sleeper alone, renormalised, and says why in `dogState`.
+     */
+    const dogMeta = await this.adp.latestForSource(UNDERDOG_SOURCE);
+    const dog = await this.resolveDog(dogMeta);
+    if (dog.warning) warnings.push(dog.warning);
+
+    /*
+     * Which blend the market baseline uses, decided by Sleeper and nobody else.
+     *
+     * `detectBestBall` reads the league's own settings; it cannot be moved by
+     * the league's name, by anything the user typed, or by the date. When
+     * Sleeper has not published the flag the detection is not confident and the
+     * ordinary 60/40 blend applies — stated in the diagnostics rather than
+     * assumed silently, because "we do not know" and "it is not best ball"
+     * price the same and mean different things.
+     */
+    const format = detectBestBall({
+      leagueSettings: league.leagueSettings,
+      draftSettings: draft.settings,
+      leagueMetadata: (league.leagueSettings?.['metadata'] as Record<string, unknown> | undefined) ?? null,
+    });
 
     const allPlayers = await this.players.listAll();
     // Only a real ranking counts. Sleeper's search_rank measures who gets
@@ -299,6 +590,15 @@ export class DraftBoardService {
     // the top of the board and retired players on it at all.
     const rankOf = (player: CanonicalPlayer): number | null =>
       importedValues.get(player.id)?.adp ?? null;
+    /*
+     * Raw Underdog ADP for one player, or null.
+     *
+     * Symmetrical with `rankOf` and deliberately never a fallback for it. A
+     * player Underdog has priced and Sleeper has not keeps a null here and a
+     * number there, and the market baseline renormalises — see
+     * `marketBaseline.ts`. Neither function can ever return the other's number.
+     */
+    const dogOf = (player: CanonicalPlayer): number | null => dog.values.get(player.id)?.adp ?? null;
     const rankedCount = allPlayers.filter((p) => p.active && rankOf(p) != null).length;
     if (rankedCount === 0) {
       warnings.push(
@@ -510,6 +810,15 @@ export class DraftBoardService {
       playerId: player.id,
       position: player.position,
       adp: rankOf(player),
+      /*
+       * Read by the local-team prior alone, which multiplies opponent demand.
+       *
+       * Deliberately not `dogOf` — the simulator models what the *room* will
+       * do, and the room drafts against the ADP of the platform it is on. DOG
+       * is this app's private read on value and says nothing about eleven other
+       * managers, exactly as `My Guy` and the tally do not.
+       */
+      team: player.team,
       order: player.searchRank ?? Number.MAX_SAFE_INTEGER,
     }));
 
@@ -539,12 +848,18 @@ export class DraftBoardService {
       totalPicks: teams * rounds,
       tiers: tierMaps,
       alternatives: alternativesByPosition(simCandidates, horizon?.pickNo ?? null),
+      // Which NFL teams this room takes early, if it has been told any.
+      localTeams: league.localTeams ?? [],
+      teamsInLeague: teams,
       completed: picks
         .filter((pick) => pick.playerId)
         .map((pick) => ({
           pickNo: pick.pickNo,
           slot: ownerSlotOf(pick),
           position: positionOf(pick.playerId!),
+          // What the room actually did with the local team, which is the
+          // measurement the prior defers to as soon as there is enough of it.
+          team: byId.get(pick.playerId!)?.team ?? null,
           adp: importedValues.get(pick.playerId!)?.adp ?? null,
         })),
       // The market's own picture of the board, drafted players included — what
@@ -559,6 +874,7 @@ export class DraftBoardService {
       candidates.map((player) => ({
         player,
         adp: rankOf(player),
+        dogAdp: dogOf(player),
         adpRank: importedValues.get(player.id)?.rank ?? null,
         signal: signals.get(player.id) ?? null,
         myGuyLevel: flags.get(player.id)?.level ?? 0,
@@ -582,6 +898,8 @@ export class DraftBoardService {
         rosterPlayers: myRosterRecord
           ? live.players.map((p) => ({ position: p.position, team: p.team }))
           : undefined,
+        // 60/40, or 75/25 in a best-ball league. Sleeper's own settings decide.
+        marketFormat: marketFormatOf(format),
       },
     )
       .slice(0, opts.limit ?? 50);
@@ -616,7 +934,22 @@ export class DraftBoardService {
       .statesFor(ranked.map((rec) => ({ playerId: rec.playerId, status: byId.get(rec.playerId)?.status ?? null })))
       .catch(() => new Map<string, InjuryState>());
 
-    const recommendations = ranked.map((rec) => ({
+    /*
+     * Inside the queue filter, the reader's order wins.
+     *
+     * This is the one list in the app the model does not get to sort. The
+     * ranking is still computed, still on every card, and still what the ★
+     * chip's rows say about each player — what changes is the sequence, which
+     * is the reader's and is stored. Everywhere else on this board the order is
+     * the composite's, untouched.
+     *
+     * Applied after ranking rather than instead of it, so a queued player's
+     * Score, Val, Next and tier are identical whether he is read on the queue
+     * or on the full board. See `queueOrder.ts`.
+     */
+    const orderedRanked = queuedOnly ? applyQueueOrder(ranked, allFlags) : ranked;
+
+    const recommendations = orderedRanked.map((rec) => ({
       ...rec,
       queued: allFlags.get(rec.playerId)?.queued === true,
       status: designationOf(byId.get(rec.playerId)?.status ?? null),
@@ -656,6 +989,15 @@ export class DraftBoardService {
             matched: snapshotMeta.matchedCount,
           }
         : null,
+      dogState: dog.state,
+      marketFormat: {
+        format: marketFormatOf(format),
+        bestBall: format.bestBall,
+        confident: format.confident,
+        basis: format.basis,
+        weights: blendWeights(marketFormatOf(format)),
+        reason: format.reason,
+      },
       recommendations,
       rosterAlerts: rosterAlerts({
         shape,
@@ -667,6 +1009,41 @@ export class DraftBoardService {
       round,
       startablePositions: orderPositions(startable),
       offersFlex: offersFlexFilter(startable),
+      /*
+       * The board-as-a-board, assembled from what is already in hand.
+       *
+       * Three read-only projections of state this method loaded pages ago: the
+       * rosters it already fetched, the pick stream it already walked, and the
+       * ownership model it already built for the `Next` horizon. No query, no
+       * poll and no second ownership model — see boardGrid.ts for what is done
+       * with them.
+       */
+      managers: managerColumns({
+        teams,
+        slotToRosterId: draft.slotToRosterId,
+        picks,
+        rosters,
+        mySlot,
+        myRosterId: myRosterRecord?.rosterId ?? null,
+      }),
+      boardPicks: picks
+        .filter((pick) => pick.playerId)
+        .map((pick) => {
+          const player = byId.get(pick.playerId!);
+          const fallback = pickMetadata(pick.raw);
+          return {
+            pickNo: pick.pickNo,
+            playerId: pick.playerId!,
+            name: player?.fullName ?? fallback.name ?? 'Unknown player',
+            position: player?.position ?? fallback.position ?? '',
+            team: player?.team ?? fallback.team ?? '',
+            ownerSlot: ownerSlotOf(pick),
+          };
+        })
+        .sort((a, b) => a.pickNo - b.pickNo),
+      pickOwners: ownership.hasTrades
+        ? Array.from({ length: teams * rounds }, (_, i) => ownership.ownerAt(i + 1) ?? ownership.slotAt(i + 1))
+        : null,
       /*
        * What the `Next` model did, for the probe and for anybody debugging a
        * number that looks wrong.
@@ -687,6 +1064,43 @@ export class DraftBoardService {
         positionRuns: Object.fromEntries(nextPick.room.runs),
         positionBias: Object.fromEntries(nextPick.room.bias),
         roomNotes: nextPick.room.notes,
+        /*
+         * The local-team prior, and what it actually did.
+         *
+         * The brief asks for diagnostics showing the real survival effect, and
+         * this is where they go: the multiplier applied per team, how many
+         * picks it was measured from, how far this room has actually been
+         * taking them ahead of the market, and how much of the answer is
+         * measurement rather than assumption. Read by the probe and by nobody
+         * on screen — `Next` is one percentage on a card and has to stay one.
+         */
+        localTeams: league.localTeams ?? [],
+        teamPrior: nextPick.teamPrior
+          ? {
+              basis: nextPick.teamPrior.basis,
+              multipliers: Object.fromEntries(nextPick.teamPrior.multipliers),
+              observed: Object.fromEntries(nextPick.teamPrior.observed),
+              notes: nextPick.teamPrior.notes,
+              /*
+               * What the prior did to survival, in percentage points.
+               *
+               * Every player carries two numbers: what the market alone says
+               * about his chances, and what the simulation says. The gap
+               * between them is everything the simulation knows that ADP does
+               * not — the room, the rosters ahead, the tiers, and the local
+               * prior. Measured for the favoured teams and for everybody else
+               * on the same board, the *difference between those two gaps* is
+               * the prior's own contribution, because every other term in the
+               * model applies to both groups.
+               *
+               * Not a controlled experiment — a Lions-heavy tier would show up
+               * here too — but it is the honest read of a live board, and it
+               * answers "is this doing anything, and how much" without running
+               * the simulation twice.
+               */
+              survivalEffect: measureSurvivalEffect(recommendations, league.localTeams ?? []),
+            }
+          : null,
         // True when the board was too thin to simulate, so these percentages
         // are the ADP model's rather than the simulation's.
         marketOnly: nextPick.marketOnly,
@@ -723,6 +1137,74 @@ export class DraftBoardService {
       warnings,
     };
   }
+}
+
+/**
+ * How far the simulation moved survival away from the market, for the room's
+ * local players against everybody else.
+ *
+ * Both figures are `simulated - market`, in percentage points, so they share
+ * every term of the model except the one being measured. A negative
+ * `difference` means the local players are being taken sooner than the rest of
+ * the board relative to what ADP alone predicted, which is what the prior is
+ * for; a difference near zero means it is not doing anything worth the setting.
+ *
+ * Null when there is nothing to compare — no local teams named, or no priced
+ * player on one side of the line.
+ */
+function measureSurvivalEffect(
+  recommendations: { team: string; survivalProbability: number | null; nextPick: { marketBaseline: number | null } | null }[],
+  localTeams: readonly string[],
+): { local: number; others: number; difference: number; sample: number } | null {
+  const favoured = new Set(localTeams.map((t) => t.trim().toUpperCase()));
+  if (favoured.size === 0) return null;
+
+  const gaps = { local: [] as number[], others: [] as number[] };
+  for (const rec of recommendations) {
+    const simulated = rec.survivalProbability;
+    const market = rec.nextPick?.marketBaseline ?? null;
+    if (simulated == null || market == null) continue;
+    const bucket = favoured.has((rec.team ?? '').toUpperCase()) ? gaps.local : gaps.others;
+    bucket.push((simulated - market) * 100);
+  }
+  if (gaps.local.length === 0 || gaps.others.length === 0) return null;
+
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const local = round1(mean(gaps.local));
+  const others = round1(mean(gaps.others));
+  return { local, others, difference: round1(local - others), sample: gaps.local.length };
+}
+
+function round1(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
+/**
+ * The queue's rows, in the order the reader put them in.
+ *
+ * A player with no stored rank sorts after every player who has one, in board
+ * order — which is where somebody the reader has never placed belongs, and
+ * which keeps a queue built entirely on an older client behaving exactly as it
+ * did before this existed.
+ *
+ * Deliberately a pure reordering of the array it is handed: no recommendation
+ * is copied or modified, so a queued player's numbers cannot differ from the
+ * same player's numbers on the unfiltered board.
+ */
+function applyQueueOrder<T extends { playerId: string }>(
+  ranked: T[],
+  flags: Map<string, { queueOrder: number | null }>,
+): T[] {
+  const rankOf = (id: string) => flags.get(id)?.queueOrder ?? null;
+  const boardPosition = new Map(ranked.map((rec, i) => [rec.playerId, i]));
+  return [...ranked].sort((a, b) => {
+    const ao = rankOf(a.playerId);
+    const bo = rankOf(b.playerId);
+    if (ao == null && bo == null) return boardPosition.get(a.playerId)! - boardPosition.get(b.playerId)!;
+    if (ao == null) return 1;
+    if (bo == null) return -1;
+    return ao - bo || boardPosition.get(a.playerId)! - boardPosition.get(b.playerId)!;
+  });
 }
 
 /**
@@ -808,6 +1290,90 @@ function alternativesByPosition(candidates: SimCandidate[], targetPick: number |
     out.set(candidate.position, (out.get(candidate.position) ?? 0) + 1);
   }
   return out;
+}
+
+/**
+ * One named manager per seat, in column order.
+ *
+ * Sleeper publishes `slot_to_roster_id` for most drafts and, occasionally, for
+ * none of them — a league that has not started yet has seats but no mapping. So
+ * the pick stream is read as a second source: a manager who has picked has
+ * proved which seat they are sitting in, which is a fact rather than an
+ * inference. Anything still unresolved is `Team 4`, said plainly, because a
+ * column with a made-up name is worse than a column with a number.
+ *
+ * The seat mapping used here is the same one the pick stream and the `Next`
+ * horizon already use. Nothing new is decided about who owns what.
+ */
+function managerColumns(input: {
+  teams: number;
+  slotToRosterId: Record<string, number>;
+  picks: { draftSlot: number; rosterId: number | null; playerId: string | null }[];
+  rosters: { rosterId: number; ownerName: string | null; isMine: boolean }[];
+  mySlot: number | null;
+  myRosterId: number | null;
+}): { slot: number; name: string; isMine: boolean }[] {
+  const rosterOfSlot = new Map<number, number>();
+  for (const [slot, rosterId] of Object.entries(input.slotToRosterId ?? {})) {
+    const seat = Number(slot);
+    if (Number.isFinite(seat) && Number.isFinite(rosterId)) rosterOfSlot.set(seat, Number(rosterId));
+  }
+  for (const pick of input.picks) {
+    if (pick.rosterId == null || !pick.draftSlot) continue;
+    if (!rosterOfSlot.has(pick.draftSlot)) rosterOfSlot.set(pick.draftSlot, pick.rosterId);
+  }
+
+  const nameOfRoster = new Map<number, string>();
+  for (const roster of input.rosters) {
+    const name = (roster.ownerName ?? '').trim();
+    if (name) nameOfRoster.set(roster.rosterId, name);
+  }
+
+  return Array.from({ length: Math.max(1, input.teams) }, (_, i) => {
+    const slot = i + 1;
+    const rosterId = rosterOfSlot.get(slot) ?? null;
+    return {
+      slot,
+      name: (rosterId == null ? null : nameOfRoster.get(rosterId)) ?? `Team ${slot}`,
+      /*
+       * Two ways of being the reader's seat, and both are needed.
+       *
+       * The roster mapping is the direct answer. `mySlot` is the one the rest
+       * of this service already worked out — including from the reader's own
+       * completed picks — and it is what makes the board emphasise the right
+       * column in a draft Sleeper never published an order for.
+       */
+      isMine: (rosterId != null && rosterId === input.myRosterId) || (input.mySlot != null && input.mySlot === slot),
+    };
+  });
+}
+
+/**
+ * The player a pick names, when the player table does not know him.
+ *
+ * Sleeper stores the drafted player's name on the pick itself, which is the
+ * only description that survives a player disappearing from the canonical
+ * table. Used as a fallback and never in preference: the canonical row is the
+ * one every other screen reads.
+ */
+function pickMetadata(raw: string | null | undefined): { name: string | null; position: string | null; team: string | null } {
+  const empty = { name: null, position: null, team: null };
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as { metadata?: Record<string, unknown> };
+    const meta = parsed?.metadata;
+    if (!meta || typeof meta !== 'object') return empty;
+    const first = typeof meta['first_name'] === 'string' ? (meta['first_name'] as string) : '';
+    const last = typeof meta['last_name'] === 'string' ? (meta['last_name'] as string) : '';
+    const name = `${first} ${last}`.trim();
+    return {
+      name: name || null,
+      position: typeof meta['position'] === 'string' ? (meta['position'] as string) : null,
+      team: typeof meta['team'] === 'string' ? (meta['team'] as string) : null,
+    };
+  } catch {
+    return empty;
+  }
 }
 
 /**
