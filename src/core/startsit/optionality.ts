@@ -20,6 +20,19 @@
  *
  * So `points` is not a field here. The output is a 0–100 score with its reasons
  * attached, and no caller can accidentally add it to a lineup.
+ *
+ * ## Not the same "optionality" as `roster/bench.ts`
+ *
+ * That module scores a bench *slot* — what it earns, against what it could earn
+ * — and one of its components is labelled `Optionality`, meaning **whether the
+ * role could still grow**. This one asks a different question: **how many of
+ * the week's futures does this player cover**, from slot eligibility, kickoff
+ * time and positional scarcity. A settled every-down back has no upside in
+ * their sense and enormous coverage in this one.
+ *
+ * Two useful quantities that share an English word, so the assessment carries
+ * `kind: 'lineup_coverage'` and a consumer holding both can never print one
+ * under the other's label.
  */
 
 import type { RosterShape } from '../sleeper/scoring.ts';
@@ -54,6 +67,14 @@ export interface OptionalityInput {
 }
 
 export interface OptionalityAssessment {
+  /**
+   * Which quantity this is, because the codebase has two.
+   *
+   * `roster/bench.ts` calls role growth "optionality" too. A consumer holding
+   * both reads this discriminator rather than the variable name it happened to
+   * be assigned to.
+   */
+  kind: 'lineup_coverage';
   playerId: string;
   name: string;
   /** 0–100. Roster-management value only. Never a projection. */
@@ -124,6 +145,7 @@ export function assessOptionality(
 
   const rounded = Math.round(score);
   return {
+    kind: 'lineup_coverage',
     playerId: input.playerId,
     name: input.name,
     score: rounded,
