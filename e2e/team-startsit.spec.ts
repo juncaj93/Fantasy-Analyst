@@ -110,11 +110,36 @@ test.describe('the recommended lineup, at a glance', () => {
 test.describe('waiver upgrades', () => {
   test.beforeEach(async ({ page }) => openTeam(page));
 
+  /**
+   * The row is a shape, and it is asserted as one.
+   *
+   * It used to name Trey Halloran, who happened to be the top upgrade the demo
+   * produced — and stopped being it the day the demo's Vegas fixture priced
+   * another quarterback higher. Which player the engine picks is the engine's
+   * business and is covered by its own tests; what this file defends is that
+   * whoever it picks arrives as one row carrying a name, a fit, a weekly value
+   * and a reason. The name is read from the engine's own answer, so the
+   * assertion is now stronger than the hardcoded one: the row and the API have
+   * to agree about who is being recommended.
+   */
   test('puts each player on one row: how strong, where he fits, what he is worth', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
     await expect(card).toBeVisible();
+
+    const top = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const leagueId = overview?.selectedLeague?.id;
+      if (!leagueId) return null;
+      const advice = (await (await fetch(`/api/leagues/${leagueId}/waivers`)).json()) as {
+        upgrades?: { candidates?: { playerId: string; name: string }[] }[];
+      };
+      return advice.upgrades?.[0]?.candidates?.[0] ?? null;
+    });
+    expect(top, 'the demo should produce at least one waiver upgrade').not.toBeNull();
+
     const row = page.locator('[data-testid="waiver-row"]').first();
-    await expect(row).toContainText('Trey Halloran');
+    await expect(row).toHaveAttribute('data-player-id', top!.playerId);
+    await expect(row).toContainText(top!.name);
     await expect(row.getByTestId('waiver-fit')).toContainText(/Upgrades|Fills/);
     await expect(row.getByTestId('waiver-short-term')).toContainText('pts');
     await expect(row.getByTestId('waiver-why')).not.toBeEmpty();

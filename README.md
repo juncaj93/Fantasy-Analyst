@@ -74,6 +74,21 @@ concise card — the verdict, the role trend, the matchup, the market and the
 availability — with the full comparison one tap further on. Pull the screen down
 to refresh it. It never changes a lineup.
 
+**Matchup** — once the draft is done, this week's head-to-head. Sleeper is the
+score, the lineups and the slots; everything else on the screen is this app's.
+Each starter's projection becomes a distribution shaped by his position and his
+role — a deep threat is wider than a possession receiver — and four thousand
+simulated afternoons over what is *left* produce a projected final and a live
+win probability. Points already scored are truth and are never re-simulated;
+a player whose game is over is an addend, so a matchup that is finished says
+100% rather than 94%. Under the score sits one card at a time saying what
+actually matters right now: what you need from whom, what the opponent needs to
+flip it, whose remaining game holds the most of the outcome, and whether an
+availability question is worth acting on before kickoff. Starters are one
+compact row per slot, both sides on one line; the bench is collapsed until you
+ask for it. Nothing here sets a lineup — it says what a change would be worth in
+win probability, and the change is made in Sleeper.
+
 **Waivers** — in season, where Draft used to be: who is available, how strongly
 he is recommended, which slot he fits and what he is worth this week. Expected
 cost, likely competition and multi-week value are shown as unknown until the
@@ -141,7 +156,9 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ## Principles enforced in code
 
-- Sleeper is the source of truth for league, roster, draft and scoring facts.
+- Sleeper is the source of truth for league, roster, draft, matchup and scoring
+  facts. Its own projections are never read: a projected number on any screen
+  here is this app's, or it is absent.
 - Canonical player identity is resolved by a strict ladder; ambiguity goes to
   review and is never guessed.
 - The evidence ledger keeps every news item; tallies are derived from it.
@@ -182,4 +199,7 @@ npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
 ```
 
-The original build brief is preserved verbatim in [docs/brief/](docs/brief/).
+The original build brief is preserved verbatim in [docs/brief/](docs/brief/),
+alongside the later ones — the Matchup brief this feature was built to is
+[09_MATCHUP.md](docs/brief/09_MATCHUP.md), and the section numbers the matchup
+code cites in its comments (`§8`, `§14`, `§33`) are its.
