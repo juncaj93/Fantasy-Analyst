@@ -460,6 +460,29 @@ suggestions).
    CI uses; locally, run with `CI=1` or kill any surviving `dev-server.mjs`
    first. Worth isolating per project if it ever fails in CI.
 
+11. **The matchup game clock is wall clock, not game clock.** This app has no
+   play-by-play feed, so how far into a game a player is is inferred from how
+   long ago it kicked off, and kickoff comes from the Vegas event table. A
+   player whose game nobody has priced has no clock at all: he is read as not
+   started while he has no points and as live once he has some, marked
+   `inferred`, and counted in the confidence line. Nothing about that is wrong
+   — it is just coarser than a scoreboard, and it is the one input a free feed
+   cannot supply.
+
+12. **Kickers and defences have no projection.** The start/sit engine models
+   neither, so in a league that starts them they arrive with `projection: null`,
+   contribute nothing to the projected total and are named in the confidence
+   line as "not projected". Both sides lose the same amount, so the win
+   probability is roughly unaffected and the projected *totals* are
+   systematically low by a kicker and a defence. The alternative — inventing a
+   number — is the one thing this app does not do.
+
+13. **Matchup calibration has no samples yet.** The ledger is written from the
+   first request and `GET /api/diagnostics/matchup-calibration` reports what is
+   in it, but a band withholds an observed rate below twenty settled weeks and
+   there are none. It is a season of Sundays before that sentence can be
+   answered, which is exactly why the writing had to start now.
+
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
 on the real Safari engine, not only on Chromium locally.
@@ -1081,6 +1104,107 @@ not, for the same missing input.
 
 Checks at this milestone: 2,018 unit/integration tests plus the browser suite at
 four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green.
+
+## Milestone 19 — the Matchup screen (done)
+
+The post-draft head-to-head, and deliberately not a prettier Sleeper.
+
+**Sleeper owns the score; Fantasy Analyst owns the forecast.** The pairing, the
+lineups, the slots and every points figure come from
+`/league/{id}/matchups/{week}` and are never recomputed. Sleeper's own
+projection sits on the same payload and is read nowhere. Everything else on the
+screen — the projected finals, the win probability, the insight card, the
+lineup counterfactuals — is this app's, built from the same start/sit engine
+Team draws.
+
+**A distribution per player, not a number.** `core/matchup/distribution.ts`
+turns each starter's projection into a lognormal whose mean is exactly that
+projection and whose spread comes from his position and his role: a deep threat
+is wider than a possession receiver, a rushing quarterback narrower than a
+pocket one. Three states, three different questions — a player who has not
+kicked off carries his full pregame distribution, a live one carries what is
+*left* conditioned on what he has already scored and how much of the game is
+gone, and a finished one carries no distribution at all. That last one is not an
+optimisation: a matchup where every game is over has one outcome, and the model
+has to say 100%.
+
+**Availability is a branch, not a discount.** An unresolved Questionable is a
+mixture over playing, playing limited and not playing, keyed on the existing
+`AvailabilityConfidence` state. The engine's own availability penalty is
+subtracted out of the projection first, so the same designation is not charged
+twice — and the mixture says the thing a shaved mean cannot, which is that his
+floor is zero. The branch collapses the moment his game starts, because the
+scoreboard has answered the question.
+
+**Correlation, as a factor model.** A quarterback and his own pass-catcher, both
+sides of one shootout, two backs splitting one committee. Loadings rather than a
+matrix, because rules written pair by pair do not produce a factorable matrix
+and the failure is a `NaN` win probability on a Sunday. Every implied
+correlation is asserted to sit under 0.45.
+
+**Four thousand afternoons, seeded from the state.** Same matchup state, same
+numbers, on any machine — the fingerprint that seeds the generator is the same
+string that keys the cache, so a state cannot change one without invalidating
+the other. Every player is drawn, starters and bench alike, and every draw is
+kept: that is what makes "starting him instead adds 3% to your win odds" an
+exact difference over the same simulated afternoons rather than the difference
+between two noisy estimates.
+
+**The hero card is the product.** One insight at a time, generated from current
+truth, ranked by a fixed ladder: can it still be acted on, how much of the
+outcome does it move, how severe is the injury or game state behind it, how much
+has it changed, how close is it to a threshold, is it about your own side. The
+first axis is a tier and not a weight, which is what makes "an injury outranks a
+projection wobble" a property of the code. When nothing material is happening it
+says so calmly and stops, because a screen that manufactures urgency is one
+whose urgency stops meaning anything.
+
+**What you need, and what they need.** Thresholds are found by bisection over a
+player's own simulated range against a target he can actually reach — aiming at
+a flat 72% produces "you need forty-one from your tight end", which is true and
+is not a path anybody is on. The wording hedges whenever more than one outcome
+is still open.
+
+**Which lineup wins *this* matchup**, which is not the same question as which
+has the highest median: a big underdog should take the wider distribution and a
+strong favourite the narrower one, and both fall out of the same stored draws.
+Advisory, like everything else here — there is no code path in this app that
+sets a lineup.
+
+**Degraded is a first-class state.** If either side has fewer than half its
+starters projectable, there is no honest number to print: the scoreboard stays,
+the forecast says it is unavailable, and Sleeper's projection is never
+substituted under this app's name.
+
+**Calibration, from day one.** `matchup_forecasts` stores one row per roster per
+week — the first forecast written once and never touched, the latest one moving
+as the afternoon does, and the outcome filled in when the week ends. Keyed by
+season and week so 2026's week sixteen cannot collide with 2027's, stamped with
+the model version so a bucket cannot mix two models, and reported in ten-point
+bands that withhold a rate below twenty settled samples.
+
+**Seven destinations, for one stretch of the year.** Matchup arrives the day the
+draft completes, which is before Draft leaves, so the bar carries seven between
+those two moments. Verified at 360px: no label wraps and no destination is
+narrower than 44px.
+
+**Nothing this screen asks is answered twice.** Floor / Balanced / Ceiling is
+`core/startsit/modeSuggest.ts`'s answer, carried through the forecast rather
+than re-read off the simulated win probability — the matchup model never sees
+the question, which is what keeps that module's circularity guard structural.
+The player sheet is the Team screen's weekly card, carrying the same
+expected-points line, from the same `assessXfp`. Every projection is the
+start/sit engine's.
+
+Checks at this milestone: 113 new unit tests across the model, the hero engine,
+the lineup decision, the names, the service and the calibration ledger, plus a
+mutation file that breaks each of the eight failure modes the brief names and
+proves the assertion catches it. 18 new browser tests across four widths, half
+against the real endpoint on the seeded server and half against whole-response
+fixtures for the states of a Sunday afternoon that a deterministic seed cannot
+reach.
+
+
 
 ## Recommended next work
 

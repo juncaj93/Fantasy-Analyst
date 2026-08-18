@@ -368,4 +368,61 @@ describe('the eight lifecycle states', () => {
     expect(r.draftVisible).toBe(true);
     expect(r.assumed).toBe(true);
   });
+
+  /**
+   * Matchup's gate, which is the mirror of the board's.
+   *
+   * A head-to-head has nothing to say until a draft is finished — every lineup
+   * is empty and every projection is zero — and from that moment on it is the
+   * screen an in-season reader opens first. Both directions matter: a tab that
+   * arrives too early leads to a screen full of nothing, and one that never
+   * arrives is a feature nobody can reach.
+   */
+  it('opens Matchup the day the draft finishes, and not before', () => {
+    const drafting = resolveLifecycle({
+      state: state('pre', 0),
+      league: { season: '2027' },
+      draft: { status: 'drafting' },
+    });
+    expect(drafting.matchupVisible).toBe(false);
+
+    const scheduled = resolveLifecycle({
+      state: state('pre', 0),
+      league: { season: '2027' },
+      draft: { status: 'pre_draft' },
+    });
+    expect(scheduled.matchupVisible).toBe(false);
+
+    const done = resolveLifecycle({
+      state: state('pre', 0),
+      league: { season: '2027' },
+      draft: { status: 'complete' },
+    });
+    expect(done.lifecycle).toBe('post_draft');
+    expect(done.matchupVisible).toBe(true);
+    // Both, for the one stretch of the year the bar carries seven.
+    expect(done.draftVisible).toBe(true);
+  });
+
+  it('keeps Matchup through the season and drops it when the league is over', () => {
+    const inSeason = resolveLifecycle({
+      state: state('regular', 3),
+      league: { season: '2027', status: 'in_season' },
+      draft: { status: 'complete' },
+    });
+    expect(inSeason.matchupVisible).toBe(true);
+
+    const playoffs = resolveLifecycle({ state: state('post', 1), league: { season: '2027', status: 'in_season' } });
+    expect(playoffs.matchupVisible).toBe(true);
+
+    const finished = resolveLifecycle({ state: state('post', 1), league: { season: '2027', status: 'complete' } });
+    expect(finished.matchupVisible).toBe(false);
+
+    const gone = resolveLifecycle({ state: state('pre', 0, '2028'), league: { season: '2027' } });
+    expect(gone.matchupVisible).toBe(false);
+  });
+
+  it('does not offer Matchup when it knows nothing at all', () => {
+    expect(resolveLifecycle({}).matchupVisible).toBe(false);
+  });
 });
