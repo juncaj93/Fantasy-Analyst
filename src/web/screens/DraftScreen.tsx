@@ -12,16 +12,22 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  InjuryDetail,
+  LastSeasonLine,
+  NewsletterTakeaway,
+  ProfileFlags,
+  SeasonOutlook,
+  usePlayerDetail,
+} from '../components/playerDetail.tsx';
+import {
   api,
   type DraftBoard,
   type DraftRecommendation,
   type LeagueSummary,
-  type PlayerDetail,
   type SlotProgress,
 } from '../api.ts';
 import {
   CompactTally,
-  DetailLabel,
   Disclose,
   Empty,
   InjuryTag,
@@ -939,38 +945,6 @@ function RecommendationRow({
 }
 
 /**
- * Last season and this season's outlook, fetched when the card opens.
- *
- * Not part of the board response on purpose. The board is what a live draft
- * waits on and it must never wait on a third party; this is asked for after the
- * user has already decided to look at one player, and a failure to answer costs
- * that one section and nothing else.
- */
-function usePlayerDetail(playerId: string) {
-  const [detail, setDetail] = useState<PlayerDetail | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setDetail(null);
-    setFailed(false);
-    api
-      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId]);
-
-  return { detail, failed };
-}
-
-/**
  * The expanded player: four things, and nothing that explains the ranking.
  *
  * It has been cut twice now, and this is the cut that changes what it is for.
@@ -982,8 +956,14 @@ function usePlayerDetail(playerId: string) {
  * him". A live draft is thirty seconds long.
  *
  * What is left is a fantasy snapshot: where his position is breaking and who
- * ahead of you still needs one, what is expected of him this season, what he
- * did last season, and whether he is coming back from something.
+ * ahead of you still needs one, what the newsletter ledger's strongest
+ * supported fact about him is, what is expected of him this season, what he did
+ * last season, and whether he is coming back from something.
+ *
+ * Every part of that snapshot below the tier line is drawn by
+ * `components/playerDetail.tsx`, which every other screen also uses — the
+ * sections used to be copied here and in Players, and two copies is how six
+ * start.
  *
  * The rationale is not deleted from the system — the board response still
  * carries every reason, counterpoint, component, weight and contribution, and
@@ -1007,179 +987,18 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
         </div>
       ) : null}
 
+      {/*
+        Why the tally reads the way it does, before the outlook rather than
+        after it: the tally is the number on the row the reader just tapped, and
+        the sentence explaining it should not be below a paragraph of somebody
+        else's prose.
+      */}
+      <NewsletterTakeaway detail={detail} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
-
-      {/*
-        A label, not a retelling. The outlook above has already explained the
-        injury in the words of somebody who knows; saying it again in the app's
-        own words would be duplication at best and paraphrase at worst.
-      */}
-      {detail?.injuryContext ? (
-        <>
-          <DetailLabel>Injury context</DetailLabel>
-          <div className="muted" data-testid="injury-context">
-            {detail.injuryContext}
-          </div>
-        </>
-      ) : null}
-
-      {/*
-        What is wrong with him now, as against what he came back from above.
-        Two different facts under two different headings, because a player
-        returning from an ACL and a player with a sore hamstring on Friday are
-        not the same situation and must not read as one.
-      */}
-      {detail?.injury ? (
-        <>
-          <DetailLabel>{detail.injury.label}</DetailLabel>
-          <div className="muted" data-testid="injury-current">
-            {detail.injury.line ?? detail.injury.label}
-            {detail.injury.provenance ? (
-              <span className="faint"> — {detail.injury.provenance}</span>
-            ) : null}
-          </div>
-          {/*
-            Disagreement is shown, never averaged away. Two sources saying
-            different things is a real state of the world and the reader is the
-            one who should decide what to do about it.
-          */}
-          {detail.injury.conflict ? (
-            <div className="muted" data-testid="injury-conflict">
-              Sources disagree — {detail.injury.conflict}
-            </div>
-          ) : null}
-        </>
-      ) : null}
+      <InjuryDetail detail={detail} />
+      <ProfileFlags detail={detail} />
     </div>
-  );
-}
-
-/**
- * What is expected of him this season, in the words of whoever wrote it.
- *
- * Sleeper serves this through a public endpoint, and it is editorial writing
- * rather than anything Sleeper or this app generated — so it carries its
- * author. Two or three sentences: the full text runs past a thousand
- * characters, and a wall of prose in a live draft is scrolled past rather than
- * read, taking whatever is under it off the screen.
- */
-function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
-  if (failed) return null;
-  if (!detail) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-pending">
-          Looking it up…
-        </div>
-      </>
-    );
-  }
-  if (!detail.outlook) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-none">
-          {detail.outlookNote ?? 'No outlook published for him.'}
-        </div>
-      </>
-    );
-  }
-  return <OutlookBody outlook={detail.outlook} />;
-}
-
-/**
- * The outlook, short by default and whole on request.
- *
- * What is printed is always the provider's own sentences in their own order —
- * the shortening is a selection, never a rewrite. But a quotation that has been
- * cut and does not say so is a misquotation, so when sentences were dropped the
- * card says how many and offers them, and the control is the only way this
- * component differs from showing the paragraph outright.
- */
-function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
-  const [whole, setWhole] = useState(false);
-  const attribution = outlook.source ? (
-    <span className="outlook-source"> — {outlook.source}, via Sleeper</span>
-  ) : null;
-
-  return (
-    <>
-      <DetailLabel>{outlook.title}</DetailLabel>
-      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
-        {whole ? outlook.fullText : outlook.text}
-        {attribution}
-      </div>
-      {outlook.summarised ? (
-        <button
-          type="button"
-          className="link-button"
-          data-testid="outlook-toggle"
-          onClick={(e) => {
-            // The row underneath is a toggle; expanding the text is not
-            // "collapse this player".
-            e.stopPropagation();
-            setWhole((v) => !v);
-          }}
-        >
-          {whole ? 'Show the short version' : 'Read the full outlook'}
-        </button>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * `16 GP · WR7 half-PPR`.
- *
- * Two numbers, one line, and neither is guessed. A player who did not appear
- * last season has no games and no finish, and gets a dash: Sleeper will happily
- * report him as the 1,240th receiver, which looks like a result and is really
- * his place in a directory.
- */
-function LastSeasonLine({
-  detail,
-  failed,
-  position,
-}: {
-  detail: PlayerDetail | null;
-  failed: boolean;
-  position: string | null;
-}) {
-  if (failed || !detail) return null;
-  const season = detail.lastSeason?.season;
-  const games = detail.lastSeason?.gamesPlayed;
-  const rank = detail.lastSeason?.positionRank;
-  if (!season) return null;
-  return (
-    <>
-      <DetailLabel>{season}</DetailLabel>
-      <div className="season-line" data-testid="last-season">
-        <span className="metric">
-          {games == null ? (
-            <>
-              GP <Unknown what={`${season} games played`} />
-            </>
-          ) : (
-            <>
-              <strong>{games}</strong> GP
-            </>
-          )}
-        </span>
-        <span className="metric" title={detail.lastSeason?.scoring}>
-          {rank == null ? (
-            <>
-              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
-            </>
-          ) : (
-            <>
-              <strong>{rank}</strong> half-PPR
-            </>
-          )}
-        </span>
-      </div>
-    </>
   );
 }
 

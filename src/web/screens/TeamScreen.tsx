@@ -24,6 +24,8 @@ import {
   type StartSitComparison,
   type StartSitMode,
   type StartSitRefreshReport,
+  type FaabAdvice,
+  type FaabBid,
   type WaiverAdvice,
   type WaiverUpgrade,
 } from '../api.ts';
@@ -550,6 +552,7 @@ function WaiverCard({
               {best.score == null ? '' : ` · ${best.score.toFixed(1)}`}) · +{best.gain} pts
             </div>
             <div className="faint">{best.reasons.join(' · ')}</div>
+            <BidLine bid={advice.faab?.bids.find((b) => b.playerId === best.playerId) ?? null} />
             <div className="btn-row" style={{ margin: '4px 0 0' }}>
               <button
                 className="btn btn-sm"
@@ -571,14 +574,99 @@ function WaiverCard({
           </div>
         );
       })}
+      <BudgetFooter faab={advice.faab ?? null} />
       <div className="faint" style={{ margin: '6px 2px 0' }}>
-        Advisory only — add or drop in Sleeper. This app never makes a transaction.
+        Advisory only — add, drop or bid in Sleeper. This app never makes a transaction.
       </div>
       {advice.notes.map((n) => (
         <div className="faint" key={n}>
           {n}
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * What he will cost, what he is worth, and what paying it costs you.
+ *
+ * Three separate sentences rather than one number, because they answer three
+ * different questions and collapsing them loses the most useful thing this card
+ * can say: *he will go for more than he is worth to you.*
+ *
+ * When no honest dollar figure exists — a priority league, an unpublished
+ * budget, a spent wallet — `withheld` carries the reason and it is shown
+ * instead. A blank space would read as "no competition".
+ */
+function BidLine({ bid }: { bid: FaabBid | null }) {
+  if (!bid) return null;
+  if (bid.withheld) {
+    return (
+      <div className="faint" data-testid="faab-withheld">
+        {bid.withheld}
+      </div>
+    );
+  }
+  return (
+    <div className="bid" data-testid="faab-bid" data-player={bid.playerId}>
+      <div>
+        <strong>{bid.headline}</strong>
+      </div>
+      <div className="faint">
+        Do not exceed ${bid.doNotExceed}
+        {bid.confidence === 'low' ? ' · price is an estimate' : ''}
+      </div>
+      {bid.opportunity ? (
+        <div className="faint" data-testid="faab-opportunity">
+          {bid.opportunity.line}
+        </div>
+      ) : null}
+      {/*
+        Market attention and model disagreement, in that order. Neither has
+        moved his projection and neither is allowed to: the first prices the
+        bid, the second raises a question.
+      */}
+      {bid.trending ? (
+        <div className="faint" data-testid="faab-trending">
+          {bid.trending}
+        </div>
+      ) : null}
+      {bid.disagreement.line ? (
+        <div className="faint" data-testid="faab-disagreement" data-kind={bid.disagreement.kind}>
+          {bid.disagreement.line}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The budget the advice above was priced against, said out loud.
+ *
+ * A recommendation of $19 means nothing without the wallet it came from, and
+ * the two numbers that make it legible — what is left, and what winning has
+ * cost in this league — are exactly the two a reader would otherwise have to go
+ * to Sleeper to find.
+ */
+function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
+  if (!faab) return null;
+  if (!faab.rule.usesFaab) {
+    return (
+      <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+        {faab.rule.provenance}.
+      </div>
+    );
+  }
+  const mine = faab.mine;
+  return (
+    <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
+      {mine?.remaining == null
+        ? 'Your remaining budget is unknown.'
+        : `$${mine.remaining} of $${faab.rule.total} left.`}
+      {faab.prices.sample > 0
+        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
+        : ' No winning bids recorded in this league yet.'}
+      <div>{faab.losingBids}</div>
     </div>
   );
 }

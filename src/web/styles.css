@@ -1152,6 +1152,27 @@ body,
   font-size: 0.78rem;
 }
 
+/*
+ * A bid recommendation: three numbers that are not the same number.
+ *
+ * Inset so the price reads as a block attached to the candidate above it rather
+ * than as another one of the reasons. Deliberately monochrome: an expected
+ * price is neither good news nor bad, and colouring it would make the app look
+ * as though it had an opinion about a fact.
+ */
+.bid {
+  margin: var(--sp-1) 0 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.bid > div + div {
+  margin-top: 1px;
+}
+
 /* ------------------------------------------------------------ metric tiles */
 /*
  * The at-a-glance numbers: a large tabular value with a small quiet label. Used
@@ -1907,6 +1928,26 @@ body,
   font-size: 0.82rem;
   line-height: 1.45;
   color: var(--text-dim);
+}
+
+/*
+ * The newsletter takeaway: one sentence, and it has to read as a conclusion.
+ *
+ * Slightly larger and less dim than the outlook under it, because it is the
+ * app's own strongest supported statement about the player rather than
+ * somebody else's preview — but not a heading, and not coloured by polarity.
+ * The signed tally on the row above already carries the direction; painting the
+ * sentence green as well would say the same thing twice and, worse, would make
+ * a quotation look like a verdict.
+ */
+.takeaway {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  font-weight: 560;
+  color: var(--text);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
 }
 
 /* Who wrote it. Quiet, and never omitted. */
