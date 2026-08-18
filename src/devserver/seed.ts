@@ -159,12 +159,19 @@ export const MOCK_GAMES: MockRoster[] = [
    * is real and is tested; what it should not be is the *only* thing the demo
    * deployment can show.
    *
-   * Cal Whitfield is deliberately *not* here. The demo needs one rostered
-   * player nobody has priced — it is the state half a dozen tests are about,
-   * and it is a real state on any Sunday — and he has been that player since
-   * the first fixture. One unpriced starter is well inside what the forecast
-   * still answers on; it costs the confidence line one clause, which is exactly
-   * what the confidence line is for.
+   * Cal Whitfield and Silas Mbeki are deliberately *not* here. The demo needs
+   * rostered players nobody has priced — it is the state half a dozen tests are
+   * about, and it is a real state on any Sunday. Two unpriced starters, one a
+   * side, is well inside what the forecast still answers on; it costs the
+   * confidence line a clause, which is exactly what the confidence line is for.
+   *
+   * Mbeki in particular stays unpriced because he is also the fourth name on
+   * the demo draft board, and a market line is a second row of text. Density at
+   * 360px is asserted in `e2e/shell.spec.ts` — eight players before a scroll —
+   * and a fixture that quietly grew a line on half the visible rows would have
+   * spent that guarantee on itself. This is a fixture, and a fixture that
+   * cannot be added to without breaking an unrelated promise is worth trimming
+   * to the players that actually need it.
    */
   {
     eventId: 'demo-game-2',
@@ -174,7 +181,6 @@ export const MOCK_GAMES: MockRoster[] = [
     players: [
       { name: 'Rhys Donnelly', position: 'QB', team: 'LAR' },
       { name: 'Owen Fitzgerald', position: 'WR', team: 'PHI' },
-      { name: 'Silas Mbeki', position: 'RB', team: 'GB' },
       { name: 'Bo Ashworth', position: 'RB', team: 'SEA' },
       { name: 'Julian Reyes', position: 'RB', team: 'MIA' },
       { name: 'Miles Barrowman', position: 'TE', team: 'CLE' },
