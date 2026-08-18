@@ -1530,8 +1530,21 @@ function RecommendationRow({
           <div className="player-row-metrics">
             <span className="metric" data-testid="score-metric">
               Score{' '}
-              <strong className="score-value" title={`Composite recommendation strength, 0-100 (raw ${rec.total})`}>
-                {rec.score}
+              <strong
+                className="score-value"
+                title={
+                  rec.score == null
+                    ? `No market has priced him, so his composite (raw ${rec.total}) is not comparable with a priced player's`
+                    : `Composite recommendation strength, 0-100 (raw ${rec.total})`
+                }
+              >
+                {/*
+                  A dash rather than a number, for the same reason ADP, Val and
+                  Next already show one on this row: the composite is real but
+                  it is not on the priced players' scale, because the component
+                  that dominates that scale is missing rather than low.
+                */}
+                {rec.score == null ? <Unknown what="Score" /> : rec.score}
               </strong>
             </span>
             <span className="metric">

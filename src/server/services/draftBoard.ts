@@ -39,6 +39,7 @@ import { AdpRepo, UNDERDOG_SOURCE, type AdpSnapshotMeta } from '../repos/adp.ts'
 import { detectBestBall, marketFormatOf } from '../../core/sleeper/bestBall.ts';
 import { blendWeights } from '../../core/draft/marketBaseline.ts';
 import { dogFreshness, dogIsUsable } from '../../core/adp/underdog.ts';
+import { isDraftable } from '../../core/draft/draftable.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerFlagsRepo } from '../repos/playerFlags.ts';
@@ -645,8 +646,44 @@ export class DraftBoardService {
     // Only positions this league starts. A league with no kicker slot should
     // never be shown a kicker, however Sleeper ranks them.
     const startable = startablePositions(buildRosterShape(league.rosterPositions));
+    /*
+     * Is this somebody you could actually draft?
+     *
+     * Sleeper's dictionary cannot answer this on its own, and the evidence is
+     * worth writing down because it rules out the obvious fixes. Sampled from
+     * the live endpoint in August 2025:
+     *
+     *   Chris Carson   active true · team null · status "Active"   · rank 200
+     *   Chase Edmonds  active true · team null · status "Active"   · rank 253
+     *   Kareem Hunt    active true · team null · status "Active"   · rank 242
+     *
+     * Carson last played in 2021. Hunt carried the ball two hundred times for
+     * Kansas City last season and is a legitimate free agent. **Sleeper records
+     * them identically** — same `active`, same `status`, same absent team, and
+     * a comparable `search_rank`. So there is no flag to filter on: `active` is
+     * true for players who retired years ago, `status` says "Active" for them
+     * too, and `search_rank` ranks Carson ahead of Hunt.
+     *
+     * What does separate them is that somebody is willing to price Hunt. A
+     * player with no NFL team *and* no price from either Underdog or Sleeper is
+     * a player no employer and no market has an opinion about, and he is not a
+     * pick — whereas a free agent either market has priced stays, which is what
+     * keeps this from being the "exclude every FA" rule the brief rules out.
+     *
+     * Deliberately an AND of two absences. On a team is enough on its own:
+     * Audric Estime (NO), Brashard Smith (KC) and J.J. McCarthy (MIN) are all
+     * unpriced deep players, all genuinely draftable, and all kept. Priced is
+     * enough on its own, whichever market did it.
+     *
+     * This bounds the *recommendation* pool only. Deep Players search reads the
+     * player table directly and is untouched.
+     */
+    const draftable = (player: CanonicalPlayer): boolean =>
+      isDraftable({ team: player.team, sleeperAdp: rankOf(player), dogAdp: dogOf(player) });
+
     const eligible = (player: CanonicalPlayer): boolean =>
       player.active &&
+      draftable(player) &&
       !takenIds.has(player.id) &&
       (startable.size === 0 || startable.has(player.position)) &&
       // `FLX` narrows to RB/WR/TE; every other value is the exact position it

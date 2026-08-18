@@ -180,9 +180,9 @@ describe('the Score on a real board', () => {
   it('is attached to every player and agrees with board order', () => {
     const ranked = rankAvailablePlayers([wr('a', 30), wr('b', 45), wr('c', 60)], ctx());
     for (let i = 1; i < ranked.length; i++) {
-      expect(ranked[i]!.score).toBeLessThanOrEqual(ranked[i - 1]!.score);
+      expect(ranked[i]!.score!).toBeLessThanOrEqual(ranked[i - 1]!.score!);
     }
-    expect(ranked.every((r) => r.score >= 0 && r.score <= 100)).toBe(true);
+    expect(ranked.every((r) => r.score! >= 0 && r.score! <= 100)).toBe(true);
   });
 
   it('is the transform of the total the board is sorted by, and nothing else', () => {
@@ -196,7 +196,7 @@ describe('the Score on a real board', () => {
     const a = find(ranked, 'a');
     const b = find(ranked, 'b');
     expect(a.total).toBeGreaterThan(b.total);
-    expect(a.score).toBeGreaterThan(b.score);
+    expect(a.score!).toBeGreaterThan(b.score!);
     expect(ranked[0]!.playerId).toBe('a');
   });
 
@@ -205,7 +205,7 @@ describe('the Score on a real board', () => {
     const a = find(ranked, 'a');
     const b = find(ranked, 'b');
     expect(a.total).toBeLessThan(b.total);
-    expect(a.score).toBeLessThan(b.score);
+    expect(a.score!).toBeLessThan(b.score!);
     expect(ranked[0]!.playerId).toBe('b');
   });
 
@@ -216,7 +216,7 @@ describe('the Score on a real board', () => {
   it('lets accumulated research outrank a better ADP, visibly', () => {
     const ranked = rankAvailablePlayers([wr('researched', 48, { signal: signal(10) }), wr('market', 42)], ctx());
     expect(ranked[0]!.playerId).toBe('researched');
-    expect(find(ranked, 'researched').score).toBeGreaterThan(find(ranked, 'market').score);
+    expect(find(ranked, 'researched').score!).toBeGreaterThan(find(ranked, 'market').score!);
     // ADP itself is untouched: the market number still says what the market says.
     expect(find(ranked, 'researched').adp).toBe(48);
     expect(find(ranked, 'market').adp).toBe(42);
@@ -245,12 +245,26 @@ describe('the Score on a real board', () => {
     }
   });
 
-  it('scores a player with no ADP and no evidence rather than failing', () => {
+  it('ranks a player with no ADP and no evidence, and leaves his Score unknown', () => {
     const ranked = rankAvailablePlayers(
       [{ ...wr('bare', 0), adp: null, adpRank: null }, wr('b', 41)],
       ctx(),
     );
-    expect(Number.isInteger(find(ranked, 'bare').score)).toBe(true);
+    const bare = find(ranked, 'bare');
+    // He is still ranked and still explained — nothing throws, nothing is
+    // dropped, and the composite is on the card for inspection.
+    expect(Number.isFinite(bare.total)).toBe(true);
+    expect(bare.reasons.length).toBeGreaterThan(0);
+    /*
+     * But the Score is unknown, because it cannot be compared.
+     *
+     * His total sits near zero — market value is absent rather than low — and
+     * `draftScore` maps zero to 83 on a curve calibrated for boards whose
+     * middle is negative. Reporting that as a number put seven players carrying
+     * `ADP —`, `Val —` and `Next —` at the top of a live board.
+     */
+    expect(bare.score).toBeNull();
+    expect(find(ranked, 'b').score).not.toBeNull();
   });
 });
 
@@ -288,8 +302,8 @@ describe('the Score as the draft moves', () => {
     const at40 = find(rankAvailablePlayers(board(), ctx({ currentPick: 40, nextPick: 62 })), 'star');
     const at50 = find(rankAvailablePlayers(board(), ctx({ currentPick: 50, nextPick: 72 })), 'star');
     const at60 = find(rankAvailablePlayers(board(), ctx({ currentPick: 60, nextPick: 82 })), 'star');
-    expect(at50.score).toBeGreaterThan(at40.score);
-    expect(at60.score).toBeGreaterThan(at50.score);
+    expect(at50.score!).toBeGreaterThan(at40.score!);
+    expect(at60.score!).toBeGreaterThan(at50.score!);
   });
 
   /**
@@ -304,7 +318,7 @@ describe('the Score as the draft moves', () => {
     const runOnReceivers = [wr('star', 40), ...alternatives().slice(3), wr('deep', 150)];
     const after = find(rankAvailablePlayers(runOnReceivers, ctx()), 'star');
     expect(separationOf(after)).toBeGreaterThan(separationOf(before));
-    expect(after.score).toBeGreaterThan(before.score);
+    expect(after.score!).toBeGreaterThan(before.score!);
     // Market value did not move, because the pick on the clock did not.
     expect(after.adpValue).toBe(before.adpValue);
   });
@@ -313,7 +327,7 @@ describe('the Score as the draft moves', () => {
   it('barely moves when only distant players are drafted', () => {
     const full = rankAvailablePlayers([...board(), wr('deep2', 170), wr('deep3', 185)], ctx());
     const thinned = rankAvailablePlayers(board(), ctx());
-    expect(Math.abs(find(thinned, 'star').score - find(full, 'star').score)).toBeLessThanOrEqual(1);
+    expect(Math.abs(find(thinned, 'star').score! - find(full, 'star').score!)).toBeLessThanOrEqual(1);
   });
 
   /** E — a falling player with news against him does not float regardless. */
@@ -326,7 +340,7 @@ describe('the Score as the draft moves', () => {
       ),
       'star',
     );
-    expect(withNews.score).toBeLessThan(clean.score);
+    expect(withNews.score!).toBeLessThan(clean.score!);
   });
 
   /*
@@ -343,7 +357,18 @@ describe('the Score as the draft moves', () => {
     expect(separationOf(alone)).toBeLessThanOrEqual(SEPARATION.weight);
     const component = alone.components.find((c) => c.key === 'separation')!;
     expect(component.score).toBeLessThanOrEqual(1);
-    expect(component.weight).toBe(SEPARATION.weight);
+    /*
+     * At most its nominal weight, not exactly it.
+     *
+     * `component.weight` is the weight *actually used*, which is what makes
+     * `score × weight = contribution` checkable on the card — the same reason
+     * `need` carries its ramped weight rather than `DEFAULT_WEIGHTS.need`.
+     * Separation is one of four components that all rise together when a
+     * position is thin, and they are capped jointly, so a sparse position sees
+     * this scaled down. See `POSITIONAL_STRUCTURE`.
+     */
+    expect(component.weight).toBeLessThanOrEqual(SEPARATION.weight);
+    expect(component.contribution).toBeCloseTo(component.score * component.weight, 3);
   });
 
   it('adds separation to the total exactly once', () => {

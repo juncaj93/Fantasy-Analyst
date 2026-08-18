@@ -49,8 +49,11 @@ export const SORT_DESCRIPTIONS: Record<SortMode, string> = {
 
 /** The least a row must carry to be sorted. Anything richer also works. */
 export interface SortableRow {
-  /** The composite, 0-100. Higher is better. */
-  score: number;
+  /**
+   * The composite, 0-100. Higher is better. Null when no market priced him and
+   * his total is therefore not on the same scale as anybody else's.
+   */
+  score: number | null;
   /** The sum the composite is derived from — the board's own ordering key. */
   total: number;
   /** Sleeper ADP. */
@@ -76,6 +79,25 @@ export function isSortMode(value: string | null | undefined): value is SortMode 
 export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortMode): T[] {
   const out = [...rows];
 
+  /*
+   * Unscored players last, before anything else is considered.
+   *
+   * This is the engine's own first sort key and it has to be reproduced here,
+   * because reproducing only the *second* one is what put seven players
+   * carrying `ADP —`, `Val —` and `Next —` at the top of the board. A player no
+   * market has priced has a total near zero — market value is absent rather
+   * than low — and zero beats the negative total every priced player carries
+   * until the draft reaches his ADP. Ordering on `total` alone therefore floats
+   * exactly the players the board knows least about.
+   *
+   * `score` is null for precisely those players, so it is the cheapest correct
+   * test, and it keeps the client's ordering tied to the same fact the Score
+   * column is showing rather than to a second rule that can drift from it.
+   */
+  const unscoredLast = (a: T, b: T): number => Number(a.score == null) - Number(b.score == null);
+  const byComposite = (a: T, b: T): number =>
+    unscoredLast(a, b) || b.total - a.total || a.name.localeCompare(b.name);
+
   if (mode === 'score') {
     /*
      * The composite, exactly as the engine ordered it: `total` and not `score`.
@@ -86,7 +108,7 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
      * had deliberately separated. Sorting on `total` reproduces the board the
      * server sent, which is the promise "Score is the default" is making.
      */
-    return out.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    return out.sort(byComposite);
   }
 
   const valueOf = (row: T): number | null => (mode === 'dog' ? row.dogAdp : row.adp);
@@ -95,11 +117,11 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
     const av = usable(valueOf(a));
     const bv = usable(valueOf(b));
     // Missing values at the bottom, whichever market is being read.
-    if (av == null && bv == null) return b.total - a.total || a.name.localeCompare(b.name);
+    if (av == null && bv == null) return byComposite(a, b);
     if (av == null) return 1;
     if (bv == null) return -1;
     // Ascending: the earliest pick is the top of the board.
-    return av - bv || b.total - a.total || a.name.localeCompare(b.name);
+    return av - bv || byComposite(a, b);
   });
 }
 

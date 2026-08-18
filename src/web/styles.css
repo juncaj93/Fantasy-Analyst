@@ -1563,9 +1563,30 @@ body,
   color: var(--pos-line, var(--text-dim));
 }
 
+/*
+ * The fallback mark occupies the same square as the logo it stands in for.
+ *
+ * `TeamLogo` promises that "the square width/height here re-flows nothing" and
+ * that "there is no state in which the reader gets an empty gap". That was true
+ * of the image and not of this: a bare text span is as wide as its string, so a
+ * free agent — `FA` — or a logo that failed to load sat in a different-sized box
+ * and pulled the row out of line with its neighbours. Every player in the demo
+ * seed had a club, so nothing ever measured it.
+ *
+ * Same box, centred, whatever is in it.
+ */
 .team-code {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--team-logo);
+  height: var(--team-logo);
   color: var(--text-faint);
   letter-spacing: 0.02em;
+  /* The abbreviation has to fit the logo's square without widening it. */
+  font-size: 0.62rem;
+  overflow: hidden;
 }
 
 /*
@@ -1639,6 +1660,19 @@ body,
   margin-top: 0;
   gap: 2px 5px;
   font-size: 0.72rem;
+}
+/*
+ * An unknown value costs no pixel.
+ *
+ * `.faint` carries its own 0.78rem, which is *larger* than this line's 0.72rem,
+ * so a single `unknown` in the metrics row grew the line box and the card came
+ * out a pixel taller than its neighbours. Nothing caught it because every
+ * player in the demo seed was priced; the first board with an unpriced player on
+ * it broke the one-rhythm promise the whole row is built around. Colour is what
+ * `.faint` is for here — the size belongs to the line.
+ */
+.player-row-metrics .faint {
+  font-size: inherit;
 }
 
 /*

@@ -118,7 +118,13 @@ describe('defences depend on the league, not on the app', () => {
     const playerRepo = new PlayerRepo(db);
     await playerRepo.upsertMany([
       player({ id: 'qb1', fullName: 'Patrick Mahomes', position: 'QB', team: 'KC' }),
-      player({ id: 'qb2', fullName: 'Unranked Passer', position: 'QB', team: 'FA' }),
+      // On an NFL roster, which is what "every other active quarterback in the
+      // league" means and what the assertion below is protecting. He was
+      // written as a free agent, which since the draftability rule landed makes
+      // him indistinguishable from a player who retired in 2021 — see
+      // `draftable.ts`, and the teamless case asserted at the end of this test.
+      player({ id: 'qb2', fullName: 'Unranked Passer', position: 'QB', team: 'DEN' }),
+      player({ id: 'qb3', fullName: 'Retired Passer', position: 'QB', team: 'FA' }),
       player({ id: 'def1', fullName: 'Kansas City Chiefs', position: 'DEF', team: 'KC' }),
       player({ id: 'def2', fullName: 'San Francisco 49ers', position: 'DEF', team: 'SF' }),
     ]);
@@ -188,6 +194,17 @@ describe('defences depend on the league, not on the app', () => {
     expect(unpriced.adp, 'no ADP is null, never a sentinel').toBeNull();
     expect(unpriced.adpValue, 'and no value is computed from one').toBeNull();
     expect(unpriced.degraded, 'the row says it is thinner than the others').toBe(true);
+    expect(unpriced.score, 'and his Score is unknown, not the centre of the curve').toBeNull();
+
+    /*
+     * A player with no NFL team and no price from either market is not on the
+     * board at all.
+     *
+     * This is the other half of the same rule, and the reason `Unranked Passer`
+     * had to be given a club: on a roster he is a deep sleeper worth listing,
+     * and off one with nobody willing to price him he is Chris Carson.
+     */
+    expect(qbs.recommendations.map((r) => r.name)).not.toContain('Retired Passer');
   });
 
   it('is still carried through the player dictionary', () => {

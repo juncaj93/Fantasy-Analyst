@@ -113,6 +113,148 @@ wrong player.
 
 ---
 
+## Addendum: the Draft Score regression
+
+Reported after the first pass: a live board sorted by `Score` opened with
+Trevor Lawrence 93, Jaxson Dart 87, Patrick Mahomes 86 — and then seven players
+on 84–85 carrying `ADP —`, `Val —` and `Next —`, three of whom had not taken an
+NFL snap in years.
+
+**Three independent faults, each of them necessary.** Removing any one would
+have hidden the symptom without fixing the others.
+
+### P0 — a total of zero is a *good* total, and unknown players score zero
+
+`draftScore` is a logistic centred at a total of **−2.5**, and that centre is
+correct: market value charges every player the distance between the clock and
+his ADP, so almost everybody worth considering carries a negative total. The
+consequence nobody had followed through is that **`draftScore(0) = 83`**.
+
+A player no market has priced totals almost exactly zero — market value is
+`unknown` and contributes nothing, and so does everything else that needs a
+price. So "we know nothing about him" rendered as a confident 83, above every
+priced player the draft had not yet reached.
+
+Worse, two components actively *paid* him. `separation` and `opportunity` both
+measure a player against the composites of his alternatives, and his near-zero
+base beat the negative bases of real players: on a board shaped like a real one,
+an unpriced back collected **+0.183 of cost-of-waiting for being nothing but
+unknown.**
+
+Fixed: a player with no market baseline is not comparable, so he is excluded
+from both components on both sides — as a subject and as an alternative — and
+his `score` is `null`. The card shows `—`, exactly as `ADP`, `Val` and `Next`
+already did for the same player and the same reason. `total` is kept for
+inspection.
+
+### P0 — the client's Score sort reproduced only half the engine's ordering
+
+`rankAvailablePlayers` sorts unpriced players last *first*, then by composite.
+`sortBoard('score')` sorted by `total` alone. That second key on its own floats
+exactly the players the board knows least about, which is what put them on
+screen. It now applies the same unscored-last rule, in every mode.
+
+### P1 — the pool readmitted players nobody can draft
+
+Draft recommendations used to require a price, which capped the board at the
+~200 players an ADP file covers. The deep-coverage work removed that — rightly,
+because an unpriced current player is exactly who you want in round eleven — and
+with it went the only thing keeping retired players out.
+
+**Sleeper cannot answer "is he draftable".** Sampled live in August 2025:
+
+| player | `active` | `team` | `status` | `search_rank` | last played |
+|---|---|---|---|---|---|
+| Chris Carson | `true` | `null` | `Active` | 200 | 2021 |
+| Chase Edmonds | `true` | `null` | `Active` | 253 | 2023 |
+| Kareem Hunt | `true` | `null` | `Active` | 242 | 2024 |
+
+Carson retired four years ago; Hunt carried the ball two hundred times last
+season. **Sleeper records them identically**, and `search_rank` — which measures
+who gets looked up, not who gets picked — ranks the retired player higher. There
+is no flag to filter on.
+
+What separates them is that somebody is willing to price Hunt. So the rule in
+`draftable.ts` is: **no NFL team *and* no price from either market → not a
+recommendation.** Deliberately an `and` of two absences, because either alone is
+ordinary — being on a roster is enough by itself, and being priced by either
+market is enough by itself, which is what stops this collapsing into "exclude
+every free agent".
+
+Worth stating plainly: three of the seven reported names — **Audric Estime (NO),
+Brashard Smith (KC) and J.J. McCarthy (MIN)** — are on NFL rosters and entirely
+legitimate deep candidates. They were never a pool problem. They were a Score
+problem, and they stay on the board.
+
+The accepted cost: a genuinely current free agent that neither market has priced
+— someone cut in late August, before signing — drops off the recommendations
+until he signs or a market prices him. He remains in Deep Players search.
+
+### P1 — QB inflation, and it is not roster need
+
+Measured per component rather than assumed. On a board shaped like a real one
+(twelve QBs in three bands against forty dense backs and receivers), at pick 60:
+
+| position | scarcity | tier cliff | separation | opportunity | **structure** | need |
+|---|---|---|---|---|---|---|
+| QB | +0.083 | +0.150 | +0.250 | +0.227 | **+0.710** | +0.056 |
+| RB | −0.130 | 0 | +0.158 | +0.123 | **+0.151** | +0.006 |
+| WR | −0.130 | 0 | +0.115 | +0.124 | **+0.109** | +0.006 |
+
+Market value was saturated at 1.0 for all three, so that half-point gap *was*
+the ranking — about fourteen picks of ADP, more than the season market and the
+news tally can produce together.
+
+**Roster need is not the cause.** Filling the quarterback slot moves the best
+quarterback's composite by 0.047, which is one pick of ADP — the calibration in
+`DEFAULT_WEIGHTS.need` working exactly as documented. Nor is any single one of
+the four components: each was individually bounded and none was wrong.
+
+The cause is that all four answer the same underlying question — *how thin is
+this position* — and nothing bounded their sum. Four weights summing to 0.9,
+handed in full to whichever position is sparsest.
+
+Fixed with a joint cap (`POSITIONAL_STRUCTURE.cap = 0.5`, about ten picks),
+scaled proportionally so the cap decides how loudly the family may speak and
+never which member is speaking. The scaling is applied to each component's
+**weight**, not to the product, so `score × weight = contribution` stays
+checkable on the card — the same convention `need` already follows with its
+ramped weight. At pick 60 the QB's structure falls 0.710 → 0.500 and his lead
+over the best back narrows by a third; at pick 140 with no quarterback rostered
+the family totals 0.445 and the cap does not fire at all, because a quarterback
+run there is correct.
+
+### P2 — two latent layout faults the fixture exposed
+
+Neither was caused by this pass; both were invisible because **every player in
+the demo seed was priced and had a club**, so no browser test had ever drawn a
+row with an unknown value or a missing team on it.
+
+- **An unknown value cost a pixel.** `.faint` carries its own `0.78rem`, which
+  is larger than the `0.72rem` of the metrics line it sits in, so a single
+  `unknown` grew the line box and the card came out a pixel taller than its
+  neighbours — breaking the one-rhythm promise the row is built around. In
+  production this fired for any unpriced player's `ADP` long before Score
+  existed. Fixed by letting the marker inherit the line's own size; colour is
+  what `.faint` is for there.
+- **The fallback club mark re-flowed the row.** `TeamLogo` documents that "the
+  square width/height here re-flows nothing" and that "there is no state in
+  which the reader gets an empty gap". True of the image; not true of the
+  `team-code` fallback, which was a bare text span as wide as its string. A free
+  agent, or any logo that failed to load, sat in a different-sized box and
+  pulled the row out of line. Fixed by giving the fallback the same square.
+
+### What the blend did not cause
+
+The DOG/Sleeper market blend was audited against §1 of the addendum and is
+sound. A missing source renormalises to the one that answered; both missing
+returns `unknown` with `adp: null` and zero weights; `null`, `undefined` and
+`NaN` cannot coerce into a favourable value; and there is no midpoint default
+anywhere in it. The blend **exposed** the Score fault by widening the pool of
+players who reach the board — it did not create it.
+
+---
+
 ## Areas audited and found sound
 
 Recorded because "we looked and it was fine" is a finding too, and the next pass

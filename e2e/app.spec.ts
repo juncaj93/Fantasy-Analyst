@@ -421,12 +421,26 @@ test.describe('draft room', () => {
     const ranks = await page.locator('[data-testid="recommendation-row"] .rank').allInnerTexts();
     expect(ranks.slice(0, 5)).toEqual(['1', '2', '3', '4', '5']);
 
-    const scores = await page
+    /*
+     * Scored rows descend. Unscored ones are last and have nothing to compare.
+     *
+     * A player no market has priced carries no Score — his composite is real
+     * but it is not on the same scale, because market value is absent rather
+     * than low. He sits below every priced player, which is the ordering being
+     * checked here, and shows `unknown` rather than a number.
+     */
+    const cells = await page
       .locator('[data-testid="recommendation-row"] .score-value')
-      .evaluateAll((nodes) => nodes.map((n) => Number(n.textContent)));
-    expect(scores.length).toBeGreaterThan(3);
-    for (let i = 1; i < scores.length; i++) {
-      expect(scores[i], `row ${i + 1} scores above row ${i}`).toBeLessThanOrEqual(scores[i - 1]!);
+      .allInnerTexts();
+    expect(cells.length).toBeGreaterThan(3);
+    const scored = cells.filter((text) => /^\d+$/.test(text.trim()));
+    expect(scored.length).toBeGreaterThan(3);
+    // Every unscored row comes after every scored one.
+    expect(cells.findIndex((t) => !/^\d+$/.test(t.trim()))).not.toBe(0);
+    for (let i = 1; i < scored.length; i++) {
+      expect(Number(scored[i]), `row ${i + 1} scores above row ${i}`).toBeLessThanOrEqual(
+        Number(scored[i - 1]),
+      );
     }
   });
 
@@ -607,8 +621,26 @@ test.describe('draft room', () => {
   /** Showing a status must not quietly become a second injury penalty. */
   test('the injury tags do not reorder the board', async ({ page }) => {
     const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
-    const ranked = board.recommendations.map((r: { total: number }) => r.total);
-    expect([...ranked].sort((a: number, b: number) => b - a)).toEqual(ranked);
+    /*
+     * Priced players first, then by composite — the board's two sort keys, and
+     * the reason this is not a plain descending sort on `total`.
+     *
+     * An unpriced player's total sits near zero because market value is absent
+     * rather than low, and zero beats the negative total every priced player
+     * carries until the draft reaches his ADP. Ordering on `total` alone
+     * therefore floats exactly the players the board knows least about, which
+     * is what once put seven `ADP —` rows at the top of a live board.
+     */
+    const key = (r: { total: number; score: number | null }): [number, number] => [
+      r.score == null ? 1 : 0,
+      -r.total,
+    ];
+    const rows = board.recommendations as { total: number; score: number | null }[];
+    const expected = [...rows].sort((a, b) => key(a)[0] - key(b)[0] || key(a)[1] - key(b)[1]);
+    expect(rows.map((r) => r.total)).toEqual(expected.map((r) => r.total));
+    // And the scored players really do descend among themselves.
+    const scored = rows.filter((r) => r.score != null).map((r) => r.total);
+    expect([...scored].sort((a, b) => b - a)).toEqual(scored);
     // The tagged players are not all at the bottom — they sit on their merits.
     const positions = board.recommendations
       .map((r: { status: string | null }, i: number) => (r.status ? i : -1))
