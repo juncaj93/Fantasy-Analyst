@@ -97,6 +97,24 @@ test.describe('density', () => {
    * This number is the whole justification for the change, so it is asserted
    * rather than described: if a later pass spends the space on padding again,
    * this fails.
+   *
+   * ## Why this is no longer a count of rows
+   *
+   * It was, and counting rows made it hostage to something it was never
+   * written to measure. A card is 58px ordinarily, 75px carrying a tally and
+   * 92px carrying a tier warning — deliberately, because a warning needs the
+   * line — so how many rows clear the toolbar depends on *which players happen
+   * to be at the top of the demo board*. When the positional-structure cap
+   * landed it reordered the board by a few hundredths and moved one 92px
+   * warned card from tenth to seventh, and the count went 8 → 7 with no space
+   * spent anywhere: the list still starts at 129px and every card is still
+   * exactly as tall as it was.
+   *
+   * So both halves of the claim are asserted directly instead. The chrome
+   * above the list is the thing the fold-the-search change actually bought,
+   * and the depth of the first screen is measured in ordinary cards, which is
+   * what "spends the space on padding" would move. A padding regression fails
+   * this exactly as it did before; a reordered board no longer does.
    */
   test('the draft board shows at least eight players before a scroll', async ({ page }) => {
     // No tap: Draft is where the app lands, and tapping the destination you are
@@ -105,7 +123,23 @@ test.describe('density', () => {
     await page.goto('/');
     await expect(page.getByTestId('board-list')).toBeVisible();
     await page.waitForTimeout(350);
-    expect(await rowsOnFirstScreen(page, 'recommendation-row')).toBeGreaterThanOrEqual(8);
+
+    const measured = await page.evaluate(() => {
+      const list = document.querySelector('[data-testid="board-list"]')!.getBoundingClientRect();
+      const floor = document.querySelector('.tabbar')!.getBoundingClientRect().top;
+      // The shortest card on screen is an ordinary one: no tally, no warning.
+      const heights = [...document.querySelectorAll('[data-testid="recommendation-row"]')].map(
+        (row) => row.getBoundingClientRect().height,
+      );
+      return { listTop: list.top, floor, ordinaryCard: Math.min(...heights) };
+    });
+
+    // 129px, and a pixel or two of rounding. Not 177.
+    expect(measured.listTop, 'the chrome above the list has grown').toBeLessThanOrEqual(132);
+    expect(
+      Math.floor((measured.floor - measured.listTop) / measured.ordinaryCard),
+      'the first screen is no longer eight ordinary cards deep',
+    ).toBeGreaterThanOrEqual(8);
   });
 
   test('the players list shows at least seven', async ({ page }) => {
