@@ -66,9 +66,19 @@ value, no Next%: the board is for reading the room, and the analysis is on the
 card you came from. It draws the picks the Draft screen already has, so it adds
 no polling of its own, and it stays readable as history once the draft is done.
 
-**Team** — Sleeper connection, league selection, ADP import, roster, and
-start/sit comparison built from Vegas market expectation, news signal,
-availability and an uncertainty penalty. It never changes a lineup.
+**Team** — the recommended lineup, the bench behind it and the short list of
+anybody unrostered worth a move, all built from Vegas market expectation, news
+signal, availability and an uncertainty penalty. Balanced, Floor and Ceiling ask
+the same question three ways. Tapping one of your players opens his week in a
+concise card — the verdict, the role trend, the matchup, the market and the
+availability — with the full comparison one tap further on. Pull the screen down
+to refresh it. It never changes a lineup.
+
+**Waivers** — in season, where Draft used to be: who is available, how strongly
+he is recommended, which slot he fits and what he is worth this week. Expected
+cost, likely competition and multi-week value are shown as unknown until the
+league-intelligence pass provides them, because a bid we invented would be worse
+than an empty field. It never makes a transaction.
 
 Waiver upgrades carry a price: what the room will probably pay, what the player
 is worth to *your* roster, and the line past which winning is worse than losing
@@ -143,8 +153,8 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ```bash
 npm run typecheck
-npm test               # 1,814 unit + integration tests
-npm run e2e            # WebKit at 390x844, 375x812, 360x800 (801 checks)
+npm test               # 1,854 unit + integration tests
+npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
 ```
 

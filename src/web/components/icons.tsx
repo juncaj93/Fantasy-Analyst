@@ -120,6 +120,23 @@ export function SearchIcon({ size = 24, className }: IconProps) {
   );
 }
 
+/**
+ * Waivers: a player joining a list.
+ *
+ * Deliberately a *different* shape from Trades, which is two players crossing.
+ * A claim is one-way — somebody comes in off the pool — and at 24px in a row of
+ * six marks the difference between one arrow and two is the whole of what makes
+ * a tab bar readable at a glance.
+ */
+export function WaiverIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M4 6.5h9M4 12h9M4 17.5h6" />
+      <path d="M18 8.5v7M14.75 12h6.5" />
+    </svg>
+  );
+}
+
 /** Review: a queue of decisions, ticked off. */
 export function ReviewIcon({ size = 24, className }: IconProps) {
   return (

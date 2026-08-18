@@ -110,13 +110,65 @@ test.describe('the recommended lineup, at a glance', () => {
 test.describe('waiver upgrades', () => {
   test.beforeEach(async ({ page }) => openTeam(page));
 
-  test('names the slot, who is in it, and who is available', async ({ page }) => {
+  test('puts each player on one row: how strong, where he fits, what he is worth', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
     await expect(card).toBeVisible();
-    const qb = page.locator('[data-testid="waiver-upgrade"][data-slot="QB"]');
-    await expect(qb).toContainText('QB upgrade available');
-    await expect(qb).toContainText('Best available');
-    await expect(qb).toContainText('Trey Halloran');
+    const row = page.locator('[data-testid="waiver-row"]').first();
+    await expect(row).toContainText('Trey Halloran');
+    await expect(row.getByTestId('waiver-fit')).toContainText(/Upgrades|Fills/);
+    await expect(row.getByTestId('waiver-short-term')).toContainText('pts');
+    await expect(row.getByTestId('waiver-why')).not.toBeEmpty();
+  });
+
+  /**
+   * The row is a decision, not a paragraph.
+   *
+   * The card this replaced spent five lines and a control per candidate. Three
+   * lines is the budget, and it is asserted as a height rather than as a line
+   * count because what matters is how much of the phone a suggestion costs.
+   */
+  test('keeps a suggestion to about three lines', async ({ page }) => {
+    const row = page.locator('[data-testid="waiver-row"]').first();
+    const height = (await row.boundingBox())!.height;
+    expect(height, 'a waiver row should not be taller than a small card').toBeLessThan(120);
+  });
+
+  /**
+   * What it does not know, it does not invent.
+   *
+   * Expected cost is a fact about this league's managers and arrives with the
+   * league-intelligence pass. Until then the field is a dash — never a number
+   * that looks like a bid.
+   */
+  test('quotes the league\u2019s own price, or no price at all', async ({ page }) => {
+    const waivers = await (await page.request.get('/api/leagues/demo-league/waivers')).json();
+    const row = page.locator('[data-testid="waiver-row"]').first();
+    const playerId = (await row.getAttribute('data-player-id'))!;
+    const bid = (waivers.faab?.bids ?? []).find((b: { playerId: string }) => b.playerId === playerId) ?? null;
+    const cost = await row.getByTestId('waiver-cost').innerText();
+
+    if (bid?.expected) {
+      // The number on the row is the number the pricing pass produced, to the
+      // dollar. A row that rounded, averaged or re-derived it would be a second
+      // opinion about somebody else's arithmetic.
+      expect(cost).toContain(`$${bid.expected.low}\u2013${bid.expected.high}`);
+    } else {
+      // No honest figure exists, so the field is a dash that says why, and
+      // carries no digit that could be read as a bid.
+      await expect(row.getByTestId('waiver-unknown')).toHaveAttribute('title', /not known yet/);
+      expect(cost).not.toMatch(/\d/);
+    }
+  });
+
+  /** Everything the row left out is one tap away, and still not a transaction. */
+  test('opens the detail on tap', async ({ page }) => {
+    await page.locator('[data-testid="waiver-row"]').first().click();
+    const sheet = page.getByTestId('waiver-detail');
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText('Expected cost');
+    await expect(sheet).toContainText('Competition');
+    await expect(sheet).toContainText('Beyond this week');
+    await expect(sheet).toContainText('add, drop or bid in Sleeper');
   });
 
   /** Advisory, and it says so. Nothing here executes anything. */
@@ -141,6 +193,10 @@ test.describe('waiver upgrades', () => {
    * beside it stops being advice.
    */
   test('quotes a bid without offering to place it', async ({ page }) => {
+    // The three figures live in the detail sheet now: the row has room for the
+    // expected range and nothing else, and the rest opens on tap.
+    await page.locator('[data-testid="waiver-row"]').first().click();
+    await expect(page.getByTestId('waiver-detail')).toBeVisible();
     const bid = page.getByTestId('faab-bid').first();
     const withheld = page.getByTestId('faab-withheld').first();
     // A league with no FAAB says so instead; either is a valid state.
@@ -179,6 +235,69 @@ test.describe('waiver upgrades', () => {
     );
     expect(offered).not.toContain('1002');
     expect(offered.length, 'and it does offer somebody').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Tapping one of your own players.
+ *
+ * The sheet that opens is the answer to "what about him this week", and its
+ * whole reason for existing is that it is *short* — so the assertions are about
+ * length and about absence as much as about content.
+ */
+test.describe('the weekly card', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('opens on a starter with the lineup’s own verdict', async ({ page }) => {
+    const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
+    const slot = (await starter.getAttribute('data-slot'))!;
+    await starter.click();
+
+    const sheet = page.getByTestId('weekly-sheet');
+    await expect(sheet).toBeVisible();
+    const verdict = page.getByTestId('weekly-verdict');
+    await expect(verdict).toHaveAttribute('data-verdict', 'start');
+    await expect(verdict).toContainText(`Start at ${slot}`);
+  });
+
+  test('and on a bench player with the other one', async ({ page }) => {
+    await page.getByTestId('bench-row').first().click();
+    await expect(page.getByTestId('weekly-verdict')).toHaveAttribute('data-verdict', /bench|not_playable|unknown/);
+  });
+
+  /**
+   * Not a stat dump.
+   *
+   * The full breakdown is still one tap further on in Compare; what arrives
+   * here is the short list that changes a decision. Two screen-heights is the
+   * budget the brief sets, and this measures against the actual viewport.
+   */
+  test('fits in about a screen', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const card = page.getByTestId('weekly-card');
+    await expect(card).toBeVisible();
+    const height = (await card.boundingBox())!.height;
+    expect(height).toBeLessThan(page.viewportSize()!.height * 2);
+    // At most five labelled lines, whatever the engine knows.
+    expect(await card.locator('.weekly-line').count()).toBeLessThanOrEqual(5);
+  });
+
+  /** Unknown is absent, and named once — never printed as a row of dashes. */
+  test('does not print a row for something nobody knows', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const lines = page.getByTestId('weekly-lines');
+    if (await lines.count()) await expect(lines).not.toContainText('unknown');
+  });
+
+  /** It never offers to change a lineup. It is a card about a decision. */
+  test('offers no control that would edit a lineup', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const buttons = (await page.getByTestId('weekly-sheet').getByRole('button').allInnerTexts())
+      .join(' ')
+      .toLowerCase();
+    for (const forbidden of ['start him', 'bench him', 'swap', 'apply', 'save']) {
+      expect(buttons).not.toContain(forbidden);
+    }
   });
 });
 
@@ -268,9 +387,17 @@ test.describe('the comparison tool', () => {
     await expect(page.getByTestId('comparison')).toContainText('Trey Halloran');
   });
 
-  /** Launching from a slot keeps the comparison about that slot. */
+  /**
+   * Launching from a slot keeps the comparison about that slot.
+   *
+   * Tapping a player now opens his week rather than the comparison — that is
+   * the question a reader is asking nine times out of ten — and Compare is the
+   * way out of it. The slot survives the trip, which is the part that matters.
+   */
   test('opens narrowed when launched from a lineup slot', async ({ page }) => {
     await page.locator('[data-testid="starter-row"][data-slot="TE"]').click();
+    await expect(page.getByTestId('weekly-sheet')).toBeVisible();
+    await page.getByTestId('weekly-compare').click();
     const sheet = page.getByTestId('compare-sheet');
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText('Compare for TE');
@@ -304,6 +431,27 @@ test.describe('the comparison tool', () => {
     await expect(row).toContainText(te.score!.toFixed(1));
   });
 });
+
+/**
+ * Pull the screen down, far enough to fire.
+ *
+ * A real pointer drag rather than the accessible fallback, because the gesture
+ * is the only *prominent* way to refresh this screen now and a test that only
+ * pressed the hidden button would prove nothing about it. It starts from the
+ * top of the page, which is the one place the gesture is allowed to begin.
+ */
+async function pullToRefresh(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = (await page.getByTestId('team-pull').boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + 40;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // In steps, so the hook sees the direction before it sees the distance —
+  // exactly as a thumb produces it.
+  for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
+  await page.mouse.up();
+}
 
 /**
  * The two controls the intelligence pass adds, drawn.
@@ -377,9 +525,7 @@ test.describe('mode and refresh', () => {
       { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
     ]);
 
-    const button = page.getByTestId('startsit-refresh');
-    await expect(button).toBeVisible();
-    await button.click();
+    await pullToRefresh(page);
 
     const status = page.getByTestId('refresh-status');
     await expect(status).toBeVisible({ timeout: 20_000 });
@@ -398,7 +544,7 @@ test.describe('mode and refresh', () => {
       { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
     ]);
 
-    await page.getByTestId('startsit-refresh').click();
+    await pullToRefresh(page);
     const status = page.getByTestId('refresh-status');
     await expect(status).toBeVisible({ timeout: 20_000 });
     // The failures are named, not swallowed...
@@ -407,5 +553,72 @@ test.describe('mode and refresh', () => {
     // ...and the last-good recommendation is still on screen.
     await expect(page.getByTestId('starters-title')).toBeVisible();
     await expect(page.locator('[data-testid="starter-row"][data-starter="true"]').first()).toBeVisible();
+  });
+
+  /**
+   * One pull, one request.
+   *
+   * The guard is a ref rather than the state that paints the spinner, because
+   * state lands a render later and a second pull happens in between. Two pulls
+   * in quick succession are counted at the network, which is the only place the
+   * answer is not a matter of opinion.
+   */
+  test('does not fire a second refresh while one is running', async ({ page }) => {
+    let calls = 0;
+    await page.route('**/api/startsit/refresh', async (route) => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          deduped: false,
+          sources: [{ source: 'sleeper', outcome: 'current', detail: 'checked just now', freshAt: null }],
+          headline: 'Already current',
+          complete: true,
+        }),
+      });
+    });
+
+    await pullToRefresh(page);
+    await pullToRefresh(page);
+    await expect(page.getByTestId('refresh-status')).toBeVisible({ timeout: 20_000 });
+    expect(calls, 'the second pull should have been swallowed by the one in flight').toBe(1);
+  });
+
+  /**
+   * The controls this screen used to have, and no longer does.
+   *
+   * Asserted as an absence because that is the whole change: a reader looking
+   * for a refresh button must find the gesture instead, and a bar control that
+   * crept back would be the third way of asking the same question.
+   */
+  test('offers no refresh button anywhere on the screen', async ({ page }) => {
+    const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
+    expect(labels).not.toContain('refresh');
+    // The keyboard fallback exists and is deliberately not part of the UI.
+    const fallback = page.getByTestId('pull-refresh-fallback');
+    await expect(fallback).toHaveCount(1);
+    await expect(fallback).not.toBeInViewport();
+  });
+
+  /**
+   * Four controls, one row.
+   *
+   * Measured rather than eyeballed: the three mode chips and Compare share a
+   * single line at every width this suite runs at, and every one of them is
+   * still a full tap target.
+   */
+  test('fits the mode chips and Compare on one row, at a thumb size', async ({ page }) => {
+    const controls = page.getByTestId('team-controls');
+    const rowBox = (await controls.boundingBox())!;
+    for (const id of ['mode-balanced', 'mode-floor', 'mode-ceiling', 'compare-open']) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.height, `${id} must stay a tap target`).toBeGreaterThanOrEqual(43);
+      expect(box.y, `${id} must be on the control row`).toBeGreaterThanOrEqual(rowBox.y - 1);
+      expect(box.y + box.height, `${id} must not wrap below it`).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+    }
   });
 });

@@ -58,7 +58,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
-import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
+import { QueueControl } from '../components/decisions.tsx';
 /*
  * The room, as a board.
  *
@@ -890,29 +890,36 @@ function RecommendationRow({
             here it is one token attached to the player, and the row below is
             free for the four numbers that describe the decision.
           */}
-          <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
-          <InjuryTag status={rec.status} />
+          {/*
+            The tally and the availability tag share one fixed-width field, so
+            the club's mark after them lands on the same edge on every row —
+            see `--row-meta`. Both are still exactly what they were; only the
+            box around them is new.
+          */}
+          <span className="player-row-meta">
+            <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
+            <InjuryTag status={rec.status} />
+          </span>
           <PositionBadge position={rec.position} team={rec.team} />
         </div>
 
         {/*
-          The only tag that still costs a row of its own. Take Now, Risky to
-          Wait and Can Probably Wait were on nearly every row, which made a row
-          of chips that told the reader nothing; the chance he reaches your next
-          pick is a number and does the same job in less space. AVOID stays,
-          because "the research is against him" is not something a percentage
-          can say — and it is rare enough that the row it costs is affordable.
+          No tag row at all any more.
 
-          The tier-cliff warning used to sit here too, and did not earn it: it
-          lands on whole runs of the board at once, and every card it touched
-          became a line taller than its neighbours. It has moved into the empty
-          right-hand end of the metrics line below.
+          Take Now, Risky to Wait and Can Probably Wait went first: they were on
+          nearly every card, which made a row of chips that told the reader
+          nothing, and the chance he reaches your next pick is a number that does
+          the same job in less space. AVOID has now followed them, and for a
+          related reason — it said out loud what the signed tally beside the name
+          already says. `-5` is the reading; `⚠ AVOID — lifetime tally -5` was
+          the same reading, in a red chip, costing a line of every card it landed
+          on. The reader interprets the number directly.
+
+          **Nothing about the recommendation changed.** The tally is still
+          computed and still shown, the lifetime threshold still exists, and the
+          bounded penalty the engine applies below it is untouched — see
+          core/draft/decisions.ts. This removed a label, not a judgement.
         */}
-        {rec.avoid.active ? (
-          <div className="tag-row" data-testid="decision-tags">
-            <AvoidBadge avoid={rec.avoid} />
-          </div>
-        ) : null}
 
         {/*
           Four numbers, four different questions, in the order they are asked.
