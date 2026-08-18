@@ -44,7 +44,7 @@ import { rankByQuery } from '../search.ts';
  * rendered as a capture with its age. See offlineCache.ts for why it never
  * invents a pick.
  */
-import { describeAge, recallBoard, rememberBoard } from '../offlineCache.ts';
+import { describeAge, recallBoard, rememberBoardSoon } from '../offlineCache.ts';
 /*
  * The chance he is still there at your next pick — as a number, in colour.
  *
@@ -233,7 +233,7 @@ export function DraftScreen({
          * the same rows, and the value of this is "the board exists at all in a
          * dead zone", not "your RB filter survived".
          */
-        if (pos === ALL_FILTER) rememberBoard(draftId, next);
+        if (pos === ALL_FILTER) rememberBoardSoon(draftId, next);
       } catch (err) {
         /*
          * A quiet load reports upwards instead of painting a banner.

@@ -16,6 +16,7 @@ import {
   forgetOtherDrafts,
   recallBoard,
   rememberBoard,
+  rememberBoardSoon,
   type StorageLike,
 } from '../src/web/offlineCache.ts';
 
@@ -207,5 +208,44 @@ describe('how old the board is, in words', () => {
     expect(describeAge(9 * 60_000)).toBe('9 minutes ago');
     expect(describeAge(65 * 60_000)).toBe('about an hour ago');
     expect(describeAge(3 * 3_600_000)).toBe('about 3 hours ago');
+  });
+});
+
+describe('writing off the render path', () => {
+  it('defers the write and still stores the board', async () => {
+    /*
+     * The screen calls this after every successful board load, which during a
+     * live draft is every few seconds and always in the frame that has just
+     * been rebuilt after a pick. Serialising four hundred rows and handing them
+     * to a synchronous, disk-backed API in that frame is exactly the jank the
+     * performance budgets exist to prevent.
+     */
+    const storage = new FakeStorage();
+    let deferred: (() => void) | null = null;
+    rememberBoardSoon('D1', board, { storage, defer: (write) => (deferred = write) });
+
+    // Nothing yet: the whole point is that the current tick is left alone.
+    expect(recallBoard('D1', { storage })).toBeNull();
+    expect(deferred, 'the write was handed to the scheduler, not run').not.toBeNull();
+
+    deferred!();
+    expect(recallBoard<typeof board>('D1', { storage })?.value).toEqual(board);
+  });
+
+  it('writes immediately where there is no frame to protect', async () => {
+    // A test, or a server render: nothing is waiting on the main thread, and a
+    // write that never happens because nothing scheduled it would be worse.
+    const storage = new FakeStorage();
+    rememberBoardSoon('D1', board, { storage });
+    expect(recallBoard<typeof board>('D1', { storage })?.value).toEqual(board);
+  });
+
+  it('swallows a failing write exactly as the synchronous form does', async () => {
+    const storage = new FakeStorage();
+    storage.setThrows = 'always';
+    // Fire-and-forget: no throw, no rejection, nothing for a caller to await
+    // back onto the hot path.
+    expect(() => rememberBoardSoon('D1', board, { storage })).not.toThrow();
+    expect(recallBoard('D1', { storage })).toBeNull();
   });
 });

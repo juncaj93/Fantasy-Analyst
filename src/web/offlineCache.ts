@@ -110,7 +110,69 @@ function storageOf(explicit?: StorageLike | null): StorageLike | null {
 const keyFor = (draftId: string) => `${PREFIX}${draftId}`;
 
 /**
+ * Remember a board, off the path the user is waiting on.
+ *
+ * `rememberBoard` writes synchronously and is what the tests drive. This is
+ * what the *screen* calls, and the difference matters during a live draft:
+ * serialising a four-hundred-row board and handing it to `localStorage` is
+ * main-thread work — `JSON.stringify` plus a synchronous, disk-backed write —
+ * and it was happening inside the same tick that had just rebuilt the board
+ * after a pick. That is precisely the frame the user is watching, several times
+ * a minute, on a phone.
+ *
+ * Nothing depends on the write having finished. The cache is only ever read on
+ * a fresh mount, so deferring it costs nothing and removes the work from the
+ * frame entirely. `requestIdleCallback` where it exists — Safari still does not
+ * have it — and a macrotask everywhere else, which is enough to let the browser
+ * paint first.
+ *
+ * Fire-and-forget on purpose: there is no outcome a caller could act on, and a
+ * promise here would only invite somebody to await it back onto the hot path.
+ */
+export function rememberBoardSoon<T>(
+  draftId: string,
+  value: T,
+  opts: { storage?: StorageLike | null; defer?: (write: () => void) => void } = {},
+): void {
+  const write = () => {
+    rememberBoard(draftId, value, opts);
+  };
+  (opts.defer ?? defaultDefer)(write);
+}
+
+/**
+ * How the write gets off the current tick.
+ *
+ * Injectable for the same reason the refresh controller's timers are: a
+ * deferral that can only be observed by waiting is a deferral no test can
+ * assert the *absence* of, and "it did not happen in this tick" is the whole
+ * property. Outside a browser — a test, a server render — there is nothing to
+ * keep responsive and the write happens immediately.
+ */
+function defaultDefer(write: () => void): void {
+  const win =
+    typeof window === 'undefined'
+      ? null
+      : (window as unknown as {
+          requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+          setTimeout: (cb: () => void, ms: number) => number;
+        });
+  if (!win) {
+    write();
+    return;
+  }
+  // The timeout matters: an idle callback with no deadline can be postponed
+  // indefinitely on a busy tab, and a draft tab polling every five seconds is a
+  // busy tab. Two seconds is far longer than the write needs and far shorter
+  // than a user could reload within.
+  if (typeof win.requestIdleCallback === 'function') win.requestIdleCallback(write, { timeout: 2_000 });
+  else win.setTimeout(write, 0);
+}
+
+/**
  * Remember a board that came from the server.
+ *
+ * Synchronous. Prefer `rememberBoardSoon` from anything on a render path.
  *
  * Silent on every failure. A full quota, a private-mode browser, a payload too
  * large to be sane — none of them are worth a word to somebody mid-draft, and
