@@ -189,6 +189,23 @@ function TradeRow({
               <ReasonList muted items={counterpoints} />
             </>
           ) : null}
+          {/*
+            What his manager spent on him.
+
+            Real context for a trade rather than decoration: what somebody paid
+            is most of what they will want back, and a second-round pick from
+            August is the number a February offer gets measured against. Absent
+            for anybody picked up off waivers, which is the honest answer — they
+            cost nothing, and a `0.00` would be a fabrication.
+          */}
+          {suggestion.draft?.line ? (
+            <>
+              <DetailLabel>Draft</DetailLabel>
+              <div className="muted" data-testid="trade-draft-provenance">
+                {suggestion.draft.line}
+              </div>
+            </>
+          ) : null}
           <div className="faint" style={{ marginTop: 8 }}>
             {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
           </div>

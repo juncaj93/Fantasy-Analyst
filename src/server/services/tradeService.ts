@@ -10,6 +10,7 @@ import { groupByVerdict, rankTrades, type Ownership, type TradeSuggestion } from
 import type { Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { draftPickLabel, draftProvenanceLine } from '../../core/draft/provenance.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { InjuryService } from './injuryService.ts';
@@ -95,12 +96,69 @@ export class TradeService {
     }));
 
     const ranked = rankTrades(candidates).slice(0, opts.limit ?? 60);
+
+    /*
+     * Where each player came from: `Drafted 1.02 by Joe`.
+     *
+     * Real context for a trade rather than decoration. What a manager spent on
+     * a player is most of what they will want back for him, and the second
+     * round pick they used in August is the fact a February offer is being
+     * measured against.
+     *
+     * Read from Sleeper's own draft history for this league, once for the whole
+     * board. A manager is named only when Sleeper names the seat — attributing
+     * a pick to a person is the worst thing on this screen to get wrong, so an
+     * unnamed seat produces a line about the pick alone.
+     */
+    const provenance = await this.draftProvenance(league);
+    const withProvenance = ranked.map((suggestion) => ({
+      ...suggestion,
+      draft: provenance.get(suggestion.playerId) ?? null,
+    }));
+
     return {
       league: { id: league.id, name: league.name },
-      sections: groupByVerdict(ranked),
-      suggestions: ranked,
+      sections: groupByVerdict(withProvenance),
+      suggestions: withProvenance,
       considered: candidates.length,
       warnings,
     };
+  }
+
+  /**
+   * One line per drafted player, keyed by player id.
+   *
+   * Empty for a league with no draft attached, a draft nobody has picked in,
+   * and every player acquired off waivers — all of which are ordinary, and all
+   * of which correctly produce no line rather than a `0.00`.
+   */
+  private async draftProvenance(
+    league: { id: string; draftId: string | null; totalRosters: number },
+  ): Promise<Map<string, { pick: string; managerName: string | null; line: string }>> {
+    const out = new Map<string, { pick: string; managerName: string | null; line: string }>();
+    if (!league.draftId) return out;
+
+    const draft = await this.leagues.getDraft(league.draftId);
+    if (!draft) return out;
+
+    const rosters = await this.leagues.listRosters(league.id);
+    const nameOf = new Map(
+      rosters.map((r) => [r.rosterId, (r.ownerName ?? '').trim() || null] as const),
+    );
+    const teams = draft.teams || league.totalRosters || 12;
+
+    for (const pick of await this.leagues.listPicks(draft.id)) {
+      if (!pick.playerId) continue;
+      const label = draftPickLabel(pick.pickNo, teams);
+      if (!label) continue;
+      const managerName = pick.rosterId == null ? null : (nameOf.get(pick.rosterId) ?? null);
+      out.set(pick.playerId, {
+        pick: label,
+        managerName,
+        line:
+          draftProvenanceLine({ pickNo: pick.pickNo, teams, managerName, season: draft.season }) ?? '',
+      });
+    }
+    return out;
   }
 }

@@ -384,3 +384,83 @@ describe('Players goes deeper than the old sixty', () => {
     expect(body.hasMore).toBe(false);
   });
 });
+
+describe('the local-team prior is set on a league and reaches Next% alone', () => {
+  let db: NodeSqliteDatabase;
+  let env: AppEnv;
+  let app: ReturnType<typeof createApp>;
+  let cookie: string;
+
+  beforeEach(async () => {
+    db = await createTestDb();
+    env = makeEnv(db);
+    app = createApp();
+    await seedDemoData(db);
+    cookie = await login(env, app);
+  });
+
+  async function selectedLeague() {
+    return (await new LeagueRepo(db).listLeagues()).find((l) => l.draftId)!;
+  }
+
+  it('stores the teams, normalised', async () => {
+    const league = await selectedLeague();
+    const res = await app(post(`/api/leagues/${league.id}/local-teams`, { teams: [' det ', 'DET', 'gb'] }, cookie), env);
+    expect(res.status).toBe(200);
+    expect((await res.json() as { localTeams: string[] }).localTeams).toEqual(['DET', 'GB']);
+  });
+
+  it('refuses a code that is not an NFL team', async () => {
+    const league = await selectedLeague();
+    const res = await app(post(`/api/leagues/${league.id}/local-teams`, { teams: ['XYZ'] }, cookie), env);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('XYZ');
+  });
+
+  it('clears the prior when given an empty list', async () => {
+    const league = await selectedLeague();
+    await app(post(`/api/leagues/${league.id}/local-teams`, { teams: ['DET'] }, cookie), env);
+    await app(post(`/api/leagues/${league.id}/local-teams`, { teams: [] }, cookie), env);
+    expect((await new LeagueRepo(db).getLeague(league.id))!.localTeams).toEqual([]);
+  });
+
+  it('requires a session', async () => {
+    const league = await selectedLeague();
+    expect((await app(post(`/api/leagues/${league.id}/local-teams`, { teams: ['DET'] }), env)).status).toBe(401);
+  });
+
+  /**
+   * The claim the whole feature stands on: setting a prior changes what the
+   * model expects other managers to do, and changes nothing about how good a
+   * player is. Measured on a real board rather than argued.
+   */
+  it('moves no Score, Val or tier when it is turned on', async () => {
+    const league = await selectedLeague();
+    const service = new DraftBoardService(db);
+
+    const before = await service.build(league.draftId!, { limit: 60 });
+    await app(post(`/api/leagues/${league.id}/local-teams`, { teams: ['DET'] }, cookie), env);
+    const after = await service.build(league.draftId!, { limit: 60 });
+
+    const beforeById = new Map(before.recommendations.map((r) => [r.playerId, r]));
+    let lions = 0;
+    for (const rec of after.recommendations) {
+      const was = beforeById.get(rec.playerId);
+      if (!was) continue;
+      if (rec.team === 'DET') lions++;
+      // Objective quality: identical, Lion or not.
+      expect(rec.adp).toBe(was.adp);
+      expect(rec.adpValue).toBe(was.adpValue);
+      expect(rec.dogAdp).toBe(was.dogAdp);
+      expect(rec.marketBlend.adp).toBe(was.marketBlend.adp);
+      expect(rec.tierCliff.severity).toBe(was.tierCliff.severity);
+      expect(rec.tierCliff.tierIndex).toBe(was.tierCliff.tierIndex);
+      // The market component — the price — is untouched too.
+      const priceOf = (r: typeof rec) => r.components.find((c) => c.key === 'market_value')!.contribution;
+      expect(priceOf(rec)).toBe(priceOf(was));
+    }
+    expect(lions).toBeGreaterThan(0);
+    // And the board reports what it applied, so the effect can be audited.
+    expect(after.nextPickModel.localTeams).toEqual(['DET']);
+  });
+});

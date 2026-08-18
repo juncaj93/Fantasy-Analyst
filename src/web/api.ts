@@ -699,6 +699,13 @@ export interface LeagueSummary {
   notes: string[];
   rosterPositions: string[];
   draftId: string | null;
+  /**
+   * NFL teams this league's room drafts earlier than the market.
+   *
+   * Optional and usually empty. It reaches `Next%` alone — the model's estimate
+   * of what somebody else will do — and never a Score, a tier or a `Val`.
+   */
+  localTeams?: string[];
 }
 
 export interface RosterPlayer {
@@ -953,6 +960,8 @@ export interface RepairStatus {
 
 /** Trade intelligence: what has changed lately, and who holds them. */
 export interface TradeSuggestion {
+  /** Where this league drafted him, when it did. */
+  draft?: DraftProvenance | null;
   playerId: string;
   name: string;
   position: string;
@@ -982,6 +991,19 @@ export interface TradeSuggestion {
   confidence: 'high' | 'medium' | 'low';
   reasons: string[];
   counterpoints: string[];
+}
+
+/**
+ * Where a player came from, when this league drafted him.
+ *
+ * `Drafted 1.02 by Joe`. Absent for a waiver pickup and for a league with no
+ * draft attached — both of which are ordinary, and neither of which gets a
+ * made-up pick number.
+ */
+export interface DraftProvenance {
+  pick: string;
+  managerName: string | null;
+  line: string;
 }
 
 export interface TradeBoard {

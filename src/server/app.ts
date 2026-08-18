@@ -12,6 +12,7 @@
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
+import { nflTeam } from '../core/nfl/teams.ts';
 import { queueSequence, reconcileQueue, reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
@@ -296,6 +297,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           notes: leagueFitNotes(profile, shape),
           rosterPositions: l.rosterPositions,
           draftId: l.draftId,
+          // Which teams this room reaches for. Read by Setup, and by the Next%
+          // model on the server; nothing else on a screen touches it.
+          localTeams: l.localTeams ?? [],
         };
       }),
     });
@@ -557,6 +561,37 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const body = await ctx.json<{ snapshotId?: number | null }>();
     await new LeagueRepo(ctx.env.db).setDraftSnapshot(ctx.params['id']!, body?.snapshotId ?? null);
     return jsonResponse({ ok: true });
+  });
+
+  /**
+   * Which NFL teams this league's room drafts earlier than the market.
+   *
+   * A property of twelve people, not of the players: a Detroit-area league
+   * takes Lions early. It is set by hand because Sleeper does not publish it
+   * and never will, and it is stored on the league rather than globally because
+   * two of the user's leagues can easily have different rooms.
+   *
+   * It reaches exactly one model — opponent demand, which is what `Next%` is
+   * computed from — and it cannot reach a Score, a tier or a `Val`. See
+   * core/draft/nextpick/teamPrior.ts for why, and for the bound.
+   */
+  router.post('/api/leagues/:id/local-teams', async (ctx) => {
+    const body = await ctx.json<{ teams?: unknown }>();
+    if (!Array.isArray(body?.teams)) return errorResponse('teams must be an array of NFL team codes', 400);
+    const leagues = new LeagueRepo(ctx.env.db);
+    const league = await leagues.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    /*
+     * Only real teams. An unknown code would sit in the settings looking
+     * effective and match nobody, which is the most confusing possible
+     * outcome — the board would report a prior that provably does nothing.
+     */
+    const requested = body.teams.map((t) => String(t).trim().toUpperCase()).filter(Boolean);
+    const unknown = requested.filter((code) => nflTeam(code) == null);
+    if (unknown.length > 0) return errorResponse(`unknown NFL team code: ${unknown.join(', ')}`, 400);
+
+    return jsonResponse({ localTeams: await leagues.setLocalTeams(league.id, requested) });
   });
 
   // --------------------------------------------------------------------- ADP

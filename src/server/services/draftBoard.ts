@@ -266,6 +266,23 @@ export interface DraftBoardState {
     positionRuns: Record<string, number>;
     positionBias: Record<string, number>;
     roomNotes: string[];
+    /** NFL teams this room is configured to take early. Usually empty. */
+    localTeams: string[];
+    /**
+     * What the local-team prior applied, and what it was measured from.
+     *
+     * Null in every league that has not named a local team, which is every
+     * league until somebody does. `basis` says whether the number came from
+     * what this room has actually done, from the bounded assumption, or from
+     * both — and `observed` carries the sample behind it, so the effect can be
+     * audited against the pick stream rather than believed.
+     */
+    teamPrior: {
+      basis: string;
+      multipliers: Record<string, number>;
+      observed: Record<string, { picks: number; meanPicksEarly: number; shrinkage: number }>;
+      notes: string[];
+    } | null;
     marketOnly: boolean;
     degraded: string[];
     elapsedMs: number;
@@ -997,6 +1014,25 @@ export class DraftBoardService {
         positionRuns: Object.fromEntries(nextPick.room.runs),
         positionBias: Object.fromEntries(nextPick.room.bias),
         roomNotes: nextPick.room.notes,
+        /*
+         * The local-team prior, and what it actually did.
+         *
+         * The brief asks for diagnostics showing the real survival effect, and
+         * this is where they go: the multiplier applied per team, how many
+         * picks it was measured from, how far this room has actually been
+         * taking them ahead of the market, and how much of the answer is
+         * measurement rather than assumption. Read by the probe and by nobody
+         * on screen — `Next` is one percentage on a card and has to stay one.
+         */
+        localTeams: league.localTeams ?? [],
+        teamPrior: nextPick.teamPrior
+          ? {
+              basis: nextPick.teamPrior.basis,
+              multipliers: Object.fromEntries(nextPick.teamPrior.multipliers),
+              observed: Object.fromEntries(nextPick.teamPrior.observed),
+              notes: nextPick.teamPrior.notes,
+            }
+          : null,
         // True when the board was too thin to simulate, so these percentages
         // are the ADP model's rather than the simulation's.
         marketOnly: nextPick.marketOnly,
