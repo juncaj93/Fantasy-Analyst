@@ -18,6 +18,7 @@ import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
 import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
+import { buildWaiverBoard } from '../src/core/waivers/board.ts';
 import { createTestDb } from './helpers/db.ts';
 
 function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEnv {
@@ -86,6 +87,27 @@ describe('league intelligence fills the waiver board’s own fields', () => {
     for (const key of ['league', 'found', 'dataFreshness', 'upgrades', 'pool', 'faab', 'notes', 'considered']) {
       expect(Object.keys(body), key).toContain(key);
     }
+  });
+
+  /*
+   * The end-to-end proof that the seam is actually closed.
+   *
+   * `buildWaiverBoard` names the columns still waiting on this pass in
+   * `pending`, and the screen prints that line. Two of those three names are
+   * this workstream's, so if the pass stops filling them the board goes back to
+   * advertising them as missing — and this test is the only thing that would
+   * notice, because a null field renders as a quiet dash rather than an error.
+   */
+  it('stops the board advertising competition and multi-week value as pending', async () => {
+    const advice = (await (await app(get('/api/leagues/demo-league/waivers'), env)).json()) as Parameters<
+      typeof buildWaiverBoard
+    >[0];
+    const board = buildWaiverBoard(advice);
+
+    expect(board.rows.length).toBeGreaterThan(0);
+    expect(board.pending).not.toContain('likely competition');
+    expect(board.pending).not.toContain('multi-week value');
+    expect(board.rows.every((r) => r.competition != null)).toBe(true);
   });
 
   it('is stable: the same request twice returns the same order', async () => {
