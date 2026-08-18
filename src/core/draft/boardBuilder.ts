@@ -23,6 +23,7 @@ import type { PlayerSignal } from '../evidence/types.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 import { offersFlexFilter, orderPositions, positionMatchesFilter } from '../sleeper/eligibility.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../sleeper/scoring.ts';
+import { isDraftable } from './draftable.ts';
 import { buildLiveRoster } from './liveRoster.ts';
 import { demandBetweenPicks } from './demandAhead.ts';
 import { injuryStatusTag } from './injury.ts';
@@ -606,8 +607,24 @@ export async function buildDraftBoard(
   // Only positions this league starts. A league with no kicker slot should
   // never be shown a kicker, however Sleeper ranks them.
   const startable = startablePositions(buildRosterShape(league.rosterPositions));
+  /*
+   * Is this somebody you could actually draft?
+   *
+   * Sleeper's dictionary cannot answer it — Chris Carson, who last played in
+   * 2021, and Kareem Hunt, who carried the ball two hundred times last season,
+   * are recorded identically, and `search_rank` puts Carson ahead. What
+   * separates them is that somebody prices Hunt. See `draftable.ts` for the
+   * sampled evidence and why every simpler rule fails.
+   *
+   * Bounds the *recommendation* pool only. Deep Players search reads the player
+   * table directly and is untouched.
+   */
+  const draftable = (player: CanonicalPlayer): boolean =>
+    isDraftable({ team: player.team, sleeperAdp: rankOf(player), dogAdp: dogOf(player) });
+
   const eligible = (player: CanonicalPlayer): boolean =>
     player.active &&
+    draftable(player) &&
     !takenIds.has(player.id) &&
     (startable.size === 0 || startable.has(player.position)) &&
     // `FLX` narrows to RB/WR/TE; every other value is the exact position it

@@ -311,8 +311,14 @@ export interface DraftRecommendation {
    * A pure function of `total` and nothing else — see `score.ts`. It is the
    * same ordering the board is sorted by, so board rank and Score can only
    * disagree where two totals round to the same number.
+   *
+   * **Null when no market has priced him.** His total is real but it is not on
+   * the same scale as a priced player's, because the component that dominates
+   * that scale is absent rather than low — and a total near zero maps to 83 on
+   * a curve calibrated for boards whose middle is negative. He shows `—` here
+   * for the same reason he already shows `—` for `ADP`, `Val` and `Next`.
    */
-  score: number;
+  score: number | null;
   reasons: string[];
   counterpoints: string[];
   /** True when a key input (ADP) was missing. */
@@ -342,6 +348,32 @@ export interface DraftRecommendation {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/**
+ * Enforce the one contract every component in this file claims to keep:
+ * **unknown contributes nothing.**
+ *
+ * It is written down on `ComponentScore.unknown` — "contribution is then 0" —
+ * and it was quietly false. Positional scarcity returned its no-data default
+ * for a player with no ADP, mapped it onto −0.4 like a real measurement, and
+ * spent −0.08 of composite on him while the same row of the breakdown told the
+ * reader the number was unknown. Every unpriced player on the board carried it.
+ *
+ * A single choke point rather than care at twelve call sites, because the
+ * failure was not carelessness at any one of them: it was that nothing checked.
+ * `contribution` is what moves the ranking, so that is what is corrected, and
+ * `score` follows it so the breakdown cannot show a number the total did not
+ * use. Returns the components it was given, mutated in place — they are freshly
+ * built and nothing else has seen them.
+ */
+export function sealComponents(components: ComponentScore[]): ComponentScore[] {
+  for (const component of components) {
+    if (!component.unknown) continue;
+    component.score = 0;
+    component.contribution = 0;
+  }
+  return components;
+}
 
 /** Before pass two has run, nothing is known about the cost of waiting. */
 const NO_OPPORTUNITY: OpportunityResult = {
@@ -538,15 +570,18 @@ export function rankAvailablePlayers(
    * here rather than per player.
    */
   const baselines = new Map<string, MarketBaseline>();
-  const poolByPosition = new Map<string, number[]>();
+  const poolByPosition = new Map<string, MarketBaseline[]>();
   for (const entry of available) {
     if (!entry.seasonMarkets || entry.seasonMarkets.length === 0) continue;
     const baseline = seasonBaseline(entry.player.position, entry.seasonMarkets, ctx.profile);
     baselines.set(entry.player.id, baseline);
     if (baseline.points != null) {
+      // Whole baselines, not their totals: the comparison is made market by
+      // market so a player priced on fewer of them is not read as a worse
+      // player. See `marketExpectationScore`.
       const list = poolByPosition.get(entry.player.position);
-      if (list) list.push(baseline.points);
-      else poolByPosition.set(entry.player.position, [baseline.points]);
+      if (list) list.push(baseline);
+      else poolByPosition.set(entry.player.position, [baseline]);
     }
   }
 
@@ -597,19 +632,26 @@ export function rankAvailablePlayers(
     });
 
     // --- positional scarcity ----------------------------------------------
+    // Scarcity is measured from where he sits on the board, so a player the
+    // market has not priced has no scarcity: `computeScarcity` returns its
+    // "insufficient data" 0.3, which maps to −0.4 and used to be spent as a
+    // real −0.08 on a component the breakdown was simultaneously labelling
+    // unknown. An unpriced player is unknown, not slightly bad.
+    const scarcityKnown = adp != null;
     const scarcity = computeScarcity({
       availableAdps: adpsByPosition.get(player.position) ?? [],
       playerAdp: adp,
       picksUntilNext,
     });
+    const scarcityScore = scarcityKnown ? round3(scarcity.score * 2 - 1) : 0;
     components.push({
       key: 'scarcity',
       label: 'Positional scarcity',
       display: scarcity.reason,
-      score: round3(scarcity.score * 2 - 1),
+      score: scarcityScore,
       weight: weights.scarcity,
-      contribution: round3((scarcity.score * 2 - 1) * weights.scarcity),
-      unknown: adp == null,
+      contribution: round3(scarcityScore * weights.scarcity),
+      unknown: !scarcityKnown,
     });
 
     // --- league fit --------------------------------------------------------
@@ -675,9 +717,7 @@ export function rankAvailablePlayers(
     // nothing rather than zero, because "nobody has quoted him" is not "the
     // market expects nothing of him".
     const baseline = baselines.get(player.id) ?? null;
-    const marketScore = baseline
-      ? marketExpectationScore(baseline.points, baseline.coverage, poolByPosition.get(player.position) ?? [])
-      : null;
+    const marketScore = marketExpectationScore(baseline, poolByPosition.get(player.position) ?? []);
     components.push({
       key: 'market_expectation',
       label: 'Season market',
@@ -773,6 +813,7 @@ export function rankAvailablePlayers(
       nextPick: ctx.nextPick,
     });
 
+    sealComponents(components);
     const total = round3(components.reduce((a, c) => a + c.contribution, 0));
     const { reasons, counterpoints } = explain(entry, components, {
       need,
@@ -897,8 +938,25 @@ function applyBoardComponents(
   recommendations: DraftRecommendation[],
   ctx: { needs: Record<string, NeedBreakdown>; nextPick: number | null },
 ): void {
+  /*
+   * Only priced players are comparable, either as a subject or as an alternative.
+   *
+   * A composite is dominated by market value, whose weight is 1.0 against about
+   * 2.4 for everything else put together — and market value is *absent* for an
+   * unpriced player rather than low. His base therefore sits near zero while a
+   * priced player who is not yet due sits well below it, because being taken
+   * before his ADP is a real cost that the board is right to charge him.
+   *
+   * Zero is not neutral on that scale. It is a good score. So measuring "how
+   * clear of his alternatives is he" or "what would waiting cost" against an
+   * unpriced base compares an absence with a measurement and returns the
+   * absence as an edge: on a live-shaped board an unpriced back collected
+   * +0.183 of cost-of-waiting for being nothing but unknown. Both components
+   * are therefore restricted to the priced population on both sides.
+   */
+  const priced = recommendations.filter((rec) => rec.marketBlend.adp != null);
   const byPosition = new Map<string, { id: string; base: number; survival: number | null }[]>();
-  for (const rec of recommendations) {
+  for (const rec of priced) {
     const entry = { id: rec.playerId, base: rec.total, survival: rec.survivalProbability };
     const list = byPosition.get(rec.position);
     if (list) list.push(entry);
@@ -906,13 +964,21 @@ function applyBoardComponents(
   }
 
   for (const rec of recommendations) {
+    const comparable = rec.marketBlend.adp != null;
     const peers = byPosition.get(rec.position) ?? [];
-    const others = peers.filter((p) => p.id !== rec.playerId);
-    const separation = separationScore({
-      base: rec.total,
-      // Himself removed: a player is not one of his own alternatives.
-      positionBases: others.map((p) => p.base),
-    });
+    const others = comparable ? peers.filter((p) => p.id !== rec.playerId) : [];
+    const separation = comparable
+      ? separationScore({
+          base: rec.total,
+          // Himself removed: a player is not one of his own alternatives.
+          positionBases: others.map((p) => p.base),
+        })
+      : {
+          score: 0,
+          gap: null,
+          comparedWith: 0,
+          reason: 'no market price, so there is no comparable composite to measure a gap from',
+        };
     const component: ComponentScore = {
       key: 'separation',
       label: 'Clear of the alternatives',
@@ -929,13 +995,18 @@ function applyBoardComponents(
      * the separation gap explicitly, so the distance between him and the
      * players behind him is paid for exactly once. See `opportunity.ts`.
      */
-    const opportunity = evaluateOpportunity({
-      base: rec.total,
-      alternatives: others.map((p) => ({ base: p.base, survival: p.survival })),
-      separationGap: separation.gap ?? 0,
-      needScore: ctx.needs[rec.position]?.score ?? 0.5,
-      nextPick: ctx.nextPick,
-    });
+    const opportunity = comparable
+      ? evaluateOpportunity({
+          base: rec.total,
+          alternatives: others.map((p) => ({ base: p.base, survival: p.survival })),
+          separationGap: separation.gap ?? 0,
+          needScore: ctx.needs[rec.position]?.score ?? 0.5,
+          nextPick: ctx.nextPick,
+        })
+      : {
+          ...NO_OPPORTUNITY,
+          reason: 'no market price, so what waiting would cost him cannot be measured',
+        };
     const opportunityComponent: ComponentScore = {
       key: 'opportunity',
       label: 'Cost of waiting',
@@ -947,8 +1018,33 @@ function applyBoardComponents(
     };
 
     rec.components.push(component, opportunityComponent);
-    rec.total = round3(rec.total + component.contribution + opportunityComponent.contribution);
-    rec.score = draftScore(rec.total);
+    sealComponents([component, opportunityComponent]);
+    capPositionalStructure(rec.components);
+    // Re-summed rather than added to, because the cap above can have changed a
+    // component that was counted on the first pass.
+    rec.total = round3(rec.components.reduce((a, c) => a + c.contribution, 0));
+    /*
+     * No market price, no Score.
+     *
+     * `draftScore` is a logistic centred at a total of −2.5, because that is
+     * where a real board's middle sits: market value charges every player the
+     * distance between the clock and his ADP, so almost everybody worth
+     * considering carries a negative total. A total of exactly zero maps to
+     * **83**.
+     *
+     * A player nobody has priced has a total of almost exactly zero — not
+     * because he is good, but because the one component that would have had an
+     * opinion is missing and the rest contribute nothing. So "we know nothing
+     * about him" rendered as a confident 83–85, above every priced player the
+     * draft had not yet reached, and a board sorted by Score opened with seven
+     * players carrying `ADP —`, `Val —` and `Next —`.
+     *
+     * The composite is not wrong; it is *not comparable*, which is the same
+     * defect the Start/Sit and season-market fixes addressed. `total` is kept
+     * for inspection and `score` is unknown, exactly as `Val` and `Next`
+     * already are for the same player and for the same reason.
+     */
+    rec.score = comparable ? draftScore(rec.total) : null;
     rec.opportunity = opportunity;
 
     // Worth a sentence only when it is most of the component. Below that it is
@@ -966,6 +1062,87 @@ function applyBoardComponents(
       if (rec.concentration.score < 0) rec.counterpoints.push(`${rec.concentration.driver}${moved}`);
       else rec.reasons.push(`${rec.concentration.driver}${moved}`);
     }
+  }
+}
+
+/**
+ * The four components that all answer "how thin is this position", and the
+ * ceiling on what they may be worth between them.
+ *
+ * Each was bounded on its own and none was wrong. What nothing checked is that
+ * they **all rise together for the same reason**, so a sparse position collects
+ * every one of them at once:
+ *
+ *   - `scarcity` counts how many are left,
+ *   - `tier_cliff` measures how far apart they are,
+ *   - `separation` measures the gap to the next one,
+ *   - `opportunity` prices what waiting for the next one would cost.
+ *
+ * Those are four different questions and one underlying fact. Measured on a
+ * board shaped like a real one — twelve quarterbacks in three bands against
+ * forty backs and forty receivers — at pick 60 the best quarterback collected
+ * `+0.083 + 0.150 + 0.250 + 0.227 = 0.710` of positional structure while the
+ * best back collected `0.151` and the best receiver `0.109`. Market value was
+ * saturated at 1.0 for all three, so that half-point of structure *was* the
+ * ranking: it is about fourteen picks of ADP, more than the season market and
+ * the news tally can produce together, handed to a position for being sparse.
+ *
+ * That is what "QBs rank too high" is. It is not roster need — an empty
+ * quarterback slot moves a quarterback by 0.05, which is the calibration
+ * working exactly as `DEFAULT_WEIGHTS.need` describes — and it is not any one
+ * of these four. It is their sum, which nothing bounded.
+ *
+ * So they are capped jointly, in the same shape Start/Sit already caps its own
+ * correlated pairs: scaled proportionally, so the cap decides how loudly the
+ * family may speak and never which member of it is speaking. Every component
+ * keeps its own line in the breakdown with the number that actually moved the
+ * ranking on it.
+ */
+export const POSITIONAL_STRUCTURE = {
+  keys: ['scarcity', 'tier_cliff', 'separation', 'opportunity'] as const,
+  /**
+   * About ten picks of ADP, at the ~0.05-per-pick exchange rate the rest of the
+   * engine uses.
+   *
+   * The four weights sum to 0.9, so an unbounded sparse position could claim
+   * eighteen picks — most of a round and a half — for structure alone. Ten is
+   * enough for a genuinely thin position to be heard over two players the market
+   * rates alike, and not enough to lift a quarterback over a back the market
+   * rates a round higher. `separation` and `opportunity` alone are documented as
+   * five and six picks respectively, so this is deliberately below their sum:
+   * the point is that they are not independent.
+   */
+  cap: 0.5,
+} as const;
+
+/**
+ * Hold the positional-structure family to its joint ceiling.
+ *
+ * Symmetric, though only the positive side can reach the cap in practice — a
+ * dense position's worst case is `scarcity` alone at −0.2. Written symmetrically
+ * anyway so the invariant is "this family is worth at most `cap`" rather than
+ * "at most `cap` in the direction we happened to check".
+ *
+ * Unknown components are skipped: they contribute nothing, and including them
+ * would let an absent measurement dilute the scaling applied to a real one.
+ *
+ * **The weight is what moves, not the contribution.** Every card in this app
+ * shows `score × weight = contribution` and a reader is invited to check it, so
+ * scaling the product alone would put a sum on screen that does not add up. The
+ * score is the sub-model's own measurement and stays untouched; the weight is
+ * this engine's judgement about what that measurement is worth, which is
+ * exactly what the cap is revising.
+ */
+export function capPositionalStructure(components: ComponentScore[]): void {
+  const family = components.filter(
+    (c) => (POSITIONAL_STRUCTURE.keys as readonly string[]).includes(c.key) && !c.unknown,
+  );
+  const total = family.reduce((a, c) => a + c.contribution, 0);
+  if (total === 0 || Math.abs(total) <= POSITIONAL_STRUCTURE.cap) return;
+  const scale = POSITIONAL_STRUCTURE.cap / Math.abs(total);
+  for (const component of family) {
+    component.weight = round3(component.weight * scale);
+    component.contribution = round3(component.score * component.weight);
   }
 }
 

@@ -1,8 +1,21 @@
 name: CI
 
+# Once per commit, not twice.
+#
+# `push: ['**']` plus `pull_request` meant every commit on a branch with a PR
+# open ran the whole workflow twice — eight WebKit runners, not four, each of
+# them fetching WebKit's system packages from apt at the same moment. That
+# contention is measurable rather than theoretical: on one afternoon the same
+# `playwright install --with-deps` step ran in 5 minutes on one runner and
+# still had not finished after 28 on another beside it, and three of four
+# widths were cancelled having never started a test.
+#
+# So: `main` is verified on every push, and everything else is verified on its
+# pull request. Nothing loses coverage — a branch is gated before it can merge,
+# and main is gated after — and the apt load halves.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -63,6 +76,12 @@ jobs:
     # again, cache the browser download first -- that is six minutes of pure
     # setup and the cheapest thing on this list to stop paying for.
     timeout-minutes: 35
+
+    # The job number above pays for setup as well as tests, so on its own it
+    # still cannot say *which* of the two overran — and that distinction is the
+    # whole point of having it. The test step therefore carries its own budget
+    # below: twenty minutes of actual testing is a stuck browser, whatever apt
+    # did beforehand.
     strategy:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
@@ -80,8 +99,13 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Slow and variable, and not a thing that can hang in an interesting way,
+      # so it is left to the job's own ceiling rather than given a second one.
       - run: npx playwright install --with-deps webkit
+      # This is the one that can hang. Twenty minutes of *testing* is a stuck
+      # browser however long apt took beforehand.
       - run: npx playwright test --project=${{ matrix.project }}
+        timeout-minutes: 20
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

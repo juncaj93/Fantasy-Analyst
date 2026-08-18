@@ -485,25 +485,35 @@ describe('what the market is allowed to do to the board', () => {
   });
 
   it('lets a partial baseline move a player less than a complete one', () => {
-    const complete = seasonBaseline(
-      'WR',
-      [
-        { market: 'season_receiving_yards', line: 1400 },
-        { market: 'season_receptions', line: 100 },
-        { market: 'season_receiving_tds', line: 10 },
-      ],
-      HALF_PPR,
-    );
+    const receiver = (yards: number, receptions: number, tds: number) =>
+      seasonBaseline(
+        'WR',
+        [
+          { market: 'season_receiving_yards', line: yards },
+          { market: 'season_receptions', line: receptions },
+          { market: 'season_receiving_tds', line: tds },
+        ],
+        HALF_PPR,
+      );
+    const complete = receiver(1400, 100, 10);
     const partial = seasonBaseline('WR', [{ market: 'season_receiving_yards', line: 1400 }], HALF_PPR);
-    const poolPoints = [60, 80, 100, 120];
-    const completeScore = marketExpectationScore(complete.points, complete.coverage, poolPoints)!;
-    const partialScore = marketExpectationScore(partial.points, partial.coverage, poolPoints)!;
+    // Peers priced on everything, so both players have a pool to be read against.
+    const pool = [complete, partial, receiver(800, 60, 4), receiver(900, 65, 5), receiver(1000, 70, 6)];
+
+    const completeScore = marketExpectationScore(complete, pool)!;
+    const partialScore = marketExpectationScore(partial, pool)!;
+    // Same player, same 1,400 yards. The partial read is damped by its coverage
+    // and keeps the sign the complete one had — it is quieter, not negative.
+    expect(Math.sign(partialScore)).toBe(Math.sign(completeScore));
     expect(Math.abs(partialScore)).toBeLessThan(Math.abs(completeScore));
   });
 
   it('will not score against a pool too small to compare with', () => {
-    expect(marketExpectationScore(120, 1, [100, 110])).toBeNull();
-    expect(marketExpectationScore(null, 1, [1, 2, 3, 4])).toBeNull();
+    const one = seasonBaseline('WR', [{ market: 'season_receiving_yards', line: 1200 }], HALF_PPR);
+    const two = seasonBaseline('WR', [{ market: 'season_receiving_yards', line: 1000 }], HALF_PPR);
+    const three = seasonBaseline('WR', [{ market: 'season_receiving_yards', line: 900 }], HALF_PPR);
+    expect(marketExpectationScore(one, [two, three])).toBeNull();
+    expect(marketExpectationScore(null, [one, two, three])).toBeNull();
   });
 
   it('covers every season market key with a scoring rate', () => {

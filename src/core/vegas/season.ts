@@ -50,14 +50,38 @@ export function resolveSeasonMarkets(quotes: SeasonMarketQuote[], index: PlayerI
   for (const group of groups.values()) {
     const first = group[0]!;
     const match = resolvePlayer({ name: first.playerName }, index);
-    const lines = group.map((q) => q.line).filter((l): l is number => l != null);
+    /*
+     * One vote per book.
+     *
+     * The consensus line is a median, and a median is a vote count: a provider
+     * that returns the same book twice — a retry that landed, two events
+     * covering one season market — would otherwise pull the line toward that
+     * book and report a `bookCount` that overstates how many opinions are
+     * actually behind it. A book that quoted more than once contributes its own
+     * middle line, which is order-independent.
+     */
+    const byBook = new Map<string, number[]>();
+    for (const quote of group) {
+      const key = (quote.book ?? '').toLowerCase();
+      const list = byBook.get(key);
+      const line = quote.line;
+      if (list) {
+        if (line != null) list.push(line);
+      } else {
+        byBook.set(key, line == null ? [] : [line]);
+      }
+    }
+    const perBook = [...byBook.values()]
+      .map((lines) => median(lines))
+      .filter((l): l is number => l != null);
+
     out.push({
       playerId: match.status === 'matched' ? match.playerId : null,
       sourcePlayerName: first.playerName,
       market: first.market,
-      line: median(lines),
+      line: median(perBook),
       book: first.book,
-      bookCount: group.length,
+      bookCount: byBook.size,
     });
   }
 
@@ -247,29 +271,61 @@ export function seasonHeadline(
   return parts.length === 0 ? null : parts.join(' · ');
 }
 
+/** How many priced peers a comparison needs before it means anything. */
+export const MIN_COMPARABLE_PEERS = 3;
+
 /**
  * How a player's market baseline compares with the pool at his position.
  *
  * Scored in [-1, 1] against the position's own spread, because a thousand
  * receiving yards means one thing among receivers and another among tight ends.
- * Multiplied by coverage: a baseline built from one market out of three is
- * genuinely less informative than a complete one and is allowed to move the
- * board less. Returns null when there is nothing to compare — which is what
- * "unknown" means, and is not the same as zero.
+ *
+ * ## Like for like, which is the whole of this function
+ *
+ * A baseline is the sum of the markets a player actually has. That makes two
+ * baselines built from different market sets **incomparable numbers**, and
+ * comparing them anyway is how a missing market turns into a negative opinion:
+ * a receiver priced on receiving yards alone implies about 140 points, a
+ * receiver priced on yards, receptions and touchdowns implies about 250, and a
+ * pool built from the second kind rates the first as a bottom-of-the-position
+ * player. Nothing about him is worse. Two of his markets are simply absent, and
+ * §15 of the audit brief is explicit that a missing market is not a negative.
+ *
+ * So the comparison is restricted to the markets *he* has, and to the peers who
+ * have at least all of them, each peer re-totalled over that same set. His
+ * receiving yards are compared with their receiving yards. When too few peers
+ * carry his markets there is no honest comparison to make and the answer is
+ * `null` — unknown, which is not zero and is certainly not negative.
+ *
+ * Coverage still multiplies the result, and now does only what it claims to: a
+ * partial picture is less informative, so it is allowed to move the board less.
+ * It is a damper on confidence, never a direction.
  */
 export function marketExpectationScore(
-  points: number | null,
-  coverage: number,
-  poolPoints: number[],
+  baseline: MarketBaseline | null,
+  pool: MarketBaseline[],
 ): number | null {
-  if (points == null) return null;
-  const pool = poolPoints.filter((p) => Number.isFinite(p)).sort((a, b) => a - b);
-  if (pool.length < 3) return null;
+  if (baseline == null || baseline.points == null) return null;
+  const markets = baseline.contributions.map((c) => c.market);
+  if (markets.length === 0) return null;
 
-  const median = quantile(pool, 0.5);
-  const spread = Math.max(1, quantile(pool, 0.75) - quantile(pool, 0.25));
-  const raw = (points - median) / spread;
-  return round3(clamp(raw, -1, 1) * clamp(coverage, 0, 1));
+  const comparable: number[] = [];
+  for (const peer of pool) {
+    if (peer === baseline) continue;
+    const byMarket = new Map(peer.contributions.map((c) => [c.market, c.points]));
+    // Only peers priced on everything he is priced on. A peer missing one of
+    // his markets would contribute a partial total to the comparison pool and
+    // reintroduce the very bias this function exists to remove.
+    if (!markets.every((m) => byMarket.has(m))) continue;
+    comparable.push(round2(markets.reduce((total, m) => total + (byMarket.get(m) ?? 0), 0)));
+  }
+  if (comparable.length < MIN_COMPARABLE_PEERS) return null;
+
+  const sorted = comparable.sort((a, b) => a - b);
+  const median = quantile(sorted, 0.5);
+  const spread = Math.max(1, quantile(sorted, 0.75) - quantile(sorted, 0.25));
+  const raw = (baseline.points - median) / spread;
+  return round3(clamp(raw, -1, 1) * clamp(baseline.coverage, 0, 1));
 }
 
 function quantile(sorted: number[], q: number): number {

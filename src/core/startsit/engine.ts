@@ -31,6 +31,7 @@ import type { UsageWeek } from '../usage/role.ts';
 import { availabilityConfidence, type AvailabilityView } from './availabilityConfidence.ts';
 import { assessMatchup, NO_MATCHUP, type DefenseTendencyIndex, type MatchupAssessment } from './defense.ts';
 import { assessGameScript, NO_GAME_SCRIPT, type GameContext, type GameScriptAssessment } from './gameScript.ts';
+import { assessMarketComparability, COMPARABLE, type MarketComparability } from './comparability.ts';
 import { compareWithMarket, type MarketAgreement } from './market.ts';
 import { modeWeightFor, type StartSitMode } from './mode.ts';
 import { classifyRole, UNCLASSIFIED, type RoleProfile } from './roleProfile.ts';
@@ -173,6 +174,13 @@ export interface StartSitComparison {
   mode: StartSitMode;
   /** Whether the betting market would make the same choice. */
   market: MarketAgreement;
+  /**
+   * Whether the top two were priced on the same markets at all.
+   *
+   * A gap between two totals built from different market sets is a fact about
+   * the provider's coverage before it is a fact about the players.
+   */
+  comparability: MarketComparability;
 }
 
 /** Status penalties in fantasy points. Editable policy, not a projection. */
@@ -703,6 +711,7 @@ export function compareStartSit(
       },
       mode,
       market,
+      comparability: COMPARABLE,
     };
   }
 
@@ -718,7 +727,30 @@ export function compareStartSit(
     );
   }
 
+  /*
+   * Are the two scores measuring the same thing?
+   *
+   * They are points, and points look comparable, but each one is the sum of the
+   * markets that player happened to be priced on — so a player the provider
+   * covered thinly scores lower for reasons that have nothing to do with him.
+   * A total market blackout was already warned about; a *partial* one was not,
+   * and partial is the common case. See `comparability.ts`.
+   */
+  const comparability = runnerUp
+    ? assessMarketComparability(
+        { name: best.name, position: best.position, expectation: best.expectation },
+        { name: runnerUp.name, position: runnerUp.position, expectation: runnerUp.expectation },
+        margin,
+      )
+    : COMPARABLE;
+
   let confidence: 'high' | 'medium' | 'low' = best.confidence;
+  if (!comparability.comparable && comparability.detail) {
+    warnings.push(comparability.detail);
+    confidence = 'low';
+  } else if (comparability.detail) {
+    reasons.push(comparability.detail);
+  }
   if (margin != null && margin < minMargin) {
     confidence = confidence === 'high' ? 'medium' : 'low';
     reasons.push(`close call: only ${margin} pts separates the top two`);
@@ -825,6 +857,7 @@ export function compareStartSit(
     lateSwap,
     mode,
     market,
+    comparability,
   };
 }
 

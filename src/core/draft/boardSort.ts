@@ -49,8 +49,11 @@ export const SORT_DESCRIPTIONS: Record<SortMode, string> = {
 
 /** The least a row must carry to be sorted. Anything richer also works. */
 export interface SortableRow {
-  /** The composite, 0-100. Higher is better. */
-  score: number;
+  /**
+   * The composite, 0-100. Higher is better. Null when no market priced him and
+   * his total is therefore not on the same scale as anybody else's.
+   */
+  score: number | null;
   /** The sum the composite is derived from — the board's own ordering key. */
   total: number;
   /** Sleeper ADP. */
@@ -76,6 +79,25 @@ export function isSortMode(value: string | null | undefined): value is SortMode 
 export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortMode): T[] {
   const out = [...rows];
 
+  /*
+   * Unscored players last, before anything else is considered.
+   *
+   * This is the engine's own first sort key and it has to be reproduced here,
+   * because reproducing only the *second* one is what put seven players
+   * carrying `ADP —`, `Val —` and `Next —` at the top of the board. A player no
+   * market has priced has a total near zero — market value is absent rather
+   * than low — and zero beats the negative total every priced player carries
+   * until the draft reaches his ADP. Ordering on `total` alone therefore floats
+   * exactly the players the board knows least about.
+   *
+   * `score` is null for precisely those players, so it is the cheapest correct
+   * test, and it keeps the client's ordering tied to the same fact the Score
+   * column is showing rather than to a second rule that can drift from it.
+   */
+  const unscoredLast = (a: T, b: T): number => Number(a.score == null) - Number(b.score == null);
+  const byComposite = (a: T, b: T): number =>
+    unscoredLast(a, b) || b.total - a.total || a.name.localeCompare(b.name);
+
   if (mode === 'score') {
     /*
      * The composite, exactly as the engine ordered it: `total` and not `score`.
@@ -86,7 +108,7 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
      * had deliberately separated. Sorting on `total` reproduces the board the
      * server sent, which is the promise "Score is the default" is making.
      */
-    return out.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    return out.sort(byComposite);
   }
 
   const valueOf = (row: T): number | null => (mode === 'dog' ? row.dogAdp : row.adp);
@@ -95,12 +117,84 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
     const av = usable(valueOf(a));
     const bv = usable(valueOf(b));
     // Missing values at the bottom, whichever market is being read.
-    if (av == null && bv == null) return b.total - a.total || a.name.localeCompare(b.name);
+    if (av == null && bv == null) return byComposite(a, b);
     if (av == null) return 1;
     if (bv == null) return -1;
     // Ascending: the earliest pick is the top of the board.
-    return av - bv || b.total - a.total || a.name.localeCompare(b.name);
+    return av - bv || byComposite(a, b);
   });
+}
+
+/**
+ * Which order the board is actually in, given everything that has an opinion.
+ *
+ * Three things can claim to order these rows and exactly one of them wins at a
+ * time. Written as a function rather than left as a ternary in the screen
+ * because the precedence *is* the feature, and a precedence living inside a
+ * React component can only be checked by driving a browser — which is how it
+ * came to be wrong without anything noticing.
+ *
+ * The order of the checks below is the whole specification:
+ *
+ *  1. **A drag that has not landed yet.** While the round trip is in flight the
+ *     row stays where it was dropped. Without this it snaps back for the length
+ *     of a request, which reads as the drop having failed.
+ *  2. **The stored queue order**, whenever the queue is what is on screen. The
+ *     server already returns the ★ filter in the reader's order, so this is
+ *     mostly a matter of *not* re-sorting it.
+ *  3. **The selected sort mode**, for the ordinary board.
+ *
+ * The bug this replaces: step 3 ran inside the queue whenever the selected mode
+ * was not Score. A reader who had been reading the board by DOG could drag a
+ * row anywhere and `sortBoard` put it straight back on the next render. Nothing
+ * was wrong with the drag; the queue was simply not the authority on its own
+ * order.
+ *
+ * `sort` is deliberately still an input, and deliberately unused in the queue
+ * branch. The mode the reader chose is *remembered* rather than overridden, so
+ * leaving the queue puts them back on the board they were reading instead of
+ * making them reselect it.
+ */
+export function orderBoardRows<T extends SortableRow & { playerId: string }>(
+  rows: readonly T[],
+  view: {
+    /** True when the ★ queue is the current filter. */
+    isQueue: boolean;
+    /** The sort mode the reader has selected, for the ordinary board. */
+    sort: SortMode;
+    /**
+     * Ids in the order a drag just put them, before the server has confirmed
+     * it. Null at rest, and ignored outside the queue — a sequence of queued
+     * ids is not an ordering of the full board.
+     */
+    pendingQueueOrder?: readonly string[] | null;
+  },
+): T[] {
+  if (!view.isQueue) return sortBoard(rows, view.sort);
+  return view.pendingQueueOrder ? reorderByIds(rows, view.pendingQueueOrder) : [...rows];
+}
+
+/**
+ * Rows in the sequence named by `ids`, with anything unnamed left at the end.
+ *
+ * Tolerant on purpose. A drag commits an order for the rows that were on screen
+ * when it started, and by the time it lands a pick may have removed one of them
+ * or a star pressed on another screen may have added one. Neither is an error,
+ * and neither may drop a row: ids that no longer exist are skipped, and rows the
+ * sequence does not mention keep their incoming order after the ones it does.
+ */
+export function reorderByIds<T extends { playerId: string }>(rows: readonly T[], ids: readonly string[]): T[] {
+  const byId = new Map(rows.map((row) => [row.playerId, row]));
+  const out: T[] = [];
+  const placed = new Set<string>();
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row || placed.has(id)) continue;
+    out.push(row);
+    placed.add(id);
+  }
+  for (const row of rows) if (!placed.has(row.playerId)) out.push(row);
+  return out;
 }
 
 /**

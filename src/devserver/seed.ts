@@ -64,7 +64,37 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
   '1017': { player_id: '1017', search_rank: 17, first_name: 'Miles', last_name: 'Barrowman', full_name: 'Miles Barrowman', team: 'CLE', position: 'TE', active: true, injury_status: null },
   '1018': { player_id: '1018', search_rank: 18, first_name: 'Teo', last_name: 'Ferreira', full_name: 'Teo Ferreira', team: 'HOU', position: 'TE', active: true, injury_status: null },
   '1019': { player_id: '1019', search_rank: 19, first_name: 'Grant', last_name: 'Aldous', full_name: 'Grant Aldous', team: 'WAS', position: 'TE', active: true, injury_status: null },
+  /*
+   * The players neither market has priced — and the one who should not be here.
+   *
+   * A live board sorted by Score once opened with seven names carrying `ADP —`,
+   * `Val —` and `Next —`, clustered on 84, above every priced player the draft
+   * had not reached. A seed in which every single player is priced cannot see
+   * that, which is why it survived to a screenshot. These three make the whole
+   * failure reachable from a browser:
+   *
+   *   - **Wes Okonkwo** and **Dane Petrossian** are on NFL rosters and unpriced.
+   *     Exactly the deep coverage the board is meant to carry: they belong on
+   *     it, they belong *below* everybody the market has an opinion about, and
+   *     their Score is unknown rather than 84.
+   *   - **Hollis Marchetti** is the historical case, recorded the way Sleeper
+   *     actually records one — `active: true`, `status: 'Active'`, a perfectly
+   *     ordinary `search_rank`, and no team. Nothing in the payload says he
+   *     stopped playing years ago, which is the entire difficulty; he is kept
+   *     out by having no club *and* no price, and by nothing else.
+   */
+  '1020': { player_id: '1020', search_rank: 20, first_name: 'Wes', last_name: 'Okonkwo', full_name: 'Wes Okonkwo', team: 'LV', position: 'RB', active: true, injury_status: null },
+  '1021': { player_id: '1021', search_rank: 21, first_name: 'Dane', last_name: 'Petrossian', full_name: 'Dane Petrossian', team: 'ARI', position: 'WR', active: true, injury_status: null },
+  '1022': { player_id: '1022', search_rank: 22, first_name: 'Hollis', last_name: 'Marchetti', full_name: 'Hollis Marchetti', team: null, position: 'RB', active: true, injury_status: null },
 };
+
+/** The seeded players no ranking prices, and what each one is here to prove. */
+export const DEMO_UNPRICED = {
+  /** On an NFL roster: on the board, below the priced players, Score unknown. */
+  rostered: ['Wes Okonkwo', 'Dane Petrossian'],
+  /** No club and no price: not a draft recommendation at all. */
+  historical: 'Hollis Marchetti',
+} as const;
 
 export const DEMO_ADP_CSV = `name,position,team,adp,rank
 Marcus Vance,RB,KC,2.4,1
