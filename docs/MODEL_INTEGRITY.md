@@ -244,6 +244,51 @@ row with an unknown value or a missing team on it.
   agent, or any logo that failed to load, sat in a different-sized box and
   pulled the row out of line. Fixed by giving the fallback the same square.
 
+### P1 — the queue was not the authority on its own order
+
+Reported separately: dragging a player in the ★ queue appeared to work, and the
+list then snapped back to the board's ordering.
+
+**The drag was never the problem.** `queueOrder.ts` and `dragReorder.ts` are
+both correct, both already tested, and the server already returns the ★ filter
+in the reader's stored order. The precedence was wrong, in one expression in the
+screen:
+
+```ts
+isQueue && sort === 'score' ? queuedRows : sortBoard(queuedRows, sort)
+```
+
+A reader whose selected mode was Score saw the queue behave perfectly. A reader
+who had been reading the board by ADP or DOG — the mode that has only existed
+since the Underdog merge — got `sortBoard` re-ordering their shortlist on every
+render, including the one immediately after their drop.
+
+Fixed by moving the precedence out of the component into `orderBoardRows`, which
+resolves the three claimants in order: a drag that has not landed yet, then the
+stored queue order whenever the queue is on screen, then the selected sort mode
+for the ordinary board. The mode is still an input and deliberately unused in
+the queue branch — it is *remembered* rather than overridden, so leaving the
+queue returns the reader to the board they were reading instead of making them
+reselect it.
+
+That it lived inside a React component is why nothing caught it: a precedence
+rule there can only be checked by driving a browser, and no browser test opened
+the queue with a non-default sort selected. It is now a pure function with the
+addendum's thirteen invariants pinned against it, plus a browser suite that
+performs the real gesture — including the long press, without which
+`pressVerdict` correctly classifies the movement as a scroll and reorders
+nothing.
+
+The sort control is dimmed inside the queue (`data-inactive`) and stays visible
+and operable. It should not look like it is ordering a list it is not ordering.
+
+**Observed and not fixed:** the drag grip is 22×28 at 390px, against this
+project's own documented standard of 44 (`--tap: 44`, design-system rule 5).
+There are thirteen pixels of gutter to its left and eight to the ★ beside it, so
+reaching 44 means taking the difference from the star or from the row's own
+expand target. That is a design trade-off rather than a bug with an obvious fix,
+and it is recorded here rather than decided unilaterally.
+
 ### What the blend did not cause
 
 The DOG/Sleeper market blend was audited against §1 of the addendum and is

@@ -90,7 +90,7 @@ import {
   SORT_LABELS,
   SORT_MODES,
   hasDogCoverage,
-  sortBoard,
+  orderBoardRows,
   type SortMode,
 } from '../../core/draft/boardSort.ts';
 import { QueueControl } from '../components/decisions.tsx';
@@ -573,14 +573,24 @@ export function DraftScreen({
    * override only applies while a drag is settling. It has to apply, or the row
    * would snap back to where it was for the length of a round trip.
    *
-   * The sort control stays live inside the queue: a reader who wants to see
-   * their shortlist by DOG can, and switching back to Score returns them to
-   * their own order rather than to the composite's.
+   * ## Inside the queue, the sort control does not order anything
+   *
+   * It used to, whenever the selected mode was not Score, and that quietly
+   * destroyed the feature: a reader who had been looking at the board by DOG
+   * and then opened their shortlist could drag a row anywhere they liked and
+   * watch `sortBoard` put it straight back on the next render. The drag was not
+   * broken — the precedence was, and the drag was the only visible symptom.
+   *
+   * A queue position is a thing the reader said out loud. There is no reading of
+   * "sort by ADP" that outranks it, because the queue is not a view of the board
+   * that happens to be filtered; it is a list they wrote. So manual order wins
+   * here unconditionally, and `sort` is left exactly as they set it so that
+   * leaving the queue returns them to the board they were reading — they should
+   * not have to reselect a mode because they glanced at their shortlist.
    */
   const isQueue = position === QUEUE_FILTER;
   const recommendations = board?.recommendations ?? [];
-  const queuedRows = isQueue && queueOrder ? reorderByIds(recommendations, queueOrder) : recommendations;
-  const ordered = isQueue && sort === DEFAULT_SORT_MODE ? queuedRows : sortBoard(queuedRows, sort);
+  const ordered = orderBoardRows(recommendations, { isQueue, sort, pendingQueueOrder: queueOrder });
 
   /*
    * Drag to reorder, inside the queue and nowhere else.
@@ -768,6 +778,11 @@ export function DraftScreen({
             <SortControl
               value={sort}
               onChange={setSort}
+              /*
+                Dimmed in the queue, where the rows are in the reader's order and
+                this control is remembering a choice rather than applying one.
+              */
+              inactive={position === QUEUE_FILTER}
               /*
                 The board's own answer, or the rows themselves.
 
@@ -1207,13 +1222,30 @@ function SortControl({
   value,
   onChange,
   dogAvailable,
+  inactive,
 }: {
   value: SortMode;
   onChange: (mode: SortMode) => void;
   dogAvailable: boolean;
+  /**
+   * True in the ★ queue, where the reader's own order is what the list is in.
+   *
+   * Dimmed rather than removed, and still operable: the mode stays selectable
+   * so that leaving the queue puts them on the board they meant to be reading.
+   * What it must not do is *look* like it is ordering the rows underneath it,
+   * because it is not — that is the whole of this regression, expressed in the
+   * one place a reader could have noticed it.
+   */
+  inactive: boolean;
 }) {
   return (
-    <span className="sort-control" role="radiogroup" aria-label="Sort the board" data-testid="draft-sort">
+    <span
+      className="sort-control"
+      role="radiogroup"
+      aria-label={inactive ? 'Sort the board — your queue keeps the order you set' : 'Sort the board'}
+      data-testid="draft-sort"
+      data-inactive={inactive ? 'yes' : 'no'}
+    >
       {SORT_MODES.map((mode) => {
         const unavailable = mode === 'dog' && !dogAvailable;
         return (
@@ -1226,9 +1258,11 @@ function SortControl({
             data-testid={`sort-${mode}`}
             data-active={value === mode ? 'yes' : 'no'}
             aria-label={
-              unavailable
-                ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
-                : SORT_DESCRIPTIONS[mode]
+              inactive
+                ? `${SORT_DESCRIPTIONS[mode]}. Not applied in your queue, which stays in the order you set.`
+                : unavailable
+                  ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                  : SORT_DESCRIPTIONS[mode]
             }
             onClick={() => onChange(mode)}
           >
@@ -1298,22 +1332,6 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
         );
       })}
     </div>
-  );
-}
-
-/**
- * Rows in the sequence an id list names, with anything unnamed kept at the end.
- *
- * Used for one thing: holding the queue where the reader dropped a player while
- * the server confirms it. Rows the sequence does not mention keep their
- * incoming order rather than being dropped — a player queued from another
- * screen mid-drag is a real possibility, and losing his row would be a much
- * worse outcome than showing him last for one refresh.
- */
-function reorderByIds<T extends { playerId: string }>(rows: T[], ids: string[]): T[] {
-  const rank = new Map(ids.map((id, i) => [id, i]));
-  return [...rows].sort(
-    (a, b) => (rank.get(a.playerId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.playerId) ?? Number.MAX_SAFE_INTEGER),
   );
 }
 

@@ -126,6 +126,78 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
 }
 
 /**
+ * Which order the board is actually in, given everything that has an opinion.
+ *
+ * Three things can claim to order these rows and exactly one of them wins at a
+ * time. Written as a function rather than left as a ternary in the screen
+ * because the precedence *is* the feature, and a precedence living inside a
+ * React component can only be checked by driving a browser — which is how it
+ * came to be wrong without anything noticing.
+ *
+ * The order of the checks below is the whole specification:
+ *
+ *  1. **A drag that has not landed yet.** While the round trip is in flight the
+ *     row stays where it was dropped. Without this it snaps back for the length
+ *     of a request, which reads as the drop having failed.
+ *  2. **The stored queue order**, whenever the queue is what is on screen. The
+ *     server already returns the ★ filter in the reader's order, so this is
+ *     mostly a matter of *not* re-sorting it.
+ *  3. **The selected sort mode**, for the ordinary board.
+ *
+ * The bug this replaces: step 3 ran inside the queue whenever the selected mode
+ * was not Score. A reader who had been reading the board by DOG could drag a
+ * row anywhere and `sortBoard` put it straight back on the next render. Nothing
+ * was wrong with the drag; the queue was simply not the authority on its own
+ * order.
+ *
+ * `sort` is deliberately still an input, and deliberately unused in the queue
+ * branch. The mode the reader chose is *remembered* rather than overridden, so
+ * leaving the queue puts them back on the board they were reading instead of
+ * making them reselect it.
+ */
+export function orderBoardRows<T extends SortableRow & { playerId: string }>(
+  rows: readonly T[],
+  view: {
+    /** True when the ★ queue is the current filter. */
+    isQueue: boolean;
+    /** The sort mode the reader has selected, for the ordinary board. */
+    sort: SortMode;
+    /**
+     * Ids in the order a drag just put them, before the server has confirmed
+     * it. Null at rest, and ignored outside the queue — a sequence of queued
+     * ids is not an ordering of the full board.
+     */
+    pendingQueueOrder?: readonly string[] | null;
+  },
+): T[] {
+  if (!view.isQueue) return sortBoard(rows, view.sort);
+  return view.pendingQueueOrder ? reorderByIds(rows, view.pendingQueueOrder) : [...rows];
+}
+
+/**
+ * Rows in the sequence named by `ids`, with anything unnamed left at the end.
+ *
+ * Tolerant on purpose. A drag commits an order for the rows that were on screen
+ * when it started, and by the time it lands a pick may have removed one of them
+ * or a star pressed on another screen may have added one. Neither is an error,
+ * and neither may drop a row: ids that no longer exist are skipped, and rows the
+ * sequence does not mention keep their incoming order after the ones it does.
+ */
+export function reorderByIds<T extends { playerId: string }>(rows: readonly T[], ids: readonly string[]): T[] {
+  const byId = new Map(rows.map((row) => [row.playerId, row]));
+  const out: T[] = [];
+  const placed = new Set<string>();
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row || placed.has(id)) continue;
+    out.push(row);
+    placed.add(id);
+  }
+  for (const row of rows) if (!placed.has(row.playerId)) out.push(row);
+  return out;
+}
+
+/**
  * Whether the DOG mode has anything to order by.
  *
  * A control offering a sort that produces one undifferentiated block of dashes

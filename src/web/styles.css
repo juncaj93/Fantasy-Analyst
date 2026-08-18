@@ -2352,6 +2352,19 @@ button:disabled {
  * chooses what order, and two identical-looking rows of chips answering
  * different questions is how a screen stops being readable at a glance.
  */
+/*
+ * The sort control, dimmed where it is not doing anything.
+ *
+ * In the ★ queue the rows are in the order the reader dragged them into, and
+ * this control is only remembering which board they were reading before. It has
+ * to stay visible and operable — they should not have to reselect a mode after
+ * glancing at their shortlist — but it must not read as though it is ordering
+ * the list underneath it. No extra row, no explanatory label: the state is the
+ * message.
+ */
+.sort-control[data-inactive='yes'] {
+  opacity: 0.45;
+}
 .sort-control {
   display: inline-flex;
   align-items: stretch;
