@@ -106,14 +106,40 @@ export class AdpRepo {
   /**
    * The newest snapshot of one named market.
    *
-   * The whole reason the board can hold Sleeper and Underdog at once without
-   * either becoming the other: two calls, two sources, two answers, and no
-   * point at which "the latest ADP" is ambiguous.
+   * Exact on the source string. Used for Underdog, which this app writes under
+   * one constant and nothing else ever writes at all.
    */
   async latestForSource(source: string): Promise<AdpSnapshotMeta | null> {
     const row = await this.db
       .prepare('SELECT * FROM adp_snapshots WHERE source = ? ORDER BY captured_at DESC, id DESC LIMIT 1')
       .bind(source)
+      .first<Record<string, unknown>>();
+    return row ? toMeta(row) : null;
+  }
+
+  /**
+   * The newest snapshot of the platform market — everything that is not
+   * Underdog.
+   *
+   * Defined by exclusion, and that is not laziness. The Sleeper-market
+   * snapshots in a real database carry at least four different source strings:
+   * `beatadp:sleeper` from the refresh workflow, `demo` from the seed, whatever
+   * a hand-import was labelled, and any earlier spelling. Matching them by name
+   * would mean maintaining a list, and the day that list falls behind is the
+   * day this returns nothing and the caller falls back to "newest of anything"
+   * — which, once an Underdog snapshot exists, is the Underdog snapshot.
+   *
+   * That failure is the exact substitution the whole two-market design forbids:
+   * Underdog's numbers, shown in the `ADP` column, driving `Val`, the tier
+   * ladders and the survival model, with nothing on screen saying so. So the
+   * rule is inverted. Underdog is the one source this app writes under a
+   * constant it owns; everything else is the platform market by definition, and
+   * a new spelling of it cannot silently disappear.
+   */
+  async latestPlatformSnapshot(): Promise<AdpSnapshotMeta | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM adp_snapshots WHERE source != ? ORDER BY captured_at DESC, id DESC LIMIT 1')
+      .bind(UNDERDOG_SOURCE)
       .first<Record<string, unknown>>();
     return row ? toMeta(row) : null;
   }

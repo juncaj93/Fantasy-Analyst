@@ -713,7 +713,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     // Draft order comes from an imported ranking. Sleeper's search_rank is NOT
     // one — it ranks by who gets looked up — so when no ranking is imported the
     // list says so and falls back to the tally rather than inventing an order.
-    const snapshot = await new AdpRepo(ctx.env.db).latest();
+    //
+    // The *platform* snapshot, not the newest of anything: this list shows one
+    // ranking and calls it the draft order, and once an Underdog snapshot
+    // exists "the newest" is the Underdog one on any day it was fetched last.
+    const snapshot = await new AdpRepo(ctx.env.db).latestPlatformSnapshot();
     const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
 
     /*
@@ -1654,7 +1658,9 @@ async function boundedFreeAgents(
   opts: { rosteredIds: Set<string>; startable: Set<string> },
 ): Promise<string[]> {
   const adpRepo = new AdpRepo(db);
-  const snapshot = await adpRepo.latest();
+  // The platform market, for the same reason the players list uses it: one
+  // ranking, named, rather than whichever source was imported most recently.
+  const snapshot = await adpRepo.latestPlatformSnapshot();
   const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
 
   const available = (await new PlayerRepo(db).listAll()).filter(

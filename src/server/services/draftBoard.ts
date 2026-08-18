@@ -30,7 +30,7 @@ import {
 } from '../../core/draft/nextpick/index.ts';
 import { buildPositionTierMap, type PositionTierMap } from '../../core/draft/tiers.ts';
 import type { Database } from '../db.ts';
-import { AdpRepo, SLEEPER_SOURCE, UNDERDOG_SOURCE, type AdpSnapshotMeta } from '../repos/adp.ts';
+import { AdpRepo, UNDERDOG_SOURCE, type AdpSnapshotMeta } from '../repos/adp.ts';
 /*
  * The two market-facing decisions this board now makes, both of them read from
  * data rather than assumed: what kind of league this is, and how old the
@@ -525,9 +525,18 @@ export class DraftBoardService {
     // Draft order comes from an imported ADP snapshot. A draft can be pinned to
     // a specific one so a board opened mid-draft does not shift under the user
     // when a fresher snapshot lands; otherwise the newest applies.
+    /*
+     * The platform market: everything that is not Underdog.
+     *
+     * Not `latest()`, which is "the newest snapshot of anything" and was
+     * correct only while one market existed. With two, it returns the Underdog
+     * board on any day Underdog was fetched last — putting Underdog's numbers
+     * in the `ADP` column and behind `Val`, the tier ladders and the survival
+     * model, with nothing on screen saying so.
+     */
     const snapshotMeta = draft.adpSnapshotId
       ? await this.adp.get(draft.adpSnapshotId)
-      : ((await this.adp.latestForSource(SLEEPER_SOURCE)) ?? (await this.adp.latest()));
+      : await this.adp.latestPlatformSnapshot();
     const importedValues = snapshotMeta ? await this.adp.valuesByPlayer(snapshotMeta.id) : new Map();
 
     /*

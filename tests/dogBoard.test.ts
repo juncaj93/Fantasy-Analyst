@@ -322,6 +322,86 @@ describe('the board reads the two markets separately', () => {
   });
 });
 
+describe('the platform market is never the Underdog one', () => {
+  let db: NodeSqliteDatabase;
+
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedDemoData(db);
+  });
+
+  /**
+   * The bug this pins, found by reading the deploy workflow rather than the
+   * code: `refresh-adp.yml` imports Sleeper's ADP under the source
+   * `beatadp:sleeper`, not `sleeper`. Resolving the platform snapshot by
+   * matching a name would therefore have missed it in production and fallen
+   * back to "the newest snapshot of anything" — which, on any day Underdog was
+   * fetched last, is the Underdog board.
+   *
+   * The consequence would have been silent and total: Underdog's numbers in the
+   * `ADP` column, behind `Val`, behind the tier ladders and behind the survival
+   * model, with the `DOG` column showing the same numbers again and nothing on
+   * screen able to say they were the same market twice.
+   */
+  it('finds a Sleeper snapshot imported under the workflow’s own source name', async () => {
+    const repo = new AdpRepo(db);
+    const players = (await new PlayerRepo(db).listAll()).filter((p) => p.active).slice(0, 20);
+
+    await repo.save({
+      // Exactly what .github/workflows/refresh-adp.yml sends.
+      source: 'beatadp:sleeper',
+      label: 'SLEEPER ADP — HALF PPR 1QB',
+      capturedAt: '2099-05-01T00:00:00.000Z',
+      fileHash: 'platform-hash',
+      rows: players.map((p, i) => ({
+        rowNumber: i + 1,
+        sourceName: p.fullName,
+        sourceTeam: p.team,
+        sourcePosition: p.position,
+        adp: 3 + i * 3.3,
+        rank: i + 1,
+        raw: {},
+        match: {
+          status: 'matched' as const,
+          method: 'name_unique' as const,
+          reason: 'test fixture',
+          playerId: p.id,
+          confidence: 1,
+          candidates: [],
+        },
+        playerId: p.id,
+      })),
+      matchedCount: players.length,
+      ambiguousCount: 0,
+      unmatchedCount: 0,
+      skipped: [],
+    });
+
+    const platform = await repo.latestPlatformSnapshot();
+    expect(platform?.source).toBe('beatadp:sleeper');
+    // And emphatically not the Underdog snapshot the seed also wrote.
+    expect(platform?.source).not.toBe(UNDERDOG_SOURCE);
+  });
+
+  it('prefers a newer Underdog snapshot for DOG and never for ADP', async () => {
+    const repo = new AdpRepo(db);
+    // The seed writes Sleeper first and Underdog second, so "newest of
+    // anything" is already the Underdog one — the exact trap.
+    expect((await repo.latest())?.source).toBe(UNDERDOG_SOURCE);
+    expect((await repo.latestPlatformSnapshot())?.source).not.toBe(UNDERDOG_SOURCE);
+  });
+
+  it('keeps the ADP and DOG columns showing different numbers on a real board', async () => {
+    const draftId = (await new LeagueRepo(db).listLeagues()).find((l) => l.draftId)!.draftId!;
+    const board = await new DraftBoardService(db).build(draftId, { limit: 20 });
+    const both = board.recommendations.filter((r) => r.adp != null && r.dogAdp != null);
+    expect(both.length).toBeGreaterThan(3);
+    // If the platform snapshot had resolved to the Underdog one, every player
+    // would show the same number twice.
+    expect(both.every((r) => r.adp === r.dogAdp)).toBe(false);
+  });
+});
+
 describe('the queue keeps the order the reader gave it', () => {
   let db: NodeSqliteDatabase;
   let env: AppEnv;

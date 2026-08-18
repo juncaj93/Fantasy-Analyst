@@ -1,0 +1,134 @@
+name: Refresh Underdog ADP
+
+# Pull raw Underdog ADP and import it as a frozen snapshot, shown on the board
+# as `DOG`.
+#
+# This runs here rather than in the worker for the same reason the Sleeper ADP
+# refresh does: the draft board must keep working when a third-party site is
+# slow, changed or down, and a snapshot taken an hour ago is a far better answer
+# mid-draft than a failed fetch.
+#
+# What this workflow will never do is substitute something else. If Underdog's
+# ADP cannot be had, DOG is simply absent and the app renormalises the market
+# baseline onto Sleeper alone and says so. A `DOG` column filled from Sleeper,
+# from Underdog's staff rankings, or from an aggregator's own consensus would be
+# worse than no column at all, because nothing on screen could tell.
+#
+# Configure at least one of the two source URLs as a repository variable:
+#
+#   UNDERDOG_ADP_URL        Best Ball Team Builder's board  (primary)
+#   FOUR4_UNDERDOG_ADP_URL  4for4's Underdog ADP export     (validation/fallback)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # An hour after the Sleeper refresh, daily through the draft season. Both
+    # markets move on news, and a blend built on last week's Underdog is a blend
+    # that has quietly become Sleeper-only in everything but its label.
+    - cron: '0 12 * * *'
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+
+      # The script tries Best Ball Team Builder first and 4for4 second, checks
+      # that what came back is raw ADP rather than a ranking, and checks that it
+      # is recent enough to describe the current market. Its exit codes are
+      # distinct because the right response to each is different — see below.
+      - name: Fetch it
+        id: fetch
+        continue-on-error: true
+        env:
+          UNDERDOG_ADP_URL: ${{ vars.UNDERDOG_ADP_URL }}
+          FOUR4_UNDERDOG_ADP_URL: ${{ vars.FOUR4_UNDERDOG_ADP_URL }}
+        run: |
+          npx vite-node scripts/fetch-underdog-adp.mjs --out /tmp/dog.json --meta /tmp/dog.meta.json
+
+      - name: Say what happened, and stop if there is nothing good to import
+        if: steps.fetch.outcome != 'success'
+        run: |
+          echo "::warning::Underdog ADP was not refreshed. The board keeps its last good snapshot"
+          echo "::warning::and, if that has gone stale, prices on Sleeper alone and says so."
+          # Deliberately not a failed job. A source being unreachable is an
+          # ordinary Tuesday and the app degrades correctly; a red run every
+          # morning would train everybody to ignore this workflow, which is
+          # exactly when a genuinely broken feed would go unnoticed.
+          exit 0
+
+      - name: Import it
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt)
+          if [ "$login" != "200" ]; then
+            echo "::error::Could not unlock the app (HTTP $login)."
+            exit 1
+          fi
+
+          # The provenance travels with the numbers: which provider served them,
+          # when we fetched, and — the one that matters — when the source says
+          # they are effective. Without that last field a file regenerated
+          # overnight and served at noon looks nine hours fresher than it is.
+          node -e "
+            const fs = require('fs');
+            const meta = JSON.parse(fs.readFileSync('/tmp/dog.meta.json', 'utf8'));
+            process.stdout.write(JSON.stringify({
+              content: fs.readFileSync('/tmp/dog.json', 'utf8'),
+              source: 'underdog',
+              label: meta.label + ' (' + new Date().toISOString().slice(0, 10) + ')',
+              provider: meta.provider,
+              snapshotAt: meta.snapshotAt,
+              fetchedAt: meta.fetchedAt,
+            }));
+          " > /tmp/payload.json
+
+          code=$(curl -s -o /tmp/result.json -w '%{http_code}' -X POST "$URL/api/adp/import" \
+            -H 'content-type: application/json' -b /tmp/cookies.txt \
+            --data-binary @/tmp/payload.json --max-time 120)
+          echo "import: $code"
+
+          node -e "
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/result.json', 'utf8');
+            let r; try { r = JSON.parse(body); } catch { console.log(body.slice(0, 500)); process.exit(1); }
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+
+            const meta = JSON.parse(fs.readFileSync('/tmp/dog.meta.json', 'utf8'));
+            console.log('provider:  ', meta.provider);
+            console.log('effective: ', meta.snapshotAt ?? '(the source publishes none)');
+            console.log('snapshot:  ', r.snapshot?.label, r.created ? '(new)' : '(unchanged — same file as last time)');
+            console.log('matched:   ', r.matched);
+            console.log('unmatched: ', r.unmatched);
+
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+              '## Underdog ADP (DOG)', '',
+              '| | |', '|---|---|',
+              ['| provider |', meta.provider, '|'].join(' '),
+              ['| effective |', meta.snapshotAt ?? 'not published by the source', '|'].join(' '),
+              ['| snapshot |', r.snapshot?.label ?? '?', '|'].join(' '),
+              ['| new |', r.created ? 'yes' : 'no — identical to the last one', '|'].join(' '),
+              ['| matched to a player |', r.matched, '|'].join(' '),
+              ['| unmatched |', r.unmatched, '|'].join(' '),
+              '',
+            ].join('\n'));
+
+            // A file that matched nobody is a file the board will refuse to use.
+            // Better to hear it here than to wonder why the column is empty.
+            if (!r.matched) {
+              console.log('::error::the Underdog file resolved to no known players — DOG will be unavailable');
+              process.exit(1);
+            }
+          "
+          [ "$code" = "200" ] || exit 1
