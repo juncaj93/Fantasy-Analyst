@@ -244,8 +244,8 @@ const ICONS = [
   { file: 'apple-touch-icon.png', size: 180, scale: 1 },
 ];
 
-const source = process.argv[2];
-if (!source) {
+const sourcePath = process.argv[2];
+if (!sourcePath) {
   console.error('usage: node scripts/make-icons-from-art.mjs path/to/artwork.png');
   process.exit(1);
 }
@@ -270,13 +270,46 @@ function favicon(art) {
 `;
 }
 
-const art = decode(readFileSync(source));
-if (art.width !== art.height) {
-  // Every target is square; cropping is a decision about the artwork, not one
-  // this script should make silently on the way past.
-  throw new Error(`artwork is ${art.width}x${art.height} — crop it square first`);
+/**
+ * How much of the artwork's outer margin to crop away before anything is
+ * resampled from it.
+ *
+ * The illustration is drawn with a band of black outside its green frame,
+ * which is right for a poster and wrong for an icon. iOS masks the Home
+ * Screen to a squircle and takes its own bite out of the corners on top of
+ * that margin, so at 1.0 the frame floated visibly inside the tile while the
+ * logo it replaced had filled the tile edge to edge.
+ *
+ * 1.06 is measured, not guessed: it lands the frame 0.6% in from the tile
+ * edge, which is where the previous icon's artwork sat, and it stops short of
+ * about 1.09, where the squircle starts cutting the frame's own corners off.
+ * Re-measure it if the artwork's margin changes.
+ */
+const ZOOM = 1.06;
+
+/** Crops the centre 1/zoom of a square image. */
+function centreCrop(art, zoom) {
+  if (zoom === 1) return art;
+  const side = Math.round(art.width / zoom);
+  const off = Math.round((art.width - side) / 2);
+  const rgba = Buffer.alloc(side * side * 4);
+  for (let y = 0; y < side; y++) {
+    const from = ((y + off) * art.width + off) * 4;
+    art.rgba.copy(rgba, y * side * 4, from, from + side * 4);
+  }
+  return { width: side, height: side, rgba };
 }
-console.log(`source ${source}  ${art.width}x${art.height}`);
+
+const source = decode(readFileSync(sourcePath));
+if (source.width !== source.height) {
+  // A non-square source needs a decision about which part of the picture to
+  // keep, and that is the illustrator's call rather than one this script
+  // should make silently on the way past. The centre crop below is a
+  // different thing: a declared, measured zoom on artwork already square.
+  throw new Error(`artwork is ${source.width}x${source.height} — crop it square first`);
+}
+const art = centreCrop(source, ZOOM);
+console.log(`source ${sourcePath}  ${source.width}x${source.height}  zoom ${ZOOM} -> ${art.width}x${art.width}`);
 
 mkdirSync(OUT, { recursive: true });
 for (const { file, size, scale } of ICONS) {
