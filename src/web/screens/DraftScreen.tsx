@@ -939,6 +939,18 @@ function useQueueDrag({
 }) {
   const [drag, setDrag] = useState<DragState | null>(null);
   /*
+   * The same drag, readable synchronously.
+   *
+   * `end` needs to know where the row was dropped, and the obvious way to get
+   * it — reading the state inside a `setDrag` updater and committing from
+   * there — is wrong twice over. An updater must be pure, and under StrictMode
+   * React deliberately calls it twice, so the commit would fire two reorder
+   * requests for one drop every time in development. The ref is the honest
+   * version: the updater only ever returns the next state, and the side effect
+   * reads what it needs from outside it.
+   */
+  const dragRef = useRef<DragState | null>(null);
+  /*
    * The live gesture, readable from event handlers that were registered once.
    *
    * Registering `pointermove` on every render would mean re-binding on every
@@ -958,19 +970,24 @@ function useQueueDrag({
   const idsRef = useRef(ids);
   idsRef.current = ids;
 
+  /** Write the drag through both the ref and the state, so they cannot drift. */
+  const applyDrag = useCallback((next: DragState | null) => {
+    dragRef.current = next;
+    setDrag(next);
+  }, []);
+
   const end = useCallback(
     (commit: boolean) => {
       const current = gesture.current;
+      const state = dragRef.current;
       gesture.current = null;
       if (current?.timer != null) window.clearTimeout(current.timer);
-      setDrag((state) => {
-        if (commit && state && current?.active && state.toIndex !== state.fromIndex) {
-          onCommit(state.playerId, state.toIndex, moveItem(idsRef.current, state.fromIndex, state.toIndex));
-        }
-        return null;
-      });
+      applyDrag(null);
+      if (commit && state && current?.active && state.toIndex !== state.fromIndex) {
+        onCommit(state.playerId, state.toIndex, moveItem(idsRef.current, state.fromIndex, state.toIndex));
+      }
     },
-    [onCommit],
+    [applyDrag, onCommit],
   );
 
   const onPointerDown = useCallback(
@@ -987,7 +1004,7 @@ function useQueueDrag({
         const current = gesture.current;
         if (!current || current.abandoned) return;
         current.active = true;
-        setDrag({ playerId, fromIndex: index, toIndex: index, deltaY: 0, rowHeight });
+        applyDrag({ playerId, fromIndex: index, toIndex: index, deltaY: 0, rowHeight });
         // A short tick when the row is picked up, where the platform offers one.
         navigator.vibrate?.(10);
       }, LONG_PRESS_MS);
@@ -1003,7 +1020,7 @@ function useQueueDrag({
         abandoned: false,
       };
     },
-    [enabled],
+    [applyDrag, enabled],
   );
 
   useEffect(() => {
@@ -1036,20 +1053,18 @@ function useQueueDrag({
        * to scrolling and this call does nothing but log a warning.
        */
       if (event.cancelable) event.preventDefault();
-      setDrag((state) =>
-        state == null
-          ? state
-          : {
-              ...state,
-              deltaY,
-              toIndex: targetIndex({
-                fromIndex: state.fromIndex,
-                deltaY,
-                rowHeight: state.rowHeight,
-                count: idsRef.current.length,
-              }),
-            },
-      );
+      const state = dragRef.current;
+      if (state == null) return;
+      applyDrag({
+        ...state,
+        deltaY,
+        toIndex: targetIndex({
+          fromIndex: state.fromIndex,
+          deltaY,
+          rowHeight: state.rowHeight,
+          count: idsRef.current.length,
+        }),
+      });
     };
 
     const onUp = () => end(true);
@@ -1063,7 +1078,7 @@ function useQueueDrag({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
     };
-  }, [enabled, end]);
+  }, [applyDrag, enabled, end]);
 
   return { drag, onPointerDown };
 }
