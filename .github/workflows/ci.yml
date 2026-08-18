@@ -49,7 +49,20 @@ jobs:
     # cancelled two thirds of the way through with nothing failing. Split, each
     # runner does about a third of the work, so twenty minutes goes back to
     # meaning "the browser is stuck" rather than "the suite got bigger".
-    timeout-minutes: 20
+    #
+    # The budget is now on the step that can hang rather than on the whole job,
+    # because the job stopped being mostly tests. `playwright install
+    # --with-deps` fetches WebKit's system packages from apt, and that download
+    # is neither fast nor predictable: measured on this repository across one
+    # afternoon it ran between five and twenty minutes on identical runners,
+    # and on three occasions it consumed the entire job budget without a single
+    # test having started. A job-level timeout cannot tell that apart from a
+    # stuck browser -- both read as "cancelled at twenty minutes" -- which is
+    # precisely the signal this timeout exists to give.
+    #
+    # So: the job is allowed enough wall clock for a bad apt day, and the test
+    # step keeps the twenty minutes, where it means what it says.
+    timeout-minutes: 45
     strategy:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
@@ -67,8 +80,12 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Slow and variable, and not a thing that can hang in an interesting way.
       - run: npx playwright install --with-deps webkit
+        timeout-minutes: 25
+      # This is the one that can. Twenty minutes of *testing* is a stuck browser.
       - run: npx playwright test --project=${{ matrix.project }}
+        timeout-minutes: 20
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
