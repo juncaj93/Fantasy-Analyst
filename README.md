@@ -55,6 +55,17 @@ counterpoint; every component score, its weight and its contribution stay one di
 under **Advanced breakdown**. The header's ↻ force-syncs the latest picks from
 Sleeper. It never drafts.
 
+**Draft board** — the ▦ beside the league name opens the room as a board:
+rounds down, managers across, the snake running the way it really runs, with
+the manager header row and the round column frozen so scrolling never costs you
+the context. It opens **compact** — every completed pick is its position in the
+position's own colour, which is what makes a receiver run or somebody hoarding
+backs visible in one glance — and an expand toggle swaps that for `J. Hurts`,
+the position and the club mark, still one cell tall. No score, no ADP, no
+value, no Next%: the board is for reading the room, and the analysis is on the
+card you came from. It draws the picks the Draft screen already has, so it adds
+no polling of its own, and it stays readable as history once the draft is done.
+
 **Team** — the recommended lineup, the bench behind it and the short list of
 anybody unrostered worth a move, all built from Vegas market expectation, news
 signal, availability and an uncertainty penalty. Balanced, Floor and Ceiling ask
@@ -119,7 +130,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
 ```bash
 npm run typecheck
-npm test               # 1,692 unit + integration tests
+npm test               # 1,730 unit + integration tests
 npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
 ```

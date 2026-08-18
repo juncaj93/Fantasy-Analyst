@@ -276,6 +276,24 @@ export interface DraftBoard {
   /** Whether the W/R/T flex view is worth a chip in this league. */
   offersFlex?: boolean;
   /**
+   * The drafting managers, one per seat, in column order.
+   *
+   * Read by the draft-board overlay and by nothing else. Optional so a client
+   * running against an older deployment simply gets `Team 4` columns rather
+   * than a broken board.
+   */
+  managers?: { slot: number; name: string; isMine: boolean }[];
+  /**
+   * Every completed pick, with the manager who actually made it.
+   *
+   * This is why the board overlay needs no request of its own: the picks travel
+   * with the board the live refresh already rebuilds, so a new pick reaches the
+   * grid through exactly the sync that was already running.
+   */
+  boardPicks?: { pickNo: number; playerId: string; name: string; position: string; team: string; ownerSlot: number }[];
+  /** Owner slot per pick, only in a draft where Sleeper published a trade. */
+  pickOwners?: number[] | null;
+  /**
    * How many players survived each stage that can lose one.
    *
    * Not drawn on the board — it is read by the production probe, which is what

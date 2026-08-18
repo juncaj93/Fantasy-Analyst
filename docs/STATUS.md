@@ -420,7 +420,13 @@ suggestions).
    nominates until it finishes or a sync fails. Syncing is a write, so a
    view-only reader's refresh rebuilds the board from stored state and never
    starts a background write loop.
-8. **The browser suite shares one dev server across all three viewports.** Run
+8. **The draft board lives on the Draft screen, and only there.** Once the
+   season is under way the Draft tab leaves the toolbar (`core/sleeper/phase.ts`),
+   and the board leaves with it — the board itself is happy to render a
+   completed draft as read-only history, but nothing else in the app currently
+   routes to it. A second entry point from a league or history context is a
+   navigation decision this workstream deliberately did not take on its own.
+9. **The browser suite shares one dev server across all three viewports.** Run
    repeatedly against a reused server, accumulated review-queue state can make
    `can reassign an item to the right player` fail; it passes on a fresh server,
    which is what CI uses. Worth isolating per project if it ever fails in CI.
@@ -580,7 +586,118 @@ six-game minimum (2), including playoff weeks in the series (1), turning a
 missing game into a zero (1), and trimming the read window before the season
 type had been read (1).
 
-## Milestone 14 — the Team screen as a weekly tool, and the waivers shell (done)
+## Milestone 14 — the room, as a board (done)
+
+The Draft screen answers "who should I take". It has never answered the other
+question a drafter asks every thirty seconds, which is *what is the room doing*
+— where the receiver run started, how many quarterbacks have gone, who is
+hoarding backs, how everybody's roster is being built. Those are questions about
+shape, and a ranked list cannot answer them however good the ranking is; until
+now the answer was a second app open on the same phone.
+
+**The entry point costs nothing.** A grid glyph beside the league name in the
+Draft header — not a row, not a tab, not a persistent `Draft Board` button. The
+bar is measured in the browser suite and is still the same two lines of type it
+was: `nav.height < 60` at every width, with the button on the title's own line.
+Everybody pays for the header on every screen of every draft; only the people
+who tap it pay for the board.
+
+**It fetches nothing.** The board draws the picks that are already in the board
+response the Draft screen's live refresh rebuilds, so a pick landing in Sleeper
+reaches the grid through exactly the sync that was already running. There is no
+second polling loop, no second endpoint and no request made from the overlay at
+all — asserted directly: with the sync fingerprint frozen, opening the board and
+switching its mode twice causes zero board rebuilds, and the existing cadence
+does not change.
+
+**It computes nothing.** `core/draft/boardGrid.ts` is a pure transformation —
+draft state → rounds → stable manager columns → pick cells — and the component
+draws what it returns. No score, no ADP, no value, no survival, no tiers; the
+ranking formula, the Monte Carlo, the tier engine, the opportunity cost and the
+polling cadence are untouched. The one arithmetic in the overlay is scroll
+positions.
+
+**One ownership model, not two.** Columns are draft slots, fixed, so a roster
+reads vertically; the snake shows up in the *pick numbers*, running left to
+right in odd rounds and right to left in even ones. Whose pick is whose comes
+from the ownership model `Next` already uses (`nextpick/ownership.ts`, imported
+rather than reimplemented), with one rule on top: a pick that has been made
+belongs to the manager Sleeper says made it, and no model overrules an event.
+
+**Compact is the default, and the restraint is the feature.** Every completed
+pick is its position in the position's own colour token — the same
+`--pos-QB-line` / `--pos-QB-tint` the player cards use, so a receiver is the
+same amber on both. Six manager columns fit on a 360px phone. Expanded swaps
+the position for `J. Hurts`, the position and the club mark from the existing
+`TeamLogo` primitive, and stops there.
+
+**Names are shortened structurally.** First token is the given name, everything
+after it identifies him — which handles `A. St. Brown`, `M. Harrison Jr.` and
+`C. McCaffrey` with one rule and no dictionary. A collision grows the initial
+one character at a time (`Mar. Brown` / `Mal. Brown`) and stops the moment the
+group separates; everybody else keeps one initial, and two genuinely identical
+names are printed identically rather than given an invented difference.
+
+**Context stays frozen.** One CSS grid inside one scroll container, with the
+manager row sticky to the top and the round column sticky to the left. Not a
+table: sticky positioning inside `display: table` is where WebKit support has
+always been thinnest, and a board whose header detaches on an iPhone is worse
+than no board.
+
+**It moves when the reader asks and not otherwise.** Centred once on open — on
+the pick on the clock, and on the reader's own column too when the two can share
+a screen — and then left alone, with a `Current` control to give the place up
+deliberately. A board that re-centred on every pick would yank the grid twelve
+times a minute during the exact activity it exists for. Switching modes keeps
+the reader's place by anchoring a *cell* rather than a pixel offset, since the
+two modes have different column widths.
+
+**The optional roster summary shipped, in the one place it is quiet.** `2 RB ·
+3 WR · 1 TE` at the foot of each expanded column, below the last round, where it
+takes nothing from any cell. Compact mode does not get it: there is no honest
+way to add a line to a 52px column, and density is the whole value of compact.
+It is also in every column header's title and accessible name, at no cost in
+pixels, in both modes.
+
+**It reads out loud in both modes.** The visible content is abbreviations by
+design, which hear badly, so each cell hides them from assistive technology and
+offers one plain sentence — pick, manager, full name, position, club — the same
+sentence compact or expanded. The pick on the clock carries `aria-current`,
+not only an outline.
+
+**A finished draft keeps its board.** Nothing about the board is tied to `draft
+is live`; a complete draft is readable history with nobody on the clock, taken
+from Sleeper's status rather than from the pick count, so a draft closed early
+does not draw a phantom turn.
+
+Checks at this milestone: 1,692 unit/integration tests (38 new — 37 in
+`tests/draftBoardGrid.test.ts` and one asserting the three new board fields end
+to end), 16 new browser tests (`e2e/draft-board.spec.ts`) run at 390, 375 and
+360, typecheck, build and `wrangler deploy --dry-run` green, and visual QA at
+430, 390, 375 and 360 in both modes, both themes, and at early / mid / late /
+complete draft states, plus landscape.
+
+And twelve deliberate mutations, each caught by a named test. Five in the pure
+layer: never reversing the snake in even rounds (3 tests), the current pick off
+by one (4), printing the full given name instead of an initial (8), a completed
+pick falling back to its seat instead of its actual owner (2), and ignoring the
+complete status so a closed draft still shows somebody on the clock (1). Seven
+in the browser: the overlay opening a polling loop of its own, switching modes
+resetting the board to round one, expanded cells printing full given names,
+compact cells carrying a metric, an unreserved club-mark box changing a cell's
+shape when the image fails, closing the board resetting the Draft filter, and
+the board button taking a row of its own in the header.
+
+Two of them initially survived, and both were informative. Ignoring the
+complete status survived because every existing test also ran the counter past
+the last pick, so `has no current cell in a draft closed before its last pick`
+was added. And the first attempt at the header mutation — making the title row
+`display: block` — was caught by nothing because it does not in fact create a
+row: an inline name and an inline-flex button still share a line. Replacing it
+with a mutation that puts the button in a block of its own failed the height
+assertion as intended.
+
+## Milestone 15 — the Team screen as a weekly tool, and the waivers shell (done)
 
 **A label removed, a judgement kept.** The `AVOID — lifetime tally -5` chip is
 gone from player cards. It said out loud what the signed tally beside the name
@@ -648,6 +765,7 @@ Checks at this milestone: 1,692 unit/integration tests (38 new), the browser
 suite extended to a fourth width — 430, the Pro Max class — plus new specs for
 the pull gesture, the weekly card, the waiver rows, the seasonal toolbar swap
 and the mark alignment. Typecheck and build green.
+
 
 ## Recommended next work
 

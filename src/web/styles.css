@@ -3713,3 +3713,470 @@ table.compact tr:last-child td {
 .install-steps li {
   margin-bottom: var(--sp-2);
 }
+
+/*
+ * ========================================================== the draft board
+ *
+ * A full-screen grid over the Draft page: rounds down, managers across, and
+ * the two axes of context frozen so that scrolling never costs the reader the
+ * answer to "whose column is this" or "which round am I in".
+ *
+ * The layout is one CSS grid inside one scroll container, which is what makes
+ * both sticky axes work in Safari. A table would have been the obvious shape
+ * and is the wrong one: sticky positioning inside `display: table` is exactly
+ * where WebKit's support has always been thinnest, and a board whose header
+ * detaches on an iPhone is worse than no board.
+ *
+ * Density is a design constraint here rather than a side effect. Compact cells
+ * carry a position and a pick number and nothing else, so six manager columns
+ * fit on a 360px phone; expanded cells add the shortest identity that is still
+ * an identity, and no metric of any kind is admitted to either.
+ */
+.dboard-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: fade-in var(--dur) var(--ease);
+}
+
+/* Compact by default; expanded columns are wider and one line taller. */
+.dboard-layer {
+  --dboard-col: 54px;
+  --dboard-round: 26px;
+  --dboard-cell-h: 40px;
+}
+
+.dboard-layer[data-mode='expanded'] {
+  --dboard-col: 78px;
+  --dboard-cell-h: 50px;
+}
+
+/* The board's own bar: close, what this is, and the two controls it owns. */
+.dboard-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: calc(var(--safe-top) + var(--sp-1)) var(--sp-2) var(--sp-1);
+  background: var(--surface);
+  border-bottom: 1px solid var(--separator-soft);
+}
+
+.dboard-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dboard-title {
+  font-size: 0.95rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.dboard-sub {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dboard-jump {
+  flex: 0 0 auto;
+}
+
+/*
+ * The scroll container, and the only thing on the screen that scrolls.
+ *
+ * `overscroll-behavior: contain` is load-bearing: without it a flick that
+ * reaches the last round carries on into the page underneath, which is how a
+ * temporary layer ends up losing somebody's place on the Draft board behind it.
+ */
+.dboard-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /*
+   * No horizontal padding, and that is not a style choice.
+   *
+   * A sticky element resolves `left: 0` against the padding box, so an inset
+   * here parks the frozen round column eight pixels in from the edge — and the
+   * cells scrolling past show through the gap it leaves. The board's own air is
+   * therefore put on the grid, where it moves with the content it belongs to.
+   */
+  padding: 0 0 calc(var(--safe-bottom) + var(--sp-4));
+}
+
+.dboard-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--dboard-round) repeat(var(--dboard-columns, 12), var(--dboard-col));
+  gap: 2px;
+  width: max-content;
+  padding: 0 var(--sp-2) var(--sp-2) 0;
+}
+
+/*
+ * The frozen context.
+ *
+ * Three z-indexes, because the two sticky axes cross: the corner has to sit
+ * over both bands, and each band has to sit over the cells it is labelling.
+ */
+.dboard-corner,
+.dboard-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  padding: var(--sp-1) 2px;
+  min-height: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-bottom: 1px solid var(--separator);
+}
+
+.dboard-corner {
+  left: 0;
+  z-index: 5;
+  align-items: center;
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  border-right: 1px solid var(--separator);
+}
+
+.dboard-head {
+  align-items: center;
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 650;
+  color: var(--text-dim);
+  overflow: hidden;
+}
+
+/*
+ * A manager's name, cut rather than allowed to widen the column.
+ *
+ * Two lines at most, because a board whose columns are as wide as the longest
+ * display name in the league is a board nobody can see two managers of at once.
+ */
+.dboard-head-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+/*
+ * Your column, said quietly.
+ *
+ * A stronger header, a hairline accent under it and a faint wash down the
+ * column. Deliberately not a border around every cell: the board is already
+ * carrying six position hues and a current-pick outline, and a bright cage
+ * around twelve of the cells would compete with all of them.
+ */
+.dboard-head-mine {
+  color: var(--accent-text);
+  font-weight: 800;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-bottom: 2px solid var(--accent);
+}
+
+.dboard-cell-mine {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+/* The round number, frozen against the left edge. */
+.dboard-round {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  border-right: 1px solid var(--separator);
+}
+
+.dboard-cell-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/*
+ * One pick.
+ *
+ * A future pick is a quiet recess with its number in it — no placeholder text,
+ * because twelve rows of the word "Waiting" is noise where the absence of a
+ * player is the whole message.
+ */
+.dboard-cell {
+  min-height: var(--dboard-cell-h);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--separator-soft);
+  background: var(--surface-inset);
+  padding: 2px 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* A round somebody traded away: no pick number, because there is no pick. */
+.dboard-cell-none {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--separator-soft);
+}
+
+/*
+ * A completed pick takes its position's own colour.
+ *
+ * The same two tokens the player cards use — `--pos-line` and `--pos-tint-bg`,
+ * set by the shared `.pos-QB` … `.pos-DEF` classes — so a receiver is the same
+ * amber here as on the board behind, and a new position anywhere in the app
+ * arrives here for free.
+ */
+.dboard-cell-done {
+  background: var(--pos-tint-bg, var(--surface));
+  border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 34%, transparent);
+  color: var(--pos-line, var(--text));
+}
+
+/* The pick number: present, and never competing with what it labels. */
+.dboard-pick {
+  font-size: 0.5rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.dboard-cell-done .dboard-pick {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* Compact: the position, as large as the cell can honestly make it. */
+.dboard-pos {
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+/* Expanded: the shortest identity that is still an identity. */
+.dboard-name {
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.dboard-meta {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1;
+}
+
+.dboard-pos-sm {
+  font-size: 0.53rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * The club mark, at board scale.
+ *
+ * The one place `--team-logo` is overridden, and only inside a cell: 22px is
+ * the size that fits the line a player's name sets on a card, and a cell is not
+ * a card. The box is still fixed before the image exists, so nothing reflows.
+ */
+.dboard-meta .team-logo,
+.dboard-meta .team-code {
+  --team-logo: 13px;
+  width: 13px;
+  height: 13px;
+  font-size: 0.45rem;
+}
+
+/*
+ * The pick on the clock.
+ *
+ * An outline and a ring, held still. No pulse, no flash: this is a board
+ * somebody is reading during the thirty seconds they have to make a decision,
+ * and a blinking cell in their peripheral vision is a cost with no benefit.
+ */
+.dboard-cell-current {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent-tint);
+}
+
+.dboard-cell-current .dboard-pick {
+  color: var(--accent-text);
+  opacity: 1;
+  font-weight: 800;
+}
+
+/*
+ * The pick that just landed.
+ *
+ * A halo in the position's own colour rather than a heavier border, so it can
+ * never be mistaken for the accent ring around the pick on the clock — those
+ * two cells are usually adjacent, and they mean opposite things.
+ */
+.dboard-cell-latest {
+  border-color: color-mix(in srgb, var(--pos-line, var(--text-dim)) 70%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pos-line, var(--text-dim)) 16%, transparent);
+}
+
+/* The optional roster summary, at the foot of an expanded column only. */
+.dboard-foot {
+  padding: var(--sp-1) 2px;
+  font-size: 0.5rem;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-align: center;
+  border-top: 1px solid var(--separator);
+  word-break: break-word;
+}
+
+.dboard-foot-mine {
+  color: var(--accent-text);
+}
+
+.dboard-foot-label {
+  background: var(--bg);
+  border-top: 1px solid var(--separator);
+}
+
+/*
+ * The narrowest phones get slightly narrower columns.
+ *
+ * At 360px the round gutter plus six 54px columns is already the whole screen;
+ * shaving four pixels keeps six columns visible with room for the seventh to
+ * show it is there, which is what tells the reader the board scrolls.
+ */
+@media (max-width: 374px) {
+  .dboard-layer {
+    --dboard-col: 50px;
+  }
+
+  .dboard-layer[data-mode='expanded'] {
+    --dboard-col: 74px;
+  }
+}
+
+/*
+ * Landscape: the same board, with the vertical space it suddenly has.
+ *
+ * A draft board is a natural thing to turn a phone sideways for, so it behaves
+ * properly when somebody does — but nothing here requires it, and there is no
+ * "rotate your device" blocker anywhere in this feature.
+ */
+@media (orientation: landscape) and (max-height: 500px) {
+  .dboard-bar {
+    padding-top: var(--sp-1);
+  }
+
+  .dboard-layer {
+    --dboard-cell-h: 34px;
+  }
+
+  .dboard-layer[data-mode='expanded'] {
+    --dboard-cell-h: 44px;
+  }
+}
+
+/*
+ * The glyph beside a navigation title.
+ *
+ * Sized to the line it sits on rather than to a tap target, because the whole
+ * point is that it costs the bar no height. The touch area is widened back out
+ * with padding that does not affect layout height, so it is still comfortably
+ * tappable on a phone.
+ */
+.nav-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.nav-title-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  margin: -6px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-text);
+  line-height: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.title-icon-btn:active {
+  opacity: 0.4;
+}
+
+/*
+ * Said to a screen reader, and to nobody else.
+ *
+ * The board is abbreviations by design — `WR`, `1.03`, a club mark — and
+ * abbreviations read badly out loud. Each cell therefore carries one plain
+ * sentence here and hides the abbreviations from assistive technology, so the
+ * spoken board says the same thing in compact mode as in expanded.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
