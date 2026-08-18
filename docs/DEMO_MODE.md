@@ -26,20 +26,23 @@ Demo Mode is a **data-source substitution layer**. There is no second app.
   repositories  ────────┐          ┌──── fixture sources
                         ▼          ▼
                  the same interfaces
-                 DraftBoardSources · StartSitInput[] · TradeCandidate[]
+                 DraftBoardSources · MatchupSources
+                 StartSitInput[] · TradeCandidate[]
                         │
                         ▼
                  the same engines
-                 buildDraftBoard · recommendLineup · recommendWaiverUpgrades
-                 priceWaiverUpgrades · evaluateBench · compareStartSit
-                 rankTrades · orderPlayers · resolveLifecycle
+                 buildDraftBoard · buildMatchupResponse · recommendLineup
+                 recommendWaiverUpgrades · priceWaiverUpgrades
+                 waiverLeagueIntel · waiverMultiWeekFor · weeklyIntelligence
+                 evaluateBench · compareStartSit · rankTrades
+                 orderPlayers · resolveLifecycle
                         │
                         ▼
                  the same React screens
 ```
 
-There is exactly one Draft screen, one Team screen, one waiver card, one player
-sheet and one scoring engine in this repository. Demo Mode renders them. If a
+There is exactly one Draft screen, one Team screen, one Matchup screen, one
+waiver card, one player sheet and one scoring engine in this repository. Demo Mode renders them. If a
 production screen changes, the demo inherits the change, because there is
 nothing to keep in step.
 
@@ -51,12 +54,13 @@ written next year inherits the behaviour for free.
 
 ### What had to change in production code
 
-Three things, all of them "one implementation instead of two":
+Four things, all of them "one implementation instead of two":
 
 | Change | Why |
 |---|---|
 | `core/draft/boardBuilder.ts` — the board assembly moved out of `server/services/draftBoard.ts` and is driven by a `DraftBoardSources` interface | So the demo runs the *same* board builder. `DraftBoardService` keeps its exact public API; every existing caller and test is untouched. |
-| `core/waivers/pricing.ts`, `core/roster/held.ts`, `core/roster/freeAgents.ts`, `core/trades/ladderInputs.ts` — assembly helpers moved out of `server/app.ts` | So a rehearsed bid and a live one are the same arithmetic. Moved verbatim. |
+| `core/matchup/build.ts` — the matchup assembly moved out of `server/services/matchupService.ts` and is driven by a `MatchupSources` interface | Same reason, same shape. The service keeps the D1 reads, the Sleeper client, the per-database forecast cache and the calibration ledger, and satisfies the interface. Its exports and tests are untouched. |
+| `core/waivers/pricing.ts`, `core/waivers/intel.ts`, `core/roster/held.ts`, `core/roster/freeAgents.ts`, `core/trades/ladderInputs.ts` — assembly helpers moved out of `server/app.ts` | So a rehearsed bid and a live one are the same arithmetic, and a rehearsed waiver card carries the same competition and multi-week columns. Moved verbatim. |
 | `POST /api/demo/enter` · `exit` · `GET status`, and a write-refusing middleware | The second half of the mutation guard — see §3. |
 
 Demo-only UI is limited to the indicator bar and the Settings picker.
@@ -124,6 +128,10 @@ and a real database, with a valid session attached), and `e2e/demo.spec.ts`
   structurally.
 - No production module imports a demo fixture. Also asserted structurally.
 - `DraftBoardSources` has no write method on it, so there is nothing to call.
+- `MatchupSources` has exactly one — `record`, the calibration ledger, because a
+  probability model nobody grades is worth nothing. The demo satisfies it with a
+  recorder that returns. Both facts are asserted: that the interface has gained
+  no second write, and that the demo's is inert.
 
 Two things are written to the browser, and only these:
 
@@ -155,8 +163,7 @@ every probability is compared exactly.
 
 ## 6. The scenarios
 
-Twenty-three of twenty-eight are wired. The five Matchup scenarios are declared
-and waiting — see §7.
+All twenty-eight are wired. Nothing in the picker is greyed out.
 
 | Group | Scenario | What it is for |
 |---|---|---|
@@ -170,6 +177,11 @@ and waiting — see §7.
 | Waivers | `waivers-tuesday-active` | $37 left, several funded rivals, one obvious add. Expected cost, worth-to-you and do-not-exceed are three different numbers; one estimate is withheld outright for want of a measured role. |
 | | `waivers-thin-data` | A priority league that has never published a bid. Upgrades stand; every price says unknown. |
 | | `waivers-processed` | Wednesday. The claim landed and the wallet moved. |
+| Matchup | `matchup-live-close` | Sunday 4:15pm, week 6. Three games finished, three running, two to come — and the two projected finals under a point apart. |
+| | `matchup-live-leading` | The same afternoon gone the reader's way. The card is about which of the opponent's remaining names can still take it. |
+| | `matchup-live-trailing` | The mirror. How much is needed, from whom, to get back to a real chance. |
+| | `matchup-injury-swing` | A starter ruled out of the night game while his slot is still changeable, and the swap priced in win probability. |
+| | `matchup-final` | Monday morning. Lost by a point and a half: what decided it, and which bench player would have won it. |
 | Trades | `trade-window` | Discovery: whose news has moved, who holds them, and which way. |
 | Draft | `draft-best-ball` | The same board in a league Sleeper flags as best ball, so Underdog's share of the baseline widens from 60% to 75%. |
 | Season | `playoff-week` | Week 15. Thin wire, no byes left, one game to plan for. |
@@ -186,8 +198,8 @@ and waiting — see §7.
 
 **Progression** (§11) is explicit only: `previous` / `next` buttons walking
 draft → post-draft → Sunday → late pivot → Tuesday waivers → processed → trade
-window → playoffs → season complete → rollover. No timers and no background
-jobs.
+window → playoffs → season complete → rollover, and separately walking the
+matchup Sunday from close to final. No timers and no background jobs.
 
 ### Interesting, not toy
 
@@ -249,15 +261,16 @@ round, which is the only way a reader ever sees the guard work.
 
 ## 8. What is declared and not wired
 
-Honesty here matters more than a longer list.
+Nothing. Every scenario in the registry is backed by a production surface, and
+`tests/demo.scenarios.test.ts` asserts that the awaiting list is empty.
 
-**Matchup** — `matchup-live-close`, `matchup-live-leading`,
-`matchup-live-trailing`, `matchup-injury-swing`, `matchup-final`. There is no
-Matchup surface in the product: no tab, no route, no live scoring, no
-remaining-points distribution. Wiring these would mean Demo Mode inventing the
-UI §1 forbids it from inventing, and the audit would then be auditing a screen
-no user can reach. They are listed in the picker, greyed, with the reason
-printed. `DemoRuntime.forScenario` refuses to run them.
+The mechanism is still there and still armed. `DemoScenario.awaiting` names a
+surface and a reason; the picker greys such a scenario and prints the reason,
+and `DemoRuntime.forScenario` refuses to run it. The five Matchup scenarios used
+it between the day this feature landed and the day the Matchup screen did, which
+is exactly what it is for: §18 forbids the merge from pretending missing
+functionality exists, and a greyed row that says why is worth more to an audit
+than a scenario quietly missing from the list.
 
 ---
 
@@ -270,9 +283,9 @@ session and the API hook, and nothing else.
 
 | | gzip |
 |---|---|
-| App JavaScript, without Demo Mode | ~94 kB |
-| App JavaScript, with it | 101.0 kB |
-| Demo Mode (never on the render path) | 72.3 kB across 8 chunks |
+| App JavaScript, without Demo Mode | ~98 kB |
+| App JavaScript, with it | 104.8 kB |
+| Demo Mode (never on the render path) | 92.3 kB across 8 chunks |
 
 `vite.config.ts` names every demo chunk `assets/demo-*.js`, which is what lets
 `perf-budgets.json` exclude them from the render-path budgets *and* cap them
@@ -322,8 +335,6 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 
 ## 12. Limitations
 
-- **Matchup is declared, not wired** (§8). This is the honest state of the
-  product, not an omission.
 - **No newsletter excerpts.** The evidence ledger holds publisher text, and
   inventing plausible excerpts would put words in a publisher's mouth on a
   screen whose premise is that every original excerpt is preserved verbatim. The
