@@ -289,6 +289,25 @@ reaching 44 means taking the difference from the star or from the row's own
 expand target. That is a design trade-off rather than a bug with an obvious fix,
 and it is recorded here rather than decided unilaterally.
 
+### P3 — a density guard that measured the wrong thing
+
+The 360px guard asserted "at least eight rows above the toolbar", and counting
+rows made it hostage to something it was never written to measure. A card is
+58px ordinarily, 75px carrying a tally and 92px carrying a tier warning —
+deliberately, because a warning needs the line — so how many clear the bar
+depends on *which players are at the top of the demo board*.
+
+The positional-structure cap reordered that board by a few hundredths and moved
+one 92px warned card from tenth to seventh. The count went 8 → 7 with **no
+space spent anywhere**: measured against `main`, the list starts at the same
+129px and every card is the same height, in a different order.
+
+The test's own comment says it exists so that "if a later pass spends the space
+on padding again, this fails". Both halves of that are now asserted directly —
+the chrome above the list, and the depth of the first screen in *ordinary*
+cards. Verified by mutation: ten pixels of row padding fails it exactly as
+before, and a reordered board no longer does.
+
 ### What the blend did not cause
 
 The DOG/Sleeper market blend was audited against §1 of the addendum and is
