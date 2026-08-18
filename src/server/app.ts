@@ -11,6 +11,7 @@
  */
 
 import { importAdpSnapshot } from '../core/adp/import.ts';
+import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { compareStartSit, type StartSitInput } from '../core/startsit/engine.ts';
@@ -335,6 +336,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           position: p?.position ?? '',
           team: p?.team ?? '',
           status: p?.status ?? null,
+          // The number on his shirt, which is what identifies a player on a
+          // team sheet once the draft has stopped being the thing happening.
+          jerseyNumber: p?.jerseyNumber ?? null,
           newsNet: signal?.raw.net ?? 0,
           recentNet: signal?.last30.net ?? 0,
           pending: signal?.pendingCount ?? 0,
@@ -368,10 +372,26 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       // open. Presenting a starters/bench split would invent decisions the user
       // has not made.
       live: liveRoster.live,
+      /*
+       * Which pick he was, and what that is called.
+       *
+       * `pickNo` is kept because it is the raw fact and other things read it;
+       * `draftPick` is the same fact in the unit the room used — `1.04` — and
+       * it is what a row prints. Formatted here rather than on the screen so
+       * the Team page, the player detail and Trades cannot disagree about which
+       * round pick 40 was in.
+       */
       drafted: hydrate(liveRoster.players.map((p) => p.playerId)).map((p, i) => ({
         ...p,
         pickNo: liveRoster.players[i]!.pickNo,
+        draftPick: draftPickLabel(liveRoster.players[i]!.pickNo, draft?.teams ?? league.totalRosters ?? 12),
       })),
+      /*
+       * How many seats the draft had, so a client can format a pick number it
+       * was not handed a label for. Without it `1.04` is unrecoverable from
+       * `40` — the round length is the whole of the conversion.
+       */
+      teams: draft?.teams ?? league.totalRosters ?? 12,
       counts: liveRoster.counts,
       filled: liveRoster.filled,
       remaining: liveRoster.remaining,
@@ -634,7 +654,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ----------------------------------------------------------------- players
   router.get('/api/players', async (ctx) => {
     const q = ctx.url.searchParams.get('q') ?? '';
-    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
+    /*
+     * How deep the list goes, and where this page starts.
+     *
+     * The default was 60 and the ceiling was 200, which is why Players ended
+     * somewhere around the sixtieth name and looked exactly like the end of the
+     * player universe rather than the end of a page — the same failure the
+     * draft board had. Both numbers move: a page is 100 by default and may be
+     * up to 200, and `offset` means the client can keep asking.
+     *
+     * The cap on one *request* stays, and deliberately. It is not a cap on
+     * coverage now that there is an offset; it is the thing that keeps a single
+     * response small enough to parse on a phone, and it is what makes the
+     * client render a page at a time instead of putting thousands of rows into
+     * the DOM at once.
+     */
+    const limit = Math.min(Math.max(Number(ctx.url.searchParams.get('limit') ?? 100) || 100, 1), 200);
+    const offset = Math.max(Number(ctx.url.searchParams.get('offset') ?? 0) || 0, 0);
     const position = ctx.url.searchParams.get('position');
     const repo = new PlayerRepo(ctx.env.db);
 
@@ -652,7 +688,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * are no more players called that". Asking for more when a filter is on
      * costs nothing when it is off.
      */
-    const pool = q ? await repo.search(q, position ? 400 : 200) : (await repo.listAll()).filter((p) => p.active);
+    /*
+     * The pool a page is cut from has to be deeper than the page.
+     *
+     * A search returns the best N matches for the text and the position filter
+     * then narrows those, so a shallow search pool looks exactly like "there
+     * are no more players called that". It also has to cover the offset: page
+     * three of a filtered search is only reachable if the search returned
+     * enough rows to have a page three.
+     */
+    const searchDepth = Math.max((position ? 400 : 200), offset + limit * 3);
+    const pool = q ? await repo.search(q, searchDepth) : (await repo.listAll()).filter((p) => p.active);
     // `FLX` is a view over RB/WR/TE and is never a position on a player — see
     // core/sleeper/eligibility.ts, which every screen's filter goes through.
     const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
@@ -674,13 +720,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
     }
 
+    /*
+     * Scored deep enough to serve this page, then some.
+     *
+     * The shortlist exists because the tally nudge is applied after the market
+     * sort, so a player can move a few places and the window has to be wider
+     * than the page for that movement to be real rather than clipped. It now
+     * grows with the offset, which is what makes page five as honest as page
+     * one — before, every page was cut from the same first 120 names.
+     */
     const shortlist = [...filtered]
       .sort(
         (a, b) =>
           (ranks.get(a.id)?.adp ?? Infinity) - (ranks.get(b.id)?.adp ?? Infinity) ||
           (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity),
       )
-      .slice(0, Math.max(limit * 3, 120));
+      .slice(0, offset + Math.max(limit * 3, 120));
 
     const signals = await new EvidenceRepo(ctx.env.db).getSignals(shortlist.map((p) => p.id));
     const flags = await new PlayerFlagsRepo(ctx.env.db).forPlayers(shortlist.map((p) => p.id));
@@ -692,12 +747,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         net: signals.get(p.id)?.raw.net ?? 0,
         player: p,
       })),
-    ).slice(0, limit);
+    );
+    const page = ordered.slice(offset, offset + limit);
 
     return jsonResponse({
       tallyWeight: TALLY_WEIGHT,
       rankingSource: snapshot ? snapshot.label : null,
-      players: ordered.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
+      /*
+       * Whether asking again would return anything.
+       *
+       * Sent rather than inferred from `players.length === limit`, which is
+       * wrong exactly once — on the page that happens to end on the boundary,
+       * where the client would show a spinner for a page that does not exist.
+       */
+      offset,
+      hasMore: filtered.length > offset + page.length,
+      total: filtered.length,
+      players: page.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
         id: row.player.id,
         name: row.player.fullName,
         position: row.player.position,
@@ -810,7 +876,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/players/:id/detail', async (ctx) => {
     const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
     if (!player) return errorResponse('player not found', 404);
-    return jsonResponse(await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id));
+    const detail = await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id);
+    /*
+     * Where he came from, kept after it stops being the headline.
+     *
+     * Mid-draft a Team row says `1.04` and the reader needs nothing more. Once
+     * the season starts the row shows his shirt number instead — and "what did
+     * I spend on him" is still a real question in week nine, so the draft
+     * position moves here rather than being dropped.
+     *
+     * Read from Sleeper's own draft history, and only ever attached to a
+     * manager Sleeper names. Attributing a pick to a person is the worst thing
+     * on this card to get wrong, so an unnamed seat produces a line about the
+     * pick alone rather than a guess about who made it.
+     */
+    return jsonResponse({ ...detail, draft: await draftProvenanceFor(ctx.env.db, player.id) });
   });
 
   /**
@@ -1523,6 +1603,50 @@ async function boundedFreeAgents(
  * Used by both the manual refresh endpoint and the scheduled worker.
  */
 /** Non-empty body text, or null. Used only to report whether one was kept. */
+/**
+ * Which pick a player was, and who made it — from Sleeper's draft history.
+ *
+ * Answered from the selected league, because "drafted 1.02 by Joe" is a fact
+ * about one league rather than about the player: the same man went in the
+ * second round of one draft and the fourth of another, and a card that mixed
+ * them would be worse than a card with no line at all.
+ *
+ * Every part degrades independently. No selected league, no draft, or no pick
+ * for this player returns null and the card shows nothing; a pick whose seat
+ * Sleeper never named still produces the pick, which is most of the value.
+ */
+async function draftProvenanceFor(
+  db: Database,
+  playerId: string,
+): Promise<{ pickNo: number; pick: string; managerName: string | null; season: string | null; line: string } | null> {
+  const leagues = new LeagueRepo(db);
+  const league = (await leagues.listLeagues()).find((l) => l.isSelected) ?? null;
+  if (!league?.draftId) return null;
+
+  const draft = await leagues.getDraft(league.draftId);
+  if (!draft) return null;
+
+  const pick = (await leagues.listPicks(draft.id)).find((p) => p.playerId === playerId);
+  if (!pick) return null;
+
+  // The manager who actually holds the seat, named only if Sleeper named them.
+  const rosters = await leagues.listRosters(league.id);
+  const managerName =
+    (rosters.find((r) => r.rosterId === pick.rosterId)?.ownerName ?? '').trim() || null;
+
+  const teams = draft.teams || league.totalRosters || 12;
+  const label = draftPickLabel(pick.pickNo, teams);
+  if (!label) return null;
+
+  return {
+    pickNo: pick.pickNo,
+    pick: label,
+    managerName,
+    season: draft.season ?? null,
+    line: draftProvenanceLine({ pickNo: pick.pickNo, teams, managerName, season: draft.season }) ?? '',
+  };
+}
+
 function bodyOf(value: string | null | undefined): string | null {
   return value && value.trim() ? value : null;
 }

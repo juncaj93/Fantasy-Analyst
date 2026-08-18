@@ -73,3 +73,15 @@ UPDATE player_flags
 -- A comma-separated list of upper-case team codes, empty by default — so every
 -- league behaves precisely as it did until somebody says otherwise.
 ALTER TABLE leagues ADD COLUMN local_teams TEXT NOT NULL DEFAULT '';
+
+-- 4. THE NUMBER ON THE SHIRT
+--
+-- During a draft the interesting fact about a player on your roster is which
+-- pick he was — `1.04`, in the unit the room actually used. Afterwards that
+-- stops being the headline (everybody has fifteen of them) and the number that
+-- identifies a player on a team sheet is the one he wears.
+--
+-- Sleeper publishes it on the player dump. Nullable, because plenty of players
+-- do not have one recorded and a made-up jersey number is worse than none:
+-- `#0` is a real number that real players wear.
+ALTER TABLE players ADD COLUMN jersey_number INTEGER;

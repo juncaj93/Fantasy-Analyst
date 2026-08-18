@@ -52,6 +52,23 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+/*
+ * Three ways to read the same board, and one pure function that reorders it.
+ *
+ * The ordering lives in core rather than here for the reason every other
+ * decision on this screen does: it is arithmetic, it has a right answer, and it
+ * can be checked without a browser. What this file supplies is the control and
+ * which mode is selected — see boardSort.ts for the guarantee that switching
+ * modes cannot touch a number on a card.
+ */
+import {
+  DEFAULT_SORT_MODE,
+  SORT_DESCRIPTIONS,
+  SORT_LABELS,
+  SORT_MODES,
+  sortBoard,
+  type SortMode,
+} from '../../core/draft/boardSort.ts';
 import { AvoidBadge, QueueControl } from '../components/decisions.tsx';
 /*
  * The room, as a board.
@@ -134,6 +151,16 @@ export function DraftScreen({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState(ALL_FILTER);
+  /**
+   * Which ordering is on screen.
+   *
+   * Presentation only, and it never reaches the server: the whole scored board
+   * is already here, so a sort is a reorder of what the reader has rather than
+   * a new request. That is what makes switching instant mid-draft, and it is
+   * also what makes it safe — a mode that cannot ask for anything cannot come
+   * back with different numbers.
+   */
+  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT_MODE);
   /**
    * Finding one player on a board of hundreds.
    *
@@ -462,9 +489,22 @@ export function DraftScreen({
    * Removing only the request limit would have left this one quietly doing the
    * same damage.
    */
-  const visible = withTierDividers(board.recommendations, isSinglePosition && !searching).filter((item) =>
-    matchesQuery(item.rec.name, query),
-  );
+  /*
+   * Sort, then group into tiers, then filter — in that order, and the order
+   * matters.
+   *
+   * Tier dividers claim that everything above one is a tier, which is only true
+   * of a contiguous run; drawing them over a board sorted by DOG would be
+   * asserting boundaries in a sequence the tier model never saw. So a market
+   * sort turns them off, exactly as a mixed-position board already does. The
+   * query filters last, because it is presentation over whatever order the
+   * reader chose.
+   */
+  const ordered = sortBoard(board.recommendations, sort);
+  const visible = withTierDividers(
+    ordered,
+    isSinglePosition && !searching && sort === 'score',
+  ).filter((item) => matchesQuery(item.rec.name, query));
 
   /*
    * When the board last moved, and when it was last checked.
@@ -564,27 +604,38 @@ export function DraftScreen({
         }
         trailing={
           /*
-            A reload glyph, not a connection switch. The old ▶ Live / ⏸ pair
-            implied the user had to keep a link open; what they actually want is
-            "show me what just happened", so that is what the control says.
+            Two controls sharing the bar's trailing end, and no new row.
+
+            The row a control costs on this screen is a player, so the sort sits
+            beside the refresh glyph rather than above the list. Both are about
+            the board as a whole, which is what the trailing end of the
+            navigation bar is for; the filter chips below stay about which
+            players, which is a different question and keeps its own row.
           */
-          <button
-            type="button"
-            className="icon-btn"
-            data-testid="draft-refresh"
-            aria-label={
-              unlocked
-                ? 'Refresh draft from Sleeper'
-                : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
-            }
-            aria-busy={refreshing}
-            disabled={refreshing}
-            onClick={() => void refreshNow()}
-          >
-            <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
-              ↻
-            </span>
-          </button>
+          <span className="nav-trailing-group">
+            <SortControl
+              value={sort}
+              onChange={setSort}
+              dogAvailable={board.dogState?.available !== false}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="draft-refresh"
+              aria-label={
+                unlocked
+                  ? 'Refresh draft from Sleeper'
+                  : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
+              }
+              aria-busy={refreshing}
+              disabled={refreshing}
+              onClick={() => void refreshNow()}
+            >
+              <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
+                ↻
+              </span>
+            </button>
+          </span>
         }
       />
 
@@ -727,6 +778,57 @@ export function DraftScreen({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Score / ADP / DOG, in the space a control has beside the refresh glyph.
+ *
+ * Three words, because three words is what the three orderings need and any
+ * fewer would be a puzzle: `S / A / D` saves nine characters and costs the
+ * reader the meaning. It is a radio group rather than a cycle button — a cycle
+ * would hide two of the three states and make "which order am I looking at"
+ * a thing to remember rather than a thing to see.
+ *
+ * The DOG chip stays visible when Underdog has priced nobody, and says so in
+ * its accessible name rather than vanishing. A control that disappears when a
+ * data source is down teaches the reader that the feature is unreliable; one
+ * that explains itself teaches them what is actually wrong.
+ */
+function SortControl({
+  value,
+  onChange,
+  dogAvailable,
+}: {
+  value: SortMode;
+  onChange: (mode: SortMode) => void;
+  dogAvailable: boolean;
+}) {
+  return (
+    <span className="sort-control" role="radiogroup" aria-label="Sort the board" data-testid="draft-sort">
+      {SORT_MODES.map((mode) => {
+        const unavailable = mode === 'dog' && !dogAvailable;
+        return (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            className="sort-chip"
+            aria-checked={value === mode}
+            data-testid={`sort-${mode}`}
+            data-active={value === mode ? 'yes' : 'no'}
+            aria-label={
+              unavailable
+                ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                : SORT_DESCRIPTIONS[mode]
+            }
+            onClick={() => onChange(mode)}
+          >
+            {SORT_LABELS[mode]}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 
@@ -950,6 +1052,21 @@ function RecommendationRow({
             <span className="metric">
               ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
             </span>
+            {/*
+              Underdog's own number, beside Sleeper's rather than instead of it.
+
+              Two markets, two columns, and the reader can see them disagree —
+              which is the whole reason the second one is worth having. It is
+              absent rather than blank when Underdog has not priced him, so a
+              card costs nothing for a player the source does not cover and the
+              line stays the height it always was.
+            */}
+            {rec.dogAdp == null ? null : (
+              <span className="metric" data-testid="dog-metric">
+                DOG{' '}
+                <strong title={rec.marketDisagreement?.note ?? 'Raw Underdog ADP'}>{rec.dogAdp}</strong>
+              </span>
+            )}
             <span className="metric">
               Val{' '}
               <strong

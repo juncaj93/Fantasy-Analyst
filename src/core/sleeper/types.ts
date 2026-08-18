@@ -90,6 +90,8 @@ export interface SleeperPlayer {
    */
   search_rank?: number | null;
   years_exp?: number | null;
+  /** Jersey number. Sleeper sends it as a number, a string, or not at all. */
+  number?: number | string | null;
   gsis_id?: string | null;
   espn_id?: number | string | null;
   yahoo_id?: number | string | null;

@@ -2178,6 +2178,80 @@ button:disabled {
   opacity: 0.4;
 }
 
+/*
+ * The sort control and the refresh glyph, sharing the bar's trailing end.
+ *
+ * They are both about the board as a whole, which is what this end of the
+ * navigation bar is for, and putting them together is what keeps the sort from
+ * costing a row — and on this screen a row is a player.
+ */
+.nav-trailing-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/*
+ * Score / ADP / DOG.
+ *
+ * A segmented control at the smallest size that is still a control: three
+ * words, one hairline frame, and the selected one filled. It deliberately does
+ * not look like the filter chips below — those choose which players, this
+ * chooses what order, and two identical-looking rows of chips answering
+ * different questions is how a screen stops being readable at a glance.
+ */
+.sort-control {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.sort-chip {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  /*
+   * Tight, because three of these plus the refresh glyph share one end of the
+   * bar on a 360px phone. The row itself is a full-height tap target, so the
+   * narrow padding costs legibility rather than reachability.
+   */
+  padding: 5px 7px;
+  min-height: 30px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.sort-chip + .sort-chip {
+  border-left: 1px solid var(--hairline);
+}
+
+.sort-chip[data-active='yes'] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.sort-chip:active {
+  opacity: 0.6;
+}
+
+/* The narrowest phones: the words stay, the padding goes. */
+@media (max-width: 375px) {
+  .sort-chip {
+    padding: 5px 5px;
+    font-size: 0.64rem;
+  }
+}
+
 .icon-btn:disabled {
   opacity: 0.5;
   cursor: progress;
@@ -3874,4 +3948,26 @@ table.compact tr:last-child td {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+ * The foot of a paged list: either the control that fetches more, or the line
+ * that says there is no more.
+ *
+ * Quiet and centred. It is the only thing on the screen that is about the list
+ * rather than about a player, so it reads as a footnote — and it is always
+ * present once the list has loaded, because the alternative is a list that
+ * simply stops and leaves the reader unable to tell "no more players" from
+ * "still loading". That ambiguity is the whole reason Players appeared to end
+ * at sixty names.
+ */
+.list-end {
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-3) var(--sp-2);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  text-align: center;
 }

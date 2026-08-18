@@ -82,8 +82,29 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   name: string;
   position: string;
   team: string;
+  /** Sleeper ADP — the market the user is drafting in. */
   adp: number | null;
+  /**
+   * Raw Underdog ADP, or null when no usable snapshot has priced him.
+   *
+   * Never filled in from `adp`. A blank DOG means Underdog has not priced him
+   * or the snapshot is not trusted — `dogState` on the board says which.
+   */
+  dogAdp: number | null;
+  /** How far past **Sleeper's** ADP this pick is. Unchanged by the blend. */
   adpValue: number | null;
+  /** The blended market baseline that priced him, and how it was weighted. */
+  marketBlend: {
+    adp: number | null;
+    weights: { dog: number; sleeper: number };
+    nominal: { dog: number; sleeper: number };
+    sources: ('dog' | 'sleeper')[];
+    singleSource: boolean;
+    unknown: boolean;
+    note: string;
+  };
+  /** How far apart the two markets are. Context, never a second bonus. */
+  marketDisagreement: { picks: number | null; leader: 'dog' | 'sleeper' | null; note: string | null };
   survivalProbability: number | null;
   newsLifetimeNet: number;
   news30Net: number;
@@ -265,6 +286,34 @@ export interface DraftBoard {
   rosterCounts: Record<string, number>;
   myRoster: { playerId: string; name: string; position: string; team: string; pickNo: number }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
+  /**
+   * Where the DOG column stands, and — when it is absent — why.
+   *
+   * Optional so a client running against an older deployment simply shows no
+   * DOG rather than breaking. The reason string is what stops a blank column
+   * from being ambiguous between "Underdog has not priced him" and "we stopped
+   * trusting the file".
+   */
+  dogState?: {
+    available: boolean;
+    provider: string | null;
+    sourceType: string | null;
+    snapshotAt: string | null;
+    fetchedAt: string | null;
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    ageHours: number | null;
+    matched: number;
+    reason: string;
+  };
+  /** How the market baseline is weighted for this league, and on what basis. */
+  marketFormat?: {
+    format: 'standard' | 'best_ball';
+    bestBall: boolean;
+    confident: boolean;
+    basis: string;
+    weights: { dog: number; sleeper: number };
+    reason: string;
+  };
   recommendations: DraftRecommendation[];
   rosterAlerts: RosterAlert[];
   /** Every starting slot the league has, filled out of required. */
@@ -658,6 +707,13 @@ export interface RosterPlayer {
   position: string;
   team: string;
   status: string | null;
+  /**
+   * The number on his shirt, when Sleeper records one.
+   *
+   * What a Team row shows once the draft is over. Optional so a client running
+   * against an older deployment falls back to the pick rather than breaking.
+   */
+  jerseyNumber?: number | null;
   newsNet: number;
   recentNet: number;
   pending: number;

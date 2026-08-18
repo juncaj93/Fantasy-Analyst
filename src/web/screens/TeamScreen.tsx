@@ -41,6 +41,11 @@ import {
 } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import { FLX_FILTER, offersFlexFilter, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
+/*
+ * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
+ * detail and Trades so the three cannot disagree about which round pick 40 was.
+ */
+import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 
 interface OpenSlot {
@@ -1140,15 +1145,28 @@ function LiveDraftRoster({
   roster,
 }: {
   roster: {
-    drafted: (RosterPlayer & { pickNo: number | null })[];
+    /** `draftPick` is `pickNo` said as `1.04`; both travel so neither is re-derived. */
+    drafted: (RosterPlayer & { pickNo: number | null; draftPick?: string | null })[];
     counts: Record<string, number>;
     filled: number;
     remaining: number;
     openStarters: OpenSlot[];
     picksMade: number;
+    /** Seats in the draft, so a client can format a pick it was handed raw. */
+    teams?: number;
   };
 }) {
-  const positions = Object.keys(roster.counts).sort();
+  /*
+   * QB, RB, WR, TE, then the flex positions, then defence.
+   *
+   * This was `Object.keys(...).sort()`, which is alphabetical — so a roster
+   * opened with DEF above QB, and QB above RB, in an order no fantasy site has
+   * ever used. `orderPositions` is the same helper the draft board's chips and
+   * the Players filter already go through, so all three now read in one order
+   * and cannot drift apart again. Anything unexpected is kept and put last
+   * rather than dropped.
+   */
+  const positions = orderPositions(Object.keys(roster.counts));
   return (
     <>
       {/*
@@ -1197,7 +1215,44 @@ function LiveDraftRoster({
                   <div key={p.playerId} className="roster-line" data-testid="drafted-line">
                     <span className="player-name">{p.name}</span>
                     <PositionBadge position={p.position} team={p.team} />
-                    <span className="pick-no">{p.pickNo ? `#${p.pickNo}` : 'held'}</span>
+                    {/*
+                      `1.04` while the draft runs, `#8` once it is over.
+
+                      `#40` — the overall pick number — was neither. Nobody
+                      thinks in overall pick numbers, and read as a jersey it is
+                      a number no player wears. Which of the two is wanted is
+                      decided by whether the draft is live rather than by the
+                      date, and the pick is not lost when it stops being the
+                      headline: it moves into the player's detail. See
+                      core/draft/provenance.ts.
+                    */}
+                    <span
+                      className="pick-no"
+                      data-testid="roster-row-label"
+                      title={
+                        p.draftPick
+                          ? `Drafted ${p.draftPick}`
+                          : p.pickNo
+                            ? `Pick ${p.pickNo}`
+                            : 'On the roster, with no draft pick behind him'
+                      }
+                    >
+                      {/*
+                        `drafting: true` because this component only renders
+                        while the draft is live — see `live` on the roster
+                        response, which is what chooses between this view and
+                        the starters/bench one. The flag is passed explicitly
+                        rather than assumed inside the helper so the same helper
+                        can answer for the post-draft view too.
+                      */}
+                      {p.draftPick ??
+                        rosterRowLabel({
+                          drafting: true,
+                          pickNo: p.pickNo,
+                          jerseyNumber: p.jerseyNumber,
+                          teams: roster.teams ?? 12,
+                        })}
+                    </span>
                   </div>
                 ))}
             </div>

@@ -19,6 +19,7 @@ interface PlayerRow {
   aliases_json: string;
   external_ids_json: string;
   draft_rank: number | null;
+  jersey_number?: number | null;
 }
 
 function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer {
@@ -36,6 +37,7 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
     externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
     searchRank: row.draft_rank ?? null,
+    jerseyNumber: row.jersey_number ?? null,
   };
 }
 
@@ -126,8 +128,8 @@ export class PlayerRepo {
             `INSERT INTO players (
                id, sleeper_player_id, full_name, first_name, last_name, team, position,
                status, active, normalized_name, aliases_json, external_ids_json, draft_rank,
-               created_at, updated_at
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               jersey_number, created_at, updated_at
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                sleeper_player_id = excluded.sleeper_player_id,
                full_name         = excluded.full_name,
@@ -141,6 +143,7 @@ export class PlayerRepo {
                aliases_json      = excluded.aliases_json,
                external_ids_json = excluded.external_ids_json,
                draft_rank        = excluded.draft_rank,
+               jersey_number     = excluded.jersey_number,
                updated_at        = excluded.updated_at`,
           )
           .bind(
@@ -157,6 +160,7 @@ export class PlayerRepo {
             toJson(p.aliases),
             toJson(p.externalIds ?? {}),
             p.searchRank ?? null,
+            p.jerseyNumber ?? null,
             now,
             now,
           ),
