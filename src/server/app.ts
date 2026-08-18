@@ -29,7 +29,24 @@ import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
 import { resolveLifecycle } from '../core/season/lifecycle.ts';
 import { buildRolloverReport } from './services/rolloverService.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
-import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
+import { recommendWaiverUpgrades, type WaiverCandidate } from '../core/startsit/waivers.ts';
+import { evaluatePlayer } from '../core/startsit/engine.ts';
+import type { LineupRecommendation } from '../core/startsit/lineup.ts';
+import type { RosterShape, ScoringProfile } from '../core/sleeper/scoring.ts';
+import {
+  recommendBid,
+  simulateOpportunityCost,
+  type BidRecommendation,
+  type OpportunityCost,
+  type RoleStability,
+  type ShelfLife,
+} from '../core/faab/strategy.ts';
+import { trendingHeadline } from '../core/market/trending.ts';
+import { detectDisagreement, type Disagreement } from '../core/market/disagreement.ts';
+import { evaluateBench, type HeldPlayer } from '../core/roster/bench.ts';
+import { buildLadder, type LadderInputs } from '../core/trades/ladder.ts';
+import { assessConsolidation, type ConsolidationAdvice } from '../core/trades/consolidation.ts';
+import { LeagueStrategyService, type StrategyContext } from './services/leagueStrategyService.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -551,6 +568,31 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       lineup,
     });
 
+    /*
+     * What each upgrade would cost, and what paying it would cost you.
+     *
+     * Bolted onto the existing advice rather than folded into it: the waiver
+     * engine answers "would he improve the lineup", which is true whether or
+     * not the league bids for players at all. The price is a second question
+     * with its own failure modes — an unpublished budget, a priority league, no
+     * bid history — and every one of them degrades to a sentence rather than
+     * taking the upgrade list with it.
+     */
+    const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
+      .context(league.id, { week: nflState?.week ?? 1, season: league.season })
+      .catch(() => null);
+
+    const budgets = strategy
+      ? priceWaiverUpgrades({
+          advice,
+          strategy,
+          rosterInputs,
+          candidateInputs,
+          rosteredIds,
+        })
+      : [];
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
@@ -558,6 +600,131 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       ...advice,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
+      faab: strategy
+        ? {
+            rule: strategy.budget.rule,
+            mine: strategy.budget.rosters.find((r) => r.isMine) ?? null,
+            rosters: strategy.budget.rosters,
+            prices: strategy.prices,
+            losingBids: strategy.losingBids,
+            bids: budgets,
+            notes: strategy.notes,
+            trendingCapturedAt: strategy.trendingCapturedAt,
+          }
+        : null,
+    });
+  });
+
+  /**
+   * Refresh the league-strategy inputs: transactions and the trending list.
+   *
+   * A write, and rate limited like every other manual refresh. Bounded to a few
+   * weeks per call by the service itself, so an established league fills its
+   * history over several refreshes rather than making eighteen requests in one.
+   */
+  router.post('/api/leagues/:id/strategy/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('strategy');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
+
+    const db = ctx.env.db;
+    const league = await new LeagueRepo(db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const service = new LeagueStrategyService(db, { sleeper: ctx.env.sleeper });
+    const transactions = await service.syncTransactions({
+      leagueId: league.id,
+      sleeperLeagueId: league.sleeperLeagueId,
+      season: league.season,
+      week: state?.week ?? 1,
+    });
+    const trending = await service.captureTrending();
+    return jsonResponse({ transactions, trending });
+  });
+
+  /**
+   * Rebuild the manager profiles from league history.
+   *
+   * Separate from the refresh above and deliberately so: it walks the
+   * previous-league chain and costs dozens of requests to produce a handful of
+   * sentences that change perhaps once a season. Nothing calls it on a page
+   * load.
+   */
+  router.post('/api/leagues/:id/managers/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('managers');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
+
+    const league = await new LeagueRepo(ctx.env.db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    const result = await new LeagueStrategyService(ctx.env.db, { sleeper: ctx.env.sleeper }).refreshProfiles({
+      leagueId: league.id,
+      sleeperLeagueId: league.sleeperLeagueId,
+    });
+    return jsonResponse(result);
+  });
+
+  /** What has been learned about the people in this league. Read-only. */
+  router.get('/api/leagues/:id/managers', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const [rosters, profiles] = await Promise.all([
+      leagueRepo.listRosters(league.id),
+      new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id),
+    ]);
+
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      room: profiles.room,
+      managers: rosters.map((roster) => ({
+        rosterId: roster.rosterId,
+        ownerName: roster.ownerName,
+        isMine: roster.isMine,
+        trade: profiles.trade.get(roster.rosterId) ?? null,
+        draft: profiles.draft.get(roster.rosterId) ?? null,
+      })),
+    });
+  });
+
+  /**
+   * What each bench slot is earning, and which ones are earning least.
+   *
+   * Deliberately its own endpoint rather than a field on the roster: it needs
+   * the free-agent pool scored, which is the same bounded scan the waiver
+   * advice does, and a roster view should not pay for it.
+   */
+  router.get('/api/leagues/:id/bench', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    if (!mine) return jsonResponse({ found: false, dropCandidates: [], ranked: [], notes: [] });
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    const rosteredIds = new Set<string>();
+    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
+    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable: startablePositions(shape) });
+
+    const [rosterInputs, candidateInputs] = await Promise.all([
+      startSitInputsFor(db, mine.playerIds),
+      startSitInputsFor(db, candidateIds),
+    ]);
+
+    const lineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
+    const advice = evaluateBench(
+      buildHeldPlayers({ rosterInputs, candidateInputs, lineup, profile, reserveIds: mine.reserveIds }),
+    );
+
+    return jsonResponse({
+      found: true,
+      league: { id: league.id, name: league.name },
+      ...advice,
     });
   });
 
@@ -1056,6 +1223,77 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/trades', async (ctx) => {
     const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
     return jsonResponse(await new TradeService(ctx.env.db).build({ limit }));
+  });
+
+  /**
+   * What to offer for one specific player, and where to stop.
+   *
+   * A separate request from the trade board on purpose. The board is discovery
+   * — whose news is moving — and this is negotiation, which needs a named
+   * target, both rosters scored, and the partner's own history. Nobody wants
+   * that computed for sixty players they are not pursuing.
+   *
+   * The values are weekly fantasy points from the same optimiser the Team
+   * screen draws, so the ladder is denominated in the one currency this app
+   * already calibrates. There is no separate "trade value" scale to keep in
+   * step with anything.
+   */
+  router.get('/api/leagues/:id/trades/ladder', async (ctx) => {
+    const db = ctx.env.db;
+    const leagueRepo = new LeagueRepo(db);
+    const league = await leagueRepo.getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const targetId = ctx.url.searchParams.get('playerId');
+    if (!targetId) return errorResponse('playerId is required', 400);
+
+    const rosters = await leagueRepo.listRosters(league.id);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const theirs = rosters.find((r) => !r.isMine && r.playerIds.includes(targetId)) ?? null;
+    if (!mine) return errorResponse('no roster in this league is marked as yours', 409);
+    if (!theirs) {
+      /*
+       * Not an error. A player nobody else holds is a waiver add, and saying so
+       * is more useful than a 404 that leaves the caller guessing which of the
+       * two things went wrong.
+       */
+      return jsonResponse({ found: false, reason: 'Nobody in this league rosters him — this is an add, not a trade.' });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const shape = buildRosterShape(league.rosterPositions);
+    const [mineInputs, theirsInputs] = await Promise.all([
+      startSitInputsFor(db, mine.playerIds),
+      startSitInputsFor(db, theirs.playerIds),
+    ]);
+
+    const ladder = buildLadderFor({ targetId, mineInputs, theirsInputs, shape, profile });
+    if (!ladder) return errorResponse('player not found on that roster', 404);
+
+    const profiles = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id);
+    const partner = profiles.trade.get(theirs.rosterId) ?? null;
+
+    /*
+     * The partner's tendencies are applied only when the cache has them, and
+     * the ladder itself says how thin the sample is. A profile that has never
+     * been built is null, and a null partner simply means the standard opening
+     * discount rather than a guess about a stranger.
+     */
+    const withPartner = buildLadder({ ...ladder.inputs, partner: partner?.profile ?? null });
+
+    return jsonResponse({
+      found: true,
+      league: { id: league.id, name: league.name },
+      partner: { rosterId: theirs.rosterId, ownerName: theirs.ownerName, profile: partner },
+      target: ladder.target,
+      ladder: withPartner,
+      /*
+       * And whether turning depth into one better player is right for this
+       * roster at all — which is a different question from what he costs, and
+       * one a ladder cannot answer.
+       */
+      consolidation: ladder.consolidation,
+    });
   });
 
   // ------------------------------------------------------- help my scores ---
@@ -1578,4 +1816,358 @@ function escapeRegex(input: string): string {
  */
 export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {}): Promise<VegasRefreshReport> {
   return new VegasRefreshService(env.db, env.vegas).refresh(opts);
+}
+
+/**
+ * Put a price on each waiver upgrade the engine found.
+ *
+ * The translation layer between two vocabularies. The waiver engine speaks in
+ * fantasy points gained over a current starter; the bid strategy speaks in
+ * shares of a budget, shelf life and contested demand. Everything below is that
+ * conversion, and every input it cannot establish is passed through as the
+ * module's own "unknown" rather than as a default that looks like knowledge.
+ */
+function priceWaiverUpgrades(opts: {
+  advice: ReturnType<typeof recommendWaiverUpgrades>;
+  strategy: StrategyContext;
+  rosterInputs: StartSitInput[];
+  candidateInputs: StartSitInput[];
+  rosteredIds: Set<string>;
+}): (BidRecommendation & { opportunity: OpportunityCost | null; trending: string | null; disagreement: Disagreement })[] {
+  const { advice, strategy } = opts;
+  const season = { week: strategy.week, finalWeek: strategy.finalWeek };
+
+  /*
+   * Rosters that could plausibly want him, for the demand reading.
+   *
+   * A blunt count on purpose: every other funded roster in the league. A finer
+   * one would need each rival's lineup scored against each candidate, which is
+   * twelve times the work for a number that feeds a 0–1 demand input.
+   */
+  const fundedRivals = strategy.budget.rosters.filter((r) => !r.isMine && (r.remaining ?? 0) > 0).length;
+
+  const out: (BidRecommendation & {
+    opportunity: OpportunityCost | null;
+    trending: string | null;
+    disagreement: Disagreement;
+  })[] = [];
+
+  /*
+   * What the budget still has to buy after this claim.
+   *
+   * The waiver engine has already sorted the upgrades by how badly each slot
+   * needs filling, so every *other* slot on that list is a call on the same
+   * wallet. Naming the biggest one is what turns "recommended max $19" into
+   * "recommended max $19 · preserve budget for RB depth" — the sentence that
+   * explains why the recommendation sits below what he is worth.
+   *
+   * Null when this is the only hole, because there is then nothing to preserve
+   * the money for and saying so would be inventing a rival need.
+   */
+  const otherNeed = (slot: string): string | null => {
+    const next = advice.upgrades.find((u) => u.slot !== slot);
+    if (!next) return null;
+    return `${next.slot} depth`;
+  };
+
+  for (const upgrade of advice.upgrades) {
+    for (const candidate of upgrade.candidates) {
+      const trend = strategy.trending.get(candidate.playerId) ?? null;
+      const marketHeat = trend?.heat ?? null;
+
+      /*
+       * The role assessment does double duty, for two different purposes.
+       *
+       * As `roleStability` it prices the bid — a role that has moved around is
+       * worth less than the same points from a settled one. As `modelObserved`
+       * it decides whether this app has enough of its own read to disagree with
+       * the market at all: a player with no usage series behind him cannot be
+       * evidence that the crowd is wrong, he is just a player nobody has
+       * measured.
+       */
+      const role = roleStabilityOf(candidate);
+      const modelObserved = candidate.score != null && candidate.role.games > 0;
+
+      const rec = recommendBid({
+        inputs: {
+          playerId: candidate.playerId,
+          name: candidate.name,
+          position: candidate.position,
+          weeklyGain: candidate.gain,
+          /*
+           * What the *next* candidate for the same slot would give you. The
+           * list is already sorted best first, so the second name is the
+           * replacement — and when there is no second name, the upgrade is
+           * genuinely exclusive rather than unmeasured.
+           */
+          gainOverReplacement: gainOverNextBest(upgrade, candidate),
+          roleStability: role,
+          shelfLife: shelfLifeOf(candidate),
+          futureOpportunity: 'normal',
+          marketHeat,
+          rivalsWithNeed: fundedRivals > 0 ? Math.min(fundedRivals, 4) : null,
+        },
+        budgetState: strategy.budget,
+        prices: strategy.prices,
+        season,
+        reserveFor: otherNeed(upgrade.slot),
+      });
+
+      out.push({
+        ...rec,
+        opportunity: rec.recommended != null ? simulateOpportunityCost(strategy.budget, rec.recommended) : null,
+        trending: trend ? trendingHeadline(trend, { availableInLeague: !opts.rosteredIds.has(candidate.playerId) }) : null,
+        disagreement: detectDisagreement({
+          marketHeat,
+          modelStrength: candidate.score != null ? Math.max(0, Math.min(1, candidate.gain / 6)) : null,
+          modelObserved,
+        }),
+      });
+    }
+  }
+
+  return out;
+}
+
+/** The gap between this candidate and the next one for the same slot. */
+function gainOverNextBest(
+  upgrade: ReturnType<typeof recommendWaiverUpgrades>['upgrades'][number],
+  candidate: { playerId: string; gain: number },
+): number | null {
+  const others = upgrade.candidates.filter((c) => c.playerId !== candidate.playerId);
+  if (others.length === 0) return null;
+  const best = Math.max(...others.map((c) => c.gain));
+  return Math.round((candidate.gain - best) * 100) / 100;
+}
+
+/**
+ * How settled the role behind the points is.
+ *
+ * Read from the role assessment the waiver candidate carries, not from the prose
+ * it also carries: the reasons are written for a card, and pricing a bid off a
+ * phrase is one rewording away from silently changing a recommendation.
+ *
+ * `spike` is deliberately volatile rather than rising. One enormous week is the
+ * single most common reason a player is on a waiver wire at all, and treating it
+ * as a settled role is how a tool pays starter money for a touchdown.
+ */
+function roleStabilityOf(candidate: WaiverCandidate): RoleStability {
+  const { trend, games } = candidate.role;
+  if (games === 0 || trend === 'insufficient_data') return 'unknown';
+  if (trend === 'rising_high' || trend === 'rising_moderate') return 'rising';
+  if (trend === 'spike' || trend === 'falling_high' || trend === 'falling_moderate') return 'volatile';
+  return candidate.statusFlag ? 'volatile' : 'stable';
+}
+
+/**
+ * How long the reason he is available is likely to last.
+ *
+ * Deliberately conservative. Only a measured, rising role is treated as a
+ * season-long asset; a healthy body filling a slot nobody can start is a
+ * multi-week hold; and anything the app cannot read is `unknown`, which the
+ * strategy module prices as two weeks rather than as optimism.
+ */
+function shelfLifeOf(candidate: WaiverCandidate): ShelfLife {
+  if (candidate.role.games > 0 && (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate')) {
+    return 'season';
+  }
+  if (candidate.reasons.some((r) => r.includes('fills a slot'))) return 'multi_week';
+  return 'unknown';
+}
+
+/**
+ * Turn a roster and a free-agent pool into bench slots to be valued.
+ *
+ * The mapping that makes §7 possible: a bench player's slot value needs what
+ * the wire offers *at his position*, which is a fact about the pool rather than
+ * about him. Computed once here and handed to the pure module, which then never
+ * has to know a free agent exists.
+ */
+function buildHeldPlayers(opts: {
+  rosterInputs: StartSitInput[];
+  candidateInputs: StartSitInput[];
+  lineup: LineupRecommendation;
+  profile: ScoringProfile;
+  reserveIds: string[];
+}): HeldPlayer[] {
+  const starters = new Set(opts.lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const reserve = new Set(opts.reserveIds);
+
+  /* The best freely available score at each position — the replacement level. */
+  const bestFree = new Map<string, number>();
+  for (const candidate of opts.candidateInputs) {
+    const evaluation = evaluatePlayer(candidate, opts.profile);
+    if (evaluation.score == null || evaluation.ruledOut) continue;
+    const current = bestFree.get(evaluation.position) ?? 0;
+    if (evaluation.score > current) bestFree.set(evaluation.position, evaluation.score);
+  }
+
+  return opts.rosterInputs.map((input) => {
+    const evaluation = evaluatePlayer(input, opts.profile);
+    const rising = evaluation.role.trend === 'rising_high' || evaluation.role.trend === 'rising_moderate';
+    return {
+      playerId: evaluation.playerId,
+      name: evaluation.name,
+      position: evaluation.position,
+      role: reserve.has(evaluation.playerId) ? 'reserve' : starters.has(evaluation.playerId) ? 'starter' : 'bench',
+      restOfSeasonValue: evaluation.score,
+      fourWeekValue: evaluation.score,
+      /*
+       * Insurance is left unmeasured rather than guessed.
+       *
+       * Knowing that a back handcuffs a specific starter needs a depth chart
+       * this app does not hold; inventing one would put a confident number
+       * under the single most consequential term in the slot valuation. Zero
+       * here means "no insurance credit claimed", and the module's own comment
+       * explains why an unclaimed credit is safer than an invented one.
+       */
+      insuranceValue: 0,
+      upside: rising ? 'high' : evaluation.role.games >= 6 ? 'none' : 'unknown',
+      coversBye: false,
+      streamingReplacement: bestFree.get(evaluation.position) ?? null,
+    } satisfies HeldPlayer;
+  });
+}
+
+/**
+ * Value one player against two rosters, and assemble the ladder's inputs.
+ *
+ * Three numbers have to come out of this, and they are genuinely different:
+ *
+ *   - **objective value** — what he scores, full stop;
+ *   - **value to me** — what my starting lineup gains by adding him, which is
+ *     zero for a fifth receiver however good he is, and large for the one
+ *     player who fills an empty slot;
+ *   - **cost to his owner** — what *his* lineup loses by giving him up, which
+ *     is what makes a deal possible: a player surplus to their needs costs them
+ *     less than he is worth.
+ *
+ * All three are weekly starting-lineup points from the same optimiser the Team
+ * screen draws, run twice per roster — with and without him. That is four
+ * optimiser passes for one ladder, which is why this is its own endpoint rather
+ * than a field on the trade board.
+ */
+function buildLadderFor(opts: {
+  targetId: string;
+  mineInputs: StartSitInput[];
+  theirsInputs: StartSitInput[];
+  shape: RosterShape;
+  profile: ScoringProfile;
+}): {
+  inputs: LadderInputs;
+  target: { playerId: string; name: string; position: string; value: number };
+  consolidation: ConsolidationAdvice | null;
+} | null {
+  const target = opts.theirsInputs.find((i) => i.player.id === opts.targetId);
+  if (!target) return null;
+
+  const evaluation = evaluatePlayer(target, opts.profile);
+  const objective = Math.max(0, evaluation.score ?? 0);
+
+  const points = (inputs: StartSitInput[]) => recommendLineup(inputs, opts.shape, opts.profile).recommendedPoints;
+
+  const mineNow = points(opts.mineInputs);
+  const mineWith = points([...opts.mineInputs, target]);
+  const theirsNow = points(opts.theirsInputs);
+  const theirsWithout = points(opts.theirsInputs.filter((i) => i.player.id !== opts.targetId));
+
+  const valueToMe = Math.round(Math.max(0, mineWith - mineNow) * 100) / 100;
+  const costToPartner = Math.round(Math.max(0, theirsNow - theirsWithout) * 100) / 100;
+
+  /*
+   * What I would send: my least productive startable players, worst first.
+   *
+   * A placeholder in the honest sense — the user picks the actual package, and
+   * this is what the ladder prices against until they do. Bench players who
+   * would not start are excluded, because sending a player nobody starts is not
+   * an offer.
+   */
+  const offering = opts.mineInputs
+    .filter((i) => i.player.id !== opts.targetId)
+    .map((i) => evaluatePlayer(i, opts.profile))
+    .filter((e) => (e.score ?? 0) > 0)
+    .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
+    .slice(0, 2);
+
+  return {
+    inputs: {
+      targetPlayerId: evaluation.playerId,
+      targetName: evaluation.name,
+      targetValue: objective,
+      targetValueToMe: valueToMe,
+      targetCostToPartner: costToPartner,
+      offering: {
+        value: round2(offering.reduce((sum, e) => sum + (e.score ?? 0), 0)),
+        valueToReceiver: round2(offering.reduce((sum, e) => sum + (e.score ?? 0), 0)),
+        playerIds: offering.map((e) => e.playerId),
+        names: offering.map((e) => e.name),
+      },
+      partner: null,
+    },
+    target: {
+      playerId: evaluation.playerId,
+      name: evaluation.name,
+      position: evaluation.position,
+      value: objective,
+    },
+    consolidation:
+      offering.length >= 2
+        ? assessConsolidation({
+            sending: offering.map((e) => ({
+              playerId: e.playerId,
+              name: e.name,
+              position: e.position,
+              weeklyValue: e.score ?? 0,
+            })),
+            receiving: {
+              playerId: evaluation.playerId,
+              name: evaluation.name,
+              position: evaluation.position,
+              weeklyValue: objective,
+            },
+            startingPointsNow: mineNow,
+            startingPointsAfter: points([
+              ...opts.mineInputs.filter((i) => !offering.some((e) => e.playerId === i.player.id)),
+              target,
+            ]),
+            usableDepth: startableDepth(opts.mineInputs, opts.shape, opts.profile),
+            fragileStarters: opts.mineInputs
+              .map((i) => evaluatePlayer(i, opts.profile))
+              .filter((e) => e.statusFlag != null).length,
+            startingSlots: opts.shape.totalStarters,
+            rosterSize: opts.mineInputs.length,
+            week: 1,
+            finalWeek: 14,
+            uncoveredByes: 0,
+          })
+        : null,
+  };
+}
+
+/**
+ * Bench players who could legally start, by position.
+ *
+ * The "depth" half of the consolidation question. Counted as *startable* rather
+ * than as bodies: two players nobody would ever start are not depth, and
+ * trading them away costs no fragility whatever the roster size says.
+ */
+function startableDepth(
+  inputs: StartSitInput[],
+  shape: RosterShape,
+  profile: ScoringProfile,
+): Record<string, number> {
+  const lineup = recommendLineup(inputs, shape, profile);
+  const starters = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const out: Record<string, number> = {};
+  for (const input of inputs) {
+    if (starters.has(input.player.id)) continue;
+    const evaluation = evaluatePlayer(input, profile);
+    if ((evaluation.score ?? 0) <= 0 || evaluation.ruledOut) continue;
+    out[evaluation.position] = (out[evaluation.position] ?? 0) + 1;
+  }
+  return out;
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }

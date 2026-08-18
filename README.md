@@ -66,13 +66,39 @@ value, no Next%: the board is for reading the room, and the analysis is on the
 card you came from. It draws the picks the Draft screen already has, so it adds
 no polling of its own, and it stays readable as history once the draft is done.
 
-**Team** — Sleeper connection, league selection, ADP import, roster, and
-start/sit comparison built from Vegas market expectation, news signal,
-availability and an uncertainty penalty. It never changes a lineup.
+**Team** — the recommended lineup, the bench behind it and the short list of
+anybody unrostered worth a move, all built from Vegas market expectation, news
+signal, availability and an uncertainty penalty. Balanced, Floor and Ceiling ask
+the same question three ways. Tapping one of your players opens his week in a
+concise card — the verdict, the role trend, the matchup, the market and the
+availability — with the full comparison one tap further on. Pull the screen down
+to refresh it. It never changes a lineup.
+
+**Waivers** — in season, where Draft used to be: who is available, how strongly
+he is recommended, which slot he fits and what he is worth this week. Expected
+cost, likely competition and multi-week value are shown as unknown until the
+league-intelligence pass provides them, because a bid we invented would be worse
+than an empty field. It never makes a transaction.
+
+Waiver upgrades carry a price: what the room will probably pay, what the player
+is worth to *your* roster, and the line past which winning is worse than losing
+— three numbers that are frequently far apart, because the most useful thing a
+waiver card can say is *he will go for more than he is worth to you*. The budget
+comes from the league's own settings and is never assumed; a league that
+publishes none, or does not bid at all, is told so instead of being shown an
+invented figure. Beside it, what a bid costs you in leverage
+(`Bid $24 → $41 remaining · still above 6/9 managers`) and what the rest of
+Sleeper is chasing. Nothing here bids, claims, adds or drops: every transaction
+in this app happens in Sleeper, by hand, on purpose.
 
 **Players** — searchable intelligence with tallies by window (7d / 21d / season
 / lifetime), category breakdown, cached prop lines and the full evidence
 timeline. Every original excerpt is preserved.
+
+Each expanded card opens with a **newsletter takeaway**: one sentence saying why
+the tally reads the way it does. It is chosen from evidence the ledger already
+holds, never composed — and it changes no number, because the sentence it quotes
+has already been counted once by the tally it is explaining.
 
 **Review** — anything the classifier was not confident about, plus ambiguous
 player identities and the items already applied. Accept, change, reassign to the
@@ -103,7 +129,14 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 - Ambiguous or mixed newsletter classifications never auto-apply.
 - Vegas access is behind a provider abstraction, cached aggressively, and
   degrades to the last snapshot marked stale.
-- Unknown data is shown as unknown. No value is invented to fill a gap.
+- Unknown data is shown as unknown. No value is invented to fill a gap. A
+  waiver budget the league does not publish stays unpublished.
+- The app advises and never acts. There is no pick, lineup, waiver, bid or trade
+  that this app can make.
+- Market attention is attention, not quality. What the rest of Sleeper is adding
+  prices a bid and raises a question; it never moves a projection.
+- A tendency needs a sample. Manager and room profiles say how many trades or
+  drafts they rest on, and say nothing at all below the threshold.
 
 ## Documentation
 
@@ -123,7 +156,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 npm run typecheck
 npm test               # unit + integration tests
 npm run perf:budget    # gzipped page weight against perf-budgets.json
-npm run e2e            # WebKit at 390x844, 375x812, 360x800 (100 checks)
+npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
 ```
 

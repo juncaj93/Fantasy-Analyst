@@ -18,6 +18,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api, type EvidenceItem, type LeagueSummary, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
+import {
+  InjuryDetail,
+  LastSeasonLine,
+  NewsletterTakeaway,
+  ProfileFlags,
+  SeasonOutlook,
+} from '../components/playerDetail.tsx';
 import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import {
@@ -264,15 +271,20 @@ function PlayerRow({
           */}
           <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />
           <span className="player-name">{player.name}</span>
-          {/* The same headline tally, in the same place, as on the draft board. */}
-          <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
           {/*
-            And the same availability tag: nothing at all for a healthy player,
-            `Q` for a questionable one. This was a word-length badge reading
-            "Questionable" or "Out", which is the same fact said three times as
-            loudly as the board says it.
+            The same headline tally, in the same place, as on the draft board —
+            and the same availability tag beside it: nothing at all for a healthy
+            player, `Q` for a questionable one. This was a word-length badge
+            reading "Questionable" or "Out", which is the same fact said three
+            times as loudly as the board says it.
+
+            Both sit in the same fixed-width field the board uses, so the club
+            marks line up down this list too. See `--row-meta`.
           */}
-          <InjuryTag status={player.status} />
+          <span className="player-row-meta">
+            <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
+            <InjuryTag status={player.status} />
+          </span>
           <PositionBadge position={player.position} team={player.team} />
         </div>
 
@@ -352,47 +364,39 @@ function PlayerFileView({ playerId, position }: { playerId: string; position: st
 
   return (
     <div className="explain" data-testid="player-file">
+      {/*
+        The takeaway leads, because this screen is the tally's own screen: the
+        windows, the categories and the whole evidence timeline are below, and
+        the one sentence that says what all of it amounts to belongs above them
+        rather than buried after somebody else's season preview.
+      */}
+      <NewsletterTakeaway detail={detail} />
       <SeasonOutlook detail={detail} failed={detailFailed} />
       <LastSeasonLine detail={detail} failed={detailFailed} position={position} />
+      <InjuryDetail detail={detail} />
+      <ProfileFlags detail={detail} />
 
-      {detail?.injuryContext ? (
-        <>
-          <DetailLabel>Injury context</DetailLabel>
-          <div className="muted" data-testid="injury-context">
-            {detail.injuryContext}
-          </div>
-        </>
-      ) : null}
-
-      {/*
-        What is wrong with him now, as against what he came back from above.
-        Two different facts under two different headings, because a player
-        returning from an ACL and a player with a sore hamstring on Friday are
-        not the same situation and must not read as one.
-      */}
-      {detail?.injury ? (
-        <>
-          <DetailLabel>{detail.injury.label}</DetailLabel>
-          <div className="muted" data-testid="injury-current">
-            {detail.injury.line ?? detail.injury.label}
-            {detail.injury.provenance ? <span className="faint"> — {detail.injury.provenance}</span> : null}
-          </div>
-          {detail.injury.conflict ? (
-            <div className="muted" data-testid="injury-conflict">
-              Sources disagree — {detail.injury.conflict}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {file ? <PlayerRecord file={file} /> : <div className="spinner">Reading his file…</div>}
+      {file ? (
+        <PlayerRecord file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />
+      ) : (
+        <div className="spinner">Reading his file…</div>
+      )}
     </div>
   );
 }
 
 /** The tally in four windows, the categories, the market and the evidence. */
-function PlayerRecord({ file }: { file: PlayerFile }) {
+function PlayerRecord({ file, quotedEvidenceIds }: { file: PlayerFile; quotedEvidenceIds: string[] }) {
   const { signal, evidence, props } = file;
+  /*
+   * Which rows the takeaway above was drawn from.
+   *
+   * This is where the takeaway's provenance lives — down in the timeline rather
+   * than beside the sentence, because a sentence followed by two item ids and a
+   * derivation label is no longer a takeaway. A reader who wants to check it
+   * scrolls here and finds the source rows marked.
+   */
+  const quoted = new Set(quotedEvidenceIds);
   return (
     <>
       <DetailLabel>News by window</DetailLabel>
@@ -485,121 +489,13 @@ function PlayerRecord({ file }: { file: PlayerFile }) {
       {evidence.length === 0 ? (
         <div className="muted">No evidence recorded yet.</div>
       ) : (
-        evidence.map((e) => <EvidenceRow key={e.id} item={e} />)
+        evidence.map((e) => <EvidenceRow key={e.id} item={e} quoted={quoted.has(e.id)} />)
       )}
     </>
   );
 }
 
-/**
- * What is expected of him this season, in the words of whoever wrote it.
- *
- * The same component the draft card uses, and the same rules: the provider's own
- * sentences, their author named, shortened only by selection and never by
- * rewriting — and when it has been cut, the card says so and offers the rest.
- */
-function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
-  if (failed) return null;
-  if (!detail) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-pending">
-          Looking it up…
-        </div>
-      </>
-    );
-  }
-  if (!detail.outlook) {
-    return (
-      <>
-        <DetailLabel>Season outlook</DetailLabel>
-        <div className="muted" data-testid="outlook-none">
-          {detail.outlookNote ?? 'No outlook published for him.'}
-        </div>
-      </>
-    );
-  }
-  return <OutlookBody outlook={detail.outlook} />;
-}
-
-function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
-  const [whole, setWhole] = useState(false);
-  const attribution = outlook.source ? <span className="outlook-source"> — {outlook.source}, via Sleeper</span> : null;
-
-  return (
-    <>
-      <DetailLabel>{outlook.title}</DetailLabel>
-      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
-        {whole ? outlook.fullText : outlook.text}
-        {attribution}
-      </div>
-      {outlook.summarised ? (
-        <button
-          type="button"
-          className="link-button"
-          data-testid="outlook-toggle"
-          onClick={(e) => {
-            // The row underneath is a toggle; expanding the text is not
-            // "collapse this player".
-            e.stopPropagation();
-            setWhole((v) => !v);
-          }}
-        >
-          {whole ? 'Show the short version' : 'Read the full outlook'}
-        </button>
-      ) : null}
-    </>
-  );
-}
-
-/** `16 GP · WR7 half-PPR`, on the same terms as the draft card states it. */
-function LastSeasonLine({
-  detail,
-  failed,
-  position,
-}: {
-  detail: PlayerDetail | null;
-  failed: boolean;
-  position: string | null;
-}) {
-  if (failed || !detail) return null;
-  const season = detail.lastSeason?.season;
-  const games = detail.lastSeason?.gamesPlayed;
-  const rank = detail.lastSeason?.positionRank;
-  if (!season) return null;
-  return (
-    <>
-      <DetailLabel>{season}</DetailLabel>
-      <div className="season-line" data-testid="last-season">
-        <span className="metric">
-          {games == null ? (
-            <>
-              GP <Unknown what={`${season} games played`} />
-            </>
-          ) : (
-            <>
-              <strong>{games}</strong> GP
-            </>
-          )}
-        </span>
-        <span className="metric" title={detail.lastSeason?.scoring}>
-          {rank == null ? (
-            <>
-              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
-            </>
-          ) : (
-            <>
-              <strong>{rank}</strong> half-PPR
-            </>
-          )}
-        </span>
-      </div>
-    </>
-  );
-}
-
-export function EvidenceRow({ item }: { item: EvidenceItem }) {
+export function EvidenceRow({ item, quoted = false }: { item: EvidenceItem; quoted?: boolean }) {
   const effective = item.userOverride?.polarity ?? item.polarity;
   const cls = effective === 'positive' ? 'pos' : effective === 'negative' ? 'neg' : effective === 'mixed' ? 'mixed' : '';
   const glyph = effective === 'positive' ? '▲' : effective === 'negative' ? '▼' : effective === 'mixed' ? '◆' : '–';
@@ -610,6 +506,7 @@ export function EvidenceRow({ item }: { item: EvidenceItem }) {
           {glyph} {effective}
           {item.userOverride ? ' (yours)' : ''}
         </span>
+        {quoted ? <span data-testid="evidence-quoted">quoted above</span> : null}
         <span>mag {item.userOverride?.magnitude ?? item.magnitude}</span>
         <span>{item.category ?? 'uncategorised'}</span>
         <span>{formatDate(item.sourceDate)}</span>

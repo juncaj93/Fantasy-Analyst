@@ -55,7 +55,11 @@ jobs:
       # fact about 360, and cancelling the other two would hide whether it is.
       fail-fast: false
       matrix:
-        project: [webkit-iphone-390, webkit-iphone-375, webkit-small-360]
+        # 430 is the Pro Max class, and it is here for the opposite reason to
+        # 360: the narrow one catches anything that overflows, and the wide one
+        # catches anything only ever tuned for a narrow screen — a control row
+        # that stretches, a fixed field that stops looking fixed.
+        project: [webkit-iphone-430, webkit-iphone-390, webkit-iphone-375, webkit-small-360]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

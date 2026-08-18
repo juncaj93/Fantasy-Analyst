@@ -451,10 +451,14 @@ suggestions).
    say `ADP still has only 2026 data` rather than letting the board quietly
    serve it.
 
-10. **The browser suite shares one dev server across all three viewports.** Run
-   repeatedly against a reused server, accumulated review-queue state can make
-   `can reassign an item to the right player` fail; it passes on a fresh server,
-   which is what CI uses. Worth isolating per project if it ever fails in CI.
+10. **The browser suite shares one dev server across all three viewports, and
+   reuses one across runs.** `reuseExistingServer` is on outside CI, so a server
+   left behind by an interrupted run is picked up by the next one with its state
+   intact — which is how a 390-width run comes to see a 375-width run's
+   newsletter sender, and how accumulated review-queue state makes `can reassign
+   an item to the right player` fail. Both pass on a fresh server, which is what
+   CI uses; locally, run with `CI=1` or kill any surviving `dev-server.mjs`
+   first. Worth isolating per project if it ever fails in CI.
 
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
@@ -722,8 +726,211 @@ row: an inline name and an inline-flex button still share a line. Replacing it
 with a mutation that puts the button in a block of its own failed the height
 assertion as intended.
 
+## Milestone 15 — league strategy (done)
+
+The layer above "who do I start". Five decisions a manager makes every week that
+the app had no opinion on — what to bid, what to drop, what to offer, whether to
+consolidate, and who they are negotiating with — plus one sentence explaining
+what the tally already said.
+
+**Three numbers, not one.** The expected market price, the recommended bid and
+the do-not-exceed ceiling are computed separately and are frequently far apart,
+which is the whole point: the most valuable sentence a waiver tool can say is
+*he will go for more than he is worth to you*, and a tool that reports one
+number cannot say it. `tests/faab.test.ts` pins the case — a contested player
+this roster barely needs produces a recommendation below the market band and the
+reason "Losing him at that price is fine."
+
+**No budget is ever assumed.** Sleeper defaults to $100 and the league's rule is
+read from its own settings; a league that publishes none gets a sentence rather
+than a dollar figure, and a waiver-priority league is told it has no bid advice
+to give. Spend is Sleeper's own `waiver_budget_used`, which already accounts for
+FAAB moved in a trade — transactions cross-check it and never replace it. That
+number was being fetched on every league sync and thrown away: migration 0020
+adds `rosters.settings_json` so the roster blob survives the sync.
+
+**Losing bids say unknown when they are unknown.** Sleeper publishes the user's
+own failed claims and other managers' inconsistently. `losingBidsComplete` is
+false unless the league provably had no failed claims at all, and the card says
+so rather than presenting a floor as a distribution.
+
+**Trending is written down before it can be differenced.** Sleeper keeps no
+history of its own trending list, so `#2 trending add` is available to anyone and
+`add rate accelerated 6×` is available only to somebody who captured yesterday's
+list. `trending_snapshots` is that capture. Two guards keep the velocity honest:
+rates from different lookback windows are never compared, and a ratio built on
+fewer than five adds an hour is withheld — three adds becoming eighteen is "6×"
+and is also nothing.
+
+**Trending never touches a projection.** It prices a bid and raises a question,
+and `detectDisagreement` returns `affects: 'bid_price_and_confidence_only'` with
+a confidence delta bounded to ±0.1. A property test walks the whole input space
+asserting no field a projection could consume ever appears. The two populations
+it finds are the ones no single ranking surfaces: the market surging while usage
+is thin, and the model strong while the market is quiet.
+
+**A bench slot is priced across positions.** The brief's own example is the test:
+a mediocre QB2 who scores 16 against a streamable 15 has more *slot value* and
+less *surplus* than a handcuff scoring 5 who insures a starter and could take the
+job. Insurance is discounted to a quarter rather than counted in full, which is
+what stops a roster acquiring four backup running backs and no third receiver.
+
+**Consolidation goes both ways, deliberately.** The same depth and the same
+lineup gain produce `consolidate` in week 13 and `keep_depth` in week 3 with two
+fragile starters, because a 2-for-1 converts depth into ceiling and fragility in
+the same move and only one of those is usually reported.
+
+**Manager profiles refuse to describe a small sample.** Below four completed
+trades nothing is called a tendency: `confident` is false, every derived field is
+null, and the one note says how many trades there were. Older seasons are
+weighted down rather than discarded — a manager who traded picks constantly in
+2023 and not since has changed, and a flat average keeps describing the 2023
+version of him. Run-following is measured at room scope only, because one
+manager's picks are every twelfth pick rather than a sequence.
+
+**The room prior does not modify Next%.** `core/draft/nextpick/` owns that model;
+the draft profile is bounded evidence offered to it, and a test asserts the
+profile exposes no `nextPercent` or `survivalMultiplier` a caller could apply
+behind that module's back.
+
+**The newsletter takeaway is selected, never written.** `Drake Maye +4` is a
+direction and a magnitude; the takeaway is the one supported sentence explaining
+it, lifted out of the ledger by category relevance, specificity, corroboration
+and a three-week recency half-life. A long excerpt is declined rather than
+trimmed. The load-bearing test asserts the headline appears while
+`aggregatePlayerSignal` returns a byte-identical signal before and after — the
+evidence has already been counted once by the tally, and counting it again as a
+headline bonus is the failure this whole evidence model exists to prevent.
+
+A real regex bug fell out of writing those fixtures: the specificity pattern for
+a ranking was `\b(?:no\.?|#)\s?\d+\b`, and `\b` before `#` can never match —
+neither `#` nor the space before it is a word character. Every `#1 in completion
+rate` claim had been scoring zero for its most decision-relevant feature.
+
+**One player-detail renderer, finally.** Draft and Players had grown
+byte-identical copies of `SeasonOutlook`, `OutlookBody` and `LastSeasonLine`,
+each with a comment noting it was the same as the other. Both now read
+`src/web/components/playerDetail.tsx`, which is also where the takeaway and the
+injury sections live.
+
+**Height and weight, stored and then almost never shown.** Migration 0021 keeps
+what the sync had been discarding, because a handful of genuine conjunctions
+cannot be asked without them — a light frame projected outside, an older back
+whose usage is falling. What stops it becoming a body-type column is enforced in
+code: a flag needs a measurement *and* a role it contradicts, the age flag needs
+declining usage read through the same `assessRole` the card prints beside it, and
+the server nulls the measurements out unless a flag actually fired.
+
+**What is built but has no screen yet.** The trade ladder and the consolidation
+read are served at `GET /api/leagues/:id/trades/ladder?playerId=` and are not
+drawn anywhere — Trades is still a discovery list, and a negotiation surface is
+its own design problem. Manager profiles are served and cached but likewise
+unrendered; the ladder consumes them internally to set its opening discount.
+Both are complete, tested and reachable, and both are honestly one screen short.
+
+Checks at this milestone: 1,814 unit/integration tests (92 new) and 801 browser
+checks after integrating the draft-board work from main, typecheck and build all
+green.
+
+One note on running the browser suite locally, because it cost time here.
+`reuseExistingServer` is on outside CI, so a dev server left behind by an
+interrupted run is silently reused by the next one — with the previous run's
+state still in it. That is the mechanism behind limitation 9, and it presents as
+a viewport seeing another viewport's data. `CI=1` forces a fresh server; failing
+that, kill any surviving `dev-server.mjs` before re-running.
+
+## Milestone 16 — the Team screen as a weekly tool, and the waivers shell (done)
+
+**A label removed, a judgement kept.** The `AVOID — lifetime tally -5` chip is
+gone from player cards. It said out loud what the signed tally beside the name
+already says, in a red chip that cost a line of every card it landed on. The
+tally, the lifetime threshold in `core/draft/decisions.ts`, the bounded penalty
+the draft engine applies below it and every test over them are untouched — the
+API still carries `avoid` and the model still believes it. The reader now
+interprets `-5` directly.
+
+**Pull to refresh.** Both refresh controls have left the Team screen — the one
+in the navigation bar and the `Refresh data` button under it. A downward pull
+from the top of the screen runs the same all-source orchestrator the button
+called, with the same dedupe, the same budget refusal and the same per-source
+report, and then reloads the roster, the lineup and the waiver scan. The
+thresholds are pure functions in `web/gestures.ts` and tested there; the hook is
+single-flight through a ref rather than through the state that paints the
+spinner, because state lands a render later and the second pull happens in
+between. It fires on distance and never on velocity, so a flick back to the top
+of a long list cannot reload the screen underneath the reader. The keyboard
+fallback is a control that is off screen until it is focused.
+
+**Four controls, one row.** Balanced, Floor and Ceiling and the `Compare` button
+now share a single row at every width down to 360px. The segmented control gives
+up horizontal padding and a step of type size; no tap target shrank, and the row
+is still 44px.
+
+**The weekly card.** Tapping one of your own players opens a concise sheet
+rather than the comparison: the lineup's own verdict, the role trend, the
+matchup, what the market expects, availability when it is not the ordinary
+answer, the two drivers that decided the score, and up to three prop lines. It
+is built from `core/startsit/weekCard.ts` — a pure view model — off evaluations
+the lineup had already computed, so it needs no request of its own and cannot
+disagree with the row that opened it. Anything unknown is absent rather than
+printed as a dash, and named once at the bottom. It carries silent slots for
+expected points and for "what would change this", which light up the moment an
+evaluation arrives carrying them.
+
+**Waivers, as decisions.** `core/waivers/board.ts` turns the engine's
+slot-shaped comparisons into one row per player — recommendation strength, the
+slot he fits and the others he also fits, what he is worth this week, one short
+phrase saying why — over an interface for the four facts that belong to the
+league rather than to the player: expected FAAB range with its unit, likely
+competition, multi-week value and a league-specific rank.
+
+That interface met its supplier on the way in. The league-strategy milestone
+above prices every upgrade, so the board now joins its bids to its rows and the
+cost column carries the real range, to the dollar, as that pass produced it. The
+bid's other two figures — what paying it costs, and whether the market is
+already on him — open in the detail sheet, and the league's wallet sits once
+under the rows rather than on every one of them. Competition and multi-week
+value have no supplier yet and still read as unknown with the reason attached.
+
+**There is no arithmetic anywhere in that file that turns projected points into
+a bid**, before that pass or after it: a price is read, or it is absent. The
+unit tests assert the absence rather than the shape, and the browser test now
+checks the row against the API's own figure, so a rounded or re-derived number
+would fail.
+
+The Team screen shows the best three rows; the whole board is the new Waivers
+destination, with position filters that only offer chips that would leave
+something on screen, and the same pull to refresh.
+
+**The seasonal slot.** One place in the toolbar is seasonal and exactly one of
+Draft and Waivers is ever in it — written as a single filter so the two facts
+cannot disagree. The switch is Sleeper's own season state, as it already was;
+no date arithmetic was added.
+
+**Alignment.** The tally and the availability tag now sit in a fixed-width,
+right-aligned field, so every club mark on every list starts at the same x
+whatever the number beside it is. Nothing is padded to `08` and nothing is
+faked: an empty field is the same width as a full one, which is the whole trick.
+The board rank is fixed-width and tabular for the same reason at the other end
+of the row.
+
+Checks at this milestone: 1,854 unit/integration tests — 40 of them this
+channel's, the rest arriving with the two milestones above — and the browser
+suite extended to a fourth width: 430, the Pro Max class, in the config, in both
+npm scripts, and in the CI matrix that actually gates a merge, which is the one
+that had been missing it. New specs cover the pull gesture, the weekly card, the
+waiver rows, the seasonal toolbar swap and the mark alignment. Typecheck, build
+and the Cloudflare dry-run green at every width.
+
+
+
 ## Recommended next work
 
+0. **Watch one real waiver run.** The FAAB layer is built and tested against
+   constructed transactions; what a preseason league cannot show is what
+   Sleeper's `transactions/{week}` actually returns for a live waiver run —
+   specifically how many other managers' failed claims come back, which is the
+   one input `losingBidsComplete` is honest about being unable to verify.
 1. **Enable SportsGameOdds and watch one real Sunday.** The adapter is written
    and tested against live payloads; what a preseason event could not show is
    whether regular-season games carry `receptions` and anytime-touchdown
