@@ -4221,3 +4221,178 @@ table.compact tr:last-child td {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------------------------------------------------------------- demo mode */
+/*
+ * The one piece of chrome Demo Mode owns.
+ *
+ * Sticky at the very top, above the navigation bar, on every screen. It is
+ * deliberately the loudest surface in the app: the failure it prevents is
+ * somebody reading a fixture as if it were their league, and that mistake costs
+ * a real lineup decision.
+ *
+ * State is conveyed three ways — the word DEMO, the scenario's name and its
+ * clock, and the amber material — so a reader who cannot distinguish the colour
+ * loses nothing (§16). The exit sits inside it rather than three taps away in
+ * Settings, because the way out of a mode belongs beside the sign that says you
+ * are in one.
+ */
+.demo-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: calc(var(--safe-top) + var(--sp-2)) var(--page-x) var(--sp-2);
+  background: var(--warn-tint);
+  color: var(--warn);
+  border-bottom: 1px solid var(--warn);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.demo-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--warn);
+  color: var(--surface);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+
+.demo-badge-small {
+  margin-left: var(--sp-2);
+  font-size: 0.6rem;
+  padding: 1px 5px;
+}
+
+.demo-what {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.demo-what .faint {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.demo-bar .demo-exit {
+  flex: none;
+  min-height: var(--tap);
+  padding-inline: var(--sp-3);
+  background: var(--surface);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/*
+ * The demo bar takes the status-bar inset, so the navigation bar underneath
+ * must not claim it a second time — two elements reserving the same pixels is
+ * how this app has produced a dead strip every previous time it happened.
+ */
+.demo-bar ~ .app-main {
+  padding-top: 0;
+}
+
+.demo-bar ~ .app-main .nav-bar {
+  margin-top: 0;
+  padding-top: calc(var(--sp-1) + 2px);
+}
+
+/* ------------------------------------------------------- the scenario picker */
+.demo-group {
+  margin-top: var(--sp-3);
+}
+
+.demo-group-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: var(--sp-1);
+}
+
+.demo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.demo-choose {
+  /* A full-width tap target that never falls below the platform minimum. */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--sp-2);
+  text-align: left;
+  background: var(--surface-inset);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-row[data-active='yes'] .demo-choose {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.demo-choose:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.demo-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.demo-row-label {
+  font-weight: 600;
+}
+
+/* State in a word, never in a colour alone. */
+.demo-row-state {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.demo-row-waiting {
+  background: var(--status-neutral);
+  color: var(--on-status-neutral);
+}
+
+.demo-row-detail {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.demo-progression {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.demo-progression .btn {
+  flex: 1;
+  min-height: var(--tap);
+}

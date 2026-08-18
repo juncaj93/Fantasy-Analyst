@@ -105,6 +105,18 @@ player identities and the items already applied. Accept, change, reassign to the
 right player, or ignore. Your corrections are authoritative and survive
 reprocessing.
 
+**Demo Mode** — a read-only walk through the states that are hard to reach on
+demand: draft night at four different picks, the morning after, a Sunday twenty
+minutes before kickoff, an injury eight minutes before it, a Tuesday waiver run
+with a finite wallet, a trade window, a playoff week, a rollover in March, and
+four ways it degrades. These are the real screens and the real recommendations,
+computed from versioned fixtures instead of your league — the app cannot tell
+the difference, because there is only one Draft screen and one scoring engine in
+here. Nothing in a demo can change a lineup, a pick, a claim, a bid, a trade or
+the database, and it is refused twice: in the browser and again at the server.
+It lives under **Settings → Demo Mode**, never in the bottom bar. See
+[docs/DEMO_MODE.md](docs/DEMO_MODE.md).
+
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
@@ -148,6 +160,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
+| [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
 
 ## Tests

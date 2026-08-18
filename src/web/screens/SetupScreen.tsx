@@ -6,7 +6,7 @@
  * here; this screen only shows what the user can do from their phone.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -20,6 +20,7 @@ import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../compone
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
+
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import {
@@ -31,6 +32,15 @@ import {
   watchSystemAppearance,
   type Appearance,
 } from '../theme.ts';
+
+/*
+ * The scenario picker, fetched when somebody opens Setup and not before.
+ *
+ * It is the only part of Demo Mode that needs the whole scenario registry, and
+ * a reader who never opens Settings should not download twenty-five
+ * descriptions to find that out (§17).
+ */
+const DemoPanel = lazy(() => import('../demo/DemoPanel.tsx'));
 
 type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | null;
 
@@ -185,6 +195,18 @@ export function SetupScreen({
         <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
         <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
       </ListGroup>
+
+      {/*
+        Demo Mode lives here rather than in the toolbar.
+
+        Six destinations is already the most that strip of glass can carry, and
+        a seventh spent on a preview tool used once a month would be a poor
+        trade. It is last on this screen for the same reason: it is the least
+        often wanted thing on it.
+      */}
+      <Suspense fallback={null}>
+        <DemoPanel />
+      </Suspense>
     </>
   );
 }

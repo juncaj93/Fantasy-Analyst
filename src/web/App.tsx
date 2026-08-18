@@ -10,6 +10,7 @@ import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { BoardIcon, GearIcon, ReviewIcon, RosterIcon, SearchIcon, TradeIcon, WaiverIcon } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
+import { DemoIndicator, useDemoWorld } from './demo/DemoIndicator.tsx';
 import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
@@ -89,6 +90,14 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Which world the app is looking at: `'live'`, or a demo scenario's id.
+   *
+   * Read here rather than inside each screen, because no screen should have to
+   * know a demo exists. It does two things and nothing else — see the effect
+   * and the `key` below.
+   */
+  const world = useDemoWorld();
 
   const refresh = useCallback(async () => {
     try {
@@ -120,10 +129,19 @@ export function App() {
     }
   }, []);
 
+  /*
+   * Re-read everything when the world changes underneath.
+   *
+   * Entering, changing or leaving a demo swaps the data source for the whole
+   * app, so the overview, the league list and the lock state are all read again
+   * against whichever source is now in force. That is what makes leaving a demo
+   * restore live mode without a page reload, and what redraws the toolbar when
+   * a scenario's lifecycle moves the seasonal tab.
+   */
   useEffect(() => {
     void checkLock();
     void refresh();
-  }, [checkLock, refresh]);
+  }, [checkLock, refresh, world]);
 
   /*
    * Which destinations the bar carries right now.
@@ -175,7 +193,23 @@ export function App() {
 
   return (
     <div className="app">
-      <main className="app-main">
+      {/*
+        Unmistakable, on every screen, for as long as a scenario is running.
+        Above the content rather than inside it, so no screen can forget it and
+        no screen has to know about it.
+      */}
+      <DemoIndicator />
+      {/*
+        The screens are remounted when the world changes, and that is the
+        simplest correct answer rather than a shortcut.
+
+        Two scenarios share a league id — it is the same fixture league at two
+        different moments — so a screen that refetches when "the selected league
+        changes" would keep Tuesday's wire on screen under an indicator naming
+        Wednesday. Nothing about a screen has to change for this to work, which
+        is the point: no screen knows a demo exists.
+      */}
+      <main className="app-main" key={world}>
         {error ? <Notice tone="error">{error}</Notice> : null}
         {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
         <InstallPrompt />
