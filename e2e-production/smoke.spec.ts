@@ -79,6 +79,34 @@ async function expectedTabs(page: Page): Promise<readonly Tab[]> {
  * So the wait is for an outcome rather than for a duration: rows, or the empty
  * state that means there genuinely are none.
  */
+/**
+ * The board's rows, once they have stopped changing.
+ *
+ * A fixed `waitForTimeout` is not enough against a deployed site. Changing the
+ * filter refetches over the network, and the first run of this check read the
+ * rows 400ms after the click — before the queue's response had landed — so it
+ * captured the *whole board*, and then reported the sort control for
+ * re-ordering a list it had never actually been shown.
+ *
+ * Two consecutive identical reads is the honest signal that the list is the one
+ * being looked at rather than the one on its way out.
+ */
+async function settledIds(page: Page): Promise<string[]> {
+  const read = () =>
+    page.$$eval('[data-testid="recommendation-row"]', (rows) =>
+      rows.map((row) => row.getAttribute('data-player-id') ?? ''),
+    );
+
+  let previous = await read();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await page.waitForTimeout(300);
+    const current = await read();
+    if (current.length === previous.length && current.every((id, i) => id === previous[i])) return current;
+    previous = current;
+  }
+  return previous;
+}
+
 async function settled(page: Page, rowTestId: string): Promise<number> {
   const rows = page.getByTestId(rowTestId);
   await Promise.race([
@@ -289,13 +317,9 @@ test.describe('the deployed app', () => {
     const queueFilter = page.getByTestId('queue-filter');
     test.skip((await queueFilter.count()) === 0, 'no queue filter on this deployment');
     await queueFilter.click();
-    await page.waitForTimeout(400);
+    await expect(queueFilter).toHaveAttribute('aria-pressed', 'true');
 
-    const ids = () =>
-      page.$$eval('[data-testid="recommendation-row"]', (rows) =>
-        rows.map((row) => row.getAttribute('data-player-id') ?? ''),
-      );
-    const before = await ids();
+    const before = await settledIds(page);
     test.skip(before.length < 2, 'fewer than two players queued on this deployment');
 
     // The control is still there and still remembers the mode, and says plainly
@@ -304,8 +328,8 @@ test.describe('the deployed app', () => {
 
     for (const mode of ['sort-adp', 'sort-dog', 'sort-score']) {
       await page.getByTestId(mode).click();
-      await page.waitForTimeout(300);
-      expect(await ids(), `${mode} re-ordered the queue`).toEqual(before);
+      await expect(page.getByTestId(mode)).toHaveAttribute('aria-checked', 'true');
+      expect(await settledIds(page), `${mode} re-ordered the queue`).toEqual(before);
     }
   });
 
