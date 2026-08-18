@@ -337,6 +337,16 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 
 ## 12. Limitations
 
+- **Only the five Matchup scenarios carry a schedule.** The other in-season
+  scenarios — `sunday-pregame`, `late-injury-pivot`, the waiver Tuesday and
+  `playoff-week` — show the Matchup tab, because `resolveLifecycle` puts it
+  there and Demo Mode does not override the production toolbar, and the screen
+  correctly reports that Sleeper has published no matchup for the week. Giving
+  them one would mean pricing the opponent's whole roster in each of those
+  weeks; pricing it badly would produce four *degraded* forecasts, which is a
+  worse demonstration than an honest empty one. The obvious next fixture is a
+  pregame matchup on `sunday-pregame`, which is the one live phase these five do
+  not cover.
 - **No newsletter excerpts.** The evidence ledger holds publisher text, and
   inventing plausible excerpts would put words in a publisher's mouth on a
   screen whose premise is that every original excerpt is preserved verbatim. The
