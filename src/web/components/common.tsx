@@ -275,12 +275,30 @@ export function Confidence({ level }: { level: string }) {
 export function Notice({
   children,
   tone = 'warn',
+  /**
+   * The ARIA live-region role, when this notice is one.
+   *
+   * Off by default, because most notices are part of the page the reader is
+   * already working through and announcing them all would make the screen
+   * chatter. `status` for something that appeared quietly, `alert` for
+   * something that should interrupt — which is a short list: the offline
+   * capture banner on Draft is on it, because reading a stale board as a live
+   * one is how somebody drafts a player who is already gone.
+   */
+  role,
+  'data-testid': testId,
 }: {
   children: ReactNode;
   tone?: 'warn' | 'error' | 'ok';
+  role?: 'status' | 'alert';
+  'data-testid'?: string;
 }) {
   const cls = tone === 'error' ? 'notice notice-error' : tone === 'ok' ? 'notice notice-ok' : 'notice';
-  return <div className={cls}>{children}</div>;
+  return (
+    <div className={cls} role={role} data-testid={testId}>
+      {children}
+    </div>
+  );
 }
 
 /** A headline number with a small label. Large value, quiet label, tabular. */

@@ -52,8 +52,27 @@ describe('matching a typed query against a name', () => {
     expect(matchesQuery('Silas Mbeki', 'kai mbeki')).toBe(false);
   });
 
+  /*
+   * Reversed deliberately, and this is the one assertion in the file that
+   * changed rather than being added to.
+   *
+   * It used to read `expect(matchesQuery('Kai Brennan', 'brennen')).toBe(false)`
+   * — not because anybody wanted a misspelled surname to find nothing, but
+   * because a substring test cannot tell a typo from a stranger and the test
+   * was written to describe what the code did. A one-letter slip on a surname
+   * is the single most common thing a thumb does on a draft clock, and coming
+   * back empty is the worst available answer.
+   */
+  it('forgives a one-letter slip on a word long enough to be sure about', () => {
+    expect(matchesQuery('Kai Brennan', 'brennen')).toBe(true);
+    expect(matchesQuery('Bijan Robinson', 'robnson')).toBe(true);
+  });
+
   it('does not match somebody else', () => {
     expect(matchesQuery('Kai Brennan', 'zzz')).toBe(false);
-    expect(matchesQuery('Kai Brennan', 'brennen')).toBe(false);
+    // Short words get no typo budget at all: at three letters, one edit reaches
+    // most of the league, and a search that returns everybody has failed.
+    expect(matchesQuery('Kai Brennan', 'zoe')).toBe(false);
+    expect(matchesQuery('Kai Brennan', 'silas')).toBe(false);
   });
 });

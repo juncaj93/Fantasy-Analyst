@@ -16,6 +16,7 @@
  * the card asks for it separately, after it is open.
  */
 
+import { calendarSeason, priorSeason } from '../../core/season/context.ts';
 import { SleeperClient } from '../../core/sleeper/client.ts';
 import { fetchPlayerOutlook, type FetchLike } from '../../core/sleeper/outlook.ts';
 import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
@@ -46,16 +47,15 @@ import type { Database } from '../db.ts';
  */
 export function lastCompletedSeason(now = new Date()): string {
   // Sleeper's league seasons roll over in the spring; a draft in August 2026 is
-  // for the 2026 season and looks back at 2025. Before March the current
-  // calendar year's season has not been played yet.
-  const year = now.getUTCFullYear();
-  return String(now.getUTCMonth() >= 2 ? year - 1 : year - 2);
+  // for the 2026 season and looks back at 2025. Expressed as "the season before
+  // the current one" rather than as its own month arithmetic, so it cannot
+  // drift from the current-season answer across the February boundary.
+  return priorSeason(outlookSeason(now));
 }
 
 /** The season an outlook is written about: the one being drafted. */
 export function outlookSeason(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  return String(now.getUTCMonth() >= 2 ? year : year - 1);
+  return calendarSeason(now);
 }
 
 /**
