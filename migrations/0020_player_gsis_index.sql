@@ -20,17 +20,31 @@
 --
 -- A generated column removes the trade. `gsis_id` is derived from the same
 -- JSON that was always there, so it cannot drift from it and needs no
--- maintenance in the upsert path; STORED rather than VIRTUAL so the index is a
--- plain B-tree over a real value. Lookup by identifier becomes the same shape
+-- maintenance in the upsert path. Lookup by identifier becomes the same shape
 -- as lookup by name -- one indexed `IN (...)` -- and the resolver can put the
 -- identifier where it belongs, which is first.
+--
+-- VIRTUAL rather than STORED, and that is not a preference. SQLite refuses to
+-- add a STORED generated column to a table that already has rows: `ALTER TABLE
+-- ... ADD COLUMN ... STORED` fails with "cannot add a STORED column". The first
+-- draft of this migration was STORED and passed every local test, because the
+-- test database applies migrations to an empty `players` table -- and it would
+-- then have failed at the `d1 migrations apply --remote` step of the deploy,
+-- against the four thousand rows that are actually there. See
+-- tests/migrations.test.ts, which now applies every migration to a populated
+-- table for exactly this reason.
+--
+-- Nothing is lost. An index on a VIRTUAL generated column materialises the
+-- value inside the index, so the lookup below is a plain B-tree search
+-- (`SEARCH players USING INDEX idx_players_gsis`) and only a write pays the
+-- `json_extract`.
 --
 -- Nothing about scoring, ranking or any football output changes. This decides
 -- only whether a row from an external file finds the player it names.
 
 ALTER TABLE players
   ADD COLUMN gsis_id TEXT
-  GENERATED ALWAYS AS (json_extract(external_ids_json, '$.gsis')) STORED;
+  GENERATED ALWAYS AS (json_extract(external_ids_json, '$.gsis')) VIRTUAL;
 
 -- Not unique: two rows with a null id are not a conflict, and a genuine
 -- duplicate id is a data problem the identity review queue should surface
