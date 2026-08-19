@@ -146,9 +146,18 @@ test.describe('pushed detail screens', () => {
     await expect(rows.first()).toBeVisible();
     const before = await rows.count();
 
-    // Narrow the list first, so Back has something to fail to restore.
+    // Narrow the list first, so Back has something to fail to restore. The
+    // count is read only once it has stopped moving: the query is debounced and
+    // the old list stays on screen until the new one lands, so a count taken on
+    // the first non-zero reading is the count of the list being replaced.
     await page.getByLabel('Search players').fill('a');
-    await expect.poll(async () => rows.count()).toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        const first = await rows.count();
+        await page.waitForTimeout(250);
+        return first > 0 && first === (await rows.count()) ? first : 0;
+      })
+      .toBeGreaterThan(0);
     const narrowed = await rows.count();
 
     // …and scroll down it, so the offset is not zero either.
@@ -156,8 +165,18 @@ test.describe('pushed detail screens', () => {
     await expect.poll(async () => page.evaluate(() => Math.round(window.scrollY))).toBeGreaterThan(100);
     const offset = await page.evaluate(() => Math.round(window.scrollY));
 
-    const name = await rows.first().locator('.player-name').innerText();
-    await rows.first().click();
+    /*
+     * A row that is on screen at this offset, deliberately.
+     *
+     * Playwright scrolls a target into view before clicking it, so clicking the
+     * *first* row from 240px down the list would scroll the page back to the
+     * top before the tap ever reached the app — and the assertion below would
+     * then be measuring Playwright rather than the app. The ninth row is inside
+     * the viewport at this offset on all four supported widths.
+     */
+    const target = rows.nth(8);
+    const name = await target.locator('.player-name').innerText();
+    await target.click();
 
     const pushed = page.getByTestId('player-page');
     await expect(pushed).toBeVisible();

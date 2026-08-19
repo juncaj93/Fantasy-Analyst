@@ -254,7 +254,25 @@ export function PlayerPage({
         {section === 'overview' ? (
           <Overview detail={detail} detailFailed={detailFailed} signal={signal} position={player.position} />
         ) : null}
-        {section === 'outlook' ? <SeasonOutlook detail={detail} failed={detailFailed} /> : null}
+        {/*
+          The outlook tab, and what it says when there is no outlook.
+
+          `SeasonOutlook` renders nothing at all when the lookup failed, which
+          was the right answer inside a card with five other blocks around it and
+          is the wrong one here: a tab a reader chose and that draws a blank
+          reads as broken rather than as empty. The provider is a third party and
+          is allowed to be unavailable; saying so is the honest version.
+        */}
+        {section === 'outlook' ? (
+          detailFailed ? (
+            <Empty>
+              His outlook could not be read just now. It is published by a third party through Sleeper, so this is
+              usually temporary — everything else on this page is unaffected.
+            </Empty>
+          ) : (
+            <SeasonOutlook detail={detail} failed={detailFailed} />
+          )
+        ) : null}
         {section === 'market' ? <Market file={file} player={player} knowsMarket={knowsMarket} /> : null}
         {section === 'evidence' ? (
           <Evidence file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />

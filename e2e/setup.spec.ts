@@ -361,7 +361,7 @@ test.describe('review actions added for setup', () => {
 
     const card = reyesCards.first();
     await expect(card.getByTestId('review-reason')).toBeVisible();
-    await card.getByRole('button', { name: '⇄ Wrong player' }).click();
+    await card.getByRole('button', { name: 'Wrong player' }).click();
     await expect(card.getByTestId('player-picker')).toBeVisible();
     await card.getByLabel('Which player is this really about?').fill('Kowalski');
     await card.getByRole('button', { name: /Nate Kowalski/ }).click();

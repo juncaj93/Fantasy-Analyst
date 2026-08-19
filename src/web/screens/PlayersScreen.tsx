@@ -494,7 +494,6 @@ function PlayerRow({
         leading={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
         onOpen={onOpen}
         testId="player-search-row"
-        label={`${player.name} — open his page`}
         /*
           Three columns and not four.
 

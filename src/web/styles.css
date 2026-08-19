@@ -145,6 +145,17 @@
    */
   --pos-mix: 15%;
   --pos-mix-open: 22%;
+  /*
+   * The same hue, for a set of eight rather than a list of a hundred.
+   *
+   * Team's recommended lineup is the one place in the app where the wash is
+   * carrying a fact rather than decorating one: eight cards, one per lineup
+   * slot, and the tint is what makes the recommended eleven readable at arm's
+   * length. A hundred rows of a database is the opposite case, which is why the
+   * strength is two tokens and not one — and why Team says so on the rule that
+   * spends it rather than by inventing a colour of its own.
+   */
+  --pos-mix-strong: 34%;
 
   /* -- elevation and focus ---------------------------------------------- */
   /*
@@ -449,6 +460,7 @@
 
     --pos-mix: 34%;
     --pos-mix-open: 48%;
+    --pos-mix-strong: 66%;
 
     --shadow-1: none;
     --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -521,6 +533,7 @@
 
   --pos-mix: 34%;
   --pos-mix-open: 48%;
+  --pos-mix-strong: 66%;
 
   --shadow-1: none;
   --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -1960,11 +1973,6 @@ body,
   background: var(--pressed);
 }
 
-/* The current row, while its detail is open on top of it. */
-.dense-row[data-open='yes'] {
-  background: var(--selected-tint);
-}
-
 /*
  * The row's top line: rank, whatever marks it, the name, the tally field, the
  * position and the chevron — the same order and the same fixed fields the draft
@@ -1973,7 +1981,16 @@ body,
 .dense-row-top {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  /*
+   * Six rather than eight, and the difference is a name.
+   *
+   * There are five gaps on this line — rank, the screen's own control, the
+   * name, the tally field, the position, the chevron — so two points each is
+   * ten points, and on a 360px phone ten points is two or three letters of the
+   * only thing on the row that cannot be abbreviated. Everything on either side
+   * of a gap here is a fixed-width field, so nothing else changes size.
+   */
+  gap: 6px;
 }
 
 /*
@@ -2057,6 +2074,9 @@ body,
 /* The chevron that says this row leads somewhere. Quiet, and never the label. */
 .dense-chevron {
   flex: none;
+  /* Tucked against the position it follows: it belongs to the row, not to a
+     column of its own, and the name is what the space is worth more to. */
+  margin-left: -2px;
   display: inline-flex;
   align-items: center;
   color: var(--text-faint);
@@ -2585,6 +2605,21 @@ button:disabled {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+
+/*
+ * A row of actions that has to fit a phone.
+ *
+ * Tighter gaps and tighter padding, and nothing else: the buttons keep their
+ * 32px height and their type size, so the row is as legible as it was and is
+ * one row instead of two on every width this app supports.
+ */
+.btn-row-tight {
+  gap: var(--sp-1);
+}
+
+.btn-row-tight > .btn {
+  padding-inline: 10px;
 }
 
 /*
@@ -3998,6 +4033,39 @@ table.compact tr:last-child td {
 .starter-row .player-row-top,
 .bench-row .player-row-top {
   min-height: 32px;
+}
+
+/*
+ * The recommended lineup keeps more of the position's hue than a list does.
+ *
+ * This is the exception the density pass deliberately left standing. Everywhere
+ * else the wash came down to a hint, because a hundred tinted rows is a rainbow
+ * rather than a list; here there are eight, one per lineup slot, and the tint is
+ * doing a job no hairline can do — it is what lets a reader see the shape of
+ * their week without reading a word. The letters are still on the pill, the slot
+ * is still printed, and the row is still labelled as a starter for anything
+ * reading it aloud, so the colour remains an accelerator and never the carrier.
+ *
+ * It borrows `--pos-mix-strong` rather than naming a number, so Light and Dark
+ * stay two settings of one system here as everywhere else.
+ */
+.starter-row.card-pos {
+  --pos-mix: var(--pos-mix-strong);
+}
+
+/*
+ * A lineup slot nothing can fill, said once and set as prose rather than as a
+ * name. It truncates rather than wraps, because the row it sits in is one line
+ * whether it is holding a player or an explanation.
+ */
+.empty-slot-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text-dim);
 }
 
 /*

@@ -503,12 +503,23 @@ function StarterCard({
   if (!slot.playerId || !slot.name) {
     return (
       <div className="player-row" data-testid="starter-row" data-slot={slot.slot} data-starter="empty">
+        {/*
+          One line, and quietly.
+
+          This used to be two: "Nobody eligible to start here" at the weight and
+          size of a player's name, with "Takes QB" on a second line under it. A
+          roster that is four players deep in the middle of a draft has four or
+          five of these, and at name weight they were the loudest thing on the
+          screen — a list shouting about what it does not have, above the answer
+          it does. What the slot takes is the same sentence continued, so it
+          sits on the same line, and neither half is a name so neither is set
+          like one.
+        */}
         <div className="player-row-top">
           <span className="slot-label">{slot.slot}</span>
-          <span className="player-name faint">Nobody eligible to start here</span>
-        </div>
-        <div className="player-row-metrics">
-          <span className="metric">Takes {slot.accepts.join(', ')}</span>
+          <span className="empty-slot-line">
+            Nobody eligible to start here <span className="faint">— takes {slot.accepts.join(', ')}</span>
+          </span>
         </div>
       </div>
     );

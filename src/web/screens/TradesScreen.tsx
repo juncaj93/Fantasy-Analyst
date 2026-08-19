@@ -157,7 +157,6 @@ function TradeRow({ suggestion, onOpen }: { suggestion: TradeSuggestion; onOpen:
         team={suggestion.team}
         onOpen={onOpen}
         testId="trade-row"
-        label={`${suggestion.name} — open the case for him`}
         metrics={[
           { label: 'Life', value: <SignedValue net={w.lifetime} /> },
           { label: '30d', value: <SignedValue net={w.last30} /> },

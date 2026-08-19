@@ -1655,13 +1655,13 @@ test.describe('review queue', () => {
 
   test('accepting an item removes it from the queue and updates the badge', async ({ page }) => {
     const cardsBefore = await page.getByTestId('review-card').count();
-    await page.getByRole('button', { name: '✓ Accept' }).first().click();
+    await page.getByRole('button', { name: 'Accept', exact: true }).first().click();
     await expect(page.getByTestId('review-card')).toHaveCount(cardsBefore - 1);
   });
 
   test('exposes explicit correction controls rather than gesture-only actions', async ({ page }) => {
     const card = page.getByTestId('review-card').first();
-    await card.getByRole('button', { name: '✎ Change' }).click();
+    await card.getByRole('button', { name: 'Change' }).click();
     await expect(card.getByRole('button', { name: 'positive', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'mixed', exact: true })).toBeVisible();
     await expect(card.getByText(/Your correction wins from now on/)).toBeVisible();

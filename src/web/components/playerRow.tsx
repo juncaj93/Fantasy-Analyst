@@ -45,10 +45,8 @@ export function CompactPlayerRow({
   leading,
   metrics,
   note,
-  open = false,
   onOpen,
   testId,
-  label,
 }: {
   playerId: string;
   name: string;
@@ -71,11 +69,8 @@ export function CompactPlayerRow({
    * the end of it.
    */
   note?: ReactNode;
-  open?: boolean;
   onOpen: () => void;
   testId: string;
-  /** The accessible name of the control, when the visible text is not enough. */
-  label?: string;
 }) {
   return (
     <button
@@ -84,8 +79,18 @@ export function CompactPlayerRow({
       data-testid={testId}
       data-player-id={playerId}
       data-position={(position ?? '').toUpperCase()}
-      data-open={open ? 'yes' : 'no'}
-      {...(label ? { 'aria-label': label } : {})}
+      /*
+        No `aria-label`, deliberately.
+
+        One was written here — "Marcus Vance — open his page" — and it was an
+        accessibility regression dressed as an improvement: an accessible name
+        on a container replaces everything inside it, so a reader listening
+        rather than looking would have been told the player's name and nothing
+        else, losing the tally, the availability tag, the club, the position and
+        all four numbers that the row exists to show. The row is a button, so
+        the platform already says it can be pressed; what it says when pressed
+        should be what it says.
+      */
       onClick={onOpen}
     >
       <span className="dense-row-top">
