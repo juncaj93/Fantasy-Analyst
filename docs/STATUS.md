@@ -1318,6 +1318,59 @@ four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green
 Full detail: [DEMO_MODE.md](DEMO_MODE.md).
 
 
+## Milestone 21 — the Matchup screen, read at arm's length (done)
+
+A visual pass over the shipped Matchup screen. No forecast changed: every
+projection, probability and threshold on it is the same number it was, and the
+one model addition is a comparison the insight engine was already computing
+inside itself.
+
+**The two scores lean on the centre.** They were pinned to opposite edges of a
+360px card with the reader's own team name between them, which is a
+scoreboard's layout — it presents two facts and leaves the subtraction to you.
+Both columns now hug the `vs`, about 40px apart, so "49 against 79" is one
+glance. Each name still sits directly above its own score, so whose is whose
+never comes into question.
+
+**The card got shorter by losing repetition rather than information.** The
+record moved onto the name's line; the insight card's link and its pager, a row
+each, became one row. Nothing was deleted: the score card went 155px → 137px and
+the insight card 174px → ~120px, and every number that was on it still is.
+
+**The headlines say the thing and stop.** `Need roughly 24.7 more from S. Brandt
+to reach 28% win odds` is now `Need ~24.7 pts from S. Brandt`, with what the
+number buys moved into the line below it rather than dropped. A delta in win
+probability is printed as `pts` rather than `%` throughout — going from 40% to
+48% is eight points and a twenty-percent increase, and the card that says "8%"
+lets the reader pick whichever reading flatters the suggestion.
+
+**The figures form a column.** The points block was content-sized, so its edge
+moved with the length of the name beside it and the numbers wandered by thirty
+pixels down the list. Letting the name take the slack pins all four figures on a
+row into a narrow band either side of the spine. A browser test asserts the
+column is one pixel value rather than a spread, because "it looks aligned" is
+not something a later change can be checked against.
+
+**Colour is an accelerator and stays rare.** A score is tinted only once its
+player has kicked off, only when he is six points off the pace, and never when
+nobody projected him — one to three of sixteen on a typical screen. It reads
+`vsExpectation`, which is pace-corrected and computed once in `core/matchup`, so
+a red score and a calm insight card cannot appear together. A finished player's
+row also stops printing his projection, because by then it has collapsed onto
+the score directly above it.
+
+**The whole starting lineup now fits above the bar at 360px.** It was five to
+seven of eight slots depending on how tall the insight card happened to be.
+Tap targets, safe areas and the collapsed bench are unchanged.
+
+Checks at this milestone: four new browser tests over the layout claims —
+column alignment, the lineup fitting, no wrapping or sideways overflow at 360px,
+and colour staying under half the scores — plus four unit tests over the
+pace-corrected comparison, and the existing copy assertions rewritten to the new
+forms rather than loosened. Read at 430/390/375/360 in both themes across the
+five Demo Mode matchup states: no wrapping and no horizontal overflow in any of
+the forty combinations.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against

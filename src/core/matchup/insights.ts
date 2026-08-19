@@ -41,7 +41,7 @@
  */
 
 import type { LineupDecision } from './decision.ts';
-import type { PlayerDistribution } from './distribution.ts';
+import { vsExpectation, type PlayerDistribution } from './distribution.ts';
 import type { ClinchState, NeedThreshold, PlayerLeverage } from './needs.ts';
 import { MATERIAL_SWING, thresholdFor } from './needs.ts';
 import type { SimulationResult } from './simulate.ts';
@@ -220,9 +220,9 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       key: `ruled-out:${player.playerId}`,
       kind: 'injury',
       urgency: 'act_now',
-      headline: `${name(player.playerId)} is out and still in your lineup`,
+      headline: `${name(player.playerId)} is OUT and still starting`,
       detail: replacement
-        ? `${name(replacement.inPlayerId)} takes the slot and adds ${percent(replacement.gain)} to your win odds.`
+        ? `${name(replacement.inPlayerId)} takes the slot and adds ${points(replacement.gain)} to your win odds.`
         : 'Nobody on your bench can legally take the slot.',
       playerId: player.playerId,
       side: 'mine',
@@ -257,10 +257,10 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       key: `injury:${player.playerId}:${player.availability}`,
       kind: 'injury',
       urgency: 'act_now',
-      headline: `${name(player.playerId)} is a genuine question`,
+      headline: `${name(player.playerId)} injury swings ${points(impact)}`,
       detail: mine
-        ? `About ${percent(impact)} of your win odds are riding on whether he plays.`
-        : `Their ${name(player.playerId)} is unresolved — worth about ${percent(impact)} either way.`,
+        ? `About ${points(impact)} of your win odds are riding on whether he plays.`
+        : `Their ${name(player.playerId)} is unresolved — worth about ${points(impact)} either way.`,
       playerId: player.playerId,
       side: player.side,
       winImpact: round4(impact),
@@ -274,7 +274,7 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       key: `lineup:${best.outPlayerId}:${best.inPlayerId}`,
       kind: 'lineup_leverage',
       urgency: 'act_now',
-      headline: `Starting ${name(best.inPlayerId)} over ${name(best.outPlayerId)} adds ${percent(best.gain)} to your win odds`,
+      headline: `Start ${name(best.inPlayerId)} over ${name(best.outPlayerId)}: +${points(best.gain)}`,
       detail: best.reason,
       playerId: best.inPlayerId,
       side: 'mine',
@@ -324,7 +324,7 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       key: `need:${need.playerId}`,
       kind: 'need',
       urgency: 'material',
-      headline: `${need.soleVariable ? 'Need' : 'Need roughly'} ${need.moreNeeded.toFixed(1)} more from ${name(need.playerId)} to reach ${percent(need.winAtTarget)} win odds`,
+      headline: `Need ${need.soleVariable ? '' : '~'}${need.moreNeeded.toFixed(1)} pts from ${name(need.playerId)}`,
       detail: needDetail(need, input, name),
       playerId: need.playerId,
       side: 'mine',
@@ -346,7 +346,7 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
         key: `opponent-need:${flip.playerId}`,
         kind: 'opponent_need',
         urgency: 'informational',
-        headline: `Opponent needs ${flip.soleVariable ? '' : 'about '}${flip.moreNeeded.toFixed(1)} more from ${name(flip.playerId)} to flip this`,
+        headline: `Opponent needs ${flip.soleVariable ? '' : '~'}${flip.moreNeeded.toFixed(1)} pts from ${name(flip.playerId)} to flip it`,
         detail: `He is on ${flip.target.toFixed(1)} at that point — projected ${(input.leverage.find((l) => l.playerId === flip.playerId)?.projected ?? 0).toFixed(1)}.`,
         playerId: flip.playerId,
         side: 'theirs',
@@ -364,14 +364,12 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
 
     /*
      * Measured against what he was projected to have by *now*, not against his
-     * whole-game projection. A quarterback on four points at half-time is not
-     * fourteen points below expectation; he is seven, and a card that says
-     * fourteen is a card that shouts every Sunday lunchtime.
+     * whole-game projection — see `vsExpectation`, which owns that correction
+     * and is also what colours the player rows, so a card and a row can never
+     * disagree about whether somebody is having a bad afternoon.
      */
-    const expectedSoFar =
-      distribution.phase === 'final' ? player.projection : player.projection * clamp01(1 - distribution.remainingShare);
-    const delta = distribution.settled - expectedSoFar;
-    if (Math.abs(delta) < MATERIAL_POINT_SWING) continue;
+    const delta = vsExpectation(distribution, player.projection);
+    if (delta == null || Math.abs(delta) < MATERIAL_POINT_SWING) continue;
 
     const grip = input.leverage.find((l) => l.playerId === distribution.playerId);
     const impact = grip?.swing ?? Math.min(0.3, Math.abs(delta) / 40);
@@ -380,7 +378,7 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       key: `${delta > 0 ? 'over' : 'under'}:${distribution.playerId}`,
       kind: good ? 'swing_positive' : 'swing_negative',
       urgency: 'informational',
-      headline: `${name(distribution.playerId)} is ${delta > 0 ? '+' : ''}${delta.toFixed(1)} against projection`,
+      headline: `Biggest swing: ${name(distribution.playerId)} ${delta > 0 ? '+' : ''}${delta.toFixed(1)} vs expectation`,
       detail: good ? 'The matchup moved toward you.' : 'The matchup moved away from you.',
       playerId: distribution.playerId,
       side: distribution.side,
@@ -396,7 +394,7 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
       kind: 'variance_concentration',
       urgency: 'informational',
       headline: `${name(concentrated.playerId)} decides ${percent(concentrated.varianceShare)} of what is left`,
-      detail: `Between ${concentrated.floor.toFixed(1)} and ${concentrated.ceiling.toFixed(1)}, your odds move ${percent(concentrated.swing)}.`,
+      detail: `Between ${concentrated.floor.toFixed(1)} and ${concentrated.ceiling.toFixed(1)}, your odds move ${points(concentrated.swing)}.`,
       playerId: concentrated.playerId,
       side: concentrated.side,
       winImpact: concentrated.swing,
@@ -563,7 +561,7 @@ function whatDecidedIt(
     urgency: 'material',
     headline: 'What decided it',
     detail:
-      `${name(top.playerId)} finished ${top.delta > 0 ? '+' : ''}${top.delta.toFixed(1)} against projection` +
+      `${name(top.playerId)} finished ${top.delta > 0 ? '+' : ''}${top.delta.toFixed(1)} vs expectation` +
       `${Math.abs(top.effect) >= Math.abs(margin) ? `, which was more than the ${Math.abs(margin).toFixed(1)}-point margin` : ''}` +
       `. You ${won ? 'won' : 'lost'} by ${Math.abs(margin).toFixed(1)}.`,
     playerId: top.playerId,
@@ -665,20 +663,39 @@ function flipThreshold(
   return null;
 }
 
+/**
+ * The two facts the shortened headline no longer carries.
+ *
+ * `Need ~24.7 pts from S. Brandt` says the thing worth acting on and stops. What
+ * it drops is *what that buys* — the win odds at that number — and that is the
+ * half a reader needs before deciding whether the number is worth hoping for, so
+ * it leads here.
+ *
+ * The projected margin used to lead this line and no longer appears at all: both
+ * projected finals are printed in the score card directly above, and a card this
+ * small cannot afford to spend a clause repeating the element above it.
+ */
 function needDetail(need: NeedThreshold, input: InsightInput, name: (id: string) => string): string {
   const grip = input.leverage.find((l) => l.playerId === need.playerId);
   const projected = grip?.projected ?? 0;
-  const gap = round2(input.result.projectedMine - input.result.projectedTheirs);
-  const side = gap >= 0 ? `Projected to outscore by ${gap.toFixed(1)}` : `Projected to trail by ${Math.abs(gap).toFixed(1)}`;
-  return `${side} · ${name(need.playerId)} is projected ${projected.toFixed(1)}, needs ${need.target.toFixed(1)}.`;
+  return `Takes you to ${percent(need.winAtTarget)} · ${name(need.playerId)} is projected ${projected.toFixed(1)}, needs ${need.target.toFixed(1)}.`;
 }
 
+/** A win probability, as a level: "61%". */
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function clamp01(v: number): number {
-  return Math.min(1, Math.max(0, v));
+/**
+ * A *change* in win probability, as points rather than a percentage.
+ *
+ * "Adds 8%" and "adds 8 pts" are different claims, and only the second one is
+ * this number: going from 40% to 48% is eight points and a twenty-percent
+ * increase, and the card that says "8%" invites the reader to pick whichever
+ * reading flatters the suggestion. Levels keep {@link percent}; deltas get this.
+ */
+function points(value: number): string {
+  return `${Math.round(value * 100)} pts`;
 }
 
 function round2(v: number): number {

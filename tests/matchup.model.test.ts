@@ -406,3 +406,44 @@ function sd(values: Float64Array): number {
   for (let i = 0; i < values.length; i++) variance += (values[i]! - mean) ** 2;
   return Math.sqrt(variance / values.length);
 }
+
+/**
+ * Over- and underperformance, as the rows and the cards both read it.
+ *
+ * The screen colours a score red or green from this number and the insight
+ * engine writes a card from the same one, so a drift between the two would show
+ * up as a red score sitting under a card saying everything is calm.
+ */
+describe('how far ahead of expectation a player is running', () => {
+  it('is pace-corrected, so half a game played is measured against half a projection', () => {
+    // Projected 20, has 4, and about half the game is gone. That is roughly six
+    // points light — not sixteen, which is what a whole-game comparison says.
+    const players = lineups({ mineProjections: [20, 12, 10, 14, 11, 8, 9] }).map((p) =>
+      p.playerId === 'mine-0' ? { ...p, actual: 4 } : p,
+    );
+    const row = forecast(players, HALFTIME).slots[0]!.mine!;
+    expect(row.phase).toBe('live');
+    expect(row.vsExpectation).toBeLessThan(0);
+    expect(row.vsExpectation).toBeGreaterThan(-10);
+  });
+
+  it('measures a finished player against his whole projection', () => {
+    const players = lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, actual: p.projection! + 9 } : p));
+    const row = forecast(players, AFTER).slots[0]!.mine!;
+    expect(row.phase).toBe('final');
+    expect(row.vsExpectation).toBeCloseTo(9, 1);
+  });
+
+  it('is absent before kickoff rather than reported as a shortfall', () => {
+    // Nobody has played. A player on nothing is not underperforming, and a
+    // screen that said so would be red every Sunday morning.
+    const row = forecast(lineups(), BEFORE).slots[0]!.mine!;
+    expect(row.phase).toBe('not_started');
+    expect(row.vsExpectation).toBe(0);
+  });
+
+  it('is null for a player nobody projected, because no projection is not a miss', () => {
+    const players = lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, projection: null } : p));
+    expect(forecast(players, HALFTIME).slots[0]!.mine!.vsExpectation).toBeNull();
+  });
+});
