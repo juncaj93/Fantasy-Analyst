@@ -133,6 +133,18 @@ const POSITION_MARKETS: Record<string, SeasonMarketKey[]> = {
   TE: ['season_receiving_yards', 'season_receptions', 'season_receiving_tds'],
 };
 
+/**
+ * One market's name in words, shared by everything that prints one.
+ *
+ * Exported so a screen naming the components behind a summed number uses the
+ * same vocabulary the baseline's own note does. Two spellings of "receiving
+ * yards" in one card is how a reader starts wondering whether they are two
+ * different things.
+ */
+export function seasonMarketLabel(market: string): string {
+  return MARKET_LABEL[market as SeasonMarketKey] ?? market;
+}
+
 const MARKET_LABEL: Record<SeasonMarketKey, string> = {
   season_pass_yards: 'passing yards',
   season_pass_tds: 'passing TDs',
@@ -143,14 +155,21 @@ const MARKET_LABEL: Record<SeasonMarketKey, string> = {
   season_receiving_tds: 'receiving TDs',
 };
 
-/** Short label for a compact card, e.g. "1,085 rec yds". */
+/**
+ * Short label for a compact card, e.g. "1,085 rec yd".
+ *
+ * Singular throughout, which is not a typo: the card line is the width-critical
+ * element on the row and four components have to fit on one line at 360px
+ * without wrapping. Six characters saved across a quarterback's line is the
+ * difference between reading his rushing touchdowns and reading an ellipsis.
+ */
 const MARKET_UNIT: Record<SeasonMarketKey, string> = {
-  season_pass_yards: 'pass yds',
+  season_pass_yards: 'pass yd',
   season_pass_tds: 'pass TD',
-  season_rush_yards: 'rush yds',
+  season_rush_yards: 'rush yd',
   season_rush_tds: 'rush TD',
   season_receptions: 'rec',
-  season_receiving_yards: 'rec yds',
+  season_receiving_yards: 'rec yd',
   season_receiving_tds: 'rec TD',
 };
 
@@ -241,34 +260,206 @@ export function seasonBaseline(
   };
 }
 
+// ------------------------------------------------- the summary a card shows
+
 /**
- * The one or two numbers worth a line on a draft card.
+ * One quantity on the card's market line, and where it came from.
+ *
+ * `parts` is the whole of the honesty story. A component built from one market
+ * is that market; a component built from two is a **sum this app performed**,
+ * and it says so rather than presenting itself as a line somebody could have
+ * bet. The distinction matters because "84.5 scrimmage yards" is not a market
+ * any book quotes — it is this app adding a rushing line to a receiving one.
+ */
+export interface PropComponent {
+  /** What the card prints, e.g. `84.5 scrim yd`. */
+  text: string;
+  /** The unit alone, e.g. `scrim yd`. Names what the number actually is. */
+  label: string;
+  value: number;
+  /** Every market summed into it, with the line each contributed. */
+  parts: { market: SeasonMarketKey; line: number; bookCount?: number }[];
+  /** True when `parts` has more than one entry — never one book's market. */
+  derived: boolean;
+  /**
+   * Markets this component would have included and did not have.
+   *
+   * Non-empty means the number is a *partial* view of the quantity its label
+   * would normally name, which is why the label changes rather than the number
+   * quietly standing in for a total it does not cover.
+   */
+  missing: SeasonMarketKey[];
+}
+
+export interface PropSummary {
+  /** The card's one line, e.g. `84.5 scrim yd · 0.55 TD`. */
+  headline: string;
+  components: PropComponent[];
+  /** True when any component is a sum this app performed. */
+  derived: boolean;
+  /** Everything the position's summary wanted and did not have. */
+  missing: SeasonMarketKey[];
+}
+
+/**
+ * What each position's card line is made of, and in what order.
+ *
+ * Deliberately **not** `POSITION_MARKETS`. That list defines what complete
+ * coverage means for `seasonBaseline`, and `coverage` multiplies
+ * `marketExpectationScore` — so adding a market here to show it would have
+ * changed every quarterback's score. Two lists, two jobs: one decides what the
+ * model expects, this one decides what the reader sees.
+ *
+ * A group with two markets is summed when both are present. With one present it
+ * is reported as that market alone, under that market's own name, because a
+ * receiving-yards line is not a scrimmage-yards line with the rushing half set
+ * to zero.
+ */
+interface PropGroup {
+  /** The markets to sum, in the order they are added. */
+  markets: SeasonMarketKey[];
+  /** The unit when every market in the group is present. */
+  label: string;
+  /** The unit when only one is, keyed by the market that survived. */
+  alone: Partial<Record<SeasonMarketKey, string>>;
+}
+
+const PROP_GROUPS: Record<string, PropGroup[]> = {
+  QB: [
+    { markets: ['season_pass_yards'], label: 'pass yd', alone: {} },
+    { markets: ['season_pass_tds'], label: 'pass TD', alone: {} },
+    { markets: ['season_rush_yards'], label: 'rush yd', alone: {} },
+    { markets: ['season_rush_tds'], label: 'rush TD', alone: {} },
+  ],
+  RB: [
+    {
+      markets: ['season_rush_yards', 'season_receiving_yards'],
+      label: 'scrim yd',
+      alone: { season_rush_yards: 'rush yd', season_receiving_yards: 'rec yd' },
+    },
+    {
+      markets: ['season_rush_tds', 'season_receiving_tds'],
+      label: 'TD',
+      alone: { season_rush_tds: 'rush TD', season_receiving_tds: 'rec TD' },
+    },
+  ],
+};
+PROP_GROUPS['WR'] = PROP_GROUPS['RB']!;
+PROP_GROUPS['TE'] = PROP_GROUPS['RB']!;
+
+/**
+ * The numbers worth a line on a draft card, by position.
  *
  * Market expectation, not a bet: no prices, no over/under language, no book
- * names. If only one market exists, one is shown; if none, nothing is — an
- * empty placeholder costs the same space as a real number and says less.
+ * names. Nothing is shown when nothing is priced — an empty placeholder costs
+ * the same space as a real number and says less.
+ *
+ * The three rules that make an aggregate honest, all of them enforced here
+ * rather than trusted to the caller:
+ *
+ *   * **Only compatible components are summed.** Yards with yards, touchdowns
+ *     with touchdowns. There is no group that mixes units.
+ *   * **A missing component is not zero.** It drops out of the sum *and* out of
+ *     the label, so a receiver priced on receiving yards alone reads
+ *     `1,085 rec yd` and never `1,085 scrim yd`.
+ *   * **A sum is never presented as one book's market.** `derived` says so, the
+ *     component keeps the lines it was built from, and the expanded card prints
+ *     them.
+ */
+export function seasonPropSummary(
+  position: string,
+  markets: { market: SeasonMarketKey; line: number | null; bookCount?: number }[],
+): PropSummary | null {
+  const pos = (position ?? '').toUpperCase();
+  const byMarket = new Map<SeasonMarketKey, { line: number; bookCount?: number }>();
+  for (const m of markets) {
+    if (m.line == null || !Number.isFinite(m.line)) continue;
+    // Providers occasionally quote the same market twice; first one wins, so
+    // the answer does not depend on array order beyond that.
+    if (!byMarket.has(m.market)) byMarket.set(m.market, { line: m.line, bookCount: m.bookCount });
+  }
+  if (byMarket.size === 0) return null;
+
+  const groups = PROP_GROUPS[pos] ?? fallbackGroups(POSITION_MARKETS[pos] ?? SEASON_MARKET_KEYS);
+  const summary = summarise(byMarket, groups);
+
+  /*
+   * A market the position's summary does not ask for is still a market.
+   *
+   * A receiver priced on receptions alone has none of the quantities his
+   * summary is built from, and returning null there would blank a card that
+   * has something real to say. So the last resort is to report exactly what is
+   * priced, under its own name — which is the same honesty rule as everywhere
+   * else, applied to a player the groups happen not to cover.
+   */
+  return summary ?? summarise(byMarket, fallbackGroups([...byMarket.keys()]));
+}
+
+function summarise(
+  byMarket: Map<SeasonMarketKey, { line: number; bookCount?: number }>,
+  groups: PropGroup[],
+): PropSummary | null {
+  const components: PropComponent[] = [];
+  const missingOverall: SeasonMarketKey[] = [];
+
+  for (const group of groups) {
+    const present = group.markets.filter((m) => byMarket.has(m));
+    const absent = group.markets.filter((m) => !byMarket.has(m));
+    for (const m of absent) missingOverall.push(m);
+    if (present.length === 0) continue;
+
+    const parts = present.map((market) => {
+      const found = byMarket.get(market)!;
+      return { market, line: found.line, bookCount: found.bookCount };
+    });
+    const value = round2(parts.reduce((total, p) => total + p.line, 0));
+    /*
+     * The label follows the evidence.
+     *
+     * Every market present: the group's own name, which is the aggregate it
+     * was defined to be. Only one: that market's own name. A group whose
+     * `alone` map has no entry for the survivor is a single-market group
+     * anyway, so its label is already the right one.
+     */
+    const label = absent.length === 0 ? group.label : (group.alone[present[0]!] ?? group.label);
+
+    components.push({
+      text: `${formatLine(value)} ${label}`,
+      label,
+      value,
+      parts,
+      derived: parts.length > 1,
+      missing: absent,
+    });
+  }
+
+  if (components.length === 0) return null;
+
+  return {
+    headline: components.map((c) => c.text).join(' · '),
+    components,
+    derived: components.some((c) => c.derived),
+    missing: missingOverall,
+  };
+}
+
+/** One component per market, for a position with no summary of its own. */
+function fallbackGroups(order: readonly SeasonMarketKey[]): PropGroup[] {
+  return order.map((market) => ({ markets: [market], label: MARKET_UNIT[market], alone: {} }));
+}
+
+/**
+ * The card's line as a string, or null.
+ *
+ * Kept as its own export because the ranking payload carries the rendered line
+ * as well as the structure behind it, and a caller that only wants the text
+ * should not have to know how the structure is shaped.
  */
 export function seasonHeadline(
   position: string,
   markets: { market: SeasonMarketKey; line: number | null }[],
-  limit = 2,
 ): string | null {
-  const pos = (position ?? '').toUpperCase();
-  const order = POSITION_MARKETS[pos] ?? SEASON_MARKET_KEYS;
-  const byMarket = new Map<SeasonMarketKey, number>();
-  for (const m of markets) {
-    if (m.line == null || !Number.isFinite(m.line)) continue;
-    if (!byMarket.has(m.market)) byMarket.set(m.market, m.line);
-  }
-
-  const parts: string[] = [];
-  for (const market of order) {
-    const line = byMarket.get(market);
-    if (line == null) continue;
-    parts.push(`${formatLine(line)} ${MARKET_UNIT[market]}`);
-    if (parts.length >= limit) break;
-  }
-  return parts.length === 0 ? null : parts.join(' · ');
+  return seasonPropSummary(position, markets)?.headline ?? null;
 }
 
 /** How many priced peers a comparison needs before it means anything. */
