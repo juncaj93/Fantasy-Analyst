@@ -982,6 +982,7 @@ export function DraftScreen({
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
                 marketSource={board.marketSource ?? null}
+                scoringLabel={board.league?.scoringLabel ?? null}
                 expanded={expanded === item.rec.playerId}
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
@@ -1390,6 +1391,18 @@ function TierDivider({ gap }: { gap: number | null }) {
  * a button may not contain buttons.
  */
 /**
+ * How hard the line has to be squeezed to keep every number on it.
+ *
+ * Measured rather than chosen: four quantities need 332px, five need 345, and
+ * the row offers 315 at 360px and 330 at 375. `yes` rescues four, `max`
+ * rescues five, and a line of three or fewer needs neither.
+ */
+function densityOf(components: number): 'no' | 'yes' | 'max' {
+  if (components >= 5) return 'max';
+  return components >= 4 ? 'yes' : 'no';
+}
+
+/**
  * The market line's own tooltip: what each number is, spelled out.
  *
  * Null when there is nothing to add — a line of single-market numbers already
@@ -1421,16 +1434,46 @@ function marketLineTitle(rec: DraftRecommendation): string | undefined {
 function MarketProvenance({
   rec,
   source,
+  scoringLabel,
 }: {
   rec: DraftRecommendation;
   source: DraftBoard['marketSource'];
+  /** The league's own scoring, which is what turned lines into points. */
+  scoringLabel: string | null;
 }) {
   const props = rec.marketProps;
   if (!props || props.components.length === 0) return null;
 
+  const baseline = rec.marketBaseline;
+
   return (
     <div className="market-detail" data-testid="market-detail">
       <DetailLabel>Market</DetailLabel>
+      {/*
+        The market-implied points, said in full before the components it is
+        made of.
+
+        Three facts, and the second two are what stop the first from being a
+        projection wearing a market's clothes: how much of what this position
+        scores on actually had a market, and whose scoring turned the lines into
+        points. A number labelled `pts` without the league behind it would mean
+        something different in every league that read it.
+      */}
+      {baseline?.points == null ? null : (
+        <div className="market-points" data-testid="market-points">
+          <strong>
+            MKT PTS {baseline.missing.length > 0 ? '~' : ''}
+            {baseline.points}
+          </strong>{' '}
+          <span className="muted">
+            {Math.round(baseline.coverage * 100)}% of what a {rec.position} scores on had a market
+            {scoringLabel ? `, converted at this league's scoring (${scoringLabel})` : ''}.{' '}
+            {baseline.missing.length > 0
+              ? 'Missing markets are left out rather than counted as nothing, so the total is a floor.'
+              : ''}
+          </span>
+        </div>
+      )}
       <ul className="market-components">
         {props.components.map((c) => (
           <li key={c.label} data-testid="market-component" data-derived={c.derived ? 'yes' : 'no'}>
@@ -1464,6 +1507,7 @@ function RecommendationRow({
   showCliffProximity,
   horizonPick,
   marketSource,
+  scoringLabel,
   onToggle,
   onQueue,
   busy,
@@ -1481,6 +1525,8 @@ function RecommendationRow({
   horizonPick: number | null;
   /** Who priced the season markets, for the expanded card's provenance. */
   marketSource: DraftBoard['marketSource'];
+  /** The league's own scoring label, which is what `MKT PTS` was converted at. */
+  scoringLabel: string | null;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -1699,7 +1745,7 @@ function RecommendationRow({
               stylesheet tightens; it is set from the component count rather
               than from the position, because the width problem is the count.
             */
-            data-dense={(rec.marketProps?.components.length ?? 0) >= 4 ? 'yes' : 'no'}
+            data-dense={densityOf(rec.marketProps?.components.length ?? 0)}
             title={marketLineTitle(rec)}
           >
             <span className="market-label">MKT</span>
@@ -1712,8 +1758,24 @@ function RecommendationRow({
               still what an older client renders.
             */}
             {rec.marketProps ? (
-              rec.marketProps.components.map((c) => (
-                <span className="market-part" key={c.label} data-derived={c.derived ? 'yes' : 'no'}>
+              rec.marketProps.components.map((c, i) => (
+                /*
+                  `data-rank` is what the stylesheet drops when the row runs out
+                  of width, in the order the brief sets: the points total first
+                  because it is the one number that compares across positions,
+                  then receptions, then the yardage, then the touchdowns. A
+                  component removed this way is removed deliberately and is
+                  still in the expanded card — the alternative was an ellipsis
+                  deciding it, which hides whichever component happens to be
+                  last rather than whichever matters least.
+                */
+                <span
+                  className="market-part"
+                  key={c.label}
+                  data-rank={i + 1}
+                  data-derived={c.derived ? 'yes' : 'no'}
+                  data-partial={c.missing.length > 0 ? 'yes' : 'no'}
+                >
                   {c.text}
                 </span>
               ))
@@ -1734,7 +1796,7 @@ function RecommendationRow({
         and never forty.
       */}
       <Disclose open={expanded}>
-        <DraftPlayerDetail rec={rec} marketSource={marketSource} />
+        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} />
       </Disclose>
     </div>
   );
@@ -1768,9 +1830,11 @@ function RecommendationRow({
 function DraftPlayerDetail({
   rec,
   marketSource,
+  scoringLabel,
 }: {
   rec: DraftRecommendation;
   marketSource: DraftBoard['marketSource'];
+  scoringLabel: string | null;
 }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
 
@@ -1800,7 +1864,7 @@ function DraftPlayerDetail({
         Before the outlook, because it is the workings of a number the reader
         just tapped past rather than somebody's prose about the season.
       */}
-      <MarketProvenance rec={rec} source={marketSource} />
+      <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
       <InjuryDetail detail={detail} />
