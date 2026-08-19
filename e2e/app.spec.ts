@@ -1366,9 +1366,16 @@ test.describe('team, ADP import and start/sit', () => {
 
   test('lists recommended starters by slot, then the bench', async ({ page }) => {
     await expect(page.getByTestId('starters-title')).toBeVisible();
-    await expect(page.getByTestId('bench-title')).toBeVisible();
     // Seven slots: QB, RB, RB, WR, WR, TE, FLEX — the league's own shape.
     expect(await page.getByTestId('starter-row').count()).toBe(7);
+
+    // The bench is behind its own chevron now, so that the starters fit on one
+    // phone screen. It still says how many are back there before it is opened,
+    // and it still holds them.
+    const toggle = page.getByTestId('bench-toggle');
+    await expect(toggle).toBeVisible();
+    expect(await page.getByTestId('bench-row').count()).toBe(0);
+    await toggle.click();
     expect(await page.getByTestId('bench-row').count()).toBeGreaterThan(0);
   });
 
