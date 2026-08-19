@@ -469,6 +469,74 @@ test.describe('the deployed app', () => {
     await first.locator('.row-button').click();
   });
 
+  /**
+   * The half of search that runs on the server, against the real dictionary.
+   *
+   * The suite already proves Draft can be searched — but Draft filters a board
+   * it already holds, so it proves nothing about the server. Players is the
+   * other path: it asks `/api/players?q=`, which used to run a literal `LIKE`
+   * against the raw typed string and therefore could not survive a slipped
+   * letter. That is the surface the shared-matcher work changed, and until now
+   * nothing checked it against a deployment.
+   *
+   * The query is derived from a name the live site just showed rather than
+   * hardcoded, because production holds real players and this file must not
+   * assume which. A surname long enough to mistype has two of its middle
+   * letters swapped — the commonest real slip, and one no substring test can
+   * absorb.
+   */
+  test('a mistyped surname still finds the player, on the server', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    const rows = page.getByTestId('player-search-row');
+    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
+
+    const full = (await rows.first().locator('.player-name').innerText()).trim();
+    const surname = full.split(/\s+/).pop() ?? '';
+    // Five letters is the shortest that leaves two middle characters to swap
+    // and still clears the matcher's own minimum for spending a typo budget.
+    test.skip(surname.length < 5, `"${full}" has no surname long enough to mistype`);
+
+    /*
+     * A dropped letter, after the opening three.
+     *
+     * The shape matters. The server recalls candidates on a word's opening
+     * characters, so a typo *inside* those characters leaves nothing to recall
+     * — see `recallTerms`, which documents that limit and why closing it needs
+     * a trigram index rather than a wider LIKE. A dropped letter further along
+     * is both the commonest real slip and the one this design is built to
+     * absorb, so it is what a smoke test should be asserting.
+     */
+    const typo = surname.slice(0, 3) + surname.slice(4);
+    expect(typo, 'the deletion actually changed the word').not.toBe(surname);
+
+    /*
+     * Wait for the search to have *happened* before reading the answer.
+     *
+     * The first version of this polled the top row's name directly, and it
+     * passed against a deliberately broken server — because the poll's first
+     * tick read the unfiltered list, whose top row was already the name being
+     * asserted. A test that passes before the thing it tests has run is worse
+     * than no test.
+     *
+     * So the wait is on the list having narrowed, which is false until the
+     * request lands and stays false if it comes back empty. Only then is the
+     * name worth reading.
+     */
+    const before = await rows.count();
+    const field = page.getByTestId('player-search');
+    await field.fill(typo);
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThan(before);
+
+    expect(await rows.count(), `“${typo}” found nobody`).toBeGreaterThan(0);
+    expect(await rows.first().locator('.player-name').innerText()).toBe(full);
+
+    // And the guard that stops the above passing for a search that returns
+    // everybody: a string no name contains must still find nobody.
+    await field.fill('zzzqqqxxx');
+    await expect(page.getByText(/Nobody matching/i)).toBeVisible();
+  });
+
   test('Setup’s areas are pushed screens, and the edge stays Safari’s in a tab', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');

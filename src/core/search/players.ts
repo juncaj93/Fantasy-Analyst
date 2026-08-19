@@ -155,20 +155,61 @@ export function squashName(normalized: string): string {
  * meaningful fraction of the dictionary for no gain, and the matcher would
  * throw all of it away.
  *
- * The one thing this cannot recall is a typo in a word's **first three
- * characters** — `Macua` for `Nacua`. Widening the net to catch that means
- * scanning the whole table, which is the cost this design exists to avoid, and
- * a slip on the opening letters is much rarer than one in the middle.
+ * A prefix cannot recall a typo in the word's own **first three characters** —
+ * `Vnace` for `Vance`, where the transposition is inside the prefix itself. An
+ * in-memory surface matches that happily, so leaving it out would mean Draft
+ * and Players disagreeing about a perfectly ordinary slip, which is exactly the
+ * divergence this workstream exists to close.
+ *
+ * `wide` is the answer for most of that, and it exists as a **second attempt**
+ * rather than as extra terms on the first because the difference was measured.
+ * Over the 3,300-row dictionary, prefix recall costs 2.7ms; adding a suffix
+ * term to the same query costs 5.9ms and returns 660 rows to rank, which is
+ * most of a Worker's 10ms budget spent on every keystroke. Run on its own, only
+ * when the fast pass matched nobody, the suffix query costs 1.3ms. The common
+ * case pays nothing for the rare one.
+ *
+ * **What still cannot be recalled, and why it is a limit rather than a gap.**
+ * A three-character window only survives a typo that falls outside it, so a
+ * *short* word whose typo straddles both windows is invisible to either.
+ * `Vnace` for `Vance` is the case: at five letters the head is `vna` and the
+ * tail is `ace`, while the target offers `van` and `nce` — a transposition in
+ * the middle of a short word leaves no three-character run of the query
+ * anywhere in the name, so there is nothing to index for. Longer words are
+ * fine, because the typo cannot corrupt both ends at once: `Rboinson` still
+ * carries `son`.
+ *
+ * An in-memory surface matches `Vnace` anyway, because it never has to recall —
+ * it scores every player. So this is the one place the surfaces genuinely
+ * differ, it is confined to short words with a central transposition, and
+ * closing it properly means a trigram or FTS index rather than a wider `LIKE`.
+ * Written down here rather than discovered later.
  */
-export function recallTerms(query: string): string[][] {
+export function recallTerms(query: string, opts: { wide?: boolean } = {}): string[][] {
   return prepareQuery(query).map((word) => {
-    const terms = [word];
-    if (fuzzyBudget(word) > 0) terms.push(word.slice(0, RECALL_PREFIX));
-    return terms;
+    if (fuzzyBudget(word) === 0) return [word];
+    /*
+     * The wide pass is the *tail* alone, deliberately.
+     *
+     * Including the head again would re-run the query that already failed, and
+     * the tail is precisely the part a first-letter slip leaves intact.
+     */
+    if (opts.wide) return [word.slice(-RECALL_PREFIX)];
+    return [word, word.slice(0, RECALL_PREFIX)];
   });
 }
 
-/** How much of a word is enough to recall it despite a typo later on. */
+/**
+ * Whether a wider second attempt could find anything the first could not.
+ *
+ * False when no word is long enough to carry a typo budget, in which case the
+ * fast pass already saw everything and a second query is pure cost.
+ */
+export function hasWiderRecall(query: string): boolean {
+  return prepareQuery(query).some((word) => fuzzyBudget(word) > 0);
+}
+
+/** How much of a word is enough to recall it despite a typo elsewhere in it. */
 const RECALL_PREFIX = 3;
 
 /** The query, normalized and split. An empty query has no words. */
