@@ -202,12 +202,23 @@ test.describe('what the line is made of', () => {
 
     const detail = page.getByTestId('market-detail');
     await expect(detail).toBeVisible();
+    // Settled, not merely present: the first component having text is what says
+    // the disclosure has finished opening.
+    await expect(detail.getByTestId('market-component').first()).not.toBeEmpty();
 
     const components = detail.getByTestId('market-component');
     expect(await components.count(), 'a market line must break down into components').toBeGreaterThan(0);
 
     for (const component of await components.all()) {
-      const text = await component.innerText();
+      /*
+       * `textContent`, not `innerText`.
+       *
+       * WebKit returns an empty string from `innerText` for content inside the
+       * disclosure while it is still animating open — and `toBeVisible` passes
+       * throughout, because the box is on screen the whole time. The text is
+       * there; only the rendered-text accessor is temporarily blind to it.
+       */
+      const text = (await component.textContent()) ?? '';
       if ((await component.getAttribute('data-derived')) === 'yes') {
         // A sum names both halves and does not pretend to be one quote.
         expect(text).toContain('+');
@@ -351,14 +362,20 @@ test.describe('receptions and market-implied points', () => {
     const rows = page.getByTestId('recommendation-row').filter({ has: page.getByTestId('market-line') });
     await rows.first().click();
 
+    /*
+     * Retrying assertions rather than one read of the text.
+     *
+     * `toBeVisible` is satisfied the moment the disclosure has any height, and
+     * WebKit reports no rendered text for a bit after that — so a single
+     * `innerText` at that instant reads empty and the assertion fails on a
+     * timing detail rather than on anything about the card.
+     */
     const points = page.getByTestId('market-points');
-    await expect(points).toBeVisible();
-    const text = await points.innerText();
-    expect(text).toContain('MKT PTS');
+    await expect(points).toContainText('MKT PTS');
     // Coverage and the league's own scoring, which is what stops the number
     // from being a projection wearing a market's clothes.
-    expect(text).toMatch(/\d+% of what a (QB|RB|WR|TE|DEF) scores on had a market/);
-    expect(text).toContain("this league's scoring");
+    await expect(points).toContainText(/\d+% of what a (QB|RB|WR|TE|DEF) scores on had a market/);
+    await expect(points).toContainText("this league's scoring");
   });
 
   /**
