@@ -3260,6 +3260,24 @@ table.compact tr:last-child td {
 .market-line {
   margin-top: 2px;
   font-size: 0.73rem;
+  /*
+   * Pinned, and pinned here rather than on the dense variant.
+   *
+   * The row is as tall as its line-height, so a type step that let the height
+   * follow the font would make every quarterback's card a pixel shorter than
+   * his neighbours'. One explicit value for both states means the dense line
+   * changes the text and nothing else.
+   */
+  line-height: 15px;
+  /*
+   * And the box, explicitly, for the same reason.
+   *
+   * `line-height` alone does not settle it: the smaller type on a dense line
+   * still produced a box a pixel shorter than an ordinary one, which is a
+   * height regression by another route. One stated height is the only version
+   * that cannot drift.
+   */
+  height: 15px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -3273,6 +3291,66 @@ table.compact tr:last-child td {
   font-weight: 700;
   color: var(--text-faint);
   margin-right: 3px;
+}
+
+/*
+ * The separator, as a rule rather than as text.
+ *
+ * ` · ` inside the string costs about ten pixels each and three of them are
+ * most of the reason a quarterback's four quantities did not fit on a 360px
+ * phone. Drawn here it costs six, and the gap can tighten on a dense line
+ * without touching what the line says.
+ */
+.market-part + .market-part::before {
+  content: '·';
+  margin: 0 3px;
+  color: var(--text-faint);
+}
+
+/*
+ * Four numbers on a phone.
+ *
+ * A quarterback carries passing yards, passing touchdowns, rushing yards and
+ * rushing touchdowns; at 360px that needs more room than the row has, and the
+ * alternative to a type step is an ellipsis eating the fourth number — which
+ * is the number this line was widened to carry.
+ *
+ * `line-height` is pinned at the value the ordinary line resolves to, so the
+ * step changes the text and not the row. Letting it shrink freely would make
+ * every quarterback's card a pixel shorter than everyone else's and cost the
+ * board the rhythm a reader scans down.
+ */
+.market-line[data-dense='yes'] {
+  font-size: 0.67rem;
+  letter-spacing: -0.005em;
+}
+
+.market-line[data-dense='yes'] .market-part + .market-part::before {
+  margin: 0 2px;
+}
+
+/*
+ * The workings behind the line, in the card that opened.
+ *
+ * A list rather than a sentence because each component is a separate claim
+ * with its own evidence, and a paragraph would let the one with a missing half
+ * hide inside the one without.
+ */
+.market-components {
+  margin: 2px 0 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.market-components li + li {
+  margin-top: 3px;
+}
+
+.market-source {
+  margin-top: 4px;
+  font-size: 0.7rem;
 }
 
 /*

@@ -91,26 +91,34 @@ describe('season baseline', () => {
 });
 
 describe('the one line a card shows', () => {
-  it('picks the most decision-relevant markets for the position', () => {
-    expect(
-      seasonHeadline('WR', [
-        { market: 'season_receptions', line: 84 },
-        { market: 'season_receiving_yards', line: 1085 },
-        { market: 'season_receiving_tds', line: 7.5 },
-      ]),
-    ).toBe('1,085 rec yds · 84 rec');
-
+  it('gives a quarterback all four of his, in reading order', () => {
     expect(
       seasonHeadline('QB', [
+        { market: 'season_rush_tds', line: 3.5 },
         { market: 'season_pass_tds', line: 29.5 },
+        { market: 'season_rush_yards', line: 385 },
         { market: 'season_pass_yards', line: 4050 },
       ]),
-    ).toBe('4,050 pass yds · 29.5 pass TD');
+    ).toBe('4,050 pass yd · 29.5 pass TD · 385 rush yd · 3.5 rush TD');
+  });
+
+  it('combines a runner’s two halves into scrimmage yards and touchdowns', () => {
+    expect(
+      seasonHeadline('RB', [
+        { market: 'season_rush_yards', line: 1020 },
+        { market: 'season_receiving_yards', line: 420 },
+        { market: 'season_rush_tds', line: 8.5 },
+        { market: 'season_receiving_tds', line: 2 },
+      ]),
+    ).toBe('1,440 scrim yd · 10.5 TD');
   });
 
   it('shows one when only one exists, and nothing when none do', () => {
-    expect(seasonHeadline('RB', [{ market: 'season_rush_yards', line: 1020 }])).toBe('1,020 rush yds');
+    expect(seasonHeadline('RB', [{ market: 'season_rush_yards', line: 1020 }])).toBe('1,020 rush yd');
     expect(seasonHeadline('RB', [])).toBeNull();
+    // Receptions are not part of a receiver's summary, but a priced player
+    // still gets a line — see marketProps.test.ts for why.
+    expect(seasonHeadline('WR', [{ market: 'season_receptions', line: 84 }])).toBe('84 rec');
   });
 });
 

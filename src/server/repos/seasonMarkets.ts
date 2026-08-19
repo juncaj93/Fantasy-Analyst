@@ -110,23 +110,34 @@ export class SeasonMarketsRepo {
   async latestForPlayers(
     season: string,
     playerIds: string[],
-  ): Promise<Map<string, { market: SeasonMarketKey; line: number | null }[]>> {
-    const out = new Map<string, { market: SeasonMarketKey; line: number | null }[]>();
+  ): Promise<Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>> {
+    const out = new Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>();
     const snapshot = await this.latestSnapshot(season);
     if (!snapshot || playerIds.length === 0) return out;
 
     for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 1)) {
       const placeholders = batch.map(() => '?').join(',');
+      /*
+       * `book_count` rides along because the card now shows quantities this app
+       * summed from more than one market, and "how many books stand behind each
+       * line" is the question a reader asks the moment a number stops being a
+       * single quote. It is one more column on a query that was already running.
+       */
       const rows = await this.db
         .prepare(
-          `SELECT player_id, market, line FROM player_props
+          `SELECT player_id, market, line, book_count FROM player_props
             WHERE snapshot_id = ? AND scope = 'season' AND player_id IN (${placeholders})`,
         )
         .bind(snapshot.id, ...batch)
         .all<Record<string, unknown>>();
       for (const r of rows.results) {
         const playerId = String(r['player_id']);
-        const entry = { market: String(r['market']) as SeasonMarketKey, line: r['line'] == null ? null : Number(r['line']) };
+        const books = r['book_count'] == null ? 0 : Number(r['book_count']);
+        const entry = {
+          market: String(r['market']) as SeasonMarketKey,
+          line: r['line'] == null ? null : Number(r['line']),
+          bookCount: Number.isFinite(books) && books > 0 ? books : undefined,
+        };
         const list = out.get(playerId);
         if (list) list.push(entry);
         else out.set(playerId, [entry]);
