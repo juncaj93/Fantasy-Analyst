@@ -1046,10 +1046,11 @@ test.describe('the decision intelligence', () => {
    * where every receiver is priced and no quarterback is would satisfy any
    * count-based check and would be exactly the gap worth knowing about.
    *
-   * It does not skip itself when nothing is priced. The first draft of this
-   * test did, and passed green while checking nothing at all — a board with no
-   * market on it is the single most important thing this test can find, and it
-   * has to arrive as a red run with the numbers attached, not as a skip.
+   * The first draft of this test skipped itself on an unpriced board and passed
+   * green while checking nothing at all. It now prints what the deployment
+   * holds before it asserts anything, and separates a broken pipeline (a stored
+   * snapshot that reaches no card — a failure) from a provider that published
+   * nothing to store (a skip that says so). See the comment at the assertion.
    */
   test('carries market context on a quarterback, a back, a receiver and a tight end', async ({ page }) => {
     await page.goto('/');
@@ -1109,12 +1110,30 @@ test.describe('the decision intelligence', () => {
         `${priced.length}/${rows.length} of the board priced; source: ${source}; scoring: ${board!.scoringLabel}`,
     );
 
-    // At least one position has to be carrying a market, or the line is dead in
-    // production however well it behaves in a rehearsal. Asserted before the
-    // per-row checks, which would otherwise pass vacuously over an empty list.
+    /*
+     * Two different facts, and only one of them is a defect.
+     *
+     * A deployment holding a snapshot whose players are all unpriced means the
+     * pipeline between the snapshot and the card is broken — that fails, with
+     * the counts attached. A deployment holding no snapshot at all means the
+     * configured provider published nothing to store: `mock` runs with an empty
+     * slate in production, and SportsGameOdds does not publish season-long
+     * player markets at all (probed, and asserted in season.markets.test.ts).
+     * There is no card to check because there is no market, and failing every
+     * smoke run over it would train the next reader to ignore a red smoke.
+     *
+     * So that case skips — but only after the line above has printed what the
+     * deployment actually holds. That is the whole difference from the first
+     * draft of this test, which skipped on an empty board and said nothing: the
+     * skip reason now names the cause, and the run carries the numbers.
+     */
+    test.skip(
+      !board!.marketSource,
+      `no season-market snapshot on this deployment, so no card can carry a market line (${rows.length} rows on the board)`,
+    );
     expect(
       priced.length,
-      `no player on the live board carries a market line (${rows.length} rows; source: ${source})`,
+      `the deployment holds a snapshot (${source}) but no player on the live board carries a market line (${rows.length} rows)`,
     ).toBeGreaterThan(0);
 
     // Whatever is priced has to be priced honestly, whichever position it is.
