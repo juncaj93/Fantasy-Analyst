@@ -219,8 +219,29 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   degraded: boolean;
   /** What the season-long market expects, in this league's points. */
   marketBaseline: MarketBaseline | null;
-  /** The one-line form of it, e.g. "1,085 rec yds · 84 rec". */
+  /** The one-line form of it, e.g. "1,085 scrim yd · 8.5 TD". */
   marketHeadline: string | null;
+  /**
+   * The same line taken apart, so the expanded card can show its workings.
+   *
+   * Optional so a client running against an older deployment simply shows the
+   * line without the breakdown rather than breaking. `derived` on a component
+   * marks a quantity this app summed from more than one market — never a
+   * number any single book quoted.
+   */
+  marketProps?: {
+    headline: string;
+    derived: boolean;
+    missing: string[];
+    components: {
+      text: string;
+      label: string;
+      value: number;
+      derived: boolean;
+      missing: string[];
+      parts: { market: string; line: number; bookCount?: number }[];
+    }[];
+  } | null;
   tierCliff: TierCliff;
   avoid: AvoidTag;
   /** Your rating from the players list. This one moves the ranking. */
@@ -441,6 +462,8 @@ export interface DraftBoard {
     matched: number;
     reason: string;
   };
+  /** Who priced the season markets behind every `MKT` line, and when. */
+  marketSource?: { provider: string; season: string; fetchedAt: string } | null;
   /** How the market baseline is weighted for this league, and on what basis. */
   marketFormat?: {
     format: 'standard' | 'best_ball';

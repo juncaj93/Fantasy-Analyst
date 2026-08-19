@@ -33,7 +33,13 @@ import {
   type MarketBaselineBlend,
   type MarketFormat,
 } from './marketBaseline.ts';
-import { marketExpectationScore, seasonBaseline, seasonHeadline, type MarketBaseline } from '../vegas/season.ts';
+import {
+  marketExpectationScore,
+  seasonBaseline,
+  seasonPropSummary,
+  type MarketBaseline,
+  type PropSummary,
+} from '../vegas/season.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 
 export interface DraftComponentWeights {
@@ -180,7 +186,7 @@ export interface AvailablePlayerInput {
    * Absent means the market has not priced him — which is not the same as
    * pricing him at zero, and is scored as unknown.
    */
-  seasonMarkets?: { market: SeasonMarketKey; line: number | null }[];
+  seasonMarkets?: { market: SeasonMarketKey; line: number | null; bookCount?: number }[];
   /**
    * The chance the room leaves him until your next pick, when the caller has
    * simulated it.
@@ -329,6 +335,15 @@ export interface DraftRecommendation {
    */
   marketBaseline: MarketBaseline | null;
   marketHeadline: string | null;
+  /**
+   * The same line, taken apart.
+   *
+   * The card prints `marketHeadline`; this is what it is made of, so the
+   * expanded card can say which markets were summed, what each one's line was
+   * and what was absent. A quantity this app derived from two markets is never
+   * presented as one book's number, and `derived` is how a renderer knows.
+   */
+  marketProps: PropSummary | null;
   /** Whether the position is about to fall off a tier. */
   tierCliff: TierCliff;
   /** The automatic caution from accumulated research. */
@@ -828,6 +843,15 @@ export function rankAvailablePlayers(
       wait,
     });
 
+    /*
+     * The market line and its workings, built once.
+     *
+     * Display only. Nothing below reads it, and nothing in the ranking reads it
+     * at any point — the score's own view of the market is `marketBaseline`,
+     * computed in the first pass and untouched by this.
+     */
+    const props = entry.seasonMarkets?.length ? seasonPropSummary(player.position, entry.seasonMarkets) : null;
+
     return {
       playerId: player.id,
       name: player.fullName,
@@ -860,9 +884,8 @@ export function rankAvailablePlayers(
       // Filled in by the second pass, once every base composite exists.
       score: 0,
       marketBaseline: baseline,
-      marketHeadline: entry.seasonMarkets?.length
-        ? seasonHeadline(player.position, entry.seasonMarkets)
-        : null,
+      marketHeadline: props?.headline ?? null,
+      marketProps: props,
       tierCliff: cliff,
       avoid,
       myGuy: flag,

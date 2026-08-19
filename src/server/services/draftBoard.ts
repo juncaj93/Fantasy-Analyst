@@ -63,6 +63,12 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
     evidence: { getSignals: (ids) => evidence.getSignals(ids) },
     flags: () => new PlayerFlagsRepo(db).all(),
     seasonMarkets: (ids) => seasonMarkets.latestForPlayers(seasonFor(), ids),
+    marketSnapshot: async () => {
+      const snapshot = await seasonMarkets.latestSnapshot(seasonFor());
+      return snapshot
+        ? { provider: snapshot.provider, season: snapshot.season, fetchedAt: snapshot.fetchedAt }
+        : null;
+    },
     repairStatus: () => new RepairService(db).status(),
     injuryStates: (list) => new InjuryService(db).statesFor(list),
     now: () => new Date(),
