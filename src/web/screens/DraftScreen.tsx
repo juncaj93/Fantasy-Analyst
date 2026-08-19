@@ -67,7 +67,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
  * both live in core so they can be checked without a browser.
  */
-import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+import { annotateTiers, tierCliffWarning } from '../../core/draft/tierBoard.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
 /*
@@ -1348,21 +1348,37 @@ interface BoardItem {
 }
 
 /**
- * The rows, in tier order, each told whether a tier boundary falls above it.
+ * The rows in the order the board chose, each told whether a tier boundary
+ * falls above it.
  *
- * The grouping and the flags have to be computed over the same sequence, and
- * that sequence is not the one the server sent: a divider claims that
- * everything above it is one tier, which is only true once the tiers are
- * contiguous. See `groupByTier`.
+ * **The order is never touched here.** Whichever sort the reader picked —
+ * Score, ADP, DOG — decides who appears where, and a tier is an annotation on
+ * that sequence. This function may insert a line between two adjacent rows; it
+ * may not move a row.
+ *
+ * That is a correction. This used to reorder the board into tier bands, to make
+ * a divider's claim literally true: everything above the line is one tier. The
+ * claim was true and the board was wrong. On the reported tight-end board it
+ * put Kenyon Sadiq (Score 68) above Juwan Johnson and Chig Okonkwo (both 83),
+ * because the market clustered him higher — so the screen contradicted its own
+ * ranking, in the one view whose entire job is to say who to draft. A reader
+ * comparing two numbers on screen should never have to know which of them the
+ * layout secretly outranked.
+ *
+ * So the divider now says something weaker and true: *the market's next tier
+ * starts here*. The rows above it are the rows the sort put above it, which is
+ * what the reader is looking at anyway.
  *
  * Off entirely on the mixed board, where there is no single position for a
- * boundary to be about — there the ranking is the order, untouched.
+ * boundary to be about.
  */
 function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
   if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false }));
-  const ordered = groupByTier(recs, (rec) => rec.tierCliff.tierIndex);
-  const flags = tierDividerFlags(ordered.map((rec) => rec.tierCliff.tierIndex));
-  return ordered.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
+  return annotateTiers(recs, (rec) => rec.tierCliff.tierIndex).map(({ row, rank, divider }) => ({
+    rec: row,
+    rank,
+    divider,
+  }));
 }
 
 /**
@@ -1474,6 +1490,22 @@ function MarketProvenance({
           </span>
         </div>
       )}
+      {/*
+        And whether that number is a good one, which is the question a reader
+        actually has at a draft.
+
+        Two markets, both already in the Score as separate components, put on
+        one positional scale so their disagreement can be read rather than
+        guessed at. No weighting maths is shown: the sentence says what the
+        markets think of him, not what the model did about it.
+      */}
+      {rec.marketStrategy ? (
+        <div className="market-strategy" data-testid="market-strategy" data-kind={rec.marketStrategy.kind}>
+          {rec.marketStrategy.standing}
+          {rec.marketStrategy.disagreement ? ` · ${rec.marketStrategy.disagreement}` : ''}
+          {rec.marketStrategy.caveat ? ` · ${rec.marketStrategy.caveat}` : ''}
+        </div>
+      ) : null}
       <ul className="market-components">
         {props.components.map((c) => (
           <li key={c.label} data-testid="market-component" data-derived={c.derived ? 'yes' : 'no'}>

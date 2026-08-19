@@ -560,11 +560,33 @@ export function marketExpectationScore(
   baseline: MarketBaseline | null,
   pool: MarketBaseline[],
 ): number | null {
+  const comparable = comparablePeers(baseline, pool);
+  if (comparable == null) return null;
+  return round3(clamp(standing(baseline!.points!, comparable.totals), -1, 1) * clamp(baseline!.coverage, 0, 1));
+}
+
+/**
+ * The peers a baseline may honestly be compared with, and their totals.
+ *
+ * Split out of `marketExpectationScore` because two questions now need the
+ * *same* peer set: how his props rate him against the position, and how the
+ * draft market rates him against the same players. Asking the second question
+ * of a different set of peers would produce a disagreement that was really just
+ * two different denominators.
+ *
+ * `null` when there is no honest comparison to make — which is unknown, and is
+ * neither zero nor negative.
+ */
+function comparablePeers(
+  baseline: MarketBaseline | null,
+  pool: MarketBaseline[],
+): { peers: MarketBaseline[]; totals: number[] } | null {
   if (baseline == null || baseline.points == null) return null;
   const markets = baseline.contributions.map((c) => c.market);
   if (markets.length === 0) return null;
 
-  const comparable: number[] = [];
+  const peers: MarketBaseline[] = [];
+  const totals: number[] = [];
   for (const peer of pool) {
     if (peer === baseline) continue;
     const byMarket = new Map(peer.contributions.map((c) => [c.market, c.points]));
@@ -572,15 +594,87 @@ export function marketExpectationScore(
     // his markets would contribute a partial total to the comparison pool and
     // reintroduce the very bias this function exists to remove.
     if (!markets.every((m) => byMarket.has(m))) continue;
-    comparable.push(round2(markets.reduce((total, m) => total + (byMarket.get(m) ?? 0), 0)));
+    peers.push(peer);
+    totals.push(round2(markets.reduce((total, m) => total + (byMarket.get(m) ?? 0), 0)));
   }
-  if (comparable.length < MIN_COMPARABLE_PEERS) return null;
+  if (totals.length < MIN_COMPARABLE_PEERS) return null;
+  return { peers, totals };
+}
 
-  const sorted = comparable.sort((a, b) => a - b);
+/**
+ * Where `value` sits in `sample`, in units of the sample's own interquartile
+ * spread. Sorts a copy: the caller holds `peers` and `totals` in matching
+ * index order, and sorting in place would silently uncouple them.
+ */
+function standing(value: number, sample: number[]): number {
+  const sorted = [...sample].sort((a, b) => a - b);
   const median = quantile(sorted, 0.5);
   const spread = Math.max(1, quantile(sorted, 0.75) - quantile(sorted, 0.25));
-  const raw = (baseline.points - median) / spread;
-  return round3(clamp(raw, -1, 1) * clamp(baseline.coverage, 0, 1));
+  return (value - median) / spread;
+}
+
+/**
+ * What the two markets each think of him, on one scale, for the expanded card.
+ *
+ * The scoring market and the draft market answer different questions — "how
+ * many points do the books imply" and "where are people taking him" — and the
+ * interesting cases are the ones where they disagree. Putting both on the same
+ * [-1, 1] positional scale is what makes "the books are more bullish than the
+ * room" a statement anyone can check rather than a feeling.
+ *
+ * Both standings are computed against **the same peers**, chosen by the
+ * comparability rule above, and both are signed so that positive means better:
+ * more implied points, and an earlier draft cost.
+ *
+ * Explanation only. Nothing here reaches a Draft Score — the score already
+ * accounts for both markets through `market_expectation` and `market_value`
+ * respectively, and adding a third component for their disagreement would be
+ * counting the same two facts a second time.
+ */
+export interface MarketStandings {
+  /** His props standing among comparable peers, [-1, 1]. Positive is better. */
+  expectation: number;
+  /** His draft-cost standing among the same peers, [-1, 1]. Positive is earlier. */
+  cost: number | null;
+  /** `expectation - cost`, when both are known. Positive means the books are the keener. */
+  disagreement: number | null;
+  /** How many peers the comparison rests on. */
+  peers: number;
+  /** Coverage of his own baseline, carried through so the reader can discount it. */
+  coverage: number;
+}
+
+export function marketStandings(
+  baseline: MarketBaseline | null,
+  pool: MarketBaseline[],
+  adpOf: (baseline: MarketBaseline) => number | null,
+): MarketStandings | null {
+  const comparable = comparablePeers(baseline, pool);
+  if (comparable == null) return null;
+
+  const expectation = round3(clamp(standing(baseline!.points!, comparable.totals), -1, 1));
+
+  /*
+   * The same players, ranked by what the draft charges for them.
+   *
+   * Negated because the scales run opposite ways: a *smaller* ADP is a player
+   * the room likes more, and both numbers have to mean "better" for their
+   * difference to mean anything.
+   */
+  const ownAdp = adpOf(baseline!);
+  const peerAdps = comparable.peers.map(adpOf).filter((a): a is number => a != null);
+  const cost =
+    ownAdp == null || peerAdps.length < MIN_COMPARABLE_PEERS
+      ? null
+      : round3(clamp(-standing(ownAdp, peerAdps), -1, 1));
+
+  return {
+    expectation,
+    cost,
+    disagreement: cost == null ? null : round3(expectation - cost),
+    peers: comparable.totals.length,
+    coverage: round3(clamp(baseline!.coverage, 0, 1)),
+  };
 }
 
 function quantile(sorted: number[], q: number): number {

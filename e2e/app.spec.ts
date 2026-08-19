@@ -927,8 +927,8 @@ test.describe('draft room', () => {
    * Tier structure, drawn two different ways for two different lists.
    *
    * The seeded board is built to have both: six quarterbacks in a cluster of
-   * four then a 23-pick hole, and five tight ends whose best group is down to
-   * two. See `DEMO_PLAYERS`.
+   * four then a hole of seventeen blended-market picks, and five tight ends
+   * whose best group is down to two. See `DEMO_PLAYERS`.
    */
   test.describe('tiers', () => {
     test('draws a line where a filtered position genuinely breaks', async ({ page }) => {
@@ -938,8 +938,18 @@ test.describe('draft room', () => {
       const dividers = page.getByTestId('tier-divider');
       await expect(dividers, 'the QB board breaks exactly once').toHaveCount(1);
       await expect(dividers.first()).toContainText(/tier drop/i);
-      // It says how big the hole is, which is the whole reason it is there.
-      await expect(dividers.first()).toContainText(/~2[0-9] picks/);
+      /*
+       * It says how big the hole is, which is the whole reason it is there.
+       *
+       * Seventeen picks, and it used to read twenty-three. The ladder is built
+       * from the DOG/Sleeper blend rather than from Sleeper alone, so the hole
+       * is measured in the same space the tiers were drawn in: the last of the
+       * top four sits at 0.6*35.8 + 0.4*30.2 = 33.6, the first of the next pair
+       * at 0.6*49.2 + 0.4*52.9 = 50.7, and the gap between them is 17.1. The old
+       * number measured the Sleeper gap while the ladder measured the blended
+       * one, which is exactly the mismatch the tier work exists to remove.
+       */
+      await expect(dividers.first()).toContainText(/~17 picks/);
 
       // And it falls between the cluster and what follows, not inside either.
       const order = await page

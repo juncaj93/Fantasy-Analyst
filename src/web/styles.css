@@ -3364,6 +3364,33 @@ table.compact tr:last-child td {
 }
 
 /*
+ * What the two markets make of him, above the workings.
+ *
+ * A sentence rather than a list, because unlike the components below it is one
+ * claim. It sits between the points total and the lines behind it because that
+ * is the order the question arrives in: how many points, is that good, and then
+ * where did the number come from.
+ *
+ * Colour carries the direction so the sentence does not have to be read to be
+ * scanned, and `agrees` deliberately takes the ordinary muted colour -- the most
+ * common case should not look like a finding.
+ */
+.market-strategy {
+  margin-top: 3px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.market-strategy[data-kind='bullish'] {
+  color: var(--pos);
+}
+
+.market-strategy[data-kind='bearish'] {
+  color: var(--warn);
+}
+
+/*
  * The workings behind the line, in the card that opened.
  *
  * A list rather than a sentence because each component is a separate claim

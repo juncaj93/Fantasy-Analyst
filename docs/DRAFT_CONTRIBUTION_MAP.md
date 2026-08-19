@@ -8,9 +8,10 @@ is worth. Written to answer one question the strategy brief asks directly:
 
 The numbers below were measured against the ranking engine by
 [`scripts/probe-mkt-pts-influence.mjs`](../scripts/probe-mkt-pts-influence.mjs),
-not read off the weights table. The claims about the props themselves are held
-in place by [`tests/marketPoints.test.ts`](../tests/marketPoints.test.ts) and
-[`tests/season.markets.test.ts`](../tests/season.markets.test.ts).
+not read off the weights table. The findings are held in place by
+[`tests/marketStrategy.test.ts`](../tests/marketStrategy.test.ts), and the
+arithmetic behind them by [`tests/marketPoints.test.ts`](../tests/marketPoints.test.ts)
+and [`tests/season.markets.test.ts`](../tests/season.markets.test.ts).
 
 ---
 
@@ -158,3 +159,98 @@ which is the honest measure of what the props are worth end to end.
 It is recorded here rather than left implicit because a contribution map that
 quoted only the nominal weight would understate the component, and the next
 person to tune it should know the multiplier exists.
+
+---
+
+# Score, tiers and `Next%` — the separation audit
+
+Added with the DOG-anchored tier work and the late-round `Next%` calibration.
+Every claim below is read off the imports and the call graph, not off intent,
+and reproduced by
+[`scripts/probe-dog-next-sensitivity.mjs`](../scripts/probe-dog-next-sensitivity.mjs).
+
+## The three jobs, and what each reads
+
+| | Question | Primary market |
+|---|---|---|
+| **Score** | who should I draft now | DOG/Sleeper blend |
+| **Tier** | where does the market's quality step down | DOG/Sleeper blend |
+| **`Next%`** | will he last to my next pick | **Sleeper**, plus DOG as tail risk only |
+
+`blendMarketBaseline` has exactly one call site — a pre-pass in `engine.ts` that
+computes it once per player. `market_value` and the tier ladders both read that
+one result, so the two cannot disagree about what the market thinks.
+
+## Score is already DOG-anchored, measured
+
+Move one market by N picks and hold the other still:
+
+| Shift | standard DOG / Sleeper | best ball DOG / Sleeper |
+|---|---|---|
+| 10 | +0.233 / +0.226 (1.03×) | +0.356 / +0.250 (**1.42×**) |
+| 20 | +0.724 / +0.614 (1.18×) | +1.026 / +0.412 (**2.49×**) |
+| 30 | +1.221 / +0.947 (1.29×) | +1.423 / +0.579 (**2.46×**) |
+
+No weight was changed to achieve this; it is what the shipped blend already did.
+
+## `Next%` is Sleeper-first
+
+Sleeper ADP moves it by 10 to 19 points over the same shifts. DOG reaches it
+only through `idiosyncraticHazard`, as a **gain on a term that is zero for the
+whole early board** — so it is structurally incapable of opening a tail the
+draft's own depth has not opened, and can widen one by at most half.
+
+| | at pick 53 | at pick 148 |
+|---|---|---|
+| DOG 10 picks earlier | 0.0 pts | −1.8 pts |
+| DOG 40 picks earlier | 0.0 pts | −6.8 pts |
+
+## Late-round calibration, before and after
+
+| Case | Before | After |
+|---|---|---|
+| pick 148 → 153 (5 away), ADP 164 | 100.0% | **93.9%** |
+| pick 148 → 165 (17 away), ADP 164 | 100.0% | **78.9%** |
+| pick 148 → 151 (3 away), ADP 210 | 100.0% | **96.9%** |
+| pick 10 → 15 (5 away), ADP 26 | 95.5% | **95.5%** |
+
+The same five-pick wait is now *less* certain late (93.9%) than early (95.5%),
+which is the ordering the brief asks for and the reverse of what shipped. Early
+rounds did not move at all, because the floor is zero below its onset.
+
+### The repair that would not have worked
+
+Widening `adpSpread` late — the obvious reading of "widen the distribution" —
+moves the number the **wrong way**, because a player sitting before his ADP
+faces a per-pick hazard of `1.702·(1−S)/spread`:
+
+| spread | 148 → 153, ADP 164 |
+|---|---|
+| 39 (shipped) | 92.5% |
+| 60 | 94.4% |
+| 90 | 96.0% |
+| 140 | 97.3% |
+
+That is asserted as a test in `tests/nextpick.lateVariance.test.ts` so the next
+reader finds out there rather than in a draft.
+
+## Separation, asserted structurally
+
+- **Score does not feed `Next%`** — `nextpick/` imports neither
+  `rankAvailablePlayers` nor `draftScore`.
+- **`Next%` does not feed Score** — `engine.ts` never references
+  `simulateNextPick`.
+- **The simulator cannot see the user's private evidence** — no `myGuy`, no
+  `PlayerSignal`, no season markets reach it.
+- **DOG is not counted twice in `Next%`** — one call site, in the hazard, and
+  only in the direction that means danger.
+
+## Known limitation
+
+Deep in a draft the simulator's own Sleeper sensitivity is low: every remaining
+candidate is saturated in `marketPickWeight`, so a 40-pick Sleeper shift at pick
+148 moves `Next%` less than a point. That saturation is much of *why* the late
+estimate was overconfident, and the hazard floor treats the symptom rather than
+that cause. "A Sleeper shift moves `Next%` more than a DOG shift" therefore
+holds mid-draft and is not asserted deep — what is asserted deep is the stronger
+structural claim that DOG cannot act on its own at any depth.
