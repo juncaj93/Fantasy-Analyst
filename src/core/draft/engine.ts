@@ -163,9 +163,14 @@ export interface AvailablePlayerInput {
    * Sleeper ADP — the market the user is drafting in.
    *
    * Still the number the card shows, still what `Val` is measured from, still
-   * what scarcity, the tier ladders and the survival model read. It is one of
+   * what positional scarcity and the survival model read: each of those is a
+   * question about *this room*, and this is the room's own market. It is one of
    * two inputs to the market baseline rather than the baseline itself; see
    * `dogAdp` below and `marketBaseline.ts`.
+   *
+   * The tier ladders no longer read it. A tier is a claim about where the
+   * market's quality steps down, so it is built from the blend the Score is
+   * anchored to — and queried with the same blended number.
    */
   adp: number | null;
   /**
@@ -432,10 +437,12 @@ const NO_CONCENTRATION: ConcentrationResult = {
  * **The baseline is not Sleeper's ADP alone.** It is the blend of raw Underdog
  * ADP and Sleeper ADP defined in `marketBaseline.ts` — 60/40, or 75/25 in a
  * best-ball league — collapsing to whichever single market answered when the
- * other has not priced him. This is the *only* component the blend reaches: the
- * ADP shown on the card, the `Val` beside it, positional scarcity, the tier
- * ladders and the survival model all still read Sleeper's own number, which is
- * the market the user is drafting in. See `blendMarketBaseline`.
+ * other has not priced him. Two things read the blend, and they are the two
+ * that make claims about the market's own view of a player: this component, and
+ * the tier ladders. The ADP shown on the card, the `Val` beside it, positional
+ * scarcity and the survival model all still read Sleeper's own number, because
+ * each of those is a question about the room the user is drafting in. See
+ * `blendMarketBaseline`.
  *
  * `blend` is optional so that every existing caller — the tests, the probes, a
  * board built before DOG was ever imported — keeps the behaviour it had, with
@@ -550,7 +557,33 @@ export function rankAvailablePlayers(
   const teams = Math.max(1, ctx.shape.totalStarters > 0 ? ctx.totalPicks / Math.max(1, ctx.totalPicks) : 1);
   void teams;
 
-  // ADP pools per position, used for scarcity.
+  /*
+   * The blended market baseline, once per player.
+   *
+   * Computed here rather than in the ranking loop because two things now need
+   * it — the market-value component, and the tier ladders below — and computing
+   * it twice would be two places for the renormalisation to drift apart.
+   */
+  const blendByPlayer = new Map<string, MarketBaselineBlend>();
+  for (const a of available) {
+    blendByPlayer.set(
+      a.player.id,
+      blendMarketBaseline({
+        dogAdp: a.dogAdp ?? null,
+        sleeperAdp: a.adp,
+        format: ctx.marketFormat ?? 'standard',
+      }),
+    );
+  }
+
+  // Sleeper ADP pools per position, used for scarcity.
+  //
+  // Deliberately still Sleeper's own number, and not the blend the tiers use
+  // below. Scarcity asks how thin the position is getting *in the room the user
+  // is drafting in*, which is a fact about Sleeper's board — a receiver Underdog
+  // rates highly is not one more receiver available here. Tiers ask a different
+  // question, about where the market's own quality clusters are, and that is why
+  // they read a different number.
   const adpsByPosition = new Map<string, number[]>();
   for (const a of available) {
     if (a.adp == null) continue;
@@ -565,14 +598,38 @@ export function rankAvailablePlayers(
    * Tier ladders, one per position, built once for the whole board.
    *
    * Every player at a position is classified from the same sorted array of
-   * still-available ADPs, so a card cannot disagree with the card above it, and
-   * a forty-row board costs one pass per position rather than one ladder per
-   * row. Recomputed on every call, which is every poll and every refresh — a
-   * cluster that empties during the draft becomes a real edge immediately.
+   * still-available market baselines, so a card cannot disagree with the card
+   * above it, and a forty-row board costs one pass per position rather than one
+   * ladder per row. Recomputed on every call, which is every poll and every
+   * refresh — a cluster that empties during the draft becomes a real edge
+   * immediately.
+   *
+   * ## Built from the blend, not from Sleeper
+   *
+   * A tier is a claim about where the *market* thinks the quality steps down,
+   * and the canonical statement of what the market thinks is the DOG/Sleeper
+   * blend the Score is already anchored to — 60/40 normally, 75/25 in best ball,
+   * collapsing to whichever single market answered. Building the ladder from
+   * Sleeper alone meant the board's tiers and the board's ranking were reading
+   * two different markets, which is how a best-ball board could rank one tight
+   * end above another and then put them in the same tier.
+   *
+   * The lookup below uses the same blended number. That is not a detail: a
+   * ladder built from one baseline and queried with another assigns players to
+   * rungs they are not on, and the failure is silent.
    */
+  const marketByPosition = new Map<string, number[]>();
+  for (const a of available) {
+    const baseline = blendByPlayer.get(a.player.id)?.adp ?? null;
+    if (baseline == null) continue;
+    const list = marketByPosition.get(a.player.position);
+    if (list) list.push(baseline);
+    else marketByPosition.set(a.player.position, [baseline]);
+  }
+
   const tierMaps = new Map<string, PositionTierMap>();
-  for (const [position, adps] of adpsByPosition) {
-    tierMaps.set(position, buildPositionTierMap(position, adps, { picksUntilNext }));
+  for (const [position, baselines] of marketByPosition) {
+    tierMaps.set(position, buildPositionTierMap(position, baselines, { picksUntilNext }));
   }
   const teamCount = estimateTeamCount(ctx);
   // Round and draft length, derived from the same team estimate the rest of the
@@ -608,11 +665,7 @@ export function rankAvailablePlayers(
     baselines.set(entry.player.id, baseline);
     costByBaseline.set(
       baseline,
-      blendMarketBaseline({
-        dogAdp: entry.dogAdp ?? null,
-        sleeperAdp: entry.adp,
-        format: ctx.marketFormat ?? 'standard',
-      }).adp,
+      blendByPlayer.get(entry.player.id)?.adp ?? null,
     );
     if (baseline.points != null) {
       // Whole baselines, not their totals: the comparison is made market by
@@ -643,11 +696,7 @@ export function rankAvailablePlayers(
      * priced and Sleeper has not, and another the other way round, and neither
      * should be penalised for the gap in the other's coverage.
      */
-    const blend = blendMarketBaseline({
-      dogAdp: entry.dogAdp ?? null,
-      sleeperAdp: adp,
-      format: ctx.marketFormat ?? 'standard',
-    });
+    const blend = blendByPlayer.get(player.id)!;
 
     const market = marketValueComponent(adp, ctx.currentPick, teamCount, blend);
     market.weight = weights.marketValue;
@@ -782,7 +831,13 @@ export function rankAvailablePlayers(
      * "is there a hole in the board" is not a question about your team. Need
      * still moves the ranking; it moves it through its own component.
      */
-    const cliff = tierMaps.get(player.position)?.at(adp) ?? NO_CLIFF;
+    /*
+     * Queried with the blended baseline the ladder was built from, never with
+     * Sleeper's own number. A ladder built from one market and read with
+     * another puts players on rungs they are not on, and says nothing while it
+     * does it.
+     */
+    const cliff = tierMaps.get(player.position)?.at(blend.adp) ?? NO_CLIFF;
     components.push({
       key: 'tier_cliff',
       label: 'Tier cliff',
