@@ -249,6 +249,20 @@ export function positionCardClass(position: string | null | undefined, extra = '
   return `player-row${tint}${extra ? ` ${extra}` : ''}`;
 }
 
+/**
+ * The class list that gives a **row** its position accent without the wash.
+ *
+ * The card classes above set two custom properties and a background; this sets
+ * only the properties, so a row can take the position's hue on its leading edge
+ * and in its pill while its surface stays the list's own. That is the whole
+ * difference between the draft board's cards and the dense lists on Players and
+ * Trades, and it is one word in a class name rather than a second palette.
+ */
+export function positionAccentClass(position: string | null | undefined, base: string): string {
+  const pos = (position ?? '').toUpperCase();
+  return TINTED_POSITIONS.includes(pos) ? `${base} card-pos-${pos}` : base;
+}
+
 export function Badge({
   children,
   tone = 'neutral',

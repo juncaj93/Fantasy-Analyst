@@ -1523,40 +1523,53 @@ test.describe('player intelligence', () => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
 
+    // The windows are on the page the reader lands on…
+    await expect(page.getByTestId('player-page-windows')).toContainText('7d');
+    await expect(page.getByTestId('player-page-windows')).toContainText('Lifetime');
+    // …and the ledger is one tap further, entire.
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
     await expect(page.getByTestId('evidence-heading')).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Last 7d' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Lifetime' })).toBeVisible();
+    await expect(page.getByTestId('evidence-item').first()).toBeVisible();
   });
 
   /**
-   * The same player, the same way, on both screens.
+   * Everything the unfolding card used to show, still shown — one tap deeper.
    *
-   * A card here opens in place exactly as a draft card does, and carries what
-   * the draft card carries — the outlook, last season, the injury — as well as
-   * everything only this screen has: the four windows, the categories, the
-   * market lines and every piece of evidence.
+   * The density pass moved the file out of the list and onto the player's own
+   * page, and the risk in a move like that is that something quietly stops
+   * being rendered. So this walks all four sections and checks the lot: last
+   * season and the injury on Overview, the provider's outlook under Outlook,
+   * the cached prop lines under Market, and the ledger under Evidence.
    */
-  test('opens a player in place, with the whole file inside it', async ({ page }) => {
+  test('opens a player as his own page, with the whole file on it', async ({ page }) => {
     const row = page.locator('[data-testid="player-search-row"][data-player-id="1004"]');
     await row.scrollIntoViewIfNeeded();
     await row.click();
 
-    const file = row.getByTestId('player-file');
-    await expect(file).toBeVisible();
+    const page_ = page.getByTestId('player-page');
+    await expect(page_).toBeVisible();
+    const sections = page.getByTestId('player-page-sections');
+
     // What the draft card shows…
-    await expect(row.getByTestId('outlook')).toBeVisible();
-    await expect(row.getByTestId('last-season')).toBeVisible();
+    await expect(page.getByTestId('last-season')).toBeVisible();
+    await expect(page.getByTestId('player-page-windows')).toBeVisible();
+
+    await sections.getByRole('button', { name: 'Outlook' }).click();
+    await expect(page.getByTestId('outlook')).toBeVisible();
+
     // …and what only this screen has.
-    await expect(row.getByRole('cell', { name: 'Season' })).toBeVisible();
-    await expect(row.getByTestId('evidence-heading')).toBeVisible();
-    await expect(row.getByText(/Vegas props/)).toBeVisible();
+    await sections.getByRole('button', { name: 'Market' }).click();
+    await expect(page.getByText(/Vegas props/)).toBeVisible();
 
-    // It is a disclosure, not a screen: no Back, and the list is still here.
-    await expect(page.getByTestId('back-button')).toHaveCount(0);
+    await sections.getByRole('button', { name: 'Evidence' }).click();
+    await expect(page.getByTestId('evidence-heading')).toBeVisible();
+
+    // It is a screen, not a disclosure: it has a Back, and it took the list.
+    await expect(page.getByTestId('back-button')).toBeVisible();
+    await expect(page.getByTestId('player-search-row')).toHaveCount(0);
+
+    await page.getByTestId('back-button').click();
     expect(await page.getByTestId('player-search-row').count()).toBeGreaterThan(1);
-
-    await row.locator('.row-button').click();
-    await expect(row.getByTestId('player-file')).toHaveCount(0);
   });
 
   /**
@@ -1595,13 +1608,15 @@ test.describe('player intelligence', () => {
   test('shows the original excerpt for every evidence item, not just a tally', async ({ page }) => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
     await expect(page.getByTestId('evidence-excerpt').first()).toContainText('named the starter');
   });
 
   test('states plainly when there are no cached props', async ({ page }) => {
     await page.getByLabel('Search players').fill('whitfield');
     await page.locator('[data-testid="player-search-row"][data-player-id="1011"]').click();
-    await expect(page.getByText(/No prop data cached/)).toBeVisible();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Market' }).click();
+    await expect(page.getByText(/Prop data unavailable/)).toBeVisible();
   });
 });
 
