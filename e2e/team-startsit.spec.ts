@@ -49,6 +49,7 @@ test.describe('the recommended lineup, at a glance', () => {
       await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
     }
 
+    await page.getByTestId('bench-toggle').click();
     for (const card of await page.getByTestId('bench-row').all()) {
       await expect(card).not.toHaveClass(/card-pos/);
       // ...and the badge stays, because which position he plays is still a fact.
@@ -59,17 +60,26 @@ test.describe('the recommended lineup, at a glance', () => {
   /**
    * The tint is never the only cue.
    *
-   * A card says which slot it is filling and says the word "Starter"; a bench
-   * card says "Bench". Both carry it in the accessible name too, so the answer
-   * survives a screen reader, a monochrome display and bright sunlight.
+   * The word "Starter" used to be printed on every card. It is not any more —
+   * eight rows repeating a word the section heading already says is exactly the
+   * density this pass bought back — so the invariant now has to hold in three
+   * other places, and all three are checked here: the heading above the list,
+   * the slot chip on the card, and the accessible name, which is the one that
+   * matters to a screen reader and survives a monochrome display.
    */
   test('says starter and bench in words, not only in colour', async ({ page }) => {
-    const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
-    await expect(starter).toContainText('Starter');
-    await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
+    await expect(page.getByTestId('starters-title')).toContainText(/starters/i);
 
+    const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
+    // The slot is on the face of the card, and it is not a colour.
+    await expect(starter.locator('.slot-label')).not.toBeEmpty();
+    await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
+    // The projection is spoken as a projection rather than left as a bare number.
+    await expect(starter).toHaveAttribute('aria-label', /projected [\d.]+ points/i);
+
+    await page.getByTestId('bench-toggle').click();
     const bench = page.getByTestId('bench-row').first();
-    await expect(bench).toContainText('Bench');
+    await expect(bench.locator('.slot-label')).toContainText('BN');
     await expect(bench).toHaveAttribute('aria-label', /bench/i);
   });
 
@@ -99,11 +109,133 @@ test.describe('the recommended lineup, at a glance', () => {
    * is on the bench, untinted, and the tight-end slot went to the other one.
    */
   test('never highlights a player who cannot play', async ({ page }) => {
+    await page.getByTestId('bench-toggle').click();
     const kowalski = page.locator('[data-testid="bench-row"][data-player-id="1009"]');
     await expect(kowalski).toBeVisible();
     await expect(kowalski).not.toHaveClass(/card-pos/);
     await expect(page.locator('[data-testid="starter-row"][data-player-id="1009"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="starter-row"][data-slot="TE"]')).toContainText('Andre Sotelo');
+  });
+});
+
+/**
+ * The density pass, measured rather than eyeballed.
+ *
+ * The claim is specific and it is the whole point of the layout: at every width
+ * this suite runs at, the recommended starters are on the first screen, the
+ * bench is folded under them, and the card that says what to change is next.
+ * A screenshot cannot fail; a measurement can.
+ */
+test.describe('a weekly command centre, on one screen', () => {
+  /**
+   * The screen as it is in season, which is the screen this layout is for.
+   *
+   * The demo league is mid-draft, so Team legitimately draws the live board
+   * above the recommendation — a different question, correctly answered, and
+   * about 300px of it. Measuring the weekly layout underneath that would be
+   * measuring the draft. So the roster is answered with `live: false`, which is
+   * the one field that decides which of the two views the screen is showing;
+   * every number below it is the deployment's own.
+   */
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/leagues/*/roster', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
+    });
+    await openTeam(page);
+  });
+
+  test('fits every recommended starter above the bench, at this width', async ({ page }) => {
+    const viewport = page.viewportSize()!.height;
+    const rows = page.getByTestId('starter-row');
+    const count = await rows.count();
+    expect(count, 'the demo league starts seven slots').toBe(7);
+
+    // Measured from the page, so the toolbar's own reservation is included.
+    const bottom = await rows.last().evaluate((el) => el.getBoundingClientRect().bottom);
+    expect(bottom, `the last starter ends at ${Math.round(bottom)}px of ${viewport}px`).toBeLessThanOrEqual(viewport);
+
+    // ...and the fold is under them rather than off the bottom of the screen.
+    const bench = (await page.getByTestId('bench-toggle').boundingBox())!;
+    expect(bench.y + bench.height).toBeLessThanOrEqual(viewport);
+  });
+
+  /** One line per starter is what buys that, so it is asserted directly. */
+  test('keeps a collapsed starter to a single line', async ({ page }) => {
+    for (const row of await page.locator('[data-testid="starter-row"][data-starter="true"]').all()) {
+      const box = (await row.boundingBox())!;
+      // A row with a conflict line is legitimately taller; nothing is taller
+      // than two lines of type inside a 44px target plus that.
+      expect(box.height, `a starter row is ${Math.round(box.height)}px`).toBeLessThanOrEqual(72);
+      // And it is still a full tap target.
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('folds the bench away, and says what is behind it', async ({ page }) => {
+    await expect(page.getByTestId('team-bench')).toHaveAttribute('data-open', 'false');
+    await expect(page.getByTestId('bench-rows')).toHaveCount(0);
+    await expect(page.getByTestId('bench-toggle')).toContainText(/Bench \(\d+\)/);
+    // The one useful summary: either there is something better on the bench, or
+    // there is not, and both are worth four words.
+    await expect(page.getByTestId('bench-toggle')).toContainText(/strong alternative|No better option/);
+
+    await page.getByTestId('bench-toggle').click();
+    await expect(page.getByTestId('team-bench')).toHaveAttribute('data-open', 'true');
+    await expect(page.getByTestId('bench-rows')).toBeVisible();
+  });
+
+  /** The thing to act on comes immediately after the fold. */
+  test('puts the changes card straight under the bench', async ({ page }) => {
+    const bench = (await page.getByTestId('bench-toggle').boundingBox())!;
+    const card = (await page.getByTestId('lineup-card').boundingBox())!;
+    expect(card.y).toBeGreaterThan(bench.y);
+    // Nothing between them but the gap the design puts there.
+    expect(card.y - (bench.y + bench.height)).toBeLessThanOrEqual(24);
+
+    // And the waiver section is after it, not between.
+    const waivers = await page.getByTestId('waiver-card').boundingBox();
+    if (waivers) expect(waivers.y).toBeGreaterThan(card.y);
+  });
+
+  /**
+   * Short, and short in the specific way the brief asks for: one change with a
+   * number on it, the rest folded away.
+   */
+  test('leads the changes card with one change', async ({ page }) => {
+    const card = page.getByTestId('lineup-card');
+    await expect(card).toBeVisible();
+    expect(await card.getByTestId('lineup-swap').count()).toBeLessThanOrEqual(1);
+    const box = (await card.boundingBox())!;
+    expect(box.height, `the changes card is ${Math.round(box.height)}px`).toBeLessThanOrEqual(260);
+  });
+
+  /**
+   * What left the card is in the sheet, not gone.
+   *
+   * The drivers, the market, the role and the matchup were on the row and are
+   * now one tap in — so the tap has to produce them, or the density was bought
+   * by deleting the intelligence rather than by moving it.
+   */
+  test('keeps the intelligence one tap away', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const sheet = page.getByTestId('weekly-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('weekly-verdict')).toBeVisible();
+    // The lines the row stopped carrying: at least one of role, matchup or
+    // market, plus the drivers that explain the pick.
+    const lines = await sheet.locator('.weekly-line').count();
+    const drivers = await sheet.getByTestId('weekly-drivers').count();
+    expect(lines + drivers, 'the sheet carries what the row gave up').toBeGreaterThan(0);
+  });
+
+  /** Nothing on this screen may widen it. */
+  test('never scrolls sideways', async ({ page }) => {
+    const width = page.viewportSize()!.width;
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.getByTestId('bench-toggle').click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   });
 });
 
@@ -301,6 +433,7 @@ test.describe('the weekly card', () => {
   });
 
   test('and on a bench player with the other one', async ({ page }) => {
+    await page.getByTestId('bench-toggle').click();
     await page.getByTestId('bench-row').first().click();
     await expect(page.getByTestId('weekly-verdict')).toHaveAttribute('data-verdict', /bench|not_playable|unknown/);
   });
@@ -327,6 +460,27 @@ test.describe('the weekly card', () => {
     await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
     const lines = page.getByTestId('weekly-lines');
     if (await lines.count()) await expect(lines).not.toContainText('unknown');
+  });
+
+  /**
+   * The deeper context is here, and it is the app's one rendering of it.
+   *
+   * Collapsing the lineup moved everything that is not about this Sunday off
+   * the row; this is where it landed. The assertion is deliberately about
+   * `player-detail` — the test id that `components/playerDetail.tsx` owns and
+   * that Draft and Players also open — so a future screen that pastes its own
+   * copy of the outlook instead of calling the shared one fails here.
+   */
+  test('reaches the shared player detail, one tap further in', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const more = page.getByTestId('weekly-more');
+    await expect(more).toBeVisible();
+    // Shut by default: nothing about last season is on the first screen.
+    await expect(page.getByTestId('player-detail')).toHaveCount(0);
+
+    await more.locator('summary').click();
+    await expect(page.getByTestId('player-detail')).toBeVisible();
+    await expect(page.getByTestId('outlook').or(page.getByTestId('outlook-none')).first()).toBeVisible();
   });
 
   /** It never offers to change a lineup. It is a card about a decision. */

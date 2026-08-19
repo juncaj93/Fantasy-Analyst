@@ -68,11 +68,15 @@ no polling of its own, and it stays readable as history once the draft is done.
 
 **Team** — the recommended lineup, the bench behind it and the short list of
 anybody unrostered worth a move, all built from Vegas market expectation, news
-signal, availability and an uncertainty penalty. Balanced, Floor and Ceiling ask
-the same question three ways. Tapping one of your players opens his week in a
-concise card — the verdict, the role trend, the matchup, the market and the
-availability — with the full comparison one tap further on. Pull the screen down
-to refresh it. It never changes a lineup.
+signal, availability and an uncertainty penalty. Every recommended starter fits
+on one phone screen: a slot, a name, a projection, a club mark and a tag only
+when a tag is material. Under them the bench is folded to `Bench (6) ›` with a
+line saying whether anything back there is better, and directly under that is
+the card that says what to change. Balanced, Floor and Ceiling ask the same
+question three ways. Tapping one of your players opens his week in a concise
+card — the verdict, the role trend, the matchup, the market and the availability
+— with his full profile and the comparison one tap further on. Pull the screen
+down to refresh it. It never changes a lineup.
 
 **Matchup** — once the draft is done, this week's head-to-head. Sleeper is the
 score, the lineups and the slots; everything else on the screen is this app's.
