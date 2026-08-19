@@ -86,6 +86,25 @@ jobs:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
       fail-fast: false
+      # Two widths at a time, not four.
+      #
+      # `webkit-small-360` hung in `playwright install --with-deps webkit`
+      # three times in one afternoon — always that job, always before a single
+      # test ran, always killed by the job timeout with the test step still
+      # `pending` while the other three had finished their installs in seconds.
+      # Three occurrences on the same matrix slot is not chance; it is the last
+      # of four jobs starting together and contending for the same apt mirrors
+      # and the same browser download.
+      #
+      # Halving the simultaneous installs is the smallest change that addresses
+      # the cause rather than the symptom. Raising the timeout again would only
+      # buy the contention more time to resolve, which is why the note above
+      # says to cache the download first instead — and the cache below does.
+      #
+      # The cost is honest: two batches instead of one, so the stage's wall
+      # clock roughly doubles when nothing is cached. With the cache warm the
+      # install is seconds rather than minutes, which pays most of it back.
+      max-parallel: 2
       matrix:
         # 430 is the Pro Max class, and it is here for the opposite reason to
         # 360: the narrow one catches anything that overflows, and the wide one
@@ -99,9 +118,41 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+
+      # The browser itself, kept between runs.
+      #
+      # Six minutes of pure setup per job, four jobs per push, every push — and
+      # the download is what the three hangs above were sitting in. Keyed on the
+      # Playwright version because the browser build is pinned to it: a bump has
+      # to miss the cache and fetch again, and reading the version from the
+      # installed package rather than writing it here means it cannot drift from
+      # what is actually being run.
+      - name: Resolve the Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the WebKit download
+        id: browser-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-webkit-${{ steps.playwright.outputs.version }}
+
       # Slow and variable, and not a thing that can hang in an interesting way,
       # so it is left to the job's own ceiling rather than given a second one.
-      - run: npx playwright install --with-deps webkit
+      #
+      # Split by whether the browser was restored. `--with-deps` is two jobs in
+      # one: an apt install of the system libraries WebKit links against, and
+      # the browser download. The libraries live on the runner image and are
+      # gone every time, so they are always installed; the browser is what the
+      # cache above makes free.
+      - name: Install WebKit and its system libraries
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps webkit
+
+      - name: Install WebKit's system libraries
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps webkit
       # This is the one that can hang. Twenty minutes of *testing* is a stuck
       # browser however long apt took beforehand.
       - run: npx playwright test --project=${{ matrix.project }}
