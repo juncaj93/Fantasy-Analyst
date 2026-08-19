@@ -145,7 +145,17 @@ export function MatchupScreen({ leagues }: { leagues: LeagueSummary[] }) {
 
           <HeroCarousel insights={forecast.insights} onOpenPlayer={setOpenPlayer} openable={openable} />
 
-          <div className="section-title" data-testid="starters-title">
+          {/*
+            Tighter than the app's usual section title, and only here.
+
+            Elsewhere a section title separates two things a reader might not
+            have expected to meet. Here it names the one list the screen is
+            about, directly under a card that has just been talking about it —
+            so it works as a label rather than as a divider, and the app's
+            standard 16px of air above it was buying separation nobody needed
+            at the cost of a starter off the bottom.
+          */}
+          <div className="section-title section-title-tight" data-testid="starters-title">
             Starters
           </div>
           <div className="matchup-rows">

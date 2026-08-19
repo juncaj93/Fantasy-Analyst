@@ -1164,6 +1164,11 @@ body,
   font-weight: 620;
 }
 
+/* A label rather than a divider — see the Matchup screen for when that holds. */
+.section-title-tight {
+  margin-top: var(--sp-1);
+}
+
 .muted {
   color: var(--text-dim);
   font-size: 0.82rem;
@@ -4362,61 +4367,117 @@ table.compact tr:last-child td {
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-2);
 }
 
 .matchup-score-teams {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: var(--sp-2);
 }
 
+/*
+ * Both columns lean on the centre.
+ *
+ * The two scores are the comparison this screen exists to make, and a
+ * comparison is made by the eye moving a short distance. Pinned to opposite
+ * edges of a 360px card they were 200px apart with the reader's own name in
+ * between, which is a scoreboard's layout: it presents two facts and leaves
+ * the subtraction to you. Leaning both columns inward puts them either side of
+ * the `vs` — about 40px apart — so "49 against 79" is one glance rather than
+ * two.
+ *
+ * Identity does not weaken for it. Each name still sits directly above its own
+ * score and the two columns still occupy their own halves, so which number is
+ * whose is never in question; the names simply hug the same edge their scores
+ * do.
+ */
 .matchup-team {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+}
+
+.matchup-team[data-align='start'] {
+  align-items: flex-end;
+  text-align: right;
 }
 
 .matchup-team[data-align='end'] {
-  text-align: right;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* Each line still has the whole half to truncate within. */
+.matchup-team > * {
+  max-width: 100%;
 }
 
 /* The fantasy team's name. One line, truncated — a manager's team name is
    frequently a joke of unbounded length and it must not wrap the card. */
+.matchup-team-id {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.matchup-team[data-align='start'] .matchup-team-id {
+  /* Mirrored, so the record trails the name away from the centre on both
+     sides and the two names stay hard against the spine. */
+  flex-direction: row-reverse;
+}
+
+.matchup-team-record {
+  flex: 0 0 auto;
+}
+
 .matchup-team-name {
-  font-size: 0.86rem;
+  min-width: 0;
+  font-size: 0.8rem;
   font-weight: 640;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
+/*
+ * The record rides on the name's line rather than claiming one.
+ *
+ * "3-2" is four characters and was costing a whole row of the card's height at
+ * every width. Inline and faint, it reads as an annotation of the name, which
+ * is what it is.
+ */
 .matchup-team-record {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 /* Sleeper's score: the largest thing on the screen, because it is the only
    number here that is a fact rather than a forecast. */
 .matchup-team-score {
-  font-size: 1.62rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  line-height: 1.15;
-  margin-top: 1px;
+  line-height: 1.1;
 }
 
 /* This app's own projection, in the quieter register everything derived uses. */
 .matchup-team-proj {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
+  line-height: 1.25;
 }
 
 .matchup-proj-label {
@@ -4612,7 +4673,9 @@ div.matchup-result {
 }
 
 .hero-action {
-  align-self: flex-start;
+  align-self: center;
+  min-width: 0;
+  white-space: nowrap;
   /*
    * A smaller box than 44px, and deliberately.
    *
@@ -4622,8 +4685,8 @@ div.matchup-result {
    * inside what a thumb finds — and the pager buttons beside it are the
    * controls that actually get repeated taps.
    */
-  min-height: 36px;
-  padding: 6px 0;
+  min-height: 34px;
+  padding: 4px 0;
   background: none;
   border: 0;
   color: var(--accent-text);
@@ -4632,17 +4695,26 @@ div.matchup-result {
   cursor: pointer;
 }
 
-.hero-pager {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* Link left, pager right, one row. See the component for why. */
+.hero-foot {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 34px;
+}
+
+.hero-pager {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 /* The paging controls exist so a gesture is never the only way through. They
    are quiet, and they are still full tap targets. */
 .hero-step {
-  min-width: var(--tap);
-  min-height: 30px;
+  min-width: 34px;
+  min-height: 34px;
   background: none;
   border: 0;
   color: var(--text-faint);
@@ -4689,8 +4761,8 @@ div.matchup-result {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--sp-1);
-  padding: 5px var(--sp-2);
+  gap: 4px;
+  padding: 5px 6px;
 }
 
 .matchup-half {
@@ -4719,11 +4791,26 @@ div.matchup-result {
   opacity: 0.55;
 }
 
+/*
+ * The name takes the slack, which is what puts the numbers in a column.
+ *
+ * Without this the name block is content-sized and the points sit immediately
+ * after it, so every row's figures start at a different x — the column wanders
+ * by thirty pixels between a short surname and a long one, and a wandering
+ * column is read rather than scanned. Letting the name absorb the spare width
+ * pins the points against the centre pill on both sides, so all four numbers on
+ * a row sit in one narrow band either side of the spine.
+ */
 .matchup-name-block {
   display: flex;
   align-items: center;
   gap: 3px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.matchup-half[data-side='theirs'] .matchup-name-block {
+  justify-content: flex-end;
 }
 
 .matchup-name {
@@ -4743,7 +4830,15 @@ div.matchup-result {
   align-items: flex-end;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
+  /*
+   * Fixed, so the column is a column.
+   *
+   * Sized for "22.4" rather than for a hypothetical three-figure score: nobody
+   * scores a hundred in a week, and reserving the width for it was taking six
+   * pixels a side from the names, which is a real cost paid against an
+   * imaginary one. A freak score overflows the box rather than moving it.
+   */
+  flex: 0 0 2.2rem;
 }
 
 .matchup-half[data-side='theirs'] .matchup-points {
@@ -4756,6 +4851,22 @@ div.matchup-result {
   color: var(--text);
 }
 
+/*
+ * Beat or missed his projection, once his game is over and only when it is
+ * worth six points. The component decides; this only paints.
+ *
+ * Deliberately the text colour rather than a chip or a background: at this size
+ * a filled badge would out-shout the score it is annotating, and there are up to
+ * sixteen of them on a screen.
+ */
+.matchup-actual[data-verdict='over'] {
+  color: var(--pos);
+}
+
+.matchup-actual[data-verdict='under'] {
+  color: var(--neg);
+}
+
 .matchup-player-proj {
   font-size: 0.68rem;
   color: var(--text-faint);
@@ -4764,7 +4875,7 @@ div.matchup-result {
 /* The spine. Fixed width, so it never moves between rows. */
 .slot-pill {
   flex: 0 0 auto;
-  min-width: 38px;
+  min-width: 34px;
   text-align: center;
   font-size: 0.62rem;
   font-weight: 700;

@@ -32,6 +32,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
+import { MATERIAL_POINT_SWING } from '../../core/matchup/insights.ts';
 import { TeamLogo } from './common.tsx';
 import { useReducedMotion } from '../gestures.ts';
 
@@ -101,10 +102,19 @@ export function ScoreCard({
 function TeamColumn({ team, align, final }: { team: MatchupTeamView; align: 'start' | 'end'; final: boolean }) {
   return (
     <div className="matchup-team" data-align={align} data-testid={`matchup-team-${team.side}`}>
-      <div className="matchup-team-name" title={team.name}>
-        {team.name}
+      {/*
+        Name and record on one line.
+
+        The record is an annotation of the name rather than a fact of its own,
+        and giving it a row of its own cost the card ~14px at every width for
+        four characters.
+      */}
+      <div className="matchup-team-id">
+        <span className="matchup-team-name" title={team.name}>
+          {team.name}
+        </span>
+        {team.record ? <span className="matchup-team-record">{team.record}</span> : null}
       </div>
-      {team.record ? <div className="matchup-team-record">{team.record}</div> : null}
       <div className="matchup-team-score" data-testid={`matchup-actual-${team.side}`}>
         {team.actual.toFixed(2)}
       </div>
@@ -339,52 +349,66 @@ export function HeroCarousel({
             {insight.detail}
           </div>
         ) : null}
-        {insight.playerId && openable(insight.playerId) ? (
-          <button
-            type="button"
-            className="hero-action"
-            data-testid="hero-action"
-            onClick={() => onOpenPlayer(insight.playerId!)}
-          >
-            View details ›
-          </button>
-        ) : null}
       </div>
 
-      {count > 1 ? (
-        <div className="hero-pager" data-testid="hero-pager">
-          <button
-            type="button"
-            className="hero-step"
-            aria-label="Previous insight"
-            data-testid="hero-prev"
-            onClick={() => go(active - 1)}
-          >
-            ‹
-          </button>
-          <span className="hero-dots" role="tablist" aria-label="Live insights">
-            {insights.map((candidate, i) => (
+      {/*
+        The action and the pager share one row.
+
+        They were a row each, which spent about 70px of a 150px card on chrome
+        — half the hero, for one link and three dots. They do not compete for
+        space: the link is a few words on the left, the pager is small and
+        fixed on the right, and neither reads as belonging to the other.
+      */}
+      {(insight.playerId && openable(insight.playerId)) || count > 1 ? (
+        <div className="hero-foot">
+          {insight.playerId && openable(insight.playerId) ? (
+            <button
+              type="button"
+              className="hero-action"
+              data-testid="hero-action"
+              onClick={() => onOpenPlayer(insight.playerId!)}
+            >
+              View details ›
+            </button>
+          ) : (
+            <span />
+          )}
+          {count > 1 ? (
+            <div className="hero-pager" data-testid="hero-pager">
               <button
-                key={candidate.key}
                 type="button"
-                role="tab"
-                className={i === active ? 'hero-dot hero-dot-on' : 'hero-dot'}
-                aria-selected={i === active}
-                aria-label={`Insight ${i + 1} of ${count}: ${candidate.headline}`}
-                data-testid="hero-dot"
-                onClick={() => go(i)}
-              />
-            ))}
-          </span>
-          <button
-            type="button"
-            className="hero-step"
-            aria-label="Next insight"
-            data-testid="hero-next"
-            onClick={() => go(active + 1)}
-          >
-            ›
-          </button>
+                className="hero-step"
+                aria-label="Previous insight"
+                data-testid="hero-prev"
+                onClick={() => go(active - 1)}
+              >
+                ‹
+              </button>
+              <span className="hero-dots" role="tablist" aria-label="Live insights">
+                {insights.map((candidate, i) => (
+                  <button
+                    key={candidate.key}
+                    type="button"
+                    role="tab"
+                    className={i === active ? 'hero-dot hero-dot-on' : 'hero-dot'}
+                    aria-selected={i === active}
+                    aria-label={`Insight ${i + 1} of ${count}: ${candidate.headline}`}
+                    data-testid="hero-dot"
+                    onClick={() => go(i)}
+                  />
+                ))}
+              </span>
+              <button
+                type="button"
+                className="hero-step"
+                aria-label="Next insight"
+                data-testid="hero-next"
+                onClick={() => go(active + 1)}
+              >
+                ›
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -458,11 +482,21 @@ function PlayerHalf({
 
   const score = (
     <span className="matchup-points">
-      <span className="matchup-actual" data-testid="matchup-player-actual">
+      <span className="matchup-actual" data-testid="matchup-player-actual" data-verdict={verdictOf(player)}>
         {player.actual.toFixed(1)}
       </span>
+      {/*
+        The projection, while it is still a projection.
+
+        Once his game is over `projectedFinal` has collapsed onto the score
+        directly above it — there is nothing left to expect — so the row was
+        printing the same number twice, which reads as a second fact and is
+        really the same one. The slot stays in the layout rather than closing
+        up, so a finished player's row is the same height as a live one and the
+        column does not stagger as the afternoon ends.
+      */}
       <span className="matchup-player-proj" data-testid="matchup-player-proj">
-        {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
+        {player.phase === 'final' ? '' : player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
       </span>
     </span>
   );
@@ -528,6 +562,38 @@ function PlayerHalf({
       {body}
     </button>
   );
+}
+
+/**
+ * Whether a finished player beat or missed his projection, materially.
+ *
+ * Three deliberate restrictions, because the brief's instruction here is as
+ * much about what not to colour as what to colour:
+ *
+ *  1. **never before kickoff.** A player on nothing who was always going to be
+ *     on nothing at this hour is not underperforming, and colouring him red
+ *     would make every Sunday morning look like a disaster.
+ *  2. **only when it is material**, at the same six-point threshold the insight
+ *     engine uses. Two colours applied to sixteen numbers is a heat map, and a
+ *     heat map is what the brief means by over-colouring.
+ *  3. **never for a player nobody projected.** No projection is not a miss.
+ *
+ * The number itself is `vsExpectation`, computed in `core/matchup` and already
+ * pace-corrected — measured against what he was projected to have *by now*
+ * rather than against his whole-game total, so a quarterback on four at
+ * half-time is eight points light rather than twenty. This row does not do that
+ * arithmetic and does not repeat the threshold; it reads the same value the
+ * insight engine reads, which is what stops a red score and a calm card
+ * appearing side by side.
+ *
+ * Green and red are the accelerator, never the carrier: the two numbers are
+ * printed one above the other, so the comparison is legible without the colour
+ * at all.
+ */
+function verdictOf(player: MatchupPlayerView): 'over' | 'under' | undefined {
+  if (player.phase === 'not_started' || player.vsExpectation == null) return undefined;
+  if (Math.abs(player.vsExpectation) < MATERIAL_POINT_SWING) return undefined;
+  return player.vsExpectation > 0 ? 'over' : 'under';
 }
 
 /** What a status mark means, spelled out for anything reading it aloud. */

@@ -24,6 +24,7 @@ import {
   buildDistribution,
   effectiveRemaining,
   projectedFinal,
+  vsExpectation,
   resolveGameClock,
   type GameClock,
   type PlayerDistribution,
@@ -71,6 +72,15 @@ export interface MatchupPlayerView {
   projectedFinal: number | null;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
+  /**
+   * Points ahead of — or behind — what he was projected to have by now.
+   *
+   * Pace-corrected, so it is comparable at half-time and not only on Monday;
+   * see `vsExpectation`. Null when nobody projected him. The rows use it to
+   * decide whether a score is worth colouring, and the insight engine uses the
+   * same number to decide whether it is worth a card.
+   */
+  vsExpectation: number | null;
   phase: PlayerDistribution['phase'];
   locked: boolean;
   /** `Q`, `OUT` and friends — shown only when material. */
@@ -283,6 +293,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       actual: distribution.settled,
       projectedFinal: distribution.projectionUnknown ? null : projectedFinal(distribution),
       remaining: distribution.projectionUnknown ? null : effectiveRemaining(distribution),
+      vsExpectation: vsExpectation(distribution, player.projection),
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),

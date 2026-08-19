@@ -421,6 +421,37 @@ export function projectedFinal(distribution: PlayerDistribution): number {
 }
 
 /**
+ * What he was projected to have scored *by now*.
+ *
+ * The pace correction, and the reason it exists: a quarterback projected 24 who
+ * has 4 at half-time is not twenty points below expectation, he is about eight.
+ * Comparing a part-played score against a whole-game projection makes every
+ * player on the slate look catastrophic at lunchtime and brilliant by Monday,
+ * which is a comparison that says more about the clock than about the player.
+ *
+ * A finished player is measured against his whole projection, because by then
+ * "by now" and "in total" are the same question.
+ */
+export function expectedByNow(distribution: PlayerDistribution, projection: number): number {
+  if (distribution.phase === 'final') return projection;
+  const played = Math.min(1, Math.max(0, 1 - distribution.remainingShare));
+  return projection * played;
+}
+
+/**
+ * How far ahead of — or behind — his own expectation he is running.
+ *
+ * Positive is ahead. Shared by the insight engine, which decides whether a swing
+ * is worth a card, and by the player rows, which decide whether a score is worth
+ * colouring: two places asking the same question, so they ask it once. Null when
+ * nobody projected him, because no projection is not a miss.
+ */
+export function vsExpectation(distribution: PlayerDistribution, projection: number | null): number | null {
+  if (projection == null || distribution.projectionUnknown) return null;
+  return round2(distribution.settled - expectedByNow(distribution, projection));
+}
+
+/**
  * The scale of the active branch, as one multiplier.
  *
  * The mixture has two playing branches, and treating them as one lognormal

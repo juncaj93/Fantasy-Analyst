@@ -441,3 +441,90 @@ test.describe('the states of an afternoon', () => {
     await expect(page.getByTestId('matchup-confidence')).toHaveCount(0);
   });
 });
+
+/**
+ * The polish, asserted as geometry rather than as taste.
+ *
+ * A visual pass that nobody measures regresses the first time somebody adds a
+ * line to a card, and "it looks tight" is not a thing a later change can be
+ * checked against. So the three claims the polish actually makes — the numbers
+ * form a column, the lineup fits, and nothing wraps or overflows — are checked
+ * as numbers, at the width where each is hardest.
+ */
+test.describe('the matchup screen’s layout', () => {
+  test.beforeEach(async ({ page }) => openMatchup(page));
+
+  /**
+   * Every score sits in the same column on its own side.
+   *
+   * The alignment defect this replaces was subtle and permanent: the points
+   * block was content-sized, so its left edge moved with the length of the name
+   * beside it and the figures wandered by thirty pixels down the list. A
+   * wandering column is read row by row; a straight one is scanned.
+   */
+  test('lines the scores up into a column on each side', async ({ page }) => {
+    const edges = await page.evaluate(() => {
+      const read = (side: string) =>
+        [...document.querySelectorAll(`[data-testid="matchup-player"][data-side="${side}"] .matchup-actual`)].map(
+          (e) => Math.round(e.getBoundingClientRect().right),
+        );
+      return { mine: read('mine'), theirs: read('theirs') };
+    });
+    expect(edges.mine.length).toBeGreaterThan(4);
+    // One value each, not a spread: every row's number ends on the same pixel.
+    expect(new Set(edges.mine).size).toBe(1);
+    expect(new Set(edges.theirs).size).toBe(1);
+  });
+
+  /**
+   * The whole starting lineup, above the bar, on the smallest phone.
+   *
+   * §16's actual requirement, and the thing the compactness pass bought: before
+   * it, between five and seven of the eight slots cleared the tab bar depending
+   * on how tall the insight card happened to be.
+   */
+  test('fits every starting slot above the navigation', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect(page.getByTestId('matchup-score')).toBeVisible();
+    const fit = await page.evaluate(() => {
+      const floor = document.querySelector('.tabbar')!.getBoundingClientRect().top;
+      const rows = [...document.querySelectorAll('[data-testid="matchup-row"]')];
+      return { fitted: rows.filter((r) => r.getBoundingClientRect().bottom <= floor).length, total: rows.length };
+    });
+    expect(fit.total).toBeGreaterThan(0);
+    expect(fit.fitted).toBe(fit.total);
+  });
+
+  /** Nothing wraps to a second line, and the page never scrolls sideways. */
+  test('keeps every name and score on one line at 360px', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect(page.getByTestId('matchup-score')).toBeVisible();
+    const problems = await page.evaluate(() => {
+      const lines = (e: Element) =>
+        e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight || '1');
+      const cells = [...document.querySelectorAll('.matchup-name, .matchup-actual, .matchup-team-score')];
+      return {
+        wrapped: cells.filter((e) => lines(e) > 1.6).length,
+        overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    expect(problems.wrapped).toBe(0);
+    expect(problems.overflowX).toBe(false);
+  });
+
+  /**
+   * Colour is restrained by construction.
+   *
+   * The rule the brief states as "do not over-color every number", checked as a
+   * proportion: a screen where most scores are coloured is a heat map, whatever
+   * the threshold behind it claims to be.
+   */
+  test('colours only the scores that materially missed or beat expectation', async ({ page }) => {
+    const marks = await page.evaluate(() => ({
+      coloured: document.querySelectorAll('.matchup-actual[data-verdict]').length,
+      total: document.querySelectorAll('.matchup-actual').length,
+    }));
+    expect(marks.total).toBeGreaterThan(8);
+    expect(marks.coloured).toBeLessThan(marks.total / 2);
+  });
+});

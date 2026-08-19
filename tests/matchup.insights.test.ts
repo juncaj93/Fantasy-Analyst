@@ -135,7 +135,7 @@ describe('priority', () => {
     const alert = result.insights.find((i) => i.key === 'ruled-out:mine-4');
     expect(alert).toBeDefined();
     expect(alert!.urgency).toBe('act_now');
-    expect(alert!.headline).toMatch(/is out and still in your lineup/);
+    expect(alert!.headline).toMatch(/is OUT and still starting/);
     expect(alert!.detail).toMatch(/takes the slot and adds/);
   });
 
@@ -250,7 +250,10 @@ describe('what each side needs', () => {
     const result = forecast(players, BEFORE);
     const need = result.insights.find((i) => i.kind === 'need');
     expect(need).toBeDefined();
-    expect(need!.headline).toMatch(/more from/);
+    // The compact form the brief asks for: the ask, the unit, the player, stop.
+    expect(need!.headline).toMatch(/^Need ~?\d+\.\d pts from /);
+    // What the number buys moved to the detail rather than being dropped.
+    expect(need!.detail).toMatch(/^Takes you to \d+%/);
     expect(need!.side).toBe('mine');
   });
 
@@ -260,7 +263,8 @@ describe('what each side needs', () => {
       theirsProjections: [20, 13, 12, 15, 12, 9, 10],
     });
     const need = forecast(players, BEFORE).insights.find((i) => i.kind === 'need');
-    expect(need!.headline).toMatch(/roughly/);
+    // The hedge survives the shortening — it is a "~", not a missing word.
+    expect(need!.headline).toMatch(/^Need ~\d/);
   });
 
   it('states what the opponent needs to flip it when you are ahead', () => {
@@ -273,7 +277,7 @@ describe('what each side needs', () => {
     // Not guaranteed to reach the top three, but the engine must be able to
     // produce it — checked through the leverage it is built from.
     expect(result.leverage.some((l) => l.side === 'theirs' && l.swing > 0)).toBe(true);
-    if (flip) expect(flip.headline).toMatch(/Opponent needs/);
+    if (flip) expect(flip.headline).toMatch(/^Opponent needs ~?\d+\.\d pts from .+ to flip it$/);
   });
 
   it('updates the opponent threshold as they score', () => {
@@ -376,7 +380,7 @@ describe('postgame', () => {
     const decided = result.insights.find((i) => i.kind === 'what_decided_it');
     expect(decided).toBeDefined();
     expect(decided!.headline).toBe('What decided it');
-    expect(decided!.detail).toMatch(/against projection/);
+    expect(decided!.detail).toMatch(/vs expectation/);
   });
 
   it('states a bench swing without implying the decision was obviously wrong', () => {

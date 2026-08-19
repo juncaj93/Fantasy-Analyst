@@ -276,6 +276,16 @@ describe('a player row that grows into a stat dump', () => {
         'starting',
         'statusFlag',
         'team',
+        /*
+         * A comparison, not a statistic.
+         *
+         * It is one number saying how far ahead of his own projection he is
+         * running, which is the thing the row colours; the fields this guard
+         * exists to keep out are the raw ones — targets, carries, xFP, prop
+         * lines, injury prose — that turn a row into a box score. Adding it
+         * here is the deliberate act the guard is asking for.
+         */
+        'vsExpectation',
       ].sort(),
     );
   });
