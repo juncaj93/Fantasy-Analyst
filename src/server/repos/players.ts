@@ -4,6 +4,8 @@ import { EXCLUDED_POSITIONS } from '../../core/sleeper/transform.ts';
 import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+/* The one player matcher, and the recall rule that keeps SQL in step with it. */
+import { rankByNormalized, recallTerms } from '../../core/search/players.ts';
 
 interface PlayerRow {
   id: string;
@@ -283,19 +285,99 @@ export class PlayerRepo {
     return out;
   }
 
+  /**
+   * Players matching a typed query, ranked by the one shared matcher.
+   *
+   * This used to be a single `LIKE '%query%'` against the raw name, and it was
+   * literal in every way that matters: `Ja'Marr` found nobody, because the
+   * stored key has no apostrophe and the query still had one; `Amon Ra` found
+   * nobody, for the mirror-image reason; a one-letter slip found nobody at all.
+   * Meanwhile the draft board — which filters a list already in memory —
+   * answered all three correctly, so the same query gave two different answers
+   * on two screens of the same app.
+   *
+   * It is now two steps, and the split is the whole design:
+   *
+   *   1. **recall** — SQL narrows the dictionary to plausible candidates, using
+   *      terms the matcher itself supplies (`recallTerms`), against the two
+   *      indexed forms of the key. Cheap, indexed, and bounded.
+   *   2. **rank** — `rankByQuery` decides which of those actually match and in
+   *      what order. The database never decides that.
+   *
+   * Recall is deliberately wider than the answer. A word's three-character
+   * prefix is included so a typo later in the word still reaches the matcher,
+   * which then throws away everything that does not survive its edit-distance
+   * guard. Recalling too much costs a bounded scan; recalling too little means
+   * a player who *would* have matched is silently never offered.
+   *
+   * Ranking happens off `normalized_name` rather than off the display name:
+   * re-normalizing every row costs a chain of regexes per player, and over the
+   * dictionary that measured 9.5ms against 5.4ms on a platform that allows a
+   * Worker 10ms in total. Here it only ever runs over the recalled set.
+   */
   async search(query: string, limit = 40): Promise<CanonicalPlayer[]> {
-    const like = `%${query.toLowerCase()}%`;
+    const terms = recallTerms(query);
+
+    /*
+     * Every word must find a home, and may find it in either form of the key.
+     *
+     * `normalized_name` is `amon ra st brown`; `search_name` is the same with
+     * the spaces squeezed out. A word typed with the hyphen dropped only ever
+     * appears in the second, which is exactly why migration 0024 added it.
+     */
+    const clauses: string[] = [];
+    const bindings: string[] = [];
+    for (const alternatives of terms) {
+      const ors: string[] = [];
+      for (const term of alternatives) {
+        ors.push('normalized_name LIKE ?', 'search_name LIKE ?');
+        bindings.push(`%${term}%`, `%${term}%`);
+      }
+      clauses.push(`(${ors.join(' OR ')})`);
+    }
+
+    /*
+     * The recall pool, deliberately larger than the page being asked for.
+     *
+     * The matcher discards from this set rather than adding to it, so a pool cut
+     * to `limit` would hand back fewer than `limit` answers whenever anything in
+     * it scored badly — which reads as "there are no more players called that".
+     * Capped so a one-letter-prefix query cannot pull the whole table into a
+     * Worker.
+     */
+    const pool = Math.min(Math.max(limit * 5, 200), 1_000);
+
+    /*
+     * An empty query is "no filter", not "no players".
+     *
+     * `recallTerms('')` is an empty list, and an early return of `[]` here
+     * would have been the natural reading of that — which is exactly wrong, and
+     * wrong in a way the caller cannot see. Every other search surface treats a
+     * cleared field as "show me everyone", so this one does too: with no terms
+     * there are simply no text clauses, and the active-player filter is the
+     * whole `WHERE`.
+     */
+    const textClause = clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '';
+
     const rows = await this.db
       .prepare(
         `SELECT * FROM players
           WHERE active = 1
-            AND position NOT IN (${EXCLUDED_PLACEHOLDERS})
-            AND (LOWER(full_name) LIKE ? OR normalized_name LIKE ?)
+            AND position NOT IN (${EXCLUDED_PLACEHOLDERS})${textClause}
           ORDER BY LENGTH(full_name), full_name
           LIMIT ?`,
       )
-      .bind(...EXCLUDED_LIST, like, like, limit)
+      .bind(...EXCLUDED_LIST, ...bindings, pool)
       .all<PlayerRow>();
-    return rows.results.map((r) => toPlayer(r));
+
+    const candidates = rows.results.map((r) => toPlayer(r));
+    /*
+     * Ranked by the shared matcher, tie-broken by the order SQL returned.
+     *
+     * That order is shortest-name-first, which is the same "the query covers
+     * more of this name" instinct the matcher would otherwise have to encode
+     * twice — and `rankByQuery` is a stable sort, so it survives.
+     */
+    return rankByNormalized(candidates, query, (p) => p.normalizedName).slice(0, limit);
   }
 }
