@@ -739,6 +739,14 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       shape,
       budgets: strategy?.budget ?? null,
       prices: strategy?.prices ?? null,
+      /*
+       * The league's published bids, for the named-rival pass.
+       *
+       * Already gathered by the strategy context — this is the same
+       * `collectBids` output the price summary was built from, not a second
+       * read, so the names and the price cannot be looking at different weeks.
+       */
+      observations: strategy?.bidHistory.observations ?? [],
     });
 
     const budgets = strategy
@@ -750,7 +758,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: freshness,
       ...advice,
-      upgrades: withCompetition(upgradesWithValue, intel.competition),
+      upgrades: withCompetition(upgradesWithValue, intel.competition, intel.bidders),
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy

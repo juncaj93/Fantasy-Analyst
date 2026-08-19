@@ -92,6 +92,16 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
         {row.competition ? (
           <span className="metric" data-testid="waiver-competition">
             {row.competition.label}
+            {/*
+              The named summary rides in the metric that was already there.
+
+              `3 likely bidders · Joe, Ryan +1` is the count the row showed plus
+              the two names, on the same line — the row does not grow, which is
+              the constraint the whole feature is bounded by.
+            */}
+            {row.competition.detail ? (
+              <span className="faint"> · {row.competition.detail}</span>
+            ) : null}
           </span>
         ) : null}
       </div>
@@ -198,6 +208,24 @@ export function WaiverDetailSheet({
               ) : (
                 <UnknownField what="Likely competition" />
               )}
+              {/*
+                Who they are, one line each.
+
+                Only rendered when the pass could support naming them; a league
+                with no bid history and no wallets shows the count above and
+                stops there, which is the honest end of this feature rather than
+                a degraded version of it.
+              */}
+              {row.bidders && row.bidders.length > 0 ? (
+                <ul className="waiver-bidders" data-testid="waiver-bidders">
+                  {row.bidders.map((bidder) => (
+                    <li key={bidder.rosterId}>
+                      {bidder.display}
+                      {bidder.caveat ? <span className="faint"> · {bidder.caveat}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </dd>
           </div>
           {row.statusFlag ? (
