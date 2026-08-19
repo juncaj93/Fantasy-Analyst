@@ -1045,6 +1045,11 @@ test.describe('the decision intelligence', () => {
    * Read-only, and it asserts per position rather than in aggregate: a board
    * where every receiver is priced and no quarterback is would satisfy any
    * count-based check and would be exactly the gap worth knowing about.
+   *
+   * It does not skip itself when nothing is priced. The first draft of this
+   * test did, and passed green while checking nothing at all — a board with no
+   * market on it is the single most important thing this test can find, and it
+   * has to arrive as a red run with the numbers attached, not as a skip.
    */
   test('carries market context on a quarterback, a back, a receiver and a tight end', async ({ page }) => {
     await page.goto('/');
@@ -1062,6 +1067,9 @@ test.describe('the decision intelligence', () => {
       const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
       return {
         scoringLabel: data.league?.scoringLabel ?? null,
+        // Whether the deployment holds a season-market snapshot at all, which
+        // is a different fact from a board whose players went unmatched.
+        marketSource: data.marketSource ?? null,
         rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
           position: r['position'],
           marketProps: r['marketProps'],
@@ -1078,7 +1086,36 @@ test.describe('the decision intelligence', () => {
     };
     const rows = board!.rows as Row[];
     const priced = rows.filter((r) => r.marketProps);
-    test.skip(priced.length === 0, 'nothing on this board is priced yet');
+
+    /*
+     * What each position actually got, printed before anything is asserted.
+     *
+     * A real provider's coverage is its own business and varies by week; this
+     * suite may not fail because a tight end went unpriced today. What it may
+     * do is print the shape of that coverage, so a card that quietly stopped
+     * carrying receptions is visible in the run rather than discovered in a
+     * draft. Printed first so the diagnosis survives a failure below.
+     */
+    const summary = ['QB', 'RB', 'WR', 'TE'].map((position) => {
+      const forPosition = priced.filter((r) => r.position === position);
+      const labels = new Set(forPosition.flatMap((r) => r.marketProps!.components.map((c) => c.label)));
+      return `${position}: ${forPosition.length} priced [${[...labels].join(', ') || 'none'}]`;
+    });
+    const source = board!.marketSource
+      ? `${board!.marketSource.provider} ${board!.marketSource.season} @ ${board!.marketSource.fetchedAt}`
+      : 'no season-market snapshot on this deployment';
+    console.log(
+      `market coverage — ${summary.join(' | ')}; ` +
+        `${priced.length}/${rows.length} of the board priced; source: ${source}; scoring: ${board!.scoringLabel}`,
+    );
+
+    // At least one position has to be carrying a market, or the line is dead in
+    // production however well it behaves in a rehearsal. Asserted before the
+    // per-row checks, which would otherwise pass vacuously over an empty list.
+    expect(
+      priced.length,
+      `no player on the live board carries a market line (${rows.length} rows; source: ${source})`,
+    ).toBeGreaterThan(0);
 
     // Whatever is priced has to be priced honestly, whichever position it is.
     for (const row of priced) {
@@ -1096,26 +1133,5 @@ test.describe('the decision intelligence', () => {
         expect(Math.round(summed * 100) / 100).toBe(points.value);
       }
     }
-
-    /*
-     * And what each position actually got, reported rather than demanded.
-     *
-     * A real provider's coverage is its own business and varies by week; this
-     * suite may not fail because a tight end went unpriced today. What it may
-     * do is print the shape of that coverage, so a card that quietly stopped
-     * carrying receptions is visible in the run rather than discovered in a
-     * draft.
-     */
-    const summary: string[] = [];
-    for (const position of ['QB', 'RB', 'WR', 'TE']) {
-      const forPosition = priced.filter((r) => r.position === position);
-      const labels = new Set(forPosition.flatMap((r) => r.marketProps!.components.map((c) => c.label)));
-      summary.push(`${position}: ${forPosition.length} priced [${[...labels].join(', ') || 'none'}]`);
-    }
-    console.log(`market coverage — ${summary.join(' | ')}; scoring: ${board!.scoringLabel}`);
-
-    // At least one position has to be carrying a market, or the line is dead in
-    // production however well it behaves in a rehearsal.
-    expect(priced.length, 'no position on the live board carries a market line').toBeGreaterThan(0);
   });
 });
