@@ -80,6 +80,17 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
       }
       return out;
     },
+    /*
+     * The demo world's markets have a provider and a time like any other, so
+     * the expanded card's provenance section renders in a rehearsal exactly as
+     * it does in production rather than being the one thing only real data can
+     * show.
+     */
+    marketSnapshot: async () => ({
+      provider: 'demo',
+      season: String(data.clock.now().getUTCFullYear()),
+      fetchedAt: data.clock.now().toISOString(),
+    }),
     repairStatus: async () => data.repair,
     injuryStates: async (players) => {
       const out = new Map<string, NonNullable<ReturnType<(typeof data.injuries)['get']>>>();

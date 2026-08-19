@@ -28,6 +28,7 @@ import {
 } from '../api.ts';
 import {
   CompactTally,
+  DetailLabel,
   Disclose,
   Empty,
   InjuryTag,
@@ -67,6 +68,8 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+/* One vocabulary for market names, shared with the baseline's own note. */
+import { seasonMarketLabel } from '../../core/vegas/season.ts';
 /*
  * Three ways to read the same board, and one pure function that reorders it.
  *
@@ -978,6 +981,7 @@ export function DraftScreen({
                 rec={item.rec}
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
+                marketSource={board.marketSource ?? null}
                 expanded={expanded === item.rec.playerId}
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
@@ -1385,12 +1389,81 @@ function TierDivider({ gap }: { gap: number | null }) {
  * the expanded view contains its own controls (Advanced, Show all reasons), and
  * a button may not contain buttons.
  */
+/**
+ * The market line's own tooltip: what each number is, spelled out.
+ *
+ * Null when there is nothing to add — a line of single-market numbers already
+ * says what it is, and a tooltip repeating the text under the text is noise.
+ * It earns its place only where the card shows a quantity this app composed.
+ */
+function marketLineTitle(rec: DraftRecommendation): string | undefined {
+  const props = rec.marketProps;
+  if (!props || !props.derived) return undefined;
+  return props.components
+    .map((c) =>
+      c.derived
+        ? `${c.text} = ${c.parts.map((p) => `${p.line} ${seasonMarketLabel(p.market)}`).join(' + ')}`
+        : `${c.text} — ${seasonMarketLabel(c.parts[0]!.market)}`,
+    )
+    .join('; ');
+}
+
+/**
+ * Where the `MKT` line's numbers came from.
+ *
+ * The card has room for the quantities and not for their provenance, so the
+ * provenance lives here — and it has to live somewhere, because two of those
+ * quantities are sums this app performed rather than lines a book published.
+ * Every component names the markets behind it and the line each contributed;
+ * anything the sum wanted and did not have is named as absent rather than
+ * quietly counted as nothing; and the snapshot says who priced it and when.
+ */
+function MarketProvenance({
+  rec,
+  source,
+}: {
+  rec: DraftRecommendation;
+  source: DraftBoard['marketSource'];
+}) {
+  const props = rec.marketProps;
+  if (!props || props.components.length === 0) return null;
+
+  return (
+    <div className="market-detail" data-testid="market-detail">
+      <DetailLabel>Market</DetailLabel>
+      <ul className="market-components">
+        {props.components.map((c) => (
+          <li key={c.label} data-testid="market-component" data-derived={c.derived ? 'yes' : 'no'}>
+            <strong>{c.text}</strong>{' '}
+            <span className="muted">
+              {c.derived
+                ? `— ${c.parts.map((p) => `${p.line} ${seasonMarketLabel(p.market)}`).join(' + ')}, added here rather than quoted as one market`
+                : `— ${seasonMarketLabel(c.parts[0]!.market)}${
+                    c.parts[0]!.bookCount ? ` across ${c.parts[0]!.bookCount} books` : ''
+                  }`}
+              {c.missing.length > 0
+                ? `. No market for ${c.missing.map(seasonMarketLabel).join(' or ')}, which is why this is not a total.`
+                : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {source ? (
+        <div className="muted market-source" data-testid="market-source">
+          {source.provider} · {source.season} season · fetched {new Date(source.fetchedAt).toLocaleDateString()}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RecommendationRow({
   rank,
   rec,
   expanded,
   showCliffProximity,
   horizonPick,
+  marketSource,
   onToggle,
   onQueue,
   busy,
@@ -1406,6 +1479,8 @@ function RecommendationRow({
   showCliffProximity: boolean;
   /** The pick survival is measured against — your next one after this. */
   horizonPick: number | null;
+  /** Who priced the season markets, for the expanded card's provenance. */
+  marketSource: DraftBoard['marketSource'];
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -1605,8 +1680,46 @@ function RecommendationRow({
           the same space and say nothing.
         */}
         {rec.marketHeadline ? (
-          <div className="market-line" data-testid="market-line">
-            <span className="market-label">Market</span> {rec.marketHeadline}
+          <div
+            className="market-line"
+            data-testid="market-line"
+            /*
+              A quantity this app summed is flagged on the element rather than
+              decorated in the text. The label already refuses to lie — a
+              receiver priced on receiving yards alone reads `rec yd`, never
+              `scrim yd` — and the expanded card prints the components. This is
+              what lets a test assert the distinction without a glyph competing
+              for the width the fourth number needs.
+            */
+            data-derived={rec.marketProps?.derived ? 'yes' : 'no'}
+            /*
+              Four quantities need 338px and a 360px phone offers 315, so a
+              quarterback's line was being ellipsised at exactly the number
+              this line was widened to carry. `data-dense` is what the
+              stylesheet tightens; it is set from the component count rather
+              than from the position, because the width problem is the count.
+            */
+            data-dense={(rec.marketProps?.components.length ?? 0) >= 4 ? 'yes' : 'no'}
+            title={marketLineTitle(rec)}
+          >
+            <span className="market-label">MKT</span>
+            {/*
+              Components as elements, not as a joined string.
+
+              The separator becomes the stylesheet's problem rather than three
+              characters of the text, which is where the width to fit a fourth
+              number comes from. `marketHeadline` is still the contract and is
+              still what an older client renders.
+            */}
+            {rec.marketProps ? (
+              rec.marketProps.components.map((c) => (
+                <span className="market-part" key={c.label} data-derived={c.derived ? 'yes' : 'no'}>
+                  {c.text}
+                </span>
+              ))
+            ) : (
+              <span className="market-part">{rec.marketHeadline}</span>
+            )}
           </div>
         ) : null}
       </button>
@@ -1621,7 +1734,7 @@ function RecommendationRow({
         and never forty.
       */}
       <Disclose open={expanded}>
-        <DraftPlayerDetail rec={rec} />
+        <DraftPlayerDetail rec={rec} marketSource={marketSource} />
       </Disclose>
     </div>
   );
@@ -1652,7 +1765,13 @@ function RecommendationRow({
  * carries every reason, counterpoint, component, weight and contribution, and
  * the engine still computes them. They have stopped being rendered here.
  */
-function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
+function DraftPlayerDetail({
+  rec,
+  marketSource,
+}: {
+  rec: DraftRecommendation;
+  marketSource: DraftBoard['marketSource'];
+}) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
 
   return (
@@ -1677,6 +1796,11 @@ function DraftPlayerDetail({ rec }: { rec: DraftRecommendation }) {
         else's prose.
       */}
       <NewsletterTakeaway detail={detail} />
+      {/*
+        Before the outlook, because it is the workings of a number the reader
+        just tapped past rather than somebody's prose about the season.
+      */}
+      <MarketProvenance rec={rec} source={marketSource} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
       <InjuryDetail detail={detail} />

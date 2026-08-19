@@ -84,7 +84,19 @@ export interface DraftBoardSources {
   /** The user's own hearts and stars, for every player who has one. */
   flags(): Promise<Map<string, BoardPlayerFlag>>;
   /** Season-long market lines for the scored pool, from the newest snapshot. */
-  seasonMarkets(playerIds: string[]): Promise<Map<string, { market: SeasonMarketKey; line: number | null }[]>>;
+  seasonMarkets(
+    playerIds: string[],
+  ): Promise<Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>>;
+  /**
+   * Who priced the season markets and when, from the same snapshot the lines
+   * came from.
+   *
+   * Snapshot-level rather than per-player because it is the same answer for
+   * every row, and repeating a provider name and a timestamp across 250
+   * recommendations would be 250 copies of one fact. The expanded card reads it
+   * from here.
+   */
+  marketSnapshot(): Promise<{ provider: string; season: string; fetchedAt: string } | null>;
   /** Unresolved newsletter names, for the draft-day readiness warning. */
   repairStatus(): Promise<BoardRepairStatus>;
   /** Normalized availability for the ranked page. May reject; the caller catches. */
@@ -245,6 +257,15 @@ export interface DraftBoardState {
    */
   rosterProgress: { slot: string; filled: number; required: number; accepts: string[] }[];
   adpSnapshot: { id: number; label: string; capturedAt: string; matched: number } | null;
+  /**
+   * Who priced the season markets on this board, and when.
+   *
+   * The provenance behind every `MKT` line, said once. A card's own components
+   * carry their lines and book counts; the provider and the time it was fetched
+   * belong to the snapshot they all came from, and a reader deciding whether to
+   * trust a number needs both halves.
+   */
+  marketSource: { provider: string; season: string; fetchedAt: string } | null;
   /**
    * Where the `DOG` column stands: which provider, how old, and — when it is
    * absent — why.
@@ -736,6 +757,7 @@ export async function buildDraftBoard(
   // fetched here: the draft board must never wait on a provider, and the
   // refresh has its own slow clock.
   const seasonLines = await sources.seasonMarkets(candidateIds);
+  const marketSnapshot = await sources.marketSnapshot();
   // The user's own shortlist, already read above.
   const flags = allFlags;
   const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
@@ -968,6 +990,7 @@ export async function buildDraftBoard(
         }
       : null,
     dogState: dog.state,
+    marketSource: marketSnapshot,
     marketFormat: {
       format: marketFormatOf(format),
       bestBall: format.bestBall,
