@@ -238,8 +238,23 @@ test.describe('the waivers page', () => {
   test('offers nothing that would make a claim', async ({ page }) => {
     await expect(page.locator('body')).toContainText('add, drop or bid in Sleeper');
     const buttons = (await page.locator('button:visible').allInnerTexts()).join(' ').toLowerCase();
+    /*
+     * Matched as whole words, not as substrings.
+     *
+     * The invariant is that no *control* offers to perform a transaction. The
+     * check was a substring scan, which reads "bidder" as "bid" — so a row whose
+     * competition metric says `Likely 2-3 bidders`, or names the rivals behind
+     * that count, failed an assertion about buttons that transact while offering
+     * no such button. Describing a bid and offering one are opposite things.
+     *
+     * Word boundaries keep every case the check exists for: a control reading
+     * `Bid`, `Place bid`, `Submit`, `Add` or `Claim` still fails.
+     */
     for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-      expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
+      expect(
+        new RegExp(`\\b${forbidden}\\b`).test(buttons),
+        `a control reading "${forbidden}" would imply a transaction`,
+      ).toBe(false);
     }
   });
 

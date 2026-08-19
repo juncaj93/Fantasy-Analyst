@@ -83,6 +83,83 @@ back to the league-wide figure when positional needs were not supplied.
 
 ---
 
+## Named rivals — `core/league/bidders.ts`
+
+Competition says *how many*. This says **which of them, and roughly how much**.
+
+The card keeps one line: `Low competition · 3 likely bidders · Joe, Ryan +1`.
+The expanded sheet lists them, one line each:
+
+```
+Joe · likely $17–22 · $41 left · needs RB2 · bids above the room
+```
+
+### The double-counting rule
+
+The expected market price already exists and is computed by
+`core/faab/strategy.ts`. Manager tendency reaches it through exactly one path —
+`rivalsWithNeed`, a *count* normalised against the funded field. It carries no
+magnitude: no manager's spending habit moves the market price, and nothing here
+changes that.
+
+So a named estimate is a **decomposition of the aggregate, never an addition to
+it**. The market range is an input here and never an output; `expected`,
+`recommended` and `doNotExceed` are untouched, and a test asserts the priced
+output is identical with the named pass fed and starved. A manager's tendency
+multiplies *his own* estimate and nothing else.
+
+Backwards, the aggressive manager raises the market price, which raises his own
+estimate, which is a number with no evidence under it.
+
+### What a tendency is, and when there isn't one
+
+The **median** bid as a share of budget, not the mean: a manager with nine $1
+claims and one $60 splash has a habit of $1 claims, and the mean says $7, which
+is a number he has never bid. Failed claims count — a losing bid is evidence
+about the bidder even though it cost him nothing.
+
+Below `MIN_BIDS_FOR_TENDENCY` he has a history, not a habit, and his estimate
+falls back to the league's own range with the reason on the card. The fallback
+**widens** the range rather than shifting it, because being less sure about
+somebody is not the same as expecting him to bid more. His own effect is bounded
+at ±`MAX_TENDENCY_EFFECT` however extreme the record.
+
+### Three gates on an amount
+
+1. the league must price at all — no market range, no estimate;
+2. his own history moves the range, or does not exist and says so;
+3. his wallet caps it, because he cannot bid money he does not have.
+
+### When no name is shown
+
+`namesShown: false` is a deliberate output rather than an empty list, so a screen
+can tell *nobody is bidding* from *we are not confident enough to say who*. It
+fires when nobody has a need, or when no rival can be told apart from any other —
+no wallet and no bid history on any of them. A card saying *Joe will bid $17–22*
+on two observations is worse than one saying *high pressure*.
+
+The summary count always equals `competition.bidders.length`, because both come
+from the same list. `High pressure · 1 likely bidder` is the kind of
+self-contradiction that costs a feature its credibility.
+
+---
+
+## After the run — `core/league/waiverRun.ts`
+
+The named card is a forecast; this is the settlement. Who won, at what price,
+which losing bids were published, what it cost each wallet — and whether the
+rivals this app named actually bid.
+
+Only winning bids count against a wallet. A failed claim carries an amount and
+costs nothing, and counting it would have every busy manager looking broke.
+
+**The scorecard is deliberately asymmetric.** Sleeper publishes the user's own
+failed claims reliably and other managers' inconsistently, so a rival who does
+not appear may have bid unpublished. A positive sighting counts either way; an
+absence is `unconfirmed` and only becomes `did_not_appear` when the losing side
+is known to be complete. Marking an unpublished bid as a miss would be scoring
+this app against a question the source declines to answer.
+
 ## Multi-week value — not here
 
 Owned by `core/value/multiWeek.ts` and wired by `waiverMultiWeekFor`. An earlier
