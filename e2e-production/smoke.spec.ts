@@ -1153,4 +1153,134 @@ test.describe('the decision intelligence', () => {
       }
     }
   });
+  /**
+   * The Score board, on the deployed site, per position.
+   *
+   * The one invariant this whole tier pass exists to protect: **the selected
+   * sort decides who appears where, and a tier is punctuation on that
+   * sequence.** It was broken in production — a tight end scoring 68 was drawn
+   * above two scoring 83 because the market clustered him higher — and the
+   * repair is only real if the deployed board obeys it.
+   *
+   * Checked per position rather than in aggregate, because the report was
+   * explicit that quarterbacks looked right while tight ends and backs did not.
+   * One position passing says nothing about the pipeline.
+   */
+  test('never draws a lower Score above a higher one, at any position', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const summary: string[] = [];
+    const violations: string[] = [];
+
+    for (const position of ['QB', 'RB', 'WR', 'TE']) {
+      const chip = page.getByRole('button', { name: position, exact: true });
+      if ((await chip.count()) === 0) {
+        summary.push(`${position}: no filter`);
+        continue;
+      }
+      await chip.click();
+      await expect(page.getByTestId('board-list')).toBeVisible();
+      await settled(page, 'recommendation-row');
+
+      /*
+       * Rows and separators in DOM order, so the separators can be checked for
+       * placement as well as the rows for ordering.
+       */
+      const sequence = await page.evaluate(() => {
+        const list = document.querySelector('[data-testid="board-list"]');
+        const nodes = list?.querySelectorAll('[data-testid="tier-divider"], [data-testid="recommendation-row"]') ?? [];
+        return [...nodes].map((n) =>
+          n.getAttribute('data-testid') === 'tier-divider'
+            ? { kind: 'divider' as const, score: null, name: null }
+            : {
+                kind: 'row' as const,
+                score: Number((n.querySelector('.score-value')?.textContent ?? '').trim()) || null,
+                name: n.querySelector('.player-name')?.textContent?.trim() ?? null,
+              },
+        );
+      });
+
+      const rows = sequence.filter((n) => n.kind === 'row');
+      const scored = rows.map((r) => r.score).filter((s): s is number => s != null);
+      summary.push(`${position}: ${rows.length} rows, ${sequence.length - rows.length} dividers`);
+
+      for (let i = 1; i < scored.length; i++) {
+        if (scored[i]! > scored[i - 1]!) {
+          const above = rows.find((r) => r.score === scored[i - 1]);
+          const below = rows.find((r) => r.score === scored[i]);
+          violations.push(
+            `${position}: ${below?.name ?? '?'} (${scored[i]}) is drawn below ${above?.name ?? '?'} (${scored[i - 1]})`,
+          );
+        }
+      }
+
+      // A separator may never lead the list, and never follow another.
+      if (sequence[0]?.kind === 'divider') violations.push(`${position}: a divider leads the board`);
+      for (let i = 1; i < sequence.length; i++) {
+        if (sequence[i]!.kind === 'divider' && sequence[i - 1]!.kind === 'divider') {
+          violations.push(`${position}: two dividers in a row`);
+        }
+      }
+    }
+
+    console.log(`score ordering — ${summary.join(' | ')}`);
+    expect(violations, violations.join('; ')).toEqual([]);
+  });
+
+  /**
+   * The late-round survival calibration, on the deployed board.
+   *
+   * Not a threshold on any one player — a real board's percentages are its own
+   * business. What is checked is the failure that shipped: every deep player
+   * reading as a certainty. A board where nothing late is under 99% is the
+   * shape the hazard floor was written to remove.
+   */
+  test('does not report late-round survival as a certainty', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const board = await page.evaluate(async () => {
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
+      return {
+        currentPick: data.currentPick ?? null,
+        rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
+          adp: r['adp'],
+          survival: r['survivalProbability'],
+        })),
+      };
+    });
+    test.skip(!board || board.rows.length === 0, 'no league selected on this deployment');
+
+    const priced = (board!.rows as { adp: number | null; survival: number | null }[]).filter(
+      (r) => r.adp != null && r.survival != null,
+    );
+    test.skip(priced.length === 0, 'nothing on this board carries a survival estimate');
+
+    const late = priced.filter((r) => r.adp! >= 100);
+    console.log(
+      `survival — pick ${board!.currentPick}; ${priced.length} priced, ${late.length} at ADP 100+;` +
+        ` max late ${late.length ? Math.max(...late.map((r) => r.survival!)).toFixed(3) : 'n/a'}`,
+    );
+
+    // Every probability has to be a probability, wherever it came from.
+    for (const row of priced) {
+      expect(row.survival!).toBeGreaterThanOrEqual(0);
+      expect(row.survival!).toBeLessThanOrEqual(1);
+    }
+
+    /*
+     * And the deep end of the board may not be uniformly certain. Skipped
+     * rather than failed when the board has no deep players to look at — that
+     * is a fact about the draft, not about the model.
+     */
+    test.skip(late.length < 5, 'too few deep players on this board to judge late calibration');
+    const allCertain = late.every((r) => r.survival! >= 0.99);
+    expect(allCertain, 'every deep player reads as a certainty, which is the calibration bug').toBe(false);
+  });
 });
