@@ -95,9 +95,81 @@ export interface SearchableName {
 }
 
 export function prepareName(fullName: string): SearchableName {
-  const normalized = normalizeName(fullName);
+  return prepareNormalized(normalizeName(fullName));
+}
+
+/**
+ * The same thing, for a caller that already holds the canonical key.
+ *
+ * `players.normalized_name` is `normalizeName(full_name)`, written at sync time
+ * and indexed. Re-deriving it per row costs a chain of regexes per player, and
+ * measured over the 3,300-row dictionary that is the difference between
+ * **9.5ms and 5.4ms** — on a platform that allows a Worker 10ms in total. The
+ * server therefore ranks off the stored column, and this is the door onto the
+ * matcher that does not pay for normalization twice.
+ *
+ * It is the caller's job to pass a genuinely canonical key. Passing a raw name
+ * here is not a type error and will simply match badly, which is why the
+ * parameter is named for what it must be.
+ */
+export function prepareNormalized(normalized: string): SearchableName {
   return { normalized, tokens: normalized.split(' ').filter(Boolean) };
 }
+
+/**
+ * The whole-name form with its spaces squeezed out.
+ *
+ * `amonrastbrown`. Exported because a datastore that wants to *recall*
+ * candidates for this matcher has to be able to index the same string the
+ * matcher compares against — see `recallTerms`.
+ */
+export function squashName(normalized: string): string {
+  return normalized.replace(/ /g, '');
+}
+
+/**
+ * What a datastore must look for to recall every candidate this matcher could
+ * accept.
+ *
+ * The problem this solves is not matching, it is **recall**. A database cannot
+ * run `scoreName`, so it has to hand the matcher a candidate set — and if that
+ * set is built by a different rule from the one the matcher applies, the two
+ * disagree and a player who *would* have matched is never offered. That is the
+ * subtlest way to end up with two matchers while believing you have one.
+ *
+ * So the recall rule lives here, beside the scoring it must not drift from.
+ * Each element is the alternatives for one query word: a store should OR within
+ * an element and AND across them, which mirrors `scoreName`'s "every word must
+ * find a home" exactly.
+ *
+ * Two alternatives per word:
+ *
+ *   - **the word itself**, which recalls the exact, prefix, word-prefix and
+ *     substring tiers;
+ *   - **its first three characters**, but only for a word long enough to have
+ *     earned a typo budget. This is what recalls the fuzzy tier: `robnson`
+ *     cannot be found by substring, but `rob` finds Robinson and the matcher
+ *     then decides whether the edit distance is acceptable.
+ *
+ * The prefix is deliberately not shorter. At two characters it recalls a
+ * meaningful fraction of the dictionary for no gain, and the matcher would
+ * throw all of it away.
+ *
+ * The one thing this cannot recall is a typo in a word's **first three
+ * characters** — `Macua` for `Nacua`. Widening the net to catch that means
+ * scanning the whole table, which is the cost this design exists to avoid, and
+ * a slip on the opening letters is much rarer than one in the middle.
+ */
+export function recallTerms(query: string): string[][] {
+  return prepareQuery(query).map((word) => {
+    const terms = [word];
+    if (fuzzyBudget(word) > 0) terms.push(word.slice(0, RECALL_PREFIX));
+    return terms;
+  });
+}
+
+/** How much of a word is enough to recall it despite a typo later on. */
+const RECALL_PREFIX = 3;
 
 /** The query, normalized and split. An empty query has no words. */
 export function prepareQuery(query: string): string[] {
@@ -221,12 +293,34 @@ function matchWord(word: string, name: SearchableName): SearchMatch | null {
  * beyond that the board already knows who is worth more.
  */
 export function rankByQuery<T>(items: readonly T[], query: string, nameOf: (item: T) => string): T[] {
+  return rankBy(items, query, (item) => prepareName(nameOf(item)));
+}
+
+/**
+ * The same ranking, for a caller whose items already carry the canonical key.
+ *
+ * The server's is the call site this exists for: it ranks rows out of the
+ * player table, every one of which has `normalized_name` written at sync time.
+ * Going through `rankByQuery` would re-derive that key per row, which is the
+ * cost `prepareNormalized` documents and the reason this door is separate.
+ *
+ * Same matcher, same ordering, same tie-break. Only the way in differs.
+ */
+export function rankByNormalized<T>(
+  items: readonly T[],
+  query: string,
+  normalizedOf: (item: T) => string,
+): T[] {
+  return rankBy(items, query, (item) => prepareNormalized(normalizedOf(item)));
+}
+
+function rankBy<T>(items: readonly T[], query: string, prepare: (item: T) => SearchableName): T[] {
   const words = prepareQuery(query);
   if (words.length === 0) return [...items];
 
   const scored: { item: T; match: SearchMatch; index: number }[] = [];
   for (const [index, item] of items.entries()) {
-    const match = scoreName(prepareName(nameOf(item)), words);
+    const match = scoreName(prepare(item), words);
     if (match) scored.push({ item, match, index });
   }
 
