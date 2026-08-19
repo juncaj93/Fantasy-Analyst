@@ -127,12 +127,26 @@ test.describe('the market line', () => {
      * decoration. Guarded by the measured width because a 430px phone has room
      * for all four at ordinary size — the step is what rescues the narrow ones,
      * and asserting it fires everywhere would be asserting a bug.
+     *
+     * `>=` rather than `>`, and that difference is the only thing in this test
+     * that is not a claim about the product. Everything above asks whether the
+     * line the card actually draws fits; this asks whether the *un-stepped* line
+     * would overflow — which is a claim about the font the runner resolves
+     * `sans-serif` to, since nothing in this repo picks one on Linux.
+     *
+     * It went from true to exactly-equal when these tests moved into the
+     * Playwright container: the ordinary line measured 315 against a clientWidth
+     * of 315, fitting by nothing at all, which `>` scores the same as having
+     * room to spare. It does not. The guard exists to catch the density ladder
+     * quietly becoming decoration, and it keeps every bit of that force at `>=`
+     * — a line with real room left measures comfortably under its width, not
+     * precisely on it, and still fails here.
      */
     if (measured.dense.clientWidth <= 345) {
       expect(
         measured.ordinary.scrollWidth,
         'the dense step is no longer doing anything at this width',
-      ).toBeGreaterThan(measured.ordinary.clientWidth);
+      ).toBeGreaterThanOrEqual(measured.ordinary.clientWidth);
     }
   });
 

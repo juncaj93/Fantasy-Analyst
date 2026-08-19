@@ -26,6 +26,7 @@ import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 import { InjuryService, previousSeason } from '../server/services/injuryService.ts';
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { UsageService } from '../server/services/usageService.ts';
+import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
@@ -89,9 +90,10 @@ export default {
    *   Sat 23:00 UTC    -> Vegas refresh
    *   Sun 15:00 UTC    -> Vegas refresh
    *   Daily 09:00 UTC  -> Sleeper player dictionary, last season's statistics,
-   *                       one injury check, and per-game usage (weekly stats
+   *                       one injury check, per-game usage (weekly stats
    *                       settle when a game ends, so a daily check learns
-   *                       everything 288 of them would)
+   *                       everything 288 of them would), and the season-long
+   *                       market lines the draft board prices against
    *
    * The injury check is deliberately the odd one out. Everything else here is a
    * job that costs real work every time it runs, so it runs on a schedule
@@ -225,6 +227,34 @@ export default {
         if (run.rowsWritten === 0) await usage.catchUpOneWeek();
       } catch (err) {
         console.error('usage refresh failed', err);
+      }
+
+      /*
+       * The season-long market lines the draft board prices players against.
+       *
+       * `SeasonMarketService` was built for a daily clock -- its TTL is
+       * twenty-four hours and one probe costs two entities -- but until now
+       * nothing ever called it on one. The only trigger was the button in
+       * Setup, so a deployment nobody had pressed it on carried no snapshot at
+       * all, and every `MKT` line on every card was blank. A production board
+       * of 250 players had exactly zero priced; that is what put this here.
+       *
+       * The service does its own gating, so this is cheap to call daily and
+       * costs nothing when it should not run: a provider with no season
+       * support or no key returns the reason without fetching, and a snapshot
+       * younger than the TTL is served rather than re-bought.
+       *
+       * After the dictionary, like everything else on this clock, because
+       * quotes are resolved against the players this app knows -- refreshing
+       * first would report a day's worth of new names as unresolved.
+       * Separately caught: a draft-time nicety must never take down the feeds
+       * a lineup depends on.
+       */
+      try {
+        const result = await new SeasonMarketService(env.DB, appEnv.vegas).refresh();
+        if (result.error) console.error('season market refresh failed', result.error);
+      } catch (err) {
+        console.error('season market refresh failed', err);
       }
 
       /*
