@@ -57,6 +57,24 @@ export interface WaiverLeagueIntel {
     label: string;
     detail?: string | null;
   } | null;
+  /**
+   * Which of them, by name, when the evidence supports saying so.
+   *
+   * Null is the ordinary answer: no bid history, no wallets, or a field of
+   * rivals nothing can tell apart. The row shows the count either way, so an
+   * absent list costs a name and never a fact.
+   */
+  bidders?: {
+    rosterId: number;
+    displayName: string;
+    needReason: string;
+    remaining: number | null;
+    estimate: { low: number; high: number } | null;
+    tendency: string | null;
+    caveat: string | null;
+    confidence: 'high' | 'medium' | 'low';
+    display: string;
+  }[] | null;
   /** What he is worth past this Sunday. */
   multiWeek?: {
     level: 'season_long' | 'multi_week' | 'streamer' | 'unknown';
@@ -152,6 +170,8 @@ export interface WaiverBoardRow {
   faab: NonNullable<WaiverLeagueIntel['faab']> | null;
   /** Who else wants him. Null until then. */
   competition: NonNullable<WaiverLeagueIntel['competition']> | null;
+  /** The named rivals behind that count, when they can be supported. */
+  bidders: NonNullable<WaiverLeagueIntel['bidders']> | null;
   /** One short phrase. The rest of the reasons open on tap. */
   why: string;
   /** Everything the engine said about him, for the detail view. */
@@ -307,6 +327,7 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
     multiWeek: candidate.multiWeek ?? null,
     faab: candidate.faab ?? null,
     competition: candidate.competition ?? null,
+    bidders: candidate.bidders ?? null,
     why: candidate.reasons[0] ?? `Projects ${candidate.gain} points above your ${upgrade.slot}.`,
     reasons: candidate.reasons ?? [],
     statusFlag: candidate.statusFlag ?? null,

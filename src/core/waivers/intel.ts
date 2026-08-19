@@ -25,7 +25,8 @@ import {
   type CompetitionAssessment,
 } from '../league/competition.ts';
 import type { LeagueBudgetState, RosterBudget } from '../faab/budget.ts';
-import type { PriceSummary } from '../faab/bids.ts';
+import type { BidObservation, PriceSummary } from '../faab/bids.ts';
+import { namedBidders, type BidderIntel } from '../league/bidders.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { WaiverAdvice } from '../startsit/waivers.ts';
@@ -51,8 +52,16 @@ export function waiverLeagueIntel(opts: {
   shape: RosterShape;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
-}): { competition: Map<string, CompetitionAssessment> } {
+  /**
+   * Every bid this league has published, for the named-rival pass.
+   *
+   * Optional: without it the competition count is unchanged and the names are
+   * simply withheld, which is the same degradation as a league with no history.
+   */
+  observations?: BidObservation[];
+}): { competition: Map<string, CompetitionAssessment>; bidders: Map<string, BidderIntel> } {
   const competition = new Map<string, CompetitionAssessment>();
+  const bidders = new Map<string, BidderIntel>();
 
   const teams = opts.rosters.map((r) => ({
     rosterId: r.rosterId,
@@ -91,8 +100,7 @@ export function waiverLeagueIntel(opts: {
       }
       const needs = needsByPosition.get(candidate.position)!;
 
-      competition.set(
-        candidate.playerId,
+      const assessed =
         needs.length === 0
           ? COMPETITION_UNKNOWN
           : assessCompetition({
@@ -104,12 +112,34 @@ export function waiverLeagueIntel(opts: {
               // nobody is excluded for affordability.
               expectedLow: opts.prices?.low ?? null,
               bidding,
-            }),
-      );
+            });
+      competition.set(candidate.playerId, assessed);
+
+      /*
+       * And which of those rivals, by name.
+       *
+       * Built from the same bidder list the label was built from, so the two can
+       * never disagree about how many there are. The amounts decompose the
+       * league price rather than adding to it — see the header of
+       * `core/league/bidders.ts` for why that direction is the whole design.
+       */
+      if (needs.length > 0) {
+        bidders.set(
+          candidate.playerId,
+          namedBidders({
+            competition: assessed,
+            needs,
+            observations: opts.observations ?? [],
+            prices: opts.prices,
+            rule: opts.budgets?.rule ?? { total: null, usesFaab: bidding, provenance: 'not read' },
+            position: candidate.position,
+          }),
+        );
+      }
     }
   }
 
-  return { competition };
+  return { competition, bidders };
 }
 
 /**
@@ -123,14 +153,32 @@ export function waiverLeagueIntel(opts: {
 export function withCompetition<T extends { candidates: { playerId: string }[] }>(
   upgrades: T[],
   competition: Map<string, CompetitionAssessment>,
+  bidders?: Map<string, BidderIntel>,
 ): T[] {
   return upgrades.map((upgrade) => ({
     ...upgrade,
     candidates: upgrade.candidates.map((candidate) => {
       const assessed = competition.get(candidate.playerId);
+      const named = bidders?.get(candidate.playerId) ?? null;
       return {
         ...candidate,
-        competition: assessed ? { level: assessed.level, label: assessed.label, detail: assessed.detail } : null,
+        competition: assessed
+          ? {
+              level: assessed.level,
+              label: assessed.label,
+              /*
+               * The named summary replaces the count when there is one.
+               *
+               * `3 likely bidders · Joe, Ryan +1` says everything the count did
+               * and one thing more, in the same space — the row does not grow.
+               * When names are withheld the original detail stands.
+               */
+              detail: named?.namesShown ? (named.summary ?? assessed.detail) : assessed.detail,
+            }
+          : null,
+        /** The expanded view. Null when the evidence does not support naming anybody. */
+        bidders: named?.namesShown ? named.named : null,
+        biddersWithheld: named && !named.namesShown ? named.notes : null,
       };
     }),
   }));
