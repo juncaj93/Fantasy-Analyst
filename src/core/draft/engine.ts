@@ -850,7 +850,9 @@ export function rankAvailablePlayers(
      * at any point — the score's own view of the market is `marketBaseline`,
      * computed in the first pass and untouched by this.
      */
-    const props = entry.seasonMarkets?.length ? seasonPropSummary(player.position, entry.seasonMarkets) : null;
+    const props = entry.seasonMarkets?.length
+      ? seasonPropSummary(player.position, entry.seasonMarkets, { baseline })
+      : null;
 
     return {
       playerId: player.id,

@@ -3308,25 +3308,59 @@ table.compact tr:last-child td {
 }
 
 /*
- * Four numbers on a phone.
+ * Four and five numbers on a phone.
  *
- * A quarterback carries passing yards, passing touchdowns, rushing yards and
- * rushing touchdowns; at 360px that needs more room than the row has, and the
- * alternative to a type step is an ellipsis eating the fourth number — which
- * is the number this line was widened to carry.
+ * A quarterback's line carries market-implied points, passing yards, passing
+ * touchdowns, rushing yards and rushing touchdowns. Measured in the browser,
+ * that content needs 345px; the row offers 315 at 360, 330 at 375, 345 at 390
+ * and 385 at 430. So the answer is not one type size, it is the smallest step
+ * each width actually needs — a 430px phone has room for all five at full size
+ * and should not be given the type a 360px phone requires.
  *
- * `line-height` is pinned at the value the ordinary line resolves to, so the
- * step changes the text and not the row. Letting it shrink freely would make
- * every quarterback's card a pixel shorter than everyone else's and cost the
- * board the rhythm a reader scans down.
+ * `data-dense` counts components and the media queries supply the strength.
+ * Neither alone is enough: the count cannot know the viewport, and the viewport
+ * cannot know how much content is on the line.
+ *
+ * Every step leaves the row exactly as tall as an ordinary line — the height is
+ * stated on `.market-line` itself, so nothing here can change it.
  */
-.market-line[data-dense='yes'] {
-  font-size: 0.67rem;
-  letter-spacing: -0.005em;
+@media (max-width: 380px) {
+  .market-line[data-dense='yes'] {
+    font-size: 0.67rem;
+    letter-spacing: -0.005em;
+  }
+
+  .market-line[data-dense='max'] {
+    font-size: 0.62rem;
+    letter-spacing: -0.01em;
+  }
 }
+
+@media (min-width: 381px) and (max-width: 400px) {
+  .market-line[data-dense='max'] {
+    font-size: 0.67rem;
+    letter-spacing: -0.005em;
+  }
+}
+
+/*
+ * Past 400px nothing is stepped: every line this card can produce fits at full
+ * size, and shrinking it there would be decoration rather than a fix.
+ */
 
 .market-line[data-dense='yes'] .market-part + .market-part::before {
   margin: 0 2px;
+}
+
+/*
+ * A pixel and a half, and the half is load-bearing.
+ *
+ * At 360px a five-part line lands within two pixels of the edge, so the four
+ * separators are worth more than they look: at 2px each the line overflows and
+ * the rushing touchdown goes to the ellipsis.
+ */
+.market-line[data-dense='max'] .market-part + .market-part::before {
+  margin: 0 1.5px;
 }
 
 /*

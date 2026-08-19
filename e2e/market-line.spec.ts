@@ -81,21 +81,24 @@ test.describe('the market line', () => {
   /**
    * The case the dev slate does not contain, measured anyway.
    *
-   * A quarterback priced on all four markets is the widest line this card can
-   * produce and the reason `data-dense` exists: without it the line needs 332px
-   * where a 360px phone offers 315, and the number ellipsised away is the
-   * rushing touchdown the line was widened to carry. Synthesised because the
-   * mock provider quotes quarterbacks three markets, and a width guarantee that
-   * only holds for the data that happens to be seeded is not a guarantee.
+   * A quarterback priced on all four markets, with his market-implied points in
+   * front of them, is the widest line this card can produce: five quantities
+   * needing 345px where a 360px phone offers 315. That is the whole reason the
+   * density ladder exists, and the component an ellipsis would eat is the
+   * rushing touchdown — the one the previous pass was written to add.
+   *
+   * Synthesised because the mock provider quotes quarterbacks three markets, and
+   * a width guarantee that only holds for the data that happens to be seeded is
+   * not a guarantee.
    */
-  test('fits a quarterback’s four quantities at the narrowest supported width', async ({ page }) => {
+  test('fits a quarterback’s five quantities at the narrowest supported width', async ({ page }) => {
     await openDraft(page);
     const measured = await page.evaluate(() => {
       const el = document.querySelector('[data-testid="market-line"]') as HTMLElement;
-      const parts = ['4,050 pass yd', '29.5 pass TD', '385 rush yd', '3.5 rush TD'];
+      const parts = ['339 pts', '4,050 pass yd', '29.5 pass TD', '385 rush yd', '3.5 rush TD'];
       const render = (dense: boolean) => {
         const clone = el.cloneNode(true) as HTMLElement;
-        clone.setAttribute('data-dense', dense ? 'yes' : 'no');
+        clone.setAttribute('data-dense', dense ? 'max' : 'no');
         clone.innerHTML =
           '<span class="market-label">MKT</span>' +
           parts.map((p) => `<span class="market-part">${p}</span>`).join('');
@@ -125,7 +128,7 @@ test.describe('the market line', () => {
      * for all four at ordinary size — the step is what rescues the narrow ones,
      * and asserting it fires everywhere would be asserting a bug.
      */
-    if (measured.dense.clientWidth <= 330) {
+    if (measured.dense.clientWidth <= 345) {
       expect(
         measured.ordinary.scrollWidth,
         'the dense step is no longer doing anything at this width',
@@ -199,12 +202,23 @@ test.describe('what the line is made of', () => {
 
     const detail = page.getByTestId('market-detail');
     await expect(detail).toBeVisible();
+    // Settled, not merely present: the first component having text is what says
+    // the disclosure has finished opening.
+    await expect(detail.getByTestId('market-component').first()).not.toBeEmpty();
 
     const components = detail.getByTestId('market-component');
     expect(await components.count(), 'a market line must break down into components').toBeGreaterThan(0);
 
     for (const component of await components.all()) {
-      const text = await component.innerText();
+      /*
+       * `textContent`, not `innerText`.
+       *
+       * WebKit returns an empty string from `innerText` for content inside the
+       * disclosure while it is still animating open — and `toBeVisible` passes
+       * throughout, because the box is on screen the whole time. The text is
+       * there; only the rendered-text accessor is temporarily blind to it.
+       */
+      const text = (await component.textContent()) ?? '';
       if ((await component.getAttribute('data-derived')) === 'yes') {
         // A sum names both halves and does not pretend to be one quote.
         expect(text).toContain('+');
@@ -244,5 +258,157 @@ test.describe('what the line is made of', () => {
         expect(component.derived, 'a partial cannot be a sum of two markets').toBe(false);
       }
     }
+  });
+});
+
+/**
+ * Receptions, and the number they roll up into.
+ *
+ * Two claims the brief makes and this file has to keep honest. A receiver's
+ * receptions are worth as much as ten of his yards in a PPR league, so they
+ * belong on the card whenever the market has them — and must never be
+ * fabricated as `0 rec` when it does not. And `MKT PTS` is the same total the
+ * ranking already scores, converted at *this* league's scoring, which means the
+ * compact number and the expanded breakdown have to be the same number.
+ */
+test.describe('receptions and market-implied points', () => {
+  /** Every priced recommendation on the live board, with its summary. */
+  async function priced(page: Page) {
+    return page.evaluate(async () => {
+      const { leagues } = await (await fetch('/api/leagues')).json();
+      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league) return null;
+      const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=120`)).json();
+      return {
+        scoringLabel: board.league?.scoringLabel ?? null,
+        rows: (board.recommendations ?? [])
+          .filter((r: { marketProps: unknown }) => r.marketProps)
+          .map((r: Record<string, unknown>) => ({
+            position: r['position'],
+            name: r['name'],
+            marketProps: r['marketProps'],
+            marketBaseline: r['marketBaseline'],
+          })),
+      };
+    });
+  }
+
+  test('keeps receptions on a runner, a receiver and a tight end', async ({ page }) => {
+    await openDraft(page);
+    const data = await priced(page);
+    test.skip(!data || data.rows.length === 0, 'no priced players on this board');
+
+    type Row = { position: string; marketProps: { components: { label: string; value: number }[] } };
+    const rows = data!.rows as Row[];
+
+    for (const position of ['RB', 'WR', 'TE']) {
+      const withReceptions = rows.filter(
+        (r) => r.position === position && r.marketProps.components.some((c) => c.label === 'rec'),
+      );
+      // The mock provider prices receptions for all three, so an empty result
+      // here is the regression this test exists for rather than thin data.
+      expect(withReceptions.length, `no ${position} kept its receptions`).toBeGreaterThan(0);
+      for (const row of withReceptions) {
+        const rec = row.marketProps.components.find((c) => c.label === 'rec')!;
+        expect(rec.value, 'a reception count of zero is an invented one').toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test('never writes 0 rec for a player the market did not price', async ({ page }) => {
+    await openDraft(page);
+    const lines = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="market-line"]')].map((el) => el.textContent ?? ''),
+    );
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).not.toMatch(/\b0 rec\b/);
+  });
+
+  /**
+   * The compact number and the expanded one are the same number.
+   *
+   * Not "close to": the card shows `marketBaseline.points`, and the breakdown
+   * is that baseline's own contributions. A discrepancy would mean a second
+   * conversion had grown somewhere, which is the thing the brief forbids.
+   */
+  test('reconciles MKT PTS to its own components, at this league’s scoring', async ({ page }) => {
+    await openDraft(page);
+    const data = await priced(page);
+    test.skip(!data || data.rows.length === 0, 'no priced players on this board');
+
+    type Row = {
+      position: string;
+      marketProps: { components: { label: string; value: number; parts: { points?: number }[] }[] };
+      marketBaseline: { points: number | null; coverage: number; contributions: { points: number }[] } | null;
+    };
+    const rows = (data!.rows as Row[]).filter((r) => r.marketBaseline?.points != null);
+    expect(rows.length, 'no player carried a market-implied total').toBeGreaterThan(0);
+
+    for (const row of rows) {
+      const pts = row.marketProps.components.find((c) => c.label === 'pts');
+      expect(pts, 'a priced player has no MKT PTS component').toBeTruthy();
+      expect(pts!.value).toBe(row.marketBaseline!.points);
+
+      const summed = row.marketBaseline!.contributions.reduce((t, c) => t + c.points, 0);
+      expect(Math.round(summed * 100) / 100).toBe(pts!.value);
+    }
+
+    // And the league whose scoring did the converting is named on the board.
+    expect(data!.scoringLabel, 'the board does not say which scoring produced the points').toBeTruthy();
+  });
+
+  test('shows MKT PTS, its coverage and the scoring behind it when a card opens', async ({ page }) => {
+    await openDraft(page);
+    const rows = page.getByTestId('recommendation-row').filter({ has: page.getByTestId('market-line') });
+    await rows.first().click();
+
+    /*
+     * Retrying assertions rather than one read of the text.
+     *
+     * `toBeVisible` is satisfied the moment the disclosure has any height, and
+     * WebKit reports no rendered text for a bit after that — so a single
+     * `innerText` at that instant reads empty and the assertion fails on a
+     * timing detail rather than on anything about the card.
+     */
+    const points = page.getByTestId('market-points');
+    await expect(points).toContainText('MKT PTS');
+    // Coverage and the league's own scoring, which is what stops the number
+    // from being a projection wearing a market's clothes.
+    await expect(points).toContainText(/\d+% of what a (QB|RB|WR|TE|DEF) scores on had a market/);
+    await expect(points).toContainText("this league's scoring");
+  });
+
+  /**
+   * Showing it changes nothing.
+   *
+   * `MKT PTS` is `marketBaseline.points`, which the `market_expectation`
+   * component already scores. If displaying it had quietly become a second
+   * input, the board would reorder — so the board is read twice and compared.
+   */
+  test('does not move the Draft Score or the board’s order', async ({ page }) => {
+    await openDraft(page);
+    const twice = await page.evaluate(async () => {
+      const { leagues } = await (await fetch('/api/leagues')).json();
+      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league) return null;
+      const read = async () => {
+        const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=80`)).json();
+        return (board.recommendations ?? []).map((r: Record<string, unknown>) => ({
+          id: r['playerId'],
+          score: r['score'],
+          total: r['total'],
+          market: (r['components'] as { key: string; contribution: number }[]).find(
+            (c) => c.key === 'market_expectation',
+          )?.contribution,
+        }));
+      };
+      return { first: await read(), second: await read() };
+    });
+    test.skip(!twice, 'no draft board on this deployment');
+
+    expect(twice!.second).toEqual(twice!.first);
+    // The market component is still scored, which is the point: the number on
+    // the card is that component's own input rather than an extra one.
+    expect(twice!.first.some((r: { market?: number }) => r.market != null)).toBe(true);
   });
 });
