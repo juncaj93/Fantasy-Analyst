@@ -559,8 +559,78 @@ if (leagueId) {
         : `${priced.length} priced from ${sample} winning bid(s), confidence ` +
           `${[...new Set(priced.map((b) => b.confidence))].join('/')}`,
     );
+    /*
+     * Named rivals: who is likely to bid, and roughly how much.
+     *
+     * A league with no published bid history is the ordinary production state
+     * in August, and the correct answer there is *no names, with a reason* —
+     * so nothing here asserts that anybody is named. What is asserted is the
+     * shape of the answer either way, because both halves of it are things a
+     * deployment can get wrong silently:
+     *
+     *   - a candidate missing both fields renders as nothing at all, which
+     *     reads on screen as "no rivals" rather than as "the pass did not run";
+     *   - names with no amounts is fine, but amounts outside the manager's own
+     *     wallet are a number he cannot bid;
+     *   - withheld names with no note is a blank space where a reason belongs.
+     */
+    const assessed = candidates.filter((c) => c.competition != null);
+    check(
+      'the named-bidder pass reports either names or a reason, on every candidate',
+      assessed.every(
+        (c) =>
+          c.bidders !== undefined &&
+          c.biddersWithheld !== undefined &&
+          (c.bidders == null || c.bidders.length > 0),
+      ),
+      `${assessed.filter((c) => c.bidders != null).length} named, ` +
+        `${assessed.filter((c) => c.biddersWithheld != null).length} withheld, of ${assessed.length}`,
+    );
+    check(
+      'it never both names rivals and says it cannot',
+      assessed.every((c) => !(c.bidders != null && c.biddersWithheld != null)),
+      'the two fields are exclusive',
+    );
+    check(
+      'a withheld list says why, rather than showing an empty one',
+      assessed.every((c) => c.biddersWithheld == null || c.biddersWithheld.length > 0),
+      assessed.find((c) => c.biddersWithheld?.length)?.biddersWithheld?.[0] ?? 'nothing withheld',
+    );
+    const named = assessed.flatMap((c) => c.bidders ?? []);
+    check(
+      'no card turns into a list of the whole league',
+      assessed.every((c) => (c.bidders ?? []).length <= 4),
+      `longest list ${Math.max(0, ...assessed.map((c) => (c.bidders ?? []).length))} of 4 allowed`,
+    );
+    check(
+      'every named estimate is a real range a manager could actually bid',
+      named.every(
+        (b) =>
+          b.estimate == null ||
+          (b.estimate.low >= 0 &&
+            b.estimate.low <= b.estimate.high &&
+            (b.remaining == null || b.estimate.high <= b.remaining)),
+      ),
+      named.length === 0 ? 'nobody named, and nothing claimed' : `${named.length} named rival(s) across the board`,
+    );
+    /*
+     * The compact row and the expanded sheet are the same answer.
+     *
+     * The row shows the summary in place of the count when names are shown, so
+     * a row still showing the count while the sheet lists people is the two
+     * disagreeing in the one place a reader would never think to check.
+     */
+    check(
+      'the row and the expanded list tell the same story',
+      assessed.every(
+        (c) => !c.bidders?.length || (c.competition.detail ?? '').includes(c.bidders[0].displayName),
+      ),
+      named.length === 0 ? 'no names to reconcile' : 'the row leads with the first named rival',
+    );
     const shown = candidates.find((c) => c.competition?.detail);
     if (shown) console.log(`      e.g. ${shown.name}: ${shown.competition.label} — ${shown.competition.detail}`);
+    const withheld = assessed.find((c) => c.biddersWithheld?.length);
+    if (withheld) console.log(`      names withheld: ${withheld.biddersWithheld.join('; ')}`);
   }
 
   // The three surfaces nothing else answers. Each has an empty state that is

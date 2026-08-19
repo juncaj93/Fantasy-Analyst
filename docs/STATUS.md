@@ -1317,6 +1317,61 @@ four widths, typecheck, build, perf budget and `wrangler deploy --dry-run` green
 
 Full detail: [DEMO_MODE.md](DEMO_MODE.md).
 
+## Milestone 21 — the Team screen at a glance (done)
+
+The weekly intelligence was all there and none of it fitted. Every starter card
+carried the market number, the usage reading, a prop line, the matchup note and
+a sentence of consequence, which is five useful things per player and, at seven
+starters, about three phone screens before the reader reached the one card that
+tells them what to actually change. This milestone did not remove any of it. It
+moved it.
+
+**A starter is one line now.** Slot, name, the projection, the club mark, and a
+tag only when a tag is material — `Locked`, `Not in Sleeper`, or the
+availability designation when it is not the ordinary answer. Under it, at most
+one short consequence, and only when the engine produced one. Everything else —
+the market, expected points, usage, the prop detail, the matchup detail, the
+evidence, the newsletter takeaway, the injury history, and the sentence about
+what would change the recommendation — is behind the tap that was always there.
+The row is between 44 and 72 pixels, so it is still a thumb target and it is no
+longer a paragraph.
+
+**The bench folds.** `Bench (6) ›`, shut when the screen opens, with a one-line
+summary of what is behind it: `1 strong alternative`, or `No better option`,
+taken from the swaps the engine already found rather than from a second opinion
+about them. The count and the summary are the two facts that decide whether it
+is worth opening, and they are outside the fold.
+
+**The changes card sits directly under it.** It leads with one change — the best
+one, its points impact and one short reason — and keeps the rest, the warnings
+and the quiet risks inside the disclosure. A risk is only promoted above the
+fold if it belongs to somebody the lineup is actually starting; a doubtful
+player on the bench is not a headline.
+
+The result is the thing the brief asked for and the thing the tests now measure:
+at 430, 390, 375 and 360, every recommended starter is above the bench and
+inside the viewport, the bench is shut, and the changes card is within 24 pixels
+under it. Those are measured against the real rendered geometry, not against a
+class name.
+
+**One expanded player, still.** The weekly sheet now composes
+`components/playerDetail.tsx` — the same newsletter takeaway, season outlook,
+last season line, injury detail and profile flags that Draft and Players open —
+behind a `More on <name>` disclosure, and mounts the body only when it is opened
+so a reader who wanted the verdict pays for no request. That is a fifth caller
+of the shared implementation rather than a fifth copy of it, which is the point:
+the sections were pasted per screen once before, and the second paste is where
+six renderers start.
+
+Checks at this milestone: the whole unit/integration suite — over 2,800 tests by
+the time this landed, the growth beyond this channel's own belonging to the
+milestones it was integrated with — and the browser suite at all four widths,
+with seven new density assertions per width — starters fit
+above the bench, a collapsed starter stays one line, the bench is folded and
+says what is behind it, the changes card follows it, it leads with one change,
+the intelligence is still one tap away, and nothing scrolls sideways. Lineup
+legality and the pull gesture are asserted unchanged.
+
 
 ## Recommended next work
 

@@ -10,7 +10,8 @@ The numbers below were measured against the ranking engine by
 [`scripts/probe-mkt-pts-influence.mjs`](../scripts/probe-mkt-pts-influence.mjs),
 not read off the weights table. The findings are held in place by
 [`tests/marketStrategy.test.ts`](../tests/marketStrategy.test.ts), and the
-arithmetic behind them by [`tests/marketPoints.test.ts`](../tests/marketPoints.test.ts).
+arithmetic behind them by [`tests/marketPoints.test.ts`](../tests/marketPoints.test.ts)
+and [`tests/season.markets.test.ts`](../tests/season.markets.test.ts).
 
 ---
 

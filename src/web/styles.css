@@ -3683,6 +3683,164 @@ table.compact tr:last-child td {
   overflow: hidden;
 }
 
+/* ============================================== the Team screen's density */
+/*
+ * A recommended starter, on one line.
+ *
+ * The card used to run to four rows — the slot and the name, then a metrics
+ * line, then the drivers, then a conflict — which is honest and, eight slots
+ * deep on a 360px phone, pushed the bench and the changes card below the fold.
+ * The reader's first question is *who do I start*, and the answer to it should
+ * not require a scroll.
+ *
+ * So the row is the identity line and nothing else: slot, name, the tags that
+ * change what to do, the projection, the club. Everything the row stopped
+ * saying is in the sheet it opens, which is where it can be read properly
+ * rather than clipped to fit.
+ *
+ * **The tap target is not what shrinks.** `.player-row` keeps its 44px minimum
+ * and its padding; what goes is the content that made the row three times that
+ * tall.
+ */
+.starter-row .player-row-top,
+.bench-row .player-row-top {
+  min-height: 32px;
+}
+
+/*
+ * The tags, in a field of their own between the name and the numbers.
+ *
+ * `flex: none` so a long tag never squeezes the projection, and the name — the
+ * one thing here with a min-width of zero — is what gives up room when a row
+ * carries two of them.
+ */
+.row-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+}
+
+/*
+ * The smallest a tag gets and still reads as one.
+ *
+ * These sit on a row that is already carrying a name and a number, so they lose
+ * the horizontal padding a standalone chip can afford. They keep their weight
+ * and their colour, and — like every state in this app — they say a word.
+ */
+.tag-mini {
+  padding: 1px 6px;
+  font-size: 0.66rem;
+  letter-spacing: 0;
+}
+
+/*
+ * The projection.
+ *
+ * The only number on the row, so it needs no label: it is set in the same
+ * tabular figures the rest of the app uses for a value, a shade heavier than
+ * the metadata around it, and in a fixed field so eight of them line up in a
+ * column down the screen. What it is, in words, is in the row's accessible
+ * name and its tooltip.
+ */
+.proj {
+  flex: none;
+  min-width: 34px;
+  text-align: right;
+  font-size: 0.86rem;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/*
+ * The one sentence a collapsed card is still allowed.
+ *
+ * A conflict, and only when there is one — see the note where it is chosen. One
+ * line, clipped rather than wrapped, because a card that grows a second line
+ * for a long sentence is the thing this pass removed.
+ */
+.player-row-consequence {
+  margin-top: 2px;
+  font-size: 0.73rem;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The folded bench.
+ *
+ * Deliberately the same control as the Matchup screen's — same shape, same
+ * chevron, same test ids — because two screens that both fold a bench away
+ * should not be two things to learn. It is a system surface rather than a
+ * player card: quieter than the rows above it, and quiet is the point, because
+ * the thing under it is the card asking to be acted on.
+ */
+.bench {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin: var(--sp-1) 0 var(--sp-3);
+}
+
+.bench-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 620;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.bench-label {
+  flex: none;
+}
+
+/* What the fold is worth saying, in the quietest type on the control. */
+.bench-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.bench-chevron {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+
+/*
+ * Inside the fold the rows are part of one surface rather than a stack of
+ * cards: no shadow of their own, divided by a hairline, so an open bench reads
+ * as the control having grown rather than as eight new objects.
+ */
+.bench [data-testid='bench-rows'] .bench-row {
+  border-radius: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+  background: none;
+}
+
+.bench [data-testid='bench-rows'] .bench-row + .bench-row {
+  border-top: 1px solid var(--separator-soft);
+}
+
 /* ======================================================== pull to refresh */
 /*
  * The gesture that replaced two refresh buttons.
