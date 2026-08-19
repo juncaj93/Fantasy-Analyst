@@ -1474,6 +1474,22 @@ function MarketProvenance({
           </span>
         </div>
       )}
+      {/*
+        And whether that number is a good one, which is the question a reader
+        actually has at a draft.
+
+        Two markets, both already in the Score as separate components, put on
+        one positional scale so their disagreement can be read rather than
+        guessed at. No weighting maths is shown: the sentence says what the
+        markets think of him, not what the model did about it.
+      */}
+      {rec.marketStrategy ? (
+        <div className="market-strategy" data-testid="market-strategy" data-kind={rec.marketStrategy.kind}>
+          {rec.marketStrategy.standing}
+          {rec.marketStrategy.disagreement ? ` · ${rec.marketStrategy.disagreement}` : ''}
+          {rec.marketStrategy.caveat ? ` · ${rec.marketStrategy.caveat}` : ''}
+        </div>
+      ) : null}
       <ul className="market-components">
         {props.components.map((c) => (
           <li key={c.label} data-testid="market-component" data-derived={c.derived ? 'yes' : 'no'}>

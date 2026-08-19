@@ -26,6 +26,7 @@ import { SEPARATION, draftScore, separationScore } from './score.ts';
 import { CONCENTRATION, assessConcentration, type ConcentrationResult, type RosteredPlayer } from './concentration.ts';
 import { OPPORTUNITY, evaluateOpportunity, type OpportunityResult } from './opportunity.ts';
 import { computeNeed, computeScarcity, type NeedBreakdown, type RosterCounts } from './need.ts';
+import { marketStrategyNote, type MarketStrategyNote } from './marketStrategy.ts';
 import { estimateSurvival } from './survival.ts';
 import {
   blendMarketBaseline,
@@ -35,6 +36,7 @@ import {
 } from './marketBaseline.ts';
 import {
   marketExpectationScore,
+  marketStandings,
   seasonBaseline,
   seasonPropSummary,
   type MarketBaseline,
@@ -344,6 +346,11 @@ export interface DraftRecommendation {
    * presented as one book's number, and `derived` is how a renderer knows.
    */
   marketProps: PropSummary | null;
+  /**
+   * Why that number is a good one for his position, and whether the draft
+   * market agrees. Explanation only; see `marketStrategy.ts`.
+   */
+  marketStrategy: MarketStrategyNote | null;
   /** Whether the position is about to fall off a tier. */
   tierCliff: TierCliff;
   /** The automatic caution from accumulated research. */
@@ -586,10 +593,27 @@ export function rankAvailablePlayers(
    */
   const baselines = new Map<string, MarketBaseline>();
   const poolByPosition = new Map<string, MarketBaseline[]>();
+  /*
+   * What the draft charges for each priced player, keyed by his baseline.
+   *
+   * Only the expanded card's explanation reads this -- it is how "the books are
+   * keener than the room" is measured against the same peers the props
+   * comparison used. The blended baseline rather than Sleeper's own number,
+   * because that is the price the board actually holds him at.
+   */
+  const costByBaseline = new Map<MarketBaseline, number | null>();
   for (const entry of available) {
     if (!entry.seasonMarkets || entry.seasonMarkets.length === 0) continue;
     const baseline = seasonBaseline(entry.player.position, entry.seasonMarkets, ctx.profile);
     baselines.set(entry.player.id, baseline);
+    costByBaseline.set(
+      baseline,
+      blendMarketBaseline({
+        dogAdp: entry.dogAdp ?? null,
+        sleeperAdp: entry.adp,
+        format: ctx.marketFormat ?? 'standard',
+      }).adp,
+    );
     if (baseline.points != null) {
       // Whole baselines, not their totals: the comparison is made market by
       // market so a player priced on fewer of them is not read as a worse
@@ -853,6 +877,17 @@ export function rankAvailablePlayers(
     const props = entry.seasonMarkets?.length
       ? seasonPropSummary(player.position, entry.seasonMarkets, { baseline })
       : null;
+    /*
+     * And why that number is a good one or a poor one, for the expanded card.
+     *
+     * Explanation only -- see `marketStrategy.ts`. The two markets it compares
+     * are both already in the composite as separate components, so their
+     * disagreement is priced; saying it out loud is not scoring it again.
+     */
+    const strategy = marketStrategyNote(
+      marketStandings(baseline, poolByPosition.get(player.position) ?? [], (b) => costByBaseline.get(b) ?? null),
+      player.position,
+    );
 
     return {
       playerId: player.id,
@@ -888,6 +923,7 @@ export function rankAvailablePlayers(
       marketBaseline: baseline,
       marketHeadline: props?.headline ?? null,
       marketProps: props,
+      marketStrategy: strategy,
       tierCliff: cliff,
       avoid,
       myGuy: flag,
