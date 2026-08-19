@@ -123,7 +123,7 @@ const ownership = buildPickOwnership({ teams: 12, rounds: 15, type: 'snake' });
 const rosters = new Map();
 for (let slot = 1; slot <= 12; slot++) rosters.set(slot, { QB: 1, RB: 2, WR: 3, TE: 1 });
 
-function candidates({ subjectAdp }) {
+function candidates({ subjectAdp, subjectDog = null }) {
   const out = [];
   for (let i = 0; i < 120; i++) {
     const adp = Math.round((20 + i * 1.4) * 10) / 10;
@@ -134,11 +134,11 @@ function candidates({ subjectAdp }) {
       order: adp,
     });
   }
-  out.push({ playerId: 'subject', position: 'WR', adp: subjectAdp, order: subjectAdp });
+  out.push({ playerId: 'subject', position: 'WR', adp: subjectAdp, dogAdp: subjectDog, order: subjectAdp });
   return out;
 }
 
-function nextOf({ subjectAdp }) {
+function nextOf({ subjectAdp, subjectDog = null }) {
   const result = simulateNextPick({
     draftId: 'probe',
     currentPick: 53,
@@ -146,7 +146,7 @@ function nextOf({ subjectAdp }) {
     mySlot: 5,
     ownership,
     shape: SHAPE,
-    candidates: candidates({ subjectAdp }),
+    candidates: candidates({ subjectAdp, subjectDog }),
     rosters,
     totalPicks: 180,
     simulations: 4000,
@@ -169,16 +169,58 @@ function nextOf({ subjectAdp }) {
 }
 
 /*
- * And DOG, which the simulator is never handed.
+ * And DOG, which reaches the simulator for exactly one thing.
  *
- * `SimCandidate` has one market field, `adp`, and the board fills it from
- * Sleeper. So the DOG sensitivity of `Next%` is exactly zero by construction —
- * not small, absent. That is the finding, and it is printed rather than
- * asserted so the next person to read this file can see why there is no number.
+ * It was structurally absent until the late-round variance work: `SimCandidate`
+ * carried one market field and the board filled it from Sleeper. It now also
+ * carries `dogAdp`, read only by the idiosyncratic hazard — so a player Underdog
+ * prices materially earlier than Sleeper is one the board is *less sure lasts*,
+ * while the central estimate of where he goes stays Sleeper's.
+ *
+ * The two columns below are the check that it stayed secondary: an equivalent
+ * shift in Sleeper must move `Next%` further than one in DOG.
  */
-console.log('\n  DOG sensitivity of Next%: structurally zero.');
-console.log('  `SimCandidate` carries one market field (`adp`), filled from Sleeper.');
-console.log('  DOG never reaches the survival model, so it cannot move it by any amount.');
+console.log('\n  DOG as a tail-risk signal only:');
+console.log('    at pick 53, before the late-round term opens at all:');
+for (const lead of [10, 40]) {
+  const withDog = nextOf({ subjectAdp: 60, subjectDog: 60 - lead });
+  const plain = nextOf({ subjectAdp: 60 });
+  console.log(`      DOG ${String(lead).padStart(2)} earlier: ${((withDog - plain) * 100).toFixed(1)} pts`);
+}
+console.log('    ^ zero, structurally: DOG is a gain on a term that is zero here,');
+console.log('      so it cannot open a tail the draft has not already opened.');
+console.log('    at pick 148, where it can act:');
+for (const lead of [10, 40]) {
+  const withDog = lateNextOf({ adp: 164, dogAdp: 164 - lead });
+  const plain = lateNextOf({ adp: 164 });
+  console.log(`      DOG ${String(lead).padStart(2)} earlier: ${((withDog - plain) * 100).toFixed(1)} pts`);
+}
+console.log('    bounded at +50% of the late-round term, however far the two disagree.');
+
+/** The same question deep in a draft, on a board that has actually been picked over. */
+function lateNextOf({ adp, dogAdp = null, currentPick = 148, targetPick = 160 }) {
+  const lateOwnership = buildPickOwnership({ teams: 12, rounds: 20, type: 'snake' });
+  const lateRosters = new Map();
+  for (let slot = 1; slot <= 12; slot++) lateRosters.set(slot, { QB: 1, RB: 2, WR: 3, TE: 1 });
+  const late = [];
+  for (let i = 0; i < 160; i++) {
+    const a = Math.round((currentPick - 12 + i * 1.6) * 10) / 10;
+    late.push({ playerId: `r${i}`, position: POSITIONS[i % POSITIONS.length], adp: a, order: a });
+  }
+  late.push({ playerId: 'subject', position: 'QB', adp, dogAdp, order: adp });
+  return simulateNextPick({
+    draftId: 'probe-late-dog',
+    currentPick,
+    targetPick,
+    mySlot: 5,
+    ownership: lateOwnership,
+    shape: SHAPE,
+    candidates: late,
+    rosters: lateRosters,
+    totalPicks: 240,
+    simulations: 4000,
+  }).byPlayer.get('subject').probability;
+}
 
 // ----------------------------------------------- 3. late-draft confidence
 

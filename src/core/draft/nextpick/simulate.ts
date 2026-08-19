@@ -53,7 +53,12 @@
  */
 
 import type { PositionTierMap } from '../tiers.ts';
-import { conditionalMarketSurvival, marketPickWeight } from '../survival.ts';
+import {
+  conditionalMarketSurvival,
+  idiosyncraticHazard,
+  idiosyncraticSurvival,
+  marketPickWeight,
+} from '../survival.ts';
 import {
   buildDemandPlan,
   createDemandScratch,
@@ -151,6 +156,16 @@ export interface SimCandidate {
   position: string;
   /** Market ADP as an overall pick number, or null when unpriced. */
   adp: number | null;
+  /**
+   * Raw Underdog ADP, when a snapshot has priced him.
+   *
+   * Read for exactly one purpose and never for the survival prior itself: when
+   * Underdog has him materially earlier than Sleeper does, he carries more
+   * early-selection risk than this room's ADP suggests, and `Next%` should be
+   * correspondingly less sure he lasts. It cannot move the central estimate of
+   * where he goes -- that stays Sleeper's. See `idiosyncraticHazard`.
+   */
+  dogAdp?: number | null;
   /**
    * His NFL team, when known.
    *
@@ -710,11 +725,40 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
        * position is a made-up percentage, and the one thing worse than "—" is a
        * confident number nobody can check.
        */
-      probability: candidate.adp == null ? null : round4((simulations - taken) / simulations),
+      /*
+       * Unpriced players are simulated so the board they are on is realistic,
+       * and then reported as unknown. A percentage derived from a made-up draft
+       * position is a made-up percentage, and the one thing worse than "-" is a
+       * confident number nobody can check.
+       *
+       * The simulated share is then thinned by the picks that were never about
+       * the market ordering at all. The simulation ranks candidates against each
+       * other by ADP; what it cannot represent is a manager in round fourteen
+       * taking the handcuff he has wanted since July. That is a floor under
+       * everybody's chance of going, so it is applied as one -- compounded over
+       * the selections actually in the way. See `idiosyncraticHazard`.
+       */
+      probability:
+        candidate.adp == null
+          ? null
+          : round4(
+              ((simulations - taken) / simulations) *
+                idiosyncraticSurvival(
+                  idiosyncraticHazard(input.currentPick, {
+                    adp: candidate.adp,
+                    dogAdp: candidate.dogAdp ?? null,
+                  }),
+                  horizon,
+                ),
+            ),
       marketBaseline:
         candidate.adp == null
           ? null
-          : round4(conditionalMarketSurvival(candidate.adp, input.currentPick, input.targetPick, room.dispersion)),
+          : round4(
+              conditionalMarketSurvival(candidate.adp, input.currentPick, input.targetPick, room.dispersion, {
+                dogAdp: candidate.dogAdp ?? null,
+              }),
+            ),
       timesTaken: taken,
     });
   }

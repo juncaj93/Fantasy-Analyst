@@ -114,6 +114,122 @@ export function adpSpread(adp: number, dispersion = 1): number {
   return base * clamp(dispersion, DISPERSION_BOUNDS.min, DISPERSION_BOUNDS.max);
 }
 
+/**
+ * How idiosyncratic the room becomes as the draft runs on.
+ *
+ * ## Why this exists, and why it is not a wider spread
+ *
+ * Late `Next%` was far too confident: pick 148, next pick 153, a player at ADP
+ * 164, and the board said he was as good as certain to last. The obvious repair
+ * is to widen `adpSpread` late, and it is the wrong one — measured, it makes the
+ * problem worse. For a player sitting *before* his ADP the per-pick hazard is
+ * `1.702 · (1 − S) / spread`; widening raises `(1 − S)` a little and divides by
+ * a much larger spread, so survival goes **up**:
+ *
+ *     spread 39 (today)   148 -> 153, ADP 164:  92.5%
+ *     spread 60                                  94.4%
+ *     spread 90                                  96.0%
+ *     spread 140                                 97.3%
+ *
+ * A wider symmetric distribution says "we are less sure where he goes", but the
+ * question here is not where he goes — it is whether anyone takes him in the
+ * next five picks, and a flatter curve spreads that risk *away* from the picks
+ * immediately ahead.
+ *
+ * What actually happens late in a draft is different in kind. Managers stop
+ * drafting the board and start drafting their guy: a handcuff somebody has
+ * wanted since July, a stack, a rookie, a name from a podcast. ADP stops
+ * describing the room. That is not extra variance around the market ordering,
+ * it is a floor under everybody's chance of being taken regardless of ordering —
+ * so that is what this is.
+ *
+ * The result is that near-certainty late has to be earned by a short wait
+ * rather than granted by a distant ADP, which is exactly the brief's ask.
+ *
+ * ## The numbers
+ *
+ * Deliberately gentle. At full strength one late pick in forty goes to somebody
+ * the market did not expect, which over a fourteen-pick wait is about a third of
+ * a chance — enough to turn "certain" into "likely", never enough to make a
+ * three-pick wait look risky.
+ *
+ * ## Keyed on the draft, not on the player
+ *
+ * The depth that matters is **where the intervening picks are**, not how deep
+ * the player is. Being idiosyncratic is a property of a phase of a draft: in
+ * round two managers take the board, and they do that whether the player under
+ * consideration is ranked twentieth or hundred-and-twentieth. Keying this on
+ * the player's own ADP instead said that a receiver at ADP 120 might vanish
+ * between picks 15 and 30 — ninety picks before anyone was close to taking him —
+ * which is not late-round chaos, it is arithmetic applied in the wrong place.
+ */
+export const LATE_NOISE = {
+  /** Before this *pick*, the market explains the room and this adds nothing. */
+  onset: 60,
+  /** The pick by which the effect reaches full strength. */
+  saturation: 200,
+  /** Per-pick probability, at full strength, of being taken for reasons ADP cannot see. */
+  maxHazard: 0.025,
+  /**
+   * How much Underdog pricing him earlier than Sleeper may widen that tail.
+   *
+   * A **multiplier on the late-round term, never an addend**, and that shape is
+   * the whole of "DOG stays secondary". Written as its own hazard it was worth
+   * more than the entire Sleeper ADP range in the deep-late regime — the market
+   * model is nearly flat there, so an independent DOG term simply took over. As
+   * a gain on a base that is zero for the whole early board, DOG cannot act on
+   * its own at any depth: it can widen a tail that draft depth already opened,
+   * by at most half again, and it can never open one.
+   *
+   * A player Sleeper has at 164 and Underdog at 126 is one sharp drafters like
+   * more than this room's ADP implies, and the honest effect is *less
+   * confidence that he lasts* — never a different central estimate of where he
+   * goes.
+   */
+  disagreementGain: 0.5,
+  /** How far DOG must lead Sleeper, in picks, for that gain to reach its cap. */
+  disagreementFull: 40,
+} as const;
+
+/**
+ * Per-pick probability that somebody takes him for reasons his ADP cannot see.
+ *
+ * Zero for the whole of the early board, so nothing about round one changes.
+ */
+export function idiosyncraticHazard(
+  currentPick: number | null,
+  opts: { adp?: number | null; dogAdp?: number | null } = {},
+): number {
+  if (currentPick == null || !Number.isFinite(currentPick)) return 0;
+  const { onset, saturation, maxHazard, disagreementGain, disagreementFull } = LATE_NOISE;
+  const depth = clamp((currentPick - onset) / (saturation - onset), 0, 1);
+  const base = maxHazard * depth;
+  if (base === 0) return 0;
+
+  /*
+   * And Underdog, as a gain on that base rather than a term beside it.
+   *
+   * Only the direction that means danger counts: DOG *earlier* than Sleeper is
+   * early-selection risk this room's ADP has not priced. DOG later than Sleeper
+   * is not evidence he lasts longer — the room drafts against Sleeper — so it is
+   * ignored rather than rewarded.
+   */
+  const { adp, dogAdp } = opts;
+  const leads =
+    adp == null || dogAdp == null || !Number.isFinite(adp) || !Number.isFinite(dogAdp)
+      ? 0
+      : Math.max(0, adp - dogAdp);
+  const gain = 1 + disagreementGain * clamp(leads / disagreementFull, 0, 1);
+
+  return Math.round(base * gain * 10_000) / 10_000;
+}
+
+/** `(1 - hazard)` compounded over `picks` selections, in [0, 1]. */
+export function idiosyncraticSurvival(hazard: number, picks: number): number {
+  if (hazard <= 0 || picks <= 0) return 1;
+  return Math.pow(1 - clamp(hazard, 0, 1), Math.max(0, picks));
+}
+
 const LOGISTIC_SCALE = 1.702; // logistic approximation to the normal CDF
 
 /**
@@ -137,12 +253,28 @@ export function marketSurvivalAt(adp: number, pick: number, dispersion = 1): num
  * which is precisely the case that matters — the player long past his ADP who
  * is somehow still on the board.
  */
-export function conditionalMarketSurvival(adp: number, from: number, to: number, dispersion = 1): number {
+export function conditionalMarketSurvival(
+  adp: number,
+  from: number,
+  to: number,
+  dispersion = 1,
+  opts: { dogAdp?: number | null } = {},
+): number {
   if (!Number.isFinite(adp)) return 0;
   if (to <= from) return 1;
   const spread = adpSpread(adp, dispersion);
   const z = (pick: number) => (LOGISTIC_SCALE * (adp - pick)) / spread;
-  return clamp01(Math.exp(softplus(-z(from)) - softplus(-z(to))));
+  const ordered = clamp01(Math.exp(softplus(-z(from)) - softplus(-z(to))));
+  /*
+   * And the picks that were never about the ordering.
+   *
+   * Compounded over the selections actually in the way, so a three-pick wait
+   * barely notices it and a fourteen-pick wait late in a draft does. See
+   * `idiosyncraticHazard`.
+   */
+  return clamp01(
+    ordered * idiosyncraticSurvival(idiosyncraticHazard(from, { adp, dogAdp: opts.dogAdp ?? null }), to - from),
+  );
 }
 
 /**
