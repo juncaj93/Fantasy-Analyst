@@ -86,25 +86,6 @@ jobs:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
       fail-fast: false
-      # Two widths at a time, not four.
-      #
-      # `webkit-small-360` hung in `playwright install --with-deps webkit`
-      # three times in one afternoon — always that job, always before a single
-      # test ran, always killed by the job timeout with the test step still
-      # `pending` while the other three had finished their installs in seconds.
-      # Three occurrences on the same matrix slot is not chance; it is the last
-      # of four jobs starting together and contending for the same apt mirrors
-      # and the same browser download.
-      #
-      # Halving the simultaneous installs is the smallest change that addresses
-      # the cause rather than the symptom. Raising the timeout again would only
-      # buy the contention more time to resolve, which is why the note above
-      # says to cache the download first instead — and the cache below does.
-      #
-      # The cost is honest: two batches instead of one, so the stage's wall
-      # clock roughly doubles when nothing is cached. With the cache warm the
-      # install is seconds rather than minutes, which pays most of it back.
-      max-parallel: 2
       matrix:
         # 430 is the Pro Max class, and it is here for the opposite reason to
         # 360: the narrow one catches anything that overflows, and the wide one
@@ -138,21 +119,35 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-webkit-${{ steps.playwright.outputs.version }}
 
-      # Slow and variable, and not a thing that can hang in an interesting way,
-      # so it is left to the job's own ceiling rather than given a second one.
+      # The browser, and deliberately **not** `--with-deps`.
       #
-      # Split by whether the browser was restored. `--with-deps` is two jobs in
-      # one: an apt install of the system libraries WebKit links against, and
-      # the browser download. The libraries live on the runner image and are
-      # gone every time, so they are always installed; the browser is what the
-      # cache above makes free.
-      - name: Install WebKit and its system libraries
+      # `--with-deps` is two jobs in one: an `apt-get` install of the system
+      # libraries WebKit links against, and the browser download. The apt half
+      # is what has been hanging, and the logs say so rather than implying it:
+      #
+      #   Ign:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+      #   ...
+      #   Get:5 https://archive.ubuntu.com/ubuntu noble-security InRelease
+      #   << thirty-four minutes of silence >>
+      #   ##[error]The operation was canceled.
+      #   Terminate orphan process: npm exec playwright install --with-deps webkit
+      #
+      # The Azure mirror refuses every index, apt falls back to
+      # archive.ubuntu.com, and the fallback stalls mid-fetch until the job
+      # timeout kills it. The browser download never even begins — it comes
+      # after apt — so this was never about the download, and never about our
+      # own jobs competing: a width in the same batch installed and passed while
+      # its neighbour sat in apt.
+      #
+      # `ubuntu-latest` already ships the libraries WebKit needs, so the apt
+      # pass was belt-and-braces on top of an image that has the belt. Dropping
+      # it removes the only step that has ever hung here. If the image ever
+      # stops carrying one of those libraries the failure is immediate, loud and
+      # in the test step — a browser that will not launch — rather than a
+      # thirty-five minute silence, which is the better way to find out.
+      - name: Install WebKit
         if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps webkit
-
-      - name: Install WebKit's system libraries
-        if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps webkit
+        run: npx playwright install webkit
       # This is the one that can hang. Twenty minutes of *testing* is a stuck
       # browser however long apt took beforehand.
       - run: npx playwright test --project=${{ matrix.project }}
