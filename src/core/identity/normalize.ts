@@ -26,8 +26,21 @@ export function normalizeName(input: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    // Apostrophes are removed rather than spaced: "d'andre" -> "dandre".
-    .replace(/[\u2018\u2019'`\u00b4]/g, '')
+    /*
+     * Apostrophes are removed rather than spaced: "d'andre" -> "dandre".
+     *
+     * Every character a keyboard, a CMS or a copy-paste can produce where a
+     * name means an apostrophe, because the ones missing from this class do not
+     * fail loudly — they fall through to the separator rule below and become a
+     * *space*, so `Jaʼmarr` keys as `ja marr chase` while `Ja'Marr` keys as
+     * `jamarr chase`. Two keys for one player, in a function whose output is
+     * persisted as an identity key.
+     *
+     * U+02BC (modifier letter apostrophe) and U+FF07 (fullwidth) were the two
+     * that did that. U+2032 (prime) is here for the same reason: it is visually
+     * indistinguishable in most fonts and is what some exports emit.
+     */
+    .replace(/[\u2018\u2019\u02bc\u02b9\uff07\u2032'`\u00b4]/g, '')
     // Everything else non-alphanumeric becomes a separator.
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();

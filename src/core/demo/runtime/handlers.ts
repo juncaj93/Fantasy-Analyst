@@ -25,6 +25,8 @@
  */
 
 import { buildDraftBoard } from '../../draft/boardBuilder.ts';
+/* The one player matcher, so Demo Mode searches exactly as the product does. */
+import { rankByNormalized } from '../../search/players.ts';
 import { buildMatchupResponse } from '../../matchup/build.ts';
 import { myGuy } from '../../draft/decisions.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../../draft/playerOrder.ts';
@@ -492,15 +494,26 @@ function managers(data: ScenarioData) {
 }
 
 function playerList(data: ScenarioData, params: URLSearchParams) {
-  const q = (params.get('q') ?? '').trim().toLowerCase();
+  const q = (params.get('q') ?? '').trim();
   const limit = Math.min(Math.max(Number(params.get('limit') ?? 100) || 100, 1), 200);
   const offset = Math.max(Number(params.get('offset') ?? 0) || 0, 0);
   const position = params.get('position');
   const availabilityLeagueId = params.get('leagueId');
 
-  const pool = data.players.filter(
-    (p) => p.active && (q === '' || p.fullName.toLowerCase().includes(q) || p.normalizedName.includes(q)),
-  );
+  /*
+   * The same matcher the live handler ranks with, for the same reason.
+   *
+   * This was a lowercase `includes`, which meant Demo Mode answered `Amon Ra`
+   * and `Ja'Marr` differently from the product it exists to demonstrate — and a
+   * demo that behaves unlike the thing it is demonstrating is worse than no
+   * demo. Ranking off `normalizedName` rather than the display name, exactly as
+   * the server does, so the two cannot drift.
+   *
+   * No recall step here: the scenario's whole player list is already in memory,
+   * so there is nothing to narrow before ranking.
+   */
+  const active = data.players.filter((p) => p.active);
+  const pool = q ? rankByNormalized(active, q, (p) => p.normalizedName) : active;
   const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
 
   const availability = new Map<string, 'mine' | 'rostered' | 'available'>();
