@@ -4759,7 +4759,15 @@ div.matchup-result {
 
 .matchup-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /*
+   * The centre column is a constant, not `auto`.
+   *
+   * `auto` sized it to whichever label the row happened to carry, so a FLEX row
+   * was wider than a QB row and the two halves beside it were narrower — which
+   * moved that row's score out of the column the rest had formed. A spine that
+   * moves is not a spine. See `pillLabel` for the other half of this.
+   */
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr);
   align-items: center;
   gap: 4px;
   padding: 5px 6px;
@@ -4875,7 +4883,10 @@ div.matchup-result {
 /* The spine. Fixed width, so it never moves between rows. */
 .slot-pill {
   flex: 0 0 auto;
-  min-width: 34px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   text-align: center;
   font-size: 0.62rem;
   font-weight: 700;

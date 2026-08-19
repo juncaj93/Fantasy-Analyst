@@ -444,12 +444,43 @@ export function SlotRow({
   return (
     <div className="matchup-row" data-testid="matchup-row" data-slot={slot}>
       <PlayerHalf player={mine} side="mine" onOpen={onOpen} openable={openable} />
-      <span className={`slot-pill slot-pill-${slot.toLowerCase().replace(/[^a-z]/g, '')}`} data-testid="slot-pill">
-        {slot}
+      <span
+        className={`slot-pill slot-pill-${slot.toLowerCase().replace(/[^a-z]/g, '')}`}
+        data-testid="slot-pill"
+        title={slot}
+      >
+        {pillLabel(slot)}
       </span>
       <PlayerHalf player={theirs} side="theirs" onOpen={onOpen} openable={openable} />
     </div>
   );
+}
+
+/**
+ * The pill's label, bounded to four characters.
+ *
+ * The centre column is the spine the eye runs down, and it only works if it is
+ * the same width on every row. It was not: the pill was sized by its contents
+ * over a floor, so a `FLEX` row's pill was three pixels wider than a `QB` row's
+ * and both halves beside it were correspondingly narrower — which put that row's
+ * score a pixel and a half out of the column the other seven had formed. Small,
+ * permanent, and exactly the kind of thing that reads as "slightly wrong"
+ * without ever being identifiable.
+ *
+ * So the column is fixed in the stylesheet, and this keeps the longest labels
+ * inside it rather than letting them clip. Sleeper's own long slot names are the
+ * only ones that need it; everything else is already two or three characters.
+ * The full name stays on the `title`, so nothing is lost.
+ */
+const PILL_LABEL: Record<string, string> = {
+  SUPER_FLEX: 'SFLX',
+  REC_FLEX: 'RFLX',
+  IDP_FLEX: 'IDP',
+  DEF: 'DST',
+};
+
+function pillLabel(slot: string): string {
+  return PILL_LABEL[slot] ?? slot;
 }
 
 function PlayerHalf({
