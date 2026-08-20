@@ -146,3 +146,59 @@ test.describe('returning to a tab opened earlier in the session', () => {
     await expect(page.getByTestId('board-list')).toBeVisible();
   });
 });
+
+/**
+ * A confirmation that arrives late must not overwrite a screen that has moved
+ * on.
+ *
+ * The cache hands the screen what it already had and confirms it behind the
+ * scenes, which means a response can land after the reader has changed what
+ * they are looking at. A round trip is slower than a chip tap, so this is not a
+ * narrow race: without the guard, tapping RB while the unfiltered board is
+ * being confirmed puts four hundred players under a chip that says RB.
+ */
+test.describe('a late confirmation never lands on the wrong filter', () => {
+  test('switching filter mid-refresh keeps the filter that was asked for', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+
+    const rb = page.getByRole('button', { name: 'RB', exact: true });
+    await rb.click();
+    await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
+    const positions = async () =>
+      page.getByTestId('recommendation-row').locator('.pos-pill').allInnerTexts();
+    expect(new Set(await positions())).toEqual(new Set(['RB']));
+
+    // Leave and come back, so the revisit is served from cache and confirmed
+    // behind the screen — and hold that confirmation open.
+    await switchTo(page, 'team');
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+
+    /*
+     * Only the *unfiltered* request is held. Delaying both would prove nothing:
+     * the new filter's response would land last simply because it was asked for
+     * last, and the test would pass whether or not anything guarded it. The
+     * race being defended against is specifically an older answer arriving
+     * after a newer one, so the older one is the one made slow.
+     */
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      if (!route.request().url().includes('position=')) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+      await route.continue();
+    });
+
+    await switchTo(page, 'draft');
+    await expect(page.getByTestId('board-list')).toBeVisible({ timeout: 1500 });
+
+    // Change the filter while the unfiltered confirmation is still in the air,
+    // then wait past the point where it lands.
+    const wr = page.getByRole('button', { name: 'WR', exact: true });
+    await wr.click();
+    await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
+    await page.waitForTimeout(4000);
+
+    const shown = new Set(await positions());
+    expect(shown, 'a stale confirmation replaced the filtered board').toEqual(new Set(['WR']));
+  });
+});

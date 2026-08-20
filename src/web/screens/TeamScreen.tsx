@@ -21,7 +21,7 @@
  * every one of these is a sentence the user acts on in Sleeper, by hand.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -162,12 +162,26 @@ export function TeamScreen({
     }
   }, [selected]);
 
+  /**
+   * The mode the screen is on *now*, readable from a callback that was created
+   * under an earlier one.
+   *
+   * A background confirmation takes a round trip and switching Balanced to
+   * Aggressive is faster than that, so without this the older mode's lineup can
+   * land on top of the newer one and the recommendation stops matching the
+   * control above it.
+   */
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
   const loadLineup = useCallback(async () => {
     if (!selected) return;
     try {
       setLineup(
         await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup?mode=${mode}`, {
-          onFresh: setLineup,
+          onFresh: (fresh) => {
+            if (modeRef.current === mode) setLineup(fresh);
+          },
         }),
       );
     } catch (err) {

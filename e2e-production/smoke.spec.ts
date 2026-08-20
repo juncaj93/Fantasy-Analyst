@@ -358,47 +358,44 @@ test.describe('the deployed app', () => {
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
-    const unfiltered = await settledIds(page);
-
     const queueFilter = page.getByTestId('queue-filter');
     test.skip((await queueFilter.count()) === 0, 'no queue filter on this deployment');
-    await queueFilter.click();
-    await expect(queueFilter).toHaveAttribute('aria-pressed', 'true');
 
     /*
-     * Wait for the *queued* board, not merely for a settled one.
+     * Wait for the queued board to arrive, by watching for the request itself.
      *
      * `aria-pressed` flips the moment the chip is tapped; the rows it asks for
      * arrive a request later. `settledIds` returns as soon as two reads 300ms
-     * apart agree, and over a real network they agree on the board that is
-     * still on screen — the unfiltered one. This test then measured "did a sort
-     * re-order the queue" against a list that was never the queue.
+     * apart agree, and over a real network they agree on the board still on
+     * screen — the unfiltered one. So this test measured "did a sort re-order
+     * the queue" against a list that had never been the queue, then read `[]`
+     * once the empty queued board landed, and reported a re-ordering.
      *
-     * It is not hypothetical. On the deploy of #89 that is exactly what
-     * happened: `before` captured 200 unfiltered rows, the queued board landed
-     * empty a moment later, and every sort was compared against a list of
-     * players that had never been queued. Two widths failed and a third was
-     * flaky, and nothing was wrong with the deployment — the queue is simply
-     * empty there, which is a `test.skip`, not a failure.
+     * That is what failed on the deploys of #89 and #108. Nothing was wrong
+     * with either deployment: production's queue is empty, which is a
+     * `test.skip`.
      *
-     * If the list never stops matching the unfiltered board, the queue *is* the
-     * whole board — everything starred — and reading it now is correct. Hence a
-     * wait rather than an assertion.
+     * A previous attempt waited for the *rows* to stop matching the unfiltered
+     * board, and it made things worse — three widths instead of two. The board
+     * on a live deployment is not still: the refresh controller rebuilds it
+     * whenever Sleeper moves, so "the list changed" is satisfied by an ordinary
+     * poll while the queued response is still in flight. The DOM cannot answer
+     * "has the thing I asked for arrived"; the response can, so this waits on
+     * that instead. Registered before the click, because a fast answer would
+     * otherwise be missed.
+     *
+     * The sorts below need no equivalent wait: sorting is client-side —
+     * `orderBoardRows` over rows already in memory — and issues no request.
      */
-    await page
-      .waitForFunction(
-        (previous) => {
-          const ids = [...document.querySelectorAll('[data-testid="recommendation-row"]')].map(
-            (row) => row.getAttribute('data-player-id') ?? '',
-          );
-          return ids.length !== previous.length || ids.some((id, i) => id !== previous[i]);
-        },
-        unfiltered,
-        { timeout: 20_000 },
-      )
-      .catch(() => {
-        /* The queue is the whole board. `before` below is already the queue. */
-      });
+    const queuedBoard = page
+      .waitForResponse((res) => res.url().includes('queued=1') && res.status() === 200, {
+        timeout: 20_000,
+      })
+      .catch(() => null);
+
+    await queueFilter.click();
+    await expect(queueFilter).toHaveAttribute('aria-pressed', 'true');
+    await queuedBoard;
 
     const before = await settledIds(page);
     test.skip(before.length < 2, 'fewer than two players queued on this deployment');
