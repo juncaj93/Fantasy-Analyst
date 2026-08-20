@@ -30,6 +30,18 @@ const MESSAGE_ID = process.env.MESSAGE_ID ?? '';
 const PASSPHRASE = process.env.PASSPHRASE ?? '';
 const DRY_RUN = /^(1|true|yes)$/i.test(process.env.DRY_RUN ?? '');
 
+/**
+ * What the operator reviewed and expects to happen. The guard refuses anything
+ * else, so a preview that has drifted since it was read cannot be applied by
+ * a run that was queued against the older shape.
+ *
+ * Both cases are real. A decoding repair replaces a garbage row with a clean
+ * one (1 and 1). A rule correction that withdraws a false positive retires a
+ * row and puts nothing back (0 and 1) — the tally moves, and it is supposed to.
+ */
+const EXPECT_ADD = Number(process.env.EXPECT_ADD ?? '1');
+const EXPECT_RETIRE = Number(process.env.EXPECT_RETIRE ?? '1');
+
 /** Review statuses that still contribute to the ledger. `ignored` does not. */
 const LIVE = new Set(['auto_applied', 'accepted', 'corrected', 'pending']);
 
@@ -134,29 +146,49 @@ async function main() {
   console.log(`  repairs: ${repairs.join(', ') || '(none)'}`);
 
   check(repairs.length > 0, 'the stored body needs a decoding repair', repairs.join(', '));
-  check(preview.wouldAdd === 1, 'exactly one row would be added', `wouldAdd=${preview.wouldAdd}`);
-  check(retire.length === 1, 'exactly one row would be retired', `wouldRetire=${retire.length}`);
+  check(
+    preview.wouldAdd === EXPECT_ADD,
+    `exactly ${EXPECT_ADD} row(s) would be added`,
+    `wouldAdd=${preview.wouldAdd}`,
+  );
+  check(
+    retire.length === EXPECT_RETIRE,
+    `exactly ${EXPECT_RETIRE} row(s) would be retired`,
+    `wouldRetire=${retire.length}`,
+  );
   check(
     (preview.protectedByUser ?? []).length === 0,
     'no user-ruled row is involved',
     `protectedByUser=${(preview.protectedByUser ?? []).length}`,
   );
-  check(preview.playersAffected === 1, 'exactly one player is affected', `playersAffected=${preview.playersAffected}`);
 
-  const playerId = retire[0]?.playerId ?? preview.tallyDelta?.[0]?.playerId;
-  check(!!playerId, 'the affected player is identifiable', playerId ?? 'none');
-  const addDelta = preview.tallyDelta?.find((d) => d.playerId === playerId)?.net ?? 0;
-  const retiredContribution =
-    retire[0]?.storedPolarity === 'positive'
-      ? retire[0].storedMagnitude
-      : retire[0]?.storedPolarity === 'negative'
-        ? -retire[0].storedMagnitude
-        : 0;
-  check(
-    addDelta === retiredContribution,
-    'the added row carries exactly what the retired one did',
-    `added ${addDelta >= 0 ? '+' : ''}${addDelta}, retiring ${retiredContribution >= 0 ? '+' : ''}${retiredContribution} → net ${addDelta - retiredContribution}`,
-  );
+  // Everyone this touches: whoever loses a row, plus whoever gains one.
+  const affected = [
+    ...new Set([...retire.map((r) => r.playerId), ...(preview.tallyDelta ?? []).map((d) => d.playerId)]),
+  ].filter(Boolean);
+  check(affected.length >= 1, 'the affected player(s) are identifiable', affected.join(', ') || 'none');
+
+  /**
+   * What the tally is supposed to do, per player — computed rather than
+   * assumed. A replacement nets to zero; a withdrawal nets to minus whatever
+   * the retired row was contributing. Asserting the computed number is
+   * stronger than asserting "unchanged", because it also catches a replacement
+   * that quietly changed its own verdict.
+   */
+  const signedOf = (polarity, magnitude) =>
+    polarity === 'positive' ? magnitude : polarity === 'negative' ? -magnitude : 0;
+  const expectedDelta = new Map();
+  for (const id of affected) {
+    const gained = (preview.tallyDelta ?? []).find((d) => d.playerId === id)?.net ?? 0;
+    const lost = retire
+      .filter((r) => r.playerId === id)
+      .reduce((sum, r) => sum + signedOf(r.storedPolarity, r.storedMagnitude), 0);
+    expectedDelta.set(id, gained - lost);
+    console.log(
+      `  tally expectation ${id}: gaining ${gained >= 0 ? '+' : ''}${gained}, ` +
+        `losing ${lost >= 0 ? '+' : ''}${lost} → net ${gained - lost >= 0 ? '+' : ''}${gained - lost}`,
+    );
+  }
 
   if (problems.length) {
     console.log('\n::error::the preview no longer has the reviewed shape — NOTHING WAS APPLIED');
@@ -166,15 +198,14 @@ async function main() {
 
   // ------------------------------------------------------------- snapshot ---
   console.log('\n=== BEFORE ================================================');
-  const before = (await api(`/api/players/${encodeURIComponent(playerId)}`)).body;
-  const beforeRows = rowsFromMessage(before.evidence, MESSAGE_ID);
-  const beforeLive = beforeRows.filter((e) => LIVE.has(e.reviewStatus));
-  const beforeSignal = signalOf(before);
-  const beforeUserRuled = (before.evidence ?? []).filter((e) => e.userOverride);
-
-  console.log(`  player ${playerId}: ${before.player?.name ?? '(unknown)'}`);
-  console.log(`  tally  : ${tallyLine(before)}`);
-  for (const e of beforeRows) console.log(`    ${describeRow(e)}`);
+  const before = new Map();
+  for (const id of affected) {
+    const body = (await api(`/api/players/${encodeURIComponent(id)}`)).body;
+    before.set(id, body);
+    console.log(`  player ${id}: ${body.player?.name ?? '(unknown)'}`);
+    console.log(`    tally: ${tallyLine(body)}`);
+    for (const e of rowsFromMessage(body.evidence, MESSAGE_ID)) console.log(`      ${describeRow(e)}`);
+  }
 
   // Everything that must NOT move.
   const otherMessages = ((await api('/api/newsletter/messages')).body.messages ?? []).filter(
@@ -209,63 +240,94 @@ async function main() {
 
   // --------------------------------------------------------------- verify ---
   console.log('\n=== AFTER =================================================');
-  const after = (await api(`/api/players/${encodeURIComponent(playerId)}`)).body;
-  const afterRows = rowsFromMessage(after.evidence, MESSAGE_ID);
-  const afterLive = afterRows.filter((e) => LIVE.has(e.reviewStatus));
-  console.log(`  tally  : ${tallyLine(after)}`);
-  for (const e of afterRows) console.log(`    ${describeRow(e)}`);
+  const after = new Map();
+  for (const id of affected) {
+    const body = (await api(`/api/players/${encodeURIComponent(id)}`)).body;
+    after.set(id, body);
+    console.log(`  player ${id}: ${tallyLine(body)}`);
+    for (const e of rowsFromMessage(body.evidence, MESSAGE_ID)) console.log(`    ${describeRow(e)}`);
+  }
 
   console.log('\n=== VERIFICATION ==========================================');
 
-  // Evidence state.
-  const retiredKey = beforeLive[0]?.dedupeKey;
-  const retiredNow = afterRows.find((e) => e.dedupeKey === retiredKey);
-  check(!!retiredNow, 'the malformed row still exists in the ledger (retired, not deleted)');
-  check(
-    retiredNow?.reviewStatus === 'ignored',
-    'the malformed row is retired',
-    `status=${retiredNow?.reviewStatus}`,
-  );
+  let totalAdded = 0;
+  let totalRetired = 0;
 
-  const replacement = afterLive.filter((e) => e.dedupeKey !== retiredKey);
-  check(afterLive.length === 1, 'exactly one row from this newsletter is live', `live=${afterLive.length}`);
-  check(replacement.length === 1, 'that live row is the clean replacement', `new=${replacement.length}`);
-  check(
-    afterRows.length === beforeRows.length + 1,
-    'exactly one row was added',
-    `${beforeRows.length} → ${afterRows.length}`,
-  );
+  for (const id of affected) {
+    const beforeRows = rowsFromMessage(before.get(id).evidence, MESSAGE_ID);
+    const afterRows = rowsFromMessage(after.get(id).evidence, MESSAGE_ID);
+    const beforeLive = beforeRows.filter((e) => LIVE.has(e.reviewStatus));
+    const afterLive = afterRows.filter((e) => LIVE.has(e.reviewStatus));
+    const beforeKeys = new Set(beforeRows.map((e) => e.dedupeKey));
 
-  const clean = replacement[0];
-  if (clean) {
-    console.log(`\n  replacement excerpt: "${clean.excerpt}"`);
-    for (const [pattern, label] of DIRT) {
-      check(!pattern.test(clean.excerpt), `replacement excerpt carries no ${label}`);
+    // Every row the preview said would go is retired, and still in the ledger.
+    for (const r of retire.filter((r) => r.playerId === id)) {
+      const gone = afterRows.find((e) => e.excerpt === r.excerpt);
+      check(!!gone, `the superseded row is still in the ledger, not deleted (${id})`);
+      check(gone?.reviewStatus === 'ignored', `the superseded row is retired (${id})`, `status=${gone?.reviewStatus}`);
+      if (gone && LIVE.has(gone.reviewStatus) === false) totalRetired++;
     }
-    check(clean.playerId === playerId, 'replacement resolves to the same player', `${clean.playerId} vs ${playerId}`);
+
+    // Whatever is live now that was not before is what the repair added.
+    const added = afterLive.filter((e) => !beforeKeys.has(e.dedupeKey));
+    totalAdded += added.length;
     check(
-      clean.polarity === beforeLive[0]?.polarity && clean.magnitude === beforeLive[0]?.magnitude,
-      'replacement carries the same verdict as the row it replaces',
-      `${clean.polarity}/${clean.magnitude} vs ${beforeLive[0]?.polarity}/${beforeLive[0]?.magnitude}`,
+      afterLive.length === beforeLive.length - retire.filter((r) => r.playerId === id).length + added.length,
+      `the live row count moves by exactly what was promised (${id})`,
+      `${beforeLive.length} → ${afterLive.length}`,
+    );
+
+    for (const clean of added) {
+      console.log(`\n  added excerpt: "${clean.excerpt}"`);
+      for (const [pattern, label] of DIRT) {
+        check(!pattern.test(clean.excerpt), `added excerpt carries no ${label}`);
+      }
+      check(clean.playerId === id, 'added row resolves to the affected player', `${clean.playerId} vs ${id}`);
+    }
+
+    // A one-for-one replacement must not quietly change its own verdict.
+    if (EXPECT_ADD === 1 && EXPECT_RETIRE === 1 && added.length === 1 && beforeLive.length === 1) {
+      check(
+        added[0].polarity === beforeLive[0].polarity && added[0].magnitude === beforeLive[0].magnitude,
+        'replacement carries the same verdict as the row it replaces',
+        `${added[0].polarity}/${added[0].magnitude} vs ${beforeLive[0].polarity}/${beforeLive[0].magnitude}`,
+      );
+    }
+
+    // Duplicates.
+    const keys = afterLive.map((e) => e.dedupeKey);
+    check(new Set(keys).size === keys.length, `no duplicate dedupe key among live rows (${id})`);
+    const excerpts = afterLive.map((e) => e.excerpt.replace(/\s+/g, ' ').trim().toLowerCase());
+    check(new Set(excerpts).size === excerpts.length, `no two live rows say the same thing (${id})`);
+
+    // The tally moved by exactly the computed amount, and by nothing else.
+    const beforeNet = before.get(id)?.signal?.raw?.net ?? 0;
+    const afterNet = after.get(id)?.signal?.raw?.net ?? 0;
+    const want = expectedDelta.get(id) ?? 0;
+    check(
+      afterNet - beforeNet === want,
+      `the derived tally moved by exactly what was promised (${id})`,
+      `${beforeNet} → ${afterNet} (expected ${want >= 0 ? '+' : ''}${want})`,
+    );
+    if (want === 0) {
+      check(
+        signalOf(after.get(id)) === signalOf(before.get(id)),
+        `no component of the derived signal moved (${id})`,
+      );
+    }
+
+    // User decisions.
+    const beforeUserRuled = (before.get(id).evidence ?? []).filter((e) => e.userOverride);
+    const afterUserRuled = (after.get(id).evidence ?? []).filter((e) => e.userOverride);
+    check(
+      JSON.stringify(afterUserRuled) === JSON.stringify(beforeUserRuled),
+      `no user-ruled evidence was modified (${id})`,
+      `${beforeUserRuled.length} before, ${afterUserRuled.length} after`,
     );
   }
 
-  // Duplicates.
-  const keys = afterLive.map((e) => e.dedupeKey);
-  check(new Set(keys).size === keys.length, 'no duplicate dedupe key among live rows');
-  const excerpts = afterLive.map((e) => e.excerpt.replace(/\s+/g, ' ').trim().toLowerCase());
-  check(new Set(excerpts).size === excerpts.length, 'no two live rows say the same thing');
-
-  // Tally.
-  check(signalOf(after) === beforeSignal, 'the derived tally is unchanged', `${tallyLine(before)} → ${tallyLine(after)}`);
-
-  // User decisions.
-  const afterUserRuled = (after.evidence ?? []).filter((e) => e.userOverride);
-  check(
-    JSON.stringify(afterUserRuled) === JSON.stringify(beforeUserRuled),
-    'no user-ruled evidence was modified',
-    `${beforeUserRuled.length} before, ${afterUserRuled.length} after`,
-  );
+  check(totalAdded === EXPECT_ADD, `exactly ${EXPECT_ADD} row(s) were added`, `added=${totalAdded}`);
+  check(totalRetired === EXPECT_RETIRE, `exactly ${EXPECT_RETIRE} row(s) were retired`, `retired=${totalRetired}`);
 
   // Review state.
   const reviewAfter = (await api('/api/review/queue')).body;
@@ -310,7 +372,12 @@ async function main() {
     for (const p of problems) console.log(`  - ${p}`);
     process.exit(1);
   }
-  console.log('Repair applied and verified. One malformed row retired, one clean row live, tally unchanged.');
+  const moved = [...expectedDelta.entries()]
+    .map(([id, net]) => `${id} ${net >= 0 ? '+' : ''}${net}`)
+    .join(', ');
+  console.log(
+    `Applied and verified. ${totalRetired} row(s) retired, ${totalAdded} added. Tally movement: ${moved || 'none'}.`,
+  );
 }
 
 main().catch((err) => {

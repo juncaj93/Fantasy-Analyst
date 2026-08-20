@@ -9,6 +9,12 @@ name: Repair a newsletter that could not be decoded
 # instead of adding alongside it — otherwise one piece of news would be counted
 # twice in a ledger that is supposed to be authoritative.
 #
+# Also used to withdraw evidence a rule correction no longer stands behind: the
+# repaired parse simply produces nothing where it used to produce a false
+# positive, so the row is retired and none replaces it. That moves the tally,
+# which is the point — state the shape you reviewed in expect_add/expect_retire
+# and the guard refuses anything else.
+#
 # Guarded and idempotent. The script refuses to apply unless the preview still
 # has the exact shape that was reviewed, verifies the result afterwards, and is
 # a no-op on a newsletter that was decoded correctly in the first place. Run it
@@ -24,6 +30,12 @@ on:
         description: 'Check the guard and stop without applying'
         type: boolean
         default: false
+      expect_add:
+        description: 'Rows the reviewed preview said would be added'
+        default: '1'
+      expect_retire:
+        description: 'Rows the reviewed preview said would be retired'
+        default: '1'
 
 jobs:
   repair:
@@ -40,4 +52,6 @@ jobs:
           PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
           MESSAGE_ID: ${{ inputs.message_id }}
           DRY_RUN: ${{ inputs.dry_run }}
+          EXPECT_ADD: ${{ inputs.expect_add }}
+          EXPECT_RETIRE: ${{ inputs.expect_retire }}
         run: node scripts/repair-newsletter-issue.mjs
