@@ -98,7 +98,7 @@ jobs:
 
           query /tmp/evidence.json "SELECT id, dedupe_key, player_id, rule_id, review_status, polarity, magnitude, excerpt, user_override_json, notes_json, created_at, updated_at FROM evidence_items WHERE source_message_id = '$MESSAGE_ID' ORDER BY player_id, id"
           query /tmp/players.json "SELECT id, full_name FROM players"
-          query /tmp/signals.json "SELECT player_id, recent_score, lifetime_score FROM player_signals"
+          query /tmp/signals.json "SELECT player_id, raw_net, recent7_net, recent21_net FROM player_signal_cache"
 
       - name: Print the current state
         if: ${{ inputs.tally == '' }}
