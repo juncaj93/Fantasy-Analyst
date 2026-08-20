@@ -77,9 +77,22 @@ jobs:
           esac
 
           # stdout carries the JSON, so wrangler's diagnostics stay on stderr.
+          #
+          # `soft` marks a query whose answer decorates the report rather than
+          # carrying it. The per-player totals are the only one: losing them
+          # costs a line of context, and taking the whole inspection down with
+          # them — after the evidence has already been read — costs the answer.
           query() {
+            local soft=0
+            if [ "$1" = "--soft" ]; then soft=1; shift; fi
             local out="$1"; shift
             npx wrangler d1 execute "$DATABASE_NAME" --remote --json --command "$1" > "$out" || {
+              if [ "$soft" = "1" ]; then
+                echo "::warning::optional query failed, continuing without it"
+                cat "$out"
+                echo '[{"results":[]}]' > "$out"
+                return 0
+              fi
               echo "::error::query failed"; cat "$out"; exit 1;
             }
             node -e "
@@ -98,7 +111,7 @@ jobs:
 
           query /tmp/evidence.json "SELECT id, dedupe_key, player_id, rule_id, review_status, polarity, magnitude, excerpt, user_override_json, notes_json, created_at, updated_at FROM evidence_items WHERE source_message_id = '$MESSAGE_ID' ORDER BY player_id, id"
           query /tmp/players.json "SELECT id, full_name FROM players"
-          query /tmp/signals.json "SELECT player_id, raw_net, recent7_net, recent21_net FROM player_signal_cache"
+          query --soft /tmp/signals.json "SELECT player_id, raw_net, recent7_net, recent30_net FROM player_signal_cache"
 
       - name: Print the current state
         if: ${{ inputs.tally == '' }}

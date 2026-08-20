@@ -88,7 +88,7 @@ if (perPlayer.size === 0) {
   for (const [playerId, net] of [...perPlayer].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))) {
     const s = signals.get(playerId);
     const total = s
-      ? `net ${show(Number(s.raw_net))} lifetime, ${show(Number(s.recent21_net))} in the last 30 days`
+      ? `net ${show(Number(s.raw_net))} lifetime, ${show(Number(s.recent30_net))} in the last 30 days`
       : 'no cached signal';
     console.log(`- ${named(playerId)}: ${show(net)} from this issue — player total ${total}`);
   }
