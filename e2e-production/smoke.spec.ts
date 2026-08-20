@@ -453,20 +453,44 @@ test.describe('the deployed app', () => {
     expect(await page.locator('html').getAttribute('data-theme')).toBeNull();
   });
 
-  test('a player opens in place, carrying his whole file', async ({ page }) => {
+  /**
+   * A player is his own page now, and Back is a real Back.
+   *
+   * This used to assert the opposite — that the file unfolded inside the row it
+   * was opened from — and it was right to, until the density pass moved a
+   * screen and a half of prose out of a list whose job is being scanned. The
+   * subject changed, so the test changed with it; what it must still prove is
+   * that nothing was lost on the way, which is why it walks to the ledger
+   * rather than stopping at the header.
+   *
+   * Still one document and no navigation: the app is a single page, and a
+   * pushed screen that changed the URL would break the browser's own Back.
+   */
+  test('a player opens as his own page, carrying his whole file', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
     test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
 
-    const first = rows.first();
-    await first.click();
-    await expect(first.getByTestId('player-file')).toBeVisible();
-    await expect(first.getByTestId('evidence-heading')).toBeVisible();
-    // A disclosure, not a screen: the list is still underneath it.
-    expect(await rows.count()).toBeGreaterThan(0);
+    const before = await rows.count();
+    await rows.first().click();
+
+    const pushed = page.getByTestId('player-page');
+    await expect(pushed).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+
+    // The ledger is one tap further in, and it is entire.
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
+    await expect(page.getByTestId('evidence-heading')).toBeVisible();
+
+    // A screen, not a disclosure — and still one document, so the browser's
+    // own Back still leaves the app rather than the player.
+    await expect(page.getByTestId('back-button')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
-    await first.locator('.row-button').click();
+
+    await page.getByTestId('back-button').click();
+    await expect(rows.first()).toBeVisible();
+    expect(await rows.count()).toBe(before);
   });
 
   test('Setup’s areas are pushed screens, and the edge stays Safari’s in a tab', async ({ page }) => {
