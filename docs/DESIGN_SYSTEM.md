@@ -147,7 +147,7 @@ blank strip under the navigation twice:
   three rows; everything the card stopped resting on is behind its one control,
   and the second test there proves it is still reachable.
 - `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
-  and ceiling, that the position is an edge and not a wash, that no column
+  and ceiling, that the position is a pill and neither a rail nor a wash, that no column
   truncates a value, that a trade suggestion is a row rather than a card, and
   that neither list nor any section of the player page scrolls sideways.
 - `e2e/shell.spec.ts` — navigation-bar height and stickiness, density per screen,

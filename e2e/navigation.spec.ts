@@ -177,6 +177,16 @@ test.describe('pushed detail screens', () => {
     const target = rows.nth(8);
     const name = await target.locator('.player-name').innerText();
     await target.click();
+    /*
+     * Through the sheet, which is where a tap lands now.
+     *
+     * The subject of this test is the *pushed* screen — that Back restores the
+     * query, the length of the list and the offset — so it takes the one step
+     * that still pushes. The sheet's own promise is a different one and is
+     * asserted in `density.spec.ts`: that it costs no restoration at all,
+     * because the list underneath it was never unmounted.
+     */
+    await page.getByTestId('player-full-profile').click();
 
     const pushed = page.getByTestId('player-page');
     await expect(pushed).toBeVisible();

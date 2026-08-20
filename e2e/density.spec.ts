@@ -75,30 +75,45 @@ test.describe('the players list is a database, not a stack of cards', () => {
   });
 
   /**
-   * The position arrives as an edge and a pill, and not as a wash.
+   * The position arrives as a pill, and as nothing else.
    *
-   * A tinted row is what the brief asked to be removed: at forty rows a screen,
-   * a saturated background stops being information and starts being the loudest
-   * thing on the page. The hue is still there — the leading border proves it,
-   * and the six positions still differ — but the surface a name is read against
-   * is the list's own.
+   * This asserted an *edge* — a three-pixel bar of the position's hue down the
+   * leading side of every row — on the argument that the hue had to survive
+   * somewhere once the wash was removed. It did not have to survive twice.
+   * Forty rails turn a player index into a chart with a colour key, while the
+   * pill on the same row was already saying the position in letters, which is
+   * the cue that works in monochrome and for a reader who has not learned the
+   * convention. The louder of the two was the one carrying less, so it went.
+   *
+   * What is asserted now is the whole of the claim: the row is the list's own
+   * surface on every side, and the position is legible without reading a colour
+   * at all.
    */
-  test('carries its position on the edge rather than across the whole row', async ({ page }) => {
+  test('carries its position in the pill rather than in the row', async ({ page }) => {
     const readings = await page.getByTestId('player-search-row').evaluateAll((rows) =>
       rows.slice(0, 8).map((r) => {
         const style = getComputedStyle(r);
-        return { edge: style.borderLeftColor, background: style.backgroundColor };
+        return {
+          background: style.backgroundColor,
+          edge: Number.parseFloat(style.borderLeftWidth) || 0,
+          badge: (r.querySelector('.pos-pill')?.textContent ?? '').trim(),
+        };
       }),
     );
     const group = await page
       .getByTestId('players-list')
       .evaluate((el) => getComputedStyle(el).backgroundColor);
 
-    expect(new Set(readings.map((r) => r.edge)).size, 'positions are indistinguishable').toBeGreaterThan(1);
-    for (const { background } of readings) {
+    expect(readings.length).toBeGreaterThan(4);
+    for (const { background, edge, badge } of readings) {
       // Transparent, or the group's own surface. Either way: not a wash.
       expect(['rgba(0, 0, 0, 0)', group]).toContain(background);
+      expect(edge, `a row still paints a ${edge}px rail`).toBe(0);
+      expect(badge, 'the position is not written anywhere on the row').toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
     }
+    // …and the list really does hold more than one position, so a uniform
+    // screen could not pass this by accident.
+    expect(new Set(readings.map((r) => r.badge)).size).toBeGreaterThan(1);
   });
 
   test('never scrolls sideways', async ({ page }) => {
@@ -153,34 +168,49 @@ test.describe('a trade suggestion is a row', () => {
   });
 
   /**
-   * The three windows are on the row, named, and none of them was dropped.
+   * Two windows on the row, and the third one tap in.
    *
-   * Density is not allowed to cost a reading. Lifetime, 30d and 7d are three
-   * different questions about the same signal and the screen answered all three
-   * before this pass; it answers all three now, in a third of the height.
+   * The row carried Lifetime, 30d and 7d. Lifetime answers "has he ever
+   * mattered", which is a different question from the one this screen exists to
+   * ask — *who is moving now* — and it was the column a reader scanning for
+   * movement had to look past. It is not gone: the sheet's metric strip still
+   * carries it, because density is not allowed to cost a reading.
    */
-  test('still gives all three tally windows, each of them labelled', async ({ page }) => {
+  test('gives the two windows that answer this screen, and keeps the third one tap in', async ({ page }) => {
     const first = page.getByTestId('trade-row').first();
-    await expect(first).toContainText('Life');
     await expect(first).toContainText('30d');
     await expect(first).toContainText('7d');
+    await expect(first, 'a lifetime tally is not what this list is asking').not.toContainText('Life');
+
+    await first.click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
   });
 
   /**
-   * And the case behind it is one tap away, on the player's own page.
+   * And the case behind it rises over the list rather than replacing it.
    *
-   * Not a screen of its own: a reader who taps a name expects the player. The
-   * case arrives as context above the same four sections every other screen
-   * opens, which is what makes a player one object across the app.
+   * A reader who taps a name is asking a question, and the honest shape of an
+   * answer is something that comes up over what they were reading and then goes
+   * away. Pushing a page answers it by taking the board away and making them
+   * find their place again. The case arrives as context above the same four
+   * sections every other screen opens, which is what makes a player one object
+   * across the app; the page is still there, one step further in.
    */
-  test('opens the whole case on the player’s own page', async ({ page }) => {
+  test('opens the whole case in a sheet, over the list', async ({ page }) => {
     await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-page')).toBeVisible();
+    const sheet = page.getByTestId('player-sheet');
+    await expect(sheet).toBeVisible();
     const kase = page.getByTestId('trade-case');
     await expect(kase).toBeVisible();
     await expect(kase).toContainText('Why');
     await expect(page.getByTestId('player-page-sections')).toBeVisible();
+    // The list was never unmounted, which is the whole reason for the sheet.
+    await expect(page.getByTestId('trade-row').first()).toBeVisible();
 
+    // The deep read is offered rather than forced.
+    await page.getByTestId('player-full-profile').click();
+    await expect(page.getByTestId('player-page')).toBeVisible();
     await page.getByTestId('back-button').click();
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
   });
@@ -194,10 +224,15 @@ test.describe('a trade suggestion is a row', () => {
 });
 
 /**
- * The player page itself: one destination, the same four sections, wherever it
- * was opened from.
+ * The player himself: one dossier, the same four sections, wherever it was
+ * opened from and whichever way it is framed.
+ *
+ * Tapping a name opens a sheet; the pushed page is what a reader asks for when
+ * a skim turns into a study. Both draw `PlayerDossier`, which is why these
+ * assertions do not care which one is on screen — and why the app cannot grow
+ * two answers to "what do we know about him".
  */
-test.describe('the player page', () => {
+test.describe('the player dossier', () => {
   test('names the player, qualifies him, and offers every section', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
@@ -206,14 +241,45 @@ test.describe('the player page', () => {
     const name = await row.locator('.player-name').innerText();
 
     await row.click();
-    const pushed = page.getByTestId('player-page');
-    await expect(pushed).toBeVisible();
-    await expect(pushed.locator('.nav-title')).toHaveText(name);
+    const sheet = page.getByTestId('player-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('.sheet-player-name')).toHaveText(name);
     // The identity is drawn, not spelled: the position pill and the club's mark.
-    await expect(pushed.locator('.player-page-ident .pos-pill')).toBeVisible();
+    await expect(sheet.locator('.player-page-ident .pos-pill')).toBeVisible();
 
     const labels = await page.getByTestId('player-page-sections').locator('button').allInnerTexts();
     expect(labels.map((l) => l.trim())).toEqual(['Overview', 'Outlook', 'Market', 'Evidence']);
+
+    // It dismisses without touching the list, which is still exactly there.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
+    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+  });
+
+  /**
+   * …and the same dossier, on his own page, when asked for.
+   *
+   * The sheet is the first stop and the page is the second. Both have to name
+   * him and both have to offer every section, or "one object across the app" is
+   * a claim rather than a fact.
+   */
+  test('offers the same sections on the pushed page', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    const row = page.getByTestId('player-search-row').first();
+    const name = await row.locator('.player-name').innerText();
+    await row.click();
+    await page.getByTestId('player-full-profile').click();
+
+    const pushed = page.getByTestId('player-page');
+    await expect(pushed).toBeVisible();
+    await expect(pushed.locator('.nav-title')).toHaveText(name);
+    await expect(pushed.locator('.player-page-ident .pos-pill')).toBeVisible();
+    const labels = await page.getByTestId('player-page-sections').locator('button').allInnerTexts();
+    expect(labels.map((l) => l.trim())).toEqual(['Overview', 'Outlook', 'Market', 'Evidence']);
+
+    await page.getByTestId('back-button').click();
+    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
   });
 
   /**
@@ -229,6 +295,7 @@ test.describe('the player page', () => {
     await page.getByTestId('player-search-row').first().click();
     await expect(page.getByTestId('player-page-metrics')).toHaveAttribute('data-mode', 'market');
     await expect(page.getByTestId('player-page-metrics')).toContainText('ADP');
+    await page.keyboard.press('Escape');
 
     await open(page, 'trades');
     await page.getByTestId('trade-row').first().click();

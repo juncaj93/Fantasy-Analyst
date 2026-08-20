@@ -1609,6 +1609,9 @@ test.describe('player intelligence', () => {
     const row = page.locator('[data-testid="player-search-row"][data-player-id="1004"]');
     await row.scrollIntoViewIfNeeded();
     await row.click();
+    // The sheet is the first stop now; the page is what a skim turning into a
+    // study asks for. Both draw the same dossier — see `density.spec.ts`.
+    await page.getByTestId('player-full-profile').click();
 
     const page_ = page.getByTestId('player-page');
     await expect(page_).toBeVisible();

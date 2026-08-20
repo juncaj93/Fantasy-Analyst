@@ -2181,6 +2181,19 @@ body,
  * type is still a row a thumb can hit, and a row with a single line of content
  * does not collapse below what can be tapped.
  */
+/*
+ * The dense list row: no rail, no wash, the position in the pill.
+ *
+ * It carried a three-pixel bar of the position's hue down its leading edge.
+ * Forty of them turned a player index into a chart with a colour key, and the
+ * pill two-thirds of the way across the same row was already saying the same
+ * thing in letters — which is the cue that survives a monochrome screen and a
+ * reader who does not know the convention. The rail was the louder of the two
+ * and the one carrying less.
+ *
+ * The hue token stays on the element (`positionAccentClass`) because the pill
+ * inside it reads from it. What went is the paint.
+ */
 .dense-row {
   position: relative;
   display: block;
@@ -2188,7 +2201,6 @@ body,
   text-align: left;
   background: none;
   border: 0;
-  border-left: 3px solid var(--pos-line, transparent);
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -4933,6 +4945,28 @@ table.compact tr:last-child td {
   font-size: 1rem;
   font-weight: 660;
   letter-spacing: -0.018em;
+}
+
+/*
+ * A player's name and what he is, on the sheet's own header line.
+ *
+ * The pushed page can afford a title and a subtitle under it. A sheet cannot —
+ * every row it spends on itself is a row of the player it came to show — so the
+ * identity is one line: the name, then the position pill, the club and the
+ * availability tag as a cluster after it. The same three marks, in the same
+ * order, as every list row in the app.
+ */
+.sheet-player-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.sheet-player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sheet-body {
