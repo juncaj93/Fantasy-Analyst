@@ -16,6 +16,37 @@
  * refused.
  *
  *   PRODUCTION_URL=https://… npx playwright test --config playwright.production.config.ts
+ *
+ * ---------------------------------------------------------------------------
+ * **CI DOES NOT RUN THIS FILE, AND THAT IS WHY IT BREAKS AFTER UI WORK.**
+ *
+ * `ci.yml` runs `e2e/`. This suite runs only in `smoke.yml`, after a deploy —
+ * so the first thing that tells you a UI change invalidated an assertion in
+ * here is production going red, minutes after the merge that caused it. That
+ * has happened twice.
+ *
+ * This file keeps its *own copies* of assertions that `e2e/` also makes. When a
+ * row, a label, a card, a metric or a navigation path changes shape, both
+ * suites have to be reconciled with the intended UI, and this one has to be
+ * *run*, not searched. Grep is not proof: the second miss was a grep for `Val`
+ * that returned two docblock comments, which read as "no assertions" when the
+ * live one sat eleven lines below them.
+ *
+ * Run it against a local production build before declaring any UI branch
+ * merge-ready — it is part of the exact-head gate, not an afterthought:
+ *
+ *   npm run build && node scripts/build-server.mjs
+ *   FA_SEED=1 … node scripts/dev-server.mjs --port 8794 &
+ *   PRODUCTION_URL=http://127.0.0.1:8794 \
+ *     npx playwright test --config playwright.production.config.ts \
+ *     --project=chromium-iphone-390 --project=chromium-small-360
+ *
+ * Two tests fail against the demo seed and pass against real production, so a
+ * local run is expected to show exactly these and nothing else: the Team
+ * `Starter` assertion (stale since the shipped density work moved that word
+ * into the row's `aria-label`) and the waiver-advice test (already flaky).
+ * Any *third* failure is yours.
+ * ---------------------------------------------------------------------------
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -265,11 +296,17 @@ test.describe('the deployed app', () => {
   });
 
   /**
-   * The draft board is the reason the app exists, so its four numbers are
-   * checked as text rather than as a screenshot: Score, ADP, Val and Next, on
+   * The draft board is the reason the app exists, so its numbers are checked as
+   * text rather than as a screenshot: Score, the two market deltas and Next, on
    * the metrics line, with the tally beside the name.
+   *
+   * `Val` used to be one of them. The row prints market *consequence* now —
+   * `ADP +3` is three picks ahead of Sleeper's market, `DOG -22` is twenty-two
+   * picks past Underdog's — which is the subtraction a reader was doing against
+   * the pick on the clock anyway, and `Val` was a third answer to the same
+   * question. It moved to the expanded card with both raw markets.
    */
-  test('the draft board still reads Score · ADP · Val · Next', async ({ page }) => {
+  test('the draft board reads Score · ADP · DOG · Next as market deltas', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
 
@@ -281,8 +318,13 @@ test.describe('the deployed app', () => {
     const metrics = await rows.first().locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
+    expect(metrics, 'Val is still on the compact row').not.toMatch(/\bVal\b/);
+
+    // The ADP column is a signed whole number of picks, or an honest unknown —
+    // never a raw market position, which is what it used to be.
+    const adp = (await rows.first().getByTestId('adp-metric').innerText()).trim();
+    expect(adp, `the ADP column read "${adp}"`).toMatch(/^ADP\s+([+-]?\d+|unknown)$/);
 
     // The position is still written in letters, not only painted.
     const badge = (await rows.first().locator('.pos-pill').innerText()).trim();

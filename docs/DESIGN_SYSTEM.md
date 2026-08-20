@@ -143,3 +143,30 @@ blank strip under the navigation twice:
   say and do. Unchanged by the visual pass, which is the point.
 - `tests/gestures.test.ts` — the gesture thresholds, as arithmetic.
 - `tests/viewport.test.ts` — the keyboard threshold, likewise.
+
+## Before a UI change is merge-ready
+
+`e2e-production/smoke.spec.ts` keeps its **own copies** of assertions that
+`e2e/` also makes — the draft row's metrics, the Team lineup, the player page,
+the shell. CI does not run it: `ci.yml` runs `e2e/`, and the production suite
+runs only in `smoke.yml`, *after* a deploy. So a UI change that invalidates an
+assertion in there is not caught by a green PR; it is caught by production going
+red minutes after the merge.
+
+That has happened twice. Both times the change was correct and the test was
+describing a UI that no longer existed; the second time it was missed because a
+grep for the removed word returned two docblock comments and read as "clean".
+
+So: **any change to UI text, structure, navigation, a card, a metric or an
+interaction must be run against both suites before merge, and searching is not
+proof.** The production suite runs against a local build:
+
+```
+npm run build && node scripts/build-server.mjs
+FA_SEED=1 FA_INSECURE_COOKIES=1 APP_PASSPHRASE=… SESSION_SECRET=…   node scripts/dev-server.mjs --port 8794 &
+PRODUCTION_URL=http://127.0.0.1:8794   npx playwright test --config playwright.production.config.ts   --project=chromium-iphone-390 --project=chromium-small-360
+```
+
+Two of its tests fail against the demo seed and pass against real production —
+the Team `Starter` assertion and the waiver-advice test. A local run showing
+exactly those two is clean. A third failure is real.
