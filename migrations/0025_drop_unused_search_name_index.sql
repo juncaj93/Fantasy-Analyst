@@ -1,0 +1,34 @@
+-- Drop an index that never ran, and correct the record about why.
+--
+-- Migration 0024 added `search_name` and put an index on it, with a comment
+-- claiming the lookup would be "a plain B-tree search". That claim was wrong,
+-- and it was wrong in the way that matters most: confidently, in a comment, in
+-- a shipped migration.
+--
+-- SQLite cannot use an index for a leading-wildcard `LIKE '%term%'`, which is
+-- the only shape player search uses -- a query has to be able to match the
+-- middle of a surname, so the wildcard on the left is not negotiable. Checked
+-- rather than assumed, after the fact:
+--
+--   EXPLAIN QUERY PLAN
+--     SELECT * FROM players
+--      WHERE active = 1
+--        AND (normalized_name LIKE '%vna%' OR search_name LIKE '%vna%')
+--
+--   => SCAN players
+--
+-- A scan, with or without the index. The index earned nothing and cost a write
+-- on every player sync, so it goes.
+--
+-- **The column stays, and is doing real work.** `search_name` is the key with
+-- its spaces squeezed out, which is what lets `amonra` recall `amon ra st
+-- brown` at all -- the tier the server could not see before 0024. Only the
+-- index was useless.
+--
+-- The scan itself is affordable, and that was measured too: over the 3,300-row
+-- dictionary, prefix recall runs in 2.7ms and the narrower fallback pass in
+-- 1.3ms, against a Worker's 10ms. If the table ever grows by an order of
+-- magnitude this is the line to revisit -- and the honest fix then is a
+-- trigram or FTS index, not a B-tree, because a B-tree was never going to help.
+
+DROP INDEX IF EXISTS idx_players_search_name;

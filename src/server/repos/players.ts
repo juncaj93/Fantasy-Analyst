@@ -5,7 +5,7 @@ import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 /* The one player matcher, and the recall rule that keeps SQL in step with it. */
-import { rankByNormalized, recallTerms } from '../../core/search/players.ts';
+import { hasWiderRecall, rankByNormalized, recallTerms } from '../../core/search/players.ts';
 
 interface PlayerRow {
   id: string;
@@ -316,14 +316,33 @@ export class PlayerRepo {
    * Worker 10ms in total. Here it only ever runs over the recalled set.
    */
   async search(query: string, limit = 40): Promise<CanonicalPlayer[]> {
-    const terms = recallTerms(query);
+    const fast = await this.recallAndRank(query, limit, false);
+    /*
+     * A second, wider attempt — but only when the first found nobody.
+     *
+     * The fast pass recalls on each word's opening characters, which cannot see
+     * a typo that lands *inside* those characters: `Vnace` for `Vance`. An
+     * in-memory surface matches that without trying, so skipping it here would
+     * leave Draft and Players disagreeing about an ordinary slip.
+     *
+     * Measured rather than assumed: folding the wider terms into the first
+     * query costs 5.9ms and 660 rows to rank; running them alone, only on a
+     * miss, costs 1.3ms. The common keystroke pays nothing for the rare one,
+     * and a query that already found somebody never runs it at all.
+     */
+    if (fast.length > 0 || !hasWiderRecall(query)) return fast;
+    return this.recallAndRank(query, limit, true);
+  }
+
+  private async recallAndRank(query: string, limit: number, wide: boolean): Promise<CanonicalPlayer[]> {
+    const terms = recallTerms(query, { wide });
 
     /*
      * Every word must find a home, and may find it in either form of the key.
      *
      * `normalized_name` is `amon ra st brown`; `search_name` is the same with
      * the spaces squeezed out. A word typed with the hyphen dropped only ever
-     * appears in the second, which is exactly why migration 0024 added it.
+     * appears in the second, which is why migration 0024 added it.
      */
     const clauses: string[] = [];
     const bindings: string[] = [];
@@ -337,27 +356,24 @@ export class PlayerRepo {
     }
 
     /*
-     * The recall pool, deliberately larger than the page being asked for.
-     *
-     * The matcher discards from this set rather than adding to it, so a pool cut
-     * to `limit` would hand back fewer than `limit` answers whenever anything in
-     * it scored badly — which reads as "there are no more players called that".
-     * Capped so a one-letter-prefix query cannot pull the whole table into a
-     * Worker.
-     */
-    const pool = Math.min(Math.max(limit * 5, 200), 1_000);
-
-    /*
      * An empty query is "no filter", not "no players".
      *
      * `recallTerms('')` is an empty list, and an early return of `[]` here
      * would have been the natural reading of that — which is exactly wrong, and
      * wrong in a way the caller cannot see. Every other search surface treats a
-     * cleared field as "show me everyone", so this one does too: with no terms
-     * there are simply no text clauses, and the active-player filter is the
-     * whole `WHERE`.
+     * cleared field as "show me everyone", so this one does too.
      */
     const textClause = clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '';
+
+    /*
+     * The recall pool, deliberately larger than the page being asked for.
+     *
+     * The matcher discards from this set rather than adding to it, so a pool cut
+     * to `limit` would hand back fewer than `limit` answers whenever anything in
+     * it scored badly — which reads as "there are no more players called that".
+     * Capped so a broad recall cannot pull the whole table into a Worker.
+     */
+    const pool = Math.min(Math.max(limit * 5, 200), 1_000);
 
     const rows = await this.db
       .prepare(
@@ -376,7 +392,7 @@ export class PlayerRepo {
      *
      * That order is shortest-name-first, which is the same "the query covers
      * more of this name" instinct the matcher would otherwise have to encode
-     * twice — and `rankByQuery` is a stable sort, so it survives.
+     * twice — and `rankByNormalized` is a stable sort, so it survives.
      */
     return rankByNormalized(candidates, query, (p) => p.normalizedName).slice(0, limit);
   }

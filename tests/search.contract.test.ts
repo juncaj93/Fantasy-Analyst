@@ -151,6 +151,19 @@ const FINDS: { why: string; query: string; expect: string }[] = [
   { why: 'dropped letter in surname', query: 'Robnson', expect: 'p-bijan' },
   { why: 'transposed letters', query: 'Nacau', expect: 'p-puka' },
   { why: 'typo with the given name correct', query: 'Bijan Robnson', expect: 'p-bijan' },
+  /*
+   * A typo inside the word's first three characters.
+   *
+   * The case the matrix originally missed, and the one that proved the
+   * surfaces were not actually in agreement. An in-memory surface matches it
+   * without trying; the server recalls candidates on a word's opening
+   * characters, so a slip *inside* those characters left it recalling nothing
+   * and Players answering "nobody matching" to a query Draft answered fine.
+   * The server now makes a second, narrower pass on the word's tail when the
+   * first finds nobody.
+   */
+  { why: 'transposition in the opening letters', query: 'Rboinson', expect: 'p-bijan' },
+  { why: 'transposition at the very start', query: 'aNcua', expect: 'p-puka' },
 
   // --- partials -------------------------------------------------------------
   { why: 'partial surname', query: 'Charbon', expect: 'p-charb' },
