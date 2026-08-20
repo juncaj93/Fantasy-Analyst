@@ -14,6 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { inSeason } from './helpers.ts';
 
 async function openTeam(page: Page) {
   await page.goto('/');
@@ -29,28 +30,6 @@ async function choose(page: Page, playerId: string) {
   await expect(row).toHaveAttribute('data-chosen', 'true');
 }
 
-/**
- * Answer the roster as the app sees it once a draft is over.
- *
- * The demo league is permanently mid-draft, which is the right fixture for most
- * of this file — but two of its subjects, the comparison tool and the mode
- * chips, are controls the Team pass deliberately withholds *during* a draft.
- * Balanced, Floor and Ceiling are three definitions of the best lineup and
- * Compare asks which of two players to start; neither question exists while
- * half the roster is unpicked, so neither control is drawn until the draft
- * ends. See the note on `team-controls` in `TeamScreen`.
- *
- * `live` is the one field that decides which of the two screens is showing, so
- * that is the only thing overridden. Every number underneath is the
- * deployment's own.
- */
-async function inSeason(page: Page) {
-  await page.route('**/api/leagues/*/roster', async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
-  });
-}
 
 test.describe('the recommended lineup, at a glance', () => {
   test.beforeEach(async ({ page }) => openTeam(page));

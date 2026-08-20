@@ -41,11 +41,13 @@
  *     npx playwright test --config playwright.production.config.ts \
  *     --project=chromium-iphone-390 --project=chromium-small-360
  *
- * Two tests fail against the demo seed and pass against real production, so a
- * local run is expected to show exactly these and nothing else: the Team
- * `Starter` assertion (stale since the shipped density work moved that word
- * into the row's `aria-label`) and the waiver-advice test (already flaky).
- * Any *third* failure is yours.
+ * A local run against the demo seed is expected to be **green**. It was not,
+ * for a long time: two assertions stood red — the Team `Starter` text, stale
+ * since the density work moved that word into the row's `aria-label`, and a
+ * waiver check that matched `bid` inside `1 likely bidder`. Both were defects
+ * in this file rather than in the app, and both are fixed. A standing red that
+ * everybody knows to ignore is worse than no test, because the next real
+ * failure hides behind it. Any failure here is now yours.
  * ---------------------------------------------------------------------------
  */
 
@@ -760,15 +762,28 @@ test.describe('the season features', () => {
       .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-slot')));
     expect(drawn).toEqual(lineup!.slots.map((s) => s.slot));
 
+    /*
+     * Starter and bench are said in words — in the accessible name.
+     *
+     * This used to read `toContainText('Starter')`, and had been failing here
+     * ever since the density work took that word off the face of the row: eight
+     * rows repeating what the section heading above them already says was the
+     * space that pass bought back. The claim it was defending is real and is
+     * kept, moved to where the word actually lives.
+     *
+     * The row still carries the position's hue token — that is what colours the
+     * slot chip — but it no longer carries the `card-pos` that paints a fill.
+     * Team is a neutral grouped roster and the wash belongs to Draft alone.
+     */
     for (const card of await page.locator('[data-testid="starter-row"][data-starter="true"]').all()) {
       const position = (await card.getAttribute('data-position'))!;
       await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
-      await expect(card).toContainText('Starter');
+      await expect(card).not.toHaveClass(/(^|\s)card-pos(\s|$)/);
+      await expect(card).toHaveAttribute('aria-label', /recommended starter at/i);
     }
-    // A backup is the same row without the tint, which is the whole visual claim.
     for (const card of await page.getByTestId('bench-row').all()) {
       await expect(card).not.toHaveClass(/card-pos/);
-      await expect(card).toContainText('Bench');
+      await expect(card).toHaveAttribute('aria-label', /bench/i);
     }
   });
 
@@ -836,12 +851,28 @@ test.describe('the season features', () => {
       }
     }
 
-    // Whatever it says, it says it is advice.
+    /*
+     * Whatever it says, it says it is advice.
+     *
+     * Matched on word boundaries rather than as substrings, which is what this
+     * was doing and why it stood red. Every waiver row is itself a button — the
+     * whole row opens the detail — so `allInnerTexts` returns the row's *content*,
+     * and a row describing the competition as `1 likely bidder` contains the
+     * letters of `bid`. A bidder is a person, not a control offering to place a
+     * bid, and failing on it taught a reader to ignore a red smoke run.
+     *
+     * The guarantee is unchanged and still the important one: no control here
+     * may read as an action this app does not take. A button labelled `Bid`,
+     * `Place bid`, `Add`, `Drop`, `Claim` or `Submit` still fails.
+     */
     const card = page.getByTestId('waiver-card');
     if ((await card.count()) > 0) {
       const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
       for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-        expect(buttons, `a control reading "${forbidden}" would imply a transaction`).not.toContain(forbidden);
+        expect(
+          buttons,
+          `a control reading "${forbidden}" would imply a transaction`,
+        ).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
       }
     }
   });
@@ -905,9 +936,35 @@ test.describe('the decision intelligence', () => {
     }
   });
 
+  /**
+   * …once there is a week to optimise for.
+   *
+   * Balanced, Floor and Ceiling are three definitions of the best *lineup*, and
+   * the Team pass withholds them during a draft: there is no week yet and half
+   * the roster is unpicked. This deployment may legitimately be mid-draft on any
+   * given day, so the absence of the control is checked against the roster's own
+   * `live` flag rather than assumed either way — a missing control during a
+   * draft is the intended design, and a missing control outside one is a defect.
+   */
   test('Start/Sit offers three modes, and asking for one reaches the server', async ({ page }) => {
     await page.goto('/');
     await open(page, 'team');
+
+    const drafting = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
+      return roster?.live === true;
+    });
+    test.skip(drafting === null, 'no league selected on this deployment');
+    if (drafting) {
+      // The intended state, asserted rather than skipped past: during a draft
+      // the controls are gone, and the live roster is what stands in their place.
+      await expect(page.getByTestId('team-controls')).toHaveCount(0);
+      await expect(page.getByTestId('live-draft-card')).toBeVisible();
+      return;
+    }
 
     const modes = page.getByTestId('mode-row');
     await expect(modes).toBeVisible();

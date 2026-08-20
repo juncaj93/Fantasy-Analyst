@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { inSeason } from './helpers.ts';
 
 /**
  * Wait for a disclosure to finish opening before reading its text.
@@ -1384,6 +1385,21 @@ test.describe('draft room', () => {
   });
 });
 
+/**
+ * Team as it stands once the draft is over, which is where Compare lives.
+ *
+ * The demo league is permanently mid-draft and the Team pass withholds the
+ * comparison control during one — see `inSeason`. The reload is what makes the
+ * route double apply: the roster this screen is drawn from was already
+ * requested by the time these tests run.
+ */
+async function openTeamInSeason(page: Page) {
+  await inSeason(page);
+  await page.reload();
+  await openTab(page, 'team');
+  await expect(page.getByTestId('team-controls')).toBeVisible();
+}
+
 test.describe('team, ADP import and start/sit', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -1435,6 +1451,7 @@ test.describe('team, ADP import and start/sit', () => {
   });
 
   test('compares two players and explains the recommendation', async ({ page }) => {
+    await openTeamInSeason(page);
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
@@ -1492,6 +1509,7 @@ test.describe('team, ADP import and start/sit', () => {
    * worth ingesting at all.
    */
   test('names the injury and the practice week in a start/sit comparison', async ({ page }) => {
+    await openTeamInSeason(page);
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
@@ -1519,6 +1537,7 @@ test.describe('team, ADP import and start/sit', () => {
 
   test('shows a degraded, honest state when Vegas data is missing', async ({ page }) => {
     // Cal Whitfield (1011) is rostered but has no props in the mock game.
+    await openTeamInSeason(page);
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1011');
