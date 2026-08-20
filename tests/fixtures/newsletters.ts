@@ -167,3 +167,49 @@ export const SUBSTACK_RAW_MIME_TEXT_ONLY = [
   'committee=2E',
   '',
 ].join('\r\n');
+
+/**
+ * The stored body of the real production issue, in shape.
+ *
+ * The live message log holds
+ * `<20260820114548.3.2eac9edb56b4cb63@mg2.substack.com>` with a `body_text`
+ * that is everything from the first boundary delimiter onwards — the top-level
+ * `Content-Type` that declared the multipart was left behind in the header
+ * block, which is exactly what made the boundary invisible in the first place.
+ *
+ * So this fixture starts AT a delimiter, with `text/plain` as the first part.
+ * Read naively that first part's headers pass for the message's own and the
+ * HTML alternative is swallowed into its body — which is why `leadingBoundary`
+ * exists. The prose reproduces the artefacts the production diagnostics listed
+ * verbatim: `Name [ redirect-url ]` cut by a soft line break, an undecoded
+ * bullet, an undecoded en dash, and an emoji whose UTF-8 lead bytes were being
+ * read as the name `F0=9F`.
+ */
+export const STORED_CORRUPT_BODY = [
+  '--_----1755690348-abcdef',
+  'Content-Type: text/plain; charset="UTF-8"',
+  'Content-Transfer-Encoding: quoted-printable',
+  '',
+  '=F0=9F=8F=88 Week 1 Notes',
+  '',
+  'Keenan Allen [ https://substack.com/redirect/5169cc6b-e24f-470d-b520-d5d5f1=',
+  '2eac9e?j=3DeyJ1IjoiOHd3MndjIn0 ] was named the starter in three-receiver se=',
+  'ts=2E',
+  '',
+  '=E2=80=A2 Puka Nacua didn=E2=80=99t practice on Wednesday=2E',
+  '',
+  'Zay Flowers =E2=80=93 0=2E152',
+  '',
+  '--_----1755690348-abcdef',
+  'Content-Type: text/html; charset="UTF-8"',
+  'Content-Transfer-Encoding: quoted-printable',
+  '',
+  '<html><body><p><a href=3D"https://substack.com/redirect/5169cc6b">Keenan All=',
+  'en</a> was named the starter in three-receiver sets.</p>',
+  '<p>Puka Nacua didn=E2=80=99t practice on Wednesday.</p>',
+  '<p>Zay Flowers =E2=80=93 0.152</p>',
+  '</body></html>',
+  '',
+  '--_----1755690348-abcdef--',
+  '',
+].join('\r\n');

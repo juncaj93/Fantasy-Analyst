@@ -22,6 +22,7 @@ import {
   decodeQuotedPrintableBytes,
   decodeTransfer,
   headerParam,
+  leadingBoundary,
   looksLikeQuotedPrintable,
   looksLikeRawMime,
   normalizePunctuation,
@@ -36,7 +37,7 @@ import { collectUnresolvedNames, detectMentions } from '../src/core/newsletter/m
 import { processNewsletter } from '../src/core/newsletter/pipeline.ts';
 import { parseRawEmail } from '../src/worker/index.ts';
 import { TEST_INDEX } from './helpers/players.ts';
-import { SUBSTACK_RAW_MIME, SUBSTACK_RAW_MIME_TEXT_ONLY } from './fixtures/newsletters.ts';
+import { STORED_CORRUPT_BODY, SUBSTACK_RAW_MIME, SUBSTACK_RAW_MIME_TEXT_ONLY } from './fixtures/newsletters.ts';
 
 const utf8 = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
@@ -375,6 +376,41 @@ describe('recovering a body that was already stored badly', () => {
     const recovered = recoverBody({ html: null, text: 'Nacua didnât practice.' });
     expect(recovered.repairs).toContain('text:mojibake_repaired');
     expect(recovered.text).toBe('Nacua didn’t practice.');
+  });
+
+  /**
+   * The shape production actually stored: everything from the first delimiter
+   * onwards, with the header that declared the multipart left behind. Without
+   * `leadingBoundary` the first part's headers pass for the message's own and
+   * the HTML alternative is swallowed into its body.
+   */
+  it('walks a stored body that begins at a boundary with no headers of its own', () => {
+    expect(leadingBoundary(STORED_CORRUPT_BODY)).toBe('_----1755690348-abcdef');
+    const parsed = parseMimeMessage(STORED_CORRUPT_BODY);
+    expect(parsed.html).toContain('Keenan Allen');
+    expect(parsed.text).toContain('Keenan Allen');
+    // The plain part must stop at its own boundary, not run into the HTML one.
+    expect(parsed.text).not.toContain('<html>');
+    expect(parsed.text).not.toContain('Content-Transfer-Encoding');
+    for (const body of [parsed.html!, parsed.text!]) {
+      expect(body).not.toMatch(/=[0-9A-F]{2}/);
+    }
+  });
+
+  it('does not mistake a line of prose starting with two hyphens for a boundary', () => {
+    expect(leadingBoundary('--and then he was benched\nmore prose here')).toBeNull();
+    // A token used only once is a stray, not a delimiter.
+    expect(leadingBoundary('--onlyonce\nsome text')).toBeNull();
+  });
+
+  it('recovers the real production body shape end to end', () => {
+    const recovered = recoverBody({ html: null, text: STORED_CORRUPT_BODY });
+    expect(recovered.repairs).toContain('text:mime_reparsed');
+    expect(recovered.html).toContain('was named the starter');
+    expect(recovered.html).toContain('didn’t');
+    // The emoji whose UTF-8 lead bytes were being read as the name `F0=9F`.
+    expect(recovered.text).toContain('🏈');
+    expect(recovered.text).toContain('–');
   });
 
   it('leaves a healthy body completely alone', () => {

@@ -18,7 +18,7 @@ import { NewsletterService } from '../src/server/services/newsletterService.ts';
 import { parseRawEmail } from '../src/worker/index.ts';
 import { createTestDb } from './helpers/db.ts';
 import { TEST_PLAYERS } from './helpers/players.ts';
-import { SUBSTACK_RAW_MIME } from './fixtures/newsletters.ts';
+import { STORED_CORRUPT_BODY, SUBSTACK_RAW_MIME } from './fixtures/newsletters.ts';
 
 const SOURCES = [
   { id: 'ff', label: 'FF Newsletter', fromPatterns: ['@substack.com'], subjectPatterns: [], enabled: true },
@@ -78,6 +78,38 @@ describe('repairing an already-ingested newsletter', () => {
     const names = (outcome.result?.evidence ?? []).map((e) => e.playerName);
     expect(names).toContain('Bijan Robinson');
     expect(names).toContain('Puka Nacua');
+  });
+
+  /**
+   * The live message log's `body_text` starts at a delimiter with `text/plain`
+   * as its first part, so the whole multipart has to be recognised from the
+   * boundary alone. This is that shape, run through the service exactly as
+   * re-reading the production message will.
+   */
+  it('reads the production stored-body shape and clears its artefacts', async () => {
+    const outcome = await service.ingest(
+      toEmailMessage({
+        messageId: 'production-shape',
+        from: 'Fantasy Football Weekly <ffweekly@substack.com>',
+        subject: 'Week 1 Notes',
+        date: '2026-08-20T11:45:48.000Z',
+        text: STORED_CORRUPT_BODY,
+      }),
+    );
+    expect(outcome.status).toBe('processed');
+    expect(outcome.coverage?.repairs).toContain('text:mime_reparsed');
+
+    // Not one sentence still carries MIME scaffolding or an undecoded escape.
+    for (const e of outcome.result?.evidence ?? []) {
+      expect(e.excerpt).not.toMatch(/=[0-9A-F]{2}|mimepart|Content-Transfer|substack|https?:/i);
+    }
+    for (const s of outcome.coverage?.samples ?? []) {
+      expect(s.excerpt).not.toMatch(/=[0-9A-F]{2}|mimepart|Content-Transfer|substack|https?:/i);
+    }
+    // The artefacts production listed under "Names not in the player list".
+    for (const name of outcome.coverage?.unknownNames ?? []) {
+      expect(name, name).toMatch(/^[A-Za-z'’.\-]+(?: [A-Za-z'’.\-]+)*$/);
+    }
   });
 
   it('offers no encoding or URL fragment as a missing player name', async () => {

@@ -290,6 +290,29 @@ function walk(headers: Map<string, string>, body: string, out: ParsedEmailParts,
 }
 
 /**
+ * A body that begins at a boundary delimiter, with no headers of its own.
+ *
+ * This is precisely what the folded-header bug stored: everything from the
+ * first delimiter onwards, with the top-level `Content-Type` that declared the
+ * multipart left behind in the header block. Read naively, the FIRST part's
+ * headers get mistaken for the message's own, and the remaining parts — the
+ * HTML alternative among them — are swallowed into that part's body.
+ *
+ * Recognising the shape restores the boundary the lost header would have named.
+ * The token must be used as a delimiter at least twice, so a line of prose that
+ * happens to start with two hyphens is not mistaken for one.
+ */
+export function leadingBoundary(raw: string): string | null {
+  const first = raw.split(/\r?\n/).find((line) => line.trim() !== '');
+  const m = first == null ? null : /^--([^\s-]\S*?)(?:--)?$/.exec(first.trim());
+  if (!m) return null;
+  const token = m[1]!;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const uses = raw.match(new RegExp(`(?:^|\\r?\\n)--${escaped}[ \\t]*(?:--)?[ \\t]*(?=\\r?\\n|$)`, 'g'));
+  return (uses?.length ?? 0) >= 2 ? token : null;
+}
+
+/**
  * Parse a raw RFC 5322 message into its HTML and plain-text bodies.
  *
  * Tolerates a fragment that begins mid-message — a stored body that is really a
@@ -300,6 +323,17 @@ export function parseMimeMessage(raw: string): ParsedEmailParts {
   const out: ParsedEmailParts = { headers: new Map(), html: null, text: null };
   if (!raw) return out;
   try {
+    // A headerless multipart body is walked as the multipart it is, rather than
+    // letting its first part impersonate the whole message.
+    const orphaned = leadingBoundary(raw);
+    if (orphaned) {
+      for (const part of splitMultipart(raw, orphaned)) {
+        const sub = splitHeadersAndBody(part);
+        walk(sub.headers, sub.body, out, 1);
+        if (out.html !== null && out.text !== null) break;
+      }
+      return out;
+    }
     const { headers, body } = splitHeadersAndBody(raw);
     out.headers = headers;
     walk(headers, body, out, 0);
