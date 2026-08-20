@@ -349,23 +349,40 @@ test.describe('the active tab, tapped again', () => {
     await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
   });
 
-  test('clears the search on Draft, and nothing else', async ({ page }) => {
+  /**
+   * One rung per tap, innermost first.
+   *
+   * This asserted that a retap cleared the search and that the position filter
+   * *survived*, on the reasoning that a filter is a choice rather than a view
+   * state. The reasoning was half right and the behaviour was the wrong half:
+   * the filter does come back, but not in the same motion as the search. A tap
+   * undoes one thing, so a reader walks back out through the layers in the
+   * order they built them and can stop wherever they meant to.
+   *
+   * That is also what makes the gesture safe. Unwinding everything at once
+   * throws away a deliberate filter in the same tap that closes a card opened
+   * by accident, and makes the second tap a no-op — which is how people learn a
+   * control is unreliable.
+   */
+  test('unwinds Draft one step at a time', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
-    // Narrow by position as well, so it is clear which one gets cleared.
     await page.getByRole('button', { name: 'QB', exact: true }).click();
     await page.getByTestId('draft-search-open').click();
     await page.getByTestId('draft-search').fill('lind');
     await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
 
+    // First tap: the query goes and the field folds back to its glyph, which is
+    // what "clear the screen" means for a control that starts folded. The
+    // filter is untouched.
     await page.getByTestId('tab-draft').click();
-    // The query is gone and the field has folded back to its glyph, which is
-    // what "clear the screen" means for a control that starts folded.
     await expect(page.getByTestId('draft-search')).toHaveCount(0);
     await expect(page.getByTestId('draft-search-open')).toBeVisible();
-    // The position filter is a choice, not a search: it survives.
     await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('button', { name: 'ALL', exact: true }).click();
+
+    // Second tap: now the board comes back.
+    await page.getByTestId('tab-draft').click();
+    await expect(page.getByRole('button', { name: 'ALL', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('does not disturb a screen with nothing to clear', async ({ page }) => {

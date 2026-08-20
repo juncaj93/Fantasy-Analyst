@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type EvidenceItem, type IdentityReview } from '../api.ts';
 import { Badge, Disclose, Empty, Notice, PositionBadge, formatDate } from '../components/common.tsx';
 import { NavBar, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
+import { unwindOne } from '../tabReset.ts';
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
@@ -23,13 +24,26 @@ function reasonFor(item: EvidenceItem): string {
   return 'Matched a news rule but was not clear enough to apply on its own.';
 }
 
-export function ReviewScreen({ onChanged }: { onChanged: () => void }) {
+export function ReviewScreen({ onChanged, resetNonce }: { onChanged: () => void; resetNonce: number }) {
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [identity, setIdentity] = useState<IdentityReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'evidence' | 'identity' | 'applied'>('evidence');
   const [applied, setApplied] = useState<EvidenceItem[]>([]);
+
+  /*
+   * Tapping Review while already on Review.
+   *
+   * Back to the queue it opens on, and to the top of it. The three tabs here
+   * are views of the same work rather than a filter the reader set, so
+   * returning to the first one is returning home; nothing in the queue itself
+   * is touched, because every item in it is a decision waiting to be made.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([{ when: tab !== 'evidence', undo: () => setTab('evidence') }]);
+  }, [resetNonce]);
   /** The scoring key, which is reference rather than part of the queue. */
   const [keyOpen, setKeyOpen] = useState(false);
 

@@ -60,6 +60,7 @@ import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { unwindOne } from '../tabReset.ts';
 
 interface OpenSlot {
   slot: string;
@@ -101,9 +102,12 @@ const ALL_FILTER = 'ALL';
 export function TeamScreen({
   leagues,
   onLeaguesChanged,
+  resetNonce,
 }: {
   leagues: LeagueSummary[];
   onLeaguesChanged: () => void;
+  /** Bumped when Team is tapped while already on Team — see `App`. */
+  resetNonce: number;
 }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const [roster, setRoster] = useState<RosterResponse | null>(null);
@@ -127,6 +131,27 @@ export function TeamScreen({
   const [weekly, setWeekly] = useState<{ playerId: string; context: WeeklyContext } | null>(null);
   /** Which waiver row's detail is open. */
   const [waiverDetail, setWaiverDetail] = useState<WaiverBoardRow | null>(null);
+
+  /*
+   * Tapping Team while already on Team.
+   *
+   * Everything closed is a sheet or a panel this screen opened over itself —
+   * the comparison, a player's week, a waiver row's detail. None of it is a
+   * decision the reader made about their roster, so unwinding it costs them
+   * nothing and gets them back to the lineup, which is what the tab is for.
+   *
+   * The mode is deliberately left alone. Balanced, Floor and Ceiling is a
+   * question the reader asked, and a tab tap is not an answer to it.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: compare != null, undo: () => setCompare(null) },
+      { when: weekly != null, undo: () => setWeekly(null) },
+      { when: waiverDetail != null, undo: () => setWaiverDetail(null) },
+      { when: message != null, undo: () => setMessage(null) },
+    ]);
+  }, [resetNonce]);
 
   const loadRoster = useCallback(async () => {
     if (!selected) return;

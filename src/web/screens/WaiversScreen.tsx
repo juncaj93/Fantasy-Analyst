@@ -26,16 +26,33 @@ import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { buildWaiverBoard, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { unwindOne } from '../tabReset.ts';
 
 const ALL_FILTER = 'ALL';
 
-export function WaiversScreen({ leagues }: { leagues: LeagueSummary[] }) {
+export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const [advice, setAdvice] = useState<WaiverAdvice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [open, setOpen] = useState<WaiverBoardRow | null>(null);
+
+  /*
+   * Tapping Waivers while already on Waivers.
+   *
+   * The open row's detail closes and the position filter goes back to All,
+   * which is this screen's resting state — a filter here narrows the *board*
+   * rather than recording anything, so returning it is returning the view and
+   * not discarding a decision. Then the top.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: open != null, undo: () => setOpen(null) },
+      { when: filter !== ALL_FILTER, undo: () => setFilter(ALL_FILTER) },
+    ]);
+  }, [resetNonce]);
 
   const load = useCallback(async () => {
     if (!selected) {

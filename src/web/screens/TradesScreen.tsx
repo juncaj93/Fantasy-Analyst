@@ -26,13 +26,29 @@ import { NavBar, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow, RowNote } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
+import { unwindOne } from '../tabReset.ts';
 
-export function TradesScreen() {
+export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   const [board, setBoard] = useState<TradeBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   /** Whether a skim has turned into a study — see `PlayerSheet`. */
   const [full, setFull] = useState(false);
+
+  /*
+   * Tapping Trades while already on Trades.
+   *
+   * The sheet closes, the pushed page unwinds, and the board returns to the
+   * top. Nothing about the suggestions themselves is touched — they are the
+   * server's answer, not a view state.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: full, undo: () => setFull(false) },
+      { when: openId != null, undo: () => setOpenId(null) },
+    ]);
+  }, [resetNonce]);
 
   const load = useCallback(async () => {
     try {

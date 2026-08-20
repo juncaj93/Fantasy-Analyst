@@ -30,6 +30,7 @@ import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../componen
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
+import { unwindOne } from '../tabReset.ts';
 
 /** An unflagged player, so the control renders the same shape either way. */
 const EMPTY_MY_GUY: MyGuyFlag = { level: 0, label: '', stars: '', score: 0 };
@@ -220,10 +221,11 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    */
   useEffect(() => {
     if (resetNonce === 0) return;
-    setQuery('');
-    setOpenId(null);
-    setFull(false);
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    unwindOne([
+      { when: full, undo: () => setFull(false) },
+      { when: openId != null, undo: () => setOpenId(null) },
+      { when: query !== '', undo: () => setQuery('') },
+    ]);
   }, [resetNonce]);
 
   /*

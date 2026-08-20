@@ -109,6 +109,7 @@ import { QueueControl } from '../components/decisions.tsx';
  */
 import { DraftBoardOverlay } from '../components/draftBoard.tsx';
 import { GridIcon } from '../components/icons.tsx';
+import { unwindOne } from '../tabReset.ts';
 /*
  * Staying level with Sleeper without being asked.
  *
@@ -380,12 +381,33 @@ export function DraftScreen({
     void load(position);
   }, [load, position]);
 
-  /* Tapping Draft while already on Draft clears the search and nothing else. */
+  /*
+   * Tapping Draft while already on Draft — one rung per tap.
+   *
+   * Innermost first, which is the order a reader would undo it themselves: the
+   * open player folds shut, then the search closes and empties, then the
+   * position filter goes back to the whole board, and a fourth tap takes the
+   * board to the top. The expansion comes before the filter deliberately —
+   * resetting the filter first would redraw the list underneath an open card
+   * and the card would vanish as a side effect, so the tap that was meant to
+   * close it would appear to have done two things.
+   *
+   * The queue, the hearts and every tally are untouched. Those are the reader's
+   * own marks and a tab tap has no business near them.
+   */
   useEffect(() => {
     if (resetNonce === 0) return;
-    setQuery('');
-    setSearchOpen(false);
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    unwindOne([
+      { when: expanded != null, undo: () => setExpanded(null) },
+      {
+        when: searchOpen || query !== '',
+        undo: () => {
+          setQuery('');
+          setSearchOpen(false);
+        },
+      },
+      { when: position !== ALL_FILTER, undo: () => setPosition(ALL_FILTER) },
+    ]);
   }, [resetNonce]);
 
   useEffect(() => {

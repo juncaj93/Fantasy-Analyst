@@ -91,7 +91,6 @@ export function ScoreCard({
           mine={mine.winProbability ?? 0.5}
           mineName={mine.name}
           theirsName={theirs.name}
-          confidence={forecast.freshness}
           {...(onExplain ? { onExplain } : {})}
         />
       )}
@@ -173,17 +172,28 @@ function Result({
  * the screen — and because 39/61 is instantly legible in a way one number is
  * not.
  */
+/**
+ * The odds, as a bar and two percentages — and no words about confidence.
+ *
+ * A line reading `medium confidence · two kickoffs unknown` used to sit under
+ * this bar. It is a real qualification and it has not been deleted: it is a row
+ * in the sheet this bar opens, which is where a reader who wants to know how
+ * much to trust a number goes. What it was doing *here* was spending the most
+ * valuable strip on the page — the one directly above the lineup — on a
+ * sentence about the forecast rather than on the forecast, and pushing the
+ * starters the reader came for further down a phone.
+ *
+ * The bar says it is tappable and the sheet behind it says the rest.
+ */
 function WinBar({
   mine,
   mineName,
   theirsName,
-  confidence,
   onExplain,
 }: {
   mine: number;
   mineName: string;
   theirsName: string;
-  confidence: MatchupForecast['freshness'];
   onExplain?: () => void;
 }) {
   const minePct = Math.round(mine * 100);
@@ -223,18 +233,6 @@ function WinBar({
           {content}
         </div>
       )}
-      {/*
-        Confidence, and only when it is materially weak.
-
-        §32's rule: this must not dominate the card. A forecast built on full
-        coverage says nothing at all here, which is what makes the line worth
-        reading on the Sunday it does appear.
-      */}
-      {confidence.level !== 'high' && confidence.detail ? (
-        <div className="matchup-confidence" data-testid="matchup-confidence">
-          {confidence.level} confidence · {confidence.detail}
-        </div>
-      ) : null}
     </>
   );
 }

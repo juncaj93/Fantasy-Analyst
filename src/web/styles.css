@@ -2455,6 +2455,24 @@ body,
   margin-bottom: 0;
 }
 
+/*
+ * A name that stops where it ends, so what qualifies it sits against it.
+ *
+ * `.player-name` is `flex: 1` everywhere else, which is right for a row whose
+ * trailing edge is a fixed field: the name takes the slack. On a starter row
+ * the trailing cluster pushes itself right with `margin-left: auto`, so a name
+ * that also grows leaves the availability tag stranded in the middle of the
+ * row — beside the projection, reading as a note about that number, which is
+ * exactly the placement the Team pass moved it out of.
+ *
+ * Shrink-to-fit here, and the tag lands against the last letter of the name.
+ * It still truncates: `min-width: 0` and the ellipsis are inherited.
+ */
+.starter-row .player-name,
+.roster-line .player-name {
+  flex: 0 1 auto;
+}
+
 /* Last season on the left, the way in on the right, one line for both. */
 .detail-foot {
   display: flex;
@@ -6461,6 +6479,16 @@ button.hero-card:active {
  * Settings, because the way out of a mode belongs beside the sign that says you
  * are in one.
  */
+/*
+ * A status bar, not a banner.
+ *
+ * It wrapped to three lines at 390px and sat above every navigation bar in the
+ * app, which made the most valuable strip on the screen a caption about the
+ * data rather than the data. `nowrap` is the rule that fixes it: the scenario
+ * and its clock truncate in the middle of the bar instead of reflowing, and the
+ * two things that must never be lost — the word DEMO and the way out — are
+ * `flex: none` on either side of them.
+ */
 .demo-bar {
   position: sticky;
   top: 0;
@@ -6468,12 +6496,12 @@ button.hero-card:active {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: calc(var(--safe-top) + var(--sp-2)) var(--page-x) var(--sp-2);
+  flex-wrap: nowrap;
+  padding: calc(var(--safe-top) + var(--sp-1)) var(--page-x) var(--sp-1);
   background: var(--warn-tint);
   color: var(--warn);
   border-bottom: 1px solid var(--warn);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.25;
 }
 
@@ -6495,8 +6523,11 @@ button.hero-card:active {
 }
 
 .demo-what {
-  flex: 1 1 8rem;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .demo-what .faint {
@@ -6504,10 +6535,17 @@ button.hero-card:active {
   opacity: 0.85;
 }
 
+/*
+ * The way out keeps its full target and gives up its width.
+ *
+ * `min-height` stays at `--tap` — a control that leaves a fixture world is not
+ * the place to economise on a fingertip — and the label lost the word `demo`,
+ * which the badge at the other end of the same bar is already saying.
+ */
 .demo-bar .demo-exit {
   flex: none;
   min-height: var(--tap);
-  padding-inline: var(--sp-3);
+  padding-inline: var(--sp-2);
   background: var(--surface);
   border-color: var(--warn);
   color: var(--warn);

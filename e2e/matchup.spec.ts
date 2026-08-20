@@ -496,20 +496,26 @@ test.describe('the states of an afternoon', () => {
   });
 
   /**
-   * The confidence line appears when the forecast is weak, and only then.
+   * Confidence is a row in the sheet, and never a line on the page.
    *
-   * §32 asks for exactly this shape: quiet when there is nothing to say, and
-   * present when a reader would otherwise take a thin number at face value.
+   * It used to sit directly under the win bar, which is the strip immediately
+   * above the lineup — the most valuable inch on this screen — spent on a
+   * sentence about the forecast rather than on the forecast. It is not deleted:
+   * a reader who wants to know how much to trust a number taps the bar, and
+   * this checks it is genuinely there when they do.
+   *
+   * The claim §32 was defending is kept whole. A weak forecast still says so,
+   * in its own words, one tap from the number it qualifies.
    */
-  test('names weak confidence, and stays silent when it is strong', async ({ page }) => {
+  test('keeps confidence off the page and inside the odds sheet', async ({ page }) => {
     await serve(page, response());
-    await expect(page.getByTestId('matchup-confidence')).toContainText('medium confidence');
-
-    await page.unroute('**/api/leagues/*/matchup*');
-    await serve(
-      page,
-      response({}, { freshness: { unresolvedAvailability: 0, missingProjection: 0, unknownKickoff: 0, level: 'high', detail: null } }),
-    );
     await expect(page.getByTestId('matchup-confidence')).toHaveCount(0);
+    await expect(page.getByText(/medium confidence/i)).toHaveCount(0);
+
+    await page.getByTestId('matchup-win').click();
+    const sheet = page.getByTestId('odds-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(/confidence/i);
+    await expect(sheet).toContainText('medium');
   });
 });
