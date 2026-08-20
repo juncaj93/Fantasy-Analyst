@@ -75,7 +75,13 @@ describe('the ChatGPT tally import', () => {
     );
     expect(preview.ready).toHaveLength(1);
     expect(preview.ready[0]).toMatchObject({ playerName: 'Jordan Love', score: 2 });
-    expect(preview.tallyDelta).toEqual([{ playerId: '9', playerName: 'Jordan Love', net: 2 }]);
+    /*
+     * +2 arriving, and the parser's own +1 for the same player in the same
+     * issue stopping — so the honest move is +1, not +2. Advertising the
+     * arrival alone would promise a number the ledger will not show.
+     */
+    expect(preview.tallyDelta).toEqual([{ playerId: '9', playerName: 'Jordan Love', net: 1 }]);
+    expect(preview.parserSuperseded).toHaveLength(1);
     expect(await evidence.countAll()).toBe(before);
   });
 
@@ -187,18 +193,23 @@ describe('the ChatGPT tally import', () => {
   });
 
   /**
-   * The sweep is scoped to this import's own rows. A newsletter's message id is
-   * shared with whatever the deterministic parser found in it, and retiring
-   * that would be the import discarding evidence it never owned.
+   * The revision sweep is scoped to this import's own rows.
+   *
+   * A newsletter's message id is shared with whatever the deterministic parser
+   * found in it. Displacing the parser's reading of a player the tally scores
+   * is deliberate; sweeping away its reading of everyone else would be the
+   * import discarding evidence it never claimed to own.
    */
-  it('never retires what the deterministic parser wrote for the same newsletter', async () => {
+  it('a revised import leaves the parser rows it does not score alone', async () => {
+    // Marvin Harrison Jr. is in the dictionary but not in this newsletter, so
+    // nothing the parser wrote here is the tally's to displace.
     const parserRows = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
       (e) => e.ruleId !== AI_TALLY_RULE_ID,
     );
     expect(parserRows.length).toBeGreaterThan(0);
 
-    await service.applyAiTally(await stored(), block('Jordan Love | +2 | Full command'));
-    await service.applyAiTally(await stored(), block('Jordan Love | +1 | Revised down'));
+    await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +2 | First reading'));
+    await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +1 | Revised down'));
 
     const after = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
       (e) => e.ruleId !== AI_TALLY_RULE_ID,
@@ -227,43 +238,124 @@ describe('the ChatGPT tally import', () => {
     expect(kept?.userOverride?.polarity).toBe('negative');
   });
 
-  // ------------------------------------------------------------- overlap ---
+  // ----------------------------------------------- the authoritative layer ---
   /**
-   * Shown, not blocked. Two rows for one player can legitimately describe
-   * different sentences in the same issue — or the same claim counted twice,
-   * and only the reader can tell which.
+   * The double-count this design exists to prevent.
+   *
+   * A newsletter scored by hand has one semantic reading, and it is the
+   * imported one. The parser's reading of the same player in the same issue
+   * must stop counting rather than stacking underneath it — otherwise one
+   * newsletter contributes twice for one player.
    */
-  it('warns when a row agrees with something the parser already found', async () => {
+  it('one newsletter cannot contribute both a parser score and its ChatGPT replacement', async () => {
     const parser = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).find(
-      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive',
-    )!;
-    const preview = await service.previewAiTally(
-      await stored(),
-      block(`${TEST_PLAYERS.find((p) => p.id === parser.playerId)!.fullName} | +1 | Same direction`),
-    );
-    expect(preview.ready[0]?.overlapsRuleId).toBe(parser.ruleId);
-    expect(preview.ready[0]?.overlapsExcerpt).toBe(parser.excerpt);
-  });
-
-  it('does not warn when nothing the parser found points the same way', async () => {
-    // Marvin Harrison Jr. is in the dictionary but not in this newsletter, so
-    // there is no deterministic row of any polarity to sit beside.
-    const preview = await service.previewAiTally(
-      await stored(),
-      block('Marvin Harrison Jr. | +2 | Nothing deterministic said this'),
-    );
-    expect(preview.ready).toHaveLength(1);
-    expect(preview.ready[0]?.overlapsRuleId).toBeNull();
-    expect(preview.ready[0]?.overlapsExcerpt).toBeNull();
-  });
-
-  it('does not warn when the parser found the opposite direction', async () => {
-    const parser = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).find(
-      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive',
+      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive' && !e.userOverride,
     )!;
     const name = TEST_PLAYERS.find((p) => p.id === parser.playerId)!.fullName;
+    const before = (await evidence.refreshSignal(parser.playerId, {})).raw.net;
+
+    const preview = await service.previewAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
+    expect(preview.parserSuperseded.map((r) => r.id)).toContain(parser.id);
+    expect(preview.detail).toContain('counted once');
+    // The advertised move already nets the parser row out.
+    const promised = preview.tallyDelta.find((d) => d.playerId === parser.playerId)!.net;
+    expect(promised).toBe(2 - parser.magnitude);
+
+    const outcome = await service.applyAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
+    expect(outcome.parserSuperseded).toBe(1);
+
+    const rows = (await evidence.listForPlayer(parser.playerId)).filter(
+      (e) => e.sourceMessageId === MESSAGE_ID,
+    );
+    const counted = rows.filter((e) => ['auto_applied', 'accepted', 'corrected'].includes(e.reviewStatus));
+    // Exactly one row from this newsletter counts for this player, and it is
+    // the imported one.
+    expect(counted).toHaveLength(1);
+    expect(counted[0]?.ruleId).toBe(AI_TALLY_RULE_ID);
+    expect(counted[0]?.magnitude).toBe(2);
+
+    // The parser's finding survives for audit, it simply stops contributing.
+    const retired = rows.find((e) => e.id === parser.id)!;
+    expect(retired.reviewStatus).toBe('ignored');
+    expect(retired.excerpt).toBe(parser.excerpt);
+    expect(retired.ruleId).toBe(parser.ruleId);
+
+    // And the promise the preview made is the move the ledger actually shows.
+    expect((await evidence.refreshSignal(parser.playerId, {})).raw.net).toBe(before + promised);
+  });
+
+  /**
+   * Pointing the other way is a genuine question, not a duplicate: the parser
+   * may have read a different sentence. Neither counted nor discarded.
+   */
+  it('parks a parser row that disagrees, rather than counting or discarding it', async () => {
+    const parser = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).find(
+      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive' && !e.userOverride,
+    )!;
+    const name = TEST_PLAYERS.find((p) => p.id === parser.playerId)!.fullName;
+
     const preview = await service.previewAiTally(await stored(), block(`${name} | -1 | The other way`));
-    // Disagreeing with the parser is not double-counting; it is a second view.
-    expect(preview.ready[0]?.overlapsRuleId).toBeNull();
+    expect(preview.parserNeedsReview.map((r) => r.id)).toContain(parser.id);
+    expect(preview.parserSuperseded).toHaveLength(0);
+    expect(preview.detail).toContain('point the other way');
+
+    const outcome = await service.applyAiTally(await stored(), block(`${name} | -1 | The other way`));
+    expect(outcome.parserNeedsReview).toBe(1);
+
+    const after = (await evidence.listByDedupeKeys([parser.dedupeKey])).get(parser.dedupeKey)!;
+    expect(after.reviewStatus).toBe('pending');
+    // Parked, not counted.
+    const rows = (await evidence.listForPlayer(parser.playerId)).filter(
+      (e) => e.sourceMessageId === MESSAGE_ID,
+    );
+    const counted = rows.filter((e) => ['auto_applied', 'accepted', 'corrected'].includes(e.reviewStatus));
+    expect(counted.every((e) => e.ruleId === AI_TALLY_RULE_ID)).toBe(true);
+  });
+
+  it('never displaces a parser row the user has ruled on', async () => {
+    const parser = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).find(
+      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive' && !e.userOverride,
+    )!;
+    await evidence.applyReview(Number(parser.id), 'correct', { polarity: 'positive', magnitude: 3 });
+    const name = TEST_PLAYERS.find((p) => p.id === parser.playerId)!.fullName;
+
+    const preview = await service.previewAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
+    expect(preview.ready[0]?.parserRows.map((r) => r.disposition)).toContain('protected');
+    expect(preview.parserSuperseded).toHaveLength(0);
+
+    await service.applyAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
+    const after = (await evidence.listByDedupeKeys([parser.dedupeKey])).get(parser.dedupeKey)!;
+    expect(after.reviewStatus).toBe('corrected');
+    expect(after.userOverride?.magnitude).toBe(3);
+  });
+
+  it('leaves alone a player the tally does not score', async () => {
+    const untouched = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
+      (e) => e.ruleId !== AI_TALLY_RULE_ID,
+    );
+    // Marvin Harrison Jr. is in the dictionary but not in this newsletter.
+    await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +2 | Unrelated to this issue'));
+    const after = await evidence.listLiveBySourceMessage(MESSAGE_ID);
+    for (const row of untouched) {
+      expect(after.find((e) => e.id === row.id)?.reviewStatus).toBe(row.reviewStatus);
+    }
+  });
+
+  it('displacing is idempotent — running it again changes nothing', async () => {
+    const parser = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).find(
+      (e) => e.ruleId !== AI_TALLY_RULE_ID && e.polarity === 'positive' && !e.userOverride,
+    )!;
+    const name = TEST_PLAYERS.find((p) => p.id === parser.playerId)!.fullName;
+    const paste = block(`${name} | +2 | The tally's reading`);
+
+    await service.applyAiTally(await stored(), paste);
+    const net = (await evidence.refreshSignal(parser.playerId, {})).raw.net;
+    const count = await evidence.countAll();
+
+    const again = await service.applyAiTally(await stored(), paste);
+    expect(again.inserted).toBe(0);
+    expect(again.parserSuperseded).toBe(0);
+    expect(await evidence.countAll()).toBe(count);
+    expect((await evidence.refreshSignal(parser.playerId, {})).raw.net).toBe(net);
   });
 });

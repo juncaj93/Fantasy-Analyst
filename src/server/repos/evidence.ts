@@ -150,6 +150,58 @@ export class EvidenceRepo {
     return rows.results.map(toItem);
   }
 
+  /**
+   * Move specific rows out of the counted set, keeping them in the ledger.
+   *
+   * Used when an imported tally becomes the semantic reading of a newsletter
+   * and the parser's own reading of the same player must stop counting beside
+   * it. `ignored` retires a row; `pending` parks one that needs a human to say
+   * whether it was ever the same claim. Neither deletes anything, so the
+   * parser's finding and its provenance survive for audit.
+   *
+   * A row the user has ruled on is never touched, and a row already at the
+   * target status is left alone so re-running changes nothing.
+   */
+  async setStatusForImport(
+    ids: number[],
+    status: 'ignored' | 'pending',
+    note: string,
+  ): Promise<{ changed: EvidenceItem[]; keptForUserOverride: EvidenceItem[] }> {
+    const changed: EvidenceItem[] = [];
+    const keptForUserOverride: EvidenceItem[] = [];
+    if (ids.length === 0) return { changed, keptForUserOverride };
+    const now = nowIso();
+
+    for (const batch of chunk([...new Set(ids)], MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(`SELECT * FROM evidence_items WHERE id IN (${placeholders})`)
+        .bind(...batch)
+        .all<EvidenceRow>();
+
+      for (const row of rows.results) {
+        const item = toItem(row);
+        if (item.userOverride) {
+          keptForUserOverride.push(item);
+          continue;
+        }
+        if (row.review_status === status) continue;
+        const notes = parseJson<string[]>(row.notes_json, []);
+        await this.db
+          .prepare(
+            `UPDATE evidence_items
+                SET review_status = ?, notes_json = ?, updated_at = ?
+              WHERE id = ?`,
+          )
+          .bind(status, toJson([...notes, note]), now, row.id)
+          .run();
+        changed.push(item);
+      }
+    }
+
+    return { changed, keptForUserOverride };
+  }
+
   async countAll(): Promise<number> {
     const row = await this.db.prepare('SELECT COUNT(*) AS n FROM evidence_items').first<{ n: number }>();
     return Number(row?.n ?? 0);

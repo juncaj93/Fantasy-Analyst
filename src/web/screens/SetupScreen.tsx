@@ -1284,12 +1284,15 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
                       <li key={row.dedupeKey} style={{ marginBottom: 6 }}>
                         <strong>{row.playerName}</strong> {row.score > 0 ? `+${row.score}` : row.score}
                         <div className="faint">{row.reason}</div>
-                        {row.overlapsRuleId ? (
-                          <div className="faint">
-                            Note: this app already read something similar from this issue — “
-                            {row.overlapsExcerpt}”. Applying both counts it twice.
+                        {row.parserRows.map((p) => (
+                          <div key={p.id} className="faint">
+                            {p.disposition === 'superseded'
+                              ? `This app's own reading of the same issue — “${p.excerpt}” — stops counting, so the newsletter counts once.`
+                              : p.disposition === 'needs_review'
+                                ? `This app read the opposite from the same issue — “${p.excerpt}”. It stops counting and waits for your decision.`
+                                : `You corrected this app's reading of the same issue — “${p.excerpt}” — and it stays exactly as you set it.`}
                           </div>
-                        ) : null}
+                        ))}
                       </li>
                     ))}
                   </ul>

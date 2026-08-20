@@ -10,6 +10,7 @@
  * fingerprint) is skipped, and evidence inserts are deduped independently.
  */
 
+import type { EvidenceItem } from '../../core/evidence/types.ts';
 import { contentFingerprint } from '../../core/newsletter/fingerprint.ts';
 import {
   processNewsletter,
@@ -150,15 +151,30 @@ export interface AiTallyPreviewRow {
   /** Held back because the same player was scored twice in one block. */
   contested: boolean;
   /**
-   * A live row the deterministic parser wrote for this player and newsletter,
-   * pointing the same way.
+   * The parser's own rows for this player in this newsletter, and what applying
+   * the tally does to each.
    *
-   * Not blocked, because the two can legitimately describe different sentences
-   * in the same issue — but shown, because they can also be the same claim
-   * counted twice, and only the reader can tell.
+   * An imported tally is the semantic reading of the issue, so the parser's
+   * reading of the same player must not count beside it. Neither is deleted.
    */
-  overlapsRuleId: string | null;
-  overlapsExcerpt: string | null;
+  parserRows: ParserRowDisposition[];
+}
+
+/** One parser row this import displaces, and how. */
+export interface ParserRowDisposition {
+  id: string;
+  ruleId: string | null;
+  excerpt: string;
+  polarity: string;
+  magnitude: number;
+  /**
+   * `superseded` — it points the same way, so it is the same assessment and is
+   * retired. `needs_review` — it points the other way, so whether it was ever
+   * the same claim is a real question; it stops counting and waits for a human
+   * rather than being counted or discarded by default. `protected` — the user
+   * has ruled on it, and nothing an import does may touch that.
+   */
+  disposition: 'superseded' | 'needs_review' | 'protected';
 }
 
 export interface AiTallyPreview {
@@ -185,6 +201,14 @@ export interface AiTallyPreview {
   wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   /** Superseded-looking rows left alone because the user had ruled on them. */
   protectedByUser: { playerId: string; excerpt: string }[];
+  /**
+   * Parser rows this import displaces, across every player it scores.
+   *
+   * Flattened alongside the per-row copy so a caller can answer "what stops
+   * counting?" without walking the rows.
+   */
+  parserSuperseded: ParserRowDisposition[];
+  parserNeedsReview: ParserRowDisposition[];
   tallyDelta: { playerId: string; playerName: string; net: number }[];
   detail: string;
 }
@@ -196,6 +220,10 @@ export interface AiTallyApplyOutcome {
   identityReviews: number;
   retired: number;
   protectedByUser: number;
+  /** Parser rows retired because the tally now speaks for this newsletter. */
+  parserSuperseded: number;
+  /** Parser rows parked for a human because they point the other way. */
+  parserNeedsReview: number;
   playersTouched: number;
   detail: string;
 }
@@ -648,6 +676,55 @@ export class NewsletterService {
   }
 
   /**
+   * Decide what an imported tally does to the parser's own rows.
+   *
+   * A newsletter that has been scored by hand has one semantic reading, and it
+   * is the imported one — so the parser's reading of the same player in the
+   * same issue must stop counting rather than stacking underneath it. Nothing
+   * is deleted: the parser's finding, its rule and its excerpt stay in the
+   * ledger for audit, they simply stop contributing.
+   *
+   * The split is by direction, because that is what separates the two real
+   * cases. Pointing the same way, the two are the same assessment and the
+   * import supersedes it. Pointing opposite ways, whether they were ever the
+   * same claim is a genuine question — the parser may have read a different
+   * sentence — and the honest answer is neither to count both nor to discard
+   * one, so it stops counting and waits for a person.
+   *
+   * Shared by preview and apply so the two cannot describe different outcomes.
+   */
+  private planParserDisplacement(
+    live: EvidenceItem[],
+    proposed: ProposedEvidence[],
+  ): Map<string, ParserRowDisposition[]> {
+    const byPlayer = new Map<string, ParserRowDisposition[]>();
+    const scored = new Map<string, ProposedEvidence>();
+    for (const item of proposed) scored.set(item.playerId, item);
+
+    for (const row of live) {
+      if (row.ruleId === AI_TALLY_RULE_ID) continue;
+      const mine = scored.get(row.playerId);
+      if (!mine) continue;
+      const disposition: ParserRowDisposition['disposition'] = row.userOverride
+        ? 'protected'
+        : row.polarity === mine.polarity
+          ? 'superseded'
+          : 'needs_review';
+      const list = byPlayer.get(row.playerId) ?? [];
+      list.push({
+        id: row.id,
+        ruleId: row.ruleId,
+        excerpt: row.excerpt,
+        polarity: row.polarity,
+        magnitude: row.magnitude,
+        disposition,
+      });
+      byPlayer.set(row.playerId, list);
+    }
+    return byPlayer;
+  }
+
+  /**
    * What pasting this tally would do. Writes nothing.
    *
    * The preview exists because the app cannot check the judgment in the block —
@@ -682,16 +759,17 @@ export class NewsletterService {
         rejected: result.rejected,
         wouldRetire: [],
         protectedByUser: [],
+        parserSuperseded: [],
+        parserNeedsReview: [],
         tallyDelta: [],
         detail: result.error,
       };
     }
 
     const stored = await this.evidence.listByDedupeKeys(result.evidence.map((e) => e.dedupeKey));
-    // Everything the deterministic parser has live for this newsletter, so a
-    // row that would sit beside one of them can say so.
     const live = await this.evidence.listLiveBySourceMessage(message.messageId);
-    const byRule = live.filter((row) => row.ruleId !== AI_TALLY_RULE_ID);
+    // What the parser found for these same players, and what happens to it.
+    const displaced = this.planParserDisplacement(live, result.evidence);
 
     const ready: AiTallyPreviewRow[] = [];
     const duplicates: AiTallyPreviewRow[] = [];
@@ -699,7 +777,6 @@ export class NewsletterService {
 
     for (const item of result.evidence) {
       const already = stored.has(item.dedupeKey);
-      const overlap = byRule.find((row) => row.playerId === item.playerId && row.polarity === item.polarity);
       const row: AiTallyPreviewRow = {
         name: item.playerName,
         playerId: item.playerId,
@@ -709,8 +786,7 @@ export class NewsletterService {
         dedupeKey: item.dedupeKey,
         alreadyImported: already,
         contested: item.reviewStatus === 'pending',
-        overlapsRuleId: overlap?.ruleId ?? null,
-        overlapsExcerpt: overlap?.excerpt ?? null,
+        parserRows: displaced.get(item.playerId) ?? [],
       };
       if (already) duplicates.push(row);
       else if (row.contested) pending.push(row);
@@ -734,13 +810,31 @@ export class NewsletterService {
       .filter((row) => row.userOverride)
       .map((row) => ({ playerId: row.playerId, excerpt: row.excerpt }));
 
-    // What the tally actually moves: new rows in, replaced rows out.
+    /*
+     * What the tally actually moves: new rows in, replaced rows out, and the
+     * parser's own rows for these players out too.
+     *
+     * Counting only the arrivals would advertise a number the ledger will not
+     * show, because applying this also stops the parser's reading of the same
+     * player from contributing.
+     */
     const delta = new Map<string, number>();
     const bump = (playerId: string, by: number) => delta.set(playerId, (delta.get(playerId) ?? 0) + by);
+    const signedOf = (polarity: string, magnitude: number) =>
+      polarity === 'positive' ? magnitude : polarity === 'negative' ? -magnitude : 0;
     for (const row of ready) bump(row.playerId, row.score);
-    for (const row of wouldRetire) {
-      bump(row.playerId, row.polarity === 'positive' ? -row.magnitude : row.magnitude);
+    for (const row of wouldRetire) bump(row.playerId, -signedOf(row.polarity, row.magnitude));
+    for (const [playerId, rows] of displaced) {
+      for (const row of rows) {
+        if (row.disposition === 'protected') continue;
+        bump(playerId, -signedOf(row.polarity, row.magnitude));
+      }
     }
+
+    const allDisplaced = [...displaced.values()].flat();
+    const parserSuperseded = allDisplaced.filter((r) => r.disposition === 'superseded');
+    const parserNeedsReview = allDisplaced.filter((r) => r.disposition === 'needs_review');
+    const parserProtected = allDisplaced.filter((r) => r.disposition === 'protected');
 
     const parts = [`${result.rowsParsed} row(s) read.`];
     if (ready.length) parts.push(`${ready.length} ready to apply.`);
@@ -752,8 +846,24 @@ export class NewsletterService {
     if (protectedByUser.length) {
       parts.push(`${protectedByUser.length} row(s) you corrected stay as you set them.`);
     }
+    if (parserSuperseded.length) {
+      parts.push(
+        `${parserSuperseded.length} item(s) this app read from the same issue would stop counting, ` +
+          'so the newsletter is counted once.',
+      );
+    }
+    if (parserNeedsReview.length) {
+      parts.push(
+        `${parserNeedsReview.length} item(s) this app read point the other way and would wait for your decision.`,
+      );
+    }
+    if (parserProtected.length) {
+      parts.push(`${parserProtected.length} item(s) you corrected stay exactly as you set them.`);
+    }
     if (result.rejected.length) parts.push(`${result.rejected.length} line(s) could not be read.`);
-    if (ready.length === 0 && wouldRetire.length === 0) parts.push('Nothing would change.');
+    if (ready.length === 0 && wouldRetire.length === 0 && parserSuperseded.length === 0 && parserNeedsReview.length === 0) {
+      parts.push('Nothing would change.');
+    }
 
     return {
       messageId: message.messageId,
@@ -769,6 +879,8 @@ export class NewsletterService {
       rejected: result.rejected,
       wouldRetire,
       protectedByUser,
+      parserSuperseded,
+      parserNeedsReview,
       tallyDelta: [...delta.entries()]
         .filter(([, net]) => net !== 0)
         .map(([playerId, net]) => ({
@@ -806,6 +918,8 @@ export class NewsletterService {
         identityReviews: 0,
         retired: 0,
         protectedByUser: 0,
+        parserSuperseded: 0,
+        parserNeedsReview: 0,
         playersTouched: 0,
         detail: result.error,
       };
@@ -820,10 +934,33 @@ export class NewsletterService {
       { ruleId: AI_TALLY_RULE_ID },
     );
 
+    /*
+     * The tally is now this newsletter's semantic reading, so the parser's
+     * reading of the same players stops counting beside it. Nothing is deleted;
+     * see `planParserDisplacement` for why the two directions differ.
+     */
+    const live = await this.evidence.listLiveBySourceMessage(message.messageId);
+    const displaced = [...this.planParserDisplacement(live, result.evidence).values()].flat();
+    const retireIds = displaced.filter((r) => r.disposition === 'superseded').map((r) => Number(r.id));
+    const reviewIds = displaced.filter((r) => r.disposition === 'needs_review').map((r) => Number(r.id));
+
+    const retiredParser = await this.evidence.setStatusForImport(
+      retireIds,
+      'ignored',
+      'superseded-by-chatgpt-tally',
+    );
+    const reviewParser = await this.evidence.setStatusForImport(
+      reviewIds,
+      'pending',
+      'contested-by-chatgpt-tally',
+    );
+
     const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
     const touched = new Set([
       ...result.evidence.map((e) => e.playerId),
       ...superseded.map((e) => e.playerId),
+      ...retiredParser.changed.map((e) => e.playerId),
+      ...reviewParser.changed.map((e) => e.playerId),
     ]);
     for (const playerId of touched) {
       await this.evidence.refreshSignal(playerId, { seasonStart });
@@ -832,6 +969,17 @@ export class NewsletterService {
     const parts = [`${inserted} item(s) applied.`];
     if (skipped) parts.push(`${skipped} were already imported.`);
     if (superseded.length) parts.push(`${superseded.length} earlier row(s) were replaced.`);
+    if (retiredParser.changed.length) {
+      parts.push(
+        `${retiredParser.changed.length} item(s) this app read from the same issue stopped counting, ` +
+          'so the newsletter is counted once.',
+      );
+    }
+    if (reviewParser.changed.length) {
+      parts.push(
+        `${reviewParser.changed.length} item(s) this app read point the other way and are waiting for your decision.`,
+      );
+    }
     if (keptForUserOverride.length) {
       parts.push(`${keptForUserOverride.length} row(s) you corrected were left as you set them.`);
     }
@@ -843,7 +991,12 @@ export class NewsletterService {
       alreadyPresent: skipped,
       identityReviews,
       retired: superseded.length,
-      protectedByUser: keptForUserOverride.length,
+      protectedByUser:
+        keptForUserOverride.length +
+        retiredParser.keptForUserOverride.length +
+        reviewParser.keptForUserOverride.length,
+      parserSuperseded: retiredParser.changed.length,
+      parserNeedsReview: reviewParser.changed.length,
       playersTouched: touched.size,
       detail: parts.join(' '),
     };

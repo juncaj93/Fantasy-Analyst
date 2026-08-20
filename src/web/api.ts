@@ -725,9 +725,16 @@ export interface AiTallyPreviewRow {
   dedupeKey: string;
   alreadyImported: boolean;
   contested: boolean;
-  /** A live parser row for the same player pointing the same way, if any. */
-  overlapsRuleId: string | null;
-  overlapsExcerpt: string | null;
+  parserRows: ParserRowDisposition[];
+}
+
+export interface ParserRowDisposition {
+  id: string;
+  ruleId: string | null;
+  excerpt: string;
+  polarity: string;
+  magnitude: number;
+  disposition: 'superseded' | 'needs_review' | 'protected';
 }
 
 export interface AiTallyPreview {
@@ -744,6 +751,8 @@ export interface AiTallyPreview {
   rejected: { line: string; lineNumber: number; why: string }[];
   wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   protectedByUser: { playerId: string; excerpt: string }[];
+  parserSuperseded: ParserRowDisposition[];
+  parserNeedsReview: ParserRowDisposition[];
   tallyDelta: { playerId: string; playerName: string; net: number }[];
   detail: string;
 }
@@ -755,6 +764,8 @@ export interface AiTallyApplyOutcome {
   identityReviews: number;
   retired: number;
   protectedByUser: number;
+  parserSuperseded: number;
+  parserNeedsReview: number;
   playersTouched: number;
   detail: string;
 }
