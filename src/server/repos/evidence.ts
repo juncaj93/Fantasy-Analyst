@@ -174,15 +174,27 @@ export class EvidenceRepo {
     sourceMessageId: string,
     keepDedupeKeys: string[],
     note: string,
+    opts: { ruleId?: string } = {},
   ): Promise<{ superseded: EvidenceItem[]; keptForUserOverride: EvidenceItem[] }> {
     const keep = new Set(keepDedupeKeys);
+    /*
+     * `ruleId` narrows the sweep to one origin, and a caller that shares a
+     * message id with another origin must pass it.
+     *
+     * A newsletter's id is carried by whatever the deterministic parser found
+     * in it AND by whatever a tally import filed against it. Re-importing the
+     * tally recomputes only its own rows, so an unscoped sweep would read the
+     * parser's rows as leftovers and retire evidence the import never claimed
+     * to own.
+     */
     const rows = await this.db
       .prepare(
         `SELECT * FROM evidence_items
           WHERE source_message_id = ?
-            AND review_status IN ('auto_applied','accepted','corrected','pending')`,
+            AND review_status IN ('auto_applied','accepted','corrected','pending')
+            ${opts.ruleId ? 'AND rule_id = ?' : ''}`,
       )
-      .bind(sourceMessageId)
+      .bind(...(opts.ruleId ? [sourceMessageId, opts.ruleId] : [sourceMessageId]))
       .all<EvidenceRow>();
 
     const superseded: EvidenceItem[] = [];

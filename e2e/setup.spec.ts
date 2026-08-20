@@ -234,6 +234,88 @@ test.describe('newsletter setup', () => {
     await expect(panel.getByTestId('reprocess-apply')).toBeDisabled();
     await expect(panel.getByTestId('reprocess-apply')).toContainText('Nothing to add');
   });
+
+  /**
+   * The weekly import, end to end in the browser.
+   *
+   * The judgment in the block is not the app's to check, so what this asserts is
+   * everything around it: that nothing is written on paste, that a matched row
+   * and an unresolvable one are told apart before anything happens, and that
+   * applying twice is not a way to count a week twice.
+   */
+  test('imports a ChatGPT tally, previewing before it writes and refusing to double count', async ({
+    page,
+  }, testInfo) => {
+    /*
+     * A row's identity includes its reason, and the dev database is shared
+     * across projects and survives between runs — so a fixed reason would come
+     * back "already imported" the second time this ever ran, and the first half
+     * of this test would be asserting nothing. Varying it per project AND per
+     * run keeps the first paste genuinely new, which is the thing under test.
+     */
+    const reason = `Full command of the backfield (${testInfo.project.name} ${Date.now()})`;
+    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+    const toggle = message.getByTestId('newsletter-message-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.click();
+
+    const panel = message.getByTestId('chat-tally-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByTestId('copy-for-chatgpt')).toBeVisible();
+
+    await panel.getByTestId('open-paste-tally').click();
+    const sheet = page.getByTestId('paste-tally-sheet');
+    await expect(sheet).toBeVisible();
+
+    // A real reply: one name the dictionary knows, one it cannot pin down.
+    await sheet.getByTestId('paste-tally-input').fill(
+      [
+        'NEWSLETTER_TALLY_V1',
+        `Marcus Vance | +2 | ${reason}`,
+        'Somebody Nobody | +1 | Not in the player list at all',
+        'END_NEWSLETTER_TALLY',
+      ].join('\n'),
+    );
+    await sheet.getByTestId('paste-tally-check').click();
+
+    const preview = sheet.getByTestId('paste-tally-preview');
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText('Marcus Vance');
+    await expect(preview).toContainText('Ready to apply');
+    // The one that cannot be resolved is named rather than silently dropped.
+    await expect(preview).toContainText('Needs review');
+    await expect(preview).toContainText('not in the player list');
+
+    await sheet.getByTestId('paste-tally-apply').click();
+    await expect(panel).toContainText('applied');
+
+    // Second time round, the same block is already in the ledger.
+    await panel.getByTestId('open-paste-tally').click();
+    const again = page.getByTestId('paste-tally-sheet');
+    await again.getByTestId('paste-tally-input').fill(
+      [
+        'NEWSLETTER_TALLY_V1',
+        `Marcus Vance | +2 | ${reason}`,
+        'END_NEWSLETTER_TALLY',
+      ].join('\n'),
+    );
+    await again.getByTestId('paste-tally-check').click();
+    await expect(again.getByTestId('paste-tally-preview')).toContainText('Nothing would change');
+    await expect(again.getByTestId('paste-tally-apply')).toBeDisabled();
+  });
+
+  test('says plainly when a paste is not a tally', async ({ page }) => {
+    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+    const toggle = message.getByTestId('newsletter-message-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.click();
+
+    await message.getByTestId('chat-tally-panel').getByTestId('open-paste-tally').click();
+    const sheet = page.getByTestId('paste-tally-sheet');
+    await sheet.getByTestId('paste-tally-input').fill('here are my thoughts about the week');
+    await sheet.getByTestId('paste-tally-check').click();
+    await expect(sheet.getByTestId('paste-tally-preview')).toContainText('NEWSLETTER_TALLY_V1');
+  });
 });
 
 test.describe('rankings import', () => {

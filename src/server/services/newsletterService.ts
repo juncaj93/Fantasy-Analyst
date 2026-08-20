@@ -20,6 +20,14 @@ import {
   type NewsletterSourceConfig,
   type ProposedEvidence,
 } from '../../core/newsletter/pipeline.ts';
+import {
+  AI_TALLY_RULE_ID,
+  buildNewsletterSource,
+  importAiTally,
+  type AiTallyImportResult,
+} from '../../core/newsletter/aiTally.ts';
+import { extractBlocks } from '../../core/newsletter/html.ts';
+import { recoverBody } from '../../core/newsletter/mime.ts';
 import { DEFAULT_NEWSLETTER_SOURCES, type EmailSource } from '../../core/newsletter/source.ts';
 import { importTally, type TallyImportResult } from '../../core/newsletter/tally.ts';
 import { nowIso, type Database } from '../db.ts';
@@ -130,8 +138,73 @@ export interface TallyImportOutcome {
   detail: string;
 }
 
+export interface AiTallyPreviewRow {
+  name: string;
+  playerId: string;
+  playerName: string;
+  score: number;
+  reason: string;
+  dedupeKey: string;
+  /** Already in the ledger from an earlier paste of this same row. */
+  alreadyImported: boolean;
+  /** Held back because the same player was scored twice in one block. */
+  contested: boolean;
+  /**
+   * A live row the deterministic parser wrote for this player and newsletter,
+   * pointing the same way.
+   *
+   * Not blocked, because the two can legitimately describe different sentences
+   * in the same issue — but shown, because they can also be the same claim
+   * counted twice, and only the reader can tell.
+   */
+  overlapsRuleId: string | null;
+  overlapsExcerpt: string | null;
+}
+
+export interface AiTallyPreview {
+  messageId: string;
+  protocolOk: boolean;
+  error: string | null;
+  rowsParsed: number;
+  /** Rows ready to apply. */
+  ready: AiTallyPreviewRow[];
+  /** Rows already in the ledger; applying again changes nothing. */
+  duplicates: AiTallyPreviewRow[];
+  /** Rows held for a human: a contested score, or a name that did not resolve. */
+  pending: AiTallyPreviewRow[];
+  ambiguous: AiTallyImportResult['ambiguous'];
+  unmatched: AiTallyImportResult['unmatched'];
+  conflicts: string[];
+  rejected: AiTallyImportResult['rejected'];
+  /**
+   * Rows from an earlier paste for this newsletter that this one replaces.
+   *
+   * A revised tally supersedes rather than stacks, so a corrected score does
+   * not sit in the ledger beside the one it corrects.
+   */
+  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  /** Superseded-looking rows left alone because the user had ruled on them. */
+  protectedByUser: { playerId: string; excerpt: string }[];
+  tallyDelta: { playerId: string; playerName: string; net: number }[];
+  detail: string;
+}
+
+export interface AiTallyApplyOutcome {
+  messageId: string;
+  inserted: number;
+  alreadyPresent: number;
+  identityReviews: number;
+  retired: number;
+  protectedByUser: number;
+  playersTouched: number;
+  detail: string;
+}
+
 /** Bodies larger than this are rejected rather than parsed. */
 export const MAX_BODY_BYTES = 2_000_000;
+
+/** Pasted tally blocks larger than this are refused rather than parsed. */
+export const MAX_TALLY_BYTES = 200_000;
 
 function duplicate(messageId: string, detail: string): IngestOutcome {
   return {
@@ -549,6 +622,230 @@ export class NewsletterService {
         wouldRetire.length,
         repairs.length > 0,
       ),
+    };
+  }
+
+  // ------------------------------------------------------- ChatGPT tally ---
+
+  /**
+   * The newsletter as one block of text, ready to paste into a chat.
+   *
+   * Built from the same extracted blocks the parser reads, so whatever the app
+   * hands over has already been through MIME repair, charset decoding, HTML
+   * stripping, tracking-URL removal and boilerplate exclusion. The reader of
+   * that chat gets the article, not the delivery.
+   */
+  async chatSource(message: EmailMessage): Promise<string> {
+    const recovered = recoverBody({ html: message.html, text: message.text });
+    const body = recovered.html ?? recovered.text ?? '';
+    const blocks = extractBlocks(body, { isHtml: recovered.html != null ? true : undefined });
+    return buildNewsletterSource({
+      subject: message.subject ?? '',
+      receivedAt: message.receivedAt,
+      messageId: message.messageId,
+      blocks,
+    });
+  }
+
+  /**
+   * What pasting this tally would do. Writes nothing.
+   *
+   * The preview exists because the app cannot check the judgment in the block —
+   * it did not make it and will not second-guess it. What it can check is
+   * everything mechanical around it: that the protocol is intact, that each
+   * name is one player, that a row is not already in the ledger, and that a
+   * score is not about to land beside a deterministic row saying the same
+   * thing. Those are the ways an import goes wrong without anybody noticing.
+   */
+  async previewAiTally(message: EmailMessage, pasted: string): Promise<AiTallyPreview> {
+    const index = await this.players.buildIndex();
+    const sources = await this.getSources();
+    const source = qualifies(message, sources);
+    const result = importAiTally(pasted, index, {
+      sourceMessageId: message.messageId,
+      sourceDate: message.receivedAt,
+      sourceName: source?.label ?? message.from,
+    });
+
+    if (result.error) {
+      return {
+        messageId: message.messageId,
+        protocolOk: false,
+        error: result.error,
+        rowsParsed: 0,
+        ready: [],
+        duplicates: [],
+        pending: [],
+        ambiguous: [],
+        unmatched: [],
+        conflicts: [],
+        rejected: result.rejected,
+        wouldRetire: [],
+        protectedByUser: [],
+        tallyDelta: [],
+        detail: result.error,
+      };
+    }
+
+    const stored = await this.evidence.listByDedupeKeys(result.evidence.map((e) => e.dedupeKey));
+    // Everything the deterministic parser has live for this newsletter, so a
+    // row that would sit beside one of them can say so.
+    const live = await this.evidence.listLiveBySourceMessage(message.messageId);
+    const byRule = live.filter((row) => row.ruleId !== AI_TALLY_RULE_ID);
+
+    const ready: AiTallyPreviewRow[] = [];
+    const duplicates: AiTallyPreviewRow[] = [];
+    const pending: AiTallyPreviewRow[] = [];
+
+    for (const item of result.evidence) {
+      const already = stored.has(item.dedupeKey);
+      const overlap = byRule.find((row) => row.playerId === item.playerId && row.polarity === item.polarity);
+      const row: AiTallyPreviewRow = {
+        name: item.playerName,
+        playerId: item.playerId,
+        playerName: index.get(item.playerId)?.fullName ?? item.playerName,
+        score: item.polarity === 'negative' ? -item.magnitude : item.magnitude,
+        reason: item.excerpt,
+        dedupeKey: item.dedupeKey,
+        alreadyImported: already,
+        contested: item.reviewStatus === 'pending',
+        overlapsRuleId: overlap?.ruleId ?? null,
+        overlapsExcerpt: overlap?.excerpt ?? null,
+      };
+      if (already) duplicates.push(row);
+      else if (row.contested) pending.push(row);
+      else ready.push(row);
+    }
+
+    // A revised paste replaces the previous one rather than stacking beside it.
+    // Scoped to this import's own rows: the parser's evidence for the same
+    // newsletter is not this import's to retire.
+    const keep = new Set(result.evidence.map((e) => e.dedupeKey));
+    const priorImports = live.filter((row) => row.ruleId === AI_TALLY_RULE_ID && !keep.has(row.dedupeKey));
+    const wouldRetire = priorImports
+      .filter((row) => !row.userOverride)
+      .map((row) => ({
+        playerId: row.playerId,
+        excerpt: row.excerpt,
+        polarity: row.polarity,
+        magnitude: row.magnitude,
+      }));
+    const protectedByUser = priorImports
+      .filter((row) => row.userOverride)
+      .map((row) => ({ playerId: row.playerId, excerpt: row.excerpt }));
+
+    // What the tally actually moves: new rows in, replaced rows out.
+    const delta = new Map<string, number>();
+    const bump = (playerId: string, by: number) => delta.set(playerId, (delta.get(playerId) ?? 0) + by);
+    for (const row of ready) bump(row.playerId, row.score);
+    for (const row of wouldRetire) {
+      bump(row.playerId, row.polarity === 'positive' ? -row.magnitude : row.magnitude);
+    }
+
+    const parts = [`${result.rowsParsed} row(s) read.`];
+    if (ready.length) parts.push(`${ready.length} ready to apply.`);
+    if (duplicates.length) parts.push(`${duplicates.length} already imported.`);
+    if (pending.length + result.ambiguous.length + result.unmatched.length > 0) {
+      parts.push(`${pending.length + result.ambiguous.length + result.unmatched.length} need review.`);
+    }
+    if (wouldRetire.length) parts.push(`${wouldRetire.length} earlier row(s) would be replaced.`);
+    if (protectedByUser.length) {
+      parts.push(`${protectedByUser.length} row(s) you corrected stay as you set them.`);
+    }
+    if (result.rejected.length) parts.push(`${result.rejected.length} line(s) could not be read.`);
+    if (ready.length === 0 && wouldRetire.length === 0) parts.push('Nothing would change.');
+
+    return {
+      messageId: message.messageId,
+      protocolOk: true,
+      error: null,
+      rowsParsed: result.rowsParsed,
+      ready,
+      duplicates,
+      pending,
+      ambiguous: result.ambiguous,
+      unmatched: result.unmatched,
+      conflicts: result.conflicts,
+      rejected: result.rejected,
+      wouldRetire,
+      protectedByUser,
+      tallyDelta: [...delta.entries()]
+        .filter(([, net]) => net !== 0)
+        .map(([playerId, net]) => ({
+          playerId,
+          playerName: index.get(playerId)?.fullName ?? playerId,
+          net,
+        }))
+        .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)),
+      detail: parts.join(' '),
+    };
+  }
+
+  /**
+   * Write what the preview described.
+   *
+   * Inserts are deduped on the row's own identity, so pasting the same block
+   * twice inserts nothing the second time. A revised block retires the rows it
+   * replaces — never the parser's, and never one the user has ruled on.
+   */
+  async applyAiTally(message: EmailMessage, pasted: string): Promise<AiTallyApplyOutcome> {
+    const index = await this.players.buildIndex();
+    const sources = await this.getSources();
+    const source = qualifies(message, sources);
+    const result = importAiTally(pasted, index, {
+      sourceMessageId: message.messageId,
+      sourceDate: message.receivedAt,
+      sourceName: source?.label ?? message.from,
+    });
+
+    if (result.error) {
+      return {
+        messageId: message.messageId,
+        inserted: 0,
+        alreadyPresent: 0,
+        identityReviews: 0,
+        retired: 0,
+        protectedByUser: 0,
+        playersTouched: 0,
+        detail: result.error,
+      };
+    }
+
+    const { inserted, skipped } = await this.evidence.insertProposed(result.evidence);
+    const identityReviews = await this.messages.insertIdentityReviews(result.identityReviews);
+    const { superseded, keptForUserOverride } = await this.evidence.supersedeStaleImports(
+      message.messageId,
+      result.evidence.map((e) => e.dedupeKey),
+      'superseded-by-newer-tally-import',
+      { ruleId: AI_TALLY_RULE_ID },
+    );
+
+    const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
+    const touched = new Set([
+      ...result.evidence.map((e) => e.playerId),
+      ...superseded.map((e) => e.playerId),
+    ]);
+    for (const playerId of touched) {
+      await this.evidence.refreshSignal(playerId, { seasonStart });
+    }
+
+    const parts = [`${inserted} item(s) applied.`];
+    if (skipped) parts.push(`${skipped} were already imported.`);
+    if (superseded.length) parts.push(`${superseded.length} earlier row(s) were replaced.`);
+    if (keptForUserOverride.length) {
+      parts.push(`${keptForUserOverride.length} row(s) you corrected were left as you set them.`);
+    }
+    if (identityReviews) parts.push(`${identityReviews} name(s) are waiting in Review.`);
+
+    return {
+      messageId: message.messageId,
+      inserted,
+      alreadyPresent: skipped,
+      identityReviews,
+      retired: superseded.length,
+      protectedByUser: keptForUserOverride.length,
+      playersTouched: touched.size,
+      detail: parts.join(' '),
     };
   }
 

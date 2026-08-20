@@ -13,12 +13,14 @@ import {
   type NewsletterMessage,
   type NewsletterStatus,
   type RepairStatus,
+  type AiTallyApplyOutcome,
+  type AiTallyPreview,
   type ReprocessPreview,
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
-import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl } from '../components/native.tsx';
+import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 
 import { PlayerPicker } from './ReviewScreen.tsx';
@@ -1127,6 +1129,7 @@ function NewsletterHistory() {
                           </div>
                         </>
                       ) : null}
+                      {m.bodyRetained ? <ChatTallyPanel messageId={m.messageId} /> : null}
                       {m.bodyRetained ? <ReprocessPanel messageId={m.messageId} /> : null}
                     </>
                   ) : null}
@@ -1137,6 +1140,224 @@ function NewsletterHistory() {
         })
       )}
     </>
+  );
+}
+
+/**
+ * The weekly one-minute import.
+ *
+ * The app cannot judge what a paragraph of analysis means for a player, and is
+ * not going to pretend to. What it can do is remove every other step: hand the
+ * cleaned article over in one tap, read a strict answer back, resolve the names,
+ * and show exactly what would change before anything is written.
+ *
+ * Two controls, in the order they are used. Nothing applies on paste — the
+ * preview is the point, because the app is importing somebody else's judgment
+ * and the reader is the only one who can check it.
+ */
+function ChatTallyPanel({ messageId }: { messageId: string }) {
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [preview, setPreview] = useState<AiTallyPreview | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const path = `/api/newsletter/messages/${encodeURIComponent(messageId)}`;
+
+  const copy = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { source } = await api.get<{ source: string }>(`${path}/chat-source`, { fresh: true });
+      /*
+       * The clipboard API is unavailable outside a secure context and can be
+       * refused even inside one, so a failure falls back to a selectable
+       * textarea rather than leaving the reader with a button that did nothing.
+       */
+      await navigator.clipboard.writeText(source);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not reach the clipboard. Open Paste AI Tally and copy the text from there.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const check = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setPreview(await api.post<AiTallyPreview>(`${path}/ai-tally/preview`, { text: pasted }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.post<AiTallyApplyOutcome>(`${path}/ai-tally/apply`, { text: pasted });
+      setDone(result.detail);
+      setPreview(null);
+      setPasted('');
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ready = preview?.ready ?? [];
+  const needsReview =
+    (preview?.pending.length ?? 0) + (preview?.ambiguous.length ?? 0) + (preview?.unmatched.length ?? 0);
+
+  return (
+    <div style={{ marginTop: 8 }} data-testid="chat-tally-panel">
+      <div className="section-title">Score this issue with ChatGPT</div>
+      {done ? <Notice tone="ok">{done}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+
+      <div className="btn-row">
+        <button className="btn btn-sm" onClick={copy} disabled={busy} data-testid="copy-for-chatgpt">
+          {copied ? 'Copied for ChatGPT' : 'Copy for ChatGPT'}
+        </button>
+        <button className="btn btn-sm" onClick={() => setOpen(true)} data-testid="open-paste-tally">
+          Paste AI Tally
+        </button>
+      </div>
+      <div className="faint" style={{ marginTop: 4 }}>
+        Paste the issue into your weekly ChatGPT thread, then bring its tally back here.
+      </div>
+
+      {open ? (
+        <Sheet title="Paste AI Tally" onClose={() => setOpen(false)} testId="paste-tally-sheet">
+          {/*
+            Capped, not free-running.
+
+            The base `textarea` rule sets a 110px floor that `rows` cannot
+            undercut, and a sheet is sized to its own content — so a tall paste
+            box pushed Parse / Preview past the bottom of a 390pt phone, where
+            it was drawn but could not be reached or tapped. This box is for
+            confirming you pasted the right thing, not for reading a week of
+            analysis in.
+          */}
+          <textarea
+            style={{ display: 'block', minHeight: 76, maxHeight: '28vh' }}
+            rows={4}
+            value={pasted}
+            placeholder={'NEWSLETTER_TALLY_V1\nChris Olave | +2 | Elite target share\nEND_NEWSLETTER_TALLY'}
+            onChange={(e) => {
+              setPasted(e.target.value);
+              // A stale preview beside edited text is worse than none.
+              setPreview(null);
+            }}
+            data-testid="paste-tally-input"
+          />
+          <div className="btn-row" style={{ marginTop: 8 }}>
+            <button
+              className="btn btn-sm"
+              onClick={check}
+              disabled={busy || !pasted.trim()}
+              data-testid="paste-tally-check"
+            >
+              {busy ? 'Checking…' : 'Parse / Preview'}
+            </button>
+          </div>
+
+          {preview ? (
+            <div className="explain" style={{ marginTop: 8 }} data-testid="paste-tally-preview">
+              {preview.error ? <Notice tone="error">{preview.error}</Notice> : null}
+              <div className="muted">{preview.detail}</div>
+
+              {ready.length > 0 ? (
+                <>
+                  <div className="section-title">Ready to apply</div>
+                  <ul style={{ paddingLeft: 16, margin: 0 }}>
+                    {ready.map((row) => (
+                      <li key={row.dedupeKey} style={{ marginBottom: 6 }}>
+                        <strong>{row.playerName}</strong> {row.score > 0 ? `+${row.score}` : row.score}
+                        <div className="faint">{row.reason}</div>
+                        {row.overlapsRuleId ? (
+                          <div className="faint">
+                            Note: this app already read something similar from this issue — “
+                            {row.overlapsExcerpt}”. Applying both counts it twice.
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {preview.wouldRetire.length > 0 ? (
+                <div className="faint" style={{ marginTop: 4 }}>
+                  {preview.wouldRetire.length} earlier row(s) from this newsletter would be replaced.
+                </div>
+              ) : null}
+
+              {needsReview > 0 ? (
+                <>
+                  <div className="section-title">Needs review</div>
+                  <ul style={{ paddingLeft: 16, margin: 0 }}>
+                    {preview.ambiguous.map((row) => (
+                      <li key={`a-${row.name}`} className="faint">
+                        {row.name} — more than one player has this name
+                      </li>
+                    ))}
+                    {preview.unmatched.map((row) => (
+                      <li key={`u-${row.name}`} className="faint">
+                        {row.name} — not in the player list
+                      </li>
+                    ))}
+                    {preview.pending.map((row) => (
+                      <li key={row.dedupeKey} className="faint">
+                        {row.playerName} — scored twice in one block
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="faint" style={{ marginTop: 4 }}>
+                    These wait in Review. The matched rows above can still be applied.
+                  </div>
+                </>
+              ) : null}
+
+              {preview.rejected.length > 0 ? (
+                <>
+                  <div className="section-title">Lines that could not be read</div>
+                  <ul style={{ paddingLeft: 16, margin: 0 }}>
+                    {preview.rejected.map((row) => (
+                      <li key={row.lineNumber} className="faint">
+                        “{row.line}” — {row.why}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              <div className="btn-row" style={{ marginTop: 8 }}>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={apply}
+                  disabled={busy || (ready.length === 0 && preview.wouldRetire.length === 0)}
+                  data-testid="paste-tally-apply"
+                >
+                  {ready.length === 0 && preview.wouldRetire.length === 0
+                    ? 'Nothing to apply'
+                    : `Apply ${ready.length} matched signal(s)`}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </Sheet>
+      ) : null}
+    </div>
   );
 }
 
