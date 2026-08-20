@@ -4,17 +4,19 @@ import { describe, expect, it } from 'vitest';
 
 /*
  * The WebKit jobs run inside the official Playwright container image, and the
- * image tag has to match the `@playwright/test` in package.json.
+ * image tag has to stay in step with the Playwright the lockfile resolves to.
  *
- * This is not a style rule. The image ships the browser builds for exactly one
- * Playwright release, so a mismatch means the test runner looks for a browser
- * revision that is not in the image and dies with "Executable doesn't exist" --
- * after checkout, after `npm ci`, inside a job that takes several minutes to
- * get there, on all four widths at once. A dependency bump is the obvious way
- * to cause it and gives no local signal at all, because nothing on a developer
- * machine reads these files.
+ * Both workflows already notice drift for themselves — they compare the two and
+ * download the browser the installed Playwright wants, so a mismatch degrades to
+ * a warning and a minute of download rather than a broken job. That is the right
+ * behaviour in CI, and it is also the reason drift can persist: a warning costs
+ * a minute per width per push and nothing ever forces anyone to read it.
  *
- * So it fails here instead: in `npm test`, in a second, naming the fix.
+ * This is the half that CI cannot do. `@playwright/test` is a caret range, so
+ * the bump that causes drift is a lockfile update with no local signal at all —
+ * nothing on a developer machine reads these files. Failing here puts the repin
+ * in front of whoever ran `npm install`, in a second, before the minute-per-job
+ * starts being paid.
  */
 const ROOT = join(import.meta.dirname, '..');
 
@@ -25,53 +27,58 @@ const BROWSER_WORKFLOWS = ['.github/workflows/ci.yml', '.github/workflows/smoke.
  * From the lockfile, not from package.json.
  *
  * package.json asks for a range (`^1.49.1`), and a range is not a version: CI
- * runs `npm ci`, which installs precisely what package-lock.json resolved --
- * 1.62.1 today. Checking the range would compare the image against a number
- * nobody is running, and would go on passing through exactly the bump this
- * test exists to catch.
+ * runs `npm ci`, which installs precisely what package-lock.json resolved.
+ * Checking the range would compare the image against a number nobody is
+ * running, and would go on passing through exactly the bump this exists to
+ * catch.
  */
-function installedPlaywrightVersion(): string {
+function lockedPlaywrightVersion(): string {
   const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
   const version: string | undefined = lock.packages?.['node_modules/@playwright/test']?.version;
   expect(version, '@playwright/test should be in the lockfile').toBeTruthy();
-  return version!;
+  return version as string;
 }
 
-/** The `container:` tags a workflow declares, without the registry prefix. */
-function containerTags(workflow: string): string[] {
+/**
+ * The image tags a workflow pins.
+ *
+ * Both spellings YAML allows for `container:` — the bare string and the mapping
+ * with `image:` — because a job that grows an `options:` line changes from one
+ * to the other, and a checker that only understood the old spelling would go
+ * quietly green on a file it could no longer see.
+ */
+function containerImages(workflow: string): string[] {
   const yaml = readFileSync(join(ROOT, workflow), 'utf8');
-  return [...yaml.matchAll(/^\s*container:\s*(\S+)\s*$/gm)].map((m) => m[1] ?? '');
+  return [
+    ...[...yaml.matchAll(/^\s*container:\s*(\S+)\s*$/gm)].map((m) => m[1] ?? ''),
+    ...[...yaml.matchAll(/^\s*image:\s*(mcr\.microsoft\.com\/playwright\S*)\s*$/gm)].map((m) => m[1] ?? ''),
+  ];
 }
 
 describe('the WebKit container tag tracks the installed Playwright', () => {
-  it.each(BROWSER_WORKFLOWS)('%s pins the official image', (workflow) => {
-    const tags = containerTags(workflow);
-    expect(tags.length, `${workflow} should run its browser job in a container`).toBe(1);
-    expect(tags[0]).toMatch(/^mcr\.microsoft\.com\/playwright:v[\d.]+-\w+$/);
+  it.each(BROWSER_WORKFLOWS)('%s runs its browser job in the official image', (workflow) => {
+    const images = containerImages(workflow);
+    expect(images.length, `${workflow} should pin exactly one container image`).toBe(1);
+    expect(images[0]).toMatch(/^mcr\.microsoft\.com\/playwright:v[\d.]+-\w+$/);
   });
 
-  it.each(BROWSER_WORKFLOWS)('%s matches package.json', (workflow) => {
-    const version = installedPlaywrightVersion();
-    expect(containerTags(workflow)[0]).toBe(`mcr.microsoft.com/playwright:v${version}-noble`);
+  it.each(BROWSER_WORKFLOWS)('%s pins the version the lockfile resolves to', (workflow) => {
+    expect(containerImages(workflow)[0]).toBe(
+      `mcr.microsoft.com/playwright:v${lockedPlaywrightVersion()}-noble`,
+    );
   });
 
   /*
-   * The image carries WebKit and everything it links against. Installing the
-   * browser again on top of it is at best wasted minutes, and at worst the
-   * thing that has already broken this repository twice: `--with-deps` pulls
-   * WebKit's system packages from apt, and apt is what hung -- once for
-   * thirty-four minutes, until the job timeout killed it.
+   * The workflows' own drift check hardcodes the version it compares against,
+   * because a shell step cannot import this file. So the number it quotes has
+   * to be the number the image is tagged with, or it warns about the wrong
+   * thing — or, worse, stays silent through a real mismatch.
    */
-  it.each(BROWSER_WORKFLOWS)('%s does not install a browser on top of the image', (workflow) => {
-    // Comments are dropped first: the notes in both files quote the old
-    // `playwright install --with-deps webkit` command on purpose, to record
-    // what went wrong, and that history should not trip its own guard.
-    const executable = readFileSync(join(ROOT, workflow), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-    expect(executable, `${workflow} should not install a browser`).not.toMatch(
-      /playwright\s+install/,
-    );
+  it.each(BROWSER_WORKFLOWS)('%s compares against the tag it actually pins', (workflow) => {
+    const tag = containerImages(workflow)[0]!.replace(/^.*:v/, '').replace(/-\w+$/, '');
+    const yaml = readFileSync(join(ROOT, workflow), 'utf8');
+    const compared = [...yaml.matchAll(/\[ "\$wanted" != "([\d.]+)" \]/g)].map((m) => m[1]);
+    expect(compared.length, `${workflow} should check the lockfile against its pin`).toBeGreaterThan(0);
+    for (const version of compared) expect(version).toBe(tag);
   });
 });
