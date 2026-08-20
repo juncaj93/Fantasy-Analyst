@@ -1137,6 +1137,14 @@ test.describe('the decision intelligence', () => {
         // Whether the deployment holds a season-market snapshot at all, which
         // is a different fact from a board whose players went unmatched.
         marketSource: data.marketSource ?? null,
+        // …and how much is *in* that snapshot, which is a third fact again. A
+        // provider can run, store a snapshot, and have published nothing.
+        snapshot: await (async () => {
+          const res = await fetch('/api/vegas/season');
+          if (!res.ok) return null;
+          const status = await res.json();
+          return { quotes: status?.quotes ?? null, players: status?.players ?? null, reason: status?.reason ?? null };
+        })(),
         rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
           position: r['position'],
           marketProps: r['marketProps'],
@@ -1173,33 +1181,47 @@ test.describe('the decision intelligence', () => {
       : 'no season-market snapshot on this deployment';
     console.log(
       `market coverage — ${summary.join(' | ')}; ` +
-        `${priced.length}/${rows.length} of the board priced; source: ${source}; scoring: ${board!.scoringLabel}`,
+        `${priced.length}/${rows.length} of the board priced; source: ${source}; ` +
+        `snapshot: ${board!.snapshot?.quotes ?? '?'} quotes / ${board!.snapshot?.players ?? '?'} players; ` +
+        `scoring: ${board!.scoringLabel}`,
     );
 
     /*
-     * Two different facts, and only one of them is a defect.
+     * Three different facts, and only the last is a defect.
      *
-     * A deployment holding a snapshot whose players are all unpriced means the
-     * pipeline between the snapshot and the card is broken — that fails, with
-     * the counts attached. A deployment holding no snapshot at all means the
-     * configured provider published nothing to store: `mock` runs with an empty
-     * slate in production, and SportsGameOdds does not publish season-long
-     * player markets at all (probed, and asserted in season.markets.test.ts).
-     * There is no card to check because there is no market, and failing every
-     * smoke run over it would train the next reader to ignore a red smoke.
+     * 1. **No snapshot at all.** Nothing has been stored, so there is no market
+     *    to put on a card.
+     * 2. **A snapshot holding nothing.** The provider ran and published no
+     *    season markets. `mock` is constructed with an empty slate in
+     *    production, and SportsGameOdds publishes no season-long player markets
+     *    at all — probed, and asserted in `season.markets.test.ts`. An empty
+     *    snapshot is the honest record of that, not a fault.
+     * 3. **A snapshot with quotes in it that reach no card.** *That* is a
+     *    broken pipeline, and it fails with the counts attached.
      *
-     * So that case skips — but only after the line above has printed what the
-     * deployment actually holds. That is the whole difference from the first
-     * draft of this test, which skipped on an empty board and said nothing: the
-     * skip reason now names the cause, and the run carries the numbers.
+     * The middle case is the one this test got wrong. It had only the two-way
+     * split, so the day a daily refresh began storing empty snapshots the check
+     * went red on every production run for a condition that is not a fault —
+     * which is the same "train the reader to ignore a red smoke" failure the
+     * two-way split was written to avoid, arrived at from the other side.
+     *
+     * Both non-defects skip, and both name their cause. The coverage line above
+     * has already printed either way.
      */
+    const quotes = board!.snapshot?.quotes ?? null;
     test.skip(
       !board!.marketSource,
       `no season-market snapshot on this deployment, so no card can carry a market line (${rows.length} rows on the board)`,
     );
+    test.skip(
+      quotes === 0,
+      `the snapshot is empty — the provider published no season markets (${source}; ` +
+        `reason: ${board!.snapshot?.reason ?? 'none given'})`,
+    );
     expect(
       priced.length,
-      `the deployment holds a snapshot (${source}) but no player on the live board carries a market line (${rows.length} rows)`,
+      `the deployment holds a snapshot of ${quotes ?? 'an unknown number of'} quotes (${source}) ` +
+        `but no player on the live board carries a market line (${rows.length} rows)`,
     ).toBeGreaterThan(0);
 
     // Whatever is priced has to be priced honestly, whichever position it is.
