@@ -208,6 +208,90 @@ export class EvidenceRepo {
   }
 
   /**
+   * Rows an earlier revision retired, that this paste is asking for again.
+   *
+   * Inserts are keyed on the row's own identity, so a row that was written,
+   * retired by a revision, and then written again by a later revision is not an
+   * insert at all — the key is already taken and `ON CONFLICT DO NOTHING` means
+   * exactly that. Without this the row would stay retired while the import
+   * reported it as already present, which is the worst of both: the user is
+   * told their score is in the ledger and it is not counting.
+   *
+   * Narrow on purpose: what can be undone here is only what an import did.
+   * Eligibility needs the note this mechanism writes AND no trace of a person
+   * having ruled on the row. Both, because neither alone is enough — retiring
+   * a row by hand leaves the same `ignored` status an import leaves, with no
+   * override and no note to tell them apart, and reinstating that would be an
+   * import overruling a decision. `user_reviews` is the ledger's own record
+   * that somebody decided something, so it is what gets asked.
+   */
+  private async retiredByImport(dedupeKeys: string[], note: string): Promise<EvidenceRow[]> {
+    const unique = [...new Set(dedupeKeys)].filter(Boolean);
+    if (unique.length === 0) return [];
+    const found: EvidenceRow[] = [];
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT * FROM evidence_items
+            WHERE dedupe_key IN (${placeholders})
+              AND review_status = 'ignored'
+              AND NOT EXISTS (
+                SELECT 1 FROM user_reviews WHERE user_reviews.evidence_item_id = evidence_items.id
+              )`,
+        )
+        .bind(...batch)
+        .all<EvidenceRow>();
+      for (const row of rows.results) {
+        if (parseJson<EvidenceOverride | null>(row.user_override_json, null)) continue;
+        if (!parseJson<string[]>(row.notes_json, []).includes(note)) continue;
+        found.push(row);
+      }
+    }
+    return found;
+  }
+
+  /** The read-only half of `reinstateRetiredImports`, for a preview to report. */
+  async listRetiredImports(dedupeKeys: string[], note: string): Promise<Map<string, EvidenceItem>> {
+    const found = new Map<string, EvidenceItem>();
+    for (const row of await this.retiredByImport(dedupeKeys, note)) {
+      found.set(row.dedupe_key, toItem(row));
+    }
+    return found;
+  }
+
+  /**
+   * Bring those rows back into the counted set.
+   *
+   * Idempotent for the same reason everything else here is: a row already live
+   * is not `ignored`, so a second run finds nothing to do.
+   */
+  async reinstateRetiredImports(
+    dedupeKeys: string[],
+    note: string,
+    reinstateNote: string,
+    status: ReviewStatus = 'auto_applied',
+  ): Promise<EvidenceItem[]> {
+    const rows = await this.retiredByImport(dedupeKeys, note);
+    if (rows.length === 0) return [];
+    const now = nowIso();
+    const reinstated: EvidenceItem[] = [];
+    for (const row of rows) {
+      const notes = parseJson<string[]>(row.notes_json, []);
+      await this.db
+        .prepare(
+          `UPDATE evidence_items
+              SET review_status = ?, notes_json = ?, updated_at = ?
+            WHERE id = ?`,
+        )
+        .bind(status, toJson([...notes, reinstateNote]), now, row.id)
+        .run();
+      reinstated.push({ ...toItem(row), reviewStatus: status });
+    }
+    return reinstated;
+  }
+
+  /**
    * Retire evidence a re-import has replaced.
    *
    * A tally document owns every row that carries its message id. Re-importing it

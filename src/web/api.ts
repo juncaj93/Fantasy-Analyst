@@ -743,13 +743,15 @@ export interface AiTallyPreview {
   error: string | null;
   rowsParsed: number;
   ready: AiTallyPreviewRow[];
+  /** Already in the ledger, retired by a later paste, and asked for again. */
+  reinstated: AiTallyPreviewRow[];
   duplicates: AiTallyPreviewRow[];
   pending: AiTallyPreviewRow[];
   ambiguous: { name: string; score: number; reason: string; candidates: string[] }[];
   unmatched: { name: string; score: number; reason: string }[];
   conflicts: string[];
   rejected: { line: string; lineNumber: number; why: string }[];
-  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  wouldRetire: { id: string; playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   protectedByUser: { playerId: string; excerpt: string }[];
   parserSuperseded: ParserRowDisposition[];
   parserNeedsReview: ParserRowDisposition[];
@@ -760,6 +762,7 @@ export interface AiTallyPreview {
 export interface AiTallyApplyOutcome {
   messageId: string;
   inserted: number;
+  reinstated: number;
   alreadyPresent: number;
   identityReviews: number;
   retired: number;

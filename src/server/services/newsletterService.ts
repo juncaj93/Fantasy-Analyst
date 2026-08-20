@@ -10,6 +10,7 @@
  * fingerprint) is skipped, and evidence inserts are deduped independently.
  */
 
+import { effectiveEvidence } from '../../core/evidence/aggregate.ts';
 import type { EvidenceItem } from '../../core/evidence/types.ts';
 import { contentFingerprint } from '../../core/newsletter/fingerprint.ts';
 import {
@@ -22,7 +23,9 @@ import {
   type ProposedEvidence,
 } from '../../core/newsletter/pipeline.ts';
 import {
+  AI_TALLY_REINSTATED_NOTE,
   AI_TALLY_RULE_ID,
+  AI_TALLY_SUPERSEDED_NOTE,
   buildNewsletterSource,
   importAiTally,
   type AiTallyImportResult,
@@ -184,7 +187,15 @@ export interface AiTallyPreview {
   rowsParsed: number;
   /** Rows ready to apply. */
   ready: AiTallyPreviewRow[];
-  /** Rows already in the ledger; applying again changes nothing. */
+  /**
+   * Rows a later revision retired that this paste asks for again.
+   *
+   * Reported apart from `ready` because nothing is inserted for them — the row
+   * is already in the ledger, and what changes is that it counts again. Apart
+   * from `duplicates` too, because those are already counting and these are not.
+   */
+  reinstated: AiTallyPreviewRow[];
+  /** Rows already in the ledger and counting; applying again changes nothing. */
   duplicates: AiTallyPreviewRow[];
   /** Rows held for a human: a contested score, or a name that did not resolve. */
   pending: AiTallyPreviewRow[];
@@ -198,7 +209,7 @@ export interface AiTallyPreview {
    * A revised tally supersedes rather than stacks, so a corrected score does
    * not sit in the ledger beside the one it corrects.
    */
-  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  wouldRetire: { id: string; playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   /** Superseded-looking rows left alone because the user had ruled on them. */
   protectedByUser: { playerId: string; excerpt: string }[];
   /**
@@ -216,6 +227,8 @@ export interface AiTallyPreview {
 export interface AiTallyApplyOutcome {
   messageId: string;
   inserted: number;
+  /** Rows a later revision had retired that this paste brought back. */
+  reinstated: number;
   alreadyPresent: number;
   identityReviews: number;
   retired: number;
@@ -751,6 +764,7 @@ export class NewsletterService {
         error: result.error,
         rowsParsed: 0,
         ready: [],
+        reinstated: [],
         duplicates: [],
         pending: [],
         ambiguous: [],
@@ -766,14 +780,18 @@ export class NewsletterService {
       };
     }
 
-    const stored = await this.evidence.listByDedupeKeys(result.evidence.map((e) => e.dedupeKey));
+    const keys = result.evidence.map((e) => e.dedupeKey);
+    const stored = await this.evidence.listByDedupeKeys(keys);
     const live = await this.evidence.listLiveBySourceMessage(message.messageId);
+    // Rows an earlier revision of this tally retired, that this one asks for again.
+    const retiredEarlier = await this.evidence.listRetiredImports(keys, AI_TALLY_SUPERSEDED_NOTE);
     // What the parser found for these same players, and what happens to it.
     const displaced = this.planParserDisplacement(live, result.evidence);
 
     const ready: AiTallyPreviewRow[] = [];
     const duplicates: AiTallyPreviewRow[] = [];
     const pending: AiTallyPreviewRow[] = [];
+    const reinstated: AiTallyPreviewRow[] = [];
 
     for (const item of result.evidence) {
       const already = stored.has(item.dedupeKey);
@@ -788,8 +806,12 @@ export class NewsletterService {
         contested: item.reviewStatus === 'pending',
         parserRows: displaced.get(item.playerId) ?? [],
       };
-      if (already) duplicates.push(row);
-      else if (row.contested) pending.push(row);
+      if (row.contested) pending.push(row);
+      // Present but retired by a later revision, and asked for again: it comes
+      // back rather than being reported as already imported while counting
+      // nothing.
+      else if (retiredEarlier.has(item.dedupeKey)) reinstated.push(row);
+      else if (already) duplicates.push(row);
       else ready.push(row);
     }
 
@@ -801,6 +823,7 @@ export class NewsletterService {
     const wouldRetire = priorImports
       .filter((row) => !row.userOverride)
       .map((row) => ({
+        id: row.id,
         playerId: row.playerId,
         excerpt: row.excerpt,
         polarity: row.polarity,
@@ -811,23 +834,36 @@ export class NewsletterService {
       .map((row) => ({ playerId: row.playerId, excerpt: row.excerpt }));
 
     /*
-     * What the tally actually moves: new rows in, replaced rows out, and the
-     * parser's own rows for these players out too.
+     * What the tally actually moves: new rows in, rows an earlier revision
+     * retired back in, replaced rows out, and the parser's own rows for these
+     * players out too.
      *
      * Counting only the arrivals would advertise a number the ledger will not
      * show, because applying this also stops the parser's reading of the same
      * player from contributing.
+     *
+     * What leaves is measured by what the row contributes today, not by its
+     * polarity and magnitude. Those two are the same number only for a row that
+     * is currently counted, and plenty of the rows here are not: a score held
+     * back as contested, or a parser row a previous paste already parked,
+     * contributes nothing, so retiring it moves nothing. `effectiveEvidence` is
+     * the ledger's own answer to that question — asking it is what keeps the
+     * promise the preview makes equal to the move the tally makes.
      */
     const delta = new Map<string, number>();
     const bump = (playerId: string, by: number) => delta.set(playerId, (delta.get(playerId) ?? 0) + by);
-    const signedOf = (polarity: string, magnitude: number) =>
-      polarity === 'positive' ? magnitude : polarity === 'negative' ? -magnitude : 0;
+    const contributes = new Map<string, number>();
+    for (const row of live) contributes.set(row.id, effectiveEvidence(row).delta);
     for (const row of ready) bump(row.playerId, row.score);
-    for (const row of wouldRetire) bump(row.playerId, -signedOf(row.polarity, row.magnitude));
+    for (const row of reinstated) bump(row.playerId, row.score);
+    for (const row of priorImports) {
+      if (row.userOverride) continue;
+      bump(row.playerId, -(contributes.get(row.id) ?? 0));
+    }
     for (const [playerId, rows] of displaced) {
       for (const row of rows) {
         if (row.disposition === 'protected') continue;
-        bump(playerId, -signedOf(row.polarity, row.magnitude));
+        bump(playerId, -(contributes.get(row.id) ?? 0));
       }
     }
 
@@ -838,6 +874,9 @@ export class NewsletterService {
 
     const parts = [`${result.rowsParsed} row(s) read.`];
     if (ready.length) parts.push(`${ready.length} ready to apply.`);
+    if (reinstated.length) {
+      parts.push(`${reinstated.length} row(s) a later paste had retired would count again.`);
+    }
     if (duplicates.length) parts.push(`${duplicates.length} already imported.`);
     if (pending.length + result.ambiguous.length + result.unmatched.length > 0) {
       parts.push(`${pending.length + result.ambiguous.length + result.unmatched.length} need review.`);
@@ -861,7 +900,13 @@ export class NewsletterService {
       parts.push(`${parserProtected.length} item(s) you corrected stay exactly as you set them.`);
     }
     if (result.rejected.length) parts.push(`${result.rejected.length} line(s) could not be read.`);
-    if (ready.length === 0 && wouldRetire.length === 0 && parserSuperseded.length === 0 && parserNeedsReview.length === 0) {
+    if (
+      ready.length === 0 &&
+      reinstated.length === 0 &&
+      wouldRetire.length === 0 &&
+      parserSuperseded.length === 0 &&
+      parserNeedsReview.length === 0
+    ) {
       parts.push('Nothing would change.');
     }
 
@@ -871,6 +916,7 @@ export class NewsletterService {
       error: null,
       rowsParsed: result.rowsParsed,
       ready,
+      reinstated,
       duplicates,
       pending,
       ambiguous: result.ambiguous,
@@ -914,6 +960,7 @@ export class NewsletterService {
       return {
         messageId: message.messageId,
         inserted: 0,
+        reinstated: 0,
         alreadyPresent: 0,
         identityReviews: 0,
         retired: 0,
@@ -927,10 +974,23 @@ export class NewsletterService {
 
     const { inserted, skipped } = await this.evidence.insertProposed(result.evidence);
     const identityReviews = await this.messages.insertIdentityReviews(result.identityReviews);
+
+    /*
+     * A row this tally asks for may already exist and be retired, because an
+     * earlier revision replaced it and a later one has brought it back. The
+     * insert above did nothing for it — the key was taken — so without this it
+     * would be reported as already present while contributing nothing.
+     */
+    const reinstated = await this.evidence.reinstateRetiredImports(
+      result.evidence.filter((e) => e.reviewStatus === 'auto_applied').map((e) => e.dedupeKey),
+      AI_TALLY_SUPERSEDED_NOTE,
+      AI_TALLY_REINSTATED_NOTE,
+    );
+
     const { superseded, keptForUserOverride } = await this.evidence.supersedeStaleImports(
       message.messageId,
       result.evidence.map((e) => e.dedupeKey),
-      'superseded-by-newer-tally-import',
+      AI_TALLY_SUPERSEDED_NOTE,
       { ruleId: AI_TALLY_RULE_ID },
     );
 
@@ -958,6 +1018,7 @@ export class NewsletterService {
     const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
     const touched = new Set([
       ...result.evidence.map((e) => e.playerId),
+      ...reinstated.map((e) => e.playerId),
       ...superseded.map((e) => e.playerId),
       ...retiredParser.changed.map((e) => e.playerId),
       ...reviewParser.changed.map((e) => e.playerId),
@@ -966,8 +1027,14 @@ export class NewsletterService {
       await this.evidence.refreshSignal(playerId, { seasonStart });
     }
 
+    // A reinstated row was "already present" to the insert, and did change. It
+    // is reported as its own outcome so the two are not conflated.
+    const alreadyPresent = Math.max(0, skipped - reinstated.length);
     const parts = [`${inserted} item(s) applied.`];
-    if (skipped) parts.push(`${skipped} were already imported.`);
+    if (reinstated.length) {
+      parts.push(`${reinstated.length} row(s) a later paste had retired count again.`);
+    }
+    if (alreadyPresent) parts.push(`${alreadyPresent} were already imported.`);
     if (superseded.length) parts.push(`${superseded.length} earlier row(s) were replaced.`);
     if (retiredParser.changed.length) {
       parts.push(
@@ -988,7 +1055,8 @@ export class NewsletterService {
     return {
       messageId: message.messageId,
       inserted,
-      alreadyPresent: skipped,
+      reinstated: reinstated.length,
+      alreadyPresent,
       identityReviews,
       retired: superseded.length,
       protectedByUser:

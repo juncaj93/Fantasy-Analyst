@@ -1,0 +1,158 @@
+name: Inspect a newsletter's tally state
+
+# What one newsletter currently contributes, and what pasting a tally over it
+# would do.
+#
+# Two questions, both reads. The first is answered from the database: every
+# evidence row filed under the message id, in every status, split by whether a
+# tally import or the app's own parse produced it. The second is answered by the
+# live app's own preview endpoint, so what is reported here is what the Paste AI
+# Tally screen would report — not a re-implementation of it that could drift.
+#
+# Read-only twice over: the queries are SELECTs, and /ai-tally/preview computes
+# and writes nothing. Applying is a different endpoint and is not called here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message_id:
+        description: 'Message-ID of the newsletter'
+        required: true
+      tally:
+        description: 'Optional NEWSLETTER_TALLY_V1 block to dry-run against it'
+        required: false
+        default: ''
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The committed wrangler.toml carries a placeholder database id so the
+      # repository stays deployable by anyone; a --remote query needs the real
+      # one patched in or the binding resolves to nothing.
+      - name: Point the config at the database
+        run: |
+          set -euo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then
+            echo "::error::No database called $DATABASE_NAME."
+            exit 1
+          fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      - name: Read the ledger
+        env:
+          MESSAGE_ID: ${{ inputs.message_id }}
+        run: |
+          set -euo pipefail
+          # Single-quoted in SQL, so a quote in the id would break out of the
+          # literal. Message-IDs do not contain one; refuse rather than assume.
+          case "$MESSAGE_ID" in
+            *"'"*) echo "::error::message id may not contain a quote"; exit 1 ;;
+          esac
+
+          # stdout carries the JSON, so wrangler's diagnostics stay on stderr.
+          query() {
+            local out="$1"; shift
+            npx wrangler d1 execute "$DATABASE_NAME" --remote --json --command "$1" > "$out" || {
+              echo "::error::query failed"; cat "$out"; exit 1;
+            }
+            node -e "
+              const fs = require('fs');
+              const raw = fs.readFileSync(process.argv[1], 'utf8');
+              const start = raw.search(/[\[{]/);
+              if (start === -1) { console.error('::error::no JSON in wrangler output'); console.error(raw.slice(0, 400)); process.exit(1); }
+              const parsed = JSON.parse(raw.slice(start));
+              const first = Array.isArray(parsed) ? parsed[0] : parsed;
+              const rows = first?.results ?? first?.result?.[0]?.results;
+              if (!Array.isArray(rows)) { console.error('::error::unexpected wrangler shape'); console.error(raw.slice(0, 400)); process.exit(1); }
+              fs.writeFileSync(process.argv[1], JSON.stringify([{ results: rows }]));
+              console.log(process.argv[1] + ': ' + rows.length + ' row(s)');
+            " "$out"
+          }
+
+          query /tmp/evidence.json "SELECT id, dedupe_key, player_id, rule_id, review_status, polarity, magnitude, excerpt, user_override_json, notes_json, created_at, updated_at FROM evidence_items WHERE source_message_id = '$MESSAGE_ID' ORDER BY player_id, id"
+          query /tmp/players.json "SELECT id, full_name FROM players"
+          query /tmp/signals.json "SELECT player_id, recent_score, lifetime_score FROM player_signals"
+
+      - name: Print the current state
+        if: ${{ inputs.tally == '' }}
+        env:
+          EVIDENCE_JSON: /tmp/evidence.json
+          PLAYERS_JSON: /tmp/players.json
+          SIGNALS_JSON: /tmp/signals.json
+          MESSAGE_ID: ${{ inputs.message_id }}
+        run: node scripts/inspect-tally-state.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run the pasted tally
+        if: ${{ inputs.tally != '' }}
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+          MESSAGE_ID: ${{ inputs.message_id }}
+          TALLY: ${{ inputs.tally }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt)
+          if [ "$login" != "200" ]; then
+            echo "::error::Could not unlock the app (HTTP $login)."
+            exit 1
+          fi
+
+          # JSON-encoded rather than interpolated: the block is full of newlines
+          # and pipes.
+          node -e 'process.stdout.write(JSON.stringify({text: process.env.TALLY}))' > /tmp/payload.json
+
+          id=$(node -e 'process.stdout.write(encodeURIComponent(process.env.MESSAGE_ID))')
+          code=$(curl -s -o /tmp/preview.json -w '%{http_code}' -X POST \
+            "$URL/api/newsletter/messages/$id/ai-tally/preview" \
+            -H 'content-type: application/json' -b /tmp/cookies.txt \
+            --data-binary @/tmp/payload.json --max-time 120)
+          echo "preview: HTTP $code"
+
+          node -e "
+            const raw = require('fs').readFileSync('/tmp/preview.json', 'utf8');
+            let p; try { p = JSON.parse(raw); } catch { console.log(raw.slice(0, 800)); process.exit(1); }
+            if (p.error) { console.log('::error::' + p.error); process.exit(1); }
+          "
+          [ "$code" = "200" ] || exit 1
+
+      # The current state and the projection are printed together, by one
+      # script reading one ledger: a report that describes the before and the
+      # after from different sources invites them to disagree silently.
+      - name: Report the state and what would change
+        if: ${{ inputs.tally != '' }}
+        env:
+          EVIDENCE_JSON: /tmp/evidence.json
+          PLAYERS_JSON: /tmp/players.json
+          SIGNALS_JSON: /tmp/signals.json
+          PREVIEW_JSON: /tmp/preview.json
+          MESSAGE_ID: ${{ inputs.message_id }}
+        run: node scripts/inspect-tally-state.mjs | tee -a "$GITHUB_STEP_SUMMARY"
