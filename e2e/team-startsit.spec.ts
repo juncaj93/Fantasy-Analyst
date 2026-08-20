@@ -14,6 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { inSeason } from './helpers.ts';
 
 async function openTeam(page: Page) {
   await page.goto('/');
@@ -29,24 +30,40 @@ async function choose(page: Page, playerId: string) {
   await expect(row).toHaveAttribute('data-chosen', 'true');
 }
 
+
 test.describe('the recommended lineup, at a glance', () => {
   test.beforeEach(async ({ page }) => openTeam(page));
 
   /**
-   * Starters carry the position tint; backups do not.
+   * Every row here is white, and the position is a chip.
    *
-   * Read from the class the card actually renders with, because that is the
-   * thing the colour comes from — asserting a computed background would be
-   * asserting the design's current opinion about opacity rather than the
-   * property that matters.
+   * This test used to assert the opposite — that a recommended starter carried
+   * a wash and a backup did not — on the argument that eight slots is where a
+   * tint shows the shape of a week. The Team pass overruled it: the wash is the
+   * draft board's alone, so that a tinted row anywhere in this app means "you
+   * are on Draft", and Team is an inset grouped roster whose rows are its own
+   * surface.
+   *
+   * Two things are checked, because the hue did not leave — it moved. The row
+   * still takes the position's *token*, which is what colours the chip on its
+   * leading edge (`card-pos-WR`, and never the `card-pos` that paints a fill),
+   * and the row's painted background is the group's own.
    */
-  test('tints recommended starters and leaves backups neutral', async ({ page }) => {
+  test('leaves every row on the group surface, and puts the position in the chip', async ({ page }) => {
     const filled = page.locator('[data-testid="starter-row"][data-starter="true"]');
     expect(await filled.count(), 'the demo roster fills three slots').toBe(3);
 
+    const surface = await page.getByTestId('starters-group').evaluate((el) => getComputedStyle(el).backgroundColor);
     for (const card of await filled.all()) {
       const position = (await card.getAttribute('data-position'))!;
+      // The hue, for the chip…
       await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
+      // …and not the fill.
+      await expect(card).not.toHaveClass(/(^|\s)card-pos(\s|$)/);
+      const own = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
+      // Transparent is the group's surface showing through, which is the point.
+      expect([surface, 'rgba(0, 0, 0, 0)'], `a starter paints ${own}`).toContain(own);
+      await expect(card.locator('.slot-label')).not.toBeEmpty();
     }
 
     await page.getByTestId('bench-toggle').click();
@@ -97,11 +114,25 @@ test.describe('the recommended lineup, at a glance', () => {
     expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX']);
   });
 
-  /** A slot nothing can fill says so, rather than being quietly dropped. */
-  test('shows an unfillable slot honestly', async ({ page }) => {
+  /**
+   * A slot nothing can fill says so, rather than being quietly dropped — and
+   * says it in three words on a short row, because mid-draft there are four or
+   * five of them and the repetition was drowning the slots that *were* filled.
+   */
+  test('shows an unfillable slot honestly, and briefly', async ({ page }) => {
     const empty = page.locator('[data-testid="starter-row"][data-starter="empty"]');
     expect(await empty.count()).toBeGreaterThan(0);
-    await expect(empty.first()).toContainText('Nobody eligible to start here');
+    await expect(empty.first()).toContainText('Nobody eligible yet');
+
+    // Materially shorter than a row carrying a player, which is the point.
+    const filled = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
+    const blank = (await empty.first().boundingBox())!.height;
+    const player = (await filled.boundingBox())!.height;
+    expect(blank, `an empty slot costs ${blank}px against a player's ${player}px`).toBeLessThan(player * 0.8);
+
+    // A FLEX cannot be read off its own chip, so it still lists what it takes.
+    const flex = page.locator('[data-testid="starter-row"][data-slot="FLEX"][data-starter="empty"]');
+    if ((await flex.count()) > 0) await expect(flex.first()).toContainText(/RB|WR|TE/);
   });
 
   /**
@@ -138,11 +169,7 @@ test.describe('a weekly command centre, on one screen', () => {
    * every number below it is the deployment's own.
    */
   test.beforeEach(async ({ page }) => {
-    await page.route('**/api/leagues/*/roster', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
-    });
+    await inSeason(page);
     await openTeam(page);
   });
 
@@ -496,7 +523,11 @@ test.describe('the weekly card', () => {
 });
 
 test.describe('the comparison tool', () => {
-  test.beforeEach(async ({ page }) => openTeam(page));
+  // Compare is a post-draft control — see `inSeason`.
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await openTeam(page);
+  });
 
   test('opens as a sheet from a compact entry point', async ({ page }) => {
     await page.getByTestId('compare-open').click();
@@ -657,7 +688,11 @@ async function pullToRefresh(page: Page) {
  * saying so rather than claiming everything is current.
  */
 test.describe('mode and refresh', () => {
-  test.beforeEach(async ({ page }) => openTeam(page));
+  // The mode chips are post-draft controls — see `inSeason`.
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await openTeam(page);
+  });
 
   test('offers Balanced, Floor and Ceiling, with exactly one chosen', async ({ page }) => {
     const row = page.getByTestId('mode-row');

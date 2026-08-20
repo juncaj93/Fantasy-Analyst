@@ -109,6 +109,7 @@ import { QueueControl } from '../components/decisions.tsx';
  */
 import { DraftBoardOverlay } from '../components/draftBoard.tsx';
 import { GridIcon } from '../components/icons.tsx';
+import { unwindOne } from '../tabReset.ts';
 /*
  * Staying level with Sleeper without being asked.
  *
@@ -380,12 +381,33 @@ export function DraftScreen({
     void load(position);
   }, [load, position]);
 
-  /* Tapping Draft while already on Draft clears the search and nothing else. */
+  /*
+   * Tapping Draft while already on Draft — one rung per tap.
+   *
+   * Innermost first, which is the order a reader would undo it themselves: the
+   * open player folds shut, then the search closes and empties, then the
+   * position filter goes back to the whole board, and a fourth tap takes the
+   * board to the top. The expansion comes before the filter deliberately —
+   * resetting the filter first would redraw the list underneath an open card
+   * and the card would vanish as a side effect, so the tap that was meant to
+   * close it would appear to have done two things.
+   *
+   * The queue, the hearts and every tally are untouched. Those are the reader's
+   * own marks and a tab tap has no business near them.
+   */
   useEffect(() => {
     if (resetNonce === 0) return;
-    setQuery('');
-    setSearchOpen(false);
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    unwindOne([
+      { when: expanded != null, undo: () => setExpanded(null) },
+      {
+        when: searchOpen || query !== '',
+        undo: () => {
+          setQuery('');
+          setSearchOpen(false);
+        },
+      },
+      { when: position !== ALL_FILTER, undo: () => setPosition(ALL_FILTER) },
+    ]);
   }, [resetNonce]);
 
   useEffect(() => {
@@ -1457,6 +1479,60 @@ function marketLineTitle(rec: DraftRecommendation): string | undefined {
 }
 
 /**
+ * The raw numbers the compact row's deltas were made from — one line.
+ *
+ * The row says `ADP +6` because it is answering "what does taking him here cost
+ * me against this market", which is the decision. This is the working: both
+ * markets' own positions, the pick they were measured against, and the value
+ * column the row no longer prints. A reader who wants to check the arithmetic
+ * can, and a reader who wants the raw market position — to compare against
+ * somewhere else, or because they think in ADP — still has it.
+ *
+ * It sits in the expanded card's resting state, above the disclosure, because
+ * it is the working for a number the reader has just tapped and one line is
+ * what it costs. The rest of the market — what the points are made of, who
+ * priced them — is provenance rather than working, and lives behind the card's
+ * one control.
+ *
+ * Nothing is computed here; every number is one the board already sent.
+ */
+function MarketRaw({
+  rec,
+  currentPick,
+}: {
+  rec: DraftRecommendation;
+  /** The pick the row's deltas were measured against, printed as the working. */
+  currentPick: number | null;
+}) {
+  if (rec.adp == null && rec.dogAdp == null) return null;
+  return (
+    <div className="market-raw" data-testid="market-raw">
+      <span className="metric">
+        Sleeper ADP <strong>{rec.adp == null ? <Unknown what="Sleeper ADP" /> : rec.adp}</strong>
+      </span>
+      {rec.dogAdp == null ? null : (
+        <span className="metric" data-testid="market-raw-dog">
+          DOG ADP <strong>{rec.dogAdp}</strong>
+        </span>
+      )}
+      {currentPick == null ? null : (
+        <span className="metric">
+          Pick <strong>{currentPick}</strong>
+        </span>
+      )}
+      <span className="metric">
+        Val{' '}
+        <strong
+          className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
+        >
+          {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
+        </strong>
+      </span>
+    </div>
+  );
+}
+
+/**
  * Where the `MKT` line's numbers came from.
  *
  * The card has room for the quantities and not for their provenance, so the
@@ -1470,14 +1546,11 @@ function MarketProvenance({
   rec,
   source,
   scoringLabel,
-  currentPick,
 }: {
   rec: DraftRecommendation;
   source: DraftBoard['marketSource'];
   /** The league's own scoring, which is what turned lines into points. */
   scoringLabel: string | null;
-  /** The pick the row's deltas were measured against, printed as the working. */
-  currentPick: number | null;
 }) {
   const props = rec.marketProps;
   if (!props || props.components.length === 0) return null;
@@ -1487,43 +1560,6 @@ function MarketProvenance({
   return (
     <div className="market-detail" data-testid="market-detail">
       <DetailLabel>Market</DetailLabel>
-      {/*
-        The raw numbers the compact row's deltas were made from.
-
-        The row says `ADP +6` because it is answering "what does taking him here
-        cost me against this market", which is the decision. This is the
-        working: both markets' own positions, the pick they were measured
-        against, and the value column the row no longer prints. A reader who
-        wants to check the arithmetic can, and a reader who wants the raw
-        market position — to compare against somewhere else, or because they
-        think in ADP — still has it.
-
-        Answer on the row, explanation here. Nothing is computed in this block;
-        every number in it is one the board already sent.
-      */}
-      <div className="market-raw" data-testid="market-raw">
-        <span className="metric">
-          Sleeper ADP <strong>{rec.adp == null ? <Unknown what="Sleeper ADP" /> : rec.adp}</strong>
-        </span>
-        {rec.dogAdp == null ? null : (
-          <span className="metric" data-testid="market-raw-dog">
-            DOG ADP <strong>{rec.dogAdp}</strong>
-          </span>
-        )}
-        {currentPick == null ? null : (
-          <span className="metric">
-            At pick <strong>{currentPick}</strong>
-          </span>
-        )}
-        <span className="metric">
-          Val{' '}
-          <strong
-            className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
-          >
-            {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-          </strong>
-        </span>
-      </div>
       {/*
         The market-implied points, said in full before the components it is
         made of.
@@ -1911,29 +1947,33 @@ function RecommendationRow({
 }
 
 /**
- * The expanded player: four things, and nothing that explains the ranking.
+ * The expanded player: a preview the height of two rows, and one way in.
  *
- * It has been cut twice now, and this is the cut that changes what it is for.
- * The first pass removed the grid of restated numbers. This one removes the
- * ranking rationale entirely — the bullets under "Why this rank", the
- * counterpoint, and the component arithmetic behind Advanced. All three
- * explained a position the reader can already see, in a place where the
- * question is not "why is he ranked here" but "who is this and should I take
- * him". A live draft is thirty seconds long.
+ * It has been cut three times, and each cut answered a different question. The
+ * first removed the grid of restated numbers. The second removed the ranking
+ * rationale — the bullets under "Why this rank", the counterpoint, the
+ * component arithmetic — because all three explained a position the reader can
+ * already see. This one is about *height*: what survived those cuts still ran
+ * to eight or nine times a collapsed row, which pushes the rest of the board
+ * off a phone. Opening a player should not cost you the board you opened him
+ * from.
  *
- * What is left is a fantasy snapshot: where his position is breaking and who
- * ahead of you still needs one, what the newsletter ledger's strongest
- * supported fact about him is, what is expected of him this season, what he did
- * last season, and whether he is coming back from something.
+ * So the card now rests at four things — where his position is breaking, the
+ * raw markets behind the row's deltas, two lines of outlook, and last season on
+ * one line — and everything else is behind a single control. One control, not
+ * one per section: a card with three "more" links is a card the reader has to
+ * shop in, and the whole point is that a draft pick is a thirty-second
+ * decision.
  *
- * Every part of that snapshot below the tier line is drawn by
- * `components/playerDetail.tsx`, which every other screen also uses — the
- * sections used to be copied here and in Players, and two copies is how six
- * start.
+ * What that control reveals is not new and not summarised — it is the same
+ * newsletter takeaway, market provenance, injury detail and profile flags this
+ * card has always drawn, plus the outlook at full length, all from
+ * `components/playerDetail.tsx`, which every other screen also uses. Nothing
+ * was deleted to make the card short; it was moved one tap further in.
  *
- * The rationale is not deleted from the system — the board response still
- * carries every reason, counterpoint, component, weight and contribution, and
- * the engine still computes them. They have stopped being rendered here.
+ * The rationale is still not rendered anywhere here. The board response carries
+ * every reason, counterpoint, component, weight and contribution, and the
+ * engine still computes them.
  */
 function DraftPlayerDetail({
   rec,
@@ -1948,9 +1988,15 @@ function DraftPlayerDetail({
   currentPick: number | null;
 }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
+  /*
+   * Resets itself, because `Disclose` unmounts this component a moment after
+   * the row closes. A player reopened is a player looked at afresh, and a card
+   * that remembered being fully open would reopen at nine rows tall.
+   */
+  const [everything, setEverything] = useState(false);
 
   return (
-    <div className="explain" data-testid="player-detail">
+    <div className="explain explain-compact" data-testid="player-detail" data-everything={everything ? 'yes' : 'no'}>
       {/*
         The one piece of ranking context that survives, because it is a fact
         about the board rather than about the model: where this position breaks,
@@ -1965,21 +2011,56 @@ function DraftPlayerDetail({
       ) : null}
 
       {/*
-        Why the tally reads the way it does, before the outlook rather than
-        after it: the tally is the number on the row the reader just tapped, and
-        the sentence explaining it should not be below a paragraph of somebody
-        else's prose.
+        The working for the deltas on the row above, one line, always shown.
+        The provenance behind it is a different question and waits below.
       */}
-      <NewsletterTakeaway detail={detail} />
+      <MarketRaw rec={rec} currentPick={currentPick} />
       {/*
-        Before the outlook, because it is the workings of a number the reader
-        just tapped past rather than somebody's prose about the season.
+        Two lines by default — clamped in the stylesheet rather than cut here,
+        so the text is whole and the truncation is the browser's, with the
+        ellipsis that says so. `everything` hands it the full version.
       */}
-      <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
-      <SeasonOutlook detail={detail} failed={failed} />
-      <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
-      <InjuryDetail detail={detail} />
-      <ProfileFlags detail={detail} />
+      <SeasonOutlook detail={detail} failed={failed} heading={everything} whole={everything} />
+
+      {everything ? (
+        <>
+          {/*
+            Why the tally reads the way it does. Below the outlook now rather
+            than above it: at rest the card is a snapshot, and once the reader
+            has asked for everything the order is the reading order.
+          */}
+          <NewsletterTakeaway detail={detail} />
+          <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} />
+          <InjuryDetail detail={detail} />
+          <ProfileFlags detail={detail} />
+        </>
+      ) : null}
+
+      {/*
+        Last season and the way in, sharing a line.
+
+        Two short things that both belong at the bottom, and stacking them
+        spends a row of the card on air. The stat line is left, the control is
+        right, which is the arrangement every grouped list on this phone already
+        uses for "here is the summary, here is the way in".
+      */}
+      <div className="detail-foot">
+        <LastSeasonLine detail={detail} failed={failed} position={rec.position} compact />
+        <button
+          type="button"
+          className="link-button detail-more"
+          data-testid="detail-more"
+          aria-expanded={everything}
+          onClick={(e) => {
+            // The row underneath is a toggle; asking for the rest of the card
+            // is not "collapse this player".
+            e.stopPropagation();
+            setEverything((v) => !v);
+          }}
+        >
+          {everything ? 'Show less' : 'Full detail'}
+        </button>
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import { NavBar, PullToRefresh, Sheet, SkeletonRows } from '../components/native
 import { BenchSection, DetailRow, HeroCarousel, MatchupStatus, ScoreCard, SlotRow } from '../components/matchup.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { MODE_LABEL } from '../../core/startsit/mode.ts';
+import { unwindOne } from '../tabReset.ts';
 
 /**
  * How often the scoreboard is re-read while games are running.
@@ -40,12 +41,28 @@ import { MODE_LABEL } from '../../core/startsit/mode.ts';
  */
 export const LIVE_POLL_MS = 30_000;
 
-export function MatchupScreen({ leagues }: { leagues: LeagueSummary[] }) {
+export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const [data, setData] = useState<MatchupResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openPlayer, setOpenPlayer] = useState<string | null>(null);
   const [oddsOpen, setOddsOpen] = useState(false);
+  /*
+   * Tapping Matchup while already on Matchup.
+   *
+   * Both of the things this screen opens over itself — a player's card and the
+   * sheet behind the odds — close, and the board comes back to the top. The
+   * matchup itself is not reloaded: what is on screen is the live state, and a
+   * tab tap is a request to see it, not to refetch it.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: openPlayer != null, undo: () => setOpenPlayer(null) },
+      { when: oddsOpen, undo: () => setOddsOpen(false) },
+    ]);
+  }, [resetNonce]);
+
   /** Guards against two loads overlapping — the later answer could be older. */
   const inFlight = useRef(false);
 

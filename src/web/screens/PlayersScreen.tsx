@@ -28,8 +28,9 @@ import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring
 import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
-import { PlayerPage, type PlayerSummary } from '../components/playerPage.tsx';
+import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
+import { unwindOne } from '../tabReset.ts';
 
 /** An unflagged player, so the control renders the same shape either way. */
 const EMPTY_MY_GUY: MyGuyFlag = { level: 0, label: '', stars: '', score: 0 };
@@ -88,6 +89,16 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [flagging, setFlagging] = useState<string | null>(null);
   /** Whose page is open on top of the list, and nothing about the list itself. */
   const [openId, setOpenId] = useState<string | null>(null);
+  /*
+   * Whether the reader has asked to leave the list.
+   *
+   * Opening a player no longer pushes anything: the sheet rises over the list,
+   * which stays mounted with its query, its filter, its fetched pages and its
+   * scroll exactly as they were. `full` is the second step — the reader saying
+   * a skim has turned into a study — and it is the only one that costs a
+   * navigation.
+   */
+  const [full, setFull] = useState(false);
   /**
    * Whether there is more of the list, and whether it is being fetched.
    *
@@ -210,9 +221,11 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    */
   useEffect(() => {
     if (resetNonce === 0) return;
-    setQuery('');
-    setOpenId(null);
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    unwindOne([
+      { when: full, undo: () => setFull(false) },
+      { when: openId != null, undo: () => setOpenId(null) },
+      { when: query !== '', undo: () => setQuery('') },
+    ]);
   }, [resetNonce]);
 
   /*
@@ -225,11 +238,11 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    * cannot scroll the page out from under somebody who has since moved.
    */
   useLayoutEffect(() => {
-    if (openId !== null || restoreScroll.current === null) return;
+    if (full || restoreScroll.current === null) return;
     const top = restoreScroll.current;
     restoreScroll.current = null;
     window.scrollTo({ top, behavior: 'auto' });
-  }, [openId]);
+  }, [full]);
 
   /**
    * Star a player from the list.
@@ -258,12 +271,12 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    * Back rather than a reload. That is the requirement the whole navigation
    * model exists to meet.
    */
-  if (open) {
+  if (open && full) {
     return (
       <PlayerPage
         player={toSummary(open)}
         backLabel="Players"
-        onBack={() => setOpenId(null)}
+        onBack={() => setFull(false)}
         trailing={
           <MyGuyControl
             myGuy={open.myGuy ?? EMPTY_MY_GUY}
@@ -336,14 +349,38 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 key={p.id}
                 player={p}
                 busy={flagging === p.id}
-                onOpen={() => {
-                  restoreScroll.current = window.scrollY;
-                  setOpenId(p.id);
-                }}
+                onOpen={() => setOpenId(p.id)}
                 onMyGuy={(level) => void setMyGuy(p.id, level)}
               />
             ))}
           </div>
+          {/*
+            The player, over the list he was tapped in.
+
+            Rendered here rather than instead of the list, which is the whole
+            point: everything behind it — the query, the filter, every page
+            fetched, the hearts and the scroll — is still mounted and still
+            true, so dismissing the sheet is not a restoration, it is just the
+            sheet going away.
+          */}
+          {open && !full ? (
+            <PlayerSheet
+              player={toSummary(open)}
+              onClose={() => setOpenId(null)}
+              onOpenFull={() => {
+                restoreScroll.current = window.scrollY;
+                setFull(true);
+              }}
+              trailing={
+                <MyGuyControl
+                  myGuy={open.myGuy ?? EMPTY_MY_GUY}
+                  busy={flagging === open.id}
+                  onChange={(level) => void setMyGuy(open.id, level)}
+                />
+              }
+            />
+          ) : null}
+
           {/*
             The end of the list, or the reason it is not the end.
 
@@ -470,7 +507,6 @@ function PlayerRow({
   onMyGuy: (level: 0 | 1 | 2 | 3) => void;
 }) {
   const lifetime = player.signal?.raw.net ?? 0;
-  const items = player.signal?.raw.items ?? 0;
 
   return (
     <div role="listitem">
@@ -509,15 +545,14 @@ function PlayerRow({
           tap deeper and every row is exactly two lines again.
         */
         metrics={[
-          {
-            label: 'Life',
-            value: (
-              <>
-                <SignedValue net={lifetime} />
-                {items > 0 ? <span className="faint"> ({items})</span> : null}
-              </>
-            ),
-          },
+          /*
+            Three columns, not four. `Life` used to lead this line and it was
+            the same number as the tally beside the name on the line above —
+            the row printing its loudest signal twice, once labelled and once
+            not. What is left is the reading the label could not give you: how
+            he has moved lately, where the market has him, and which way that
+            has been going.
+          */
           { label: '21d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
           {
             label: 'ADP',

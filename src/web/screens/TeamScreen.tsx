@@ -3,11 +3,18 @@
  * unrostered would be better.
  *
  * The screen answers one question at a glance — **who does Fantasy Analyst
- * currently recommend starting?** — and it answers it in the same visual
- * language the rest of the app uses for a position: a recommended starter keeps
- * the position tint on its card, a backup sits underneath on the ordinary
- * surface. The colour is an accelerator; every card also says the word, because
- * a tint that is the only cue is not a cue for everybody.
+ * currently recommend starting?** — and it answers it as an inset grouped
+ * roster: white rows on one surface, divided by hairlines, with the position
+ * carried by the slot chip on the leading edge rather than by a wash across the
+ * row. The tint belongs to the draft board alone, so that a tinted row anywhere
+ * in this app means "you are on Draft"; here the colour is in the chip, and the
+ * chip also says the word, because a colour that is the only cue is not a cue
+ * for everybody.
+ *
+ * During a draft the screen drops the questions that do not exist yet. Balanced,
+ * Floor and Ceiling are three definitions of the best lineup and Compare asks
+ * which of two players to start — neither means anything while half the roster
+ * is still unpicked, so both wait for the draft to end.
  *
  * There is no lineup-editing control anywhere here, and there is no add, drop or
  * claim either. The app never changes a fantasy lineup and never transacts —
@@ -37,8 +44,9 @@ import {
   InjuryTag,
   Notice,
   PositionBadge,
+  TeamLogo,
   Unknown,
-  positionCardClass,
+  positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
@@ -52,6 +60,7 @@ import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { unwindOne } from '../tabReset.ts';
 
 interface OpenSlot {
   slot: string;
@@ -93,9 +102,12 @@ const ALL_FILTER = 'ALL';
 export function TeamScreen({
   leagues,
   onLeaguesChanged,
+  resetNonce,
 }: {
   leagues: LeagueSummary[];
   onLeaguesChanged: () => void;
+  /** Bumped when Team is tapped while already on Team — see `App`. */
+  resetNonce: number;
 }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const [roster, setRoster] = useState<RosterResponse | null>(null);
@@ -119,6 +131,27 @@ export function TeamScreen({
   const [weekly, setWeekly] = useState<{ playerId: string; context: WeeklyContext } | null>(null);
   /** Which waiver row's detail is open. */
   const [waiverDetail, setWaiverDetail] = useState<WaiverBoardRow | null>(null);
+
+  /*
+   * Tapping Team while already on Team.
+   *
+   * Everything closed is a sheet or a panel this screen opened over itself —
+   * the comparison, a player's week, a waiver row's detail. None of it is a
+   * decision the reader made about their roster, so unwinding it costs them
+   * nothing and gets them back to the lineup, which is what the tab is for.
+   *
+   * The mode is deliberately left alone. Balanced, Floor and Ceiling is a
+   * question the reader asked, and a tab tap is not an answer to it.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: compare != null, undo: () => setCompare(null) },
+      { when: weekly != null, undo: () => setWeekly(null) },
+      { when: waiverDetail != null, undo: () => setWaiverDetail(null) },
+      { when: message != null, undo: () => setMessage(null) },
+    ]);
+  }, [resetNonce]);
 
   const loadRoster = useCallback(async () => {
     if (!selected) return;
@@ -334,6 +367,23 @@ export function TeamScreen({
             step of type size to do it and gives up no tap target at all — the
             chips are still 44px tall, and so is the button beside them.
           */}
+          {/*
+            …and none of them during a draft.
+
+            Balanced, Floor and Ceiling are three definitions of the best
+            *lineup*, and Compare asks which of two players to start. Neither
+            question exists while the roster is still being assembled: there is
+            no week to optimise for and half the team has not been picked. The
+            controls used to sit at the top of the screen through the whole
+            draft, which put the four least useful things on the page above the
+            players who had actually been taken.
+
+            They come back the moment the draft is over — the flag is the
+            roster's own `live`, the same one that decides whether the live view
+            is drawn at all, so there is one answer to "is a draft happening"
+            and this reads it rather than forming a second opinion.
+          */}
+          {roster?.live ? null : (
           <div className="control-row" data-testid="team-controls">
             <SegmentedControl
               label="Recommendation mode"
@@ -356,6 +406,7 @@ export function TeamScreen({
               Compare
             </button>
           </div>
+          )}
 
           {refresh ? (
             <div className="faint" data-testid="refresh-status" style={{ margin: '0 4px 10px' }}>
@@ -498,11 +549,18 @@ export function TeamScreen({
 /**
  * One recommended starter, in the slot the league actually starts.
  *
- * The card keeps the position tint, which is what makes the recommended lineup
- * readable at arm's length. **The tint is never the only cue**: the slot is
- * printed on the card, the row is labelled as a starter for anything reading it
- * aloud, and an empty slot says so in words rather than by being a paler shade
- * of the same thing.
+ * The row is **neutral**, and that is deliberate: the wash belongs to the draft
+ * board and to nothing else, so that a tinted row anywhere in this app means
+ * "you are on Draft". Position colour still reaches this row — through the slot
+ * chip on the leading edge, which is the thing that actually says which spot
+ * this is. See `positionAccentClass`, which hands over the hue and not the fill.
+ *
+ * Left to right the row is a sentence: which spot, who is in it and whether he
+ * is fit, then what he is worth and who he plays for. The availability tag sits
+ * against the name because it qualifies the *player* — a `Q` at the far edge of
+ * a row reads as a fact about the projection beside it — and the projection and
+ * the logo sit together as one cluster, because a number and the badge of the
+ * team that will produce it are one thought.
  */
 function StarterCard({
   slot,
@@ -518,21 +576,28 @@ function StarterCard({
     return (
       <div className="player-row" data-testid="starter-row" data-slot={slot.slot} data-starter="empty">
         {/*
-          One line, and quietly.
+          Three words, on a row half the height of a player's.
 
-          This used to be two: "Nobody eligible to start here" at the weight and
-          size of a player's name, with "Takes QB" on a second line under it. A
-          roster that is four players deep in the middle of a draft has four or
-          five of these, and at name weight they were the loudest thing on the
-          screen — a list shouting about what it does not have, above the answer
-          it does. What the slot takes is the same sentence continued, so it
-          sits on the same line, and neither half is a name so neither is set
-          like one.
+          This has been cut twice. It used to be two lines — "Nobody eligible to
+          start here" at the weight and size of a player's name, with "Takes QB"
+          under it — and then one. One line was still too much: a roster four
+          players deep mid-draft has four or five of these, and five copies of
+          the same nine-word sentence, each on a row as tall as a real player's,
+          is a list shouting about what it does not have above the answer it
+          does. They read as repetition rather than as information, which is
+          exactly what they are.
+
+          So the sentence is now as short as it can be while still being a
+          sentence, and the row is sized for it. The slot chip beside it already
+          says which spot is open, which is why "takes QB" went: it repeated the
+          chip. What it does not repeat is kept — a FLEX takes three positions
+          and its chip cannot say which, so that one still lists them.
         */}
         <div className="player-row-top">
           <span className="slot-label">{slot.slot}</span>
           <span className="empty-slot-line">
-            Nobody eligible to start here <span className="faint">— takes {slot.accepts.join(', ')}</span>
+            Nobody eligible yet
+            {slot.accepts.length > 1 ? <span className="faint"> · {slot.accepts.join(', ')}</span> : null}
           </span>
         </div>
       </div>
@@ -554,7 +619,7 @@ function StarterCard({
 
   return (
     <button
-      className={positionCardClass(position, 'starter-row')}
+      className={positionAccentClass(position, 'player-row starter-row')}
       data-testid="starter-row"
       data-slot={slot.slot}
       data-starter="true"
@@ -580,9 +645,19 @@ function StarterCard({
         <span className="slot-label">{slot.slot}</span>
         <span className="player-name">{slot.name}</span>
         {/*
-          Only the tags that change what the reader does: the spot is settled,
-          Sleeper does not agree yet, or he may not play. Everything else — the
-          market, the role, the matchup, the props — is one tap away.
+          Availability against the name, because it is about him.
+
+          `Q` is the one fact that can change a decision before any of the
+          numbers do, and where it sits decides what it appears to qualify. At
+          the right-hand end of the row it sat next to the projection and read
+          as a note about that number; here it reads as part of the player, which
+          is what it is.
+        */}
+        <InjuryTag status={player?.status} />
+        {/*
+          Then the two tags that are about the *slot* rather than the player: the
+          spot is settled, or Sleeper does not agree yet. They keep the trailing
+          side, where a reader scanning names is not made to read past them.
         */}
         <span className="row-tags">
           {slot.locked ? (
@@ -595,17 +670,27 @@ function StarterCard({
               Not in Sleeper
             </span>
           ) : null}
-          <InjuryTag status={player?.status} />
         </span>
         {/*
-          The projection carries its weight in type rather than in a label: it
-          is the only number on the row, it is tabular so eight of them line up
-          down the column, and the word "projected" is in the accessible name.
+          The projection and the badge of the team that will produce it, as one
+          cluster.
+
+          They used to sit at opposite ends of a stretch of empty row with the
+          position pill between them, which made a number and its team read as
+          two unrelated things. The pill is gone from this row entirely: the slot
+          chip on the leading edge already says which spot this is, and printing
+          the position twice on a row eight rows long is eight wasted readings.
+
+          The projection carries its weight in type rather than in a label: it is
+          the only number on the row, it is tabular so eight of them line up down
+          the column, and the word "projected" is in the accessible name.
         */}
-        <span className="proj" data-testid="starter-proj" title="Projected points">
-          {slot.score == null ? '—' : slot.score.toFixed(1)}
+        <span className="row-value">
+          <span className="proj" data-testid="starter-proj" title="Projected points">
+            {slot.score == null ? '—' : slot.score.toFixed(1)}
+          </span>
+          <TeamLogo team={player?.team ?? ''} />
         </span>
-        <PositionBadge position={position} team={player?.team ?? ''} />
       </div>
       {consequence ? (
         <div className="player-row-consequence" data-testid="starter-conflict">
@@ -770,12 +855,14 @@ function WaiverSection({
 /**
  * How many waiver rows the Team screen shows before it stops.
  *
- * Team is a roster screen with a waiver section, not a waiver screen: three is
- * enough to answer "is there anything I should be doing", and the whole board —
- * every position, every filter — is one tab away. The cut is stated in the line
- * under the rows rather than left as a silent truncation.
+ * Team is a roster screen with a waiver section, not a waiver screen: the
+ * strongest two answer "is there anything I should be doing", and the whole
+ * board — every position, every filter — is one tab away. It was three, which
+ * is a third of a phone screen spent reproducing a tab that already exists.
+ * The cut is stated in the line under the rows rather than left as a silent
+ * truncation.
  */
-const TEAM_WAIVER_ROWS = 3;
+const TEAM_WAIVER_ROWS = 2;
 
 function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -1466,7 +1553,23 @@ function LiveDraftRoster({
                 .map((p) => (
                   <div key={p.playerId} className="roster-line" data-testid="drafted-line">
                     <span className="player-name">{p.name}</span>
-                    <PositionBadge position={p.position} team={p.team} />
+                    {/*
+                      His availability, against his name — the same placement
+                      the recommended-starter rows use, for the same reason. It
+                      is a fact about the player, not about the pick beside it.
+                    */}
+                    <InjuryTag status={p.status} />
+                    {/*
+                      The club and the pick, as one cluster on the trailing edge.
+
+                      The position pill used to sit here too, which put three
+                      things on the right of a row whose group heading — `RB (1)`
+                      — has already said the position. Reading it again on every
+                      line is a reading that buys nothing, and it was what forced
+                      the logo away from the number it belongs with.
+                    */}
+                    <span className="row-value">
+                      <TeamLogo team={p.team} />
                     {/*
                       `1.04` while the draft runs, `#8` once it is over.
 
@@ -1504,6 +1607,7 @@ function LiveDraftRoster({
                           jerseyNumber: p.jerseyNumber,
                           teams: roster.teams ?? 12,
                         })}
+                    </span>
                     </span>
                   </div>
                 ))}

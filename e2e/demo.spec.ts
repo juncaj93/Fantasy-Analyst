@@ -109,11 +109,22 @@ test.describe('the indicator', () => {
   test('says DEMO in words, names the scenario and prints its clock', async ({ page }) => {
     await openScenario(page, 'sunday-pregame');
     const bar = page.getByTestId('demo-bar');
-    // §4 and §16: conveyed beyond colour. The badge is a word, the scenario is
-    // named, and the as-of instant is a real <time>.
+    /*
+     * §4 and §16: conveyed beyond colour. The badge is a word, the scenario is
+     * named, and the as-of instant is a real `<time>` carrying the full
+     * timestamp whatever the bar has room to print of it.
+     *
+     * It used to also assert the words `Fixture data`. They were the caption
+     * that made this bar three lines tall on a phone, and they were saying what
+     * the badge two centimetres to their left already says. What the rule
+     * actually requires is that the state is legible without reading a colour,
+     * and all three of these are text.
+     */
     await expect(page.getByTestId('demo-badge')).toHaveText('DEMO');
-    await expect(bar).toContainText('Fixture data');
+    await expect(page.getByTestId('demo-scenario')).not.toBeEmpty();
     await expect(bar.locator('time')).toHaveAttribute('datetime', '2026-10-11T15:40:00.000Z');
+    // One line, not a banner: it may not cost more than a navigation bar.
+    expect((await bar.boundingBox())!.height).toBeLessThan(64);
   });
 
   test('follows the reader onto every screen', async ({ page }) => {

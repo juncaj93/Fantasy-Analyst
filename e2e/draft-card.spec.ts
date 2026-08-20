@@ -372,3 +372,79 @@ test.describe('it does not get in the way', () => {
     await expect(star).toHaveAttribute('data-queued', '0');
   });
 });
+
+/**
+ * …and the expanded card, as a budget.
+ *
+ * Draft is the one screen where opening a player costs you the thing you opened
+ * him from. The expanded row once ran to eight or nine times a collapsed one —
+ * a full outlook, the market's whole provenance, injury history and profile
+ * notes, all inline — which pushed the next four players off a phone. It now
+ * rests at four short blocks and one control.
+ *
+ * "Much shorter" is exactly the kind of claim that decays a line at a time, so
+ * it is asserted as a ratio against the board's own collapsed rows rather than
+ * as a pixel count that would need editing every time a font changes. The
+ * budget is roughly two to two and a half rows; the ceiling here is three,
+ * which leaves room for a long tier-cliff line without leaving room for the
+ * article coming back.
+ *
+ * Nothing was deleted to hit it. The second test is the other half of the
+ * claim: everything the card stopped resting on is one tap away.
+ */
+test.describe('the expanded card is a preview, not an article', () => {
+  test('rests at about two rows, on every player the board is drawing', async ({ page }) => {
+    await openDraft(page);
+    const rows = page.getByTestId('recommendation-row');
+    const collapsed = (await rows.nth(1).boundingBox())!.height;
+    expect(collapsed, 'a collapsed row should be a row').toBeGreaterThan(40);
+
+    // Several players, because they differ in what they have to say: a cliff
+    // line, an outlook or none, a market or none.
+    for (const i of [0, 1, 2, 3, 4]) {
+      const row = rows.nth(i);
+      await row.scrollIntoViewIfNeeded();
+      await row.click();
+      await expect(row.getByTestId('player-detail')).toBeVisible();
+      // Settled, rather than mid-animation: the disclosure grows into place.
+      await page.waitForTimeout(500);
+
+      const expanded = (await row.boundingBox())!.height;
+      const ratio = expanded / collapsed;
+      const name = await row.locator('.player-name').first().innerText();
+      expect(ratio, `${name} expands to ${ratio.toFixed(1)} rows (${Math.round(expanded)}px)`).toBeLessThan(3);
+      // …and it did open. A card that renders nothing would pass a ceiling.
+      expect(ratio, `${name} did not actually open`).toBeGreaterThan(1.2);
+
+      await row.locator('.row-button').click();
+      await page.waitForTimeout(300);
+    }
+  });
+
+  test('and everything it stopped showing is one tap away', async ({ page }) => {
+    await openDraft(page);
+    // A player the seed gives a market, an outlook and an injury history.
+    const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+
+    // At rest: the working behind the row's deltas, and nothing that explains
+    // where those markets came from.
+    await expect(row.getByTestId('market-raw')).toBeVisible();
+    await expect(row.getByTestId('market-detail')).toHaveCount(0);
+    await expect(row.getByTestId('injury-current')).toHaveCount(0);
+
+    const short = (await row.boundingBox())!.height;
+    await row.getByTestId('detail-more').click();
+    await page.waitForTimeout(400);
+
+    await expect(row.getByTestId('market-detail')).toBeVisible();
+    await expect(row.getByTestId('injury-current')).toBeVisible();
+    expect((await row.boundingBox())!.height, 'asking for everything showed nothing more').toBeGreaterThan(short);
+
+    // And it closes again, back to the preview.
+    await row.getByTestId('detail-more').click();
+    await page.waitForTimeout(400);
+    await expect(row.getByTestId('market-detail')).toHaveCount(0);
+  });
+});

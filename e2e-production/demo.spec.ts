@@ -92,13 +92,23 @@ test.describe('Demo Mode on the deployed site', () => {
 
     await enter(page, 'draft-mid');
 
-    // §4: conveyed beyond colour, and carrying the scenario's own clock.
+    /*
+     * §4: conveyed beyond colour, and carrying the scenario's own clock.
+     *
+     * The words `Fixture data` used to be asserted here too. They were the
+     * caption that made this bar three lines tall on a phone, above every
+     * navigation bar in the app, and they said what the badge beside them
+     * already says. The rule is that the state is legible without reading a
+     * colour; the badge, the scenario's name and a real `<time>` are all text.
+     */
     await expect(page.getByTestId('demo-badge')).toHaveText('DEMO');
-    await expect(page.getByTestId('demo-bar')).toContainText('Fixture data');
+    await expect(page.getByTestId('demo-scenario')).not.toBeEmpty();
     await expect(page.getByTestId('demo-bar').locator('time')).toHaveAttribute(
       'datetime',
       '2026-08-31T00:04:00.000Z',
     );
+    // A status bar, not a banner.
+    expect((await page.getByTestId('demo-bar').boundingBox())!.height).toBeLessThan(64);
 
     // …and it is not a tab, on the deployed bundle as much as locally.
     await expect(page.getByTestId('tab-demo')).toHaveCount(0);

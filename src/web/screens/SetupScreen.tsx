@@ -23,6 +23,7 @@ import { InstallPanel } from '../components/install.tsx';
 
 import { PlayerPicker } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
+import { unwindOne } from '../tabReset.ts';
 import {
   APPEARANCES,
   APPEARANCE_LABELS,
@@ -90,16 +91,35 @@ export function SetupScreen({
   unlocked,
   canUnlock,
   onUnlocked,
+  resetNonce,
 }: {
   leagues: LeagueSummary[];
   onChanged: () => void;
   unlocked: boolean;
   canUnlock: boolean;
   onUnlocked: () => void;
+  /** Bumped when Setup is tapped while already on Setup — see `App`. */
+  resetNonce: number;
 }) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [open, setOpen] = useState<Panel>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Tapping Setup while already on Setup.
+   *
+   * Back to the root of Settings, which is what the tab means, and to the top
+   * of it. An open panel is a place the reader navigated to and this is the
+   * gesture for coming back out of it — the same thing Back does, reachable
+   * without hunting for a control in the corner of the screen.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: open != null, undo: () => setOpen(null) },
+      { when: error != null, undo: () => setError(null) },
+    ]);
+  }, [resetNonce]);
 
   const load = useCallback(async () => {
     try {

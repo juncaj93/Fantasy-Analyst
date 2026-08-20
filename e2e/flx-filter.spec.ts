@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { inSeason } from './helpers.ts';
 
 /**
  * Every position currently drawn in a list of player rows.
@@ -114,6 +115,8 @@ test.describe('the player list', () => {
 
 test.describe('the comparison picker', () => {
   test('narrows the pool to the flex-eligible', async ({ page }) => {
+    // Compare is a post-draft control, and the demo league is mid-draft.
+    await inSeason(page);
     await page.goto('/');
     await page.getByTestId('tab-team').click();
     await page.getByTestId('compare-open').click();

@@ -43,16 +43,28 @@ export function DemoIndicator() {
       <span className="demo-badge" data-testid="demo-badge">
         DEMO
       </span>
+      {/*
+        The scenario and its clock, on one line.
+
+        This used to read `Sunday, 11:40am · Fixture data, as of Sun, Oct 11,
+        03:40 PM UTC` and wrapped to three lines on a 390px phone — a hundred
+        pixels of the most valuable strip on the screen, above every navigation
+        bar in the app, spent on a caption. Two of those words did no work:
+        `Fixture data` is what the DEMO badge to its left already says, and the
+        weekday and month are in the scenario's own label.
+
+        What is left is the pair a reader actually checks — which scenario, and
+        what time it thinks it is — and the whole thing is one line that
+        truncates rather than a paragraph that reflows. The full timestamp is in
+        the `time` element's `dateTime` and in the tooltip, so nothing is lost
+        to anything reading it properly.
+      */}
       <span className="demo-what">
         <strong data-testid="demo-scenario">{scenario.label}</strong>
         <span className="faint">
           {' · '}
-          Fixture data, as of{' '}
-          <time dateTime={scenario.asOf}>
+          <time dateTime={scenario.asOf} title={asOf.toUTCString()}>
             {asOf.toLocaleString(undefined, {
-              weekday: 'short',
-              day: 'numeric',
-              month: 'short',
               hour: '2-digit',
               minute: '2-digit',
               timeZone: 'UTC',
@@ -71,7 +83,7 @@ export function DemoIndicator() {
           void exitDemo().finally(() => setBusy(false));
         }}
       >
-        {busy ? 'Leaving…' : 'Leave demo'}
+        {busy ? 'Leaving…' : 'Leave'}
       </button>
     </div>
   );

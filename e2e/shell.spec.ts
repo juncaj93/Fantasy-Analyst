@@ -22,6 +22,56 @@ async function open(page: Page, tab: (typeof TABS)[number]) {
   await page.waitForTimeout(350);
 }
 
+/**
+ * Every background on a page, as comparable 0–255 triples.
+ *
+ * `getComputedStyle` does not answer in one syntax: a plain token comes back as
+ * `rgb(255, 255, 255)`, but the resolved value of a `color-mix()` comes back as
+ * `color(srgb 0.98 0.98 1)`. Comparing those as strings makes two identical
+ * colours look different, and comparing their digits makes a white row look 254
+ * away from white. So each colour is painted onto a 1×1 canvas and read back,
+ * which is the one reading that is the same for every syntax.
+ */
+const NORMALISE = `(colour) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 1, 1);
+  ctx.fillStyle = '#000';
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, 1, 1);
+  return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
+}`;
+
+/** The rows' own painted backgrounds, in source order. */
+function backgrounds(page: Page, selector: string) {
+  return page.locator(selector).evaluateAll(
+    (els, normaliseSource) => {
+      const normalise = eval(normaliseSource) as (c: string) => number[];
+      return els.map((el) => normalise(getComputedStyle(el).backgroundColor));
+    },
+    NORMALISE,
+  );
+}
+
+/** What `var(--surface)` currently resolves to, painted the same way. */
+function surfaceColour(page: Page) {
+  return page.evaluate((normaliseSource) => {
+    const normalise = eval(normaliseSource) as (c: string) => number[];
+    /*
+     * Measured against the token rather than against the group element, which
+     * reports `rgba(0, 0, 0, 0)` often enough — a container that paints nothing
+     * of its own — to make the comparison meaningless.
+     */
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--surface)';
+    document.body.append(probe);
+    const painted = normalise(getComputedStyle(probe).backgroundColor);
+    probe.remove();
+    return painted;
+  }, NORMALISE);
+}
+
 test.describe('the navigation bar', () => {
   test('every screen has one, and none of them is a banner', async ({ page }) => {
     await page.goto('/');
@@ -216,20 +266,61 @@ test.describe('the two themes are one design', () => {
     await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
   });
 
+  /**
+   * The tint moved from the row's edge to its surface, and only on Draft.
+   *
+   * It used to be a coloured rail down the leading edge of every list in the
+   * app, which this asserted by reading `borderLeftColor`. Draft is now the one
+   * board that carries a wash — faint, so the row is white first — and the rail
+   * is gone, because two cues for one fact is one too many. So the reading
+   * moves to the background, which is where the tint now is.
+   */
   test('the position tint survives in both, and stays a tint', async ({ page }) => {
     await page.goto('/');
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
       await open(page, 'draft');
-      const edges = await page
-        .locator('[data-testid="recommendation-row"]')
-        .evaluateAll((rows) => [...new Set(rows.map((r) => getComputedStyle(r).borderLeftColor))]);
-      expect(edges.length, `positions are indistinguishable in ${theme}`).toBeGreaterThan(1);
+      const painted = await backgrounds(page, '[data-testid="recommendation-row"]');
+      expect(painted.length, 'the board drew no rows').toBeGreaterThan(4);
+      const distinct = new Set(painted.map((c) => c.join(',')));
+      expect(distinct.size, `positions are indistinguishable in ${theme}`).toBeGreaterThan(1);
+
+      // …and it stays a *tint*: the row is still much closer to the list's own
+      // surface than to the position's colour, which is what "white first"
+      // means and what stops a board of forty being a rainbow.
+      const surface = await surfaceColour(page);
+      for (const own of painted) {
+        const drift = Math.max(...own.map((v, i) => Math.abs(v - surface[i]!)));
+        expect(
+          drift,
+          `a row drifts ${drift} from the list's own surface in ${theme}, which is a fill`,
+        ).toBeLessThan(26);
+      }
+
       // The letters are still there, so the colour is never the only carrier.
       const badges = await page.locator('[data-testid="recommendation-row"] .pos-pill').allInnerTexts();
       for (const badge of badges) expect(badge.trim()).toMatch(/^(QB|RB|WR|TE|K|DEF)$/);
     }
     await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  });
+
+  /**
+   * …and Draft is the only screen that has one.
+   *
+   * The whole point of giving the board a wash is that it reads as *the board*.
+   * That only works if the lists around it are genuinely neutral, so this
+   * checks the two densest ones are exactly their own surface.
+   */
+  test('and no other screen tints a row', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of ['players', 'trades'] as const) {
+      await open(page, tab);
+      const testId = tab === 'players' ? 'player-search-row' : 'trade-row';
+      await expect(page.getByTestId(testId).first()).toBeVisible();
+      const painted = await backgrounds(page, `[data-testid="${testId}"]`);
+      const distinct = new Set(painted.map((c) => c.join(',')));
+      expect(distinct.size, `${tab} tints its rows by position`).toBe(1);
+    }
   });
 });
 
@@ -258,23 +349,40 @@ test.describe('the active tab, tapped again', () => {
     await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
   });
 
-  test('clears the search on Draft, and nothing else', async ({ page }) => {
+  /**
+   * One rung per tap, innermost first.
+   *
+   * This asserted that a retap cleared the search and that the position filter
+   * *survived*, on the reasoning that a filter is a choice rather than a view
+   * state. The reasoning was half right and the behaviour was the wrong half:
+   * the filter does come back, but not in the same motion as the search. A tap
+   * undoes one thing, so a reader walks back out through the layers in the
+   * order they built them and can stop wherever they meant to.
+   *
+   * That is also what makes the gesture safe. Unwinding everything at once
+   * throws away a deliberate filter in the same tap that closes a card opened
+   * by accident, and makes the second tap a no-op — which is how people learn a
+   * control is unreliable.
+   */
+  test('unwinds Draft one step at a time', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
-    // Narrow by position as well, so it is clear which one gets cleared.
     await page.getByRole('button', { name: 'QB', exact: true }).click();
     await page.getByTestId('draft-search-open').click();
     await page.getByTestId('draft-search').fill('lind');
     await expect(page.getByTestId('recommendation-row')).toHaveCount(1);
 
+    // First tap: the query goes and the field folds back to its glyph, which is
+    // what "clear the screen" means for a control that starts folded. The
+    // filter is untouched.
     await page.getByTestId('tab-draft').click();
-    // The query is gone and the field has folded back to its glyph, which is
-    // what "clear the screen" means for a control that starts folded.
     await expect(page.getByTestId('draft-search')).toHaveCount(0);
     await expect(page.getByTestId('draft-search-open')).toBeVisible();
-    // The position filter is a choice, not a search: it survives.
     await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('button', { name: 'ALL', exact: true }).click();
+
+    // Second tap: now the board comes back.
+    await page.getByTestId('tab-draft').click();
+    await expect(page.getByRole('button', { name: 'ALL', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('does not disturb a screen with nothing to clear', async ({ page }) => {

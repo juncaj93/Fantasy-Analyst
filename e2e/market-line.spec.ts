@@ -212,7 +212,18 @@ test.describe('what the line is made of', () => {
     await openDraft(page);
 
     const rows = page.getByTestId('recommendation-row').filter({ has: page.getByTestId('market-line') });
-    await rows.first().click();
+    const row = rows.first();
+    await row.click();
+    /*
+     * The provenance sits behind the compact card's one control.
+     *
+     * What the expanded row rests at is the *working* — `market-raw`, the two
+     * raw markets and the pick they were measured against, which is one line.
+     * Which books priced which component, and what this app added together, is
+     * a different question and a much longer answer, so it waits until it is
+     * asked for. `draft-market-delta.spec.ts` owns the resting line.
+     */
+    await row.getByTestId('detail-more').click();
 
     const detail = page.getByTestId('market-detail');
     await expect(detail).toBeVisible();
@@ -374,7 +385,10 @@ test.describe('receptions and market-implied points', () => {
   test('shows MKT PTS, its coverage and the scoring behind it when a card opens', async ({ page }) => {
     await openDraft(page);
     const rows = page.getByTestId('recommendation-row').filter({ has: page.getByTestId('market-line') });
-    await rows.first().click();
+    const row = rows.first();
+    await row.click();
+    // Behind the card's one control, with the rest of the provenance.
+    await row.getByTestId('detail-more').click();
 
     /*
      * Retrying assertions rather than one read of the text.

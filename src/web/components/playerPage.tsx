@@ -42,7 +42,7 @@ import {
   Unknown,
   formatDate,
 } from './common.tsx';
-import { ListGroup, ListRow, PushScreen, SegmentedControl, SkeletonRows } from './native.tsx';
+import { ListGroup, ListRow, PushScreen, SegmentedControl, Sheet, SkeletonRows } from './native.tsx';
 import { InjuryDetail, LastSeasonLine, NewsletterTakeaway, ProfileFlags, SeasonOutlook } from './playerDetail.tsx';
 
 /** The whole of this app's own record of one player. */
@@ -86,6 +86,15 @@ export interface PlayerSummary {
   movement?: number;
 }
 
+/**
+ * The player as a pushed page.
+ *
+ * The deep read: his own screen, his own place in the back stack, the whole
+ * ledger with room to scroll. Reached deliberately — from the sheet's own way
+ * in — rather than as the answer to every tap on a name, because pushing a
+ * screen to check one number and then hunting for Back is the interaction this
+ * app spent a pass getting rid of.
+ */
 export function PlayerPage({
   player,
   backLabel,
@@ -99,6 +108,126 @@ export function PlayerPage({
   onBack: () => void;
   /** A control belonging to the player rather than to the page — the heart. */
   trailing?: React.ReactNode;
+  context?: React.ReactNode;
+  initialSection?: Section;
+}) {
+  /*
+   * The page starts at the top on arrival, and on arrival only.
+   *
+   * Pushing a screen and landing halfway down it is the single most disorienting
+   * thing a pushed navigation can do, and it is what happens by default when the
+   * list underneath was scrolled. Keyed on the player rather than run once, so
+   * moving from one player to another does the same thing.
+   */
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [player.id]);
+
+  return (
+    <PushScreen
+      title={player.name}
+      subtitle={
+        <span className="player-page-ident">
+          <PositionBadge position={player.position} team={player.team} />
+          <InjuryTag status={player.status} />
+        </span>
+      }
+      backLabel={backLabel}
+      onBack={onBack}
+      {...(trailing === undefined ? {} : { trailing })}
+      testId="player-page"
+    >
+      <PlayerDossier
+        player={player}
+        {...(context === undefined ? {} : { context })}
+        initialSection={initialSection}
+      />
+    </PushScreen>
+  );
+}
+
+/**
+ * The player as a sheet, which is how a player is normally opened.
+ *
+ * Tapping a name is a question — *who is this, and why is he here* — and the
+ * honest shape of an answer to a question is something that rises over what you
+ * were reading and then goes away again. A pushed page answers it by taking the
+ * list away and making the reader find their place afterwards.
+ *
+ * So this is the first stop everywhere, and `PlayerPage` is what the reader
+ * asks for when a skim turns into a study. The sheet inherits swipe-down
+ * dismissal, the grip, the backdrop and Escape from `Sheet`; the list behind it
+ * keeps its scroll, its search and its filters, because it was never unmounted.
+ */
+export function PlayerSheet({
+  player,
+  onClose,
+  onOpenFull,
+  trailing,
+  context,
+  initialSection = 'overview',
+}: {
+  player: PlayerSummary;
+  onClose: () => void;
+  /** Offered only when the caller has a page to push. */
+  onOpenFull?: () => void;
+  trailing?: React.ReactNode;
+  context?: React.ReactNode;
+  initialSection?: Section;
+}) {
+  return (
+    <Sheet
+      testId="player-sheet"
+      onClose={onClose}
+      title={
+        <span className="sheet-player-title">
+          <span className="sheet-player-name">{player.name}</span>
+          <span className="player-page-ident">
+            <PositionBadge position={player.position} team={player.team} />
+            <InjuryTag status={player.status} />
+            {trailing}
+          </span>
+        </span>
+      }
+    >
+      <PlayerDossier
+        player={player}
+        {...(context === undefined ? {} : { context })}
+        initialSection={initialSection}
+        {...(onOpenFull === undefined
+          ? {}
+          : {
+              footer: (
+                <button type="button" className="link-button" data-testid="player-full-profile" onClick={onOpenFull}>
+                  View full profile
+                </button>
+              ),
+            })}
+      />
+    </Sheet>
+  );
+}
+
+/**
+ * Everything this app knows about one player, with no opinion about framing.
+ *
+ * The same four numbers, the same segmented control and the same four subviews,
+ * whether they arrive as a sheet rising over the list or as a pushed page. That
+ * is the whole reason it is its own component: a player inspected from Players
+ * and a player inspected from Trades have to be the same object, and so does a
+ * player skimmed in a sheet and a player studied on his own page. Two copies of
+ * this is how the app grows two answers to "what do we know about him".
+ *
+ * It renders no chrome — no bar, no grip, no back control. What wraps it is the
+ * caller's business: see `PlayerPage` and `PlayerSheet` directly below.
+ */
+export function PlayerDossier({
+  player,
+  context,
+  initialSection = 'overview',
+  footer,
+}: {
+  player: PlayerSummary;
   /**
    * Why this reader is here, from the screen that sent them.
    *
@@ -108,6 +237,8 @@ export function PlayerPage({
    */
   context?: React.ReactNode;
   initialSection?: Section;
+  /** A way further in, when the caller has one to offer. */
+  footer?: React.ReactNode;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
   const [file, setFile] = useState<PlayerFile | null>(null);
@@ -148,10 +279,6 @@ export function PlayerPage({
    * list underneath was scrolled. Keyed on the player rather than run once, so
    * moving from one player to another does the same thing.
    */
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'auto' });
-  }, [player.id]);
-
   const signal = file?.signal ?? null;
   /*
    * Whether the screen behind this one deals in the draft market at all.
@@ -164,19 +291,7 @@ export function PlayerPage({
   const knowsMarket = player.draftRank !== undefined || player.adjustedRank !== undefined;
 
   return (
-    <PushScreen
-      title={player.name}
-      subtitle={
-        <span className="player-page-ident">
-          <PositionBadge position={player.position} team={player.team} />
-          <InjuryTag status={player.status} />
-        </span>
-      }
-      backLabel={backLabel}
-      onBack={onBack}
-      {...(trailing === undefined ? {} : { trailing })}
-      testId="player-page"
-    >
+    <>
       {/*
         The four numbers a reader came for, above everything else.
 
@@ -285,7 +400,9 @@ export function PlayerPage({
           <Evidence file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />
         ) : null}
       </div>
-    </PushScreen>
+
+      {footer}
+    </>
   );
 }
 

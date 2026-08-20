@@ -24,13 +24,31 @@ import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
 import { NavBar, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow, RowNote } from '../components/playerRow.tsx';
-import { PlayerPage } from '../components/playerPage.tsx';
+import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
+import { unwindOne } from '../tabReset.ts';
 
-export function TradesScreen() {
+export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   const [board, setBoard] = useState<TradeBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  /** Whether a skim has turned into a study — see `PlayerSheet`. */
+  const [full, setFull] = useState(false);
+
+  /*
+   * Tapping Trades while already on Trades.
+   *
+   * The sheet closes, the pushed page unwinds, and the board returns to the
+   * top. Nothing about the suggestions themselves is touched — they are the
+   * server's answer, not a view state.
+   */
+  useEffect(() => {
+    if (resetNonce === 0) return;
+    unwindOne([
+      { when: full, undo: () => setFull(false) },
+      { when: openId != null, undo: () => setOpenId(null) },
+    ]);
+  }, [resetNonce]);
 
   const load = useCallback(async () => {
     try {
@@ -66,12 +84,12 @@ export function TradesScreen() {
    * a name expects the player, not a sub-view of the screen they came from. The
    * case is passed in as context and sits above the page's own tabs.
    */
-  if (open) {
+  if (open && full) {
     return (
       <PlayerPage
         player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}
         backLabel="Trades"
-        onBack={() => setOpenId(null)}
+        onBack={() => setFull(false)}
         context={<TradeCase suggestion={open} />}
       />
     );
@@ -153,6 +171,25 @@ export function TradesScreen() {
         })
       )}
 
+      {/*
+        The case, over the list rather than instead of it.
+
+        This is where the rows' explanations went. A collapsed row now says who
+        and how he is moving; everything about *why* — the reasons, the
+        counterpoints, what this league paid for him, how much evidence is
+        behind it — is one tap away and arrives without taking the board off the
+        screen. The full page is still there for a reader who wants the whole
+        ledger, one step further in.
+      */}
+      {open && !full ? (
+        <PlayerSheet
+          player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}
+          onClose={() => setOpenId(null)}
+          onOpenFull={() => setFull(true)}
+          context={<TradeCase suggestion={open} />}
+        />
+      ) : null}
+
       {board.considered > 0 ? (
         <div className="faint" style={{ margin: '8px 2px' }}>
           {board.considered} player{board.considered === 1 ? '' : 's'} with evidence were considered. Players nobody
@@ -189,8 +226,7 @@ function TradeRow({
   onOpen: () => void;
 }) {
   const w = suggestion.windows;
-  const reasons = withoutRepeats(suggestion.reasons);
-  const line = suggestion.injury.line ?? reasons[0];
+
 
   return (
     <div role="listitem">
@@ -201,27 +237,38 @@ function TradeRow({
         team={suggestion.team}
         onOpen={onOpen}
         testId="trade-row"
+        /*
+          Two windows, and nothing that reads like a sentence.
+
+          The row used to carry three numbers and a line of prose under them —
+          `improving over 30 days (+7 from 1 item(s))` beneath `30d +7`, which
+          is the number saying itself twice, once in figures and once in words.
+          `Life` went with it: a lifetime tally answers "has he ever mattered",
+          and this screen is about who is moving *now*.
+
+          What is left is the question the list exists to answer — who should I
+          care about right now — and the answer to *why* is one tap away in the
+          sheet, where there is room to say it properly.
+        */
         metrics={[
-          { label: 'Life', value: <SignedValue net={w.lifetime} /> },
           { label: '30d', value: <SignedValue net={w.last30} /> },
           { label: '7d', value: <SignedValue net={w.last7} /> },
         ]}
-        note={
-          line ? (
-            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
-              <span
-                className={suggestion.injury.line ? 'injury-line-inline' : undefined}
-                data-testid={suggestion.injury.line ? 'trade-injury' : 'trade-line'}
-              >
-                {line}
-              </span>
-            </RowNote>
-          ) : (
-            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
-              <span className="faint">No single reason leads — the case is on his page.</span>
-            </RowNote>
-          )
-        }
+        {...(showConfidence
+          ? {
+              /*
+                Only where it varies. A section whose rows all share a
+                confidence says so in its own header — see the note there — and
+                repeating it down the edge of every row is a pattern the eye
+                follows instead of the names.
+              */
+              note: (
+                <RowNote trailing={<Confidence level={suggestion.confidence} />}>
+                  <span className="faint">{suggestion.label}</span>
+                </RowNote>
+              ),
+            }
+          : {})}
       />
     </div>
   );

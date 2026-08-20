@@ -243,15 +243,18 @@ export function App() {
         {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
         <InstallPrompt />
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}
-        {tab === 'team' ? <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} /> : null}
-        {tab === 'matchup' ? <MatchupScreen leagues={leagues} /> : null}
-        {tab === 'waivers' ? <WaiversScreen leagues={leagues} /> : null}
-        {tab === 'trades' ? <TradesScreen /> : null}
+        {tab === 'team' ? (
+          <TeamScreen leagues={leagues} onLeaguesChanged={() => void refresh()} resetNonce={resetNonce} />
+        ) : null}
+        {tab === 'matchup' ? <MatchupScreen leagues={leagues} resetNonce={resetNonce} /> : null}
+        {tab === 'waivers' ? <WaiversScreen leagues={leagues} resetNonce={resetNonce} /> : null}
+        {tab === 'trades' ? <TradesScreen resetNonce={resetNonce} /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
-        {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} /> : null}
+        {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} resetNonce={resetNonce} /> : null}
         {tab === 'setup' ? (
           <SetupScreen
             leagues={leagues}
+            resetNonce={resetNonce}
             onChanged={() => void refresh()}
             unlocked={unlocked}
             canUnlock={canUnlock}
@@ -266,6 +269,20 @@ export function App() {
       <FloatingToolbar
         tabs={tabs}
         active={tab}
+        /*
+         * Tapping the destination you are already on.
+         *
+         * iOS gives the current tab the one job it has nothing else to do:
+         * take the screen back towards its resting state. Every screen reads
+         * this counter and unwinds whatever it is holding — an open sheet, a
+         * pushed page, a typed query, an expanded row — and then returns to the
+         * top. What none of them touch is anything the user owns: a heart, a
+         * queue, a filter they set deliberately and a tally are not view state,
+         * and a tab tap has no business changing them.
+         *
+         * A counter rather than a boolean, because two retaps in a row are two
+         * separate requests and a boolean's second one would be a no-op.
+         */
         onSelect={(id) => {
           chosen.current = true;
           if (tab === id) setResetNonce((n) => n + 1);
