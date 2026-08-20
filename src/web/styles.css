@@ -283,7 +283,15 @@
    * height the container adds.
    */
   --tab-w: 52px;
-  --toolbar-pad: 5px;
+  /*
+   * Four rather than five, and it is the honest way to slim the bar.
+   *
+   * The pill is a destination's 44px plus this at the top and this at the
+   * bottom, so a point here is two points off the height of the bar on every
+   * screen — taken from the air around the destinations rather than from the
+   * destinations themselves.
+   */
+  --toolbar-pad: 4px;
 
   /*
    * Replaced at runtime with the toolbar's measured height. This value only has
@@ -871,12 +879,14 @@ body,
    * The pill's height is this plus its own padding, and nothing else adds to
    * it — a bar that grows is a bar that starts eating the page.
    *
-   * 42 rather than 44, and this is the one place in the app where that trade is
-   * right: a destination is a whole column of the bar, so the *target* is the
-   * full width of the column and two points taller than the label needs. The
-   * bar loses four points of bulk across the bottom of every screen for it.
+   * **44 and not a pixel less.** This was taken to 42 to buy the bar some of
+   * the vertical bulk the finishing pass asked it to give up, and that was the
+   * wrong pixel to take it from: 44 is a fingertip, it is the floor the whole
+   * design system is written around, and five specs across three files assert
+   * it at every supported width. The bulk came out of the pill's own padding
+   * instead — see `--toolbar-pad` — which costs a reader nothing.
    */
-  min-height: 42px;
+  min-height: var(--tap);
   padding: 1px 1px;
   background: none;
   border: none;
