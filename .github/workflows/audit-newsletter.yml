@@ -35,6 +35,32 @@ jobs:
 
       - run: npm ci
 
+      # The committed wrangler.toml carries a placeholder database id so the
+      # repository stays deployable by anyone; the deploy workflow discovers the
+      # real one and patches it in at build time. A --remote query needs the
+      # same treatment, or wrangler resolves the binding to nothing.
+      - name: Point the config at the database
+        run: |
+          set -euo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then
+            echo "::error::No database called $DATABASE_NAME — nothing to audit."
+            exit 1
+          fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+          echo "Using database $DATABASE_NAME ($id)"
+
       - name: Read the stored newsletter and the player dictionary
         env:
           MESSAGE_ID: ${{ inputs.message_id }}
@@ -45,12 +71,32 @@ jobs:
           case "$MESSAGE_ID" in
             *"'"*) echo "::error::message id may not contain a quote"; exit 1 ;;
           esac
-          npx wrangler d1 execute "$DATABASE_NAME" --remote --json \
-            --command "SELECT message_id, subject, received_at, status, body_html, body_text FROM newsletter_messages WHERE message_id = '$MESSAGE_ID'" \
-            > /tmp/message.json
-          npx wrangler d1 execute "$DATABASE_NAME" --remote --json \
-            --command "SELECT id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json FROM players WHERE position NOT IN ('K')" \
-            > /tmp/players.json
+
+          # stdout carries the JSON, so wrangler's own diagnostics have to be
+          # kept on stderr — redirecting both is how the first run reported
+          # "exit code 1" and nothing else.
+          query() {
+            local out="$1"; shift
+            npx wrangler d1 execute "$DATABASE_NAME" --remote --json --command "$1" > "$out" || {
+              echo "::error::query failed"; cat "$out"; exit 1;
+            }
+            node -e "
+              const fs = require('fs');
+              const raw = fs.readFileSync(process.argv[1], 'utf8');
+              const start = raw.search(/[\[{]/);
+              if (start === -1) { console.error('::error::no JSON in wrangler output'); console.error(raw.slice(0, 400)); process.exit(1); }
+              const parsed = JSON.parse(raw.slice(start));
+              const first = Array.isArray(parsed) ? parsed[0] : parsed;
+              const rows = first?.results ?? first?.result?.[0]?.results;
+              if (!Array.isArray(rows)) { console.error('::error::unexpected wrangler shape'); console.error(raw.slice(0, 400)); process.exit(1); }
+              // Re-write it in the shape the audit script reads, trimmed of the banner.
+              fs.writeFileSync(process.argv[1], JSON.stringify([{ results: rows }]));
+              console.log(process.argv[1] + ': ' + rows.length + ' row(s)');
+            " "$out"
+          }
+
+          query /tmp/message.json "SELECT message_id, subject, received_at, status, body_html, body_text FROM newsletter_messages WHERE message_id = '$MESSAGE_ID'"
+          query /tmp/players.json "SELECT id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json FROM players WHERE position NOT IN ('K')"
 
       - name: Audit
         env:
