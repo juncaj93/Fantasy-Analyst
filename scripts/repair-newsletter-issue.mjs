@@ -162,6 +162,23 @@ async function main() {
     `protectedByUser=${(preview.protectedByUser ?? []).length}`,
   );
 
+  /*
+   * Nothing to do is a result, not a failure.
+   *
+   * A preview with no adds and no retires means this newsletter is already
+   * rebuilt: re-reading it would reproduce exactly the ledger it already has.
+   * The checks below all describe a change, and demanding an affected player
+   * when nothing is affected reported that healthy state as a scary red run —
+   * which is the same sin as a check that passes on nothing, pointing the other
+   * way. Say so plainly and stop, without applying anything.
+   */
+  if (preview.wouldAdd === 0 && retire.length === 0) {
+    console.log('');
+    console.log('=== RESULT ================================================');
+    console.log('Already rebuilt — re-reading this newsletter would change nothing. Nothing was applied.');
+    process.exit(problems.length === 0 ? 0 : 1);
+  }
+
   // Everyone this touches: whoever loses a row, plus whoever gains one.
   const affected = [
     ...new Set([...retire.map((r) => r.playerId), ...(preview.tallyDelta ?? []).map((d) => d.playerId)]),

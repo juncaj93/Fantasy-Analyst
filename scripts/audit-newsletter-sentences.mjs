@@ -166,3 +166,30 @@ for (const r of rows) {
 console.log('');
 console.log('=== NAME-LIKE SPANS NOT IN THE DICTIONARY ================');
 for (const name of [...unknownNames].sort()) console.log(`  ${name}`);
+
+/*
+ * The whole issue in document order, on request.
+ *
+ * A sentence-by-sentence audit answers "what did the classifier make of this
+ * line", which is the right question for rule coverage and the wrong one for
+ * deciding whether a line is news at all. A leaderboard row reads `Romeo Doubs
+ * - 0.216`, and whether that number is good or bad lives in a heading two
+ * blocks above it that names no player and therefore never appears in the
+ * audit. The same gap hides whether a projection sits under a real transaction
+ * or under a hypothetical.
+ *
+ * So this prints every block and every sentence with its index, including the
+ * ones naming nobody, so the structure the reader sees can be read here too.
+ */
+if (process.env.FULL_TEXT === '1') {
+  console.log('');
+  console.log('=== THE WHOLE ISSUE, IN ORDER ============================');
+  let n = 0;
+  for (const block of blocks) {
+    console.log(`[block ${String(block.index).padStart(3)} ${block.kind}]`);
+    for (const sentence of splitSentences(block.text)) {
+      n++;
+      console.log(`  ${String(n).padStart(3)}| ${sentence.replace(/\s+/g, ' ')}`);
+    }
+  }
+}
