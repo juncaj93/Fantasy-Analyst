@@ -519,6 +519,20 @@ test.describe('the deployed app', () => {
     const before = await rows.count();
     await rows.first().click();
 
+    /*
+     * The sheet first, the page second.
+     *
+     * A tap on a name opens a sheet over the list — the list stays mounted, so
+     * its query, its filter and its scroll are simply still true — and the
+     * pushed page is what a reader asks for when a skim turns into a study.
+     * Both draw the same dossier. This test is about the *page*, so it takes
+     * the step that pushes; that the sheet costs the list nothing is asserted
+     * in `e2e/density.spec.ts`.
+     */
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+    await page.getByTestId('player-full-profile').click();
+
     const pushed = page.getByTestId('player-page');
     await expect(pushed).toBeVisible();
     await expect(page.getByTestId('player-page-metrics')).toBeVisible();
