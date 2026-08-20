@@ -216,14 +216,34 @@ export function TeamLogo({ team }: { team: string | null | undefined }) {
  * {@link TeamLogo} for what happens when it cannot be.
  */
 export function PositionBadge({ position, team }: { position: string | null; team?: string | null }) {
+  return (
+    <span className="pos-team">
+      <PositionPill position={position} />
+      {team !== undefined ? <TeamLogo team={team} /> : null}
+    </span>
+  );
+}
+
+/**
+ * The position, alone, in letters.
+ *
+ * Split out of {@link PositionBadge} because the row rule separated the two
+ * marks it used to carry together: the pill belongs immediately *left* of the
+ * player's name, where it is the first thing read and lands on the same column
+ * on every row of every list, and the club's mark belongs on the trailing edge
+ * beside whatever number that screen is about. A badge holding both could only
+ * ever sit at one end.
+ *
+ * A fixed minimum width, because the point of putting it left of the name is
+ * that the names line up: `QB` and `DEF` must occupy the same column or the
+ * rule buys nothing.
+ */
+export function PositionPill({ position }: { position: string | null }) {
   const pos = (position ?? '').toUpperCase();
   const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
   return (
-    <span className="pos-team">
-      <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
-        {pos || '—'}
-      </span>
-      {team !== undefined ? <TeamLogo team={team} /> : null}
+    <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
+      {pos || '—'}
     </span>
   );
 }

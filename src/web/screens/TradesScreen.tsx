@@ -238,21 +238,24 @@ function TradeRow({
         onOpen={onOpen}
         testId="trade-row"
         /*
-          Two windows, and nothing that reads like a sentence.
+          Two windows: what has moved lately, and how much he has ever mattered.
+          Nothing that reads like a sentence.
 
           The row used to carry three numbers and a line of prose under them —
           `improving over 30 days (+7 from 1 item(s))` beneath `30d +7`, which
           is the number saying itself twice, once in figures and once in words.
-          `Life` went with it: a lifetime tally answers "has he ever mattered",
-          and this screen is about who is moving *now*.
+          The prose is gone for good.
 
-          What is left is the question the list exists to answer — who should I
-          care about right now — and the answer to *why* is one tap away in the
-          sheet, where there is room to say it properly.
+          The pairing has changed once since: it was `30d` beside `7d`, two
+          recency windows where the shorter is mostly a noisier reading of the
+          longer. `Life` is the more useful second number precisely because it
+          is not another recency window — together they separate "moving now"
+          from "has always been worth something", which is the actual trade
+          question. `7d` is still in the sheet with the rest of the windows.
         */
         metrics={[
           { label: '30d', value: <SignedValue net={w.last30} /> },
-          { label: '7d', value: <SignedValue net={w.last7} /> },
+          { label: 'Life', value: <SignedValue net={w.lifetime} /> },
         ]}
         {...(showConfidence
           ? {

@@ -409,6 +409,8 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
     null,
   );
   const reduced = useReducedMotion();
+  /** Held so the same function can be removed from a body that is going away. */
+  const edgeListener = useRef<(() => void) | null>(null);
 
   const onPointerDown = useCallback((e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -481,13 +483,48 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
     [onDismiss, reduced],
   );
 
+  /*
+   * Which way the browser is allowed to take the gesture, moment to moment.
+   *
+   * This is the fix for the bug that made swipe-to-dismiss feel broken: a drag
+   * down the sheet pulled the page behind it instead of closing anything. The
+   * cause is the one already written down on `.drag-handle` — with
+   * `touch-action: pan-y`, Safari has decided the gesture is a scroll before
+   * the first `pointermove` arrives, and by then nothing in JavaScript can take
+   * it back.
+   *
+   * A sheet cannot simply say `none`, because its body has to scroll. So the
+   * permission is directional and depends on where the body is: scrolled, the
+   * browser owns both directions and the sheet stays out of the way; at the
+   * top, only *upward* panning is the browser's — which is still every scroll
+   * the content can actually perform — and a downward drag arrives as pointer
+   * events, which is the one this hook exists to read.
+   *
+   * One attribute flip at a single boundary, so scrolling costs nothing.
+   */
+  const markEdge = useCallback((node: HTMLElement | null) => {
+    if (node) node.dataset['atTop'] = (node.scrollTop <= 0).toString();
+  }, []);
+
   return {
     sheetRef: useCallback((node: HTMLElement | null) => {
       sheet.current = node;
     }, []),
-    bodyRef: useCallback((node: HTMLElement | null) => {
-      body.current = node;
-    }, []),
+    bodyRef: useCallback(
+      (node: HTMLElement | null) => {
+        if (body.current && edgeListener.current) {
+          body.current.removeEventListener('scroll', edgeListener.current);
+        }
+        body.current = node;
+        edgeListener.current = null;
+        if (!node) return;
+        const onScroll = () => markEdge(node);
+        edgeListener.current = onScroll;
+        node.addEventListener('scroll', onScroll, { passive: true });
+        markEdge(node);
+      },
+      [markEdge],
+    ),
     handlers: {
       onPointerDown,
       onPointerMove,

@@ -355,14 +355,22 @@ test.describe('waiver upgrades', () => {
     await expect(sheet).toContainText('add, drop or bid in Sleeper');
   });
 
-  /** Advisory, and it says so. Nothing here executes anything. */
+  /**
+   * Advisory, and the absence of any control is what says so.
+   *
+   * The sentence promising the app never transacts used to sit on the face of
+   * this teaser. It moved to the detail sheet — beside the bid it qualifies,
+   * where somebody about to act actually is — because two of the teaser's four
+   * lines were the engine describing its own bookkeeping rather than naming a
+   * player worth adding. `the waiver detail sheet` test above still holds it to
+   * carrying that sentence.
+   *
+   * What is asserted here is the stronger guarantee, and the one that would
+   * still matter if the sentence were missing: there is no control on this card
+   * that offers to add, drop, claim, bid or submit anything.
+   */
   test('offers no control that would make a transaction', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
-    // The disclaimer names Sleeper as the only place a transaction happens. The
-    // exact verbs it lists have grown with the card — it now quotes bids as well
-    // as adds — so the assertion is on the invariant rather than the sentence.
-    await expect(card).toContainText('in Sleeper');
-    await expect(card).toContainText('never makes a transaction');
     const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     /*
      * Matched as whole words, not as substrings.

@@ -157,7 +157,7 @@ test.describe('Demo Mode on the deployed site', () => {
     await expect(page.getByTestId('matchup-score')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
     await expect(page.getByTestId('matchup-win-mine')).toBeVisible();
-    await expect(page.getByTestId('hero-headline')).toBeVisible();
+    await expect(page.getByTestId('insight-entry-label')).toBeVisible();
     await expect(page.getByTestId('matchup-row')).toHaveCount(8);
   });
 

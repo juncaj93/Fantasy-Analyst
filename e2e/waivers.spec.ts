@@ -234,9 +234,20 @@ test.describe('the waivers page', () => {
     await expect.poll(() => called, { timeout: 10_000 }).toBe(1);
   });
 
-  /** Advisory in every sense: there is no control here that transacts. */
+  /**
+   * Advisory in every sense: there is no control here that transacts.
+   *
+   * The sentence saying so left the bottom of this list, along with the count
+   * of players considered — the final pass took the engine's bookkeeping off a
+   * screen whose job is naming two players worth adding. It is still in the
+   * app, on the detail sheet beside the bid it qualifies, which the sheet test
+   * above holds it to.
+   *
+   * What is checked here is the guarantee the sentence was only describing, and
+   * the one that would still hold if every word of it were gone: no control on
+   * this screen offers to perform a transaction.
+   */
   test('offers nothing that would make a claim', async ({ page }) => {
-    await expect(page.locator('body')).toContainText('add, drop or bid in Sleeper');
     const buttons = (await page.locator('button:visible').allInnerTexts()).join(' ').toLowerCase();
     /*
      * Matched as whole words, not as substrings.

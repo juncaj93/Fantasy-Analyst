@@ -483,6 +483,28 @@ export function Sheet({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  /*
+   * The page behind holds still.
+   *
+   * The other half of the dismissal bug: a sheet is modal, and a modal surface
+   * whose backdrop scrolls when you drag on it is not modal — the reader drags
+   * to close and watches the list underneath move instead, which reads as the
+   * gesture being broken rather than as scrolling. Locking the body is also
+   * what makes the scroll position survive: nothing moved, so nothing has to be
+   * restored.
+   *
+   * The previous value is put back rather than assumed to be empty, because the
+   * draft board's own overlay does the same thing and the two can be open at
+   * once.
+   */
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
   return createPortal(
     <>
       <div className="sheet-backdrop" data-testid="sheet-backdrop" onClick={onClose} />

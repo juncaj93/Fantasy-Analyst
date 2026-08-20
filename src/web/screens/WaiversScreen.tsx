@@ -138,24 +138,30 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           )}
 
           {/*
-            What the page knows it does not know, said once at the bottom rather
-            than as four empty fields on every row.
+            What the page knows it does not know — and nothing about its own
+            bookkeeping.
+
+            Three lines used to close this screen: how many players were
+            checked, which fields are missing, and a sentence promising the app
+            never transacts. Only the middle one changes a decision, because it
+            says a blank means *unknown* rather than *zero*; it is kept, without
+            the count in front of it. A tally of how many free agents were
+            considered is the engine describing its own work to a reader who
+            came here to decide on two names.
+
+            The promise is not deleted from the app — it is on the detail sheet
+            beside the bid it qualifies, which is where somebody about to act
+            actually is. And it is enforced by something stronger than a
+            sentence: there is no control on this screen that could transact,
+            which `e2e-production/smoke.spec.ts` asserts by reading every button
+            on it.
           */}
           {board && board.pending.length > 0 ? (
             <div className="faint" data-testid="waivers-pending" style={{ margin: '4px 4px 8px' }}>
-              {board.considered} available players checked. {joinFields(board.pending)}{' '}
-              {board.pending.length === 1 ? 'arrives' : 'arrive'} with league intelligence — shown as unknown rather
-              than estimated.
+              {joinFields(board.pending)} {board.pending.length === 1 ? 'arrives' : 'arrive'} with league
+              intelligence — shown as unknown rather than estimated.
             </div>
-          ) : (
-            <div className="faint" style={{ margin: '4px 4px 8px' }}>
-              {board?.considered ?? 0} available players checked.
-            </div>
-          )}
-
-          <div className="faint" style={{ margin: '0 4px 8px' }}>
-            Advisory only — add, drop or bid in Sleeper. This app never makes a transaction.
-          </div>
+          ) : null}
 
           {(board?.notes ?? []).map((note) => (
             <div className="faint" key={note} style={{ margin: '0 4px 4px' }}>

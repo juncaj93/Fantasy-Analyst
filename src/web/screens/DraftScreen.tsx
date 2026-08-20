@@ -33,7 +33,8 @@ import {
   Empty,
   InjuryTag,
   Notice,
-  PositionBadge,
+  PositionPill,
+  TeamLogo,
   Unknown,
   formatShortAge,
   positionCardClass,
@@ -1808,7 +1809,7 @@ function RecommendationRow({
           ) : (
             <span className="rank">{rank}</span>
           )}
-          <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+          <PositionPill position={rec.position} />
           <span className="player-name">{rec.name}</span>
           {/*
             The tally, beside the name it is about.
@@ -1828,7 +1829,18 @@ function RecommendationRow({
             <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
             <InjuryTag status={rec.status} />
           </span>
-          <PositionBadge position={rec.position} team={rec.team} />
+          {/*
+            The star sits with the club rather than beside the rank.
+
+            The position pill took the slot to the left of the name — see
+            `CompactPlayerRow`, which is where that rule is written down — and
+            the row is better for it: the marks that qualify the *player* are
+            now all on one side of his name and the controls that act on the
+            row are all on the other, instead of a bookmark toggle sitting in
+            the middle of the identity.
+          */}
+          <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+          <TeamLogo team={rec.team} />
         </div>
 
         {/*

@@ -22,7 +22,7 @@
 
 import type { ReactNode } from 'react';
 import { ChevronIcon } from './icons.tsx';
-import { CompactTally, InjuryTag, PositionBadge, positionAccentClass } from './common.tsx';
+import { CompactTally, InjuryTag, PositionPill, TeamLogo, positionAccentClass } from './common.tsx';
 
 /** One labelled number in the row's second line. */
 export interface RowMetric {
@@ -93,24 +93,40 @@ export function CompactPlayerRow({
       */
       onClick={onOpen}
     >
+      {/*
+        The locked order, and it is the same on every screen in the app.
+
+        Rank, then the **position pill**, then the name, then whatever qualifies
+        the *player* — his tally and his availability — and only then the club
+        and the way in. The pill moved here from the trailing edge, which is the
+        whole rule: it is fixed-width, so it puts every name in the list on one
+        column, and a reader running down a list of forty is answering "which
+        position" before "who" more often than the other way round.
+
+        Anything that qualifies the player sits to the right of his name, and
+        anything that belongs to the row as an object — the heart, the star —
+        sits with the club on the trailing side, where it is out of the path the
+        eye takes down the names.
+      */}
       <span className="dense-row-top">
         {rank !== undefined ? (
           <span className="rank" aria-hidden="true">
             {rank}
           </span>
         ) : null}
-        {leading}
+        <PositionPill position={position} />
         <span className="player-name">{name}</span>
         {/*
           The tally and the availability tag share one fixed-width field, so
-          the position pill and the club's mark after them land on the same
-          edge on every row of every list. See `--row-meta`.
+          the marks after them land on the same edge on every row of every
+          list. See `--row-meta`.
         */}
         <span className="player-row-meta">
           {tally === undefined ? null : <CompactTally net={tally} label="Lifetime research tally" />}
           <InjuryTag status={status} />
         </span>
-        <PositionBadge position={position} team={team} />
+        {leading}
+        {team === undefined ? null : <TeamLogo team={team} />}
         <span className="dense-chevron" aria-hidden="true">
           <ChevronIcon />
         </span>
