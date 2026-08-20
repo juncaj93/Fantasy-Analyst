@@ -360,24 +360,33 @@ test.describe('draft room', () => {
   });
 
   /**
-   * The four numbers, and the tally that stopped being one of them.
+   * The numbers, and the two that stopped being raw market positions.
    *
-   * The metrics line used to read `ADP · Value · Next pick · ▲ +6 pos`, which
-   * spent a third of itself on the tally and had no room left for the thing the
-   * board is actually deciding. The tally is now one token beside the name and
-   * the line carries `Score · ADP · Val · Next`.
+   * The line used to read `Score · ADP 170 · DOG 145.1 · Val -6 · Next`, and
+   * three of those asked the reader to subtract against the pick on the clock
+   * before any of them meant anything. It carries the subtraction now — `ADP
+   * +6` is six picks ahead of Sleeper's market, `DOG -19` is nineteen picks
+   * past Underdog's — and `Val`, which was a third answer to the same question,
+   * has moved onto the expanded card with both raw markets.
    */
-  test('reads Score · ADP · Val · Next, with the tally beside the name', async ({ page }) => {
+  test('reads Score · ADP · DOG · Next as market deltas, with the tally beside the name', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
     const metrics = await first.locator('.player-row-metrics').innerText();
 
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
-    // The long labels are what cost the fourth column its space.
+    // `Val` was the third answer to "how does this pick compare to the market",
+    // and the two deltas answer it directly. It lives on the expanded card now.
+    expect(metrics, 'Val is still on the compact row').not.toMatch(/\bVal\b/);
+    // The long labels are what cost the columns their space.
     expect(metrics).not.toMatch(/\bValue\b/);
     expect(metrics).not.toMatch(/Next pick/);
+
+    // The ADP column is a signed delta or an honest unknown — never a raw
+    // market position, which is what it used to be.
+    const adp = await first.getByTestId('adp-metric').innerText();
+    expect(adp, `ADP column read "${adp}"`).toMatch(/^ADP\s+([+-]?\d+|unknown)$/);
 
     // Score is a whole number in range, and not a percentage.
     const score = Number(metrics.match(/Score\s+(\d{1,3})/)![1]);

@@ -2050,6 +2050,50 @@ body,
   color: var(--text-faint);
 }
 
+/*
+ * A market delta, and the one place in this app where a `+` is red.
+ *
+ * Everywhere else a positive number is a good number. Here it is the opposite
+ * and deliberately so: `+6` means taking him at this pick is six picks *ahead*
+ * of that market, which is what the pick costs you, and `-19` means he lasted
+ * nineteen picks past it, which is why you take him. Painting those the usual
+ * way round would tell the reader the exact opposite of what the number means.
+ *
+ * The sign is always printed, so colour is an accelerator here as everywhere —
+ * a reader who cannot separate the hues reads the `+` and the `-`, and a screen
+ * reader reads the title, which says it in words.
+ *
+ * Deliberately unsaturated. Two of these on every row of a forty-row board at
+ * full strength is a trading terminal, which is the opposite of the target.
+ */
+.metric strong.delta {
+  font-variant-numeric: tabular-nums;
+}
+
+.metric strong.delta-reach {
+  color: var(--neg);
+}
+
+.metric strong.delta-value {
+  color: var(--pos);
+}
+
+.metric strong.delta-even {
+  color: var(--text-dim);
+}
+
+/*
+ * The working behind the row's two deltas, on the expanded card: both raw
+ * markets, the pick they were measured against, and the value column the
+ * compact row stopped printing.
+ */
+.market-raw {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
 .metric strong.sig-pos {
   color: var(--pos);
 }
