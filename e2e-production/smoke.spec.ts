@@ -16,6 +16,37 @@
  * refused.
  *
  *   PRODUCTION_URL=https://… npx playwright test --config playwright.production.config.ts
+ *
+ * ---------------------------------------------------------------------------
+ * **CI DOES NOT RUN THIS FILE, AND THAT IS WHY IT BREAKS AFTER UI WORK.**
+ *
+ * `ci.yml` runs `e2e/`. This suite runs only in `smoke.yml`, after a deploy —
+ * so the first thing that tells you a UI change invalidated an assertion in
+ * here is production going red, minutes after the merge that caused it. That
+ * has happened twice.
+ *
+ * This file keeps its *own copies* of assertions that `e2e/` also makes. When a
+ * row, a label, a card, a metric or a navigation path changes shape, both
+ * suites have to be reconciled with the intended UI, and this one has to be
+ * *run*, not searched. Grep is not proof: the second miss was a grep for `Val`
+ * that returned two docblock comments, which read as "no assertions" when the
+ * live one sat eleven lines below them.
+ *
+ * Run it against a local production build before declaring any UI branch
+ * merge-ready — it is part of the exact-head gate, not an afterthought:
+ *
+ *   npm run build && node scripts/build-server.mjs
+ *   FA_SEED=1 … node scripts/dev-server.mjs --port 8794 &
+ *   PRODUCTION_URL=http://127.0.0.1:8794 \
+ *     npx playwright test --config playwright.production.config.ts \
+ *     --project=chromium-iphone-390 --project=chromium-small-360
+ *
+ * Two tests fail against the demo seed and pass against real production, so a
+ * local run is expected to show exactly these and nothing else: the Team
+ * `Starter` assertion (stale since the shipped density work moved that word
+ * into the row's `aria-label`) and the waiver-advice test (already flaky).
+ * Any *third* failure is yours.
+ * ---------------------------------------------------------------------------
  */
 
 import { expect, test, type Page } from '@playwright/test';
