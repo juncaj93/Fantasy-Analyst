@@ -34,7 +34,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
 | Injury | `.injury-caution` `.injury-serious` `.injury-out`, over `--status-neutral` |
-| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-strong` for how much of it a row shows |
+| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-open` / `--pos-mix-draft` for how much of it a row shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-toolbar: 25` `--radius-pill` `--tap: 44` |
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
@@ -48,12 +48,24 @@ page and a card. Anything greyer looked calmer on a desk and vanished on a phone
 in daylight.
 
 `--pos-mix` is how much of a position's hue a row's surface actually takes, and
-it is deliberately small: 15% in Light, 34% in Dark. A wash strong enough to read
-as a colour turns a hundred-row list into a rainbow, so the position is carried
-by the leading accent edge and the lettered pill instead, and the wash is only a
-hint that a row belongs to a run. `--pos-mix-strong` is the one exception, spent
-by `.starter-row` on the Team screen: eight cards, one per lineup slot, is the
-case where the tint shows the shape of a week rather than decorating a list.
+the default is **none**. A wash strong enough to read as a colour turns a
+hundred-row list into a rainbow, so on almost every screen the position is
+carried by the lettered pill and nothing else.
+
+**Draft is the one screen with a tinted row, and that is the point.** The board
+spends `--pos-mix-draft` — 9% in Light, 22% in Dark — which is faint enough that
+the row still reads white first and strong enough to show that four receivers in
+a row are four receivers in a row. It is scoped to `.board-list > .card-pos`
+rather than set on `.card-pos` itself, so a reader who has learned that a tinted
+row means "you are on the draft board" is never shown one anywhere else. Team,
+Players, Trades and Waivers all draw the same `card-pos-*` classes and take only
+the hue for their pills. `--pos-mix-open` is the same wash on an opened card,
+which sits on `--surface-raised` and therefore needs a little more of it to look
+like the same amount.
+
+There is no rail. The board used to carry a coloured left border *and* a wash,
+which is two cues for one fact; the wash stayed, the border went, and the
+hairline between rows is the list's own.
 
 `--status-neutral` exists for the same reason in reverse. A chip that lands on a
 card washed in a position's colour cannot be painted in a hue and stay legible —
@@ -79,7 +91,7 @@ is which.
 | `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
 | `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
-| `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. |
+| `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. `positionCardClass` paints a fill and belongs to the draft board; `positionAccentClass` hands over the hue without the fill, and is what every other list uses. |
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
 | Draft card bottom row | `1fr auto`: the four metrics on the left, the tier-cliff warning tucked into the right-hand end of the same line. A warning costs the card no height, so a thinning position no longer puts a stutter in the board's rhythm. The chip has a short spelling below 376px, where four labelled numbers and nineteen characters will not share the line — the full sentence stays in its accessible name at every width. |
 | `Badge` / tags / `Confidence` | Status pills, ranked by how much attention each state deserves. |
@@ -127,9 +139,13 @@ blank strip under the navigation twice:
 - `e2e/draft-controls.spec.ts` — the folded search beside the position filters:
   collapsed shape, control-row height, expansion, query semantics, and that the
   filters are untouched by any of it.
-- `e2e/draft-card.spec.ts` — the collapsed player card: where the tier-cliff
-  warning sits, that it costs no height, that the metrics never wrap to make
-  room for it, and that it takes no tap meant for the card.
+- `e2e/draft-card.spec.ts` — the player card, collapsed and expanded: where the
+  tier-cliff warning sits, that it costs no height, that the metrics never wrap
+  to make room for it, that it takes no tap meant for the card — and the
+  expanded card's **height budget**, asserted as a ratio against the board's own
+  collapsed rows rather than as a pixel count. An opened player rests at under
+  three rows; everything the card stopped resting on is behind its one control,
+  and the second test there proves it is still reachable.
 - `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
   and ceiling, that the position is an edge and not a wash, that no column
   truncates a value, that a trade suggestion is a row rather than a card, and

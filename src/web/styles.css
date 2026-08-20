@@ -155,10 +155,26 @@
    * Draft, Players and Trades alike.
    *
    * The token stays rather than the rule being deleted, because it is what
-   * `--pos-mix-strong` is measured against and what Team still spends.
+   * `--pos-mix-draft` is measured against.
    */
   --pos-mix: 0%;
   --pos-mix-open: 8%;
+
+  /*
+   * The one board that keeps a wash, and how little of one it keeps.
+   *
+   * Draft is deliberately the only screen in the app with a position-tinted
+   * row, and that is a reversal: the convergence pass took the wash to nothing
+   * everywhere including here, and the Draft pass that followed asked for a
+   * faint one back — as the thing that makes the board recognisable at a glance
+   * as *the board*, distinct from the six quieter lists around it.
+   *
+   * Nine per cent, so the row is still white first. It is a hint that a run of
+   * receivers is a run of receivers, not a colour the eye has to read past to
+   * reach the name. Dark takes more of it because a wash on a near-black
+   * surface built from a pale tint is a difference of two points of luminance.
+   */
+  --pos-mix-draft: 9%;
   /*
    * The same hue, for a set of eight rather than a list of a hundred.
    *
@@ -169,7 +185,7 @@
    * strength is two tokens and not one — and why Team says so on the rule that
    * spends it rather than by inventing a colour of its own.
    */
-  --pos-mix-strong: 34%;
+
 
   /* -- elevation and focus ---------------------------------------------- */
   /*
@@ -492,7 +508,7 @@
 
     --pos-mix: 0%;
     --pos-mix-open: 14%;
-    --pos-mix-strong: 66%;
+    --pos-mix-draft: 22%;
 
     --shadow-1: none;
     --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -565,7 +581,7 @@
 
   --pos-mix: 0%;
   --pos-mix-open: 14%;
-  --pos-mix-strong: 66%;
+  --pos-mix-draft: 22%;
 
   --shadow-1: none;
   --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -1477,6 +1493,24 @@ body,
   box-shadow: none;
 }
 
+/*
+ * The faint wash, and it lives here rather than on `.card-pos`.
+ *
+ * Scoping it to the board is what keeps it Draft's alone: Players, Trades, Team
+ * and the rest all draw the same `card-pos-*` classes for the pill's colour and
+ * take nothing from them but that. A reader who has learned that a tinted row
+ * means "this is the draft board" is never shown one anywhere else.
+ *
+ * The rail goes at the same time, and for the same reason it can: two cues for
+ * one fact is one too many. The wash now says which position a row is; the
+ * coloured edge was the last thing making these read as bordered cards rather
+ * than as rows, and the hairline between them is the list's own.
+ */
+.board-list > .card-pos {
+  --pos-mix: var(--pos-mix-draft);
+  border-left: 0;
+}
+
 .board-list > .player-row + .player-row {
   border-top: 1px solid var(--separator-soft);
 }
@@ -2373,6 +2407,107 @@ body,
   margin-bottom: 3px;
   font-size: 0.82rem;
   color: var(--text-dim);
+}
+
+/*
+ * The Draft board's expanded row, budgeted in lines.
+ *
+ * Draft is the one screen where opening a player costs you the thing you opened
+ * him from: the board. An expanded row that runs eight or nine times the height
+ * of a collapsed one pushes the next four players off a phone, which is the
+ * opposite of what tapping one of them was for. So this variant is measured
+ * against a target — about two to two and a half collapsed rows — and the
+ * markup is arranged to hit it: four short blocks and one control.
+ *
+ * The other screens keep plain `.explain`. Players and the player page are
+ * *about* the player, and there is nothing behind them to protect.
+ */
+.explain-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+}
+
+/*
+ * The working, at the size of working.
+ *
+ * Four raw numbers that have to sit on one line at 360px, because two lines
+ * here is a tenth of the card's whole budget spent on the arithmetic behind a
+ * number rather than on the player.
+ */
+.explain-compact .market-raw {
+  font-size: 0.72rem;
+  gap: 2px var(--sp-2);
+  margin-bottom: 0;
+}
+
+/* Last season on the left, the way in on the right, one line for both. */
+.detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+
+/*
+ * The gaps are the flex gap now, so the labels stop bringing their own. A
+ * label's margin plus a flex gap is two spacings doing one job, and on a card
+ * this tight the difference is a whole row of pixels.
+ */
+.explain-compact .detail-label {
+  margin: 0;
+}
+
+/*
+ * Two lines of outlook at rest.
+ *
+ * Clamped rather than cut in the component, so the paragraph in the DOM is the
+ * one the provider wrote and the truncation is the browser's — with the
+ * ellipsis that admits it. The control below hands over the rest.
+ */
+.explain-compact[data-everything='no'] .outlook {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The season, as the first token of the line it used to be a heading over. */
+.season-line .season-year {
+  font-weight: 680;
+  color: var(--text-dim);
+}
+
+/*
+ * The card's one way in.
+ *
+ * Sits last, reads as a link, and carries the same chevron the disclosures
+ * elsewhere use — the affordance for "there is more of this" is already spelled
+ * one way in this app and a second spelling would be a second thing to learn.
+ */
+.explain-compact .detail-more {
+  min-height: 28px;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.detail-more::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.8px solid currentcolor;
+  border-bottom: 1.8px solid currentcolor;
+  transform: rotate(-45deg) translate(-1px, 1px);
+  opacity: 0.6;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.detail-more[aria-expanded='true']::after {
+  transform: rotate(45deg) translate(-1px, -1px);
 }
 
 /*
@@ -4350,22 +4485,19 @@ table.compact tr:last-child td {
 }
 
 /*
- * The recommended lineup keeps more of the position's hue than a list does.
+ * Team's rows are neutral, and Draft's are the only tinted ones in the app.
  *
- * This is the exception the density pass deliberately left standing. Everywhere
- * else the wash came down to a hint, because a hundred tinted rows is a rainbow
- * rather than a list; here there are eight, one per lineup slot, and the tint is
- * doing a job no hairline can do — it is what lets a reader see the shape of
- * their week without reading a word. The letters are still on the pill, the slot
- * is still printed, and the row is still labelled as a starter for anything
- * reading it aloud, so the colour remains an accelerator and never the carrier.
+ * This rule used to give the recommended lineup a strong wash, on the argument
+ * that eight slots is where a tint shows the shape of a week rather than
+ * decorating a list. The Team pass overruled it: Team is an inset grouped
+ * roster, its rows are white, and the position lives in the pill. Draft keeps
+ * the wash — see `--pos-mix-draft` — precisely so that one board reads as
+ * different from the six lists around it, which only works if the others are
+ * genuinely quiet.
  *
- * It borrows `--pos-mix-strong` rather than naming a number, so Light and Dark
- * stay two settings of one system here as everywhere else.
+ * The rule is gone rather than zeroed. A selector that sets a value to its own
+ * default is a rule that looks like it is doing something.
  */
-.starter-row.card-pos {
-  --pos-mix: var(--pos-mix-strong);
-}
 
 /*
  * A lineup slot nothing can fill, said once and set as prose rather than as a
@@ -4380,6 +4512,25 @@ table.compact tr:last-child td {
   white-space: nowrap;
   font-size: 0.82rem;
   color: var(--text-dim);
+}
+
+/*
+ * …and the row it sits in is sized for three words, not for a player.
+ *
+ * There is nothing to tap on an empty slot's row except the slot itself, so the
+ * 44px minimum that protects a player's row is protecting nothing here. Four of
+ * these at a player's height is most of a phone spent on absence; at this
+ * height they read as the gaps they are, and the slots that *are* filled are
+ * what the eye lands on.
+ */
+.slot-group > [data-starter='empty'] {
+  min-height: 0;
+  padding-top: var(--sp-1);
+  padding-bottom: var(--sp-1);
+}
+
+.slot-group > [data-starter='empty'] .player-row-top {
+  min-height: 24px;
 }
 
 /*
@@ -4427,6 +4578,24 @@ table.compact tr:last-child td {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   color: var(--text);
+}
+
+/*
+ * The projection and the club, as one cluster.
+ *
+ * A number and the badge of the team that will produce it are one thought, and
+ * they used to sit at opposite ends of a stretch of empty row with a position
+ * pill between them — which read as two unrelated things separated by a third.
+ * `gap` here is the only distance between them, and it is small on purpose:
+ * everything else on the row is separated by more than this, so these two read
+ * as belonging together.
+ */
+.row-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  margin-left: auto;
 }
 
 /*

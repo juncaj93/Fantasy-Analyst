@@ -141,12 +141,40 @@ function formatHeight(inches: number): string {
  * characters, and a wall of prose in a live draft is scrolled past rather than
  * read, taking whatever is under it off the screen.
  */
-export function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null; failed: boolean }) {
+export function SeasonOutlook({
+  detail,
+  failed,
+  heading = true,
+  whole,
+}: {
+  detail: PlayerDetail | null;
+  failed: boolean;
+  /**
+   * Draw the provider's own title above the paragraph.
+   *
+   * On by default. Draft's compact card turns it off, because a heading over
+   * two clamped lines is a third of the card spent naming prose that already
+   * names itself — the attribution inside it reads `— Rotowire, via Sleeper`.
+   * The title comes back with everything else when the card is opened in full.
+   */
+  heading?: boolean;
+  /**
+   * Whether the full text is showing, when the caller owns that decision.
+   *
+   * Players and the player page let the outlook run its own "read the rest"
+   * control, because the outlook is most of what those screens are. Draft's
+   * expanded row has one control for the whole card — see `DraftPlayerDetail` —
+   * and a second one inside the paragraph it governs would be two answers to
+   * the same question. Passing this hands the decision up and suppresses the
+   * inner control; leaving it undefined keeps the old, self-governing outlook.
+   */
+  whole?: boolean;
+}) {
   if (failed) return null;
   if (!detail) {
     return (
       <>
-        <DetailLabel>Season outlook</DetailLabel>
+        {heading ? <DetailLabel>Season outlook</DetailLabel> : null}
         <div className="muted" data-testid="outlook-pending">
           Looking it up…
         </div>
@@ -156,28 +184,42 @@ export function SeasonOutlook({ detail, failed }: { detail: PlayerDetail | null;
   if (!detail.outlook) {
     return (
       <>
-        <DetailLabel>Season outlook</DetailLabel>
+        {heading ? <DetailLabel>Season outlook</DetailLabel> : null}
         <div className="muted" data-testid="outlook-none">
           {detail.outlookNote ?? 'No outlook published for him.'}
         </div>
       </>
     );
   }
-  return <OutlookBody outlook={detail.outlook} />;
+  return <OutlookBody outlook={detail.outlook} heading={heading} governed={whole} />;
 }
 
-function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']> }) {
-  const [whole, setWhole] = useState(false);
+function OutlookBody({
+  outlook,
+  heading,
+  governed,
+}: {
+  outlook: NonNullable<PlayerDetail['outlook']>;
+  heading: boolean;
+  governed: boolean | undefined;
+}) {
+  const [own, setOwn] = useState(false);
+  const whole = governed ?? own;
   const attribution = outlook.source ? <span className="outlook-source"> — {outlook.source}, via Sleeper</span> : null;
 
   return (
     <>
-      <DetailLabel>{outlook.title}</DetailLabel>
-      <div className="outlook" data-testid="outlook" data-summarised={outlook.summarised ? 'yes' : 'no'}>
+      {heading ? <DetailLabel>{outlook.title}</DetailLabel> : null}
+      <div
+        className="outlook"
+        data-testid="outlook"
+        data-summarised={outlook.summarised ? 'yes' : 'no'}
+        data-whole={whole ? 'yes' : 'no'}
+      >
         {whole ? outlook.fullText : outlook.text}
         {attribution}
       </div>
-      {outlook.summarised ? (
+      {governed === undefined && outlook.summarised ? (
         <button
           type="button"
           className="link-button"
@@ -186,7 +228,7 @@ function OutlookBody({ outlook }: { outlook: NonNullable<PlayerDetail['outlook']
             // The row underneath is a toggle; expanding the text is not
             // "collapse this player".
             e.stopPropagation();
-            setWhole((v) => !v);
+            setOwn((v) => !v);
           }}
         >
           {whole ? 'Show the short version' : 'Read the full outlook'}
@@ -208,10 +250,19 @@ export function LastSeasonLine({
   detail,
   failed,
   position,
+  compact = false,
 }: {
   detail: PlayerDetail | null;
   failed: boolean;
   position: string | null;
+  /**
+   * Put the season on the line instead of above it.
+   *
+   * `2025` as a heading over two numbers costs a whole row of the card to say
+   * one word. On Draft, where the expanded row is budgeted in single lines, the
+   * year is just the first token of the line it labels.
+   */
+  compact?: boolean;
 }) {
   if (failed || !detail) return null;
   const season = detail.lastSeason?.season;
@@ -220,8 +271,9 @@ export function LastSeasonLine({
   if (!season) return null;
   return (
     <>
-      <DetailLabel>{season}</DetailLabel>
+      {compact ? null : <DetailLabel>{season}</DetailLabel>}
       <div className="season-line" data-testid="last-season">
+        {compact ? <span className="metric season-year">{season}</span> : null}
         <span className="metric">
           {games == null ? (
             <>

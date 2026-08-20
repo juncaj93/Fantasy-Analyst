@@ -665,6 +665,13 @@ test.describe('draft room', () => {
    * work forwards. It then showed the whole twelve hundred characters. Now a
    * *selection* is shown: the provider's own sentences, in the provider's own
    * order, and the card says it has been shortened and offers the rest.
+   *
+   * "The rest" is the Draft card's one control, `detail-more`, rather than a
+   * link belonging to the paragraph. The compact card governs the outlook along
+   * with everything else it holds back — see `DraftPlayerDetail` — so a second
+   * control inside the prose would be a second answer to the same question. On
+   * Players and the player page the outlook still governs itself, which
+   * `players.spec.ts` covers.
    */
   test('shortens a long outlook to the provider’s own sentences, and offers the rest', async ({ page }) => {
     const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Owen Fitzgerald' }).first();
@@ -688,7 +695,7 @@ test.describe('draft room', () => {
     }
 
     // A cut quotation that admits it, and gives the rest back.
-    await row.getByTestId('outlook-toggle').click();
+    await row.getByTestId('detail-more').click();
     const whole = (await outlook.innerText()).split(' — ')[0]!.trim();
     expect(whole).toBe(stored.fullText);
     expect(whole.length).toBeGreaterThan(short.length);
@@ -700,14 +707,20 @@ test.describe('draft room', () => {
   /**
    * And it declines rather than produce a bad summary. The three-sentence
    * outlooks in the demo data are already short, so there is nothing to choose
-   * between and the whole thing is shown, with no control offering "the rest".
+   * between and the whole paragraph is what the card holds.
+   *
+   * "Whole" is a fact about the text, not about how many lines of it are on
+   * screen: the compact card shows two and the stylesheet clamps the rest,
+   * which is why this compares against the stored text rather than counting
+   * pixels. Nothing was summarised, so nothing was lost — and the paragraph
+   * carries no control of its own, because on Draft the card owns the one
+   * control there is.
    */
   test('leaves a short outlook whole, and admits when there is none', async ({ page }) => {
     const withOutlook = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
     await withOutlook.click();
     const outlook = withOutlook.getByTestId('outlook');
     await expect(outlook).toBeVisible();
-    await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
     await expect(outlook).toContainText('via Sleeper');
     await expect(outlook).toHaveAttribute('data-summarised', 'no');
     await expect(withOutlook.getByTestId('outlook-toggle')).toHaveCount(0);
@@ -717,6 +730,13 @@ test.describe('draft room', () => {
     const stored = await (await page.request.get('/api/players/1005/detail')).json();
     expect(shown).toBe(stored.outlook.fullText);
     expect(shown.length).toBeGreaterThan(300);
+
+    // The provider's own title is part of "everything", not part of the
+    // snapshot: a heading over two clamped lines names prose that already names
+    // itself.
+    await expect(withOutlook.getByText(/season outlook/i)).toHaveCount(0);
+    await withOutlook.getByTestId('detail-more').click();
+    await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
     await withOutlook.locator('.row-button').click();
 
     const without = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();
@@ -773,6 +793,10 @@ test.describe('draft room', () => {
     const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
     await row.scrollIntoViewIfNeeded();
     await row.click();
+    // One tap further in than it used to be: the compact card rests at four
+    // short blocks and the injury detail is part of what its control reveals.
+    // The row's own availability badge is what survives at a glance.
+    await row.getByTestId('detail-more').click();
     await expect(row.getByTestId('injury-conflict')).toContainText(/disagree/i);
     await expect(row.getByTestId('injury-current')).toContainText(/knee/i);
     // And it says where it came from, so the freshness can be judged.
@@ -790,6 +814,7 @@ test.describe('draft room', () => {
     const hurt = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
     await hurt.scrollIntoViewIfNeeded();
     await hurt.click();
+    await hurt.getByTestId('detail-more').click();
     await expect(hurt.getByTestId('injury-context')).toContainText('Major injury history: ACL');
     // One line, not a paragraph, and it does not restate the outlook.
     await revealed(hurt.getByTestId('injury-context'));
@@ -805,6 +830,7 @@ test.describe('draft room', () => {
     const fit = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
     await fit.scrollIntoViewIfNeeded();
     await fit.click();
+    await fit.getByTestId('detail-more').click();
     await expect(fit.getByTestId('injury-context')).toHaveCount(0);
     await expect(fit.getByText('Injury context')).toHaveCount(0);
   });
@@ -1068,19 +1094,29 @@ test.describe('draft room', () => {
     });
   });
 
+  /**
+   * The tint is the row's surface now, not a rail down its edge.
+   *
+   * It used to be both — a coloured left border *and* a wash — which is two
+   * cues for one fact. The rail went and the wash stayed, faint enough that the
+   * row still reads white first, so this reads `backgroundColor` where it used
+   * to read `borderLeftColor`. How faint is asserted in `shell.spec.ts`, which
+   * owns the shell; what this owns is that the board distinguishes positions at
+   * all, and that it never does so by colour alone.
+   */
   test('tints the whole card by position, and keeps the letters', async ({ page }) => {
     const rows = page.getByTestId('recommendation-row');
     const sample = await rows.evaluateAll((nodes) =>
       nodes.slice(0, 8).map((n) => ({
         position: n.getAttribute('data-position'),
-        edge: getComputedStyle(n).borderLeftColor,
+        surface: getComputedStyle(n).backgroundColor,
         badge: (n.querySelector('.pos-pill')?.textContent ?? '').trim(),
       })),
     );
     const positions = new Set(sample.map((s) => s.position));
     expect(positions.size, 'the seeded board has several positions').toBeGreaterThan(1);
-    // Every position paints a different edge…
-    const byPosition = new Map(sample.map((s) => [s.position, s.edge]));
+    // Every position paints a different surface…
+    const byPosition = new Map(sample.map((s) => [s.position, s.surface]));
     expect(new Set(byPosition.values()).size).toBe(byPosition.size);
     // …and the position is still written on the card in words.
     for (const s of sample) expect(s.badge).toBe(s.position);
