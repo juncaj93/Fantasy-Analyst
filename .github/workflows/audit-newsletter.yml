@@ -1,0 +1,59 @@
+name: Audit a newsletter
+
+# Print every player-containing sentence in one stored newsletter, with the
+# outcome the current rules give it.
+#
+# The coverage report in Settings caps its examples, which is right for a
+# prompt-to-write-rules and wrong for answering "are the other hundred sentences
+# genuinely non-actionable?". This answers that, by re-running the same pure
+# pipeline over the same stored body and printing all of it.
+#
+# Read-only. Both queries are SELECTs and the script writes nothing back.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message_id:
+        description: 'Message-ID of the newsletter to audit'
+        required: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The audit script imports the pipeline's TypeScript directly, so it
+          # needs a Node that can strip types.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Read the stored newsletter and the player dictionary
+        env:
+          MESSAGE_ID: ${{ inputs.message_id }}
+        run: |
+          set -euo pipefail
+          # Single-quoted in SQL, so a quote in the id would break out of the
+          # literal. Message-IDs do not contain one; refuse rather than assume.
+          case "$MESSAGE_ID" in
+            *"'"*) echo "::error::message id may not contain a quote"; exit 1 ;;
+          esac
+          npx wrangler d1 execute "$DATABASE_NAME" --remote --json \
+            --command "SELECT message_id, subject, received_at, status, body_html, body_text FROM newsletter_messages WHERE message_id = '$MESSAGE_ID'" \
+            > /tmp/message.json
+          npx wrangler d1 execute "$DATABASE_NAME" --remote --json \
+            --command "SELECT id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json FROM players WHERE position NOT IN ('K')" \
+            > /tmp/players.json
+
+      - name: Audit
+        env:
+          AUDIT_MESSAGE_JSON: /tmp/message.json
+          AUDIT_PLAYERS_JSON: /tmp/players.json
+        run: node --experimental-strip-types --no-warnings scripts/audit-newsletter-sentences.mjs
