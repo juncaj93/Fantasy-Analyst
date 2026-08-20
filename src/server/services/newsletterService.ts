@@ -209,7 +209,7 @@ export interface AiTallyPreview {
    * A revised tally supersedes rather than stacks, so a corrected score does
    * not sit in the ledger beside the one it corrects.
    */
-  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  wouldRetire: { id: string; playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   /** Superseded-looking rows left alone because the user had ruled on them. */
   protectedByUser: { playerId: string; excerpt: string }[];
   /**
@@ -823,6 +823,7 @@ export class NewsletterService {
     const wouldRetire = priorImports
       .filter((row) => !row.userOverride)
       .map((row) => ({
+        id: row.id,
         playerId: row.playerId,
         excerpt: row.excerpt,
         polarity: row.polarity,

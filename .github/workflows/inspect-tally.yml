@@ -100,7 +100,8 @@ jobs:
           query /tmp/players.json "SELECT id, full_name FROM players"
           query /tmp/signals.json "SELECT player_id, recent_score, lifetime_score FROM player_signals"
 
-      - name: Print it
+      - name: Print the current state
+        if: ${{ inputs.tally == '' }}
         env:
           EVIDENCE_JSON: /tmp/evidence.json
           PLAYERS_JSON: /tmp/players.json
@@ -137,36 +138,21 @@ jobs:
           echo "preview: HTTP $code"
 
           node -e "
-            const fs = require('fs');
-            const raw = fs.readFileSync('/tmp/preview.json', 'utf8');
+            const raw = require('fs').readFileSync('/tmp/preview.json', 'utf8');
             let p; try { p = JSON.parse(raw); } catch { console.log(raw.slice(0, 800)); process.exit(1); }
             if (p.error) { console.log('::error::' + p.error); process.exit(1); }
-            const out = [];
-            const say = (s) => { out.push(s); console.log(s); };
-            const show = (n) => (n > 0 ? '+' + n : String(n));
-
-            say('# Dry run — nothing was written');
-            say('');
-            say(p.detail);
-            say('');
-            const section = (title, list, render) => {
-              say('## ' + title + ' — ' + list.length);
-              say('');
-              if (!list.length) { say('(none)'); say(''); return; }
-              for (const r of list) say('- ' + render(r));
-              say('');
-            };
-            section('Would be added', p.ready, (r) => r.playerName + ' ' + show(r.score) + ' — ' + r.reason);
-            section('Already on the record, unchanged', p.duplicates, (r) => r.playerName + ' ' + show(r.score));
-            section('Would wait for review', p.pending, (r) => r.playerName + ' ' + show(r.score));
-            section('Earlier imported rows retired', p.wouldRetire, (r) => r.playerId + ' was ' + r.polarity + ' ' + r.magnitude + ' — ' + r.excerpt);
-            section('App-found rows that stop counting', p.parserSuperseded, (r) => r.playerId + ' ' + r.polarity + ' ' + r.magnitude + ' (' + r.ruleId + ') — ' + r.excerpt);
-            section('App-found rows that disagree and wait', p.parserNeedsReview, (r) => r.playerId + ' ' + r.polarity + ' ' + r.magnitude + ' (' + r.ruleId + ') — ' + r.excerpt);
-            section('Left as you ruled them', p.protectedByUser, (r) => r.playerId + ' — ' + r.excerpt);
-            section('Names needing a person', [...p.ambiguous, ...p.unmatched], (r) => r.name + ' ' + show(r.score));
-            section('Lines that could not be read', p.rejected, (r) => 'line ' + r.lineNumber + ': ' + r.why);
-            section('Net tally change', p.tallyDelta, (r) => r.playerName + ' ' + show(r.net));
-
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join('\n') + '\n');
           "
           [ "$code" = "200" ] || exit 1
+
+      # The current state and the projection are printed together, by one
+      # script reading one ledger: a report that describes the before and the
+      # after from different sources invites them to disagree silently.
+      - name: Report the state and what would change
+        if: ${{ inputs.tally != '' }}
+        env:
+          EVIDENCE_JSON: /tmp/evidence.json
+          PLAYERS_JSON: /tmp/players.json
+          SIGNALS_JSON: /tmp/signals.json
+          PREVIEW_JSON: /tmp/preview.json
+          MESSAGE_ID: ${{ inputs.message_id }}
+        run: node scripts/inspect-tally-state.mjs | tee -a "$GITHUB_STEP_SUMMARY"

@@ -751,7 +751,7 @@ export interface AiTallyPreview {
   unmatched: { name: string; score: number; reason: string }[];
   conflicts: string[];
   rejected: { line: string; lineNumber: number; why: string }[];
-  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  wouldRetire: { id: string; playerId: string; excerpt: string; polarity: string; magnitude: number }[];
   protectedByUser: { playerId: string; excerpt: string }[];
   parserSuperseded: ParserRowDisposition[];
   parserNeedsReview: ParserRowDisposition[];
