@@ -53,6 +53,18 @@ export const AI_TALLY_RULE_ID = 'ai-tally-import';
 export const AI_TALLY_PROVENANCE = 'manual_chatgpt_import';
 
 /**
+ * Notes the replacement rules write, and read back.
+ *
+ * A revised paste retires the rows it replaces, and a later paste that asks for
+ * one of them again has to be able to tell "an import retired this" from "a
+ * person did". The note is how, so it is named once and shared rather than
+ * spelled out at each site — a typo in one of them would silently turn
+ * reinstatement off.
+ */
+export const AI_TALLY_SUPERSEDED_NOTE = 'superseded-by-newer-tally-import';
+export const AI_TALLY_REINSTATED_NOTE = 'reinstated-by-later-tally-import';
+
+/**
  * The only scores the protocol accepts.
  *
  * Bounded on purpose. An open range invites a scale nobody agreed on, and the

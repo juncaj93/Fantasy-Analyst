@@ -743,6 +743,8 @@ export interface AiTallyPreview {
   error: string | null;
   rowsParsed: number;
   ready: AiTallyPreviewRow[];
+  /** Already in the ledger, retired by a later paste, and asked for again. */
+  reinstated: AiTallyPreviewRow[];
   duplicates: AiTallyPreviewRow[];
   pending: AiTallyPreviewRow[];
   ambiguous: { name: string; score: number; reason: string; candidates: string[] }[];
@@ -760,6 +762,7 @@ export interface AiTallyPreview {
 export interface AiTallyApplyOutcome {
   messageId: string;
   inserted: number;
+  reinstated: number;
   alreadyPresent: number;
   identityReviews: number;
   retired: number;

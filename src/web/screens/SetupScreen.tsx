@@ -1215,6 +1215,22 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
   };
 
   const ready = preview?.ready ?? [];
+  const reinstated = preview?.reinstated ?? [];
+  /*
+   * Whether applying would do anything, by the same five-way count the preview
+   * uses to decide whether to say "Nothing would change".
+   *
+   * Enabling on matched rows alone got this wrong in the direction that matters:
+   * a paste whose only effect is to stop this app's own reading of the issue
+   * from counting does change the ledger, and the button would have said there
+   * was nothing to apply.
+   */
+  const changes =
+    ready.length > 0 ||
+    reinstated.length > 0 ||
+    (preview?.wouldRetire.length ?? 0) > 0 ||
+    (preview?.parserSuperseded.length ?? 0) > 0 ||
+    (preview?.parserNeedsReview.length ?? 0) > 0;
   const needsReview =
     (preview?.pending.length ?? 0) + (preview?.ambiguous.length ?? 0) + (preview?.unmatched.length ?? 0);
 
@@ -1299,10 +1315,40 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
                 </>
               ) : null}
 
+              {reinstated.length > 0 ? (
+                <>
+                  <div className="section-title">Would count again</div>
+                  <ul style={{ paddingLeft: 16, margin: 0 }}>
+                    {reinstated.map((row) => (
+                      <li key={row.dedupeKey} style={{ marginBottom: 6 }}>
+                        <strong>{row.playerName}</strong> {row.score > 0 ? `+${row.score}` : row.score}
+                        <div className="faint">
+                          Already on the record, retired when a later tally replaced it. This one asks for
+                          it again, so it counts again.
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
               {preview.wouldRetire.length > 0 ? (
                 <div className="faint" style={{ marginTop: 4 }}>
                   {preview.wouldRetire.length} earlier row(s) from this newsletter would be replaced.
                 </div>
+              ) : null}
+
+              {preview.tallyDelta.length > 0 ? (
+                <>
+                  <div className="section-title">Net change to each score</div>
+                  <ul style={{ paddingLeft: 16, margin: 0 }}>
+                    {preview.tallyDelta.map((row) => (
+                      <li key={row.playerId} className="faint">
+                        {row.playerName} {row.net > 0 ? `+${row.net}` : row.net}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               ) : null}
 
               {needsReview > 0 ? (
@@ -1348,12 +1394,10 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
                 <button
                   className="btn btn-sm btn-primary"
                   onClick={apply}
-                  disabled={busy || (ready.length === 0 && preview.wouldRetire.length === 0)}
+                  disabled={busy || !changes}
                   data-testid="paste-tally-apply"
                 >
-                  {ready.length === 0 && preview.wouldRetire.length === 0
-                    ? 'Nothing to apply'
-                    : `Apply ${ready.length} matched signal(s)`}
+                  {!changes ? 'Nothing to apply' : `Apply ${ready.length} matched signal(s)`}
                 </button>
               </div>
             </div>
