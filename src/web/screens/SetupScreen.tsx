@@ -1050,8 +1050,19 @@ function NewsletterHistory() {
                   {m.rejectReason ? <div className="muted">{m.rejectReason}</div> : null}
                   {m.status === 'processed' ? (
                     <>
+                      {(c.repairs ?? []).length > 0 ? (
+                        <Notice tone="warn">
+                          This email had to be repaired before it could be read — it was stored
+                          before its encoding was decoded properly. Re-read it below to rebuild
+                          its news from the corrected text.
+                        </Notice>
+                      ) : null}
                       <table className="compact" style={{ marginTop: 6 }}>
                         <tbody>
+                          <tr>
+                            <td>Sentences found</td>
+                            <td>{c.sentences ?? 0}</td>
+                          </tr>
                           <tr>
                             <td>Sentences about your players</td>
                             <td>{c.sentencesWithPlayers ?? 0}</td>
@@ -1139,10 +1150,15 @@ function ReprocessPanel({ messageId }: { messageId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.post<{ evidenceInserted: number }>(
+      const result = await api.post<{ evidenceInserted: number; detail?: string }>(
         `/api/newsletter/messages/${encodeURIComponent(messageId)}/reprocess`,
       );
-      setDone(`Added ${result.evidenceInserted} new item(s). Your corrections were left as they are.`);
+      // The server's own sentence covers the cases this one cannot know about —
+      // chiefly that repairing an unreadable email retires what it replaces.
+      setDone(
+        result.detail ??
+          `Added ${result.evidenceInserted} new item(s). Your corrections were left as they are.`,
+      );
       setPreview(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

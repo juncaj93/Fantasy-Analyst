@@ -13,6 +13,7 @@
  */
 
 import { SleeperClient } from '../core/sleeper/client.ts';
+import { decodeEncodedWords, parseMimeMessage } from '../core/newsletter/mime.ts';
 import { toEmailMessage } from '../core/newsletter/source.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
@@ -321,7 +322,16 @@ export default {
     env: WorkerEnv,
   ): Promise<void> {
     try {
-      const raw = await new Response(message.raw).text();
+      // Read the message as octets and view them one-byte-per-character rather
+      // than letting the runtime decode the whole thing as UTF-8. Every part
+      // then reaches the MIME decoder with its bytes intact, so the part's own
+      // charset — not a guess made over the entire message — decides what its
+      // text says.
+      const bytes = new Uint8Array(await new Response(message.raw).arrayBuffer());
+      let raw = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        raw += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
       const parsed = parseRawEmail(raw);
       // `message.from` is the SMTP envelope sender. Bulk senders put a
       // per-message bounce address there (Substack sends
@@ -329,11 +339,15 @@ export default {
       // matched against it would work once and then silently stop. The visible
       // `From:` header is the stable identity; the envelope is kept alongside
       // it for the record.
+      //
+      // Header values arrive RFC 2047 encoded whenever they are not pure ASCII,
+      // so a subject like `Week 1 =?UTF-8?Q?=E2=80=94?= Risers` is decoded
+      // before it is stored or matched against a subject pattern.
       const email = toEmailMessage({
         messageId: message.headers.get('message-id') ?? parsed.messageId,
-        from: message.headers.get('from') ?? parsed.from ?? message.from,
+        from: decodeEncodedWords(message.headers.get('from') ?? '') || parsed.from || message.from,
         envelopeFrom: message.from,
-        subject: message.headers.get('subject') ?? parsed.subject,
+        subject: decodeEncodedWords(message.headers.get('subject') ?? '') || parsed.subject,
         date: message.headers.get('date'),
         html: parsed.html,
         text: parsed.text,
@@ -348,9 +362,19 @@ export default {
 };
 
 /**
- * Minimal MIME extraction: enough to pull the HTML or plain-text part out of a
- * newsletter. Anything more exotic is handled by storing the raw body as text —
- * the sanitizer is tolerant of malformed input by design.
+ * Pull the HTML and plain-text bodies out of a raw newsletter.
+ *
+ * The decoding itself lives in `core/newsletter/mime.ts`, done to the standard:
+ * headers are unfolded before they are read, nested multiparts are walked, and
+ * transfer decoding produces octets that the part's own charset then
+ * interprets. This wrapper exists to give the worker the flat shape
+ * `toEmailMessage` wants.
+ *
+ * The version this replaced read headers a physical line at a time. A
+ * `Content-Type` folded before its `boundary=` parameter — which is exactly how
+ * Substack sends one — therefore looked like a message with no boundary at all,
+ * and the entire raw MIME body was handed downstream as the newsletter's plain
+ * text: part headers, boundary markers, undecoded quoted-printable and all.
  */
 export function parseRawEmail(raw: string): {
   messageId: string | null;
@@ -359,61 +383,19 @@ export function parseRawEmail(raw: string): {
   html: string | null;
   text: string | null;
 } {
-  const headerEnd = raw.search(/\r?\n\r?\n/);
-  const headerBlock = headerEnd === -1 ? raw : raw.slice(0, headerEnd);
-  const body = headerEnd === -1 ? '' : raw.slice(headerEnd).trimStart();
-
+  const parsed = parseMimeMessage(raw);
   const header = (name: string): string | null => {
-    const re = new RegExp(`^${name}:\\s*(.*)$`, 'im');
-    const m = re.exec(headerBlock);
-    return m?.[1]?.trim() ?? null;
+    const value = parsed.headers.get(name);
+    return value == null || value === '' ? null : decodeEncodedWords(value);
   };
-
-  const contentType = header('content-type') ?? '';
-  const boundaryMatch = /boundary="?([^";\s]+)"?/i.exec(contentType);
-
-  let html: string | null = null;
-  let text: string | null = null;
-
-  if (boundaryMatch) {
-    const boundary = `--${boundaryMatch[1]}`;
-    for (const part of body.split(boundary)) {
-      const partHeaderEnd = part.search(/\r?\n\r?\n/);
-      if (partHeaderEnd === -1) continue;
-      const partHeaders = part.slice(0, partHeaderEnd).toLowerCase();
-      const partBody = part.slice(partHeaderEnd).trim();
-      if (partHeaders.includes('text/html') && !html) html = decodeBody(partBody, partHeaders);
-      else if (partHeaders.includes('text/plain') && !text) text = decodeBody(partBody, partHeaders);
-    }
-  } else if (contentType.toLowerCase().includes('text/html')) {
-    html = body;
-  } else {
-    text = body;
-  }
 
   return {
     messageId: header('message-id'),
     subject: header('subject'),
     from: header('from'),
-    html,
-    text,
+    html: parsed.html,
+    text: parsed.text,
   };
-}
-
-function decodeBody(body: string, headers: string): string {
-  if (headers.includes('quoted-printable')) {
-    return body
-      .replace(/=\r?\n/g, '')
-      .replace(/=([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-  }
-  if (headers.includes('base64')) {
-    try {
-      return atob(body.replace(/\s+/g, ''));
-    } catch {
-      return body;
-    }
-  }
-  return body;
 }
 
 
