@@ -113,8 +113,25 @@ export const POSITIVE_RULES: ClassificationRule[] = [
     id: 'pos.promoted',
     category: 'depth_chart',
     polarity: 'positive',
+    /**
+     * Movement UP THE DEPTH CHART, which is not the same as movement upward.
+     *
+     * This used to accept the bare verbs `climbed`, `moved up` and `elevated`.
+     * On a real issue that made "Cyrus Allen climbed the ladder to get that
+     * one" — a highlight caption for a leaping catch, sitting in the fun-stuff
+     * section between a fan sneaking into camp and a Madden rating — the single
+     * signal the whole newsletter produced, auto-applied at high confidence.
+     *
+     * So the loose verbs now need a depth chart to climb, and `elevated` needs
+     * something to be elevated to: a player elevates his game, and it means
+     * nothing about his role. `promoted` stays bare because in football writing
+     * it reliably means the depth chart, and the practice-squad exclusion it
+     * already carried stays with it — a practice-squad elevation is a roster
+     * mechanic, not a promotion.
+     */
     magnitude: 2,
-    pattern: /\b(promoted|elevated|moved up|climbed)\b(?![^.]*\bpractice squad\b)/i,
+    pattern:
+      /\b(?:(?:was|been|officially)\s+)?promoted\b(?![^.]*\bpractice squad\b)|\belevated to\b(?![^.]*\bpractice squad\b)|\b(?:climbed|moved up|jumped|leapfrogged|worked his way up|moving up)\b[^.]{0,40}\bdepth chart\b|\bup the depth chart\b/i,
     template: 'Promoted on the depth chart.',
   },
   {

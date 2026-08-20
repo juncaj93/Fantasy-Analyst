@@ -56,6 +56,22 @@ function isContiguousName(raw: string): boolean {
   return /^[A-Za-z'’.\-]+(?: [A-Za-z'’.\-]+)*$/.test(raw);
 }
 
+/**
+ * Position labels that introduce a name rather than belonging to it.
+ *
+ * `WR Jaylen Waddle projects for a 26% target share` is a label and one player.
+ * Read as a three-token name it resolves to nobody — and worse than nobody: the
+ * fuzzy ladder answers "ambiguous" rather than "unmatched", so the span is
+ * claimed, the tokens are consumed, and the real two-token name inside it is
+ * never tried. Both position-prefixed sentences in the audited issue landed in
+ * the unresolved pile that way.
+ *
+ * Matched case-sensitively, because these are abbreviations: `TE` is a label and
+ * `Te` is the start of somebody's name. Single letters are left out — `S` and
+ * `K` are initials far more often than they are positions.
+ */
+const POSITION_PREFIX = /^(QB|RB|WR|TE|FB|DST|DEF|LB|CB|EDGE|IDP)$/;
+
 interface Token {
   text: string;
   start: number;
@@ -103,6 +119,8 @@ export function detectMentions(
     if (consumed.has(i)) continue;
     const first = tokens[i]!;
     if (!isNameToken(first.text)) continue;
+    // Step over a position label so the name it introduces is read on its own.
+    if (POSITION_PREFIX.test(first.text) && isNameToken(tokens[i + 1]?.text ?? '')) continue;
 
     let placed = false;
     for (let len = Math.min(MAX_SPAN, tokens.length - i); len >= 2 && !placed; len--) {
@@ -252,6 +270,8 @@ export function collectUnresolvedNames(
     const first = tokens[i]!;
     if (!NAME_TOKEN.test(first.text)) continue;
     if (SENTENCE_STARTERS.has(first.text.toLowerCase())) continue;
+    // A position label is not the first word of a missing player's name either.
+    if (POSITION_PREFIX.test(first.text)) continue;
 
     for (let len = 3; len >= 2; len--) {
       const span = tokens.slice(i, i + len);
