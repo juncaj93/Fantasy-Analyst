@@ -5022,17 +5022,22 @@ table.compact tr:last-child td {
 }
 
 /*
- * The body scrolls, and hands the gesture back at its own top edge.
+ * The body scrolls only when it has somewhere to go.
  *
- * `pan-y` while there is anywhere to scroll to. At the top — `data-at-top`,
- * flipped by `useSheetDrag` on one boundary — it narrows to `pan-up`, which is
- * still every scroll the content can actually perform from there and leaves a
- * downward drag to arrive as pointer events. That is what lets a reader who has
- * scrolled back to the top of a sheet keep pulling and have it close, rather
- * than hitting an invisible wall and watching the page behind move instead.
+ * `data-scrollable` is set by `useSheetDrag` from the one question both engines
+ * answer the same way — is this content taller than its box? A sheet shorter
+ * than the screen, which is most of them, takes `none` and can be dragged shut
+ * from anywhere on it. A taller one keeps `pan-y` so the browser scrolls it,
+ * and the grip and header above — which never scroll, and inherit `none` from
+ * `.sheet` — are what dismisses it.
  *
- * `overscroll-behavior: contain` is the belt to that brace: whatever happens,
- * a scroll that runs out of sheet never becomes a scroll of the page.
+ * This replaced a `pan-up` at the body's top edge. Chromium honoured it; WebKit
+ * does not implement the directional values and discarded the declaration
+ * entirely, which left the mechanism inert on the browser the original bug came
+ * from. Nothing here now depends on a value both engines do not implement.
+ *
+ * `overscroll-behavior: contain` is the belt to that brace: whatever happens, a
+ * scroll that runs out of sheet never becomes a scroll of the page.
  */
 .sheet-body {
   flex: 1 1 auto;
@@ -5043,8 +5048,8 @@ table.compact tr:last-child td {
   padding: 0 var(--sp-4) var(--sp-4);
 }
 
-.sheet-body[data-at-top='true'] {
-  touch-action: pan-up;
+.sheet-body[data-scrollable='false'] {
+  touch-action: none;
 }
 
 @keyframes sheet-rise {

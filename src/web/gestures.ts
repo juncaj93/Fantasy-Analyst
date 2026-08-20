@@ -411,6 +411,8 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
   const reduced = useReducedMotion();
   /** Held so the same function can be removed from a body that is going away. */
   const edgeListener = useRef<(() => void) | null>(null);
+  /** Watches the body for content that arrives after the sheet does. */
+  const observer = useRef<ResizeObserver | null>(null);
 
   const onPointerDown = useCallback((e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -484,26 +486,31 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
   );
 
   /*
-   * Which way the browser is allowed to take the gesture, moment to moment.
+   * Whether this sheet's body has anywhere to scroll to.
    *
    * This is the fix for the bug that made swipe-to-dismiss feel broken: a drag
    * down the sheet pulled the page behind it instead of closing anything. The
-   * cause is the one already written down on `.drag-handle` — with
-   * `touch-action: pan-y`, Safari has decided the gesture is a scroll before
-   * the first `pointermove` arrives, and by then nothing in JavaScript can take
-   * it back.
+   * cause is the one already written on `.drag-handle` — with `touch-action:
+   * pan-y`, Safari has decided the gesture is a scroll before the first
+   * `pointermove` arrives, and by then nothing in JavaScript can take it back.
    *
-   * A sheet cannot simply say `none`, because its body has to scroll. So the
-   * permission is directional and depends on where the body is: scrolled, the
-   * browser owns both directions and the sheet stays out of the way; at the
-   * top, only *upward* panning is the browser's — which is still every scroll
-   * the content can actually perform — and a downward drag arrives as pointer
-   * events, which is the one this hook exists to read.
+   * The first attempt made the permission *directional*: `pan-up` at the top of
+   * the body, so that only a downward drag reached this hook. It worked in
+   * Chromium and did nothing at all in WebKit, which does not implement the
+   * directional values and quietly discarded the declaration — inert on the one
+   * browser the bug was reported from. CI caught it; no local run could have.
    *
-   * One attribute flip at a single boundary, so scrolling costs nothing.
+   * So the question asked is one both engines answer the same way: *can this
+   * body scroll at all?* Most sheets are shorter than the screen and cannot, so
+   * they take `touch-action: none` and a drag anywhere on them dismisses. A
+   * sheet with more content than fits keeps `pan-y`, the browser scrolls it, and
+   * the grip and header above it — which never scroll — are what dismisses it.
+   *
+   * Re-asked on scroll and on resize, because content arrives after the sheet
+   * does: a body that is short while its data loads is tall a moment later.
    */
-  const markEdge = useCallback((node: HTMLElement | null) => {
-    if (node) node.dataset['atTop'] = (node.scrollTop <= 0).toString();
+  const markScrollable = useCallback((node: HTMLElement | null) => {
+    if (node) node.dataset['scrollable'] = (node.scrollHeight > node.clientHeight + 1).toString();
   }, []);
 
   return {
@@ -514,16 +521,22 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
       (node: HTMLElement | null) => {
         if (body.current && edgeListener.current) {
           body.current.removeEventListener('scroll', edgeListener.current);
+          observer.current?.disconnect();
         }
         body.current = node;
         edgeListener.current = null;
+        observer.current = null;
         if (!node) return;
-        const onScroll = () => markEdge(node);
-        edgeListener.current = onScroll;
-        node.addEventListener('scroll', onScroll, { passive: true });
-        markEdge(node);
+        const recheck = () => markScrollable(node);
+        edgeListener.current = recheck;
+        node.addEventListener('scroll', recheck, { passive: true });
+        if (typeof ResizeObserver === 'function') {
+          observer.current = new ResizeObserver(recheck);
+          observer.current.observe(node);
+        }
+        markScrollable(node);
       },
-      [markEdge],
+      [markScrollable],
     ),
     handlers: {
       onPointerDown,

@@ -360,13 +360,33 @@ test.describe('sheets', () => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
       return {
         sheet: getComputedStyle(sheet).touchAction,
-        atTop: body.dataset['atTop'],
+        scrollable: body.dataset['scrollable'],
         body: getComputedStyle(body).touchAction,
       };
     });
+
+    // The chrome — grip, header — claims every gesture that lands on it.
     expect(claimed.sheet, 'the browser will take the drag before the sheet sees it').toBe('none');
-    expect(claimed.atTop, 'the sheet body did not report where it is scrolled to').toBe('true');
-    expect(claimed.body, 'a downward drag at the top will be taken as a scroll').toBe('pan-up');
+
+    /*
+     * And the body takes exactly what its own content justifies.
+     *
+     * Asserted as the mapping rather than as one value, because both branches
+     * are real and which one this sheet is in depends on how much it is holding.
+     * An earlier version of this pinned the expectation to `pan-up`, which
+     * Chromium honoured and WebKit discarded — the declaration was invalid
+     * there, the mechanism was inert, and only CI could see it. Hence the last
+     * assertion: nothing here may depend on a value one engine does not
+     * implement.
+     */
+    expect(claimed.scrollable, 'the sheet body did not report whether it can scroll').toMatch(/^(true|false)$/);
+    expect(claimed.body, `a body reporting scrollable=${claimed.scrollable} claimed ${claimed.body}`).toBe(
+      claimed.scrollable === 'true' ? 'pan-y' : 'none',
+    );
+    expect(
+      ['pan-up', 'pan-down', 'pan-left', 'pan-right'],
+      'a directional touch-action is silently ignored by WebKit',
+    ).not.toContain(claimed.body);
   });
 
   /**
