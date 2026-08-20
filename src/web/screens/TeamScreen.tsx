@@ -44,6 +44,7 @@ import {
   InjuryTag,
   Notice,
   PositionBadge,
+  PositionPill,
   TeamLogo,
   Unknown,
   positionAccentClass,
@@ -663,6 +664,23 @@ function StarterCard({
         <span className="slot-label">{slot.slot}</span>
         <span className="player-name">{slot.name}</span>
         {/*
+          His own position, but only where the slot has not already said it.
+
+          The row rule puts the position immediately beside the name, and on
+          every other screen that is a pill on the left. Here the left column is
+          the lineup *slot*, which is the more useful fact on a lineup screen
+          and is already fixed-width and already coloured by position — so the
+          alignment the rule exists for is intact and a second `QB` beside `QB`
+          would be the row saying one thing twice.
+
+          A FLEX is the case that is not covered: the chip cannot name what he
+          plays, and on the one row where the reader most needs to know whether
+          this is a back or a receiver, nothing was saying so.
+        */}
+        {position && position.toUpperCase() !== slot.slot.toUpperCase() ? (
+          <PositionPill position={position} />
+        ) : null}
+        {/*
           Availability against the name, because it is about him.
 
           `Q` is the one fact that can change a decision before any of the
@@ -861,11 +879,21 @@ function WaiverSection({
         is used here unchanged.
       */}
       <BudgetFooter faab={faab} />
-      <div className="faint" style={{ margin: '2px 4px 12px' }}>
-        {board.considered} available players checked. Advisory only — add, drop or bid in Sleeper. This app
-        never makes a transaction.
-        {board.pending.length > 0 ? ` ${capitalise(board.pending.join(', '))} is not known yet.` : ''}
-      </div>
+      {/*
+        Only the part that changes a reading.
+
+        The count of free agents considered and the never-transacts promise both
+        left this footer: Team shows the strongest two upgrades as a teaser, and
+        a teaser that spends two of its four lines on the engine's bookkeeping
+        is not a teaser. What is left is the one clause that qualifies the
+        numbers above it — a field that is not known yet, said so a blank is not
+        read as a zero.
+      */}
+      {board.pending.length > 0 ? (
+        <div className="faint" style={{ margin: '2px 4px 12px' }}>
+          {capitalise(board.pending.join(', '))} is not known yet.
+        </div>
+      ) : null}
     </div>
   );
 }

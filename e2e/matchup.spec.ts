@@ -72,9 +72,9 @@ test.describe('the real matchup', () => {
     await expect(bar).toHaveAttribute('aria-label', /% to win/);
   });
 
-  test('shows one hero insight card', async ({ page }) => {
-    await expect(page.getByTestId('hero-card')).toHaveCount(1);
-    await expect(page.getByTestId('hero-headline')).not.toBeEmpty();
+  test('shows one insight entry point', async ({ page }) => {
+    await expect(page.getByTestId('insight-entry')).toHaveCount(1);
+    await expect(page.getByTestId('insight-entry-label')).not.toBeEmpty();
   });
 
   /**
@@ -355,27 +355,33 @@ test.describe('the states of an afternoon', () => {
   test('shows one insight and opens the rest in a sheet, with no carousel chrome', async ({ page }) => {
     await serve(page, response());
 
-    // One card, and it is the first — the list arrives in priority order.
-    await expect(page.getByTestId('hero-card')).toHaveCount(1);
-    const shown = await page.getByTestId('hero-headline').innerText();
-    expect(shown).not.toBe('');
+    /*
+     * One entry point, and it does not narrate.
+     *
+     * It used to be a card carrying the first insight's own sentence above the
+     * lineup — the most volatile paragraph in the app, holding the space the
+     * starter rows needed on the one screen whose stated job is fitting a
+     * lineup onto a phone. What is left says how many there are and opens them.
+     */
+    await expect(page.getByTestId('insight-entry')).toHaveCount(1);
+    await expect(page.getByTestId('insight-entry-label')).toHaveText('Live insights · 2');
+    // It names none of them on the page itself.
+    await expect(page.getByTestId('insight-entry')).not.toContainText('Need roughly');
 
-    // None of the chrome survives in the resting state.
+    // None of the carousel chrome survives, and none has come back.
     await expect(page.getByTestId('hero-dot')).toHaveCount(0);
     await expect(page.getByTestId('hero-prev')).toHaveCount(0);
     await expect(page.getByTestId('hero-next')).toHaveCount(0);
     await expect(page.getByTestId('hero-pager')).toHaveCount(0);
     await expect(page.getByTestId('hero-action')).toHaveCount(0);
-    await expect(page.getByTestId('hero-card')).not.toContainText('View details');
+    await expect(page.getByTestId('insight-entry')).not.toContainText('View details');
 
-    // The whole card is the target, and it opens every insight as a list.
-    await page.getByTestId('hero-card').click();
+    // Every insight is still there, in priority order, one tap away.
+    await page.getByTestId('insight-entry').click();
     const sheet = page.getByTestId('insight-sheet');
     await expect(sheet).toBeVisible();
     await expect(sheet.getByTestId('insight-row')).toHaveCount(2);
-    await expect(sheet.getByTestId('insight-row').first()).toContainText(shown);
-    // …and the one that was not on the card is reachable by tap, not by swipe.
-    await expect(sheet.getByTestId('insight-row').nth(1)).not.toContainText(shown);
+    await expect(sheet.getByTestId('insight-row').first()).toContainText('Need roughly');
   });
 
   /**
@@ -387,7 +393,7 @@ test.describe('the states of an afternoon', () => {
     (body.forecast.insights as unknown[]).length = 1;
     await serve(page, body);
 
-    const card = page.getByTestId('hero-card');
+    const card = page.getByTestId('insight-entry');
     await expect(card).toBeVisible();
     await expect(page.getByTestId('hero-pager')).toHaveCount(0);
     await card.click();
@@ -422,7 +428,8 @@ test.describe('the states of an afternoon', () => {
       ),
     );
     await expect(page.getByTestId('matchup-state')).toHaveText('FINAL');
-    await expect(page.getByTestId('hero-headline')).toHaveText('What decided it');
+    // The insight itself lives in the sheet the entry point opens, not on the page.
+    await expect(page.getByTestId('insight-entry-label')).toHaveText('Live insight');
     // The odds are gone: a settled matchup has a result, not a probability.
     await expect(page.getByTestId('matchup-win')).toHaveCount(0);
     await expect(page.getByTestId('matchup-proj-mine')).toHaveCount(0);

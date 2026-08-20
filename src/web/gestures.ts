@@ -409,6 +409,10 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
     null,
   );
   const reduced = useReducedMotion();
+  /** Held so the same function can be removed from a body that is going away. */
+  const edgeListener = useRef<(() => void) | null>(null);
+  /** Watches the body for content that arrives after the sheet does. */
+  const observer = useRef<ResizeObserver | null>(null);
 
   const onPointerDown = useCallback((e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -481,13 +485,59 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
     [onDismiss, reduced],
   );
 
+  /*
+   * Whether this sheet's body has anywhere to scroll to.
+   *
+   * This is the fix for the bug that made swipe-to-dismiss feel broken: a drag
+   * down the sheet pulled the page behind it instead of closing anything. The
+   * cause is the one already written on `.drag-handle` — with `touch-action:
+   * pan-y`, Safari has decided the gesture is a scroll before the first
+   * `pointermove` arrives, and by then nothing in JavaScript can take it back.
+   *
+   * The first attempt made the permission *directional*: `pan-up` at the top of
+   * the body, so that only a downward drag reached this hook. It worked in
+   * Chromium and did nothing at all in WebKit, which does not implement the
+   * directional values and quietly discarded the declaration — inert on the one
+   * browser the bug was reported from. CI caught it; no local run could have.
+   *
+   * So the question asked is one both engines answer the same way: *can this
+   * body scroll at all?* Most sheets are shorter than the screen and cannot, so
+   * they take `touch-action: none` and a drag anywhere on them dismisses. A
+   * sheet with more content than fits keeps `pan-y`, the browser scrolls it, and
+   * the grip and header above it — which never scroll — are what dismisses it.
+   *
+   * Re-asked on scroll and on resize, because content arrives after the sheet
+   * does: a body that is short while its data loads is tall a moment later.
+   */
+  const markScrollable = useCallback((node: HTMLElement | null) => {
+    if (node) node.dataset['scrollable'] = (node.scrollHeight > node.clientHeight + 1).toString();
+  }, []);
+
   return {
     sheetRef: useCallback((node: HTMLElement | null) => {
       sheet.current = node;
     }, []),
-    bodyRef: useCallback((node: HTMLElement | null) => {
-      body.current = node;
-    }, []),
+    bodyRef: useCallback(
+      (node: HTMLElement | null) => {
+        if (body.current && edgeListener.current) {
+          body.current.removeEventListener('scroll', edgeListener.current);
+          observer.current?.disconnect();
+        }
+        body.current = node;
+        edgeListener.current = null;
+        observer.current = null;
+        if (!node) return;
+        const recheck = () => markScrollable(node);
+        edgeListener.current = recheck;
+        node.addEventListener('scroll', recheck, { passive: true });
+        if (typeof ResizeObserver === 'function') {
+          observer.current = new ResizeObserver(recheck);
+          observer.current.observe(node);
+        }
+        markScrollable(node);
+      },
+      [markScrollable],
+    ),
     handlers: {
       onPointerDown,
       onPointerMove,

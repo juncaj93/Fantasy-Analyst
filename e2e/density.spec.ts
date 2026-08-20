@@ -168,23 +168,29 @@ test.describe('a trade suggestion is a row', () => {
   });
 
   /**
-   * Two windows on the row, and the third one tap in.
+   * Two windows on the row, and the rest one tap in.
    *
-   * The row carried Lifetime, 30d and 7d. Lifetime answers "has he ever
-   * mattered", which is a different question from the one this screen exists to
-   * ask — *who is moving now* — and it was the column a reader scanning for
-   * movement had to look past. It is not gone: the sheet's metric strip still
-   * carries it, because density is not allowed to cost a reading.
+   * The row carried three: Lifetime, 30d and 7d. Which two survive has now been
+   * decided twice, and the second decision reversed the first — worth writing
+   * down, because the reasoning is the useful part.
+   *
+   * The first cut kept the two recency windows and dropped Lifetime, on the
+   * argument that this screen asks *who is moving now*. The second kept 30d and
+   * Lifetime instead, on the better argument that 30d and 7d are two readings
+   * of the same thing and the shorter is mostly the noisier — whereas "moving
+   * lately" beside "has ever been worth something" are the two halves of an
+   * actual trade question. `7d` is not gone; it is in the sheet with every
+   * other window, because density is not allowed to cost a reading.
    */
-  test('gives the two windows that answer this screen, and keeps the third one tap in', async ({ page }) => {
+  test('gives the two windows that answer this screen, and keeps the rest one tap in', async ({ page }) => {
     const first = page.getByTestId('trade-row').first();
     await expect(first).toContainText('30d');
-    await expect(first).toContainText('7d');
-    await expect(first, 'a lifetime tally is not what this list is asking').not.toContainText('Life');
+    await expect(first).toContainText('Life');
+    await expect(first, 'a second recency window is the same reading twice').not.toContainText('7d');
 
     await first.click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
+    await expect(page.getByTestId('player-page-metrics')).toContainText('7d');
   });
 
   /**

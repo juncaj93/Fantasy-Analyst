@@ -464,12 +464,30 @@ test.describe('draft room', () => {
    */
   test('fits the identity row and the metrics line on one line each', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
-    const name = await first.locator('.player-name').boundingBox();
     const metrics = await first.locator('.player-row-metrics').boundingBox();
     const top = await first.locator('.player-row-top').boundingBox();
 
-    // The name is still the dominant thing in its row.
-    expect(name!.width).toBeGreaterThan(top!.width * 0.35);
+    /*
+     * The name is printed whole, which is the claim that survives the layout.
+     *
+     * This measured the name against a share of the row — greater than 35% of
+     * it — which worked while `.player-name` took all the row's slack and stopped
+     * meaning anything when it stopped. It is now sized by its own text so the
+     * marks that qualify it can sit against it, and a short name is legitimately
+     * a small fraction of a wide row.
+     *
+     * What the percentage was really guarding is unchanged and is asserted
+     * directly: the name is not squeezed to the point of truncating. That is
+     * the failure a reader would actually see, and it is true regardless of
+     * which element is holding the slack.
+     */
+    const clipped = await first.locator('.player-name').evaluate((el) => ({
+      text: el.textContent ?? '',
+      overflowing: el.scrollWidth > el.clientWidth + 1,
+    }));
+    expect(clipped.text.length, 'the row drew no name at all').toBeGreaterThan(0);
+    expect(clipped.overflowing, `"${clipped.text}" is truncated on the board`).toBe(false);
+
     // One line each: two would roughly double these.
     expect(top!.height).toBeLessThan(34);
     expect(metrics!.height).toBeLessThan(26);
@@ -913,8 +931,24 @@ test.describe('draft room', () => {
   test('filters the board by position', async ({ page }) => {
     await page.getByRole('button', { name: 'QB', exact: true }).click();
     await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
-    for (const text of await page.locator('.pos-team').allInnerTexts()) {
-      expect(text).toContain('QB');
+    /*
+     * Read off the pill, and only after checking there were any to read.
+     *
+     * This looked for `.pos-team`, the wrapper that used to hold the pill and
+     * the club's mark together on the trailing edge. The row rule split them —
+     * the pill moved to the left of the name — and the wrapper stopped existing
+     * on this board, so `allInnerTexts()` returned an empty array and the loop
+     * below it never ran. The test went on passing while asserting nothing at
+     * all, which is worse than the failure it should have been: a filter could
+     * have broken completely and this would still have been green.
+     *
+     * Hence the count assertion. A list of positions that is empty is now a
+     * failure in its own right, whatever the loop would have said about it.
+     */
+    const positions = await page.locator('[data-testid="recommendation-row"] .pos-pill').allInnerTexts();
+    expect(positions.length, 'the filtered board drew no position pills to check').toBeGreaterThan(0);
+    for (const text of positions) {
+      expect(text.trim()).toBe('QB');
     }
   });
 

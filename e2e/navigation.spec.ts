@@ -339,6 +339,74 @@ test.describe('sheets', () => {
     await expect(page.getByTestId('scoring-key')).toBeVisible();
   });
 
+  /**
+   * The gesture is the browser's to give away, and the sheet asks correctly.
+   *
+   * This is the one property in this file that no drag test can check, and the
+   * reason a real bug lived here through several passes: `touch-action` governs
+   * *touch* input, and every drag in this suite is synthesised with a mouse. So
+   * the pointer arithmetic above passed while a finger on a phone produced
+   * nothing but the page behind rubber-banding — Safari had classified the drag
+   * as a scroll before the first `pointermove`, exactly as the note on
+   * `.drag-handle` warned it would.
+   *
+   * What is asserted is therefore the declaration rather than the outcome: the
+   * sheet's chrome claims every gesture, and its scrolling body narrows to
+   * `pan-up` at the top so a downward drag from there reaches the handler.
+   */
+  test('lets the browser scroll the body, and keeps the drag for itself', async ({ page }) => {
+    const claimed = await page.evaluate(() => {
+      const sheet = document.querySelector('.sheet') as HTMLElement;
+      const body = document.querySelector('.sheet-body') as HTMLElement;
+      return {
+        sheet: getComputedStyle(sheet).touchAction,
+        scrollable: body.dataset['scrollable'],
+        body: getComputedStyle(body).touchAction,
+      };
+    });
+
+    // The chrome — grip, header — claims every gesture that lands on it.
+    expect(claimed.sheet, 'the browser will take the drag before the sheet sees it').toBe('none');
+
+    /*
+     * And the body takes exactly what its own content justifies.
+     *
+     * Asserted as the mapping rather than as one value, because both branches
+     * are real and which one this sheet is in depends on how much it is holding.
+     * An earlier version of this pinned the expectation to `pan-up`, which
+     * Chromium honoured and WebKit discarded — the declaration was invalid
+     * there, the mechanism was inert, and only CI could see it. Hence the last
+     * assertion: nothing here may depend on a value one engine does not
+     * implement.
+     */
+    expect(claimed.scrollable, 'the sheet body did not report whether it can scroll').toMatch(/^(true|false)$/);
+    expect(claimed.body, `a body reporting scrollable=${claimed.scrollable} claimed ${claimed.body}`).toBe(
+      claimed.scrollable === 'true' ? 'pan-y' : 'none',
+    );
+    expect(
+      ['pan-up', 'pan-down', 'pan-left', 'pan-right'],
+      'a directional touch-action is silently ignored by WebKit',
+    ).not.toContain(claimed.body);
+  });
+
+  /**
+   * A modal surface is modal, including underneath.
+   *
+   * The other half of the same complaint: dragging on a sheet moved the list
+   * behind it. A backdrop the reader can scroll is not a backdrop, and it made
+   * a working dismissal look broken — the sheet did go away, but the page had
+   * moved by the time it did.
+   */
+  test('holds the page behind still while it is open', async ({ page }) => {
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe('hidden');
+    await page.getByTestId('sheet-close').click();
+    await expect(page.getByTestId('scoring-key')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.body.style.overflow),
+      'the page was left locked after the sheet closed',
+    ).not.toBe('hidden');
+  });
+
   test('scrolled content keeps the gesture until it is back at the top', async ({ page }) => {
     // Force the body to be scrolled: a sheet that dismissed from here would be
     // taking a scroll away from the reader.

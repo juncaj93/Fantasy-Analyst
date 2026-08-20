@@ -306,26 +306,26 @@ export function HeroCarousel({
   const opensSheet = count > 1;
   const tappable = opensPlayer || opensSheet;
 
+  /*
+   * A way in, not a thing to read.
+   *
+   * This was a card carrying the insight itself — `Need roughly 24.7 more from
+   * S. Brandt to reach 28% win odds` — above the lineup, on the one screen
+   * whose whole purpose is fitting a starting lineup onto a phone. It read as
+   * the page's headline while being the page's least durable sentence: it is
+   * recomputed every time anybody scores, it is a projection about a
+   * projection, and it was displacing the rows a reader came to compare.
+   *
+   * What is left is an entry point. It names how many insights there are and
+   * opens them; it does not narrate. The insights themselves are unchanged and
+   * every one of them is still reachable — in the sheet, where a paragraph can
+   * be a paragraph.
+   */
   const card = (
     <>
-      <span className="hero-body">
-        <span className="hero-headline" data-testid="hero-headline">
-          {insight.headline}
-        </span>
-        {insight.detail ? (
-          <span className="hero-detail" data-testid="hero-detail">
-            {insight.detail}
-          </span>
-        ) : null}
+      <span className="insight-entry-label" data-testid="insight-entry-label">
+        {count === 1 ? 'Live insight' : `Live insights · ${count}`}
       </span>
-      {/*
-        The affordance, and it is a chevron rather than a sentence.
-
-        `View details ›` was a link the reader had to hit inside a card that was
-        already a target's worth of glass. The whole card is the target now and
-        the chevron says so, in the grammar every pushed row in the app already
-        uses.
-      */}
       {tappable ? (
         <span className="hero-chevron" aria-hidden="true">
           <ChevronIcon />
@@ -339,8 +339,8 @@ export function HeroCarousel({
       {tappable ? (
         <button
           type="button"
-          className="hero-card"
-          data-testid="hero-card"
+          className="insight-entry"
+          data-testid="insight-entry"
           data-kind={insight.kind}
           data-urgency={insight.urgency}
           data-count={count}
@@ -355,8 +355,8 @@ export function HeroCarousel({
         </button>
       ) : (
         <div
-          className="hero-card"
-          data-testid="hero-card"
+          className="insight-entry"
+          data-testid="insight-entry"
           data-kind={insight.kind}
           data-urgency={insight.urgency}
           data-count={count}

@@ -1628,7 +1628,16 @@ body,
   font-weight: 620;
   font-size: 1rem;
   letter-spacing: -0.021em;
-  flex: 1;
+  /*
+   * Sized by the name, not by the row.
+   *
+   * It used to take all the slack, which pushed everything after it — including
+   * the tag that qualifies it — to the far edge. The slack now sits after the
+   * status marks instead (see `.player-row-meta`), so a `Q` stays against the
+   * name it is about. The name still shrinks first and still truncates, which
+   * is what keeps a long one from pushing the club's mark off its column.
+   */
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2041,12 +2050,29 @@ body,
  * are wider than the field they overflow into the name's ellipsis instead,
  * where the reader loses a character rather than the column losing its edge.
  */
+/*
+ * What qualifies the player, immediately after his name.
+ *
+ * This was a fixed-width field pinned to the trailing edge, which kept the
+ * marks after it on one column — and put a `Q` at the far side of the row,
+ * beside the club, where it read as a note about the number next to it rather
+ * than about the man. The rule is that a status belongs to the name: `Christian
+ * McCaffrey  Q` is one unit and has to look like one.
+ *
+ * The alignment it was bought with is not given up. The field is now sized by
+ * its contents and takes the row's slack as a trailing margin, so everything
+ * after it — the star, the club's mark, the chevron — is pushed to the same
+ * edge on every row exactly as before; the name gives up the space instead,
+ * which it can, because it is the one thing here that truncates.
+ */
 .player-row-meta {
-  flex: 0 0 var(--row-meta);
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--sp-1);
+  margin-right: auto;
+  min-width: 0;
   overflow: visible;
 }
 
@@ -4920,7 +4946,15 @@ table.compact tr:last-child td {
   box-shadow: var(--shadow-sheet);
   padding-bottom: var(--safe-bottom);
   animation: sheet-rise var(--dur-slow) var(--ease);
-  touch-action: pan-y;
+  /*
+   * The sheet's own chrome never scrolls, so the browser is told to keep its
+   * hands off every gesture that lands on it. This is the line that makes
+   * swipe-to-dismiss work: with `pan-y` here Safari had already classified the
+   * drag as a scroll before the first `pointermove` arrived, the sheet never
+   * moved, and what the reader saw instead was the page behind rubber-banding.
+   * The same lesson is written on `.drag-handle`, which learned it first.
+   */
+  touch-action: none;
 }
 
 .sheet-dragging {
@@ -4987,12 +5021,35 @@ table.compact tr:last-child td {
   white-space: nowrap;
 }
 
+/*
+ * The body scrolls only when it has somewhere to go.
+ *
+ * `data-scrollable` is set by `useSheetDrag` from the one question both engines
+ * answer the same way — is this content taller than its box? A sheet shorter
+ * than the screen, which is most of them, takes `none` and can be dragged shut
+ * from anywhere on it. A taller one keeps `pan-y` so the browser scrolls it,
+ * and the grip and header above — which never scroll, and inherit `none` from
+ * `.sheet` — are what dismisses it.
+ *
+ * This replaced a `pan-up` at the body's top edge. Chromium honoured it; WebKit
+ * does not implement the directional values and discarded the declaration
+ * entirely, which left the mechanism inert on the browser the original bug came
+ * from. Nothing here now depends on a value both engines do not implement.
+ *
+ * `overscroll-behavior: contain` is the belt to that brace: whatever happens, a
+ * scroll that runs out of sheet never becomes a scroll of the page.
+ */
 .sheet-body {
   flex: 1 1 auto;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 0 var(--sp-4) var(--sp-4);
+}
+
+.sheet-body[data-scrollable='false'] {
+  touch-action: none;
 }
 
 @keyframes sheet-rise {
@@ -5793,60 +5850,44 @@ div.matchup-result {
  * text rather than under it — the same shape as every other thing in the app
  * that leads somewhere.
  */
-.hero-card {
-  width: 100%;
+/*
+ * The way into the live insights: one quiet line, not a headline.
+ *
+ * It replaced a card that carried the insight's own sentence above the lineup.
+ * On the one screen whose stated purpose is fitting a starting lineup onto a
+ * phone, the most volatile sentence in the app was taking the space the rows
+ * needed. This is a control the width of its own label.
+ */
+.insight-entry {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--sp-2);
-  text-align: left;
+  width: 100%;
+  min-height: 36px;
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
   background: var(--surface);
   border: 0;
-  border-left: 2px solid var(--accent);
   border-radius: var(--radius);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-2);
-  color: inherit;
-  font: inherit;
   box-shadow: var(--shadow-1);
-  transition: background-color var(--dur-fast) ease;
-}
-
-button.hero-card {
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 620;
+  text-align: left;
   cursor: pointer;
 }
 
-button.hero-card:active {
+.insight-entry:active {
   background: var(--pressed);
 }
 
-.hero-body {
-  flex: 1;
+.insight-entry-label {
   min-width: 0;
-}
-
-/*
- * Two lines, and they must be two.
- *
- * These are spans inside a button — the card is one target, so it cannot
- * contain block-level elements — and an inline span runs straight on from the
- * one before it. `display: block` is what keeps the headline and the sentence
- * under it from reading as a single run-on sentence.
- */
-.hero-headline {
-  display: block;
-  font-size: 0.92rem;
-  font-weight: 640;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-
-.hero-detail {
-  display: block;
-  margin-top: 1px;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  line-height: 1.32;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hero-chevron {
