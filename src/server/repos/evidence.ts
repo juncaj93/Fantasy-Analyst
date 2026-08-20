@@ -132,6 +132,24 @@ export class EvidenceRepo {
     return found;
   }
 
+  /**
+   * Live evidence carrying one source message id.
+   *
+   * The read-only half of `supersedeStaleImports`: it answers "what would be
+   * retired?" so a preview can report it without writing anything.
+   */
+  async listLiveBySourceMessage(sourceMessageId: string): Promise<EvidenceItem[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM evidence_items
+          WHERE source_message_id = ?
+            AND review_status IN ('auto_applied','accepted','corrected','pending')`,
+      )
+      .bind(sourceMessageId)
+      .all<EvidenceRow>();
+    return rows.results.map(toItem);
+  }
+
   async countAll(): Promise<number> {
     const row = await this.db.prepare('SELECT COUNT(*) AS n FROM evidence_items').first<{ n: number }>();
     return Number(row?.n ?? 0);

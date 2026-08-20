@@ -615,6 +615,8 @@ export interface NewsletterStatus {
 }
 
 export interface NewsletterCoverage {
+  sentences?: number;
+  repairs?: string[];
   sentencesWithPlayers?: number;
   classifiedSentences?: number;
   unclassifiedSentences?: number;
@@ -654,6 +656,8 @@ export interface ReprocessPreview {
   messageId: string;
   wouldAdd: number;
   alreadyStored: number;
+  wouldRetire: ReprocessDisagreement[];
+  repairs: string[];
   stale: ReprocessDisagreement[];
   protectedByUser: ReprocessDisagreement[];
   playersAffected: number;
