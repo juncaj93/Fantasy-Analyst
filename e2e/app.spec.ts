@@ -944,8 +944,18 @@ test.describe('draft room', () => {
       await page.getByRole('button', { name: 'QB', exact: true }).click();
       await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
 
+      /*
+       * Twice, not once.
+       *
+       * The market ladder breaks this board in one place — the 28-pick hole
+       * after the fourth quarterback — and that is the divider this test was
+       * written for. The second one is the Score: 59 to 53 at the bottom of the
+       * board is a six-point drop, past the 95th percentile of adjacent gaps
+       * measured across every position and depth, and a band may now end on
+       * that as well as on a market cliff. See `SCORE_BANDS`.
+       */
       const dividers = page.getByTestId('tier-divider');
-      await expect(dividers, 'the QB board breaks exactly once').toHaveCount(1);
+      await expect(dividers, 'the QB board breaks at the market hole and at the Score drop').toHaveCount(2);
       await expect(dividers.first()).toContainText(/tier drop/i);
       /*
        * It says how big the hole is, which is the whole reason it is there.
@@ -1325,8 +1335,10 @@ test.describe('draft room', () => {
     });
 
     test('draws no tier line across a filtered result', async ({ page }) => {
+      // Two on this board: the market's hole after the fourth quarterback, and
+      // the Score drop from 59 to 53 at the bottom. See `SCORE_BANDS`.
       await page.getByRole('button', { name: 'QB', exact: true }).click();
-      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await expect(page.getByTestId('tier-divider')).toHaveCount(2);
       await openSearch(page);
       await page.getByTestId('draft-search').fill('a');
       // A line between two rows that are not adjacent on the board would be
@@ -1335,7 +1347,7 @@ test.describe('draft room', () => {
       // Cancelling puts the row back exactly as it was, filter and all.
       await page.getByTestId('draft-search-close').click();
       await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await expect(page.getByTestId('tier-divider')).toHaveCount(2);
       await page.getByRole('button', { name: 'ALL', exact: true }).click();
     });
   });
