@@ -223,20 +223,35 @@ function EvidenceReviewCard({
         </span>
       </div>
 
-      <div className="btn-row" style={{ marginTop: 8 }}>
+      {/*
+        Four actions, on one line.
+
+        They used to carry a decorative glyph each — a tick, a pencil, a pair of
+        arrows and a slashed circle — drawn from four different typographic
+        families at four different weights, and between them they pushed the row
+        past the width of a 390px phone. Every card in the queue therefore spent
+        a whole extra row of the screen on a wrap, which on a queue of three is
+        a third of a phone.
+
+        The glyphs are gone and the words are not: it was the words carrying the
+        meaning in every case. Accept keeps the filled treatment because it is
+        the one action the queue exists to make easy; the other three are
+        corrections and are quiet.
+      */}
+      <div className="btn-row btn-row-tight" style={{ marginTop: 8 }}>
         {applied ? null : (
           <button className="btn btn-sm btn-primary" onClick={() => void onAction(item.id, 'accept')}>
-            ✓ Accept
+            Accept
           </button>
         )}
         <button className="btn btn-sm" onClick={() => setExpanded((v) => !v)}>
-          ✎ Change
+          Change
         </button>
         <button className="btn btn-sm" onClick={() => setWrongPlayer((v) => !v)}>
-          ⇄ Wrong player
+          Wrong player
         </button>
         <button className="btn btn-sm" onClick={() => void onAction(item.id, 'ignore')}>
-          ⊘ Ignore
+          Ignore
         </button>
       </div>
 

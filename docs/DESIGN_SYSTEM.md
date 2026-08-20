@@ -34,7 +34,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
 | Injury | `.injury-caution` `.injury-serious` `.injury-out`, over `--status-neutral` |
-| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` for how much of it a card shows |
+| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-strong` for how much of it a row shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-toolbar: 25` `--radius-pill` `--tap: 44` |
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
@@ -46,6 +46,14 @@ icon, asset or branding — every glyph in the app is drawn in
 `--text-faint` is the quietest text allowed: it reads at 4.5:1 against both the
 page and a card. Anything greyer looked calmer on a desk and vanished on a phone
 in daylight.
+
+`--pos-mix` is how much of a position's hue a row's surface actually takes, and
+it is deliberately small: 15% in Light, 34% in Dark. A wash strong enough to read
+as a colour turns a hundred-row list into a rainbow, so the position is carried
+by the leading accent edge and the lettered pill instead, and the wash is only a
+hint that a row belongs to a run. `--pos-mix-strong` is the one exception, spent
+by `.starter-row` on the Team screen: eight cards, one per lineup slot, is the
+case where the tint shows the shape of a week rather than decorating a list.
 
 `--status-neutral` exists for the same reason in reverse. A chip that lands on a
 card washed in a position's colour cannot be painted in a hue and stay legible —
@@ -67,6 +75,9 @@ is which.
 | `SearchFilterRow` | Search folded into a glyph beside the filters, unfolding into a field that takes the row. Draft uses it; the row is one tap target tall in both states, so opening it moves nothing. Only the control labelled Cancel discards a query. |
 | `Sheet` | A modal sheet: rounded top, grab handle, dimmed backdrop, swipe-to-dismiss, and a Done control because a gesture is never the only way out. |
 | `SkeletonRows` | Loading at the shape of what is coming, so the page does not jump when it lands. |
+| `CompactPlayerRow` | One player as one row, in the columns every list shares: rank, a control of the screen's own, the name, the tally/availability field, the position, a chevron — then up to four labelled numbers and one short line. Players and Trades both draw from it, which is what makes a player read as the same object on both. |
+| `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
+| `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
 | `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. |
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
@@ -119,6 +130,10 @@ blank strip under the navigation twice:
 - `e2e/draft-card.spec.ts` — the collapsed player card: where the tier-cliff
   warning sits, that it costs no height, that the metrics never wrap to make
   room for it, and that it takes no tap meant for the card.
+- `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
+  and ceiling, that the position is an edge and not a wash, that no column
+  truncates a value, that a trade suggestion is a row rather than a card, and
+  that neither list nor any section of the player page scrolls sideways.
 - `e2e/shell.spec.ts` — navigation-bar height and stickiness, density per screen,
   touch targets, no sideways scroll in either theme, theme parity, reduced
   motion.

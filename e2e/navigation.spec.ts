@@ -129,24 +129,72 @@ test.describe('pushed detail screens', () => {
   });
 
   /**
-   * A player is not a pushed screen any more — it opens where it sits.
+   * A player is his own page, and Back is a real Back.
    *
-   * Which is the point: the list keeps its scroll and its search, and moving
-   * between two players costs one tap rather than a round trip.
+   * The file used to unfold inside the row it was opened from, which put a
+   * screen and a half of prose — the outlook, the injury, four tally windows,
+   * the categories, the market and the whole ledger — inside a list whose job
+   * is being scanned. It is a pushed destination now, and the thing that makes
+   * that an improvement rather than a round trip is asserted here: what the
+   * reader typed, which position they had narrowed it to, and where they were
+   * in the list are all exactly as they left them.
    */
-  test('a player opens in place, without leaving the list', async ({ page }) => {
+  test('a player opens as his own page, and Back restores the list exactly', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-players').click();
     const rows = page.getByTestId('player-search-row');
     await expect(rows.first()).toBeVisible();
     const before = await rows.count();
 
-    await rows.first().click();
-    await expect(rows.first().getByTestId('player-file')).toBeVisible();
-    await expect(rows, 'the list is still the list').toHaveCount(before);
-    await expect(page.getByTestId('back-button')).toHaveCount(0);
+    // Narrow the list first, so Back has something to fail to restore. The
+    // count is read only once it has stopped moving: the query is debounced and
+    // the old list stays on screen until the new one lands, so a count taken on
+    // the first non-zero reading is the count of the list being replaced.
+    await page.getByLabel('Search players').fill('a');
+    await expect
+      .poll(async () => {
+        const first = await rows.count();
+        await page.waitForTimeout(250);
+        return first > 0 && first === (await rows.count()) ? first : 0;
+      })
+      .toBeGreaterThan(0);
+    const narrowed = await rows.count();
 
-    await rows.first().locator('.row-button').click();
+    // …and scroll down it, so the offset is not zero either.
+    await page.evaluate(() => window.scrollTo({ top: 240, behavior: 'auto' }));
+    await expect.poll(async () => page.evaluate(() => Math.round(window.scrollY))).toBeGreaterThan(100);
+    const offset = await page.evaluate(() => Math.round(window.scrollY));
+
+    /*
+     * A row that is on screen at this offset, deliberately.
+     *
+     * Playwright scrolls a target into view before clicking it, so clicking the
+     * *first* row from 240px down the list would scroll the page back to the
+     * top before the tap ever reached the app — and the assertion below would
+     * then be measuring Playwright rather than the app. The ninth row is inside
+     * the viewport at this offset on all four supported widths.
+     */
+    const target = rows.nth(8);
+    const name = await target.locator('.player-name').innerText();
+    await target.click();
+
+    const pushed = page.getByTestId('player-page');
+    await expect(pushed).toBeVisible();
+    await expect(pushed.locator('.nav-title')).toHaveText(name);
+    await expect(page.getByTestId('back-button')).toContainText('Players');
+    // A pushed screen starts at the top of itself, whatever the list was doing.
+    expect(await page.evaluate(() => Math.round(window.scrollY))).toBeLessThan(40);
+
+    await page.getByTestId('back-button').click();
+    await expect(page.getByTestId('players-list')).toBeVisible();
+    await expect(page.getByLabel('Search players')).toHaveValue('a');
+    await expect(rows, 'the list came back as it was').toHaveCount(narrowed);
+    expect(
+      Math.abs((await page.evaluate(() => Math.round(window.scrollY))) - offset),
+      'Back put the reader back where they were',
+    ).toBeLessThan(24);
+
+    expect(before).toBeGreaterThan(0);
   });
 });
 

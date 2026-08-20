@@ -129,12 +129,33 @@
    * On white, a little pigment goes a long way and more would make the board
    * loud; on a near-black surface the same mixture disappears, which is exactly
    * what it was doing — the tint was technically present and practically
-   * invisible. Dark therefore takes almost all of the tint, and the tints it
-   * takes are themselves darker and more saturated so "almost all" still lands
-   * on a readable card.
+   * invisible. Dark therefore takes more of the tint, and the tints it takes
+   * are themselves darker and more saturated so the extra still lands on a
+   * readable card.
+   *
+   * **These numbers came down a long way, and that is the change.** A wash at
+   * 58% of the hue turned every row into a pastel block, and forty pastel
+   * blocks is a web dashboard rather than a list: the colour stopped being an
+   * accelerator and became the loudest thing on the screen, competing with the
+   * names and the numbers it was supposed to help find. What carries the
+   * position now is what the eye is meant to read anyway — the leading accent
+   * edge and the lettered pill — and the wash is reduced to the faintest hint
+   * that the row belongs to a run. Nothing about which positions are tinted, or
+   * which hue each takes, changed.
    */
-  --pos-mix: 58%;
-  --pos-mix-open: 74%;
+  --pos-mix: 15%;
+  --pos-mix-open: 22%;
+  /*
+   * The same hue, for a set of eight rather than a list of a hundred.
+   *
+   * Team's recommended lineup is the one place in the app where the wash is
+   * carrying a fact rather than decorating one: eight cards, one per lineup
+   * slot, and the tint is what makes the recommended eleven readable at arm's
+   * length. A hundred rows of a database is the opposite case, which is why the
+   * strength is two tokens and not one — and why Team says so on the rule that
+   * spends it rather than by inventing a colour of its own.
+   */
+  --pos-mix-strong: 34%;
 
   /* -- elevation and focus ---------------------------------------------- */
   /*
@@ -418,10 +439,11 @@
     --confidence: #82909f;
 
     /*
-     * Darker, more saturated, and taken almost neat — see `--pos-mix`. The old
-     * pair (a pale tint at 45% of a near-black surface) was a difference of two
-     * or three points of luminance, which is not a difference on a phone in
-     * daylight.
+     * Darker and more saturated than the light pair, because a wash on a
+     * near-black surface has to be built from something with pigment in it or
+     * it is a difference of two points of luminance, which is not a difference
+     * on a phone in daylight. Dark still takes roughly twice the mix Light
+     * does — see `--pos-mix` — and both are now a hint rather than a wash.
      */
     --pos-QB-line: #8fb8fa;
     --pos-QB-tint: #1c2f5e;
@@ -436,8 +458,9 @@
     --pos-DEF-line: #f492bd;
     --pos-DEF-tint: #44172c;
 
-    --pos-mix: 88%;
-    --pos-mix-open: 100%;
+    --pos-mix: 34%;
+    --pos-mix-open: 48%;
+    --pos-mix-strong: 66%;
 
     --shadow-1: none;
     --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -508,8 +531,9 @@
   --pos-DEF-line: #f492bd;
   --pos-DEF-tint: #44172c;
 
-  --pos-mix: 88%;
-  --pos-mix-open: 100%;
+  --pos-mix: 34%;
+  --pos-mix-open: 48%;
+  --pos-mix-strong: 66%;
 
   --shadow-1: none;
   --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
@@ -1552,14 +1576,18 @@ body,
 }
 
 /*
- * Inside a tinted card the badge no longer has to carry the colour on its own,
- * so it steps back to an outline and stops competing with the name — but it
- * keeps the letters and it keeps the hue in its text, because the tint is an
- * accelerator and the word is what actually says the position.
+ * The pill keeps its fill, including inside a tinted row.
+ *
+ * It used to step back to a bare outline here, on the argument that the card
+ * around it was already carrying the colour. That argument left with the wash:
+ * now that a row is a hint of a hue rather than a block of one, the pill is the
+ * thing carrying the position, and a hollow pill on a near-white row is the
+ * quietest possible way to say the loudest thing in the column. It is still the
+ * *letters* that say which position — the fill only makes them findable.
  */
 .card-pos .pos-pill[class*='pos-'] {
-  background: transparent;
-  border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 55%, transparent);
+  border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 40%, transparent);
+  background: var(--pos-tint-bg, var(--surface-sunken));
   color: var(--pos-line, var(--text-dim));
 }
 
@@ -1873,6 +1901,203 @@ body,
 
 .metric strong.sig-neg {
   color: var(--neg);
+}
+
+/* ==================================================== the compact list rows */
+/*
+ * The dense list: one grouped surface, players separated by hairlines.
+ *
+ * This is the shape Players and Trades use, and it is deliberately *not* the
+ * card the draft board uses. A draft row is a decision being weighed one at a
+ * time and it earns the space a card takes; a row in a player database is one
+ * line of a table being scanned forty at a time, and forty cards with forty
+ * gaps and forty shadows between them is a web page. What separates one player
+ * from the next here is a hairline, which is the strongest and cheapest native
+ * cue there is.
+ *
+ * The position no longer washes the row. It arrives as the leading accent edge
+ * and as the lettered pill on the trailing one, which is what the brief's
+ * "small position pills, slim accent bars" asks for and what keeps a hundred
+ * rows readable as a column of names rather than a column of colours.
+ */
+.dense-group {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-3);
+  scroll-margin-top: 72px;
+  scroll-margin-bottom: var(--content-inset);
+}
+
+/*
+ * One player, two lines, the full tap target.
+ *
+ * `min-height` holds the 44px a thumb needs while the padding stays at six
+ * points: a row that is exactly as tall as its contents on a phone with large
+ * type is still a row a thumb can hit, and a row with a single line of content
+ * does not collapse below what can be tapped.
+ */
+.dense-row {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 3px solid var(--pos-line, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: var(--tap);
+  padding: 6px var(--sp-2) 7px var(--sp-2);
+  transition: background-color var(--dur-fast) ease;
+  scroll-margin-top: 72px;
+  scroll-margin-bottom: var(--content-inset);
+}
+
+/*
+ * The hairline goes between rows and never under the last one.
+ *
+ * On the group's children rather than on `.dense-row` itself, because a row is
+ * sometimes wrapped — a list that publishes `role="list"` needs something
+ * carrying `role="listitem"` around each button — and a sibling selector on the
+ * row would then never match. `> * + *` is true of the second child onwards
+ * whatever that child happens to be.
+ */
+.dense-group > * + * {
+  border-top: 1px solid var(--separator-soft);
+}
+
+.dense-row:active {
+  background: var(--pressed);
+}
+
+/*
+ * The row's top line: rank, whatever marks it, the name, the tally field, the
+ * position and the chevron — the same order and the same fixed fields the draft
+ * board uses, so the club marks land on one edge on both screens.
+ */
+.dense-row-top {
+  display: flex;
+  align-items: center;
+  /*
+   * Six rather than eight, and the difference is a name.
+   *
+   * There are five gaps on this line — rank, the screen's own control, the
+   * name, the tally field, the position, the chevron — so two points each is
+   * ten points, and on a 360px phone ten points is two or three letters of the
+   * only thing on the row that cannot be abbreviated. Everything on either side
+   * of a gap here is a fixed-width field, so nothing else changes size.
+   */
+  gap: 6px;
+}
+
+/*
+ * The second line: the numbers, in fixed columns.
+ *
+ * A grid rather than a flex row, because the whole point of a dense list is
+ * that the eye can run *down* a column without re-finding it on every row. Each
+ * cell prints its own quiet label above nothing — the label is inline and small
+ * — so a column is still self-describing when the list is filtered down to one
+ * player.
+ */
+.dense-row-metrics {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: baseline;
+  gap: var(--sp-1);
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A column that has to hold whatever the trailing edge holds — a movement
+ * badge, a chevron's worth of nothing — without stretching its neighbours.
+ */
+.dense-row-metrics > .dense-metric-wide {
+  grid-column: span 2;
+}
+
+.dense-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.dense-metric-label {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+  flex: none;
+}
+
+.dense-metric-value {
+  font-weight: 620;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * One short sentence under the numbers, where a row has something to say.
+ *
+ * Capped at a single line on purpose. A reason that needs two lines is a reason
+ * that belongs on the player's own page, and a list where some rows are three
+ * lines and some are five has lost the rhythm that made it scannable.
+ */
+.dense-row-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  margin-top: 2px;
+  font-size: 0.73rem;
+  color: var(--text-dim);
+  min-width: 0;
+}
+
+.dense-row-note > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The chevron that says this row leads somewhere. Quiet, and never the label. */
+.dense-chevron {
+  flex: none;
+  /* Tucked against the position it follows: it belongs to the row, not to a
+     column of its own, and the name is what the space is worth more to. */
+  margin-left: -2px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+.dense-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+/*
+ * The count beside a section's name, and nothing else on the line.
+ *
+ * `Targets 6` rather than `Targets (6)`: the parentheses were punctuation doing
+ * a job that weight and colour already do.
+ */
+.section-count {
+  font-weight: 600;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ========================================================= player detail */
@@ -2222,6 +2447,86 @@ body,
   font-size: 0.72rem;
 }
 
+/* ----------------------------------------------------- the player's own page */
+/*
+ * The identity line under the pushed title: the position pill, the club's mark
+ * and whatever is wrong with him. It sits where a navigation bar's subtitle goes
+ * because it is doing a subtitle's job — qualifying the name above it — and it
+ * is drawn rather than spelled so it reads identically to the rows the reader
+ * arrived from.
+ */
+.player-page-ident {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/*
+ * Why this reader is here, from the screen that sent them.
+ *
+ * A recessed block rather than another card, because it is context for the page
+ * rather than a second page stacked on top of it. It is the only thing between
+ * the metrics and the tabs, and on a player opened from Players there is
+ * nothing here at all.
+ */
+.player-page-context {
+  background: var(--surface-inset);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.player-page-body {
+  padding-bottom: var(--sp-2);
+}
+
+/*
+ * The verdict, and how sure the app is of it, on one line.
+ *
+ * `Sell high` and `low confidence` are a claim and its qualifier, and putting
+ * them on one line is what stops the qualifier reading as a second claim.
+ */
+.trade-case-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+
+.trade-case-verdict {
+  font-weight: 650;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Confidence, on a row rather than on a card.
+ *
+ * It qualifies the sentence beside it and must not compete with it: the badge
+ * keeps its colour where the level is low — that is the only level that changes
+ * what a reader does — and gives up its weight and a point of size, because a
+ * bold amber chip at the end of every row in a section is a section where the
+ * qualifier is louder than the claim.
+ */
+.dense-row-note .badge-confidence {
+  font-size: 0.68rem;
+  font-weight: 550;
+  flex: none;
+}
+
+/*
+ * An availability note where it has to share a line with a confidence badge.
+ *
+ * The block form of this — `.injury-line` — has its own margins and its own
+ * amber; inline it keeps the colour and gives up the box, because a row may
+ * spend exactly one line on it.
+ */
+.injury-line-inline {
+  color: var(--warn);
+  font-weight: 550;
+}
+
 /* ================================================================ controls */
 
 /*
@@ -2300,6 +2605,21 @@ button:disabled {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+
+/*
+ * A row of actions that has to fit a phone.
+ *
+ * Tighter gaps and tighter padding, and nothing else: the buttons keep their
+ * 32px height and their type size, so the row is as legible as it was and is
+ * one row instead of two on every width this app supports.
+ */
+.btn-row-tight {
+  gap: var(--sp-1);
+}
+
+.btn-row-tight > .btn {
+  padding-inline: 10px;
 }
 
 /*
@@ -3476,9 +3796,17 @@ table.compact tr:last-child td {
  * nesting this pass exists to remove. The data is unchanged and none of it is
  * hidden.
  */
+/*
+ * The tally's windows, side by side.
+ *
+ * Wraps rather than overflows: four windows fit one line on a 390px phone and
+ * two lines on a 360px one, and a row that scrolled sideways would put the
+ * lifetime reading off the edge of the screen where nobody would find it.
+ */
 .window-row {
   display: flex;
-  gap: var(--sp-4);
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
   margin-top: var(--sp-2);
   font-size: 0.78rem;
 }
@@ -3705,6 +4033,39 @@ table.compact tr:last-child td {
 .starter-row .player-row-top,
 .bench-row .player-row-top {
   min-height: 32px;
+}
+
+/*
+ * The recommended lineup keeps more of the position's hue than a list does.
+ *
+ * This is the exception the density pass deliberately left standing. Everywhere
+ * else the wash came down to a hint, because a hundred tinted rows is a rainbow
+ * rather than a list; here there are eight, one per lineup slot, and the tint is
+ * doing a job no hairline can do — it is what lets a reader see the shape of
+ * their week without reading a word. The letters are still on the pill, the slot
+ * is still printed, and the row is still labelled as a starter for anything
+ * reading it aloud, so the colour remains an accelerator and never the carrier.
+ *
+ * It borrows `--pos-mix-strong` rather than naming a number, so Light and Dark
+ * stay two settings of one system here as everywhere else.
+ */
+.starter-row.card-pos {
+  --pos-mix: var(--pos-mix-strong);
+}
+
+/*
+ * A lineup slot nothing can fill, said once and set as prose rather than as a
+ * name. It truncates rather than wraps, because the row it sits in is one line
+ * whether it is holding a player or an explanation.
+ */
+.empty-slot-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text-dim);
 }
 
 /*
