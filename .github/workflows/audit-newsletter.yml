@@ -16,6 +16,10 @@ on:
       message_id:
         description: 'Message-ID of the newsletter to audit'
         required: true
+      full_text:
+        description: 'Also print the whole issue in document order'
+        type: boolean
+        default: false
 
 jobs:
   audit:
@@ -102,4 +106,5 @@ jobs:
         env:
           AUDIT_MESSAGE_JSON: /tmp/message.json
           AUDIT_PLAYERS_JSON: /tmp/players.json
+          FULL_TEXT: ${{ inputs.full_text && '1' || '0' }}
         run: node --experimental-strip-types --no-warnings scripts/audit-newsletter-sentences.mjs
