@@ -136,6 +136,49 @@ test.describe('the real matchup', () => {
    * phone: a row a few pixels wider than the viewport turns every vertical
    * scroll into a fight.
    */
+  /**
+   * The alignment fix, asserted as pixels.
+   *
+   * Each half of a row used to be a flex line — club, name, score — so the
+   * score began wherever the name happened to end, and a name is a player's
+   * name. Eight rows produced eight different x positions for the column a
+   * reader is trying to compare left against right, which is what made the list
+   * read as sloppy without it being obvious why. Fixed columns now, so this is
+   * checkable: every score on a side starts on one edge, to the pixel.
+   */
+  test('lines every score up down the page, on both sides', async ({ page }) => {
+    const edges = await page.getByTestId('matchup-row').evaluateAll((rows) => {
+      const read = (side: string, pick: (r: DOMRect) => number) =>
+        rows
+          .map((row) => row.querySelector(`.matchup-half[data-side="${side}"] .matchup-points`))
+          .filter((el): el is Element => el != null)
+          .map((el) => Math.round(pick(el.getBoundingClientRect())));
+      return {
+        // Mine sits against the pill, so its right edge is the shared one.
+        mine: read('mine', (r) => r.right),
+        theirs: read('theirs', (r) => r.left),
+      };
+    });
+
+    expect(edges.mine.length, 'the lineup should be drawing scores').toBeGreaterThan(4);
+    expect(new Set(edges.mine).size, `my scores ended at ${[...new Set(edges.mine)].join(', ')}`).toBe(1);
+    expect(new Set(edges.theirs).size, `their scores began at ${[...new Set(edges.theirs)].join(', ')}`).toBe(1);
+  });
+
+  /**
+   * …and the rows really do contain the mix that used to break it: a short
+   * name, a long one, and a status chip. A uniform lineup could otherwise pass
+   * the assertion above by accident.
+   */
+  test('and does so with names of every length and a status chip among them', async ({ page }) => {
+    const names = await page
+      .getByTestId('matchup-row')
+      .locator('.matchup-name')
+      .evaluateAll((els) => els.map((e) => (e as HTMLElement).innerText.length));
+    expect(names.length).toBeGreaterThan(4);
+    expect(Math.max(...names) - Math.min(...names), 'every name is the same length').toBeGreaterThan(2);
+  });
+
   test('never overflows the page sideways', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
     const overflow = await page.evaluate(
@@ -302,25 +345,54 @@ test.describe('the states of an afternoon', () => {
   });
 
   /**
-   * Two insights means a carousel; one means a card.
+   * The carousel is gone, and this is what replaced it.
    *
-   * Both directions are checked, because a control that offers paging through a
-   * single slide is a control that lies about having more to say.
+   * It advanced itself on a timer and carried two arrows and a row of dots,
+   * above the fold, on the screen where the starting lineup is what a reader
+   * came to scan — and none of that chrome said anything about the matchup. The
+   * card now shows the highest-priority insight and opens the rest.
    */
-  test('pages between insights when there is more than one', async ({ page }) => {
+  test('shows one insight and opens the rest in a sheet, with no carousel chrome', async ({ page }) => {
     await serve(page, response());
-    await expect(page.getByTestId('hero-dot')).toHaveCount(2);
-    const first = await page.getByTestId('hero-headline').innerText();
-    await page.getByTestId('hero-next').click();
-    await expect(page.getByTestId('hero-headline')).not.toHaveText(first);
+
+    // One card, and it is the first — the list arrives in priority order.
+    await expect(page.getByTestId('hero-card')).toHaveCount(1);
+    const shown = await page.getByTestId('hero-headline').innerText();
+    expect(shown).not.toBe('');
+
+    // None of the chrome survives in the resting state.
+    await expect(page.getByTestId('hero-dot')).toHaveCount(0);
+    await expect(page.getByTestId('hero-prev')).toHaveCount(0);
+    await expect(page.getByTestId('hero-next')).toHaveCount(0);
+    await expect(page.getByTestId('hero-pager')).toHaveCount(0);
+    await expect(page.getByTestId('hero-action')).toHaveCount(0);
+    await expect(page.getByTestId('hero-card')).not.toContainText('View details');
+
+    // The whole card is the target, and it opens every insight as a list.
+    await page.getByTestId('hero-card').click();
+    const sheet = page.getByTestId('insight-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('insight-row')).toHaveCount(2);
+    await expect(sheet.getByTestId('insight-row').first()).toContainText(shown);
+    // …and the one that was not on the card is reachable by tap, not by swipe.
+    await expect(sheet.getByTestId('insight-row').nth(1)).not.toContainText(shown);
   });
 
-  test('shows no pager at all when there is only one insight', async ({ page }) => {
+  /**
+   * One insight leads straight to its player: a sheet holding a single row the
+   * reader has already read is a tap that achieves nothing.
+   */
+  test('opens the player directly when there is only one insight', async ({ page }) => {
     const body = response();
     (body.forecast.insights as unknown[]).length = 1;
     await serve(page, body);
-    await expect(page.getByTestId('hero-card')).toBeVisible();
+
+    const card = page.getByTestId('hero-card');
+    await expect(card).toBeVisible();
     await expect(page.getByTestId('hero-pager')).toHaveCount(0);
+    await card.click();
+    // The player's own sheet, not the list of insights.
+    await expect(page.getByTestId('insight-sheet')).toHaveCount(0);
   });
 
   test('replaces the live state with FINAL and drops the odds bar', async ({ page }) => {

@@ -315,6 +315,46 @@ export function Notice({
   );
 }
 
+/**
+ * A statement of fact, as one line rather than a banner.
+ *
+ * `Notice` is a filled, bordered block, and that is the right shape for
+ * something that interrupts — an offline capture, a failed write. It is the
+ * wrong shape for the far more common case: the screen saying what it could not
+ * work out. "Roster not identified" is not an alarm, and a yellow box the width
+ * of the phone announcing it is the screen shouting about its own limitations
+ * above the answers it does have.
+ *
+ * A mark, a sentence, and the page's own ground under it. The mark is a glyph
+ * rather than a colour, so the state survives greyscale and a screen reader
+ * alike; `role` is offered for the rare line that genuinely needs announcing.
+ */
+export function StatusRow({
+  children,
+  tone = 'warn',
+  role,
+  'data-testid': testId,
+}: {
+  children: ReactNode;
+  tone?: 'warn' | 'error' | 'info';
+  role?: 'status' | 'alert';
+  'data-testid'?: string;
+}) {
+  return (
+    <div
+      className={tone === 'error' ? 'notice-row notice-row-error' : 'notice-row'}
+      role={role}
+      data-testid={testId}
+      data-tone={tone}
+    >
+      <span className="notice-row-mark" aria-hidden="true">
+        {tone === 'info' ? 'ⓘ' : '⚠'}
+      </span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
 /** A headline number with a small label. Large value, quiet label, tabular. */
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (

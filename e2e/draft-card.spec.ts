@@ -133,10 +133,10 @@ test.describe('the numbers keep the line', () => {
    * The four metrics are what the row is about, and the warning may not cost
    * them so much as a wrap. Checked with the widest numbers this app can
    * produce as well as with the ones the seed happens to have: a three-digit
-   * ADP and a three-digit Val are ordinary on a deep board and would be the
-   * thing that broke this in production rather than here.
+   * ADP delta and a three-digit DOG delta are ordinary on a deep board and
+   * would be the thing that broke this in production rather than here.
    */
-  test('Score, ADP, Val and Next stay on one line, even at their widest', async ({ page }) => {
+  test('Score, ADP, DOG and Next stay on one line, even at their widest', async ({ page }) => {
     await openDraft(page);
     const row = cliffRow(page);
     await expect(row).toBeVisible();
@@ -148,8 +148,8 @@ test.describe('the numbers keep the line', () => {
       const values = [...el.querySelectorAll('.player-row-metrics strong')] as HTMLElement[];
       const saved = values.map((v) => v.textContent);
       values[0]!.textContent = '100';
-      values[1]!.textContent = '128.4';
-      values[2]!.textContent = '-118.6';
+      values[1]!.textContent = '+128';
+      values[2]!.textContent = '-118';
       const widest = count();
       values.forEach((v, i) => (v.textContent = saved[i]!));
       return { seeded, widest };
@@ -164,8 +164,10 @@ test.describe('the numbers keep the line', () => {
     const metrics = await cliffRow(page).locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
+    // `Val` moved to the expanded card when ADP and DOG became deltas — the row
+    // answers "how far ahead of this market am I" directly now.
+    expect(metrics).not.toMatch(/\bVal\b/);
     // Nothing was traded away to fit the warning.
     await expect(cliffRow(page).getByTestId('survival')).toBeVisible();
   });

@@ -70,6 +70,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
 import { annotateTiers, tierCliffWarning } from '../../core/draft/tierBoard.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
+import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
 /*
  * Three ways to read the same board, and one pure function that reorders it.
  *
@@ -956,6 +957,15 @@ export function DraftScreen({
         </Empty>
       ) : (
         <div
+          /*
+            One grouped surface, and the rows are flush inside it.
+
+            The list had a test id and no class, so it had never been styled as
+            a container at all — which is exactly why every row was left being
+            its own floating rounded card with its own shadow and a gap under
+            it. See `.board-list` in the stylesheet.
+          */
+          className="board-list"
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
@@ -981,6 +991,7 @@ export function DraftScreen({
                 rec={item.rec}
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
+                currentPick={board.currentPick}
                 marketSource={board.marketSource ?? null}
                 scoringLabel={board.league?.scoringLabel ?? null}
                 expanded={expanded === item.rec.playerId}
@@ -1451,11 +1462,14 @@ function MarketProvenance({
   rec,
   source,
   scoringLabel,
+  currentPick,
 }: {
   rec: DraftRecommendation;
   source: DraftBoard['marketSource'];
   /** The league's own scoring, which is what turned lines into points. */
   scoringLabel: string | null;
+  /** The pick the row's deltas were measured against, printed as the working. */
+  currentPick: number | null;
 }) {
   const props = rec.marketProps;
   if (!props || props.components.length === 0) return null;
@@ -1465,6 +1479,43 @@ function MarketProvenance({
   return (
     <div className="market-detail" data-testid="market-detail">
       <DetailLabel>Market</DetailLabel>
+      {/*
+        The raw numbers the compact row's deltas were made from.
+
+        The row says `ADP +6` because it is answering "what does taking him here
+        cost me against this market", which is the decision. This is the
+        working: both markets' own positions, the pick they were measured
+        against, and the value column the row no longer prints. A reader who
+        wants to check the arithmetic can, and a reader who wants the raw
+        market position — to compare against somewhere else, or because they
+        think in ADP — still has it.
+
+        Answer on the row, explanation here. Nothing is computed in this block;
+        every number in it is one the board already sent.
+      */}
+      <div className="market-raw" data-testid="market-raw">
+        <span className="metric">
+          Sleeper ADP <strong>{rec.adp == null ? <Unknown what="Sleeper ADP" /> : rec.adp}</strong>
+        </span>
+        {rec.dogAdp == null ? null : (
+          <span className="metric" data-testid="market-raw-dog">
+            DOG ADP <strong>{rec.dogAdp}</strong>
+          </span>
+        )}
+        {currentPick == null ? null : (
+          <span className="metric">
+            At pick <strong>{currentPick}</strong>
+          </span>
+        )}
+        <span className="metric">
+          Val{' '}
+          <strong
+            className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
+          >
+            {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
+          </strong>
+        </span>
+      </div>
       {/*
         The market-implied points, said in full before the components it is
         made of.
@@ -1538,6 +1589,14 @@ function RecommendationRow({
   expanded,
   showCliffProximity,
   horizonPick,
+  /**
+   * The pick on the clock, straight from the board.
+   *
+   * The market deltas are measured against this and nothing else — not the
+   * row's rank, not the reader's next turn, not a cached copy. See
+   * `marketDelta.ts`.
+   */
+  currentPick,
   marketSource,
   scoringLabel,
   onToggle,
@@ -1555,6 +1614,8 @@ function RecommendationRow({
   showCliffProximity: boolean;
   /** The pick survival is measured against — your next one after this. */
   horizonPick: number | null;
+  /** The pick on the clock, which the market deltas are measured against. */
+  currentPick: number | null;
   /** Who priced the season markets, for the expanded card's provenance. */
   marketSource: DraftBoard['marketSource'];
   /** The league's own scoring label, which is what `MKT PTS` was converted at. */
@@ -1718,32 +1779,39 @@ function RecommendationRow({
                 {rec.score == null ? <Unknown what="Score" /> : rec.score}
               </strong>
             </span>
-            <span className="metric">
-              ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
-            </span>
             {/*
-              Underdog's own number, beside Sleeper's rather than instead of it.
+              What each market says about taking him *right now*, rather than
+              where each market has him.
 
-              Two markets, two columns, and the reader can see them disagree —
-              which is the whole reason the second one is worth having. It is
-              absent rather than blank when Underdog has not priced him, so a
+              These were two raw positions and a value column — `ADP 170  DOG
+              145.1  Val -6` — and all three asked the reader to subtract
+              against the pick on the clock before any of them meant anything.
+              The board does the subtraction: `+6` is six picks ahead of that
+              market and costs you, `-19` is nineteen picks past it and is the
+              reason to take him. Three columns become two and the row reads in
+              one pass.
+
+              Nothing about the model moved. `rec.adp`, `rec.dogAdp` and
+              `rec.adpValue` are all still computed, still sent, and still what
+              the sort controls sort on — only the compact row's rendering
+              changed, and the raw numbers are on the expanded card underneath.
+            */}
+            <MarketDeltaMetric label="ADP" marketAdp={rec.adp} currentPick={currentPick} source="Sleeper" />
+            {/*
+              Absent rather than blank when Underdog has not priced him, so a
               card costs nothing for a player the source does not cover and the
               line stays the height it always was.
             */}
             {rec.dogAdp == null ? null : (
-              <span className="metric" data-testid="dog-metric">
-                DOG{' '}
-                <strong title={rec.marketDisagreement?.note ?? 'Raw Underdog ADP'}>{rec.dogAdp}</strong>
-              </span>
+              <MarketDeltaMetric
+                label="DOG"
+                marketAdp={rec.dogAdp}
+                currentPick={currentPick}
+                source="Underdog"
+                testId="dog-metric"
+                note={rec.marketDisagreement?.note ?? null}
+              />
             )}
-            <span className="metric">
-              Val{' '}
-              <strong
-                className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
-              >
-                {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-              </strong>
-            </span>
             <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
           </div>
 
@@ -1828,7 +1896,7 @@ function RecommendationRow({
         and never forty.
       */}
       <Disclose open={expanded}>
-        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} />
+        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
       </Disclose>
     </div>
   );
@@ -1863,10 +1931,13 @@ function DraftPlayerDetail({
   rec,
   marketSource,
   scoringLabel,
+  currentPick,
 }: {
   rec: DraftRecommendation;
   marketSource: DraftBoard['marketSource'];
   scoringLabel: string | null;
+  /** The pick the compact row's market deltas were measured against. */
+  currentPick: number | null;
 }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
 
@@ -1896,7 +1967,7 @@ function DraftPlayerDetail({
         Before the outlook, because it is the workings of a number the reader
         just tapped past rather than somebody's prose about the season.
       */}
-      <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} />
+      <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
       <InjuryDetail detail={detail} />
@@ -1958,6 +2029,59 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
  * Absent rather than empty when there is no cliff, so the grid column collapses
  * and an unwarned card spends nothing on it.
  */
+/**
+ * One market's consequence, as one column of the compact row.
+ *
+ * The label, the signed number, and a tone the stylesheet paints — nothing
+ * else. `data-tone` is the contract a test reads, deliberately in preference to
+ * a colour: what "reach" looks like is the design's business and may change,
+ * but that a positive delta *is* a reach is the semantics and may not.
+ *
+ * An unknown market prints the app's own unknown mark rather than a zero. Zero
+ * is the claim "he is going at about this market", which is a real reading and
+ * a different one.
+ */
+function MarketDeltaMetric({
+  label,
+  marketAdp,
+  currentPick,
+  source,
+  testId,
+  note,
+}: {
+  /** What the column is called on the row: `ADP` or `DOG`. */
+  label: string;
+  marketAdp: number | null;
+  /** The pick on the clock, from the board itself. Never derived from a row. */
+  currentPick: number | null;
+  /** Whose market it is, for the sentence in the title. */
+  source: string;
+  testId?: string;
+  /** Anything the board wants to say about this market, kept in the title. */
+  note?: string | null;
+}) {
+  const delta = marketDelta(marketAdp, currentPick);
+  return (
+    <span
+      className="metric"
+      {...(testId ? { 'data-testid': testId } : { 'data-testid': 'adp-metric' })}
+      data-tone={delta?.tone ?? 'unknown'}
+    >
+      {label}{' '}
+      {delta == null || marketAdp == null || currentPick == null ? (
+        <Unknown what={`${source} ADP`} />
+      ) : (
+        <strong
+          className={`delta delta-${delta.tone}`}
+          title={note ?? marketDeltaTitle(source, marketAdp, currentPick, delta)}
+        >
+          {delta.label}
+        </strong>
+      )}
+    </span>
+  );
+}
+
 function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: boolean }) {
   const warning = enabled ? tierCliffWarning(rec.tierCliff) : null;
   if (warning == null) return null;

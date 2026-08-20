@@ -143,8 +143,22 @@
    * that the row belongs to a run. Nothing about which positions are tinted, or
    * which hue each takes, changed.
    */
-  --pos-mix: 15%;
-  --pos-mix-open: 22%;
+  /*
+   * Nothing, and that is the finished answer.
+   *
+   * The wash came down from 58% to 15% in the density pass, which stopped the
+   * board being a rainbow but left every row faintly coloured — and a hundred
+   * faintly coloured rows still read as a styled web page rather than a list.
+   * A compact list is not where a position belongs: it belongs on the pill,
+   * which carries the letters, and on the hairline rail at the leading edge.
+   * So the surface a name is read against is now exactly the list's own, on
+   * Draft, Players and Trades alike.
+   *
+   * The token stays rather than the rule being deleted, because it is what
+   * `--pos-mix-strong` is measured against and what Team still spends.
+   */
+  --pos-mix: 0%;
+  --pos-mix-open: 8%;
   /*
    * The same hue, for a set of eight rather than a list of a hundred.
    *
@@ -174,7 +188,7 @@
    * look like a web page. This is wide, soft and dark enough to separate the
    * pill from a scrolling list passing under it, and no darker.
    */
-  --shadow-toolbar: 0 6px 20px rgb(17 24 39 / 12%);
+  --shadow-toolbar: 0 2px 10px rgb(17 24 39 / 7%);
   --focus-ring: 0 0 0 3px rgb(42 95 216 / 32%);
 
   /* -- geometry ---------------------------------------------------------- */
@@ -210,6 +224,16 @@
    * when this said `CHI`.
    */
   --team-logo: 22px;
+
+  /*
+   * The width both of a matchup row's score columns take, named once.
+   *
+   * Wide enough for `100.0` over `100.0` at the sizes those two numbers are
+   * set in, which is more than a lineup slot ever scores — and that is the
+   * point. A column sized to the numbers the seed happens to contain is a
+   * column that moves the first time somebody has a big week.
+   */
+  --matchup-points-w: 42px;
 
   /*
    * The width reserved for whatever sits between a player's name and his club.
@@ -269,7 +293,15 @@
    * height the container adds.
    */
   --tab-w: 52px;
-  --toolbar-pad: 5px;
+  /*
+   * Four rather than five, and it is the honest way to slim the bar.
+   *
+   * The pill is a destination's 44px plus this at the top and this at the
+   * bottom, so a point here is two points off the height of the bar on every
+   * screen — taken from the air around the destinations rather than from the
+   * destinations themselves.
+   */
+  --toolbar-pad: 4px;
 
   /*
    * Replaced at runtime with the toolbar's measured height. This value only has
@@ -458,14 +490,14 @@
     --pos-DEF-line: #f492bd;
     --pos-DEF-tint: #44172c;
 
-    --pos-mix: 34%;
-    --pos-mix-open: 48%;
+    --pos-mix: 0%;
+    --pos-mix-open: 14%;
     --pos-mix-strong: 66%;
 
     --shadow-1: none;
     --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
     --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
-    --shadow-toolbar: 0 6px 22px rgb(0 0 0 / 50%);
+    --shadow-toolbar: 0 2px 12px rgb(0 0 0 / 38%);
     --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
   }
 }
@@ -531,14 +563,14 @@
   --pos-DEF-line: #f492bd;
   --pos-DEF-tint: #44172c;
 
-  --pos-mix: 34%;
-  --pos-mix-open: 48%;
+  --pos-mix: 0%;
+  --pos-mix-open: 14%;
   --pos-mix-strong: 66%;
 
   --shadow-1: none;
   --shadow-2: 0 4px 18px rgb(0 0 0 / 45%);
   --shadow-sheet: 0 -8px 32px rgb(0 0 0 / 55%);
-  --shadow-toolbar: 0 6px 22px rgb(0 0 0 / 50%);
+  --shadow-toolbar: 0 2px 12px rgb(0 0 0 / 38%);
   --focus-ring: 0 0 0 3px rgb(110 163 247 / 34%);
 }
 
@@ -853,10 +885,19 @@ body,
 .tabbar button {
   position: relative;
   width: var(--tab-w);
-  /* The pill's height is this plus its own padding, and nothing else adds to
-     it — a bar that grows is a bar that starts eating the page. */
+  /*
+   * The pill's height is this plus its own padding, and nothing else adds to
+   * it — a bar that grows is a bar that starts eating the page.
+   *
+   * **44 and not a pixel less.** This was taken to 42 to buy the bar some of
+   * the vertical bulk the finishing pass asked it to give up, and that was the
+   * wrong pixel to take it from: 44 is a fingertip, it is the floor the whole
+   * design system is written around, and five specs across three files assert
+   * it at every supported width. The bulk came out of the pill's own padding
+   * instead — see `--toolbar-pad` — which costs a reader nothing.
+   */
   min-height: var(--tap);
-  padding: 2px 1px;
+  padding: 1px 1px;
   background: none;
   border: none;
   border-radius: calc(var(--radius-toolbar) - var(--toolbar-pad));
@@ -872,7 +913,7 @@ body,
   align-items: center;
   justify-content: center;
   /* Tight enough that the icon and its label read as one control. */
-  gap: 2px;
+  gap: 1px;
   cursor: pointer;
   transition:
     color var(--dur-fast) ease,
@@ -1240,20 +1281,77 @@ body,
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-1);
-  margin: var(--sp-2) 0;
+  gap: 0;
+  /* Tight to the bar above it: a pushed page that opens on a band of empty
+     ground reads as one that has not finished loading. */
+  margin: 0 0 var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--separator-soft);
 }
 
 .metric-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/*
+ * A status line, not a banner.
+ *
+ * `Notice` was a filled, bordered, padded block — the right shape for something
+ * that interrupts, and the wrong one for the things that actually use it, which
+ * are statements of fact about what the screen could not work out. One line, a
+ * mark to say what kind of line it is, and the page's own ground under it.
+ */
+.notice-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-2);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.notice-row-mark {
+  flex: none;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--warn);
+}
+
+.notice-row-error .notice-row-mark {
+  color: var(--neg);
+}
+
+/*
+ * A metric block, not a tile.
+ *
+ * These were four filled boxes across the top of the player page, each with its
+ * own surface and its own padding, and together they read as a dashboard header
+ * on a screen whose job is to be a document. What identifies a metric is its
+ * label and its number; the box around it was doing nothing the spacing could
+ * not do, so it is gone and a single hairline holds the row together.
+ */
 .stat {
   flex: 0 0 auto;
-  background: var(--surface-inset);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-1) var(--sp-2);
+  background: none;
+  border-radius: 0;
+  padding: 0 var(--sp-2) 0 0;
   min-width: 0;
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--separator-soft);
+  padding-left: var(--sp-2);
+}
+
+.metric-grid .stat-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+
+.metric-grid .stat-value {
+  font-size: 1.05rem;
+  font-weight: 660;
+  letter-spacing: -0.02em;
 }
 
 .stat .stat-label {
@@ -1350,6 +1448,64 @@ body,
   transition:
     background-color var(--dur-fast) ease,
     transform var(--dur-fast) var(--ease);
+}
+
+/*
+ * The board is one surface, not forty floating cards.
+ *
+ * Every row used to be its own rounded rectangle with its own shadow and a gap
+ * beneath it, which is the single strongest "styled web app" cue the screen had:
+ * iOS lists are one grouped surface divided by hairlines, and the gaps were
+ * costing four points of vertical rhythm per row on top of that. The rows are
+ * flush now, the hairline does the separating, and the group rounds only at its
+ * own two ends.
+ *
+ * Deliberately no `overflow: hidden` on the group. The queue reorders by
+ * translating a row under the reader's finger, and a clipping container would
+ * cut the row being dragged in half at the boundary.
+ */
+.board-list {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  margin-bottom: var(--sp-3);
+}
+
+.board-list > .player-row {
+  margin-bottom: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.board-list > .player-row + .player-row {
+  border-top: 1px solid var(--separator-soft);
+}
+
+/*
+ * A tier divider already separates two rows, so the hairline under it would be
+ * a second line saying the same thing half a pixel away.
+ */
+.board-list > .tier-divider + .player-row {
+  border-top: 0;
+}
+
+.board-list > .player-row:first-child {
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+}
+
+.board-list > .player-row:last-child {
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+
+/* The open row rises out of the group, which is what "open" should look like. */
+.board-list > .player-row[aria-expanded='true'],
+.board-list > .player-row.player-row-open {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  position: relative;
+  z-index: 1;
 }
 
 .player-row:active,
@@ -1537,7 +1693,16 @@ body,
  * computed once rather than per frame.
  */
 .card-pos {
-  border-left: 3px solid var(--pos-line, var(--separator));
+  /*
+   * A hairline of the position's hue, not a rail.
+   *
+   * Three solid pixels at full saturation was the loudest thing on a row whose
+   * subject is a player's name, and forty of them down the left edge of a board
+   * read as a chart rather than a list. Two pixels at a little over half
+   * strength is still unmistakably that position's colour at a glance, and it
+   * stops competing with the pill that actually says which position it is.
+   */
+  border-left: 2px solid color-mix(in srgb, var(--pos-line, var(--separator)) 62%, transparent);
   background: color-mix(in srgb, var(--pos-tint-bg, var(--surface)) var(--pos-mix), var(--surface));
 }
 
@@ -1895,6 +2060,50 @@ body,
   color: var(--text-faint);
 }
 
+/*
+ * A market delta, and the one place in this app where a `+` is red.
+ *
+ * Everywhere else a positive number is a good number. Here it is the opposite
+ * and deliberately so: `+6` means taking him at this pick is six picks *ahead*
+ * of that market, which is what the pick costs you, and `-19` means he lasted
+ * nineteen picks past it, which is why you take him. Painting those the usual
+ * way round would tell the reader the exact opposite of what the number means.
+ *
+ * The sign is always printed, so colour is an accelerator here as everywhere —
+ * a reader who cannot separate the hues reads the `+` and the `-`, and a screen
+ * reader reads the title, which says it in words.
+ *
+ * Deliberately unsaturated. Two of these on every row of a forty-row board at
+ * full strength is a trading terminal, which is the opposite of the target.
+ */
+.metric strong.delta {
+  font-variant-numeric: tabular-nums;
+}
+
+.metric strong.delta-reach {
+  color: var(--neg);
+}
+
+.metric strong.delta-value {
+  color: var(--pos);
+}
+
+.metric strong.delta-even {
+  color: var(--text-dim);
+}
+
+/*
+ * The working behind the row's two deltas, on the expanded card: both raw
+ * markets, the pick they were measured against, and the value column the
+ * compact row stopped printing.
+ */
+.market-raw {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
 .metric strong.sig-pos {
   color: var(--pos);
 }
@@ -2039,6 +2248,14 @@ body,
   flex: none;
 }
 
+/*
+ * A column whose value names itself — a movement mark is already an arrow and a
+ * number — takes no label and therefore no gap where one would have been.
+ */
+.dense-metric-label:empty {
+  display: none;
+}
+
 .dense-metric-value {
   font-weight: 620;
   color: var(--text-dim);
@@ -2098,6 +2315,39 @@ body,
   font-weight: 600;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A section heading with something to say on its right-hand end: how many rows
+ * are under it, and — when every one of them agrees — how sure the app is about
+ * all of them at once.
+ */
+.section-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.section-title-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.section-title-meta .badge-confidence {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 0.68rem;
+  font-weight: 550;
+  color: var(--text-faint);
+}
+
+.section-title-meta .badge-confidence-low {
+  color: var(--warn);
 }
 
 /* ========================================================= player detail */
@@ -2509,10 +2759,26 @@ body,
  * bold amber chip at the end of every row in a section is a section where the
  * qualifier is louder than the claim.
  */
+/*
+ * Confidence on a row, and it is the quietest thing on it.
+ *
+ * It is a qualifier repeated on every row of a section, and repeated loudly it
+ * stops qualifying anything and starts being the pattern the eye follows. So it
+ * gives up its capsule entirely and becomes small muted text — the amber is
+ * kept only for `low`, which is the one level that changes what a reader does.
+ */
 .dense-row-note .badge-confidence {
-  font-size: 0.68rem;
-  font-weight: 550;
+  font-size: 0.66rem;
+  font-weight: 500;
   flex: none;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+}
+
+.dense-row-note .badge-confidence-low {
+  color: var(--warn);
 }
 
 /*
@@ -2688,10 +2954,14 @@ button:disabled {
 .sort-control {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--hairline);
+  /* A recessed track and no outline: the border was one more box on a screen
+     that had too many, and a sunken ground is what makes a raised segment read
+     as raised without one. */
+  border: 0;
   border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--surface);
+  padding: 2px;
+  gap: 2px;
+  background: var(--surface-sunken);
 }
 
 .sort-chip {
@@ -2715,13 +2985,25 @@ button:disabled {
   transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
-.sort-chip + .sort-chip {
-  border-left: 1px solid var(--hairline);
+.sort-chip {
+  border-radius: calc(var(--radius-sm) - 2px);
 }
 
+/*
+ * Selected, said the way the other segmented control says it.
+ *
+ * This was a saturated accent fill, and on the Draft header it was the most
+ * colourful object on a screen whose subject is a list of names — a control
+ * shouting about itself. iOS raises the selected segment rather than flooding
+ * it, so this now does what `.filter-row`'s chips already did: a surface face
+ * lifted off the sunken track, with the accent in the *text* where it labels
+ * the state rather than fills the box.
+ */
 .sort-chip[data-active='yes'] {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--surface);
+  color: var(--accent-text);
+  font-weight: 680;
+  box-shadow: var(--shadow-1);
 }
 
 .sort-chip:active {
@@ -2809,9 +3091,15 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
+  /*
+   * Two points slimmer than it was. The button around it is still the full
+   * 44px tap target — that number is not negotiable and is asserted — but the
+   * *face* is what the eye measures the control by, and 36px of painted pill
+   * above a dense list was reading as a toolbar rather than a filter.
+   */
+  min-height: 32px;
   padding: 0 var(--sp-3);
-  border-radius: 10px;
+  border-radius: 9px;
   transition:
     background-color var(--dur-fast) ease,
     box-shadow var(--dur-fast) ease;
@@ -4036,6 +4324,32 @@ table.compact tr:last-child td {
 }
 
 /*
+ * The lineup as one inset group.
+ *
+ * Same argument as `.board-list`: a set of rows read top to bottom is one
+ * surface divided by hairlines, not a stack of separate rounded cards with gaps
+ * between them. Eight slots at four points of gap each was most of a row of the
+ * phone spent on nothing.
+ */
+.slot-group {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-3);
+}
+
+.slot-group > .player-row {
+  margin-bottom: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.slot-group > .player-row + .player-row {
+  border-top: 1px solid var(--separator-soft);
+}
+
+/*
  * The recommended lineup keeps more of the position's hue than a list does.
  *
  * This is the exception the density pass deliberately left standing. Everywhere
@@ -5016,11 +5330,23 @@ table.compact tr:last-child td {
  * because one name was longer would cost more than the four pixels saved.
  */
 
+/*
+ * The head-to-head, compressed.
+ *
+ * It carried sixteen points of padding, a 1.62rem score and a spread of gaps
+ * between the score, the projection and the win bar — a hero panel on the
+ * screen where the starting lineup is the thing a reader came to scan, and the
+ * lineup started well below the fold because of it. Every number it showed
+ * still shows; what went is the air between them.
+ *
+ * This is the one card on the page that earns being a card, so it keeps the
+ * larger radius and its surface. It just stops being half a screen tall.
+ */
 .matchup-score {
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-2);
 }
 
@@ -5028,7 +5354,7 @@ table.compact tr:last-child td {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--sp-2);
+  gap: var(--sp-1) var(--sp-2);
 }
 
 .matchup-team {
@@ -5061,13 +5387,17 @@ table.compact tr:last-child td {
 /* Sleeper's score: the largest thing on the screen, because it is the only
    number here that is a fact rather than a forecast. */
 .matchup-team-score {
-  font-size: 1.62rem;
+  /*
+   * A step down, and still comfortably the largest type on the screen — which
+   * is the only thing the size had to achieve.
+   */
+  font-size: 1.44rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  line-height: 1.15;
-  margin-top: 1px;
+  line-height: 1.1;
+  margin-top: 0;
 }
 
 /* This app's own projection, in the quieter register everything derived uses. */
@@ -5106,7 +5436,7 @@ table.compact tr:last-child td {
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
-  margin-top: var(--sp-1);
+  margin-top: var(--sp-2);
   padding: 0;
   background: none;
   border: 0;
@@ -5196,7 +5526,7 @@ div.matchup-result {
 .matchup-degraded {
   font-size: 0.72rem;
   color: var(--text-faint);
-  margin-top: var(--sp-1);
+  margin-top: 5px;
 }
 
 .matchup-degraded {
@@ -5228,106 +5558,148 @@ div.matchup-result {
  * breathe. It is one card at a time on purpose: three stacked would be a
  * dashboard, which is exactly what the approved concept is not.
  */
+/*
+ * A compact alert surface, and the whole of it is the target.
+ *
+ * It was a filled accent panel about 120px tall with a link, two arrows and a
+ * row of dots inside it, sitting directly under the score card and rivalling
+ * the one thing on this screen that genuinely deserves to be a card. An insight
+ * is a sentence with somewhere to go: it keeps a surface so it still reads as
+ * one object, gives up the saturated fill for the page's own card tone, and
+ * takes a hairline of the accent on its leading edge to say which kind it is.
+ *
+ * Laid out as a row rather than a stack, because the chevron sits beside the
+ * text rather than under it — the same shape as every other thing in the app
+ * that leads somewhere.
+ */
 .hero-card {
-  background: var(--accent-tint);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-3);
-  margin-bottom: var(--sp-2);
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: left;
+  background: var(--surface);
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  color: inherit;
+  font: inherit;
+  box-shadow: var(--shadow-1);
+  transition: background-color var(--dur-fast) ease;
 }
 
-/* Something the reader can still act on gets the warmer surface. Colour is an
-   accelerator here too — the sentence itself says what it is. */
-.hero-card[data-urgency='act_now'] {
-  background: var(--warn-tint);
+button.hero-card {
+  cursor: pointer;
 }
 
-.hero-card[data-kind='clinch'],
-.hero-card[data-kind='near_clinch'] {
-  background: var(--pos-tint);
+button.hero-card:active {
+  background: var(--pressed);
 }
 
 .hero-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
 }
 
+/*
+ * Two lines, and they must be two.
+ *
+ * These are spans inside a button — the card is one target, so it cannot
+ * contain block-level elements — and an inline span runs straight on from the
+ * one before it. `display: block` is what keeps the headline and the sentence
+ * under it from reading as a single run-on sentence.
+ */
 .hero-headline {
-  font-size: 1.02rem;
-  font-weight: 660;
-  line-height: 1.28;
-  letter-spacing: -0.012em;
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 640;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
 .hero-detail {
-  font-size: 0.8rem;
+  display: block;
+  margin-top: 1px;
+  font-size: 0.78rem;
   color: var(--text-dim);
-  line-height: 1.35;
+  line-height: 1.32;
 }
 
-.hero-action {
-  align-self: flex-start;
-  /*
-   * A smaller box than 44px, and deliberately.
-   *
-   * The whole card is about 120px of glass and a full-height target inside it
-   * would spend a third of that on white space above and below eight words.
-   * The padding here still gives a ~36px tall, ~110px wide target — comfortably
-   * inside what a thumb finds — and the pager buttons beside it are the
-   * controls that actually get repeated taps.
-   */
-  min-height: 36px;
-  padding: 6px 0;
-  background: none;
-  border: 0;
-  color: var(--accent-text);
-  font-size: 0.82rem;
-  font-weight: 640;
-  cursor: pointer;
-}
-
-.hero-pager {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+.hero-chevron {
+  flex: none;
+  display: inline-flex;
   align-items: center;
+  color: var(--text-faint);
+  opacity: 0.75;
 }
 
-/* The paging controls exist so a gesture is never the only way through. They
-   are quiet, and they are still full tap targets. */
-.hero-step {
-  min-width: var(--tap);
-  min-height: 30px;
+.hero-chevron svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* One insight in the sheet the card opens. */
+.insight-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: left;
   background: none;
   border: 0;
-  color: var(--text-faint);
-  font-size: 1.1rem;
-  line-height: 1;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
+  min-height: var(--tap);
+  padding: var(--sp-2);
 }
 
-.hero-dots {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
+.insight-row-static {
+  cursor: default;
 }
 
-.hero-dot {
-  width: 7px;
-  height: 7px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
-  cursor: pointer;
+.insight-row:active {
+  background: var(--pressed);
 }
 
-.hero-dot-on {
-  background: var(--accent);
+.insight-row-body {
+  flex: 1;
+  min-width: 0;
 }
+
+.insight-row-headline {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.insight-row-detail {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.32;
+}
+
+.insight-row > .dense-chevron {
+  margin-left: auto;
+}
+
+/* Something the reader can still act on gets the warmer surface. Colour is an
+   accelerator here too — the sentence itself says what it is. */
+/*
+ * The carousel's chrome is gone, and so are its rules.
+ *
+ * `.hero-action`, `.hero-pager`, `.hero-foot`, `.hero-step`, `.hero-dots` and
+ * `.hero-dot` all styled controls that no longer exist: the `View details ›`
+ * link the whole card replaced, and the two arrows and row of dots that the
+ * insight sheet replaced. Deleted rather than left behind, because dead
+ * selectors are how a stylesheet stops being readable.
+ */
+
 
 /* ---------------------------------------------------------- starter rows */
 .matchup-rows {
@@ -5351,8 +5723,24 @@ div.matchup-result {
   padding: 5px var(--sp-2);
 }
 
+/*
+ * A fixed grid, so the numbers line up down the page.
+ *
+ * Each half was a flex row — logo, name, score — which meant the score started
+ * wherever the name happened to end, and the name is a player's name. Eight
+ * rows produced eight different x positions for the column a reader is trying
+ * to compare left against right, and the whole list read as sloppy without it
+ * being obvious why.
+ *
+ * Three columns of known width instead. The score column is the same width on
+ * every row of both sides, so the two score blocks meet the position pill at
+ * the same distance every time and the eye can run straight down either one.
+ * The name is the only flexible column, because the name is the only thing here
+ * that can afford to lose a letter.
+ */
 .matchup-half {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) var(--matchup-points-w);
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -5368,9 +5756,17 @@ div.matchup-result {
   cursor: pointer;
 }
 
+/* The far side reads inward: score, name, club — so both score columns sit
+   against the pill in the middle and are compared without crossing the row. */
 .matchup-half[data-side='theirs'] {
-  justify-content: flex-end;
+  grid-template-columns: var(--matchup-points-w) minmax(0, 1fr) auto;
   text-align: right;
+}
+
+/* An empty slot still has to hold the row's shape, or the rows either side of
+   it step sideways. */
+.matchup-half[data-empty='true'] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .matchup-half:active {
@@ -5400,8 +5796,12 @@ div.matchup-result {
   flex-direction: column;
   align-items: flex-end;
   line-height: 1.1;
+  /*
+   * Tabular, and it is doing real work here rather than being a nicety: a
+   * proportional `1` is half the width of a `2`, so `11.1` and `22.2` are
+   * different widths and a column of them wanders even when the box does not.
+   */
   font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
 }
 
 .matchup-half[data-side='theirs'] .matchup-points {

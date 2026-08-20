@@ -30,10 +30,11 @@
  * row rather than a control.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
 import { TeamLogo } from './common.tsx';
-import { useReducedMotion } from '../gestures.ts';
+import { ChevronIcon } from './icons.tsx';
+import { Sheet } from './native.tsx';
 
 /* --------------------------------------------------------------- score card */
 
@@ -238,30 +239,31 @@ function WinBar({
   );
 }
 
-/* ---------------------------------------------------------- hero carousel */
+/* ------------------------------------------------------------ live insight */
 
 /**
- * One live insight at a time.
+ * The one insight that matters most, as a compact card that opens.
  *
- * The card is the reason this screen exists, so it gets the space a hero gets —
- * and it gets exactly one card's worth of it. A stack of three would be a
- * dashboard, which is the thing the approved concept explicitly is not.
+ * This was a carousel, and everything that made it one has gone. It advanced
+ * itself on a seven-second timer, carried a previous arrow, a next arrow and a
+ * row of dots, and spent a whole line of the card on chrome — above the fold,
+ * on the screen where the starting lineup is the thing a reader came to scan.
+ * None of that chrome said anything about the matchup.
  *
- * Three behaviours, and each is there for a stated reason:
+ * What replaced it is the simplest thing that keeps every insight reachable:
  *
- *  - **it auto-advances slowly**, and only when there is more than one card to
- *    advance to. Fast enough to notice, slow enough to finish reading — see
- *    {@link CYCLE_MS}. It stops the moment the reader touches it, because
- *    something that moves while you are reading it is worse than something
- *    static.
- *  - **it can be swiped**, and it can also be paged by a button, because a
- *    gesture must never be the only way to reach anything.
- *  - **it does not pretend.** One insight means one card, no dots and no
- *    rotation. A carousel with a single slide is a control that lies about
- *    having more to say.
+ *  - **one card, and it is the highest-priority insight.** The list arrives in
+ *    priority order, so "first" is a decision the engine already made.
+ *  - **the whole card is the target.** A chevron says so, in the grammar the
+ *    rest of the app already uses for a row that leads somewhere; the reader no
+ *    longer has to hit a small link inside a large card.
+ *  - **nothing moves on its own.** A card that rotates while it is being read
+ *    is worse than a static one, and with the dots gone there would be nothing
+ *    to say it had rotated.
+ *  - **the others are one tap away, not one swipe away.** More than one insight
+ *    and the card opens a sheet listing all of them, each leading to its own
+ *    player. A gesture is never the only way to anything here.
  */
-export const CYCLE_MS = 7000;
-
 export function HeroCarousel({
   insights,
   onOpenPlayer,
@@ -278,116 +280,145 @@ export function HeroCarousel({
    */
   openable: (playerId: string) => boolean;
 }) {
-  const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const reducedMotion = useReducedMotion();
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  /*
+   * Which insight is showing, and by default it is simply the first.
+   *
+   * This used to be a carousel: it advanced itself on a timer, carried two
+   * arrows and a row of dots, and spent a line of the card on chrome that told
+   * the reader nothing about their matchup. All of that has gone. The list
+   * arrives in priority order, so the card shows the one that matters most and
+   * the rest are one tap away — see the sheet below.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  // A shorter list than last time must never leave the index past its end.
   const count = insights.length;
-  const active = count === 0 ? 0 : Math.min(index, count - 1);
+  if (count === 0) return null;
+  const insight = insights[0]!;
 
-  useEffect(() => {
-    if (count <= 1 || paused || reducedMotion) return;
-    const handle = window.setInterval(() => setIndex((i) => (i + 1) % count), CYCLE_MS);
-    return () => window.clearInterval(handle);
-  }, [count, paused, reducedMotion]);
+  /*
+   * What tapping the card does, in the order a reader would expect.
+   *
+   * More than one insight and the card opens the list, because that is the only
+   * way the others are reachable and a gesture must never be the only way to
+   * anything. Exactly one that leads to a player, and the card is that player's
+   * card and opens him directly — a sheet containing a single row the reader
+   * has already read is a tap that achieves nothing.
+   */
+  const opensPlayer = count === 1 && insight.playerId != null && openable(insight.playerId);
+  const opensSheet = count > 1;
+  const tappable = opensPlayer || opensSheet;
 
-  const go = useCallback(
-    (next: number) => {
-      if (count === 0) return;
-      setIndex(((next % count) + count) % count);
-      setPaused(true);
-    },
-    [count],
+  const card = (
+    <>
+      <span className="hero-body">
+        <span className="hero-headline" data-testid="hero-headline">
+          {insight.headline}
+        </span>
+        {insight.detail ? (
+          <span className="hero-detail" data-testid="hero-detail">
+            {insight.detail}
+          </span>
+        ) : null}
+      </span>
+      {/*
+        The affordance, and it is a chevron rather than a sentence.
+
+        `View details ›` was a link the reader had to hit inside a card that was
+        already a target's worth of glass. The whole card is the target now and
+        the chevron says so, in the grammar every pushed row in the app already
+        uses.
+      */}
+      {tappable ? (
+        <span className="hero-chevron" aria-hidden="true">
+          <ChevronIcon />
+        </span>
+      ) : null}
+    </>
   );
 
-  if (count === 0) return null;
-  const insight = insights[active]!;
-
   return (
-    <div
-      className="hero-card"
-      data-testid="hero-card"
-      data-kind={insight.kind}
-      data-urgency={insight.urgency}
-      data-index={active}
-      data-count={count}
-      onTouchStart={(e) => {
-        const touch = e.touches[0];
-        if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
-      }}
-      onTouchEnd={(e) => {
-        const start = touchStart.current;
-        touchStart.current = null;
-        const touch = e.changedTouches[0];
-        if (!start || !touch) return;
-        const dx = touch.clientX - start.x;
-        const dy = touch.clientY - start.y;
-        // Horizontal, and clearly so: a diagonal drag is the page scrolling,
-        // and stealing it would make the list feel stuck.
-        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-        go(active + (dx < 0 ? 1 : -1));
-      }}
-    >
-      <div className="hero-body">
-        <div className="hero-headline" data-testid="hero-headline">
-          {insight.headline}
+    <>
+      {tappable ? (
+        <button
+          type="button"
+          className="hero-card"
+          data-testid="hero-card"
+          data-kind={insight.kind}
+          data-urgency={insight.urgency}
+          data-count={count}
+          aria-label={
+            opensSheet
+              ? `${insight.headline}. ${count} live insights — open the list.`
+              : `${insight.headline}. Open the player.`
+          }
+          onClick={() => (opensSheet ? setSheetOpen(true) : onOpenPlayer(insight.playerId!))}
+        >
+          {card}
+        </button>
+      ) : (
+        <div
+          className="hero-card"
+          data-testid="hero-card"
+          data-kind={insight.kind}
+          data-urgency={insight.urgency}
+          data-count={count}
+        >
+          {card}
         </div>
-        {insight.detail ? (
-          <div className="hero-detail" data-testid="hero-detail">
-            {insight.detail}
-          </div>
-        ) : null}
-        {insight.playerId && openable(insight.playerId) ? (
-          <button
-            type="button"
-            className="hero-action"
-            data-testid="hero-action"
-            onClick={() => onOpenPlayer(insight.playerId!)}
-          >
-            View details ›
-          </button>
-        ) : null}
-      </div>
+      )}
 
-      {count > 1 ? (
-        <div className="hero-pager" data-testid="hero-pager">
-          <button
-            type="button"
-            className="hero-step"
-            aria-label="Previous insight"
-            data-testid="hero-prev"
-            onClick={() => go(active - 1)}
-          >
-            ‹
-          </button>
-          <span className="hero-dots" role="tablist" aria-label="Live insights">
-            {insights.map((candidate, i) => (
-              <button
-                key={candidate.key}
-                type="button"
-                role="tab"
-                className={i === active ? 'hero-dot hero-dot-on' : 'hero-dot'}
-                aria-selected={i === active}
-                aria-label={`Insight ${i + 1} of ${count}: ${candidate.headline}`}
-                data-testid="hero-dot"
-                onClick={() => go(i)}
-              />
-            ))}
-          </span>
-          <button
-            type="button"
-            className="hero-step"
-            aria-label="Next insight"
-            data-testid="hero-next"
-            onClick={() => go(active + 1)}
-          >
-            ›
-          </button>
-        </div>
+      {/*
+        Every insight, once the reader asks for them.
+
+        A sheet rather than a carousel: they arrive as a list, which is what
+        they are, and each one leads to its own player. Nothing auto-advances
+        and nothing is behind a swipe only.
+      */}
+      {sheetOpen ? (
+        <Sheet title="Live insights" onClose={() => setSheetOpen(false)} testId="insight-sheet">
+          <div className="dense-group" role="list" aria-label="Live insights">
+            {insights.map((candidate) => {
+              const canOpen = candidate.playerId != null && openable(candidate.playerId);
+              const body = (
+                /*
+                  Wrapped, because the row is a flex container and two bare
+                  spans inside one become two columns rather than two lines.
+                */
+                <span className="insight-row-body">
+                  <span className="insight-row-headline">{candidate.headline}</span>
+                  {candidate.detail ? <span className="insight-row-detail">{candidate.detail}</span> : null}
+                </span>
+              );
+              return (
+                <div role="listitem" key={candidate.key}>
+                  {canOpen ? (
+                    <button
+                      type="button"
+                      className="insight-row"
+                      data-testid="insight-row"
+                      data-kind={candidate.kind}
+                      onClick={() => {
+                        setSheetOpen(false);
+                        onOpenPlayer(candidate.playerId!);
+                      }}
+                    >
+                      {body}
+                      <span className="dense-chevron" aria-hidden="true">
+                        <ChevronIcon />
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="insight-row insight-row-static" data-testid="insight-row" data-kind={candidate.kind}>
+                      {body}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Sheet>
       ) : null}
-    </div>
+    </>
   );
 }
 

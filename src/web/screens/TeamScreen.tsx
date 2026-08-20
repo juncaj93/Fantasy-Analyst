@@ -388,6 +388,19 @@ export function TeamScreen({
                   <div className="section-title" data-testid="starters-title">
                     Recommended starters
                   </div>
+                  {/*
+                    One inset group, not eight floating cards.
+
+                    The lineup is a set of slots read top to bottom, which is
+                    exactly what an inset grouped list is for: one surface, the
+                    slots divided by hairlines, and the rounding at the two ends
+                    of the set rather than around each row. The recommended
+                    starters keep their position tint inside it — see
+                    `.starter-row.card-pos` — because eight slots is the one
+                    place in the app where the tint is showing the shape of a
+                    week rather than decorating a list.
+                  */}
+                  <div className="slot-group" data-testid="starters-group">
                   {lineup!.slots.map((slot, i) => (
                     <StarterCard
                       key={`${slot.slot}-${i}`}
@@ -405,6 +418,7 @@ export function TeamScreen({
                       }
                     />
                   ))}
+                  </div>
                 </>
               ) : null}
 

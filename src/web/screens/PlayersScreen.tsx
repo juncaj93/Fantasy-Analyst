@@ -25,7 +25,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
-import { Badge, Empty, SignedValue } from '../components/common.tsx';
+import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, type PlayerSummary } from '../components/playerPage.tsx';
@@ -471,7 +471,6 @@ function PlayerRow({
 }) {
   const lifetime = player.signal?.raw.net ?? 0;
   const items = player.signal?.raw.items ?? 0;
-  const pending = player.signal?.pendingCount ?? 0;
 
   return (
     <div role="listitem">
@@ -495,14 +494,19 @@ function PlayerRow({
         onOpen={onOpen}
         testId="player-search-row"
         /*
-          Three columns and not four.
+          Four columns, and the movement gets one of its own.
 
-          `Sleeper` and `Moved` were two of them, and they are one fact: where
-          the market has him, and how far this app's own research has pushed him
-          off it. Split apart, the pair spent half the line on two labels and
-          left neither number room to print — a draft rank of `15.2` came out as
-          `1…` on a 360px phone, which is a column that has stopped being data.
-          Together they read as the sentence they always were.
+          It was merged into the ADP cell to stop a value truncating, and that
+          fixed the width at the cost of the reading: `ADP 2.1▲1.6` is two
+          numbers with nothing between them, which is exactly the collision the
+          brief calls out by name. Label, value and movement are three different
+          things and they now sit in three different places.
+
+          What made room for the fourth column was taking the pending-review
+          chip off the row entirely. It is not needed to scan a list of players
+          — the Review tab already carries the count as a badge, and the
+          player's own page still says his tally is incomplete — so it moved one
+          tap deeper and every row is exactly two lines again.
         */
         metrics={[
           {
@@ -517,53 +521,25 @@ function PlayerRow({
           { label: '21d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
           {
             label: 'ADP',
-            wide: true,
             testId: 'players-adp',
-            value: (
-              <>
-                {player.draftRank != null ? (
-                  player.draftRank
-                ) : (
-                  /*
-                    A dash, not the word.
-
-                    `unranked` is nine characters in a cell that also has to
-                    hold a movement mark and, on the rows that have one, a
-                    review chip — and nine characters is what pushed the whole
-                    cell past its column on a 360px phone. The sentence is in
-                    the title, where a reader who wonders can reach it, and the
-                    label beside it already says what the dash is standing in
-                    for.
-                  */
-                  <span className="faint" title="Sleeper does not rank him">
-                    —
-                  </span>
-                )}
-                {player.movement ? (
-                  <span className={player.movement > 0 ? 'tally tally-pos' : 'tally tally-neg'}>
-                    {player.movement > 0 ? `▲${player.movement}` : `▼${Math.abs(player.movement)}`}
-                  </span>
-                ) : null}
-                {/*
-                  Evidence nobody has ruled on yet, and which is therefore in
-                  none of the numbers on this row.
-
-                  A chip in the column that already has the room rather than a
-                  sentence on a line of its own: it was a whole third line
-                  reading "1 news item waiting for your review — not counted
-                  yet", on every row that had one, which is a paragraph down a
-                  list whose entire purpose is being scannable. The sentence
-                  still exists, in the chip's own accessible name and on the
-                  player's page.
-                */}
-                {pending > 0 ? (
-                  <Badge tone="warn">
-                    <span title={`${pending} news item(s) waiting for your review — not counted in these tallies yet`}>
-                      {pending} to review
-                    </span>
-                  </Badge>
-                ) : null}
-              </>
+            value:
+              player.draftRank != null ? (
+                player.draftRank
+              ) : (
+                <span className="faint" title="Sleeper does not rank him">
+                  —
+                </span>
+              ),
+          },
+          {
+            label: '',
+            testId: 'players-movement',
+            value: player.movement ? (
+              <span className={player.movement > 0 ? 'tally tally-pos' : 'tally tally-neg'}>
+                {player.movement > 0 ? `▲ ${player.movement}` : `▼ ${Math.abs(player.movement)}`}
+              </span>
+            ) : (
+              <span className="faint">—</span>
             ),
           },
         ]}
