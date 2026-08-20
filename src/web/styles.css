@@ -226,6 +226,16 @@
   --team-logo: 22px;
 
   /*
+   * The width both of a matchup row's score columns take, named once.
+   *
+   * Wide enough for `100.0` over `100.0` at the sizes those two numbers are
+   * set in, which is more than a lineup slot ever scores — and that is the
+   * point. A column sized to the numbers the seed happens to contain is a
+   * column that moves the first time somebody has a big week.
+   */
+  --matchup-points-w: 42px;
+
+  /*
    * The width reserved for whatever sits between a player's name and his club.
    *
    * A signed tally is one, two or three characters wide and an availability tag
@@ -5320,11 +5330,23 @@ table.compact tr:last-child td {
  * because one name was longer would cost more than the four pixels saved.
  */
 
+/*
+ * The head-to-head, compressed.
+ *
+ * It carried sixteen points of padding, a 1.62rem score and a spread of gaps
+ * between the score, the projection and the win bar — a hero panel on the
+ * screen where the starting lineup is the thing a reader came to scan, and the
+ * lineup started well below the fold because of it. Every number it showed
+ * still shows; what went is the air between them.
+ *
+ * This is the one card on the page that earns being a card, so it keeps the
+ * larger radius and its surface. It just stops being half a screen tall.
+ */
 .matchup-score {
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-2);
 }
 
@@ -5332,7 +5354,7 @@ table.compact tr:last-child td {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--sp-2);
+  gap: var(--sp-1) var(--sp-2);
 }
 
 .matchup-team {
@@ -5365,13 +5387,17 @@ table.compact tr:last-child td {
 /* Sleeper's score: the largest thing on the screen, because it is the only
    number here that is a fact rather than a forecast. */
 .matchup-team-score {
-  font-size: 1.62rem;
+  /*
+   * A step down, and still comfortably the largest type on the screen — which
+   * is the only thing the size had to achieve.
+   */
+  font-size: 1.44rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  line-height: 1.15;
-  margin-top: 1px;
+  line-height: 1.1;
+  margin-top: 0;
 }
 
 /* This app's own projection, in the quieter register everything derived uses. */
@@ -5410,7 +5436,7 @@ table.compact tr:last-child td {
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
-  margin-top: var(--sp-1);
+  margin-top: var(--sp-2);
   padding: 0;
   background: none;
   border: 0;
@@ -5500,7 +5526,7 @@ div.matchup-result {
 .matchup-degraded {
   font-size: 0.72rem;
   color: var(--text-faint);
-  margin-top: var(--sp-1);
+  margin-top: 5px;
 }
 
 .matchup-degraded {
@@ -5532,49 +5558,61 @@ div.matchup-result {
  * breathe. It is one card at a time on purpose: three stacked would be a
  * dashboard, which is exactly what the approved concept is not.
  */
+/*
+ * A compact alert surface, and the whole of it is the target.
+ *
+ * It was a filled accent panel about 120px tall with a link, two arrows and a
+ * row of dots inside it, sitting directly under the score card and rivalling
+ * the one thing on this screen that genuinely deserves to be a card. An insight
+ * is a sentence with somewhere to go: it keeps a surface so it still reads as
+ * one object, gives up the saturated fill for the page's own card tone, and
+ * takes a hairline of the accent on its leading edge to say which kind it is.
+ *
+ * Laid out as a row rather than a stack, because the chevron sits beside the
+ * text rather than under it — the same shape as every other thing in the app
+ * that leads somewhere.
+ */
 .hero-card {
-  /*
-   * Materially smaller, and no longer a block of colour.
-   *
-   * It was a filled accent panel roughly 120px tall sitting directly under the
-   * score card, and it was rivalling the one thing on the screen that genuinely
-   * deserves to be a card — the head-to-head itself. An insight is a sentence
-   * with somewhere to go, not a second hero: it keeps its own surface so it
-   * still reads as one object, gives up the saturated fill for the page's own
-   * card tone, and takes a hairline of the accent on its leading edge to say
-   * which kind of insight it is.
-   */
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: left;
   background: var(--surface);
+  border: 0;
   border-left: 2px solid var(--accent);
   border-radius: var(--radius);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  color: inherit;
+  font: inherit;
+  box-shadow: var(--shadow-1);
+  transition: background-color var(--dur-fast) ease;
 }
 
-/* Something the reader can still act on gets the warmer surface. Colour is an
-   accelerator here too — the sentence itself says what it is. */
-/* Something the reader can still act on takes the warmer edge, and a settled
-   game the positive one. The sentence still says what it is; the edge only
-   makes which kind of insight it is findable at a glance. */
-.hero-card[data-urgency='act_now'] {
-  border-left-color: var(--warn);
+button.hero-card {
+  cursor: pointer;
 }
 
-.hero-card[data-kind='clinch'],
-.hero-card[data-kind='near_clinch'] {
-  border-left-color: var(--pos);
+button.hero-card:active {
+  background: var(--pressed);
 }
 
 .hero-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
 }
 
+/*
+ * Two lines, and they must be two.
+ *
+ * These are spans inside a button — the card is one target, so it cannot
+ * contain block-level elements — and an inline span runs straight on from the
+ * one before it. `display: block` is what keeps the headline and the sentence
+ * under it from reading as a single run-on sentence.
+ */
 .hero-headline {
+  display: block;
   font-size: 0.92rem;
   font-weight: 640;
   line-height: 1.3;
@@ -5583,105 +5621,85 @@ div.matchup-result {
 }
 
 .hero-detail {
+  display: block;
+  margin-top: 1px;
   font-size: 0.78rem;
   color: var(--text-dim);
   line-height: 1.32;
 }
 
-.hero-action {
-  align-self: flex-start;
-  /*
-   * A smaller box than 44px, and deliberately.
-   *
-   * The whole card is about 120px of glass and a full-height target inside it
-   * would spend a third of that on white space above and below eight words.
-   * The padding here still gives a ~36px tall, ~110px wide target — comfortably
-   * inside what a thumb finds — and the pager buttons beside it are the
-   * controls that actually get repeated taps.
-   */
-  min-height: 32px;
-  padding: 4px 0;
-  background: none;
-  border: 0;
-  color: var(--accent-text);
-  font-size: 0.82rem;
-  font-weight: 640;
-  cursor: pointer;
-}
-
-.hero-pager {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+.hero-chevron {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-}
-
-/*
- * The action and the pager share one row at the foot of the card.
- *
- * Two arrows and two dots had a whole line to themselves, and on a card being
- * asked to shrink that is the cheapest line there is to reclaim — it carries no
- * information the card has not already shown. `space-between` puts the action
- * where a reader's thumb looks for it and the pager at the other end, and the
- * row is as tall as the taller of the two rather than as tall as both.
- */
-.hero-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-top: 2px;
-}
-
-/*
- * Sized by what is in it, not by a number.
- *
- * A fixed width here squeezed the dots between the two arrows until the centre
- * column was zero pixels wide and the page indicator simply was not drawn — the
- * one part of a pager that says how many there are.
- */
-.hero-foot > .hero-pager {
-  flex: 0 0 auto;
-  grid-template-columns: auto auto auto;
-  gap: var(--sp-1);
-}
-
-/* A card with a pager but nothing to open still puts the pager on the right. */
-.hero-foot:not(:has(> .hero-action)) {
-  justify-content: flex-end;
-}
-
-/* The paging controls exist so a gesture is never the only way through. They
-   are quiet, and they are still full tap targets. */
-.hero-step {
-  min-width: var(--tap);
-  min-height: 30px;
-  background: none;
-  border: 0;
   color: var(--text-faint);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
+  opacity: 0.75;
 }
 
-.hero-dots {
+.hero-chevron svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* One insight in the sheet the card opens. */
+.insight-row {
+  width: 100%;
   display: flex;
-  justify-content: center;
-  gap: 6px;
-}
-
-.hero-dot {
-  width: 7px;
-  height: 7px;
-  padding: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: left;
+  background: none;
   border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
+  color: inherit;
+  font: inherit;
   cursor: pointer;
+  min-height: var(--tap);
+  padding: var(--sp-2);
 }
 
-.hero-dot-on {
-  background: var(--accent);
+.insight-row-static {
+  cursor: default;
 }
+
+.insight-row:active {
+  background: var(--pressed);
+}
+
+.insight-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.insight-row-headline {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.insight-row-detail {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.32;
+}
+
+.insight-row > .dense-chevron {
+  margin-left: auto;
+}
+
+/* Something the reader can still act on gets the warmer surface. Colour is an
+   accelerator here too — the sentence itself says what it is. */
+/*
+ * The carousel's chrome is gone, and so are its rules.
+ *
+ * `.hero-action`, `.hero-pager`, `.hero-foot`, `.hero-step`, `.hero-dots` and
+ * `.hero-dot` all styled controls that no longer exist: the `View details ›`
+ * link the whole card replaced, and the two arrows and row of dots that the
+ * insight sheet replaced. Deleted rather than left behind, because dead
+ * selectors are how a stylesheet stops being readable.
+ */
+
 
 /* ---------------------------------------------------------- starter rows */
 .matchup-rows {
@@ -5705,8 +5723,24 @@ div.matchup-result {
   padding: 5px var(--sp-2);
 }
 
+/*
+ * A fixed grid, so the numbers line up down the page.
+ *
+ * Each half was a flex row — logo, name, score — which meant the score started
+ * wherever the name happened to end, and the name is a player's name. Eight
+ * rows produced eight different x positions for the column a reader is trying
+ * to compare left against right, and the whole list read as sloppy without it
+ * being obvious why.
+ *
+ * Three columns of known width instead. The score column is the same width on
+ * every row of both sides, so the two score blocks meet the position pill at
+ * the same distance every time and the eye can run straight down either one.
+ * The name is the only flexible column, because the name is the only thing here
+ * that can afford to lose a letter.
+ */
 .matchup-half {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) var(--matchup-points-w);
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -5722,9 +5756,17 @@ div.matchup-result {
   cursor: pointer;
 }
 
+/* The far side reads inward: score, name, club — so both score columns sit
+   against the pill in the middle and are compared without crossing the row. */
 .matchup-half[data-side='theirs'] {
-  justify-content: flex-end;
+  grid-template-columns: var(--matchup-points-w) minmax(0, 1fr) auto;
   text-align: right;
+}
+
+/* An empty slot still has to hold the row's shape, or the rows either side of
+   it step sideways. */
+.matchup-half[data-empty='true'] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .matchup-half:active {
@@ -5754,8 +5796,12 @@ div.matchup-result {
   flex-direction: column;
   align-items: flex-end;
   line-height: 1.1;
+  /*
+   * Tabular, and it is doing real work here rather than being a nicety: a
+   * proportional `1` is half the width of a `2`, so `11.1` and `22.2` are
+   * different widths and a column of them wanders even when the box does not.
+   */
   font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
 }
 
 .matchup-half[data-side='theirs'] .matchup-points {
