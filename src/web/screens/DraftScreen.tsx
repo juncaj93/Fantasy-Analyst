@@ -67,7 +67,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
  * both live in core so they can be checked without a browser.
  */
-import { annotateTiers, tierCliffWarning } from '../../core/draft/tierBoard.ts';
+import { annotateTiers, tierCliffWarning, type TierBreak } from '../../core/draft/tierBoard.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
 import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
@@ -985,7 +985,14 @@ export function DraftScreen({
           {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
-              {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
+              {/*
+                The pick count only appears when a market gap is what opened the
+                band. A Score break has no distance behind it, and printing one
+                would be inventing a number.
+              */}
+              {item.divider ? (
+                <TierDivider gap={item.breakReason === 'market' ? item.rec.tierCliff.tierGapBefore : null} />
+              ) : null}
               <RecommendationRow
                 rank={item.rank}
                 rec={item.rec}
@@ -1356,6 +1363,7 @@ interface BoardItem {
   rec: DraftRecommendation;
   rank: number;
   divider: boolean;
+  breakReason: TierBreak | null;
 }
 
 /**
@@ -1384,12 +1392,12 @@ interface BoardItem {
  * boundary to be about.
  */
 function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
-  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false }));
-  return annotateTiers(recs, (rec) => rec.tierCliff.tierIndex).map(({ row, rank, divider }) => ({
-    rec: row,
-    rank,
-    divider,
-  }));
+  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false, breakReason: null }));
+  return annotateTiers(
+    recs,
+    (rec) => rec.tierCliff.tierIndex,
+    (rec) => rec.score,
+  ).map(({ row, rank, divider, breakReason }) => ({ rec: row, rank, divider, breakReason }));
 }
 
 /**

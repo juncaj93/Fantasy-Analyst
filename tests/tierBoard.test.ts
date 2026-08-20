@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  SCORE_BANDS,
   activeTierCliffWarnings,
   annotateTiers,
   tierCliffWarning,
@@ -584,5 +585,152 @@ describe('the reported inversions', () => {
     // …and does not open again at Chig Okonkwo, nor reopen tier 0 at Sadiq.
     expect(annotated[2]!.divider).toBe(false);
     expect(annotated[3]!.divider).toBe(false);
+  });
+});
+
+describe('a band the market never closes', () => {
+  /*
+   * The reported late-round boards, at pick 168.
+   *
+   * The market ladder emitted no boundary at all for either — late ADP is
+   * smooth, so `tierIndex` is 0 the whole way down — and the reader was shown
+   * one receiver group running from a Score of 91 to 63, and one back group
+   * from 80 to 52. Ordering was right; the grouping was useless.
+   *
+   * `tierOf` returns a constant here on purpose. That is what the market
+   * actually said, and it is what makes these fixtures a test of the Score
+   * triggers rather than of the ladder.
+   */
+  const smoothMarket = () => 0;
+  const band = (scores: number[]) => {
+    const rows = scores.map((score, id) => ({ score, id }));
+    const annotated = annotateTiers(rows, smoothMarket, (r) => r.score);
+    const bands: number[][] = [];
+    for (const a of annotated) {
+      if (a.divider || bands.length === 0) bands.push([]);
+      bands[bands.length - 1]!.push(a.row.score);
+    }
+    return { annotated, bands };
+  };
+
+  const WR = [91, 84, 78, 73, 72, 72, 71, 68, 68, 63, 63];
+  const RB = [80, 79, 79, 74, 67, 60, 58, 56, 54, 52, 52];
+
+  it('breaks the receiver board into more than one group', () => {
+    const { bands } = band(WR);
+    expect(bands.length).toBeGreaterThan(1);
+  });
+
+  it('never leaves the 91 in the same group as a 63', () => {
+    const { bands } = band(WR);
+    const withTop = bands.find((b) => b.includes(91))!;
+    expect(withTop).not.toContain(63);
+  });
+
+  it('breaks the back board into more than one group', () => {
+    const { bands } = band(RB);
+    expect(bands.length).toBeGreaterThan(1);
+  });
+
+  it('does not run the 80/79 group uninterrupted down to the 52s', () => {
+    const { bands } = band(RB);
+    const withTop = bands.find((b) => b.includes(80))!;
+    expect(withTop).not.toContain(52);
+  });
+
+  it('breaks the back board at the drops the report itself named', () => {
+    /*
+     * 79 -> 74, 74 -> 67, 67 -> 60. Not hardcoded as a target — this is what
+     * the calibrated rule produces, and it happening to match the three drops a
+     * human picked out by eye is the strongest evidence available that the
+     * thresholds are in the right place.
+     */
+    const { bands } = band(RB);
+    expect(bands.map((b) => b[0])).toEqual([80, 74, 67, 60]);
+  });
+
+  it('keeps every band inside the span a reader can hold', () => {
+    for (const scores of [WR, RB]) {
+      for (const b of band(scores).bands) {
+        expect(b[0]! - b[b.length - 1]!, `a band ran ${b[0]} to ${b[b.length - 1]}`).toBeLessThanOrEqual(
+          SCORE_BANDS.span,
+        );
+      }
+    }
+  });
+
+  it('reports a Score break as a Score break, so the label cannot invent picks', () => {
+    const { annotated } = band(RB);
+    const reasons = annotated.filter((a) => a.divider).map((a) => a.breakReason);
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(new Set(reasons)).toEqual(new Set(['score']));
+  });
+});
+
+describe('the boundary rule, as properties', () => {
+  const rowsOf = (scores: (number | null)[], tiers?: (number | null)[]) =>
+    scores.map((score, i) => ({ score, tier: tiers?.[i] ?? 0, id: i }));
+  const run = (rows: ReturnType<typeof rowsOf>) =>
+    annotateTiers(rows, (r) => r.tier, (r) => r.score);
+
+  it('never changes the order or the rank', () => {
+    const rows = rowsOf([90, 70, 69, 40, 39, 12]);
+    const out = run(rows);
+    expect(out.map((a) => a.row)).toEqual(rows);
+    expect(out.map((a) => a.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('opens on a large adjacent drop even when the market is flat', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap]));
+    expect(out[1]!.divider).toBe(true);
+    expect(out[1]!.breakReason).toBe('score');
+  });
+
+  it('does not open on a drop below the threshold', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap + 1]));
+    expect(out[1]!.divider).toBe(false);
+  });
+
+  it('cannot be defeated by a long gentle slope', () => {
+    // Every step is one point, so no adjacent gap ever fires. The span trigger
+    // is the only thing standing between this and one forty-point band.
+    const gentle = Array.from({ length: 40 }, (_, i) => 90 - i);
+    const out = run(rowsOf(gentle));
+    expect(out.some((a) => a.divider)).toBe(true);
+    let top = gentle[0]!;
+    for (const a of out) {
+      if (a.divider) top = a.row.score!;
+      expect(top - a.row.score!).toBeLessThanOrEqual(SCORE_BANDS.span);
+    }
+  });
+
+  it('does not spam separators on a flat board', () => {
+    // Twelve players inside one point of each other are one decision.
+    const out = run(rowsOf([70, 70, 70, 69, 69, 69, 69, 69, 69, 69, 69, 69]));
+    expect(out.filter((a) => a.divider)).toHaveLength(0);
+  });
+
+  it('still lets the market open a band, and says so', () => {
+    const out = run(rowsOf([70, 69, 68], [0, 1, 1]));
+    expect(out[1]!.divider).toBe(true);
+    expect(out[1]!.breakReason).toBe('market');
+  });
+
+  it('prefers the market reason when both would fire, because it has a number', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap - 5], [0, 1]));
+    expect(out[1]!.breakReason).toBe('market');
+  });
+
+  it('does not treat an unpriced player as a cliff', () => {
+    // A null Score is unknown, not a drop to zero.
+    const out = run(rowsOf([70, null, 69]));
+    expect(out[1]!.divider).toBe(false);
+    expect(out[2]!.divider).toBe(false);
+  });
+
+  it('works with no Score accessor at all, as the market-only board does', () => {
+    const rows = rowsOf([90, 40], [0, 0]);
+    const out = annotateTiers(rows, (r) => r.tier);
+    expect(out.every((a) => !a.divider)).toBe(true);
   });
 });
