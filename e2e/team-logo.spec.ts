@@ -132,7 +132,21 @@ test.describe('when the marks cannot be loaded', () => {
     const cardWithoutTheCluster = () =>
       page.getByTestId('recommendation-row').first().evaluate((row) => {
         const copy = row.cloneNode(true) as HTMLElement;
-        copy.querySelectorAll('.pos-team').forEach((el) => el.remove());
+        /*
+         * The club's mark, however it is currently drawn.
+         *
+         * This removed `.pos-team`, the wrapper that used to hold the position
+         * pill and the logo together on the trailing edge. The row rule split
+         * those two apart — the pill sits left of the name now and the mark
+         * stayed on the right — so there is no wrapper any more, and stripping
+         * it removed nothing: the abbreviation the fallback draws was left in
+         * the text being compared, which is exactly the difference this test
+         * exists to ignore.
+         *
+         * Both forms are named, so the comparison is of everything *except*
+         * the mark whether it loaded or not.
+         */
+        copy.querySelectorAll('.pos-team, .team-logo, [data-testid="team-code"]').forEach((el) => el.remove());
         return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
       });
 
