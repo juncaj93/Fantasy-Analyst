@@ -313,6 +313,47 @@ describe('block and sentence extraction', () => {
     expect(normalizePunctuation('Bijan​Robinson')).toBe('BijanRobinson');
   });
 
+  /**
+   * Caught in production, after the rest of the decoding was already fixed.
+   *
+   * Punctuation was normalized on the raw input, but in HTML it may still be
+   * spelled as a numeric character reference that `htmlToText` does not turn
+   * into a character until later. So `&#8217;` sailed past normalization and
+   * the live repaired parse still reported `Brandon Thorn’s` and
+   * `Romeo Doubs – 0.216` — and, worse than cosmetically, `didn&#8217;t` would
+   * still have slipped past `neg.did_not_practice`.
+   */
+  it('normalizes punctuation that arrives as a numeric HTML entity', () => {
+    const blocks = extractBlocks(
+      '<p>Brandon Thorn&#8217;s tape</p>' +
+        '<p>Romeo Doubs &#8211; 0.216</p>' +
+        '<li>&#8226; Averaged 18.8 PPG</li>' +
+        '<p>Puka Nacua didn&#8217;t practice on Wednesday.</p>',
+      { isHtml: true },
+    );
+    const text = blocks.map((b) => b.text);
+    expect(text).toContain("Brandon Thorn's tape");
+    expect(text).toContain('Romeo Doubs - 0.216');
+    expect(text).toContain('Averaged 18.8 PPG');
+    expect(text).toContain("Puka Nacua didn't practice on Wednesday.");
+    for (const t of text) expect(t).not.toMatch(/[’‘“”–—•]/);
+  });
+
+  it('normalizes an entity-spelled apostrophe well enough for the rule to fire', () => {
+    const result = processNewsletter(
+      {
+        messageId: 'entity-apostrophe',
+        from: 'ffweekly@substack.com',
+        subject: 'x',
+        receivedAt: '2026-08-13T12:00:00.000Z',
+        html: '<p>Puka Nacua didn&#8217;t practice on Wednesday.</p>',
+        text: null,
+      },
+      TEST_INDEX,
+    );
+    expect(result.evidence[0]?.ruleId).toContain('neg.did_not_practice');
+  });
+
   it('still guards abbreviations when splitting sentences', () => {
     expect(splitSentences('He is the No. 1 back in camp.')).toHaveLength(1);
     expect(splitSentences('Amon-Ra St. Brown is healthy.')).toHaveLength(1);

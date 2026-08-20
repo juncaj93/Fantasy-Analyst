@@ -218,15 +218,23 @@ function textPieces(text: string): string[] {
  * Convert raw newsletter content (HTML or plain text) into ordered, deduped,
  * boilerplate-free text blocks.
  *
- * Punctuation is normalized first, so that bullet detection sees one marker
- * rather than six, and so the rule dictionary — written in ASCII — meets the
+ * Punctuation is normalized so that bullet detection sees one marker rather
+ * than six, and so the rule dictionary — written in ASCII — meets the
  * apostrophe it expects in `didn't` rather than the typographic one the
  * newsletter actually shipped.
+ *
+ * WHEN it is normalized matters as much as that it is. In HTML the punctuation
+ * may still be spelled as a numeric character reference — `&#8217;` for a curly
+ * apostrophe, `&#8226;` for a bullet — and those do not become characters until
+ * `htmlToText` decodes them. Normalizing the raw input would therefore walk
+ * straight past them, which is what let `Brandon Thorn’s` and `Romeo Doubs –
+ * 0.216` through in production after the rest of the decoding was fixed. So the
+ * HTML path normalizes AFTER entity decoding; plain text, which has no entity
+ * layer, normalizes before it is split so bullets can start a paragraph.
  */
 export function extractBlocks(raw: string, opts: { isHtml?: boolean } = {}): TextBlock[] {
   const isHtml = opts.isHtml ?? looksLikeHtml(raw);
-  const source = normalizePunctuation(raw);
-  const pieces = (isHtml ? htmlPieces(source) : textPieces(source))
+  const pieces = (isHtml ? htmlPieces(raw).map(normalizePunctuation) : textPieces(normalizePunctuation(raw)))
     .map((p) => stripLinkNoise(p.replace(/\s+/g, ' ').trim()))
     .filter(Boolean);
 
