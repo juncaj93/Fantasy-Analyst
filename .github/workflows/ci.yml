@@ -52,6 +52,37 @@ jobs:
   e2e:
     name: iPhone WebKit smoke tests
     runs-on: ubuntu-latest
+
+    # The browser and everything it links against, shipped together.
+    #
+    # This is the canonical way this repository runs WebKit, and the history
+    # behind it is worth keeping because both of the obvious alternatives were
+    # tried here and both failed:
+    #
+    #   `playwright install --with-deps webkit` — apt hangs. The Azure mirror
+    #   returns `Ign:` for every index, apt falls back to archive.ubuntu.com,
+    #   and the fallback stalls mid-fetch until the job timeout kills it. Seen
+    #   repeatedly, including a run where one width installed and passed while
+    #   its neighbour in the same batch sat in apt for thirty-four minutes.
+    #
+    #   `playwright install webkit` (no deps) — no apt, and the browser will
+    #   not start:
+    #
+    #     MiniBrowser: error while loading shared libraries: libevent-2.1.so.7:
+    #       cannot open shared object file
+    #
+    #   `ubuntu-latest` does not carry everything WebKit links against, so the
+    #   apt pass was never belt-and-braces. It was the belt.
+    #
+    # The official image has the libraries baked in and the browsers already at
+    # /ms-playwright, so there is no apt call and no browser download in this
+    # job at all — the two things that have ever hung here are simply not
+    # present. The tag is pinned to the `@playwright/test` version in
+    # package.json and has to be bumped with it: a mismatch fails immediately
+    # and loudly ("Executable doesn't exist"), which is the failure mode we
+    # want when a version drifts.
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
+
     # A hung browser is a real failure mode, and without this it is invisible:
     # the job sits at "in progress" for six hours and nobody learns anything.
     #
@@ -63,25 +94,25 @@ jobs:
     #
     # Raised from 20 to 35 when that happened a second time, and the arithmetic
     # is why rather than the symptom. This is a *job* timeout, so it pays for
-    # `npm ci` and `playwright install --with-deps webkit` before a single test
-    # runs -- about six minutes of it. The suite itself is now around fourteen
-    # minutes per width on a good runner, and a shared runner can be half again
-    # as slow. Twenty left roughly fourteen minutes for a twenty-minute job, so
-    # the fast widths finished and the slow ones were cut two thirds through:
-    # the number had quietly gone back to policing how big the suite is.
+    # pulling the image and `npm ci` before a single test runs. The suite itself
+    # is now around fourteen minutes per width on a good runner, and a shared
+    # runner can be half again as slow. Twenty left roughly fourteen minutes for
+    # a twenty-minute job, so the fast widths finished and the slow ones were cut
+    # two thirds through: the number had quietly gone back to policing how big
+    # the suite is.
     #
     # Thirty-five restores what it is for. A browser that is genuinely stuck
     # still fails here inside the hour instead of sitting until GitHub's own
-    # six-hour ceiling; a suite that merely grew does not. If this needs raising
-    # again, cache the browser download first -- that is six minutes of pure
-    # setup and the cheapest thing on this list to stop paying for.
+    # six-hour ceiling; a suite that merely grew does not. It is deliberately
+    # left where it was when the container went in, so that this run measures
+    # the image against the same ceiling the apt runs were measured against.
     timeout-minutes: 35
 
     # The job number above pays for setup as well as tests, so on its own it
     # still cannot say *which* of the two overran — and that distinction is the
     # whole point of having it. The test step therefore carries its own budget
-    # below: twenty minutes of actual testing is a stuck browser, whatever apt
-    # did beforehand.
+    # below: twenty minutes of actual testing is a stuck browser, however long
+    # the image took to pull beforehand.
     strategy:
       # Every width reports for itself: a failure at 360 is usually a layout
       # fact about 360, and cancelling the other two would hide whether it is.
@@ -100,56 +131,17 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # The browser itself, kept between runs.
+      # No install step. The image already carries WebKit and its libraries;
+      # PLAYWRIGHT_BROWSERS_PATH points at /ms-playwright and the browsers are
+      # there before the job starts.
       #
-      # Six minutes of pure setup per job, four jobs per push, every push — and
-      # the download is what the three hangs above were sitting in. Keyed on the
-      # Playwright version because the browser build is pinned to it: a bump has
-      # to miss the cache and fetch again, and reading the version from the
-      # installed package rather than writing it here means it cannot drift from
-      # what is actually being run.
-      - name: Resolve the Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      # The tag has to be bumped in step with `@playwright/test`, and
+      # `tests/workflows.playwrightImage.test.ts` fails in `npm test` if it is
+      # not — a second locally, rather than several minutes into four WebKit
+      # jobs that then cannot find a browser.
 
-      - name: Restore the WebKit download
-        id: browser-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-webkit-${{ steps.playwright.outputs.version }}
-
-      # The browser, and deliberately **not** `--with-deps`.
-      #
-      # `--with-deps` is two jobs in one: an `apt-get` install of the system
-      # libraries WebKit links against, and the browser download. The apt half
-      # is what has been hanging, and the logs say so rather than implying it:
-      #
-      #   Ign:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
-      #   ...
-      #   Get:5 https://archive.ubuntu.com/ubuntu noble-security InRelease
-      #   << thirty-four minutes of silence >>
-      #   ##[error]The operation was canceled.
-      #   Terminate orphan process: npm exec playwright install --with-deps webkit
-      #
-      # The Azure mirror refuses every index, apt falls back to
-      # archive.ubuntu.com, and the fallback stalls mid-fetch until the job
-      # timeout kills it. The browser download never even begins — it comes
-      # after apt — so this was never about the download, and never about our
-      # own jobs competing: a width in the same batch installed and passed while
-      # its neighbour sat in apt.
-      #
-      # `ubuntu-latest` already ships the libraries WebKit needs, so the apt
-      # pass was belt-and-braces on top of an image that has the belt. Dropping
-      # it removes the only step that has ever hung here. If the image ever
-      # stops carrying one of those libraries the failure is immediate, loud and
-      # in the test step — a browser that will not launch — rather than a
-      # thirty-five minute silence, which is the better way to find out.
-      - name: Install WebKit
-        if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: npx playwright install webkit
       # This is the one that can hang. Twenty minutes of *testing* is a stuck
-      # browser however long apt took beforehand.
+      # browser, and now there is nothing else in this job it could be.
       - run: npx playwright test --project=${{ matrix.project }}
         timeout-minutes: 20
       - uses: actions/upload-artifact@v4
