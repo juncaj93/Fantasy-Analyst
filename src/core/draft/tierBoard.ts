@@ -110,45 +110,6 @@ export function activeTierCliffWarnings(players: WarnablePlayer[]): Map<string, 
 }
 
 /**
- * The rows of a position-filtered board, in tier order.
- *
- * A divider is a claim about everything above and below it, and that claim is
- * only true if a tier is contiguous. The board is ordered by the *ranking*,
- * which is market value plus the news ledger plus My Guy, so it interleaves
- * tiers routinely — and one interleaving is enough to make the line a lie.
- *
- * The reported case, four quarterbacks: ADP 53.2 and 55.3 are one tier, 63.4
- * and 65.8 are the next, and the second-tier 65.8 outranks the first-tier 55.3.
- * Drawn in ranking order that reads 53.2, 65.8, 55.3, 63.4 — and the single
- * divider, correctly placed at the first row that reaches tier 1, lands after
- * 53.2. The screen then says the top group is one player and the next is three.
- * Both are false, and the `Tier cliff · 2 away` tags on the two genuine members
- * of tier 1 sat right beside it saying so.
- *
- * So tiers are drawn as bands, and the ranking orders the players inside each
- * band. Nothing about the ranking is discarded — within a tier it is the whole
- * order, and a tier is by definition the players who are close enough in market
- * value to be one decision, which is exactly where a preference belongs. Across
- * tiers the market decides, because that is what the divider is describing.
- *
- * Players with no tier at all — no published ADP — keep to the tail, where the
- * board already puts them.
- */
-export function groupByTier<T>(items: T[], tierOf: (item: T) => number | null): T[] {
-  const tiered: { item: T; at: number; tier: number }[] = [];
-  const untiered: T[] = [];
-  items.forEach((item, at) => {
-    const tier = tierOf(item);
-    if (tier == null) untiered.push(item);
-    else tiered.push({ item, at, tier });
-  });
-  // Ties broken by the incoming position, so the ranking survives inside a
-  // band and the same board never draws itself two ways.
-  tiered.sort((a, b) => a.tier - b.tier || a.at - b.at);
-  return [...tiered.map((e) => e.item), ...untiered];
-}
-
-/**
  * Which rows in a position-filtered board have a tier boundary above them.
  *
  * Takes the tier index of each row in the order they are drawn and returns one
@@ -172,5 +133,130 @@ export function tierDividerFlags(tierIndices: (number | null)[]): boolean[] {
     const opens = tier != null && tier > deepestSoFar;
     if (opens) deepestSoFar = tier;
     return opens && !first;
+  });
+}
+
+/**
+ * Where a band ends, when the market never says so.
+ *
+ * The market ladder answers "is there a hole in the draft here", and late in a
+ * draft the honest answer is usually no: ADP thins out, the blend runs smooth,
+ * and `buildPositionTierMap` emits no boundary at all. Measured on a live-shaped
+ * board at pick 168 that produced **one** receiver tier of forty-four players
+ * spanning 69 points of Score, and **one** back tier of thirty-four spanning 55.
+ * A group that wide is not a group, and the reader was being told that a 91 and
+ * a 63 were the same decision.
+ *
+ * So a band may also end on the Score itself, by either of two triggers:
+ *
+ *   - **`gap`** — one adjacent drop large enough to be a cliff on its own.
+ *     Measured against the real distribution of adjacent Score gaps, which runs
+ *     p50 1–2, p75 2–3, p90 3–4, p95 4–5 across every position and depth. Five
+ *     therefore sits just past the 95th percentile: rare enough that a single
+ *     step opening a band means something, which is what keeps this from
+ *     becoming a divider between every other row.
+ *
+ *   - **`span`** — how far a band may drift from its own best player, however
+ *     gentle the slope. This one is not optional: a gap rule bounds the step
+ *     between neighbours and cannot bound the total. Twenty players dropping two
+ *     points each never trip a threshold of five, and the band still spans
+ *     forty — which is precisely the reported failure. Twelve keeps a band
+ *     inside a range a reader can treat as interchangeable.
+ *
+ * Both are deterministic and both are checked against the reported boards in
+ * `tests/tierBoard.test.ts`. On the reported back sequence the rule breaks after
+ * 79, 74 and 67 — the three drops the report itself named.
+ */
+export const SCORE_BANDS = {
+  /** An adjacent Score drop of at least this much is a cliff in its own right. */
+  gap: 5,
+  /** However gentle the slope, a band may not drift further than this from its top. */
+  span: 12,
+} as const;
+
+/** What opened the band a row starts: the market's own ladder, or the Score. */
+export type TierBreak = 'market' | 'score';
+
+/** One drawn row, and whether a tier boundary is drawn above it. */
+export interface AnnotatedRow<T> {
+  row: T;
+  /** Rank as drawn, 1-based. Follows the sequence, never the tiers. */
+  rank: number;
+  divider: boolean;
+  /**
+   * Why that divider is there, or null when there is none.
+   *
+   * The label depends on it. A market break has a real distance behind it and
+   * says `Tier drop ~N picks`; a Score break does not, and says `Tier drop` and
+   * nothing else. Printing a pick count that no market gap supports would be
+   * inventing a number, which is the one thing a divider must not do.
+   */
+  breakReason: TierBreak | null;
+}
+
+/**
+ * Annotate a board with tier boundaries **without reordering it**.
+ *
+ * The one rule, and the reason this function exists rather than a pair of calls
+ * at the call site: the sequence handed in is the sequence handed back. Whatever
+ * sort the reader chose — Score, ADP, DOG — decides who appears where, and a
+ * tier is punctuation on that sequence.
+ *
+ * ## What this replaced
+ *
+ * The board used to be re-sorted into tier bands first, so that a divider's
+ * claim — everything above this line is one tier — came out literally true. It
+ * did, and the board was wrong. On the reported tight-end board a Score of 68
+ * was drawn above two Scores of 83 because the market clustered him higher; on
+ * the running-back board the best-scoring player was pushed below four worse
+ * ones. The Score tab exists to answer one question, and it was answering it
+ * with the ranking in one column and the opposite claim in the layout.
+ *
+ * A reader comparing two numbers on screen cannot be expected to know that the
+ * layout silently outranked one of them. So the divider now says something
+ * weaker and true — *the market's next tier starts here* — and the rows above it
+ * are the rows the reader's own sort put above it.
+ *
+ * Returning flags rather than an order is deliberate: this shape has no way to
+ * express "move this row", which is what makes the invariant structural instead
+ * of a rule somebody has to remember.
+ */
+export function annotateTiers<T>(
+  rows: readonly T[],
+  tierOf: (row: T) => number | null,
+  scoreOf?: (row: T) => number | null,
+): AnnotatedRow<T>[] {
+  const flags = tierDividerFlags(rows.map(tierOf));
+
+  /*
+   * The Score pass walks the same sequence, carrying the top of the band it is
+   * currently inside. Both triggers are evaluated against the *drawn* order,
+   * which is the only order that exists here — so a boundary can still only
+   * ever fall between two adjacent rows.
+   */
+  let bandTop: number | null = null;
+  return rows.map((row, i) => {
+    const score = scoreOf?.(row) ?? null;
+    const previous = i > 0 ? (scoreOf?.(rows[i - 1]!) ?? null) : null;
+
+    const market = flags[i] === true;
+    const scoreBreak =
+      !market &&
+      i > 0 &&
+      score != null &&
+      ((previous != null && previous - score >= SCORE_BANDS.gap) ||
+        (bandTop != null && bandTop - score > SCORE_BANDS.span));
+
+    const divider = market || scoreBreak;
+    // A row with no Score cannot start a band, and must not end one either: an
+    // unpriced player is unknown, and unknown is not a cliff.
+    if (divider || bandTop == null) bandTop = score ?? bandTop;
+
+    return {
+      row,
+      rank: i + 1,
+      divider,
+      breakReason: divider ? (market ? ('market' as const) : ('score' as const)) : null,
+    };
   });
 }

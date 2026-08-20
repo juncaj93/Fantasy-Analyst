@@ -19,8 +19,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  SCORE_BANDS,
   activeTierCliffWarnings,
-  groupByTier,
+  annotateTiers,
   tierCliffWarning,
   tierDividerFlags,
   type WarnablePlayer,
@@ -377,7 +378,20 @@ describe('the regressions this rule must not allow back', () => {
  * also saying. The list was ordered by the ranking, the ranking interleaves
  * tiers, and a divider drawn across an interleaved list cannot be true.
  */
-describe('drawing a position as bands', () => {
+describe('tiers annotate the board and never reorder it', () => {
+  /*
+   * The bug this replaced.
+   *
+   * The board used to be re-sorted into tier bands before the dividers were
+   * drawn, so that a divider's claim — everything above this line is one tier —
+   * would be literally true. It was true, and the board was wrong: on the
+   * reported tight-end board a Score of 68 was drawn above two Scores of 83
+   * because the market clustered him higher. The Score tab is the one view
+   * whose entire job is to say who to draft, and it was contradicting itself.
+   *
+   * The divider now makes the weaker, true claim: the market's next tier starts
+   * here. The rows above it are the rows the reader's chosen sort put above it.
+   */
   const QB = [
     53.2, 55.3, 63.4, 65.8, 79.4, 81, 90.2, 93.7, 97.6, 105.4, 111.5, 114.5, 116.9, 127.9, 149.3, 151, 164.1, 165.4,
   ];
@@ -387,88 +401,68 @@ describe('drawing a position as bands', () => {
   const map = () => buildPositionTierMap('QB', QB, { picksUntilNext: 13 });
   const drawn = () => {
     const m = map();
-    const ordered = groupByTier(RANKED, (adp) => m.at(adp).tierIndex);
-    const flags = tierDividerFlags(ordered.map((adp) => m.at(adp).tierIndex));
-    return { ordered, flags, m };
+    const flags = tierDividerFlags(RANKED.map((adp) => m.at(adp).tierIndex));
+    return { ordered: RANKED, flags, m };
   };
 
-  it('puts a tier-mate back beside his tier rather than across the line', () => {
+  it('draws the board in exactly the order it was given', () => {
     const { ordered } = drawn();
-    // 55.3 belongs with 53.2 and was being drawn below the divider, among the
-    // players it is two picks better than.
-    expect(ordered.slice(0, 4)).toEqual([53.2, 55.3, 65.8, 63.4]);
+    expect(ordered).toEqual(RANKED);
   });
 
-  it('draws each break once, between the bands it separates', () => {
-    const { ordered, flags, m } = drawn();
-    const opensAt = ordered.filter((_, i) => flags[i]);
-    expect(opensAt).toEqual([65.8, 81, 90.2]);
-    // And the tier above every line is complete before the line is drawn.
-    for (let i = 1; i < ordered.length; i++) {
-      const above = m.at(ordered[i - 1]!).tierIndex!;
-      const here = m.at(ordered[i]!).tierIndex!;
-      expect(here).toBeGreaterThanOrEqual(above);
-      expect(flags[i]).toBe(here > above);
+  it('produces one flag per row and moves nothing', () => {
+    /*
+     * The structural guarantee. `tierDividerFlags` returns booleans positionally
+     * aligned to the rows it was handed — it has no way to express "move this
+     * row", which is exactly why the reordering helper was deleted rather than
+     * corrected. Render the rows, drop the separators, and the sequence is the
+     * one the sorter produced.
+     */
+    const { ordered, flags } = drawn();
+    expect(flags).toHaveLength(RANKED.length);
+
+    const rendered: (number | 'divider')[] = [];
+    ordered.forEach((adp, i) => {
+      if (flags[i]) rendered.push('divider');
+      rendered.push(adp);
+    });
+    expect(rendered.filter((r): r is number => r !== 'divider')).toEqual(RANKED);
+  });
+
+  it('holds for any tier sequence a ranking could produce', () => {
+    // Property form: whatever order the tiers arrive in — and a ranking can
+    // deliver them in any order at all — the rows come back untouched.
+    const sequences: (number | null)[][] = [
+      [0, 0, 1, 1, 2],
+      [0, 2, 1, 0, 3],
+      [2, 1, 0, 0, 1],
+      [null, 0, null, 1],
+      [3, 3, 3],
+      [],
+    ];
+    for (const tiers of sequences) {
+      const rows = tiers.map((tier, i) => ({ tier, id: i }));
+      const flags = tierDividerFlags(rows.map((r) => r.tier));
+      expect(flags).toHaveLength(rows.length);
+      const rendered: ({ tier: number | null; id: number } | 'divider')[] = [];
+      rows.forEach((row, i) => {
+        if (flags[i]) rendered.push('divider');
+        rendered.push(row);
+      });
+      expect(rendered.filter((r) => r !== 'divider')).toEqual(rows);
     }
   });
 
-  /**
-   * The contradiction the reader spotted: a line said three, a chip said two.
-   *
-   * Both halves are checked. The top band is the one the chips are about, so
-   * every member of it carries the same count and the same chip; the band below
-   * is drawn with its own divider and stays silent, because the group above it
-   * has to go first.
-   */
-  it('agrees with the tags drawn beside it', () => {
-    const { ordered, flags, m } = drawn();
-    const band = (start: number) => {
-      const out = [ordered[start]!];
-      for (let i = start + 1; i < ordered.length && !flags[i]; i++) out.push(ordered[i]!);
-      return out;
-    };
-    const first = band(0);
-    expect(first).toEqual([53.2, 55.3]);
-    for (const adp of first) {
-      expect(m.at(adp).tierSize).toBe(first.length);
-      expect(tierCliffWarning(m.at(adp))?.label).toBe('Tier cliff · 2 left');
-    }
-    const second = band(ordered.findIndex((_, i) => flags[i]));
-    expect(second).toEqual([65.8, 63.4]);
-    for (const adp of second) expect(tierCliffWarning(m.at(adp))).toBeNull();
+  it('opens each tier at most once, in reading order', () => {
+    const { flags, m } = drawn();
+    const opened = RANKED.filter((_, i) => flags[i]).map((adp) => m.at(adp).tierIndex);
+    expect(new Set(opened).size).toBe(opened.length);
+    expect([...opened]).toEqual([...opened].sort((a, b) => (a ?? 0) - (b ?? 0)));
   });
 
-  it('keeps the ranking inside a band', () => {
-    // 65.8 still comes before 63.4: they are one decision, and which of them to
-    // prefer is exactly what the ranking is for.
-    const { ordered } = drawn();
-    expect(ordered.indexOf(65.8)).toBeLessThan(ordered.indexOf(63.4));
-    expect(ordered.indexOf(81)).toBeLessThan(ordered.indexOf(79.4));
-  });
-});
-
-describe('grouping rows into bands', () => {
-  const rows = (tiers: (number | null)[]) => tiers.map((tier, i) => ({ tier, id: i }));
-  const tiersOf = (out: { tier: number | null }[]) => out.map((r) => r.tier);
-
-  it('is stable inside a band', () => {
-    const out = groupByTier(rows([0, 1, 0, 1, 2]), (r) => r.tier);
-    expect(tiersOf(out)).toEqual([0, 0, 1, 1, 2]);
-    expect(out.map((r) => r.id)).toEqual([0, 2, 1, 3, 4]);
-  });
-
-  it('leaves an already-ordered board exactly as it was', () => {
-    const before = rows([0, 0, 1, 2, 2]);
-    expect(groupByTier(before, (r) => r.tier)).toEqual(before);
-  });
-
-  it('keeps players with no draft order at the tail', () => {
-    const out = groupByTier(rows([1, null, 0, null]), (r) => r.tier);
-    expect(tiersOf(out)).toEqual([0, 1, null, null]);
-  });
-
-  it('handles an empty board', () => {
-    expect(groupByTier([], () => null)).toEqual([]);
+  it('never draws a line above the first row', () => {
+    const { flags } = drawn();
+    expect(flags[0]).toBe(false);
   });
 });
 
@@ -503,5 +497,240 @@ describe('where a tier divider goes', () => {
 
   it('ignores players with no tier at all', () => {
     expect(tierDividerFlags([0, null, 0, 1])).toEqual([false, false, false, true]);
+  });
+});
+
+describe('the reported inversions', () => {
+  /*
+   * Both boards from the bug report, with the tier indices that caused them.
+   *
+   * These are the fixtures the old behaviour actually failed: a market cluster
+   * that disagrees with the Score order. The demo dataset does not contain one —
+   * its tiers happen to run with the ranking — which is why an end-to-end check
+   * against it passed with the bug in place and why the guard belongs here.
+   */
+  const annotate = <T extends { score: number; tier: number | null }>(rows: T[]) =>
+    annotateTiers(rows, (r) => r.tier);
+
+  /** The old band-sorting behaviour, kept only so the guards can be shown to bite. */
+  function oldGroupByTier<T>(items: T[], tierOf: (item: T) => number | null): T[] {
+    const tiered: { item: T; at: number; tier: number }[] = [];
+    const untiered: T[] = [];
+    items.forEach((item, at) => {
+      const tier = tierOf(item);
+      if (tier == null) untiered.push(item);
+      else tiered.push({ item, at, tier });
+    });
+    tiered.sort((a, b) => a.tier - b.tier || a.at - b.at);
+    return [...tiered.map((e) => e.item), ...untiered];
+  }
+
+  const TE = [
+    { name: 'Hunter Henry', score: 84, tier: 0 },
+    { name: 'Juwan Johnson', score: 83, tier: 1 },
+    { name: 'Chig Okonkwo', score: 83, tier: 1 },
+    // The market likes him far more than the model does, which is the whole bug.
+    { name: 'Kenyon Sadiq', score: 68, tier: 0 },
+  ];
+
+  const RB = [
+    { name: 'MarShawn Lloyd', score: 68, tier: 2 },
+    { name: 'Brian Robinson', score: 67, tier: 0 },
+    { name: 'Dylan Sampson', score: 66, tier: 1 },
+    { name: 'Isiah Pacheco', score: 65, tier: 0 },
+    { name: 'Emmett Johnson', score: 51, tier: 1 },
+  ];
+
+  it('keeps the tight ends in Score order', () => {
+    const drawn = annotate(TE).map((a) => a.row.name);
+    expect(drawn).toEqual(['Hunter Henry', 'Juwan Johnson', 'Chig Okonkwo', 'Kenyon Sadiq']);
+    expect(drawn.indexOf('Juwan Johnson')).toBeLessThan(drawn.indexOf('Kenyon Sadiq'));
+    expect(drawn.indexOf('Chig Okonkwo')).toBeLessThan(drawn.indexOf('Kenyon Sadiq'));
+  });
+
+  it('would have failed under the old band sort — tight ends', () => {
+    // Proof the fixture reproduces the report rather than merely passing now.
+    const before = oldGroupByTier(TE, (r) => r.tier).map((r) => r.name);
+    expect(before.indexOf('Kenyon Sadiq')).toBeLessThan(before.indexOf('Juwan Johnson'));
+  });
+
+  it('keeps MarShawn Lloyd first among the backs', () => {
+    const drawn = annotate(RB).map((a) => a.row.name);
+    expect(drawn[0]).toBe('MarShawn Lloyd');
+    expect(drawn).toEqual(RB.map((r) => r.name));
+  });
+
+  it('would have failed under the old band sort — backs', () => {
+    const before = oldGroupByTier(RB, (r) => r.tier).map((r) => r.name);
+    expect(before[0]).not.toBe('MarShawn Lloyd');
+    expect(before.indexOf('MarShawn Lloyd')).toBeGreaterThan(before.indexOf('Emmett Johnson'));
+  });
+
+  it('never lets a rendered Score rise going down the page', () => {
+    for (const board of [TE, RB]) {
+      const scores = annotate(board).map((a) => a.row.score);
+      for (let i = 1; i < scores.length; i++) expect(scores[i]!).toBeLessThanOrEqual(scores[i - 1]!);
+    }
+  });
+
+  it('numbers the ranks by what is drawn, not by tier', () => {
+    expect(annotate(RB).map((a) => a.rank)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('still marks a boundary, and only between adjacent rows', () => {
+    const annotated = annotate(TE);
+    expect(annotated[0]!.divider, 'a divider was drawn above the first row').toBe(false);
+    // Tier 1 opens at Juwan Johnson, where the ranking first reaches it.
+    expect(annotated[1]!.divider).toBe(true);
+    // …and does not open again at Chig Okonkwo, nor reopen tier 0 at Sadiq.
+    expect(annotated[2]!.divider).toBe(false);
+    expect(annotated[3]!.divider).toBe(false);
+  });
+});
+
+describe('a band the market never closes', () => {
+  /*
+   * The reported late-round boards, at pick 168.
+   *
+   * The market ladder emitted no boundary at all for either — late ADP is
+   * smooth, so `tierIndex` is 0 the whole way down — and the reader was shown
+   * one receiver group running from a Score of 91 to 63, and one back group
+   * from 80 to 52. Ordering was right; the grouping was useless.
+   *
+   * `tierOf` returns a constant here on purpose. That is what the market
+   * actually said, and it is what makes these fixtures a test of the Score
+   * triggers rather than of the ladder.
+   */
+  const smoothMarket = () => 0;
+  const band = (scores: number[]) => {
+    const rows = scores.map((score, id) => ({ score, id }));
+    const annotated = annotateTiers(rows, smoothMarket, (r) => r.score);
+    const bands: number[][] = [];
+    for (const a of annotated) {
+      if (a.divider || bands.length === 0) bands.push([]);
+      bands[bands.length - 1]!.push(a.row.score);
+    }
+    return { annotated, bands };
+  };
+
+  const WR = [91, 84, 78, 73, 72, 72, 71, 68, 68, 63, 63];
+  const RB = [80, 79, 79, 74, 67, 60, 58, 56, 54, 52, 52];
+
+  it('breaks the receiver board into more than one group', () => {
+    const { bands } = band(WR);
+    expect(bands.length).toBeGreaterThan(1);
+  });
+
+  it('never leaves the 91 in the same group as a 63', () => {
+    const { bands } = band(WR);
+    const withTop = bands.find((b) => b.includes(91))!;
+    expect(withTop).not.toContain(63);
+  });
+
+  it('breaks the back board into more than one group', () => {
+    const { bands } = band(RB);
+    expect(bands.length).toBeGreaterThan(1);
+  });
+
+  it('does not run the 80/79 group uninterrupted down to the 52s', () => {
+    const { bands } = band(RB);
+    const withTop = bands.find((b) => b.includes(80))!;
+    expect(withTop).not.toContain(52);
+  });
+
+  it('breaks the back board at the drops the report itself named', () => {
+    /*
+     * 79 -> 74, 74 -> 67, 67 -> 60. Not hardcoded as a target — this is what
+     * the calibrated rule produces, and it happening to match the three drops a
+     * human picked out by eye is the strongest evidence available that the
+     * thresholds are in the right place.
+     */
+    const { bands } = band(RB);
+    expect(bands.map((b) => b[0])).toEqual([80, 74, 67, 60]);
+  });
+
+  it('keeps every band inside the span a reader can hold', () => {
+    for (const scores of [WR, RB]) {
+      for (const b of band(scores).bands) {
+        expect(b[0]! - b[b.length - 1]!, `a band ran ${b[0]} to ${b[b.length - 1]}`).toBeLessThanOrEqual(
+          SCORE_BANDS.span,
+        );
+      }
+    }
+  });
+
+  it('reports a Score break as a Score break, so the label cannot invent picks', () => {
+    const { annotated } = band(RB);
+    const reasons = annotated.filter((a) => a.divider).map((a) => a.breakReason);
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(new Set(reasons)).toEqual(new Set(['score']));
+  });
+});
+
+describe('the boundary rule, as properties', () => {
+  const rowsOf = (scores: (number | null)[], tiers?: (number | null)[]) =>
+    scores.map((score, i) => ({ score, tier: tiers?.[i] ?? 0, id: i }));
+  const run = (rows: ReturnType<typeof rowsOf>) =>
+    annotateTiers(rows, (r) => r.tier, (r) => r.score);
+
+  it('never changes the order or the rank', () => {
+    const rows = rowsOf([90, 70, 69, 40, 39, 12]);
+    const out = run(rows);
+    expect(out.map((a) => a.row)).toEqual(rows);
+    expect(out.map((a) => a.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('opens on a large adjacent drop even when the market is flat', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap]));
+    expect(out[1]!.divider).toBe(true);
+    expect(out[1]!.breakReason).toBe('score');
+  });
+
+  it('does not open on a drop below the threshold', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap + 1]));
+    expect(out[1]!.divider).toBe(false);
+  });
+
+  it('cannot be defeated by a long gentle slope', () => {
+    // Every step is one point, so no adjacent gap ever fires. The span trigger
+    // is the only thing standing between this and one forty-point band.
+    const gentle = Array.from({ length: 40 }, (_, i) => 90 - i);
+    const out = run(rowsOf(gentle));
+    expect(out.some((a) => a.divider)).toBe(true);
+    let top = gentle[0]!;
+    for (const a of out) {
+      if (a.divider) top = a.row.score!;
+      expect(top - a.row.score!).toBeLessThanOrEqual(SCORE_BANDS.span);
+    }
+  });
+
+  it('does not spam separators on a flat board', () => {
+    // Twelve players inside one point of each other are one decision.
+    const out = run(rowsOf([70, 70, 70, 69, 69, 69, 69, 69, 69, 69, 69, 69]));
+    expect(out.filter((a) => a.divider)).toHaveLength(0);
+  });
+
+  it('still lets the market open a band, and says so', () => {
+    const out = run(rowsOf([70, 69, 68], [0, 1, 1]));
+    expect(out[1]!.divider).toBe(true);
+    expect(out[1]!.breakReason).toBe('market');
+  });
+
+  it('prefers the market reason when both would fire, because it has a number', () => {
+    const out = run(rowsOf([80, 80 - SCORE_BANDS.gap - 5], [0, 1]));
+    expect(out[1]!.breakReason).toBe('market');
+  });
+
+  it('does not treat an unpriced player as a cliff', () => {
+    // A null Score is unknown, not a drop to zero.
+    const out = run(rowsOf([70, null, 69]));
+    expect(out[1]!.divider).toBe(false);
+    expect(out[2]!.divider).toBe(false);
+  });
+
+  it('works with no Score accessor at all, as the market-only board does', () => {
+    const rows = rowsOf([90, 40], [0, 0]);
+    const out = annotateTiers(rows, (r) => r.tier);
+    expect(out.every((a) => !a.divider)).toBe(true);
   });
 });

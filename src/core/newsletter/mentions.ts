@@ -39,6 +39,23 @@ const NAME_TOKEN = /^[A-Z][A-Za-z'’.\-]*$/;
 const SUFFIX_TOKEN = /^(Jr\.?|Sr\.?|II|III|IV|V)$/;
 const MAX_SPAN = 4;
 
+/**
+ * A multi-token name must be spelled contiguously.
+ *
+ * Tokenizing skips over anything that is not a name character, so a span is
+ * built from the first token's start to the last token's end and can silently
+ * swallow whatever lay between them. Over `=E2=80=9Cthe engine` that produced
+ * the candidate `E2=80=9Cthe`, and over a redirect URL it produced
+ * `DeyJ1IjoiYWJ` — neither of which any newsletter contains, and both of which
+ * were offered to the user as names their player list was missing.
+ *
+ * A real name is letters, apostrophes, hyphens, periods and single spaces.
+ * Anything else between the tokens means the span is an artefact, not a name.
+ */
+function isContiguousName(raw: string): boolean {
+  return /^[A-Za-z'’.\-]+(?: [A-Za-z'’.\-]+)*$/.test(raw);
+}
+
 interface Token {
   text: string;
   start: number;
@@ -92,6 +109,7 @@ export function detectMentions(
       const span = tokens.slice(i, i + len);
       if (span.some((t, k) => k > 0 && !isNameToken(t.text))) continue;
       const raw = text.slice(span[0]!.start, span[span.length - 1]!.end);
+      if (!isContiguousName(raw)) continue;
       const result = resolvePlayer({ name: raw, team: opts.teamHint ?? null }, index);
       if (result.status === 'unmatched') continue;
       mentions.push(toMention(raw, span[0]!.start, span[span.length - 1]!.end, result, false));
@@ -243,6 +261,8 @@ export function collectUnresolvedNames(
       const end = span[span.length - 1]!.end;
       if (overlaps(start, end)) break;
       const raw = text.slice(start, end);
+      // Never offer a parser artefact as a name the player list is missing.
+      if (!isContiguousName(raw)) continue;
       if (resolvePlayer({ name: raw }, index).status !== 'unmatched') break;
       out.add(raw);
       break;

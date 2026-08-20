@@ -34,7 +34,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
 | Injury | `.injury-caution` `.injury-serious` `.injury-out`, over `--status-neutral` |
-| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` for how much of it a card shows |
+| Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-strong` for how much of it a row shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-toolbar: 25` `--radius-pill` `--tap: 44` |
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
@@ -46,6 +46,14 @@ icon, asset or branding — every glyph in the app is drawn in
 `--text-faint` is the quietest text allowed: it reads at 4.5:1 against both the
 page and a card. Anything greyer looked calmer on a desk and vanished on a phone
 in daylight.
+
+`--pos-mix` is how much of a position's hue a row's surface actually takes, and
+it is deliberately small: 15% in Light, 34% in Dark. A wash strong enough to read
+as a colour turns a hundred-row list into a rainbow, so the position is carried
+by the leading accent edge and the lettered pill instead, and the wash is only a
+hint that a row belongs to a run. `--pos-mix-strong` is the one exception, spent
+by `.starter-row` on the Team screen: eight cards, one per lineup slot, is the
+case where the tint shows the shape of a week rather than decorating a list.
 
 `--status-neutral` exists for the same reason in reverse. A chip that lands on a
 card washed in a position's colour cannot be painted in a hue and stay legible —
@@ -67,6 +75,9 @@ is which.
 | `SearchFilterRow` | Search folded into a glyph beside the filters, unfolding into a field that takes the row. Draft uses it; the row is one tap target tall in both states, so opening it moves nothing. Only the control labelled Cancel discards a query. |
 | `Sheet` | A modal sheet: rounded top, grab handle, dimmed backdrop, swipe-to-dismiss, and a Done control because a gesture is never the only way out. |
 | `SkeletonRows` | Loading at the shape of what is coming, so the page does not jump when it lands. |
+| `CompactPlayerRow` | One player as one row, in the columns every list shares: rank, a control of the screen's own, the name, the tally/availability field, the position, a chevron — then up to four labelled numbers and one short line. Players and Trades both draw from it, which is what makes a player read as the same object on both. |
+| `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
+| `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
 | `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. |
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
@@ -119,6 +130,10 @@ blank strip under the navigation twice:
 - `e2e/draft-card.spec.ts` — the collapsed player card: where the tier-cliff
   warning sits, that it costs no height, that the metrics never wrap to make
   room for it, and that it takes no tap meant for the card.
+- `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
+  and ceiling, that the position is an edge and not a wash, that no column
+  truncates a value, that a trade suggestion is a row rather than a card, and
+  that neither list nor any section of the player page scrolls sideways.
 - `e2e/shell.spec.ts` — navigation-bar height and stickiness, density per screen,
   touch targets, no sideways scroll in either theme, theme parity, reduced
   motion.
@@ -128,3 +143,30 @@ blank strip under the navigation twice:
   say and do. Unchanged by the visual pass, which is the point.
 - `tests/gestures.test.ts` — the gesture thresholds, as arithmetic.
 - `tests/viewport.test.ts` — the keyboard threshold, likewise.
+
+## Before a UI change is merge-ready
+
+`e2e-production/smoke.spec.ts` keeps its **own copies** of assertions that
+`e2e/` also makes — the draft row's metrics, the Team lineup, the player page,
+the shell. CI does not run it: `ci.yml` runs `e2e/`, and the production suite
+runs only in `smoke.yml`, *after* a deploy. So a UI change that invalidates an
+assertion in there is not caught by a green PR; it is caught by production going
+red minutes after the merge.
+
+That has happened twice. Both times the change was correct and the test was
+describing a UI that no longer existed; the second time it was missed because a
+grep for the removed word returned two docblock comments and read as "clean".
+
+So: **any change to UI text, structure, navigation, a card, a metric or an
+interaction must be run against both suites before merge, and searching is not
+proof.** The production suite runs against a local build:
+
+```
+npm run build && node scripts/build-server.mjs
+FA_SEED=1 FA_INSECURE_COOKIES=1 APP_PASSPHRASE=… SESSION_SECRET=…   node scripts/dev-server.mjs --port 8794 &
+PRODUCTION_URL=http://127.0.0.1:8794   npx playwright test --config playwright.production.config.ts   --project=chromium-iphone-390 --project=chromium-small-360
+```
+
+Two of its tests fail against the demo seed and pass against real production —
+the Team `Starter` assertion and the waiver-advice test. A local run showing
+exactly those two is clean. A third failure is real.

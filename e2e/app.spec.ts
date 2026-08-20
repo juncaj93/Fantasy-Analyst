@@ -360,24 +360,33 @@ test.describe('draft room', () => {
   });
 
   /**
-   * The four numbers, and the tally that stopped being one of them.
+   * The numbers, and the two that stopped being raw market positions.
    *
-   * The metrics line used to read `ADP · Value · Next pick · ▲ +6 pos`, which
-   * spent a third of itself on the tally and had no room left for the thing the
-   * board is actually deciding. The tally is now one token beside the name and
-   * the line carries `Score · ADP · Val · Next`.
+   * The line used to read `Score · ADP 170 · DOG 145.1 · Val -6 · Next`, and
+   * three of those asked the reader to subtract against the pick on the clock
+   * before any of them meant anything. It carries the subtraction now — `ADP
+   * +6` is six picks ahead of Sleeper's market, `DOG -19` is nineteen picks
+   * past Underdog's — and `Val`, which was a third answer to the same question,
+   * has moved onto the expanded card with both raw markets.
    */
-  test('reads Score · ADP · Val · Next, with the tally beside the name', async ({ page }) => {
+  test('reads Score · ADP · DOG · Next as market deltas, with the tally beside the name', async ({ page }) => {
     const first = page.getByTestId('recommendation-row').first();
     const metrics = await first.locator('.player-row-metrics').innerText();
 
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
-    // The long labels are what cost the fourth column its space.
+    // `Val` was the third answer to "how does this pick compare to the market",
+    // and the two deltas answer it directly. It lives on the expanded card now.
+    expect(metrics, 'Val is still on the compact row').not.toMatch(/\bVal\b/);
+    // The long labels are what cost the columns their space.
     expect(metrics).not.toMatch(/\bValue\b/);
     expect(metrics).not.toMatch(/Next pick/);
+
+    // The ADP column is a signed delta or an honest unknown — never a raw
+    // market position, which is what it used to be.
+    const adp = await first.getByTestId('adp-metric').innerText();
+    expect(adp, `ADP column read "${adp}"`).toMatch(/^ADP\s+([+-]?\d+|unknown)$/);
 
     // Score is a whole number in range, and not a percentage.
     const score = Number(metrics.match(/Score\s+(\d{1,3})/)![1]);
@@ -927,19 +936,39 @@ test.describe('draft room', () => {
    * Tier structure, drawn two different ways for two different lists.
    *
    * The seeded board is built to have both: six quarterbacks in a cluster of
-   * four then a 23-pick hole, and five tight ends whose best group is down to
-   * two. See `DEMO_PLAYERS`.
+   * four then a hole of seventeen blended-market picks, and five tight ends
+   * whose best group is down to two. See `DEMO_PLAYERS`.
    */
   test.describe('tiers', () => {
     test('draws a line where a filtered position genuinely breaks', async ({ page }) => {
       await page.getByRole('button', { name: 'QB', exact: true }).click();
       await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
 
+      /*
+       * Twice, not once.
+       *
+       * The market ladder breaks this board in one place — the 28-pick hole
+       * after the fourth quarterback — and that is the divider this test was
+       * written for. The second one is the Score: 59 to 53 at the bottom of the
+       * board is a six-point drop, past the 95th percentile of adjacent gaps
+       * measured across every position and depth, and a band may now end on
+       * that as well as on a market cliff. See `SCORE_BANDS`.
+       */
       const dividers = page.getByTestId('tier-divider');
-      await expect(dividers, 'the QB board breaks exactly once').toHaveCount(1);
+      await expect(dividers, 'the QB board breaks at the market hole and at the Score drop').toHaveCount(2);
       await expect(dividers.first()).toContainText(/tier drop/i);
-      // It says how big the hole is, which is the whole reason it is there.
-      await expect(dividers.first()).toContainText(/~2[0-9] picks/);
+      /*
+       * It says how big the hole is, which is the whole reason it is there.
+       *
+       * Seventeen picks, and it used to read twenty-three. The ladder is built
+       * from the DOG/Sleeper blend rather than from Sleeper alone, so the hole
+       * is measured in the same space the tiers were drawn in: the last of the
+       * top four sits at 0.6*35.8 + 0.4*30.2 = 33.6, the first of the next pair
+       * at 0.6*49.2 + 0.4*52.9 = 50.7, and the gap between them is 17.1. The old
+       * number measured the Sleeper gap while the ladder measured the blended
+       * one, which is exactly the mismatch the tier work exists to remove.
+       */
+      await expect(dividers.first()).toContainText(/~17 picks/);
 
       // And it falls between the cluster and what follows, not inside either.
       const order = await page
@@ -1306,8 +1335,10 @@ test.describe('draft room', () => {
     });
 
     test('draws no tier line across a filtered result', async ({ page }) => {
+      // Two on this board: the market's hole after the fourth quarterback, and
+      // the Score drop from 59 to 53 at the bottom. See `SCORE_BANDS`.
       await page.getByRole('button', { name: 'QB', exact: true }).click();
-      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await expect(page.getByTestId('tier-divider')).toHaveCount(2);
       await openSearch(page);
       await page.getByTestId('draft-search').fill('a');
       // A line between two rows that are not adjacent on the board would be
@@ -1316,7 +1347,7 @@ test.describe('draft room', () => {
       // Cancelling puts the row back exactly as it was, filter and all.
       await page.getByTestId('draft-search-close').click();
       await expect(page.getByRole('button', { name: 'QB', exact: true })).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('tier-divider')).toHaveCount(1);
+      await expect(page.getByTestId('tier-divider')).toHaveCount(2);
       await page.getByRole('button', { name: 'ALL', exact: true }).click();
     });
   });
@@ -1366,9 +1397,16 @@ test.describe('team, ADP import and start/sit', () => {
 
   test('lists recommended starters by slot, then the bench', async ({ page }) => {
     await expect(page.getByTestId('starters-title')).toBeVisible();
-    await expect(page.getByTestId('bench-title')).toBeVisible();
     // Seven slots: QB, RB, RB, WR, WR, TE, FLEX — the league's own shape.
     expect(await page.getByTestId('starter-row').count()).toBe(7);
+
+    // The bench is behind its own chevron now, so that the starters fit on one
+    // phone screen. It still says how many are back there before it is opened,
+    // and it still holds them.
+    const toggle = page.getByTestId('bench-toggle');
+    await expect(toggle).toBeVisible();
+    expect(await page.getByTestId('bench-row').count()).toBe(0);
+    await toggle.click();
     expect(await page.getByTestId('bench-row').count()).toBeGreaterThan(0);
   });
 
@@ -1506,40 +1544,53 @@ test.describe('player intelligence', () => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
 
+    // The windows are on the page the reader lands on…
+    await expect(page.getByTestId('player-page-windows')).toContainText('7d');
+    await expect(page.getByTestId('player-page-windows')).toContainText('Lifetime');
+    // …and the ledger is one tap further, entire.
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
     await expect(page.getByTestId('evidence-heading')).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Last 7d' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Lifetime' })).toBeVisible();
+    await expect(page.getByTestId('evidence-item').first()).toBeVisible();
   });
 
   /**
-   * The same player, the same way, on both screens.
+   * Everything the unfolding card used to show, still shown — one tap deeper.
    *
-   * A card here opens in place exactly as a draft card does, and carries what
-   * the draft card carries — the outlook, last season, the injury — as well as
-   * everything only this screen has: the four windows, the categories, the
-   * market lines and every piece of evidence.
+   * The density pass moved the file out of the list and onto the player's own
+   * page, and the risk in a move like that is that something quietly stops
+   * being rendered. So this walks all four sections and checks the lot: last
+   * season and the injury on Overview, the provider's outlook under Outlook,
+   * the cached prop lines under Market, and the ledger under Evidence.
    */
-  test('opens a player in place, with the whole file inside it', async ({ page }) => {
+  test('opens a player as his own page, with the whole file on it', async ({ page }) => {
     const row = page.locator('[data-testid="player-search-row"][data-player-id="1004"]');
     await row.scrollIntoViewIfNeeded();
     await row.click();
 
-    const file = row.getByTestId('player-file');
-    await expect(file).toBeVisible();
+    const page_ = page.getByTestId('player-page');
+    await expect(page_).toBeVisible();
+    const sections = page.getByTestId('player-page-sections');
+
     // What the draft card shows…
-    await expect(row.getByTestId('outlook')).toBeVisible();
-    await expect(row.getByTestId('last-season')).toBeVisible();
+    await expect(page.getByTestId('last-season')).toBeVisible();
+    await expect(page.getByTestId('player-page-windows')).toBeVisible();
+
+    await sections.getByRole('button', { name: 'Outlook' }).click();
+    await expect(page.getByTestId('outlook')).toBeVisible();
+
     // …and what only this screen has.
-    await expect(row.getByRole('cell', { name: 'Season' })).toBeVisible();
-    await expect(row.getByTestId('evidence-heading')).toBeVisible();
-    await expect(row.getByText(/Vegas props/)).toBeVisible();
+    await sections.getByRole('button', { name: 'Market' }).click();
+    await expect(page.getByText(/Vegas props/)).toBeVisible();
 
-    // It is a disclosure, not a screen: no Back, and the list is still here.
-    await expect(page.getByTestId('back-button')).toHaveCount(0);
+    await sections.getByRole('button', { name: 'Evidence' }).click();
+    await expect(page.getByTestId('evidence-heading')).toBeVisible();
+
+    // It is a screen, not a disclosure: it has a Back, and it took the list.
+    await expect(page.getByTestId('back-button')).toBeVisible();
+    await expect(page.getByTestId('player-search-row')).toHaveCount(0);
+
+    await page.getByTestId('back-button').click();
     expect(await page.getByTestId('player-search-row').count()).toBeGreaterThan(1);
-
-    await row.locator('.row-button').click();
-    await expect(row.getByTestId('player-file')).toHaveCount(0);
   });
 
   /**
@@ -1578,13 +1629,15 @@ test.describe('player intelligence', () => {
   test('shows the original excerpt for every evidence item, not just a tally', async ({ page }) => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
     await expect(page.getByTestId('evidence-excerpt').first()).toContainText('named the starter');
   });
 
   test('states plainly when there are no cached props', async ({ page }) => {
     await page.getByLabel('Search players').fill('whitfield');
     await page.locator('[data-testid="player-search-row"][data-player-id="1011"]').click();
-    await expect(page.getByText(/No prop data cached/)).toBeVisible();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Market' }).click();
+    await expect(page.getByText(/Prop data unavailable/)).toBeVisible();
   });
 });
 
@@ -1623,13 +1676,13 @@ test.describe('review queue', () => {
 
   test('accepting an item removes it from the queue and updates the badge', async ({ page }) => {
     const cardsBefore = await page.getByTestId('review-card').count();
-    await page.getByRole('button', { name: '✓ Accept' }).first().click();
+    await page.getByRole('button', { name: 'Accept', exact: true }).first().click();
     await expect(page.getByTestId('review-card')).toHaveCount(cardsBefore - 1);
   });
 
   test('exposes explicit correction controls rather than gesture-only actions', async ({ page }) => {
     const card = page.getByTestId('review-card').first();
-    await card.getByRole('button', { name: '✎ Change' }).click();
+    await card.getByRole('button', { name: 'Change' }).click();
     await expect(card.getByRole('button', { name: 'positive', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'mixed', exact: true })).toBeVisible();
     await expect(card.getByText(/Your correction wins from now on/)).toBeVisible();

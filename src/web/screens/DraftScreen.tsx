@@ -67,9 +67,10 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
  * both live in core so they can be checked without a browser.
  */
-import { groupByTier, tierCliffWarning, tierDividerFlags } from '../../core/draft/tierBoard.ts';
+import { annotateTiers, tierCliffWarning, type TierBreak } from '../../core/draft/tierBoard.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
+import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
 /*
  * Three ways to read the same board, and one pure function that reorders it.
  *
@@ -956,6 +957,15 @@ export function DraftScreen({
         </Empty>
       ) : (
         <div
+          /*
+            One grouped surface, and the rows are flush inside it.
+
+            The list had a test id and no class, so it had never been styled as
+            a container at all — which is exactly why every row was left being
+            its own floating rounded card with its own shadow and a gap under
+            it. See `.board-list` in the stylesheet.
+          */
+          className="board-list"
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
@@ -975,13 +985,22 @@ export function DraftScreen({
           {visible.map((item, i) => (
             /* The divider goes above the row that opens the tier, not instead of it. */
             <Fragment key={item.rec.playerId}>
-              {item.divider ? <TierDivider gap={item.rec.tierCliff.tierGapBefore} /> : null}
+              {/*
+                The pick count only appears when a market gap is what opened the
+                band. A Score break has no distance behind it, and printing one
+                would be inventing a number.
+              */}
+              {item.divider ? (
+                <TierDivider gap={item.breakReason === 'market' ? item.rec.tierCliff.tierGapBefore : null} />
+              ) : null}
               <RecommendationRow
                 rank={item.rank}
                 rec={item.rec}
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
+                currentPick={board.currentPick}
                 marketSource={board.marketSource ?? null}
+                scoringLabel={board.league?.scoringLabel ?? null}
                 expanded={expanded === item.rec.playerId}
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
@@ -1344,24 +1363,41 @@ interface BoardItem {
   rec: DraftRecommendation;
   rank: number;
   divider: boolean;
+  breakReason: TierBreak | null;
 }
 
 /**
- * The rows, in tier order, each told whether a tier boundary falls above it.
+ * The rows in the order the board chose, each told whether a tier boundary
+ * falls above it.
  *
- * The grouping and the flags have to be computed over the same sequence, and
- * that sequence is not the one the server sent: a divider claims that
- * everything above it is one tier, which is only true once the tiers are
- * contiguous. See `groupByTier`.
+ * **The order is never touched here.** Whichever sort the reader picked —
+ * Score, ADP, DOG — decides who appears where, and a tier is an annotation on
+ * that sequence. This function may insert a line between two adjacent rows; it
+ * may not move a row.
+ *
+ * That is a correction. This used to reorder the board into tier bands, to make
+ * a divider's claim literally true: everything above the line is one tier. The
+ * claim was true and the board was wrong. On the reported tight-end board it
+ * put Kenyon Sadiq (Score 68) above Juwan Johnson and Chig Okonkwo (both 83),
+ * because the market clustered him higher — so the screen contradicted its own
+ * ranking, in the one view whose entire job is to say who to draft. A reader
+ * comparing two numbers on screen should never have to know which of them the
+ * layout secretly outranked.
+ *
+ * So the divider now says something weaker and true: *the market's next tier
+ * starts here*. The rows above it are the rows the sort put above it, which is
+ * what the reader is looking at anyway.
  *
  * Off entirely on the mixed board, where there is no single position for a
- * boundary to be about — there the ranking is the order, untouched.
+ * boundary to be about.
  */
 function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
-  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false }));
-  const ordered = groupByTier(recs, (rec) => rec.tierCliff.tierIndex);
-  const flags = tierDividerFlags(ordered.map((rec) => rec.tierCliff.tierIndex));
-  return ordered.map((rec, i) => ({ rec, rank: i + 1, divider: flags[i] === true }));
+  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false, breakReason: null }));
+  return annotateTiers(
+    recs,
+    (rec) => rec.tierCliff.tierIndex,
+    (rec) => rec.score,
+  ).map(({ row, rank, divider, breakReason }) => ({ rec: row, rank, divider, breakReason }));
 }
 
 /**
@@ -1389,6 +1425,18 @@ function TierDivider({ gap }: { gap: number | null }) {
  * the expanded view contains its own controls (Advanced, Show all reasons), and
  * a button may not contain buttons.
  */
+/**
+ * How hard the line has to be squeezed to keep every number on it.
+ *
+ * Measured rather than chosen: four quantities need 332px, five need 345, and
+ * the row offers 315 at 360px and 330 at 375. `yes` rescues four, `max`
+ * rescues five, and a line of three or fewer needs neither.
+ */
+function densityOf(components: number): 'no' | 'yes' | 'max' {
+  if (components >= 5) return 'max';
+  return components >= 4 ? 'yes' : 'no';
+}
+
 /**
  * The market line's own tooltip: what each number is, spelled out.
  *
@@ -1421,16 +1469,102 @@ function marketLineTitle(rec: DraftRecommendation): string | undefined {
 function MarketProvenance({
   rec,
   source,
+  scoringLabel,
+  currentPick,
 }: {
   rec: DraftRecommendation;
   source: DraftBoard['marketSource'];
+  /** The league's own scoring, which is what turned lines into points. */
+  scoringLabel: string | null;
+  /** The pick the row's deltas were measured against, printed as the working. */
+  currentPick: number | null;
 }) {
   const props = rec.marketProps;
   if (!props || props.components.length === 0) return null;
 
+  const baseline = rec.marketBaseline;
+
   return (
     <div className="market-detail" data-testid="market-detail">
       <DetailLabel>Market</DetailLabel>
+      {/*
+        The raw numbers the compact row's deltas were made from.
+
+        The row says `ADP +6` because it is answering "what does taking him here
+        cost me against this market", which is the decision. This is the
+        working: both markets' own positions, the pick they were measured
+        against, and the value column the row no longer prints. A reader who
+        wants to check the arithmetic can, and a reader who wants the raw
+        market position — to compare against somewhere else, or because they
+        think in ADP — still has it.
+
+        Answer on the row, explanation here. Nothing is computed in this block;
+        every number in it is one the board already sent.
+      */}
+      <div className="market-raw" data-testid="market-raw">
+        <span className="metric">
+          Sleeper ADP <strong>{rec.adp == null ? <Unknown what="Sleeper ADP" /> : rec.adp}</strong>
+        </span>
+        {rec.dogAdp == null ? null : (
+          <span className="metric" data-testid="market-raw-dog">
+            DOG ADP <strong>{rec.dogAdp}</strong>
+          </span>
+        )}
+        {currentPick == null ? null : (
+          <span className="metric">
+            At pick <strong>{currentPick}</strong>
+          </span>
+        )}
+        <span className="metric">
+          Val{' '}
+          <strong
+            className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
+          >
+            {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
+          </strong>
+        </span>
+      </div>
+      {/*
+        The market-implied points, said in full before the components it is
+        made of.
+
+        Three facts, and the second two are what stop the first from being a
+        projection wearing a market's clothes: how much of what this position
+        scores on actually had a market, and whose scoring turned the lines into
+        points. A number labelled `pts` without the league behind it would mean
+        something different in every league that read it.
+      */}
+      {baseline?.points == null ? null : (
+        <div className="market-points" data-testid="market-points">
+          <strong>
+            MKT PTS {baseline.missing.length > 0 ? '~' : ''}
+            {baseline.points}
+          </strong>{' '}
+          <span className="muted">
+            {Math.round(baseline.coverage * 100)}% of what a {rec.position} scores on had a market
+            {scoringLabel ? `, converted at this league's scoring (${scoringLabel})` : ''}.{' '}
+            {baseline.missing.length > 0
+              ? 'Missing markets are left out rather than counted as nothing, so the total is a floor.'
+              : ''}
+          </span>
+        </div>
+      )}
+      {/*
+        And whether that number is a good one, which is the question a reader
+        actually has at a draft.
+
+        Two markets, both already in the Score as separate components, put on
+        one positional scale so their disagreement can be read rather than
+        guessed at. No weighting maths is shown: the sentence says what the
+        markets think of him, not what the model did about it.
+      */}
+      {rec.marketStrategy ? (
+        <div className="market-strategy" data-testid="market-strategy" data-kind={rec.marketStrategy.kind}>
+          {rec.marketStrategy.standing}
+          {rec.marketStrategy.disagreement ? ` · ${rec.marketStrategy.disagreement}` : ''}
+          {rec.marketStrategy.caveat ? ` · ${rec.marketStrategy.caveat}` : ''}
+        </div>
+      ) : null}
       <ul className="market-components">
         {props.components.map((c) => (
           <li key={c.label} data-testid="market-component" data-derived={c.derived ? 'yes' : 'no'}>
@@ -1463,7 +1597,16 @@ function RecommendationRow({
   expanded,
   showCliffProximity,
   horizonPick,
+  /**
+   * The pick on the clock, straight from the board.
+   *
+   * The market deltas are measured against this and nothing else — not the
+   * row's rank, not the reader's next turn, not a cached copy. See
+   * `marketDelta.ts`.
+   */
+  currentPick,
   marketSource,
+  scoringLabel,
   onToggle,
   onQueue,
   busy,
@@ -1479,8 +1622,12 @@ function RecommendationRow({
   showCliffProximity: boolean;
   /** The pick survival is measured against — your next one after this. */
   horizonPick: number | null;
+  /** The pick on the clock, which the market deltas are measured against. */
+  currentPick: number | null;
   /** Who priced the season markets, for the expanded card's provenance. */
   marketSource: DraftBoard['marketSource'];
+  /** The league's own scoring label, which is what `MKT PTS` was converted at. */
+  scoringLabel: string | null;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   busy: boolean;
@@ -1640,32 +1787,39 @@ function RecommendationRow({
                 {rec.score == null ? <Unknown what="Score" /> : rec.score}
               </strong>
             </span>
-            <span className="metric">
-              ADP <strong>{rec.adp == null ? <Unknown what="ADP" /> : rec.adp}</strong>
-            </span>
             {/*
-              Underdog's own number, beside Sleeper's rather than instead of it.
+              What each market says about taking him *right now*, rather than
+              where each market has him.
 
-              Two markets, two columns, and the reader can see them disagree —
-              which is the whole reason the second one is worth having. It is
-              absent rather than blank when Underdog has not priced him, so a
+              These were two raw positions and a value column — `ADP 170  DOG
+              145.1  Val -6` — and all three asked the reader to subtract
+              against the pick on the clock before any of them meant anything.
+              The board does the subtraction: `+6` is six picks ahead of that
+              market and costs you, `-19` is nineteen picks past it and is the
+              reason to take him. Three columns become two and the row reads in
+              one pass.
+
+              Nothing about the model moved. `rec.adp`, `rec.dogAdp` and
+              `rec.adpValue` are all still computed, still sent, and still what
+              the sort controls sort on — only the compact row's rendering
+              changed, and the raw numbers are on the expanded card underneath.
+            */}
+            <MarketDeltaMetric label="ADP" marketAdp={rec.adp} currentPick={currentPick} source="Sleeper" />
+            {/*
+              Absent rather than blank when Underdog has not priced him, so a
               card costs nothing for a player the source does not cover and the
               line stays the height it always was.
             */}
             {rec.dogAdp == null ? null : (
-              <span className="metric" data-testid="dog-metric">
-                DOG{' '}
-                <strong title={rec.marketDisagreement?.note ?? 'Raw Underdog ADP'}>{rec.dogAdp}</strong>
-              </span>
+              <MarketDeltaMetric
+                label="DOG"
+                marketAdp={rec.dogAdp}
+                currentPick={currentPick}
+                source="Underdog"
+                testId="dog-metric"
+                note={rec.marketDisagreement?.note ?? null}
+              />
             )}
-            <span className="metric">
-              Val{' '}
-              <strong
-                className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
-              >
-                {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-              </strong>
-            </span>
             <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
           </div>
 
@@ -1699,7 +1853,7 @@ function RecommendationRow({
               stylesheet tightens; it is set from the component count rather
               than from the position, because the width problem is the count.
             */
-            data-dense={(rec.marketProps?.components.length ?? 0) >= 4 ? 'yes' : 'no'}
+            data-dense={densityOf(rec.marketProps?.components.length ?? 0)}
             title={marketLineTitle(rec)}
           >
             <span className="market-label">MKT</span>
@@ -1712,8 +1866,24 @@ function RecommendationRow({
               still what an older client renders.
             */}
             {rec.marketProps ? (
-              rec.marketProps.components.map((c) => (
-                <span className="market-part" key={c.label} data-derived={c.derived ? 'yes' : 'no'}>
+              rec.marketProps.components.map((c, i) => (
+                /*
+                  `data-rank` is what the stylesheet drops when the row runs out
+                  of width, in the order the brief sets: the points total first
+                  because it is the one number that compares across positions,
+                  then receptions, then the yardage, then the touchdowns. A
+                  component removed this way is removed deliberately and is
+                  still in the expanded card — the alternative was an ellipsis
+                  deciding it, which hides whichever component happens to be
+                  last rather than whichever matters least.
+                */
+                <span
+                  className="market-part"
+                  key={c.label}
+                  data-rank={i + 1}
+                  data-derived={c.derived ? 'yes' : 'no'}
+                  data-partial={c.missing.length > 0 ? 'yes' : 'no'}
+                >
                   {c.text}
                 </span>
               ))
@@ -1734,7 +1904,7 @@ function RecommendationRow({
         and never forty.
       */}
       <Disclose open={expanded}>
-        <DraftPlayerDetail rec={rec} marketSource={marketSource} />
+        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
       </Disclose>
     </div>
   );
@@ -1768,9 +1938,14 @@ function RecommendationRow({
 function DraftPlayerDetail({
   rec,
   marketSource,
+  scoringLabel,
+  currentPick,
 }: {
   rec: DraftRecommendation;
   marketSource: DraftBoard['marketSource'];
+  scoringLabel: string | null;
+  /** The pick the compact row's market deltas were measured against. */
+  currentPick: number | null;
 }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
 
@@ -1800,7 +1975,7 @@ function DraftPlayerDetail({
         Before the outlook, because it is the workings of a number the reader
         just tapped past rather than somebody's prose about the season.
       */}
-      <MarketProvenance rec={rec} source={marketSource} />
+      <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
       <InjuryDetail detail={detail} />
@@ -1862,6 +2037,59 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
  * Absent rather than empty when there is no cliff, so the grid column collapses
  * and an unwarned card spends nothing on it.
  */
+/**
+ * One market's consequence, as one column of the compact row.
+ *
+ * The label, the signed number, and a tone the stylesheet paints — nothing
+ * else. `data-tone` is the contract a test reads, deliberately in preference to
+ * a colour: what "reach" looks like is the design's business and may change,
+ * but that a positive delta *is* a reach is the semantics and may not.
+ *
+ * An unknown market prints the app's own unknown mark rather than a zero. Zero
+ * is the claim "he is going at about this market", which is a real reading and
+ * a different one.
+ */
+function MarketDeltaMetric({
+  label,
+  marketAdp,
+  currentPick,
+  source,
+  testId,
+  note,
+}: {
+  /** What the column is called on the row: `ADP` or `DOG`. */
+  label: string;
+  marketAdp: number | null;
+  /** The pick on the clock, from the board itself. Never derived from a row. */
+  currentPick: number | null;
+  /** Whose market it is, for the sentence in the title. */
+  source: string;
+  testId?: string;
+  /** Anything the board wants to say about this market, kept in the title. */
+  note?: string | null;
+}) {
+  const delta = marketDelta(marketAdp, currentPick);
+  return (
+    <span
+      className="metric"
+      {...(testId ? { 'data-testid': testId } : { 'data-testid': 'adp-metric' })}
+      data-tone={delta?.tone ?? 'unknown'}
+    >
+      {label}{' '}
+      {delta == null || marketAdp == null || currentPick == null ? (
+        <Unknown what={`${source} ADP`} />
+      ) : (
+        <strong
+          className={`delta delta-${delta.tone}`}
+          title={note ?? marketDeltaTitle(source, marketAdp, currentPick, delta)}
+        >
+          {delta.label}
+        </strong>
+      )}
+    </span>
+  );
+}
+
 function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: boolean }) {
   const warning = enabled ? tierCliffWarning(rec.tierCliff) : null;
   if (warning == null) return null;

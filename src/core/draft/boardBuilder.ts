@@ -811,12 +811,19 @@ export async function buildDraftBoard(
     position: player.position,
     adp: rankOf(player),
     /*
-     * Read by the local-team prior alone, which multiplies opponent demand.
+     * DOG reaches the simulator for exactly one thing: tail risk.
      *
-     * Deliberately not `dogOf` — the simulator models what the *room* will
-     * do, and the room drafts against the ADP of the platform it is on. DOG
-     * is this app's private read on value and says nothing about eleven other
-     * managers, exactly as `My Guy` and the tally do not.
+     * The survival prior is still Sleeper's and only Sleeper's — the room
+     * drafts against the ADP of the platform it is on, and DOG says nothing
+     * about what eleven other managers will do. What a large DOG-vs-Sleeper
+     * gap does say is that sharp drafters like him more than this room's ADP
+     * implies, so the board should be *less sure he lasts*. It widens the
+     * early tail and cannot move the central estimate. See
+     * `idiosyncraticHazard`.
+     */
+    dogAdp: dogOf(player),
+    /*
+     * Read by the local-team prior alone, which multiplies opponent demand.
      */
     team: player.team,
     order: player.searchRank ?? Number.MAX_SAFE_INTEGER,

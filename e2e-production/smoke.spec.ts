@@ -16,6 +16,37 @@
  * refused.
  *
  *   PRODUCTION_URL=https://… npx playwright test --config playwright.production.config.ts
+ *
+ * ---------------------------------------------------------------------------
+ * **CI DOES NOT RUN THIS FILE, AND THAT IS WHY IT BREAKS AFTER UI WORK.**
+ *
+ * `ci.yml` runs `e2e/`. This suite runs only in `smoke.yml`, after a deploy —
+ * so the first thing that tells you a UI change invalidated an assertion in
+ * here is production going red, minutes after the merge that caused it. That
+ * has happened twice.
+ *
+ * This file keeps its *own copies* of assertions that `e2e/` also makes. When a
+ * row, a label, a card, a metric or a navigation path changes shape, both
+ * suites have to be reconciled with the intended UI, and this one has to be
+ * *run*, not searched. Grep is not proof: the second miss was a grep for `Val`
+ * that returned two docblock comments, which read as "no assertions" when the
+ * live one sat eleven lines below them.
+ *
+ * Run it against a local production build before declaring any UI branch
+ * merge-ready — it is part of the exact-head gate, not an afterthought:
+ *
+ *   npm run build && node scripts/build-server.mjs
+ *   FA_SEED=1 … node scripts/dev-server.mjs --port 8794 &
+ *   PRODUCTION_URL=http://127.0.0.1:8794 \
+ *     npx playwright test --config playwright.production.config.ts \
+ *     --project=chromium-iphone-390 --project=chromium-small-360
+ *
+ * Two tests fail against the demo seed and pass against real production, so a
+ * local run is expected to show exactly these and nothing else: the Team
+ * `Starter` assertion (stale since the shipped density work moved that word
+ * into the row's `aria-label`) and the waiver-advice test (already flaky).
+ * Any *third* failure is yours.
+ * ---------------------------------------------------------------------------
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -265,11 +296,17 @@ test.describe('the deployed app', () => {
   });
 
   /**
-   * The draft board is the reason the app exists, so its four numbers are
-   * checked as text rather than as a screenshot: Score, ADP, Val and Next, on
+   * The draft board is the reason the app exists, so its numbers are checked as
+   * text rather than as a screenshot: Score, the two market deltas and Next, on
    * the metrics line, with the tally beside the name.
+   *
+   * `Val` used to be one of them. The row prints market *consequence* now —
+   * `ADP +3` is three picks ahead of Sleeper's market, `DOG -22` is twenty-two
+   * picks past Underdog's — which is the subtraction a reader was doing against
+   * the pick on the clock anyway, and `Val` was a third answer to the same
+   * question. It moved to the expanded card with both raw markets.
    */
-  test('the draft board still reads Score · ADP · Val · Next', async ({ page }) => {
+  test('the draft board reads Score · ADP · DOG · Next as market deltas', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
 
@@ -281,8 +318,13 @@ test.describe('the deployed app', () => {
     const metrics = await rows.first().locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
+    expect(metrics, 'Val is still on the compact row').not.toMatch(/\bVal\b/);
+
+    // The ADP column is a signed whole number of picks, or an honest unknown —
+    // never a raw market position, which is what it used to be.
+    const adp = (await rows.first().getByTestId('adp-metric').innerText()).trim();
+    expect(adp, `the ADP column read "${adp}"`).toMatch(/^ADP\s+([+-]?\d+|unknown)$/);
 
     // The position is still written in letters, not only painted.
     const badge = (await rows.first().locator('.pos-pill').innerText()).trim();
@@ -453,20 +495,44 @@ test.describe('the deployed app', () => {
     expect(await page.locator('html').getAttribute('data-theme')).toBeNull();
   });
 
-  test('a player opens in place, carrying his whole file', async ({ page }) => {
+  /**
+   * A player is his own page now, and Back is a real Back.
+   *
+   * This used to assert the opposite — that the file unfolded inside the row it
+   * was opened from — and it was right to, until the density pass moved a
+   * screen and a half of prose out of a list whose job is being scanned. The
+   * subject changed, so the test changed with it; what it must still prove is
+   * that nothing was lost on the way, which is why it walks to the ledger
+   * rather than stopping at the header.
+   *
+   * Still one document and no navigation: the app is a single page, and a
+   * pushed screen that changed the URL would break the browser's own Back.
+   */
+  test('a player opens as his own page, carrying his whole file', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
     test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
 
-    const first = rows.first();
-    await first.click();
-    await expect(first.getByTestId('player-file')).toBeVisible();
-    await expect(first.getByTestId('evidence-heading')).toBeVisible();
-    // A disclosure, not a screen: the list is still underneath it.
-    expect(await rows.count()).toBeGreaterThan(0);
+    const before = await rows.count();
+    await rows.first().click();
+
+    const pushed = page.getByTestId('player-page');
+    await expect(pushed).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+
+    // The ledger is one tap further in, and it is entire.
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
+    await expect(page.getByTestId('evidence-heading')).toBeVisible();
+
+    // A screen, not a disclosure — and still one document, so the browser's
+    // own Back still leaves the app rather than the player.
+    await expect(page.getByTestId('back-button')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
-    await first.locator('.row-button').click();
+
+    await page.getByTestId('back-button').click();
+    await expect(rows.first()).toBeVisible();
+    expect(await rows.count()).toBe(before);
   });
 
   /**
@@ -1099,5 +1165,278 @@ test.describe('the decision intelligence', () => {
     await page.getByTestId('sort-score').click();
     await expect(page.getByTestId('sort-score')).toHaveAttribute('aria-checked', 'true');
     expect((await snapshot()).order).toEqual(byScore.order);
+  });
+
+  /**
+   * The `MKT` line, on the deployed board, for each position that has one.
+   *
+   * The dev server proves the arithmetic against a mock provider whose coverage
+   * is fixed and known. Only production can say what the *real* provider prices
+   * — which markets a quarterback actually has, whether receptions come through
+   * for a tight end — and therefore whether the card a reader opens tonight has
+   * the numbers this line was built to carry.
+   *
+   * Read-only, and it asserts per position rather than in aggregate: a board
+   * where every receiver is priced and no quarterback is would satisfy any
+   * count-based check and would be exactly the gap worth knowing about.
+   *
+   * The first draft of this test skipped itself on an unpriced board and passed
+   * green while checking nothing at all. It now prints what the deployment
+   * holds before it asserts anything, and separates a broken pipeline (a stored
+   * snapshot that reaches no card — a failure) from a provider that published
+   * nothing to store (a skip that says so). See the comment at the assertion.
+   */
+  test('carries market context on a quarterback, a back, a receiver and a tight end', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const board = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const selected = overview?.selectedLeague?.id;
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league =
+        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
+        leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
+      return {
+        scoringLabel: data.league?.scoringLabel ?? null,
+        // Whether the deployment holds a season-market snapshot at all, which
+        // is a different fact from a board whose players went unmatched.
+        marketSource: data.marketSource ?? null,
+        // …and how much is *in* that snapshot, which is a third fact again. A
+        // provider can run, store a snapshot, and have published nothing.
+        snapshot: await (async () => {
+          const res = await fetch('/api/vegas/season');
+          if (!res.ok) return null;
+          const status = await res.json();
+          return { quotes: status?.quotes ?? null, players: status?.players ?? null, reason: status?.reason ?? null };
+        })(),
+        rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
+          position: r['position'],
+          marketProps: r['marketProps'],
+          marketBaseline: r['marketBaseline'],
+        })),
+      };
+    });
+    test.skip(!board || board.rows.length === 0, 'no league selected on this deployment');
+
+    type Row = {
+      position: string;
+      marketProps: { components: { label: string; value: number; missing: string[] }[] } | null;
+      marketBaseline: { points: number | null; coverage: number; contributions: { points: number }[] } | null;
+    };
+    const rows = board!.rows as Row[];
+    const priced = rows.filter((r) => r.marketProps);
+
+    /*
+     * What each position actually got, printed before anything is asserted.
+     *
+     * A real provider's coverage is its own business and varies by week; this
+     * suite may not fail because a tight end went unpriced today. What it may
+     * do is print the shape of that coverage, so a card that quietly stopped
+     * carrying receptions is visible in the run rather than discovered in a
+     * draft. Printed first so the diagnosis survives a failure below.
+     */
+    const summary = ['QB', 'RB', 'WR', 'TE'].map((position) => {
+      const forPosition = priced.filter((r) => r.position === position);
+      const labels = new Set(forPosition.flatMap((r) => r.marketProps!.components.map((c) => c.label)));
+      return `${position}: ${forPosition.length} priced [${[...labels].join(', ') || 'none'}]`;
+    });
+    const source = board!.marketSource
+      ? `${board!.marketSource.provider} ${board!.marketSource.season} @ ${board!.marketSource.fetchedAt}`
+      : 'no season-market snapshot on this deployment';
+    console.log(
+      `market coverage — ${summary.join(' | ')}; ` +
+        `${priced.length}/${rows.length} of the board priced; source: ${source}; ` +
+        `snapshot: ${board!.snapshot?.quotes ?? '?'} quotes / ${board!.snapshot?.players ?? '?'} players; ` +
+        `scoring: ${board!.scoringLabel}`,
+    );
+
+    /*
+     * Three different facts, and only the last is a defect.
+     *
+     * 1. **No snapshot at all.** Nothing has been stored, so there is no market
+     *    to put on a card.
+     * 2. **A snapshot holding nothing.** The provider ran and published no
+     *    season markets. `mock` is constructed with an empty slate in
+     *    production, and SportsGameOdds publishes no season-long player markets
+     *    at all — probed, and asserted in `season.markets.test.ts`. An empty
+     *    snapshot is the honest record of that, not a fault.
+     * 3. **A snapshot with quotes in it that reach no card.** *That* is a
+     *    broken pipeline, and it fails with the counts attached.
+     *
+     * The middle case is the one this test got wrong. It had only the two-way
+     * split, so the day a daily refresh began storing empty snapshots the check
+     * went red on every production run for a condition that is not a fault —
+     * which is the same "train the reader to ignore a red smoke" failure the
+     * two-way split was written to avoid, arrived at from the other side.
+     *
+     * Both non-defects skip, and both name their cause. The coverage line above
+     * has already printed either way.
+     */
+    const quotes = board!.snapshot?.quotes ?? null;
+    test.skip(
+      !board!.marketSource,
+      `no season-market snapshot on this deployment, so no card can carry a market line (${rows.length} rows on the board)`,
+    );
+    test.skip(
+      quotes === 0,
+      `the snapshot is empty — the provider published no season markets (${source}; ` +
+        `reason: ${board!.snapshot?.reason ?? 'none given'})`,
+    );
+    expect(
+      priced.length,
+      `the deployment holds a snapshot of ${quotes ?? 'an unknown number of'} quotes (${source}) ` +
+        `but no player on the live board carries a market line (${rows.length} rows)`,
+    ).toBeGreaterThan(0);
+
+    // Whatever is priced has to be priced honestly, whichever position it is.
+    for (const row of priced) {
+      const labels = row.marketProps!.components.map((c) => c.label);
+      expect(new Set(labels).size, 'a component is listed twice').toBe(labels.length);
+      for (const component of row.marketProps!.components) {
+        expect(component.value, `${row.position} ${component.label} came through as zero`).toBeGreaterThan(0);
+      }
+
+      const points = row.marketProps!.components.find((c) => c.label === 'pts');
+      if (points) {
+        // The compact total and the components behind it are the same number.
+        expect(points.value).toBe(row.marketBaseline?.points);
+        const summed = (row.marketBaseline?.contributions ?? []).reduce((t, c) => t + c.points, 0);
+        expect(Math.round(summed * 100) / 100).toBe(points.value);
+      }
+    }
+  });
+  /**
+   * The Score board, on the deployed site, per position.
+   *
+   * The one invariant this whole tier pass exists to protect: **the selected
+   * sort decides who appears where, and a tier is punctuation on that
+   * sequence.** It was broken in production — a tight end scoring 68 was drawn
+   * above two scoring 83 because the market clustered him higher — and the
+   * repair is only real if the deployed board obeys it.
+   *
+   * Checked per position rather than in aggregate, because the report was
+   * explicit that quarterbacks looked right while tight ends and backs did not.
+   * One position passing says nothing about the pipeline.
+   */
+  test('never draws a lower Score above a higher one, at any position', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const summary: string[] = [];
+    const violations: string[] = [];
+
+    for (const position of ['QB', 'RB', 'WR', 'TE']) {
+      const chip = page.getByRole('button', { name: position, exact: true });
+      if ((await chip.count()) === 0) {
+        summary.push(`${position}: no filter`);
+        continue;
+      }
+      await chip.click();
+      await expect(page.getByTestId('board-list')).toBeVisible();
+      await settled(page, 'recommendation-row');
+
+      /*
+       * Rows and separators in DOM order, so the separators can be checked for
+       * placement as well as the rows for ordering.
+       */
+      const sequence = await page.evaluate(() => {
+        const list = document.querySelector('[data-testid="board-list"]');
+        const nodes = list?.querySelectorAll('[data-testid="tier-divider"], [data-testid="recommendation-row"]') ?? [];
+        return [...nodes].map((n) =>
+          n.getAttribute('data-testid') === 'tier-divider'
+            ? { kind: 'divider' as const, score: null, name: null }
+            : {
+                kind: 'row' as const,
+                score: Number((n.querySelector('.score-value')?.textContent ?? '').trim()) || null,
+                name: n.querySelector('.player-name')?.textContent?.trim() ?? null,
+              },
+        );
+      });
+
+      const rows = sequence.filter((n) => n.kind === 'row');
+      const scored = rows.map((r) => r.score).filter((s): s is number => s != null);
+      summary.push(`${position}: ${rows.length} rows, ${sequence.length - rows.length} dividers`);
+
+      for (let i = 1; i < scored.length; i++) {
+        if (scored[i]! > scored[i - 1]!) {
+          const above = rows.find((r) => r.score === scored[i - 1]);
+          const below = rows.find((r) => r.score === scored[i]);
+          violations.push(
+            `${position}: ${below?.name ?? '?'} (${scored[i]}) is drawn below ${above?.name ?? '?'} (${scored[i - 1]})`,
+          );
+        }
+      }
+
+      // A separator may never lead the list, and never follow another.
+      if (sequence[0]?.kind === 'divider') violations.push(`${position}: a divider leads the board`);
+      for (let i = 1; i < sequence.length; i++) {
+        if (sequence[i]!.kind === 'divider' && sequence[i - 1]!.kind === 'divider') {
+          violations.push(`${position}: two dividers in a row`);
+        }
+      }
+    }
+
+    console.log(`score ordering — ${summary.join(' | ')}`);
+    expect(violations, violations.join('; ')).toEqual([]);
+  });
+
+  /**
+   * The late-round survival calibration, on the deployed board.
+   *
+   * Not a threshold on any one player — a real board's percentages are its own
+   * business. What is checked is the failure that shipped: every deep player
+   * reading as a certainty. A board where nothing late is under 99% is the
+   * shape the hazard floor was written to remove.
+   */
+  test('does not report late-round survival as a certainty', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const board = await page.evaluate(async () => {
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
+      return {
+        currentPick: data.currentPick ?? null,
+        rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
+          adp: r['adp'],
+          survival: r['survivalProbability'],
+        })),
+      };
+    });
+    test.skip(!board || board.rows.length === 0, 'no league selected on this deployment');
+
+    const priced = (board!.rows as { adp: number | null; survival: number | null }[]).filter(
+      (r) => r.adp != null && r.survival != null,
+    );
+    test.skip(priced.length === 0, 'nothing on this board carries a survival estimate');
+
+    const late = priced.filter((r) => r.adp! >= 100);
+    console.log(
+      `survival — pick ${board!.currentPick}; ${priced.length} priced, ${late.length} at ADP 100+;` +
+        ` max late ${late.length ? Math.max(...late.map((r) => r.survival!)).toFixed(3) : 'n/a'}`,
+    );
+
+    // Every probability has to be a probability, wherever it came from.
+    for (const row of priced) {
+      expect(row.survival!).toBeGreaterThanOrEqual(0);
+      expect(row.survival!).toBeLessThanOrEqual(1);
+    }
+
+    /*
+     * And the deep end of the board may not be uniformly certain. Skipped
+     * rather than failed when the board has no deep players to look at — that
+     * is a fact about the draft, not about the model.
+     */
+    test.skip(late.length < 5, 'too few deep players on this board to judge late calibration');
+    const allCertain = late.every((r) => r.survival! >= 0.99);
+    expect(allCertain, 'every deep player reads as a certainty, which is the calibration bug').toBe(false);
   });
 });

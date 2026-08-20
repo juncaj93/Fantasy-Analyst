@@ -65,6 +65,13 @@ export interface ReprocessPreview {
   /** Items the current rules find that are not stored yet. */
   wouldAdd: number;
   alreadyStored: number;
+  /**
+   * Stored items that came from a body that could not be read, and that the
+   * repaired parse replaces. Zero unless the email needed decoding repairs.
+   */
+  wouldRetire: ReprocessDisagreement[];
+  /** Decoding repairs the stored body needs before it can be read at all. */
+  repairs: string[];
   /** Stored items the rules now disagree with. Reprocessing will NOT change these. */
   stale: ReprocessDisagreement[];
   /** Disagreements on items a user has corrected. These are never touched. */
@@ -75,9 +82,21 @@ export interface ReprocessPreview {
   detail: string;
 }
 
-function describePreview(added: number, stale: number, protectedCount: number): string {
+function describePreview(
+  added: number,
+  stale: number,
+  protectedCount: number,
+  retired: number,
+  repaired: boolean,
+): string {
   const parts: string[] = [];
+  if (repaired) {
+    parts.push('This email was stored before it could be decoded properly; re-reading it repairs the text first.');
+  }
   parts.push(added === 0 ? 'Nothing new would be added.' : `${added} new item(s) would be added.`);
+  if (retired > 0) {
+    parts.push(`${retired} item(s) read from the unreadable text would be retired, so nothing is counted twice.`);
+  }
   if (stale > 0) {
     parts.push(
       `${stale} stored item(s) are now read differently by the rules, but reprocessing leaves them as they are.`,
@@ -490,10 +509,31 @@ export class NewsletterService {
       tallyDelta.set(e.playerId, (tallyDelta.get(e.playerId) ?? 0) + signed);
     }
 
+    // What the repair would retire. Only a message whose body could not be read
+    // has anything here: its stored rows were derived from garbage, so the
+    // repaired parse replaces rather than joins them.
+    const repairs = result.coverage.repairs;
+    const keep = new Set(result.evidence.map((e) => e.dedupeKey));
+    const wouldRetire: ReprocessDisagreement[] = repairs.length
+      ? (await this.evidence.listLiveBySourceMessage(message.messageId))
+          .filter((row) => !keep.has(row.dedupeKey) && !row.userOverride)
+          .map((row) => ({
+            playerId: row.playerId,
+            excerpt: row.excerpt,
+            storedPolarity: row.polarity,
+            storedMagnitude: row.magnitude,
+            newPolarity: 'retired',
+            newMagnitude: 0,
+            ruleId: row.ruleId,
+          }))
+      : [];
+
     return {
       messageId: message.messageId,
       wouldAdd: added.length,
       alreadyStored: unchanged.length,
+      wouldRetire,
+      repairs,
       stale,
       protectedByUser,
       playersAffected: new Set(added.map((e) => e.playerId)).size,
@@ -502,31 +542,80 @@ export class NewsletterService {
         .map(([playerId, net]) => ({ playerId, net }))
         .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)),
       coverage: result.coverage,
-      detail: describePreview(added.length, stale.length, protectedByUser.length),
+      detail: describePreview(
+        added.length,
+        stale.length,
+        protectedByUser.length,
+        wouldRetire.length,
+        repairs.length > 0,
+      ),
     };
   }
 
   /**
    * Re-run the classifier over a stored message.
-   * User overrides are preserved: existing rows are never updated, only new
-   * dedupe keys are inserted.
+   *
+   * Normally insert-only: existing rows are never updated, only new dedupe keys
+   * are inserted, so a user's correction survives any rule change.
+   *
+   * The one exception is a message whose stored body could not be read — an
+   * email kept before its MIME was decoded correctly. There, insert-only would
+   * double count. The rows already stored were derived from fragments of
+   * undecoded text; the repaired parse produces the same news spelled properly,
+   * which is a different excerpt and therefore a different dedupe key. Both
+   * would then sit in the ledger describing one event. So when — and only
+   * when — a repair was needed, the rows this message owns that the repaired
+   * parse does not reproduce are retired, exactly as a tally re-import retires
+   * the revision it replaces. Rows the user has ruled on are still never
+   * touched, and a signal the repaired parse finds again keeps its own row
+   * rather than gaining a second one.
    */
   async reprocess(message: EmailMessage): Promise<IngestOutcome> {
     const index = await this.players.buildIndex();
     const result = processNewsletter(message, index);
     const { inserted } = await this.evidence.insertProposed(result.evidence);
+
+    let superseded: { playerId: string }[] = [];
+    let keptForUserOverride: { playerId: string }[] = [];
+    if (result.coverage.repairs.length > 0) {
+      const outcome = await this.evidence.supersedeStaleImports(
+        message.messageId,
+        result.evidence.map((e) => e.dedupeKey),
+        'superseded-by-decoding-repair',
+      );
+      superseded = outcome.superseded;
+      keptForUserOverride = outcome.keptForUserOverride;
+    }
+
     const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
-    for (const playerId of [...new Set(result.evidence.map((e) => e.playerId))]) {
+    const touched = new Set([
+      ...result.evidence.map((e) => e.playerId),
+      ...superseded.map((e) => e.playerId),
+    ]);
+    for (const playerId of touched) {
       await this.evidence.refreshSignal(playerId, { seasonStart });
     }
+
+    const detail =
+      (result.coverage.repairs.length
+        ? 'The stored email had to be decoded before it could be read. '
+        : '') +
+      `Reprocessed: ${inserted} new item(s).` +
+      (superseded.length
+        ? ` ${superseded.length} item(s) read from the unreadable text were retired, so nothing is counted twice.`
+        : '') +
+      (keptForUserOverride.length
+        ? ` ${keptForUserOverride.length} item(s) you had corrected were left exactly as you set them.`
+        : ' Your existing corrections were left untouched.');
+
     return {
       messageId: message.messageId,
       status: 'processed',
       evidenceInserted: inserted,
       evidencePending: result.stats.pendingReview,
       identityReviews: 0,
-      playersTouched: new Set(result.evidence.map((e) => e.playerId)).size,
-      detail: `Reprocessed: ${inserted} new item(s). Your existing corrections were left untouched.`,
+      playersTouched: touched.size,
+      detail,
       coverage: result.coverage,
       result,
     };

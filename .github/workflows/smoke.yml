@@ -27,18 +27,28 @@ jobs:
     # A deploy that failed has nothing worth smoke-testing.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-
-    # The same canonical WebKit path as `ci.yml`, for the same reasons and with
-    # the same pinned tag — see the long note there. This workflow had the
-    # identical apt problem: on one run `playwright install --with-deps webkit`
-    # took sixteen of the twenty minutes available, and the run was cancelled
-    # mid-check with nothing failing, which reads exactly like a broken site and
-    # is not one. There is only one way this repository launches WebKit, and
-    # this is it.
-    container: mcr.microsoft.com/playwright:v1.62.1-noble
-
-    # Wall clock for the image pull and `npm ci`, with the real budget on the
-    # step below that can actually hang.
+    # The browser and its system libraries arrive with the image, rather than
+    # being installed onto a runner that is busy installing something else.
+    #
+    # `ci.yml` moved to this image for a measured reason and this file did not
+    # follow, which is how one smoke run sat twenty minutes inside `playwright
+    # install --with-deps webkit` without reaching a single check. `--with-deps`
+    # shells out to apt, the hosted runner image does its own package work in
+    # the first minutes of a job, and apt has no timeout — so the install waits
+    # on `/var/lib/apt/lists/lock` for as long as the runner takes, and a
+    # production check that never runs looks exactly like a broken site.
+    #
+    # The tag is pinned to the Playwright version the lockfile resolves to, and
+    # the step below re-checks that rather than trusting the pin: when the two
+    # drift the browser is downloaded into the container, which costs a minute
+    # and touches no package manager.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      # The image's default user does not own the workspace the runner mounts,
+      # so writes — npm's cache, Playwright's report — fail without this.
+      options: --user 1001
+    # Wall clock for the checks themselves, with the real budget on the step
+    # below that can actually hang. No longer paying for an apt run first.
     timeout-minutes: 45
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
@@ -49,12 +59,19 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      # No install step: the image carries WebKit and its libraries already.
+      - name: Check the image carries the browser this Playwright wants
+        timeout-minutes: 10
+        run: |
+          wanted="$(node -p "require('./node_modules/@playwright/test/package.json').version")"
+          echo "lockfile resolves Playwright to $wanted; image is pinned to v1.62.1-noble"
+          if [ "$wanted" != "1.62.1" ]; then
+            echo "::warning::the container tag and the lockfile have drifted (image v1.62.1, lockfile $wanted); downloading the browser this Playwright wants. Repin the image tag to v$wanted."
+          fi
+          npx playwright install webkit
 
       - name: Check the live site on an iPhone
         # The one step that can hang: twenty minutes of checking a live site is
-        # a stuck browser or a site that stopped answering, and there is now
-        # nothing else in this job it could be.
+        # a stuck browser or a site that stopped answering, whichever apt did.
         timeout-minutes: 20
         run: |
           npx playwright test --config playwright.production.config.ts \

@@ -1,47 +1,34 @@
 /**
- * Player Intelligence: search, and one card per player that opens into
- * everything the app knows about him.
+ * Player Intelligence: a compact, sortable player database, and one tap to
+ * everything the app knows about anybody in it.
  *
- * The same grammar as the draft board, deliberately. A player is the same
- * player on both screens — same identity row, same tally, same injury tag, same
- * expand-in-place disclosure — and the difference is only what the expansion
- * says. On the board it is what a drafter needs in thirty seconds. Here it is
- * the whole file: what is expected of him this season, what he did last season,
- * what is wrong with him, the tally in four windows, the categories it came
- * from, the market's lines, and every piece of evidence behind all of it, never
- * merely an aggregate.
+ * This screen used to be a list of cards that unfolded into a screen and a half
+ * of prose each: the outlook, last season, the injury, four tally windows, the
+ * categories, the market lines and the whole evidence ledger, all rendered
+ * inside a row of the list they were opened from. It read as a page that
+ * exploded rather than a database, and a reader comparing two players spent
+ * their time scrolling past the first one's ledger to reach the second one's
+ * name.
  *
- * That file used to be a screen of its own, reached by pushing. It reads better
- * as a disclosure: the list stays where it was, the reader keeps their place in
- * it, and moving between two players is a tap rather than a round trip.
+ * So the list is now a list — a hundred rows in fixed columns, on one grouped
+ * surface, separated by hairlines — and the file is now a *destination*, pushed
+ * on top with a Back control (see `components/playerPage.tsx`). The reader's
+ * place in the list, what they typed, and which position they had narrowed it
+ * to all survive the round trip, which is the whole point of pushing rather
+ * than replacing.
+ *
+ * Nothing about the data changed. The same two endpoints answer the same two
+ * questions, and every number on the row is the number that was on the card.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type EvidenceItem, type LeagueSummary, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
-import {
-  InjuryDetail,
-  LastSeasonLine,
-  NewsletterTakeaway,
-  ProfileFlags,
-  SeasonOutlook,
-} from '../components/playerDetail.tsx';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
-import {
-  Badge,
-  CompactTally,
-  DetailLabel,
-  Disclose,
-  Empty,
-  InjuryTag,
-  PositionBadge,
-  Signal,
-  SignedValue,
-  Unknown,
-  formatDate,
-  positionCardClass,
-} from '../components/common.tsx';
+import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+import { CompactPlayerRow } from '../components/playerRow.tsx';
+import { PlayerPage, type PlayerSummary } from '../components/playerPage.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -61,14 +48,6 @@ interface PlayerListItem {
   movement: number;
   signal: PlayerSignal | null;
   /** The user's own flag. Absent on responses from an older deployment. */
-  myGuy?: MyGuyFlag;
-}
-
-interface PlayerFile {
-  player: { id: string; name: string; position: string; team: string; status: string | null; aliases: string[] };
-  signal: PlayerSignal;
-  evidence: EvidenceItem[];
-  props: { market: string; line: number | null; bookCount: number; impliedProbability: number | null }[];
   myGuy?: MyGuyFlag;
 }
 
@@ -107,7 +86,8 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  /** Whose page is open on top of the list, and nothing about the list itself. */
+  const [openId, setOpenId] = useState<string | null>(null);
   /**
    * Whether there is more of the list, and whether it is being fetched.
    *
@@ -120,6 +100,18 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    */
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  /*
+   * Where the reader was when they opened a player.
+   *
+   * Back must mean Back. The list itself never unmounts its *state* — the
+   * fetched pages, the query and the filter all live in this component — but
+   * the rows do leave the document while a player's page is on top of them, and
+   * the browser has no memory of a scroll offset for a document that changed
+   * height to zero and back. So it is recorded on the way in and reapplied on
+   * the way out, before the browser paints. See the layout effect below.
+   */
+  const restoreScroll = useRef<number | null>(null);
 
   /*
    * The chips come from the league, exactly as the draft board's do.
@@ -213,14 +205,31 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    *
    * The tab you are on is the one control that has nothing left to do, so iOS
    * gives it this job. It clears what you typed and returns to the top, and
-   * that is the whole of it: an open card stays open, and the hearts, the queue
-   * and every tally are server state that a tab tap has no business touching.
+   * that is the whole of it: the hearts, the queue and every tally are server
+   * state that a tab tap has no business touching.
    */
   useEffect(() => {
     if (resetNonce === 0) return;
     setQuery('');
+    setOpenId(null);
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, [resetNonce]);
+
+  /*
+   * Put the reader back exactly where they were, before the frame is painted.
+   *
+   * `useLayoutEffect` rather than `useEffect` on purpose: an effect that runs
+   * after paint shows the reader the top of the list for one frame and then
+   * jumps them down it, which is worse than not restoring at all. The ref is
+   * consumed rather than merely read, so a later render for any other reason
+   * cannot scroll the page out from under somebody who has since moved.
+   */
+  useLayoutEffect(() => {
+    if (openId !== null || restoreScroll.current === null) return;
+    const top = restoreScroll.current;
+    restoreScroll.current = null;
+    window.scrollTo({ top, behavior: 'auto' });
+  }, [openId]);
 
   /**
    * Star a player from the list.
@@ -238,6 +247,33 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       setFlagging(null);
     }
   };
+
+  const open = openId == null ? null : (players.find((p) => p.id === openId) ?? null);
+
+  /*
+   * The player's page, on top of the list rather than instead of it.
+   *
+   * The list's state — every page fetched, the query, the filter, the hearts —
+   * lives in this component and is untouched by the push, so Back is a genuine
+   * Back rather than a reload. That is the requirement the whole navigation
+   * model exists to meet.
+   */
+  if (open) {
+    return (
+      <PlayerPage
+        player={toSummary(open)}
+        backLabel="Players"
+        onBack={() => setOpenId(null)}
+        trailing={
+          <MyGuyControl
+            myGuy={open.myGuy ?? EMPTY_MY_GUY}
+            busy={flagging === open.id}
+            onChange={(level) => void setMyGuy(open.id, level)}
+          />
+        }
+      />
+    );
+  }
 
   return (
     <>
@@ -294,14 +330,16 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         </Empty>
       ) : (
         <>
-          <div role="list" aria-label="Players, best first" data-testid="players-list">
+          <div className="dense-group" role="list" aria-label="Players, best first" data-testid="players-list">
             {players.map((p) => (
               <PlayerRow
                 key={p.id}
                 player={p}
-                expanded={expanded === p.id}
                 busy={flagging === p.id}
-                onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
+                onOpen={() => {
+                  restoreScroll.current = window.scrollY;
+                  setOpenId(p.id);
+                }}
                 onMyGuy={(level) => void setMyGuy(p.id, level)}
               />
             ))}
@@ -320,6 +358,20 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       )}
     </>
   );
+}
+
+/** What the page needs from the row the reader tapped, and nothing more. */
+function toSummary(p: PlayerListItem): PlayerSummary {
+  return {
+    id: p.id,
+    name: p.name,
+    position: p.position,
+    team: p.team,
+    status: p.status,
+    draftRank: p.draftRank,
+    adjustedRank: p.adjustedRank,
+    movement: p.movement,
+  };
 }
 
 /**
@@ -395,297 +447,103 @@ function LoadMore({
 }
 
 /**
- * One player, collapsed to the same shape a draft row has.
+ * One player, on one row, in the columns every row shares.
  *
- * Rank, the user's own flag, the name, the headline tally, the injury tag and
- * the position — then the windows and the ranking underneath. The only
- * difference from the board is which numbers are worth the second line: there
- * it is the four that decide a pick, here it is the tally over time and where
- * the ranking came from.
+ * Rank, the reader's own flag, the name, the headline tally, the availability
+ * tag and the position on the top line; the lifetime tally, the recent window,
+ * Sleeper's own order and what the research moved him underneath. That is the
+ * whole row — seven facts in two lines and a 44px tap target, where the same
+ * seven used to take a card with a coloured wash and a disclosure arrow.
+ *
+ * Everything the card used to unfold is now one tap away on the player's own
+ * page, which is where a screen and a half of prose belongs.
  */
 function PlayerRow({
   player,
-  expanded,
   busy,
-  onToggle,
+  onOpen,
   onMyGuy,
 }: {
   player: PlayerListItem;
-  expanded: boolean;
   busy: boolean;
-  onToggle: () => void;
+  onOpen: () => void;
   onMyGuy: (level: 0 | 1 | 2 | 3) => void;
 }) {
-  return (
-    <div
-      className={positionCardClass(player.position, expanded ? 'player-row-open' : '')}
-      data-testid="player-search-row"
-      data-player-id={player.id}
-      data-position={(player.position ?? '').toUpperCase()}
-      role="listitem"
-    >
-      <button className="row-button" aria-expanded={expanded} onClick={onToggle}>
-        <div className="player-row-top">
-          <span className="rank" aria-hidden="true">
-            {player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
-          </span>
-          {/*
-            A heart here, a star on the draft board — two different marks. This
-            one is an opinion and moves the player up your board; the star over
-            there is a bookmark and changes nothing.
-          */}
-          <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />
-          <span className="player-name">{player.name}</span>
-          {/*
-            The same headline tally, in the same place, as on the draft board —
-            and the same availability tag beside it: nothing at all for a healthy
-            player, `Q` for a questionable one. This was a word-length badge
-            reading "Questionable" or "Out", which is the same fact said three
-            times as loudly as the board says it.
-
-            Both sit in the same fixed-width field the board uses, so the club
-            marks line up down this list too. See `--row-meta`.
-          */}
-          <span className="player-row-meta">
-            <CompactTally net={player.signal?.raw.net ?? 0} label="Lifetime research tally" />
-            <InjuryTag status={player.status} />
-          </span>
-          <PositionBadge position={player.position} team={player.team} />
-        </div>
-
-        <div className="player-row-metrics">
-          <span className="metric">
-            Lifetime <SignedValue net={player.signal?.raw.net ?? 0} />
-            {(player.signal?.raw.items ?? 0) > 0 ? <span className="faint"> ({player.signal!.raw.items})</span> : null}
-          </span>
-          <span className="metric">
-            21d <SignedValue net={player.signal?.last30.net ?? 0} />
-          </span>
-          {/* Say where the order came from, and what the news changed. */}
-          {player.draftRank != null ? (
-            <span className="metric">
-              Sleeper <strong>{player.draftRank}</strong>
-            </span>
-          ) : (
-            <span className="metric faint">unranked</span>
-          )}
-          {player.movement ? (
-            <Badge tone={player.movement > 0 ? 'pos' : 'neg'}>
-              {player.movement > 0 ? `▲ ${player.movement}` : `▼ ${Math.abs(player.movement)}`}
-            </Badge>
-          ) : null}
-          {(player.signal?.pendingCount ?? 0) > 0 ? (
-            <Badge tone="warn">{player.signal!.pendingCount} to review</Badge>
-          ) : null}
-        </div>
-      </button>
-
-      <Disclose open={expanded}>
-        <PlayerFileView playerId={player.id} position={player.position} />
-      </Disclose>
-    </div>
-  );
-}
-
-/**
- * Everything the app knows about him, fetched when the card opens.
- *
- * Two requests, because the answers come from two places that fail
- * independently: the tally, the categories, the market lines and the evidence
- * are this app's own record, and the outlook, last season and the injury report
- * are read from elsewhere. Either can be missing without taking the other with
- * it, and neither is asked for until somebody actually opens the card.
- */
-function PlayerFileView({ playerId, position }: { playerId: string; position: string | null }) {
-  const [file, setFile] = useState<PlayerFile | null>(null);
-  const [detail, setDetail] = useState<PlayerDetail | null>(null);
-  const [detailFailed, setDetailFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setFile(null);
-    setDetail(null);
-    setDetailFailed(false);
-    api
-      .get<PlayerFile>(`/api/players/${playerId}`)
-      .then((res) => {
-        if (!cancelled) setFile(res);
-      })
-      .catch(() => {
-        /* the section simply does not appear */
-      });
-    api
-      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
-      .then((res) => {
-        if (!cancelled) setDetail(res);
-      })
-      .catch(() => {
-        if (!cancelled) setDetailFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId]);
+  const lifetime = player.signal?.raw.net ?? 0;
+  const items = player.signal?.raw.items ?? 0;
 
   return (
-    <div className="explain" data-testid="player-file">
-      {/*
-        The takeaway leads, because this screen is the tally's own screen: the
-        windows, the categories and the whole evidence timeline are below, and
-        the one sentence that says what all of it amounts to belongs above them
-        rather than buried after somebody else's season preview.
-      */}
-      <NewsletterTakeaway detail={detail} />
-      <SeasonOutlook detail={detail} failed={detailFailed} />
-      <LastSeasonLine detail={detail} failed={detailFailed} position={position} />
-      <InjuryDetail detail={detail} />
-      <ProfileFlags detail={detail} />
+    <div role="listitem">
+      <CompactPlayerRow
+        playerId={player.id}
+        name={player.name}
+        position={player.position}
+        team={player.team}
+        status={player.status}
+        tally={lifetime}
+        rank={player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
+        /*
+          A heart here, a star on the draft board — two different marks. This
+          one is an opinion and moves the player up your board; the star over
+          there is a bookmark and changes nothing.
 
-      {file ? (
-        <PlayerRecord file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />
-      ) : (
-        <div className="spinner">Reading his file…</div>
-      )}
-    </div>
-  );
-}
+          It sits inside the row and is its own control, which is why the row is
+          a button beside it rather than a button around it.
+        */
+        leading={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
+        onOpen={onOpen}
+        testId="player-search-row"
+        /*
+          Four columns, and the movement gets one of its own.
 
-/** The tally in four windows, the categories, the market and the evidence. */
-function PlayerRecord({ file, quotedEvidenceIds }: { file: PlayerFile; quotedEvidenceIds: string[] }) {
-  const { signal, evidence, props } = file;
-  /*
-   * Which rows the takeaway above was drawn from.
-   *
-   * This is where the takeaway's provenance lives — down in the timeline rather
-   * than beside the sentence, because a sentence followed by two item ids and a
-   * derivation label is no longer a takeaway. A reader who wants to check it
-   * scrolls here and finds the source rows marked.
-   */
-  const quoted = new Set(quotedEvidenceIds);
-  return (
-    <>
-      <DetailLabel>News by window</DetailLabel>
-      <table className="compact">
-        <thead>
-          <tr>
-            <th>Window</th>
-            <th>Pos</th>
-            <th>Neg</th>
-            <th>Net</th>
-            <th>Items</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(
-            [
-              ['Last 7d', signal.last7],
-              ['Last 21d', signal.last30],
-              ['Season', signal.seasonToDate],
-              ['Lifetime', signal.raw],
-            ] as const
-          ).map(([label, w]) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td>{w.positive}</td>
-              <td>{w.negative}</td>
-              <td>
-                <Signal net={w.net} />
-              </td>
-              <td>{w.items}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {signal.pendingCount > 0 ? (
-        <div className="hint hint-caution">
-          {signal.pendingCount} news item{signal.pendingCount === 1 ? '' : 's'} still waiting for your review, so
-          {signal.pendingCount === 1 ? ' it is' : ' they are'} not counted in these tallies yet.
-        </div>
-      ) : null}
+          It was merged into the ADP cell to stop a value truncating, and that
+          fixed the width at the cost of the reading: `ADP 2.1▲1.6` is two
+          numbers with nothing between them, which is exactly the collision the
+          brief calls out by name. Label, value and movement are three different
+          things and they now sit in three different places.
 
-      {Object.keys(signal.categoryBreakdown).length > 0 ? (
-        <>
-          <DetailLabel>Categories</DetailLabel>
-          <div className="badge-row" style={{ marginTop: 0 }}>
-            {Object.entries(signal.categoryBreakdown).map(([cat, v]) => (
-              <Badge key={cat} tone={v.positive > v.negative ? 'pos' : v.negative > v.positive ? 'neg' : 'neutral'}>
-                {cat}: +{v.positive} / −{v.negative}
-              </Badge>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      <DetailLabel>Vegas props</DetailLabel>
-      {props.length === 0 ? (
-        <div className="muted">
-          No prop data cached for this player. <Unknown what="Vegas expectation" />
-        </div>
-      ) : (
-        <table className="compact">
-          <thead>
-            <tr>
-              <th>Market</th>
-              <th>Line</th>
-              <th>Books</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.map((p) => (
-              <tr key={p.market}>
-                <td>{p.market}</td>
-                <td>
-                  {p.line != null
-                    ? p.line
-                    : p.impliedProbability != null
-                      ? `${Math.round(p.impliedProbability * 100)}%`
-                      : '—'}
-                </td>
-                <td>{p.bookCount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <div className="detail-label" data-testid="evidence-heading">
-        Evidence timeline ({evidence.length})
-      </div>
-      {evidence.length === 0 ? (
-        <div className="muted">No evidence recorded yet.</div>
-      ) : (
-        evidence.map((e) => <EvidenceRow key={e.id} item={e} quoted={quoted.has(e.id)} />)
-      )}
-    </>
-  );
-}
-
-export function EvidenceRow({ item, quoted = false }: { item: EvidenceItem; quoted?: boolean }) {
-  const effective = item.userOverride?.polarity ?? item.polarity;
-  const cls = effective === 'positive' ? 'pos' : effective === 'negative' ? 'neg' : effective === 'mixed' ? 'mixed' : '';
-  const glyph = effective === 'positive' ? '▲' : effective === 'negative' ? '▼' : effective === 'mixed' ? '◆' : '–';
-  return (
-    <div className={`evidence ${cls}`} data-testid="evidence-item">
-      <div className="evidence-meta">
-        <span>
-          {glyph} {effective}
-          {item.userOverride ? ' (yours)' : ''}
-        </span>
-        {quoted ? <span data-testid="evidence-quoted">quoted above</span> : null}
-        <span>mag {item.userOverride?.magnitude ?? item.magnitude}</span>
-        <span>{item.category ?? 'uncategorised'}</span>
-        <span>{formatDate(item.sourceDate)}</span>
-        <span>{item.reviewStatus}</span>
-      </div>
-      {item.contextSummary ? <div className="evidence-excerpt">{item.contextSummary}</div> : null}
-      <div className="faint" data-testid="evidence-excerpt">
-        “{item.excerpt}”
-      </div>
-      <div className="evidence-meta">
-        <span>{item.sourceName}</span>
-        {item.ruleId ? <span>rule: {item.ruleId}</span> : null}
-        <span>confidence: {item.confidence}</span>
-      </div>
+          What made room for the fourth column was taking the pending-review
+          chip off the row entirely. It is not needed to scan a list of players
+          — the Review tab already carries the count as a badge, and the
+          player's own page still says his tally is incomplete — so it moved one
+          tap deeper and every row is exactly two lines again.
+        */
+        metrics={[
+          {
+            label: 'Life',
+            value: (
+              <>
+                <SignedValue net={lifetime} />
+                {items > 0 ? <span className="faint"> ({items})</span> : null}
+              </>
+            ),
+          },
+          { label: '21d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
+          {
+            label: 'ADP',
+            testId: 'players-adp',
+            value:
+              player.draftRank != null ? (
+                player.draftRank
+              ) : (
+                <span className="faint" title="Sleeper does not rank him">
+                  —
+                </span>
+              ),
+          },
+          {
+            label: '',
+            testId: 'players-movement',
+            value: player.movement ? (
+              <span className={player.movement > 0 ? 'tally tally-pos' : 'tally tally-neg'}>
+                {player.movement > 0 ? `▲ ${player.movement}` : `▼ ${Math.abs(player.movement)}`}
+              </span>
+            ) : (
+              <span className="faint">—</span>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

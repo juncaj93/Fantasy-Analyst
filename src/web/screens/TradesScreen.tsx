@@ -4,21 +4,27 @@
  * Sections in a fixed order so the screen does not reshuffle under the reader
  * as evidence arrives, and every row says why it is there. A trade call with no
  * reason attached is a horoscope.
+ *
+ * What changed in the density pass: a suggestion used to be a card five lines
+ * tall — a name, an injury line, a three-cell table of tally windows, a trend
+ * line and a confidence badge — which meant four ideas filled a phone and the
+ * fifth was below the fold. The same five facts now fit two lines and a note:
+ * the windows are a labelled row rather than a table, and the case behind them —
+ * why, the counterpoints, what the league paid for him — moved onto the
+ * player's own page, where the rest of what the app knows about him already is.
+ *
+ * **Nothing about which players appear, in which section, in which order, or
+ * with what confidence has changed.** The board is read exactly as it arrives
+ * from `/api/trades`; this file decides only how much of a phone each idea is
+ * allowed to take.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
-import {
-  Confidence,
-  DetailLabel,
-  Disclose,
-  Empty,
-  Notice,
-  PositionBadge,
-  SignedValue,
-  positionCardClass,
-} from '../components/common.tsx';
+import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
 import { NavBar, SkeletonRows } from '../components/native.tsx';
+import { CompactPlayerRow, RowNote } from '../components/playerRow.tsx';
+import { PlayerPage } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 
 export function TradesScreen() {
@@ -49,6 +55,28 @@ export function TradesScreen() {
     );
   }
 
+  const open = openId == null ? null : (board.sections.flatMap((s) => s.players).find((p) => p.playerId === openId) ?? null);
+
+  /*
+   * The same player page every other screen opens, with the trade case at the
+   * top of it.
+   *
+   * A separate "trade detail" screen would have been a second place where a
+   * player's evidence, injury and outlook are rendered — and a reader who taps
+   * a name expects the player, not a sub-view of the screen they came from. The
+   * case is passed in as context and sits above the page's own tabs.
+   */
+  if (open) {
+    return (
+      <PlayerPage
+        player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}
+        backLabel="Trades"
+        onBack={() => setOpenId(null)}
+        context={<TradeCase suggestion={open} />}
+      />
+    );
+  }
+
   return (
     <>
       {/*
@@ -66,8 +94,18 @@ export function TradesScreen() {
         }
       />
 
+      {/*
+        The board's own caveats, as status lines rather than warning blocks.
+
+        These are almost always one sentence about what could not be worked out
+        — "your roster was not identified, so sell suggestions are unavailable" —
+        and a filled yellow box the width of the phone was the loudest object on
+        a screen whose subject is a list of trade ideas.
+      */}
       {board.warnings.map((w) => (
-        <Notice key={w}>{w}</Notice>
+        <StatusRow key={w} tone="info" data-testid="trades-warning">
+          {w}
+        </StatusRow>
       ))}
 
       {board.sections.length === 0 ? (
@@ -76,21 +114,43 @@ export function TradesScreen() {
           issues have been read, this fills in.
         </Empty>
       ) : (
-        board.sections.map((section) => (
-          <div key={section.verdict}>
-            <div className="section-title">
-              {section.label} ({section.players.length})
+        board.sections.map((section) => {
+          /*
+           * A confidence every row shares is a fact about the section.
+           *
+           * Printed per row it was the same two words down the right-hand edge
+           * of every suggestion — a pattern the eye follows instead of the
+           * names, qualifying nothing because it never varies. Said once beside
+           * the section's own count it still qualifies everything under it, and
+           * the rows get their line back for the reason they are there.
+           *
+           * Only when it is genuinely unanimous. A section where the confidence
+           * differs row to row is one where the reader needs it row to row.
+           */
+          const levels = new Set(section.players.map((p) => p.confidence));
+          const shared = levels.size === 1 ? [...levels][0]! : null;
+          return (
+            <div key={section.verdict}>
+              <div className="section-title section-title-row">
+                <span>{section.label}</span>
+                <span className="section-title-meta">
+                  <span className="section-count">{section.players.length}</span>
+                  {shared ? <Confidence level={shared} /> : null}
+                </span>
+              </div>
+              <div className="dense-group" role="list" aria-label={section.label}>
+                {section.players.map((s) => (
+                  <TradeRow
+                    key={s.playerId}
+                    suggestion={s}
+                    showConfidence={shared == null}
+                    onOpen={() => setOpenId(s.playerId)}
+                  />
+                ))}
+              </div>
             </div>
-            {section.players.map((s) => (
-              <TradeRow
-                key={s.playerId}
-                suggestion={s}
-                expanded={openId === s.playerId}
-                onToggle={() => setOpenId(openId === s.playerId ? null : s.playerId)}
-              />
-            ))}
-          </div>
-        ))
+          );
+        })
       )}
 
       {board.considered > 0 ? (
@@ -104,113 +164,123 @@ export function TradesScreen() {
 }
 
 /**
- * One trade idea.
+ * One trade idea, in two lines and a sentence.
  *
- * The three tally windows used to sit side by side as three identical signals,
- * which read as the same number printed three times — `+13 pos +13 pos +13 pos`.
- * Nothing is merged and nothing is hidden: each window is simply named, so the
- * eye can see at once whether the case is a lifetime body of evidence, a recent
- * move, or both. Confidence qualifies that signal rather than competing with it,
- * so it sits at the end of the trend line in the quietest treatment that is
- * still legible.
+ * The three windows sit in the row's own columns rather than in a table of
+ * their own: `Life +13 · 30d +13 · 7d +13` reads as three readings of one
+ * signal, which is what they are, and the eye can run down any one of them
+ * across the whole section. Confidence qualifies the signal, so it sits at the
+ * end of the reason line in the quietest treatment that is still legible.
+ *
+ * The availability line survives, and it is deliberately the trade vocabulary
+ * rather than the Start/Sit one: a designation costing a lineup six points is
+ * not the same fact as a player whose season is in question. It replaces the
+ * reason on the rows that have one, because a row may have exactly one sentence
+ * and an injury outranks a trend.
  */
 function TradeRow({
   suggestion,
-  expanded,
-  onToggle,
+  showConfidence,
+  onOpen,
 }: {
   suggestion: TradeSuggestion;
-  expanded: boolean;
-  onToggle: () => void;
+  /** False when the section header already said it for every row under it. */
+  showConfidence: boolean;
+  onOpen: () => void;
 }) {
   const w = suggestion.windows;
   const reasons = withoutRepeats(suggestion.reasons);
-  const counterpoints = withoutRepeats(suggestion.counterpoints, reasons);
+  const line = suggestion.injury.line ?? reasons[0];
+
   return (
-    <button
-      className={positionCardClass(suggestion.position)}
-      data-testid="trade-row"
-      data-position={(suggestion.position ?? '').toUpperCase()}
-      aria-expanded={expanded}
-      onClick={onToggle}
-    >
-      <div className="player-row-top">
-        <span className="player-name">{suggestion.name}</span>
-        <PositionBadge position={suggestion.position} team={suggestion.team} />
+    <div role="listitem">
+      <CompactPlayerRow
+        playerId={suggestion.playerId}
+        name={suggestion.name}
+        position={suggestion.position}
+        team={suggestion.team}
+        onOpen={onOpen}
+        testId="trade-row"
+        metrics={[
+          { label: 'Life', value: <SignedValue net={w.lifetime} /> },
+          { label: '30d', value: <SignedValue net={w.last30} /> },
+          { label: '7d', value: <SignedValue net={w.last7} /> },
+        ]}
+        note={
+          line ? (
+            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
+              <span
+                className={suggestion.injury.line ? 'injury-line-inline' : undefined}
+                data-testid={suggestion.injury.line ? 'trade-injury' : 'trade-line'}
+              >
+                {line}
+              </span>
+            </RowNote>
+          ) : (
+            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
+              <span className="faint">No single reason leads — the case is on his page.</span>
+            </RowNote>
+          )
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * The whole case for moving him, at the top of his own page.
+ *
+ * Everything the collapsed card used to hide behind a disclosure, in the place
+ * a reader who tapped the row is already looking — and nothing is lost on the
+ * way: the reasons, the counterpoints, what this league paid for him, and how
+ * much evidence is behind all of it.
+ */
+function TradeCase({ suggestion }: { suggestion: TradeSuggestion }) {
+  const w = suggestion.windows;
+  const reasons = withoutRepeats(suggestion.reasons);
+  const counterpoints = withoutRepeats(suggestion.counterpoints, reasons);
+
+  return (
+    <div data-testid="trade-case">
+      <div className="trade-case-head">
+        <span className="trade-case-verdict">{suggestion.label}</span>
+        <Confidence level={suggestion.confidence} />
       </div>
 
-      {/*
-        Availability, in the terms a trade is decided in.
-
-        Deliberately not the Start/Sit language: "Q · hamstring — appears
-        short-term" is the whole point, because a designation that costs a
-        lineup decision six points barely touches what a player is worth for the
-        rest of the season. Absent for everybody healthy, which is most of them.
-      */}
       {suggestion.injury.line ? (
         <div className="injury-line" data-testid="trade-injury">
           {suggestion.injury.line}
         </div>
       ) : null}
 
-      <div className="window-row" data-testid="trade-windows">
-        <div className="window-cell">
-          <div className="window-label">Lifetime</div>
-          <div className="window-value">
-            <SignedValue net={w.lifetime} />
+      <DetailLabel>Why</DetailLabel>
+      <ReasonList items={reasons} />
+      {counterpoints.length > 0 ? (
+        <>
+          <DetailLabel>{counterpoints.length === 1 ? 'Counterpoint' : 'Counterpoints'}</DetailLabel>
+          <ReasonList muted items={counterpoints} />
+        </>
+      ) : null}
+      {/*
+        What his manager spent on him.
+
+        Real context for a trade rather than decoration: what somebody paid is
+        most of what they will want back, and a second-round pick from August is
+        the number a February offer gets measured against. Absent for anybody
+        picked up off waivers, which is the honest answer — they cost nothing,
+        and a `0.00` would be a fabrication.
+      */}
+      {suggestion.draft?.line ? (
+        <>
+          <DetailLabel>Draft</DetailLabel>
+          <div className="muted" data-testid="trade-draft-provenance">
+            {suggestion.draft.line}
           </div>
-        </div>
-        <div className="window-cell">
-          <div className="window-label">30d</div>
-          <div className="window-value">
-            <SignedValue net={w.last30} />
-          </div>
-        </div>
-        <div className="window-cell">
-          <div className="window-label">7d</div>
-          <div className="window-value">
-            <SignedValue net={w.last7} />
-          </div>
-        </div>
+        </>
+      ) : null}
+      <div className="faint" style={{ marginTop: 8 }}>
+        {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
       </div>
-
-      <div className="trade-trend">
-        <span className="trade-line">{reasons[0]}</span>
-        <Confidence level={suggestion.confidence} />
-      </div>
-
-      <Disclose open={expanded}>
-        <div className="explain">
-          <DetailLabel>Why</DetailLabel>
-          <ReasonList items={reasons} />
-          {counterpoints.length > 0 ? (
-            <>
-              <DetailLabel>{counterpoints.length === 1 ? 'Counterpoint' : 'Counterpoints'}</DetailLabel>
-              <ReasonList muted items={counterpoints} />
-            </>
-          ) : null}
-          {/*
-            What his manager spent on him.
-
-            Real context for a trade rather than decoration: what somebody paid
-            is most of what they will want back, and a second-round pick from
-            August is the number a February offer gets measured against. Absent
-            for anybody picked up off waivers, which is the honest answer — they
-            cost nothing, and a `0.00` would be a fabrication.
-          */}
-          {suggestion.draft?.line ? (
-            <>
-              <DetailLabel>Draft</DetailLabel>
-              <div className="muted" data-testid="trade-draft-provenance">
-                {suggestion.draft.line}
-              </div>
-            </>
-          ) : null}
-          <div className="faint" style={{ marginTop: 8 }}>
-            {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
-          </div>
-        </div>
-      </Disclose>
-    </button>
+    </div>
   );
 }

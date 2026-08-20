@@ -34,9 +34,9 @@ import {
   Confidence,
   Empty,
   formatAge,
+  InjuryTag,
   Notice,
   PositionBadge,
-  Signal,
   Unknown,
   positionCardClass,
 } from '../components/common.tsx';
@@ -242,6 +242,22 @@ export function TeamScreen({
   /** The waiver advice, turned from slot-shaped comparisons into decisions. */
   const waiverBoard = useMemo(() => (waivers?.found ? buildWaiverBoard(waivers) : null), [waivers]);
 
+  /**
+   * What the folded bench is worth saying in four words.
+   *
+   * The optimiser has already answered this — a swap *is* a bench player who
+   * would start — so the summary counts its swaps rather than forming a second
+   * opinion about the same players. Silent when the lineup could not be
+   * computed at all, because "No better option" would then be a claim nobody
+   * checked.
+   */
+  const benchSummary = useMemo(() => {
+    if (!lineup?.found) return null;
+    const count = lineup.swaps.length;
+    if (count === 0) return 'No better option';
+    return `${count} strong alternative${count === 1 ? '' : 's'}`;
+  }, [lineup]);
+
   const weeklyCard = useMemo(() => {
     if (!weekly) return null;
     const evaluation = evaluations.get(weekly.playerId);
@@ -372,6 +388,19 @@ export function TeamScreen({
                   <div className="section-title" data-testid="starters-title">
                     Recommended starters
                   </div>
+                  {/*
+                    One inset group, not eight floating cards.
+
+                    The lineup is a set of slots read top to bottom, which is
+                    exactly what an inset grouped list is for: one surface, the
+                    slots divided by hairlines, and the rounding at the two ends
+                    of the set rather than around each row. The recommended
+                    starters keep their position tint inside it — see
+                    `.starter-row.card-pos` — because eight slots is the one
+                    place in the app where the tint is showing the shape of a
+                    week rather than decorating a list.
+                  */}
+                  <div className="slot-group" data-testid="starters-group">
                   {lineup!.slots.map((slot, i) => (
                     <StarterCard
                       key={`${slot.slot}-${i}`}
@@ -389,29 +418,31 @@ export function TeamScreen({
                       }
                     />
                   ))}
+                  </div>
                 </>
               ) : null}
 
-              {bench.length > 0 ? (
-                <>
-                  <div className="section-title" data-testid="bench-title">
-                    Bench
-                  </div>
-                  {bench.map((p) => (
-                    <BenchCard
-                      key={p.playerId}
-                      player={p}
-                      onOpen={() => openPlayer(p.playerId, { starting: false })}
-                    />
-                  ))}
-                </>
-              ) : null}
+              {/*
+                Bench, then the changes, then the waiver wire.
+
+                That order is the screen's whole argument: the starters answer
+                "who do I start", the folded bench keeps the answer on one
+                screen, and the card immediately under it is the only thing on
+                the page asking to be *acted* on. The free-agent scan is a
+                different question and goes last.
+              */}
+              <BenchSection
+                players={bench}
+                scoreOf={(playerId) => evaluations.get(playerId)?.score ?? null}
+                summary={benchSummary}
+                onOpen={(playerId) => openPlayer(playerId, { starting: false })}
+              />
+
+              {lineup?.found ? <LineupCard lineup={lineup} /> : null}
 
               {waiverBoard ? (
                 <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
               ) : null}
-
-              {lineup?.found ? <LineupCard lineup={lineup} /> : null}
             </>
           )}
         </>
@@ -486,62 +517,99 @@ function StarterCard({
   if (!slot.playerId || !slot.name) {
     return (
       <div className="player-row" data-testid="starter-row" data-slot={slot.slot} data-starter="empty">
+        {/*
+          One line, and quietly.
+
+          This used to be two: "Nobody eligible to start here" at the weight and
+          size of a player's name, with "Takes QB" on a second line under it. A
+          roster that is four players deep in the middle of a draft has four or
+          five of these, and at name weight they were the loudest thing on the
+          screen — a list shouting about what it does not have, above the answer
+          it does. What the slot takes is the same sentence continued, so it
+          sits on the same line, and neither half is a name so neither is set
+          like one.
+        */}
         <div className="player-row-top">
           <span className="slot-label">{slot.slot}</span>
-          <span className="player-name faint">Nobody eligible to start here</span>
-        </div>
-        <div className="player-row-metrics">
-          <span className="metric">Takes {slot.accepts.join(', ')}</span>
+          <span className="empty-slot-line">
+            Nobody eligible to start here <span className="faint">— takes {slot.accepts.join(', ')}</span>
+          </span>
         </div>
       </div>
     );
   }
 
   const position = player?.position ?? slot.position ?? '';
+  /*
+   * The one line under the row, and usually there is none.
+   *
+   * A conflict is the only thing a collapsed card still says in a sentence,
+   * because it is the only one that changes what the reader does with the card:
+   * it says this call is close and the evidence disagrees with itself. The
+   * drivers — *why* he is the pick — moved into the sheet the card opens, where
+   * they sit beside the numbers they came from instead of costing a line on
+   * every one of eight rows.
+   */
+  const consequence = (slot.conflicts ?? [])[0] ?? null;
+
   return (
     <button
-      className={positionCardClass(position)}
+      className={positionCardClass(position, 'starter-row')}
       data-testid="starter-row"
       data-slot={slot.slot}
       data-starter="true"
       data-position={position.toUpperCase()}
       data-player-id={slot.playerId}
-      aria-label={`${slot.name}, recommended starter at ${slot.slot}`}
+      /*
+       * The whole state of the row, in the accessible name.
+       *
+       * This is where "starter" survives now that the word has left the face of
+       * the card: the section heading above says it once, the slot chip says
+       * which spot, and anything reading the row aloud gets the sentence.
+       */
+      aria-label={
+        `${slot.name}, recommended starter at ${slot.slot}` +
+        `${slot.score == null ? '' : `, projected ${slot.score.toFixed(1)} points`}` +
+        `${slot.locked ? ', locked' : ''}` +
+        `${!slot.alreadyStarting && !slot.locked ? ', not in your Sleeper lineup' : ''}` +
+        `${player?.status ? `, ${player.status}` : ''}`
+      }
       onClick={onOpen}
     >
       <div className="player-row-top">
         <span className="slot-label">{slot.slot}</span>
         <span className="player-name">{slot.name}</span>
+        {/*
+          Only the tags that change what the reader does: the spot is settled,
+          Sleeper does not agree yet, or he may not play. Everything else — the
+          market, the role, the matchup, the props — is one tap away.
+        */}
+        <span className="row-tags">
+          {slot.locked ? (
+            <span className="tag tag-calm tag-mini" data-testid="locked-tag">
+              Locked
+            </span>
+          ) : null}
+          {!slot.alreadyStarting && !slot.locked ? (
+            <span className="tag tag-warn tag-mini" data-testid="not-in-lineup-tag">
+              Not in Sleeper
+            </span>
+          ) : null}
+          <InjuryTag status={player?.status} />
+        </span>
+        {/*
+          The projection carries its weight in type rather than in a label: it
+          is the only number on the row, it is tabular so eight of them line up
+          down the column, and the word "projected" is in the accessible name.
+        */}
+        <span className="proj" data-testid="starter-proj" title="Projected points">
+          {slot.score == null ? '—' : slot.score.toFixed(1)}
+        </span>
         <PositionBadge position={position} team={player?.team ?? ''} />
       </div>
-      <div className="player-row-metrics">
-        {/* The word, beside the colour, for everybody who does not see one. */}
-        <span className="metric">Starter</span>
-        <span className="metric">
-          Proj <strong>{slot.score == null ? '—' : slot.score.toFixed(1)}</strong>
-        </span>
-        {slot.locked ? <span className="tag tag-calm" data-testid="locked-tag">🔒 Locked</span> : null}
-        {!slot.alreadyStarting && !slot.locked ? <Badge tone="warn">not in your Sleeper lineup</Badge> : null}
-        {player?.status ? <Badge tone="warn">{player.status}</Badge> : null}
-      </div>
-      {/*
-        Why him, in the words the engine used.
-
-        Two lines at most, and only what actually moved the score: the drivers
-        come from the components themselves, so this cannot describe a signal
-        the recommendation did not use. A conflict is shown *beside* the reasons
-        rather than instead of them — disagreement between usage and matchup is
-        the most useful thing a card can say, and averaging it into silence is
-        what a worse screen would do.
-      */}
-      {(slot.drivers ?? []).length > 0 ? (
-        <div className="player-row-metrics" data-testid="starter-drivers">
-          <span className="metric faint">{(slot.drivers ?? []).slice(0, 2).join(' · ')}</span>
-        </div>
-      ) : null}
-      {(slot.conflicts ?? []).length > 0 ? (
-        <div className="player-row-metrics" data-testid="starter-conflict">
-          <span className="metric faint">{(slot.conflicts ?? [])[0]}</span>
+      {consequence ? (
+        <div className="player-row-consequence" data-testid="starter-conflict">
+          {consequence}
         </div>
       ) : null}
     </button>
@@ -556,28 +624,84 @@ function StarterCard({
  * badge stays, because "which position is this" is still a fact worth knowing
  * about a bench player.
  */
-function BenchCard({ player, onOpen }: { player: RosterPlayer; onOpen: () => void }) {
+function BenchCard({ player, score, onOpen }: { player: RosterPlayer; score: number | null; onOpen: () => void }) {
   return (
     <button
-      className="player-row"
+      className="player-row bench-row"
       data-testid="bench-row"
       data-starter="false"
       data-position={(player.position ?? '').toUpperCase()}
       data-player-id={player.playerId}
-      aria-label={`${player.name}, bench`}
+      aria-label={`${player.name}, bench${score == null ? '' : `, projected ${score.toFixed(1)} points`}`}
       onClick={onOpen}
     >
       <div className="player-row-top">
+        <span className="slot-label">BN</span>
         <span className="player-name">{player.name}</span>
+        <span className="row-tags">
+          <InjuryTag status={player.status} />
+        </span>
+        <span className="proj" title="Projected points">
+          {score == null ? '—' : score.toFixed(1)}
+        </span>
         <PositionBadge position={player.position} team={player.team} />
       </div>
-      <div className="player-row-metrics">
-        <span className="metric">Bench</span>
-        <Signal net={player.recentNet} label="recent news (21d)" />
-        {player.status ? <Badge tone="warn">{player.status}</Badge> : null}
-        {player.pending > 0 ? <Badge tone="warn">{player.pending} to review</Badge> : null}
-      </div>
     </button>
+  );
+}
+
+/**
+ * The bench, folded away.
+ *
+ * The screen's job is to answer *who do I start* before anything else, and on a
+ * 360px phone the bench was pushing the last recommended starters — and the
+ * changes card, which is the thing to act on — below the fold. So it is a
+ * chevron: the count is on it, the one useful summary is beside it, and the
+ * players are one tap away.
+ *
+ * The control is deliberately the same one the Matchup screen uses, down to the
+ * test ids: two screens with a foldaway bench should not be two interactions to
+ * learn. And the rows are not rendered while it is closed, so a collapsed bench
+ * costs the layout nothing rather than merely hiding it.
+ */
+function BenchSection({
+  players,
+  scoreOf,
+  summary,
+  onOpen,
+}: {
+  players: RosterPlayer[];
+  scoreOf: (playerId: string) => number | null;
+  /** `1 strong alternative` / `No better option`, or nothing worth saying. */
+  summary: string | null;
+  onOpen: (playerId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (players.length === 0) return null;
+
+  return (
+    <div className="bench" data-testid="team-bench" data-open={open ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="bench-toggle"
+        data-testid="bench-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <span className="bench-label">Bench ({players.length})</span>
+        {summary ? <span className="bench-summary">{summary}</span> : null}
+        <span className="bench-chevron" aria-hidden="true">
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open ? (
+        <div data-testid="bench-rows">
+          {players.map((p) => (
+            <BenchCard key={p.playerId} player={p} score={scoreOf(p.playerId)} onOpen={() => onOpen(p.playerId)} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -935,6 +1059,17 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   const gain =
     lineup.currentPoints == null ? null : Math.round((lineup.recommendedPoints - lineup.currentPoints) * 10) / 10;
 
+  /*
+   * The change worth making, and everything else.
+   *
+   * The optimiser already sorts its swaps biggest-gain-first, so "the best one"
+   * is the first one rather than a new judgement made here.
+   */
+  const [best = null, ...rest] = lineup.swaps;
+  const risks = lineup.lateSwapRisks ?? [];
+  const material = risks.filter((r) => r.starting);
+  const quiet = risks.filter((r) => !r.starting);
+
   return (
     <div className="card" data-testid="lineup-card">
       <div className="header-row">
@@ -942,7 +1077,7 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         <Confidence level={lineup.confidence} />
       </div>
 
-      {lineup.swaps.length === 0 ? (
+      {best == null ? (
         <div className="faint" data-testid="lineup-verdict">
           {lineup.currentPoints == null
             ? 'No changes to suggest from what is known so far.'
@@ -950,61 +1085,78 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         </div>
       ) : (
         <>
-          <div className="faint" data-testid="lineup-verdict">
-            {lineup.swaps.length} change{lineup.swaps.length === 1 ? '' : 's'} to consider
-            {gain != null && gain > 0 ? ` · worth about ${gain} pts` : ''}
-          </div>
           {/*
-            A swap is a sentence, not a box. The card used to hold a bordered
-            card per change, which made three suggestions look like three
-            separate screens; an accent rule and the type do the same job in a
-            third of the height.
+            The best change, and only the best change.
+
+            Three suggestions stacked on a phone is a list to work through; the
+            biggest one is a thing to do. The others have not gone anywhere —
+            they are named under it and spelled out in the disclosure — but the
+            card's first line is now a single action with a number on it.
           */}
-          {lineup.swaps.map((s) => (
-            <div className="swap" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap">
-              <div>
-                <strong>Start {s.inName}</strong> over {s.outName} <span className="faint">({s.slot})</span>
-              </div>
-              <div className="faint">
-                +{s.gain} pts · {s.reason}
-              </div>
+          <div className="swap" data-testid="lineup-swap">
+            <div>
+              <strong>Start {best.inName}</strong> over {best.outName} <span className="faint">({best.slot})</span>
             </div>
-          ))}
-          <div className="faint" style={{ margin: '6px 2px 0' }}>
+            <div className="faint">
+              +{best.gain} pts · {best.reason}
+            </div>
+          </div>
+          {rest.length > 0 ? (
+            <div className="faint" data-testid="lineup-verdict">
+              {rest.length} smaller change{rest.length === 1 ? '' : 's'} below
+              {gain != null && gain > 0 ? ` · ${gain} pts in total` : ''}
+            </div>
+          ) : null}
+          <div className="faint" style={{ margin: '4px 2px 0' }}>
             Make changes in Sleeper — this app never edits a lineup.
           </div>
         </>
       )}
 
       {/*
-        Missing data is ordinary, not an incident: it gets a caution rule and a
-        readable sentence rather than an inset warning box.
-      */}
-      {lineup.warnings.map((w) => (
-        <div className="hint hint-caution" key={w}>
-          {w}
-        </div>
-      ))}
+        The one risk that is worth a line above the fold, and no others.
 
-      {/*
-        Availability risk that depends on the bench rather than on the player.
-
-        A different statement from the warnings above and shown separately: those
-        say something is wrong now, and these say what happens on Sunday morning
-        if a coin lands the other way. Only the risks that are actually live —
-        an exposed late swap, or a bench with nobody to cover — reach here; a
-        questionable player with a fallback that locks later is covered, and
-        saying so would be noise.
+        A late-swap risk on somebody *starting* is a Sunday-morning problem the
+        reader has to plan for. The same risk on a bench player is a fact about
+        a player they are not starting, and the warnings beside it are usually
+        about missing data — both are true, neither changes what to do first, so
+        both wait inside the disclosure.
       */}
-      {(lineup.lateSwapRisks ?? []).map((risk) => (
+      {material.map((risk) => (
         <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk">
-          {risk.starting ? 'Starting: ' : ''}
           {risk.name} — {risk.detail}
         </div>
       ))}
 
       <details className="disclosure">
         <summary>Recommended lineup in full</summary>
+
+        {rest.length > 0 ? (
+          <div data-testid="lineup-rest">
+            {rest.map((s) => (
+              <div className="swap" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap-more">
+                <div>
+                  <strong>Start {s.inName}</strong> over {s.outName} <span className="faint">({s.slot})</span>
+                </div>
+                <div className="faint">
+                  +{s.gain} pts · {s.reason}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {lineup.warnings.map((w) => (
+          <div className="hint hint-caution" key={w}>
+            {w}
+          </div>
+        ))}
+        {quiet.map((risk) => (
+          <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk-quiet">
+            {risk.name} — {risk.detail}
+          </div>
+        ))}
+
         <table className="compact">
           <thead>
             <tr>

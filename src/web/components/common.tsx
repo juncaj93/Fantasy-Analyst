@@ -249,6 +249,20 @@ export function positionCardClass(position: string | null | undefined, extra = '
   return `player-row${tint}${extra ? ` ${extra}` : ''}`;
 }
 
+/**
+ * The class list that gives a **row** its position accent without the wash.
+ *
+ * The card classes above set two custom properties and a background; this sets
+ * only the properties, so a row can take the position's hue on its leading edge
+ * and in its pill while its surface stays the list's own. That is the whole
+ * difference between the draft board's cards and the dense lists on Players and
+ * Trades, and it is one word in a class name rather than a second palette.
+ */
+export function positionAccentClass(position: string | null | undefined, base: string): string {
+  const pos = (position ?? '').toUpperCase();
+  return TINTED_POSITIONS.includes(pos) ? `${base} card-pos-${pos}` : base;
+}
+
 export function Badge({
   children,
   tone = 'neutral',
@@ -297,6 +311,46 @@ export function Notice({
   return (
     <div className={cls} role={role} data-testid={testId}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * A statement of fact, as one line rather than a banner.
+ *
+ * `Notice` is a filled, bordered block, and that is the right shape for
+ * something that interrupts — an offline capture, a failed write. It is the
+ * wrong shape for the far more common case: the screen saying what it could not
+ * work out. "Roster not identified" is not an alarm, and a yellow box the width
+ * of the phone announcing it is the screen shouting about its own limitations
+ * above the answers it does have.
+ *
+ * A mark, a sentence, and the page's own ground under it. The mark is a glyph
+ * rather than a colour, so the state survives greyscale and a screen reader
+ * alike; `role` is offered for the rare line that genuinely needs announcing.
+ */
+export function StatusRow({
+  children,
+  tone = 'warn',
+  role,
+  'data-testid': testId,
+}: {
+  children: ReactNode;
+  tone?: 'warn' | 'error' | 'info';
+  role?: 'status' | 'alert';
+  'data-testid'?: string;
+}) {
+  return (
+    <div
+      className={tone === 'error' ? 'notice-row notice-row-error' : 'notice-row'}
+      role={role}
+      data-testid={testId}
+      data-tone={tone}
+    >
+      <span className="notice-row-mark" aria-hidden="true">
+        {tone === 'info' ? 'ⓘ' : '⚠'}
+      </span>
+      <span>{children}</span>
     </div>
   );
 }

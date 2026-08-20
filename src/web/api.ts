@@ -242,6 +242,17 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
       parts: { market: string; line: number; bookCount?: number }[];
     }[];
   } | null;
+  /**
+   * Why the market number is a good one for his position, and whether the draft
+   * market agrees. Optional so a client on an older deployment simply omits the
+   * sentence rather than breaking.
+   */
+  marketStrategy?: {
+    kind: 'bullish' | 'bearish' | 'agrees';
+    standing: string;
+    disagreement: string | null;
+    caveat: string | null;
+  } | null;
   tierCliff: TierCliff;
   avoid: AvoidTag;
   /** Your rating from the players list. This one moves the ranking. */
@@ -604,6 +615,8 @@ export interface NewsletterStatus {
 }
 
 export interface NewsletterCoverage {
+  sentences?: number;
+  repairs?: string[];
   sentencesWithPlayers?: number;
   classifiedSentences?: number;
   unclassifiedSentences?: number;
@@ -643,6 +656,8 @@ export interface ReprocessPreview {
   messageId: string;
   wouldAdd: number;
   alreadyStored: number;
+  wouldRetire: ReprocessDisagreement[];
+  repairs: string[];
   stale: ReprocessDisagreement[];
   protectedByUser: ReprocessDisagreement[];
   playersAffected: number;

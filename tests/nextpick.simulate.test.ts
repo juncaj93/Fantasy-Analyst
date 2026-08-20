@@ -283,8 +283,20 @@ describe('directional invariants', () => {
     expect(twoManagers.ownership.ownerAt(84)).toBe(12);
     expect(twoManagers.ownership.ownerAt(85)).toBe(1);
 
+    /*
+     * Counted from `timesTaken` rather than from `probability`.
+     *
+     * This measures what the *simulation* did — whether the manager's roster
+     * updated between his two picks — and `probability` is the simulated share
+     * after the late-round idiosyncratic floor has thinned it (see
+     * `idiosyncraticHazard`). That floor is a uniform additive dilution applied
+     * to both boards equally, so it cancels from a difference and does not
+     * cancel from a ratio. Reading the raw counts keeps this assertion about
+     * the thing it is named for.
+     */
     const tightEndsTaken = (result: ReturnType<typeof simulateNextPick>) =>
-      2 - result.byPlayer.get('TE-84')!.probability! - result.byPlayer.get('TE-84b')!.probability!;
+      (result.byPlayer.get('TE-84')!.timesTaken + result.byPlayer.get('TE-84b')!.timesTaken) /
+      result.simulations;
 
     const alone = simulateNextPick(oneManager);
     const apart = simulateNextPick(twoManagers);

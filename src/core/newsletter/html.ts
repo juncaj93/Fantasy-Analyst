@@ -4,7 +4,15 @@
  * Tolerant by design: newsletter HTML is frequently malformed (unclosed tags,
  * inline styles, tracking pixels, MSO conditionals). This module never throws;
  * worst case it returns fewer blocks.
+ *
+ * By the time text reaches here it has been transfer- and charset-decoded (see
+ * `mime.ts`). What remains is to decide where one thought ends and the next
+ * begins — which is not the same question in HTML as in plain text, and getting
+ * it wrong is how a newsletter turns into hundreds of fragments that match no
+ * rule. See `extractBlocks`.
  */
+
+import { normalizePunctuation } from './mime.ts';
 
 export interface TextBlock {
   /** 0-based index in document order. */
@@ -82,7 +90,9 @@ export function htmlToText(html: string): string {
   // A stray unclosed final tag.
   s = s.replace(/<[^>]*$/g, ' ');
   s = decodeEntities(s);
-  s = s.replace(/[\t\f\v\u00a0\u200b\u2028\u2029]/g, ' ');
+  // Newlines in HTML source are insignificant whitespace: the boundaries have
+  // already been recorded by the block-level tags above.
+  s = s.replace(/[\r\n\t\f\v\u00a0\u200b\u2028\u2029]/g, ' ');
   return s;
 }
 
@@ -110,6 +120,16 @@ export const BOILERPLATE_PATTERNS: { id: string; pattern: RegExp }[] = [
   { id: 'advertisement', pattern: /^(advertisement|sponsored( content| by)?|presented by)\b/i },
   { id: 'app_promo', pattern: /(download (the|our) app|available on the app store|get it on google play)/i },
   { id: 'nav_chrome', pattern: /^(home|about|archive|subscribe|contact|newsletter)(\s*[|\u00b7\-\u2022]\s*\w+)+$/i },
+  // Substack chrome. It surrounds the article on every issue, mentions players
+  // in "recent posts" teasers, and is not the newsletter's own reporting.
+  // The action row reads "Like \u00b7 Comment \u00b7 Restack", and punctuation
+  // normalization has already turned every separator into a hyphen.
+  { id: 'substack_actions', pattern: /^(?:(?:like|comment|restack|share|read in app|view comments?|leave a comment)\s*[|\u00b7-]?\s*)+$/i },
+  { id: 'substack_upgrade', pattern: /\b(upgrade to paid|subscribe now|become a (paid|founding) (subscriber|member)|pledge your support)\b/i },
+  { id: 'substack_forward', pattern: /\b(forwarded this (email|post)\?|refer a friend|share this post)\b/i },
+  { id: 'substack_app', pattern: /\b(read (this )?(post )?(in|on) the substack app|get the substack app)\b/i },
+  { id: 'substack_attribution', pattern: /^a guest post by\b/i },
+  { id: 'reader_count', pattern: /^\d[\d,.]*\s*(likes?|comments?|restacks?|shares?|subscribers?)$/i },
 ];
 
 /** A block is boilerplate when a pattern matches and it carries no sentence content. */
@@ -127,15 +147,95 @@ export function isBoilerplate(text: string): { boilerplate: boolean; ruleId: str
 }
 
 /**
+ * Strip tracking and redirect URLs, keeping the visible text around them.
+ *
+ * A newsletter's plain-text part spells a link as `Keenan Allen [ https://... ]`
+ * and the reader's eye skips the bracket entirely. The parser does not: the URL
+ * becomes tokens, its path segments become name candidates, and the sentence it
+ * was embedded in stops resembling English. The anchor text is the content; the
+ * target is plumbing.
+ */
+export function stripLinkNoise(text: string): string {
+  return (
+    text
+      // `visible text [ https://... ]` and `visible text < https://... >`.
+      .replace(/\s*\[\s*(?:https?:\/\/|www\.)[^\]]*\]/gi, '')
+      .replace(/\s*<\s*(?:https?:\/\/|www\.)[^>]*>/gi, '')
+      // A bare URL left in prose.
+      .replace(/\bhttps?:\/\/\S+/gi, ' ')
+      .replace(/\bwww\.[^\s,;)\]]+/gi, ' ')
+      // Tidy what a removed link leaves stranded.
+      .replace(/\(\s*\)/g, ' ')
+      .replace(/\[\s*\]/g, ' ')
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  );
+}
+
+/** Bullet markers, as they read after punctuation normalization. */
+const BULLET_MARKER = /^[-*]\s+/;
+
+/**
+ * Split HTML into candidate blocks.
+ *
+ * Only the block-level tags decide a boundary. A newline in HTML source is
+ * insignificant whitespace — the sender's text editor wrapping a column — and
+ * treating it as a boundary chops mid-sentence, which is how
+ * `<li>Keenan Allen is dealing with a heel injury - he did not\npractice.</li>`
+ * became two fragments that between them matched nothing.
+ */
+function htmlPieces(html: string): string[] {
+  return htmlToText(html).split(BLOCK_BOUNDARY);
+}
+
+/**
+ * Split plain text into candidate blocks.
+ *
+ * The inverse problem: here a newline IS often just wrapping, because senders
+ * hard-wrap plain-text parts at around 72 columns. A paragraph is what sits
+ * between blank lines, and a bullet starts one of its own; every other line
+ * break inside a paragraph is rejoined.
+ */
+function textPieces(text: string): string[] {
+  const pieces: string[] = [];
+  for (const paragraph of text.split(/\r?\n[ \t]*\r?\n/)) {
+    let current = '';
+    for (const line of paragraph.split(/\r?\n/)) {
+      if (BULLET_MARKER.test(line.trim()) && current.trim()) {
+        pieces.push(current);
+        current = line;
+      } else {
+        current = current ? `${current} ${line}` : line;
+      }
+    }
+    if (current.trim()) pieces.push(current);
+  }
+  return pieces;
+}
+
+/**
  * Convert raw newsletter content (HTML or plain text) into ordered, deduped,
  * boilerplate-free text blocks.
+ *
+ * Punctuation is normalized so that bullet detection sees one marker rather
+ * than six, and so the rule dictionary — written in ASCII — meets the
+ * apostrophe it expects in `didn't` rather than the typographic one the
+ * newsletter actually shipped.
+ *
+ * WHEN it is normalized matters as much as that it is. In HTML the punctuation
+ * may still be spelled as a numeric character reference — `&#8217;` for a curly
+ * apostrophe, `&#8226;` for a bullet — and those do not become characters until
+ * `htmlToText` decodes them. Normalizing the raw input would therefore walk
+ * straight past them, which is what let `Brandon Thorn’s` and `Romeo Doubs –
+ * 0.216` through in production after the rest of the decoding was fixed. So the
+ * HTML path normalizes AFTER entity decoding; plain text, which has no entity
+ * layer, normalizes before it is split so bullets can start a paragraph.
  */
 export function extractBlocks(raw: string, opts: { isHtml?: boolean } = {}): TextBlock[] {
   const isHtml = opts.isHtml ?? looksLikeHtml(raw);
-  const text = isHtml ? htmlToText(raw) : raw;
-  const pieces = text
-    .split(new RegExp(`[${BLOCK_BOUNDARY}\\n]`))
-    .map((p) => p.replace(/\s+/g, ' ').trim())
+  const pieces = (isHtml ? htmlPieces(raw).map(normalizePunctuation) : textPieces(normalizePunctuation(raw)))
+    .map((p) => stripLinkNoise(p.replace(/\s+/g, ' ').trim()))
     .filter(Boolean);
 
   const blocks: TextBlock[] = [];
@@ -147,7 +247,9 @@ export function extractBlocks(raw: string, opts: { isHtml?: boolean } = {}): Tex
     const key = piece.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    blocks.push({ index: blocks.length, text: piece, kind: classifyBlock(piece) });
+    // The marker told us this is a list item; it is not part of the sentence.
+    const kind = classifyBlock(piece);
+    blocks.push({ index: blocks.length, text: piece.replace(BULLET_MARKER, ''), kind });
   }
   return blocks;
 }
