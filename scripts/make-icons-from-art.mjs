@@ -94,21 +94,20 @@ function decode(buf) {
   return { width, height, rgba };
 }
 
-/* -- erasing the wordmark's outline ------------------------------------------
+/* -- erasing outline elements the icon doesn't want ---------------------------
  *
  * The illustration draws a green stroke around every element — the
- * character's silhouette, the football, the calculator, the trophy, and the
- * "THE JUNCULATOR" badge — as its line style. The badge's stroke is the one
- * asked to go; the rest of the style stays.
- *
- * The badge outline turns out to be the artwork's only green shape that both
- * sits entirely below the character's shoulder and is not the picture's own
- * outer frame: everything else green down there is either much smaller (the
- * football, the calculator, the trophy) or much larger and touches the
- * source's left and right edges (the frame). So "largest green connected
- * component below the shoulder line, not touching either edge" finds the
- * badge on its own, without hand-drawn coordinates that would need updating
- * if the illustration were ever redrawn at a different pose or scale. */
+ * character's silhouette, the football, the calculator, the trophy, the
+ * "THE JUNCULATOR" badge, and a large rounded-square frame around the whole
+ * scene — as its line style. Two of those are cropped for the icon rather
+ * than kept: the badge's own stroke, and the frame. The frame is mostly
+ * outside ZOOM's crop already, but VERTICAL_SHIFT pushes the crop window's
+ * bottom edge to the source's bottom edge to show more of the badge, and the
+ * frame's bottom corners live exactly there — so a sliver of it survives
+ * cropping as a stray curve along the bottom of every icon. Erasing it at
+ * the source is simpler than re-tuning the crop to dodge a shape that was
+ * never meant to be part of the icon in the first place. Every other
+ * element's outline stays. */
 
 /** True where a pixel is the artwork's outline green — saturated, and green
  * well ahead of both red and blue, which the badge fill, the white text and
@@ -157,6 +156,54 @@ function findBadgeOutline(art, yFrom) {
   }
   if (!best) throw new Error('no badge outline found below the shoulder line — did the artwork change?');
   return best;
+}
+
+/**
+ * Finds the outer frame: the single largest 8-connected blob of outline
+ * green in the whole source, required to span almost the entire canvas in
+ * both directions — a picture frame's signature, and not one any single
+ * illustrated element shares. The character's own silhouette is the next
+ * largest green shape in this artwork, and it falls well short on height,
+ * because it stops at the shoulders rather than running the full canvas.
+ * Bailing out below that threshold rather than always returning the largest
+ * blob means a redraw that removed the frame gets a clear error here instead
+ * of this function quietly erasing whatever illustrated element happened to
+ * be biggest.
+ */
+function findOuterFrame(art) {
+  const { width: w, height: h, rgba } = art;
+  const visited = new Uint8Array(w * h);
+  let best = null;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (visited[y * w + x] || !isOutlineGreen(rgba, w, h, x, y)) continue;
+      const stack = [[x, y]];
+      visited[y * w + x] = 1;
+      const pixels = [];
+      let minX = x, maxX = x, minY = y, maxY = y;
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        pixels.push([cx, cy]);
+        minX = Math.min(minX, cx);
+        maxX = Math.max(maxX, cx);
+        minY = Math.min(minY, cy);
+        maxY = Math.max(maxY, cy);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          if (visited[ny * w + nx] || !isOutlineGreen(rgba, w, h, nx, ny)) continue;
+          visited[ny * w + nx] = 1;
+          stack.push([nx, ny]);
+        }
+      }
+      if (!best || pixels.length > best.pixels.length) best = { pixels, minX, maxX, minY, maxY };
+    }
+  }
+  if (!best || (best.maxX - best.minX) / w < 0.85 || (best.maxY - best.minY) / h < 0.85) {
+    throw new Error('no full-canvas frame found — did the artwork change?');
+  }
+  return best.pixels;
 }
 
 /**
@@ -432,6 +479,7 @@ if (source.width !== source.height) {
 // pose changes.
 const BADGE_SEARCH_Y = 740;
 paintBlack(source, findBadgeOutline(source, BADGE_SEARCH_Y));
+paintBlack(source, findOuterFrame(source));
 
 const art = centreCrop(source, ZOOM, VERTICAL_SHIFT);
 console.log(`source ${sourcePath}  ${source.width}x${source.height}  zoom ${ZOOM} -> ${art.width}x${art.width}`);
