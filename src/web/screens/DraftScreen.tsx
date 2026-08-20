@@ -359,10 +359,35 @@ export function DraftScreen({
            * the same function, so a background correction and a foreground load
            * leave the screen in identical states — and only when the answer has
            * actually moved, so a poll that finds nothing new redraws nothing.
+           *
+           * Guarded on the filter still being the one that asked. A
+           * revalidation runs behind the screen and takes a round trip, and a
+           * chip tap is faster than that: without this, tapping RB while the
+           * unfiltered board is being confirmed lands four hundred players on a
+           * screen whose chip says RB. The guard is the point at which the
+           * answer is applied, not the request — cancelling the request would
+           * throw away a confirmation the cache is entitled to keep.
            */
-          onFresh: (fresh) => applyBoard(fresh, pos),
+          onFresh: (fresh) => {
+            if (positionRef.current === pos) applyBoard(fresh, pos);
+          },
         });
-        applyBoard(next, pos);
+        /*
+         * The same guard, and it matters more here than above.
+         *
+         * This is the foreground path, and it has applied its answer
+         * unconditionally since long before there was a cache: whichever board
+         * *response* arrived last won, regardless of which board was asked for
+         * last. Two chips tapped in quick succession over a slow connection
+         * therefore leave the first one's players under the second one's chip
+         * until something else reloads.
+         *
+         * That is not theoretical either. It is the most likely explanation for
+         * the production smoke failure this test was written beside, where the
+         * queue filter was tapped and the unfiltered board was what stayed on
+         * screen.
+         */
+        if (positionRef.current === pos) applyBoard(next, pos);
       } catch (err) {
         /*
          * A quiet load reports upwards instead of painting a banner.
