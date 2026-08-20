@@ -1,0 +1,43 @@
+name: Repair a newsletter that could not be decoded
+
+# Re-reads one stored newsletter through the corrected MIME pipeline.
+#
+# For an issue ingested before folded `Content-Type` headers were unfolded: its
+# evidence was derived from undecoded MIME, and re-reading it produces the same
+# news spelled properly. Because that is a different excerpt, and therefore a
+# different dedupe key, the product's reprocess path retires what it replaces
+# instead of adding alongside it — otherwise one piece of news would be counted
+# twice in a ledger that is supposed to be authoritative.
+#
+# Guarded and idempotent. The script refuses to apply unless the preview still
+# has the exact shape that was reviewed, verifies the result afterwards, and is
+# a no-op on a newsletter that was decoded correctly in the first place. Run it
+# with dry_run first to see the guard pass without changing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message_id:
+        description: 'Message-ID of the newsletter to re-read'
+        required: true
+      dry_run:
+        description: 'Check the guard and stop without applying'
+        type: boolean
+        default: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply and verify
+        env:
+          URL: https://fantasy-analyst.juncaj93.workers.dev
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+          MESSAGE_ID: ${{ inputs.message_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node scripts/repair-newsletter-issue.mjs
