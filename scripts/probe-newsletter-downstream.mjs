@@ -114,11 +114,19 @@ if (!DRAFT_ID) {
     check(row.newsLifetimeNet === raw.net, 'the draft board agrees with the ledger', `${row.newsLifetimeNet} vs ${raw.net}`);
   }
 
-  // Whatever the board does carry must also agree, which is the stronger claim:
-  // it proves the board reads evidence rather than a snapshot of it.
+  /*
+   * Whatever the board does carry must also agree, which is the stronger claim:
+   * it proves the board reads evidence rather than a snapshot of it.
+   *
+   * Every row, not a sample. A sample answers "is the board broadly right",
+   * which nobody doubted; the question after a withdrawal is whether any single
+   * row is still carrying a number the ledger no longer supports, and one row is
+   * all it takes. The board is a few hundred rows and each is one cached read,
+   * so checking all of them costs seconds and removes the caveat entirely.
+   */
   let compared = 0;
   let disagreed = 0;
-  for (const p of rows.slice(0, 25)) {
+  for (const p of rows) {
     const id = String(p.playerId ?? p.id);
     const detail = (await get(`/api/players/${encodeURIComponent(id)}`)).body;
     const net = detail?.signal?.raw?.net;
