@@ -42,7 +42,7 @@ import {
   Unknown,
   formatDate,
 } from './common.tsx';
-import { PushScreen, SegmentedControl, SkeletonRows } from './native.tsx';
+import { ListGroup, ListRow, PushScreen, SegmentedControl, SkeletonRows } from './native.tsx';
 import { InjuryDetail, LastSeasonLine, NewsletterTakeaway, ProfileFlags, SeasonOutlook } from './playerDetail.tsx';
 
 /** The whole of this app's own record of one player. */
@@ -252,7 +252,14 @@ export function PlayerPage({
 
       <div className="player-page-body" data-testid={`player-page-${section}`}>
         {section === 'overview' ? (
-          <Overview detail={detail} detailFailed={detailFailed} signal={signal} position={player.position} />
+          <Overview
+            detail={detail}
+            detailFailed={detailFailed}
+            signal={signal}
+            position={player.position}
+            evidenceCount={file ? file.evidence.length : null}
+            onGo={setSection}
+          />
         ) : null}
         {/*
           The outlook tab, and what it says when there is no outlook.
@@ -288,11 +295,17 @@ function Overview({
   detailFailed,
   signal,
   position,
+  evidenceCount,
+  onGo,
 }: {
   detail: PlayerDetail | null;
   detailFailed: boolean;
   signal: PlayerSignal | null;
   position: string | null;
+  /** How many items the ledger holds, once it has been read. */
+  evidenceCount: number | null;
+  /** Moves to another section. Absent only if a caller wants Overview alone. */
+  onGo?: (section: Section) => void;
 }) {
   return (
     <>
@@ -338,6 +351,32 @@ function Overview({
       ) : (
         <SkeletonRows rows={2} testId="player-page-overview-skeleton" />
       )}
+
+      {/*
+        Where the rest of him is, as a grouped list.
+
+        Overview is short for a player nobody has written much about, and a
+        pushed page that ends two thirds of the way up the screen reads as one
+        that failed to load rather than one that has said everything it knows.
+        This is the honest ending: three rows naming what is behind the other
+        three segments, with the count where there is one, in the same grammar
+        every settings screen on the platform uses. It invents no content — it
+        says where the content is.
+      */}
+      {onGo ? (
+        <ListGroup header="More on him" testId="player-page-more">
+          <ListRow label="Season outlook" detail="What is expected of him, in his provider's words" chevron onClick={() => onGo('outlook')} testId="player-page-go-outlook" />
+          <ListRow label="Market" detail="Draft order, movement and cached prop lines" chevron onClick={() => onGo('market')} testId="player-page-go-market" />
+          <ListRow
+            label="Evidence"
+            detail="Every item behind the tally, with its own words"
+            {...(evidenceCount == null ? {} : { value: evidenceCount })}
+            chevron
+            onClick={() => onGo('evidence')}
+            testId="player-page-go-evidence"
+          />
+        </ListGroup>
+      ) : null}
     </>
   );
 }

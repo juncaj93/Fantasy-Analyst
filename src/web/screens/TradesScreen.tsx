@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
-import { Confidence, DetailLabel, Empty, Notice, SignedValue } from '../components/common.tsx';
+import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
 import { NavBar, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow, RowNote } from '../components/playerRow.tsx';
 import { PlayerPage } from '../components/playerPage.tsx';
@@ -94,8 +94,18 @@ export function TradesScreen() {
         }
       />
 
+      {/*
+        The board's own caveats, as status lines rather than warning blocks.
+
+        These are almost always one sentence about what could not be worked out
+        — "your roster was not identified, so sell suggestions are unavailable" —
+        and a filled yellow box the width of the phone was the loudest object on
+        a screen whose subject is a list of trade ideas.
+      */}
       {board.warnings.map((w) => (
-        <Notice key={w}>{w}</Notice>
+        <StatusRow key={w} tone="info" data-testid="trades-warning">
+          {w}
+        </StatusRow>
       ))}
 
       {board.sections.length === 0 ? (
@@ -104,18 +114,43 @@ export function TradesScreen() {
           issues have been read, this fills in.
         </Empty>
       ) : (
-        board.sections.map((section) => (
-          <div key={section.verdict}>
-            <div className="section-title">
-              {section.label} <span className="section-count">{section.players.length}</span>
+        board.sections.map((section) => {
+          /*
+           * A confidence every row shares is a fact about the section.
+           *
+           * Printed per row it was the same two words down the right-hand edge
+           * of every suggestion — a pattern the eye follows instead of the
+           * names, qualifying nothing because it never varies. Said once beside
+           * the section's own count it still qualifies everything under it, and
+           * the rows get their line back for the reason they are there.
+           *
+           * Only when it is genuinely unanimous. A section where the confidence
+           * differs row to row is one where the reader needs it row to row.
+           */
+          const levels = new Set(section.players.map((p) => p.confidence));
+          const shared = levels.size === 1 ? [...levels][0]! : null;
+          return (
+            <div key={section.verdict}>
+              <div className="section-title section-title-row">
+                <span>{section.label}</span>
+                <span className="section-title-meta">
+                  <span className="section-count">{section.players.length}</span>
+                  {shared ? <Confidence level={shared} /> : null}
+                </span>
+              </div>
+              <div className="dense-group" role="list" aria-label={section.label}>
+                {section.players.map((s) => (
+                  <TradeRow
+                    key={s.playerId}
+                    suggestion={s}
+                    showConfidence={shared == null}
+                    onOpen={() => setOpenId(s.playerId)}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="dense-group" role="list" aria-label={section.label}>
-              {section.players.map((s) => (
-                <TradeRow key={s.playerId} suggestion={s} onOpen={() => setOpenId(s.playerId)} />
-              ))}
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
 
       {board.considered > 0 ? (
@@ -143,7 +178,16 @@ export function TradesScreen() {
  * reason on the rows that have one, because a row may have exactly one sentence
  * and an injury outranks a trend.
  */
-function TradeRow({ suggestion, onOpen }: { suggestion: TradeSuggestion; onOpen: () => void }) {
+function TradeRow({
+  suggestion,
+  showConfidence,
+  onOpen,
+}: {
+  suggestion: TradeSuggestion;
+  /** False when the section header already said it for every row under it. */
+  showConfidence: boolean;
+  onOpen: () => void;
+}) {
   const w = suggestion.windows;
   const reasons = withoutRepeats(suggestion.reasons);
   const line = suggestion.injury.line ?? reasons[0];
@@ -164,7 +208,7 @@ function TradeRow({ suggestion, onOpen }: { suggestion: TradeSuggestion; onOpen:
         ]}
         note={
           line ? (
-            <RowNote trailing={<Confidence level={suggestion.confidence} />}>
+            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
               <span
                 className={suggestion.injury.line ? 'injury-line-inline' : undefined}
                 data-testid={suggestion.injury.line ? 'trade-injury' : 'trade-line'}
@@ -173,7 +217,7 @@ function TradeRow({ suggestion, onOpen }: { suggestion: TradeSuggestion; onOpen:
               </span>
             </RowNote>
           ) : (
-            <RowNote trailing={<Confidence level={suggestion.confidence} />}>
+            <RowNote {...(showConfidence ? { trailing: <Confidence level={suggestion.confidence} /> } : {})}>
               <span className="faint">No single reason leads — the case is on his page.</span>
             </RowNote>
           )

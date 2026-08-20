@@ -339,6 +339,17 @@ export function HeroCarousel({
             {insight.detail}
           </div>
         ) : null}
+      </div>
+
+      {/*
+        The way out of the card and the way through the carousel, on one line.
+
+        They were two stacked rows at the foot of a card whose whole problem was
+        height, and neither needs a line to itself: one is a link and the other
+        is four small controls. Rendered together they cost the card one row
+        instead of two, and nothing about what either does has changed.
+      */}
+      <div className="hero-foot">
         {insight.playerId && openable(insight.playerId) ? (
           <button
             type="button"
@@ -349,7 +360,6 @@ export function HeroCarousel({
             View details ›
           </button>
         ) : null}
-      </div>
 
       {count > 1 ? (
         <div className="hero-pager" data-testid="hero-pager">
@@ -387,6 +397,7 @@ export function HeroCarousel({
           </button>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

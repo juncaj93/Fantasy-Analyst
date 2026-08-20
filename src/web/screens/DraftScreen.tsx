@@ -956,6 +956,15 @@ export function DraftScreen({
         </Empty>
       ) : (
         <div
+          /*
+            One grouped surface, and the rows are flush inside it.
+
+            The list had a test id and no class, so it had never been styled as
+            a container at all — which is exactly why every row was left being
+            its own floating rounded card with its own shadow and a gap under
+            it. See `.board-list` in the stylesheet.
+          */
+          className="board-list"
           role="list"
           aria-label={position === QUEUE_FILTER ? 'Your queue, best first' : 'Available players, best first'}
           data-testid="board-list"
