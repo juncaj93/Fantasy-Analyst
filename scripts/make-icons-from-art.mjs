@@ -94,6 +94,92 @@ function decode(buf) {
   return { width, height, rgba };
 }
 
+/* -- erasing the wordmark's outline ------------------------------------------
+ *
+ * The illustration draws a green stroke around every element — the
+ * character's silhouette, the football, the calculator, the trophy, and the
+ * "THE JUNCULATOR" badge — as its line style. The badge's stroke is the one
+ * asked to go; the rest of the style stays.
+ *
+ * The badge outline turns out to be the artwork's only green shape that both
+ * sits entirely below the character's shoulder and is not the picture's own
+ * outer frame: everything else green down there is either much smaller (the
+ * football, the calculator, the trophy) or much larger and touches the
+ * source's left and right edges (the frame). So "largest green connected
+ * component below the shoulder line, not touching either edge" finds the
+ * badge on its own, without hand-drawn coordinates that would need updating
+ * if the illustration were ever redrawn at a different pose or scale. */
+
+/** True where a pixel is the artwork's outline green — saturated, and green
+ * well ahead of both red and blue, which the badge fill, the white text and
+ * the black background never are. */
+function isOutlineGreen(rgba, w, h, x, y) {
+  if (x < 0 || x >= w || y < 0 || y >= h) return false;
+  const i = (y * w + x) * 4;
+  const r = rgba[i];
+  const g = rgba[i + 1];
+  const b = rgba[i + 2];
+  return g > 110 && g > r * 1.5 && g > b * 1.5;
+}
+
+/**
+ * Below `yFrom`, finds the largest 8-connected blob of outline green that
+ * never touches the source's left or right edge — which rules out the outer
+ * frame, the one green shape down there big enough to compete — and returns
+ * its pixel coordinates.
+ */
+function findBadgeOutline(art, yFrom) {
+  const { width: w, height: h, rgba } = art;
+  const visited = new Uint8Array(w * h);
+  let best = null;
+  for (let y = yFrom; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (visited[y * w + x] || !isOutlineGreen(rgba, w, h, x, y)) continue;
+      const stack = [[x, y]];
+      visited[y * w + x] = 1;
+      const pixels = [];
+      let touchesEdge = false;
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        pixels.push([cx, cy]);
+        if (cx === 0 || cx === w - 1) touchesEdge = true;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= w || ny < yFrom || ny >= h) continue;
+          if (visited[ny * w + nx] || !isOutlineGreen(rgba, w, h, nx, ny)) continue;
+          visited[ny * w + nx] = 1;
+          stack.push([nx, ny]);
+        }
+      }
+      if (!touchesEdge && (!best || pixels.length > best.length)) best = pixels;
+    }
+  }
+  if (!best) throw new Error('no badge outline found below the shoulder line — did the artwork change?');
+  return best;
+}
+
+/**
+ * Paints a set of pixels solid black, in place.
+ *
+ * Not a blend or an inpaint: the badge fill and the background just outside
+ * it are both already within a shade of pure black (checked against this
+ * artwork — re-check if it changes), so removing the stroke is exactly
+ * "the black now covers where the green line was," not a color to blend
+ * toward. Blending toward each pixel's neighbours instead would smear in
+ * whatever else touches the stroke — the white text sits flush against it in
+ * places — and leave a grey ghost of the line rather than erasing it.
+ */
+function paintBlack(art, pixels) {
+  const { width: w, rgba } = art;
+  for (const [x, y] of pixels) {
+    const i = (y * w + x) * 4;
+    rgba[i] = 0;
+    rgba[i + 1] = 0;
+    rgba[i + 2] = 0;
+  }
+}
+
 /* -- resampling ------------------------------------------------------------- */
 
 /**
@@ -338,6 +424,15 @@ if (source.width !== source.height) {
   // different thing: a declared, measured zoom on artwork already square.
   throw new Error(`artwork is ${source.width}x${source.height} — crop it square first`);
 }
+
+// The badge sits low in the illustration; the character's hand is the
+// nearest thing above it that also happens to be outlined in the same
+// green, so the search starts below where the hand ends. Measured against
+// this artwork's 1254px source — re-measure if the source resolution or the
+// pose changes.
+const BADGE_SEARCH_Y = 740;
+paintBlack(source, findBadgeOutline(source, BADGE_SEARCH_Y));
+
 const art = centreCrop(source, ZOOM, VERTICAL_SHIFT);
 console.log(`source ${sourcePath}  ${source.width}x${source.height}  zoom ${ZOOM} -> ${art.width}x${art.width}`);
 
