@@ -14,6 +14,7 @@ import { classifySentence, canAutoApply, type Classification } from './classify.
 import { contentFingerprint, evidenceKey } from './fingerprint.ts';
 import { extractBlocks, splitSentences } from './html.ts';
 import { collectUnresolvedNames, detectMentions, type PlayerMention } from './mentions.ts';
+import { recoverBody } from './mime.ts';
 import type { ClassificationRule } from './rules.ts';
 
 /** A newsletter email as delivered by any ingestion source. */
@@ -94,6 +95,17 @@ export interface IdentityReviewItem {
  * closed by hand — no LLM required.
  */
 export interface CoverageReport {
+  /** Every sentence the extractor produced, whether or not it named a player. */
+  sentences: number;
+  /**
+   * Decoding repairs that had to be applied to read this email at all.
+   *
+   * Empty is the healthy state. A non-empty list means the body as stored was
+   * not readable text — undecoded MIME, quoted-printable or mojibake — and says
+   * which. It is surfaced in Settings so the next decoding regression is a
+   * visible line rather than an unexplained collapse in matched rules.
+   */
+  repairs: string[];
   /** Sentences containing at least one recognised player. */
   sentencesWithPlayers: number;
   /** ...of those, how many produced a classification. */
@@ -226,8 +238,23 @@ export function processNewsletter(
 ): NewsletterProcessResult {
   const maxExcerpt = opts.maxExcerpt ?? 400;
   const sourceName = opts.sourceName ?? message.from ?? 'newsletter';
-  const body = message.html ?? message.text ?? '';
-  const blocks = extractBlocks(body, { isHtml: message.html != null });
+
+  /*
+   * Repair before reading.
+   *
+   * A newsletter already sitting in the message log may have been stored with a
+   * raw MIME blob for a body — that is what the folded-header bug produced —
+   * and reprocessing reads what was stored, not what arrived. Running the
+   * recovery here means re-running the rules over that stored message repairs
+   * it, with no migration and no re-delivery, and the message keeps its
+   * identity. On a body that was decoded correctly every check declines and the
+   * text is returned untouched, which is what makes it safe unconditionally.
+   */
+  const recovered = recoverBody({ html: message.html, text: message.text });
+  const body = recovered.html ?? recovered.text ?? '';
+  // Auto-detect when the HTML part is absent: a plain-text part that is really
+  // HTML should still have its markup stripped rather than read as prose.
+  const blocks = extractBlocks(body, { isHtml: recovered.html != null ? true : undefined });
 
   const evidence: ProposedEvidence[] = [];
   const identityReview: IdentityReviewItem[] = [];
@@ -242,6 +269,8 @@ export function processNewsletter(
 
   const maxSamples = opts.maxSamples ?? 8;
   const coverage: CoverageReport = {
+    sentences: 0,
+    repairs: recovered.repairs,
     sentencesWithPlayers: 0,
     classifiedSentences: 0,
     unclassifiedSentences: 0,
@@ -253,6 +282,7 @@ export function processNewsletter(
 
   for (const block of blocks) {
     for (const sentence of splitSentences(block.text)) {
+      coverage.sentences++;
       const mentions = detectMentions(sentence, index, { documentPlayerIds });
 
       // Coverage only: name-like spans the dictionary does not know.

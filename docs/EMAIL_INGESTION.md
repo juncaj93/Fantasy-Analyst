@@ -41,10 +41,49 @@ unnecessary for this workflow.
    rejected at the SMTP level, because rejecting bounces the message back and
    looks like a broken subscription.
 4. **Size-checked.** Bodies over 2 MB are rejected rather than parsed.
-5. **Processed** through the deterministic pipeline.
-6. **Never fatal.** A parse failure is stored with a plain-language message and
+5. **Decoded.** See below — this is a layer in its own right, not a detail.
+6. **Processed** through the deterministic pipeline.
+7. **Never fatal.** A parse failure is stored with a plain-language message and
    changes nothing. `email()` never throws, so mail is never bounced or retried
    in a loop.
+
+## Decoding (`src/core/newsletter/mime.ts`)
+
+The parser is only as good as the text it is handed, and a decoding fault does
+not fail loudly — it produces fragments that quietly match no rule, which reads
+in the coverage report as "the rules are bad". So decoding is done to the
+standard, once, rather than compensated for downstream:
+
+1. **Headers are unfolded** (RFC 5322) before any of them is read. A header may
+   be continued on the next line and `Content-Type` very often is, immediately
+   before its `boundary=` parameter.
+2. **Multiparts are walked recursively.** `multipart/mixed` wrapping
+   `multipart/alternative` is ordinary. Attachments are skipped.
+3. **Transfer decoding produces octets.** Quoted-printable and base64 both
+   describe bytes, not characters.
+4. **The part's own charset decodes those octets.** `=E2=80=9C` is three UTF-8
+   octets spelling one `“`; decoding each octet separately yields `â€œ`.
+5. **Header values are RFC 2047 decoded**, so an encoded-word subject is stored
+   and matched as the text it stands for.
+6. **Punctuation is normalized to ASCII** during extraction, matching the HTML
+   entity table's existing convention. This is a matching concern, not a
+   cosmetic one: `neg.did_not_practice` tests `did ?n[o']?t` and a typographic
+   apostrophe in `didn’t` slips straight past it.
+
+> **Why this is spelled out.** One production issue was received, read, and
+> turned 209 player sentences into a single signal. `Content-Type:
+> multipart/mixed;` was folded before its `boundary=` parameter; the header
+> reader saw only the first physical line; with no boundary the entire raw MIME
+> payload — part headers, boundary markers, undecoded quoted-printable and both
+> alternative parts at once — was handed downstream as the newsletter's plain
+> text. Nothing about the rules was wrong.
+
+Bodies are also **repaired on the way in**, so a newsletter stored before this
+worked is fixed by re-reading it rather than by a migration: a stored body that
+is really raw MIME, undecoded quoted-printable, or UTF-8 that was decoded one
+byte at a time is recognised and recovered. A body that was already fine is
+returned untouched, and `coverage.repairs` records what had to be done — empty
+is the healthy state, and Settings shows a warning when it is not.
 
 ## Configuration
 
@@ -80,11 +119,23 @@ No `send_email` binding is required — the app only receives.
 `NewsletterService.reprocess()` re-runs an updated rule set over a stored
 message: it inserts only genuinely new items and leaves corrections intact.
 
+There is exactly one exception, and it exists to *protect* that guarantee. When
+a stored body could not be read and had to be repaired (`coverage.repairs` is
+non-empty), insert-only would double count: the rows already stored were derived
+from fragments of undecoded text, and the repaired parse describes the same news
+in clean prose — a different excerpt, so a different dedupe key. Both would then
+sit in the ledger describing one event. So in that case, and only in that case,
+the rows this message owns that the repaired parse does not reproduce are
+retired to `ignored` — never deleted, and never if the user has ruled on them.
+Reprocessing the same message again is then a no-op.
+
 ## Coverage reporting
 
 Every processed newsletter stores a small report, shown in the app under
 **Setup → Newsletter → Recent emails**:
 
+- how many sentences were extracted at all
+- whether the body needed decoding repairs before it could be read
 - sentences that mentioned one of your players
 - how many produced a signal
 - how many matched no rule
