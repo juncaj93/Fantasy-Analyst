@@ -78,7 +78,7 @@ check(recomputed === raw.net, 'the cached signal agrees with its own live eviden
 
 // ---------------------------------------------------------------- Players ---
 console.log('\n=== PLAYERS ===============================================');
-const list = (await get(`/api/players?search=${encodeURIComponent(name)}&limit=25`)).body;
+const list = (await get(`/api/players?q=${encodeURIComponent(name)}&limit=50`)).body;
 const inList = (list?.players ?? []).find((p) => String(p.id) === String(PLAYER_ID));
 if (inList) {
   console.log(`  found in the Players list: newsNet=${inList.newsNet ?? '(absent)'}`);
@@ -94,9 +94,11 @@ console.log('\n=== DRAFT =================================================');
 if (!DRAFT_ID) {
   console.log('  no draft configured on this deployment; the board cannot be read.');
 } else {
-  const board = (await get(`/api/drafts/${encodeURIComponent(DRAFT_ID)}/board?limit=400`)).body;
-  const rows = board?.players ?? board?.board ?? [];
-  console.log(`  board returned ${rows.length} player(s)`);
+  const board = (await get(`/api/drafts/${encodeURIComponent(DRAFT_ID)}/board?limit=200`)).body;
+  // The board's rows are its recommendations; there is no `players` array.
+  const rows = board?.recommendations ?? [];
+  console.log(`  board status=${board?.status ?? '(none)'}, ${rows.length} recommendation(s)`);
+  check(rows.length > 0, 'the draft board returned rows to check against');
   const row = rows.find((p) => String(p.playerId ?? p.id) === String(PLAYER_ID));
   if (!row) {
     /*
@@ -116,7 +118,7 @@ if (!DRAFT_ID) {
   // it proves the board reads evidence rather than a snapshot of it.
   let compared = 0;
   let disagreed = 0;
-  for (const p of rows.slice(0, 40)) {
+  for (const p of rows.slice(0, 25)) {
     const id = String(p.playerId ?? p.id);
     const detail = (await get(`/api/players/${encodeURIComponent(id)}`)).body;
     const net = detail?.signal?.raw?.net;
