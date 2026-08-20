@@ -227,6 +227,67 @@ function paintBlack(art, pixels) {
   }
 }
 
+/** True for a pixel with any trace of green over red and blue — much looser
+ * than isOutlineGreen, which is deliberately strict so it can pick the
+ * outline out from everything else in the picture. This one is only ever
+ * asked about pixels already close to a stroke that's just been erased, so
+ * it doesn't need to be selective — it needs to catch the last of the
+ * anti-aliasing, which fades close enough to black that isOutlineGreen never
+ * counted it as part of the stroke in the first place. */
+function isFaintTinge(rgba, w, h, x, y) {
+  const i = (y * w + x) * 4;
+  const r = rgba[i];
+  const g = rgba[i + 1];
+  const b = rgba[i + 2];
+  return g > 2 && g > r + 2 && g > b + 2;
+}
+
+/**
+ * Paints the antialiasing halo around an already-erased stroke.
+ *
+ * A drawn line is not a hard edge — the pixels right along both sides blend
+ * partway between the line's colour and whatever is behind it, which is
+ * exactly the pixels isOutlineGreen's threshold was built to exclude, so
+ * that it could tell the badge's outline apart from a background that is
+ * itself flecked with green. Erasing only what that threshold caught left a
+ * faint, dotted fringe the width of the blend sitting right where the badge
+ * and frame strokes used to be — visible once the strong colour it was
+ * blending toward was gone.
+ *
+ * Rather than loosen isOutlineGreen itself (which would risk it catching
+ * something it shouldn't, out among the rest of the picture), this stays
+ * loose only where it's safe to: within `radius` of a pixel that's already
+ * confirmed part of the stroke. That keeps it from ever reaching the
+ * football, the calculator, or the "+" marks, which sit well clear of both
+ * erased shapes; it only has to clear the couple of pixels of blend either
+ * shape actually had.
+ */
+function mopUpFringe(art, corePixels, radius) {
+  const { width: w, height: h, rgba } = art;
+  const core = new Uint8Array(w * h);
+  for (const [x, y] of corePixels) core[y * w + x] = 1;
+  const fringe = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (core[y * w + x]) continue;
+      let nearCore = false;
+      for (let dy = -radius; dy <= radius && !nearCore; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          if (core[ny * w + nx]) {
+            nearCore = true;
+            break;
+          }
+        }
+      }
+      if (nearCore && isFaintTinge(rgba, w, h, x, y)) fringe.push([x, y]);
+    }
+  }
+  return fringe;
+}
+
 /* -- resampling ------------------------------------------------------------- */
 
 /**
@@ -478,8 +539,12 @@ if (source.width !== source.height) {
 // this artwork's 1254px source — re-measure if the source resolution or the
 // pose changes.
 const BADGE_SEARCH_Y = 740;
-paintBlack(source, findBadgeOutline(source, BADGE_SEARCH_Y));
-paintBlack(source, findOuterFrame(source));
+const erasedCore = [...findBadgeOutline(source, BADGE_SEARCH_Y), ...findOuterFrame(source)];
+paintBlack(source, erasedCore);
+// 4px is a couple of pixels more than either stroke's blend actually
+// measured at — enough margin that a slightly heavier blend on a future
+// artwork export doesn't leave a fringe of its own.
+paintBlack(source, mopUpFringe(source, erasedCore, 4));
 
 const art = centreCrop(source, ZOOM, VERTICAL_SHIFT);
 console.log(`source ${sourcePath}  ${source.width}x${source.height}  zoom ${ZOOM} -> ${art.width}x${art.width}`);
