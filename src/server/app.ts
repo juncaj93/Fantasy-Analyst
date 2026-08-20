@@ -85,7 +85,7 @@ import { InjuryService } from './services/injuryService.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
-import { MAX_BODY_BYTES, NewsletterService } from './services/newsletterService.ts';
+import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService } from './services/seasonMarketService.ts';
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
 import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
@@ -1746,6 +1746,57 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       return errorResponse('That email was not kept, so its rules cannot be re-run.', 404);
     }
     return jsonResponse(await service.reprocess(message));
+  });
+
+  /**
+   * The newsletter as one block of text, ready to paste into a chat.
+   *
+   * A read, but not a public one. Everything else about a stored newsletter is
+   * masked or summarised for readers because the issue is somebody else's work;
+   * handing out the whole cleaned article would undo that in one request. The
+   * user is unlocked whenever they are about to import anyway.
+   */
+  router.get('/api/newsletter/messages/:id/chat-source', async (ctx) => {
+    const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
+    if (!unlocked) return errorResponse('Unlock to copy the newsletter.', 401);
+    const service = new NewsletterService(ctx.env.db);
+    const message = await service.storedMessage(ctx.params['id']!);
+    if (!message) {
+      return errorResponse('That email was not kept, so it cannot be copied.', 404);
+    }
+    return jsonResponse({ messageId: message.messageId, source: await service.chatSource(message) });
+  });
+
+  /**
+   * What pasting this tally would do. A read: it computes and writes nothing.
+   *
+   * A POST because the block goes in the body — it is far too big for a query
+   * string — which also means the passphrase is required, and that is right for
+   * something whose next step is a write.
+   */
+  router.post('/api/newsletter/messages/:id/ai-tally/preview', async (ctx) => {
+    const body = await ctx.json<{ text?: string }>();
+    if (typeof body?.text !== 'string') return errorResponse('text required (the pasted tally)', 400);
+    if (body.text.length > MAX_TALLY_BYTES) {
+      return errorResponse('That paste is too large to be a tally.', 400);
+    }
+    const service = new NewsletterService(ctx.env.db);
+    const message = await service.storedMessage(ctx.params['id']!);
+    if (!message) return errorResponse('That email was not kept, so a tally cannot be filed against it.', 404);
+    return jsonResponse(await service.previewAiTally(message, body.text));
+  });
+
+  /** Apply what the preview described. Existing corrections are untouched. */
+  router.post('/api/newsletter/messages/:id/ai-tally/apply', async (ctx) => {
+    const body = await ctx.json<{ text?: string }>();
+    if (typeof body?.text !== 'string') return errorResponse('text required (the pasted tally)', 400);
+    if (body.text.length > MAX_TALLY_BYTES) {
+      return errorResponse('That paste is too large to be a tally.', 400);
+    }
+    const service = new NewsletterService(ctx.env.db);
+    const message = await service.storedMessage(ctx.params['id']!);
+    if (!message) return errorResponse('That email was not kept, so a tally cannot be filed against it.', 404);
+    return jsonResponse(await service.applyAiTally(message, body.text));
   });
 
   /**

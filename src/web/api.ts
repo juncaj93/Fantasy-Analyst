@@ -716,6 +716,60 @@ export interface ReprocessPreview {
   detail: string;
 }
 
+export interface AiTallyPreviewRow {
+  name: string;
+  playerId: string;
+  playerName: string;
+  score: number;
+  reason: string;
+  dedupeKey: string;
+  alreadyImported: boolean;
+  contested: boolean;
+  parserRows: ParserRowDisposition[];
+}
+
+export interface ParserRowDisposition {
+  id: string;
+  ruleId: string | null;
+  excerpt: string;
+  polarity: string;
+  magnitude: number;
+  disposition: 'superseded' | 'needs_review' | 'protected';
+}
+
+export interface AiTallyPreview {
+  messageId: string;
+  protocolOk: boolean;
+  error: string | null;
+  rowsParsed: number;
+  ready: AiTallyPreviewRow[];
+  duplicates: AiTallyPreviewRow[];
+  pending: AiTallyPreviewRow[];
+  ambiguous: { name: string; score: number; reason: string; candidates: string[] }[];
+  unmatched: { name: string; score: number; reason: string }[];
+  conflicts: string[];
+  rejected: { line: string; lineNumber: number; why: string }[];
+  wouldRetire: { playerId: string; excerpt: string; polarity: string; magnitude: number }[];
+  protectedByUser: { playerId: string; excerpt: string }[];
+  parserSuperseded: ParserRowDisposition[];
+  parserNeedsReview: ParserRowDisposition[];
+  tallyDelta: { playerId: string; playerName: string; net: number }[];
+  detail: string;
+}
+
+export interface AiTallyApplyOutcome {
+  messageId: string;
+  inserted: number;
+  alreadyPresent: number;
+  identityReviews: number;
+  retired: number;
+  protectedByUser: number;
+  parserSuperseded: number;
+  parserNeedsReview: number;
+  playersTouched: number;
+  detail: string;
+}
+
 export interface SetupStatus {
   steps: SetupStep[];
   readyForDraft: boolean;

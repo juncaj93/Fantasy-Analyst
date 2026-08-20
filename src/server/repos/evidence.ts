@@ -150,6 +150,58 @@ export class EvidenceRepo {
     return rows.results.map(toItem);
   }
 
+  /**
+   * Move specific rows out of the counted set, keeping them in the ledger.
+   *
+   * Used when an imported tally becomes the semantic reading of a newsletter
+   * and the parser's own reading of the same player must stop counting beside
+   * it. `ignored` retires a row; `pending` parks one that needs a human to say
+   * whether it was ever the same claim. Neither deletes anything, so the
+   * parser's finding and its provenance survive for audit.
+   *
+   * A row the user has ruled on is never touched, and a row already at the
+   * target status is left alone so re-running changes nothing.
+   */
+  async setStatusForImport(
+    ids: number[],
+    status: 'ignored' | 'pending',
+    note: string,
+  ): Promise<{ changed: EvidenceItem[]; keptForUserOverride: EvidenceItem[] }> {
+    const changed: EvidenceItem[] = [];
+    const keptForUserOverride: EvidenceItem[] = [];
+    if (ids.length === 0) return { changed, keptForUserOverride };
+    const now = nowIso();
+
+    for (const batch of chunk([...new Set(ids)], MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(`SELECT * FROM evidence_items WHERE id IN (${placeholders})`)
+        .bind(...batch)
+        .all<EvidenceRow>();
+
+      for (const row of rows.results) {
+        const item = toItem(row);
+        if (item.userOverride) {
+          keptForUserOverride.push(item);
+          continue;
+        }
+        if (row.review_status === status) continue;
+        const notes = parseJson<string[]>(row.notes_json, []);
+        await this.db
+          .prepare(
+            `UPDATE evidence_items
+                SET review_status = ?, notes_json = ?, updated_at = ?
+              WHERE id = ?`,
+          )
+          .bind(status, toJson([...notes, note]), now, row.id)
+          .run();
+        changed.push(item);
+      }
+    }
+
+    return { changed, keptForUserOverride };
+  }
+
   async countAll(): Promise<number> {
     const row = await this.db.prepare('SELECT COUNT(*) AS n FROM evidence_items').first<{ n: number }>();
     return Number(row?.n ?? 0);
@@ -174,15 +226,27 @@ export class EvidenceRepo {
     sourceMessageId: string,
     keepDedupeKeys: string[],
     note: string,
+    opts: { ruleId?: string } = {},
   ): Promise<{ superseded: EvidenceItem[]; keptForUserOverride: EvidenceItem[] }> {
     const keep = new Set(keepDedupeKeys);
+    /*
+     * `ruleId` narrows the sweep to one origin, and a caller that shares a
+     * message id with another origin must pass it.
+     *
+     * A newsletter's id is carried by whatever the deterministic parser found
+     * in it AND by whatever a tally import filed against it. Re-importing the
+     * tally recomputes only its own rows, so an unscoped sweep would read the
+     * parser's rows as leftovers and retire evidence the import never claimed
+     * to own.
+     */
     const rows = await this.db
       .prepare(
         `SELECT * FROM evidence_items
           WHERE source_message_id = ?
-            AND review_status IN ('auto_applied','accepted','corrected','pending')`,
+            AND review_status IN ('auto_applied','accepted','corrected','pending')
+            ${opts.ruleId ? 'AND rule_id = ?' : ''}`,
       )
-      .bind(sourceMessageId)
+      .bind(...(opts.ruleId ? [sourceMessageId, opts.ruleId] : [sourceMessageId]))
       .all<EvidenceRow>();
 
     const superseded: EvidenceItem[] = [];
