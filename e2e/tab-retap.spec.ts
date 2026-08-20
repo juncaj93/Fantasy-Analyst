@@ -142,14 +142,29 @@ test.describe('a retap returns the screen home', () => {
     const sheet = page.getByTestId('player-sheet');
     await expect(sheet).toBeVisible();
 
-    // The bar is under the sheet: what is on top at the tab's own centre is
-    // the sheet, not the button.
-    const covered = await page.evaluate(() => {
+    /*
+     * The bar is under the modal: what is on top at the tab's own centre is not
+     * the button.
+     *
+     * *Which* layer is on top is not the claim and must not be asserted as one.
+     * The sheet is `bottom: 0` with a content-driven height, so whether the tab
+     * bar's centre lands on the sheet itself or on the backdrop above which it
+     * sits depends on how tall this particular sheet's content is — which
+     * differs between engines, and did: this read the sheet specifically and
+     * passed in Chromium at every width while failing in WebKit at every width.
+     * Both layers are modal and both intercept the tap, which is the whole
+     * point.
+     */
+    const overBar = await page.evaluate(() => {
       const tab = document.querySelector('[data-testid="tab-trades"]')!.getBoundingClientRect();
       const hit = document.elementFromPoint(tab.left + tab.width / 2, tab.top + tab.height / 2);
-      return hit?.closest('[data-testid="player-sheet"]') != null;
+      return {
+        isTab: hit?.closest('[data-testid="tab-trades"]') != null,
+        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-backdrop"]') != null,
+      };
     });
-    expect(covered, 'the sheet does not actually cover the bar').toBe(true);
+    expect(overBar.isTab, 'the tab bar is tappable through an open sheet').toBe(false);
+    expect(overBar.isModal, 'something that is neither the sheet nor its backdrop is over the bar').toBe(true);
 
     // …and it goes away without one, by the backdrop.
     await page.getByTestId('sheet-backdrop').click({ position: { x: 5, y: 5 } });
