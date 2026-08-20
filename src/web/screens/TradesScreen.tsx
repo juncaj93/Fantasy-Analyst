@@ -34,7 +34,7 @@ export function TradesScreen() {
 
   const load = useCallback(async () => {
     try {
-      setBoard(await api.get<TradeBoard>('/api/trades'));
+      setBoard(await api.get<TradeBoard>('/api/trades', { onFresh: setBoard }));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

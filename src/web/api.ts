@@ -2,6 +2,7 @@
 
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 import { demoSession } from './demo/session.ts';
+import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -60,10 +61,60 @@ function parseBody(body: BodyInit | null | undefined): unknown {
   }
 }
 
+/**
+ * Which data source is in force, as a cache key.
+ *
+ * The same league id means two different leagues across two demo scenarios, so
+ * this has to be part of the identity of a cached response. It is read here
+ * rather than passed in because no screen should have to know a demo exists —
+ * the same reason the substitution itself lives at this seam.
+ */
+function currentWorld(): string {
+  return demoSession()?.scenario.id ?? 'live';
+}
+
 export const api = {
-  get: <T,>(path: string) => request<T>(path),
-  post: <T,>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body == null ? undefined : JSON.stringify(body) }),
+  /**
+   * Read something.
+   *
+   * With no options this is what it has always been: a request, awaited. Pass
+   * `onFresh` and it becomes stale-while-revalidate — the promise resolves
+   * immediately with whatever the app last saw at this path, and `onFresh` is
+   * called a round trip later if the server's answer has changed. That is the
+   * difference between a revisited tab painting in the next frame and painting
+   * after a round trip; see sessionCache.ts for the measurements.
+   *
+   * A caller that passes nothing still benefits from request de-duplication and
+   * still populates the cache for the next caller, so nothing has to be
+   * converted for the cache to start being correct.
+   */
+  get: <T,>(path: string, options: CacheOptions<T> = {}) =>
+    cached<T>(path, currentWorld(), () => request<T>(path), options),
+  /**
+   * Change something.
+   *
+   * A write empties the cache. It is the one event that can change an answer
+   * already held without this module hearing about it — starring a player,
+   * applying a lineup, importing a snapshot, changing a league — and deciding
+   * which cached paths a given write invalidates would mean teaching the client
+   * what every endpoint means. Dropping everything is correct without that.
+   *
+   * `invalidates: false` is for the exception, and there is exactly one shape
+   * of it: a POST that is really a poll. The draft refresh controller syncs
+   * from Sleeper every few seconds, and a write that empties the whole cache on
+   * a timer would mean no other tab could ever hold anything for longer than
+   * one tick — which is this module's entire purpose, defeated by its own
+   * safety rule. The caller taking that route owes the same guarantee by
+   * another means; see the sync in DraftScreen, which re-reads the board with
+   * `fresh: true` in the same beat.
+   */
+  post: async <T,>(path: string, body?: unknown, options: { invalidates?: boolean } = {}) => {
+    try {
+      return await request<T>(path, { method: 'POST', body: body == null ? undefined : JSON.stringify(body) });
+    } finally {
+      if (options.invalidates !== false) clearSessionCache();
+    }
+  },
 };
 
 // ------------------------------------------------------------------- types

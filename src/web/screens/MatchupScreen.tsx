@@ -53,7 +53,7 @@ export function MatchupScreen({ leagues }: { leagues: LeagueSummary[] }) {
     if (!selected || inFlight.current) return;
     inFlight.current = true;
     try {
-      setData(await api.get<MatchupResponse>(`/api/leagues/${selected.id}/matchup`));
+      setData(await api.get<MatchupResponse>(`/api/leagues/${selected.id}/matchup`, { onFresh: setData }));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

@@ -254,6 +254,48 @@ the refresh layer duplicates none of them. Repeated failures keep the last good
 board and show one compact `Draft sync delayed · retrying` line rather than an
 error page. `window.__draftRefresh()` reports the loop's state on the device.
 
+## Same-session response cache
+
+Tabs are mounted as `{tab === 'draft' ? <DraftScreen/> : null}`, so leaving one
+destroys the screen and every piece of state it held. Each screen fetched on
+mount and rendered nothing until the response landed, which meant a *revisit*
+cost a full round trip of blank screen — measured on the seeded league with a
+fixed delay added to every `/api/` call:
+
+| revisit | +0 ms | +250 ms | +600 ms |
+| --- | --- | --- | --- |
+| Team → Draft | 25 ms | 276 ms | 626 ms |
+| Draft → Team | 26 ms | 276 ms | 627 ms |
+| Team → Players | 244 ms | 494 ms | 843 ms |
+
+The tab itself lit up in 3–11 ms every time. All of the delay was between the tab
+lighting up and there being anything to look at, it scaled exactly with the round
+trip, and the request count per revisit was fixed — a caching problem, not a slow
+query. `src/web/sessionCache.ts` makes `api.get` stale-while-revalidate: a repeat
+read resolves in the same microtask with what the app last saw, revalidates
+behind it, and calls the caller's `onFresh` only if the answer moved. Those
+revisits are now 9–17 ms at any latency.
+
+**It caches responses, not decisions.** Nothing in it scores, ranks or projects
+anything; every number still comes from the server. It is a `Map` and does not
+survive a reload — persistence for the Draft board is `offlineCache.ts`'s job,
+with its own schema, age limit and "this is a capture" banner, and two caches
+disagreeing about the last known board would be worse than one round trip.
+
+Writes empty it, since a write is the one thing that can change a held answer
+without it hearing. The single exception is the draft refresh controller's sync,
+which is a poll wearing a POST's clothes: emptying the whole cache every few
+seconds would mean no other tab could hold anything during a draft, and what that
+sync changes — the board — is re-read with `fresh: true` in the same beat.
+Demo worlds are handled by dropping everything when the world changes, because
+two scenarios share a league id.
+
+Guarded by `tests/sessionCache.test.ts` and `e2e/tab-revisit.spec.ts`. The e2e
+tests assert the structural property — content is on screen while the request
+that would have produced it is still being held open — rather than a wall-clock
+number, which a shared runner cannot be trusted with. `scripts/measure-tabs.mjs`
+is the diagnostic that produced the table above.
+
 ## Vegas provider abstraction
 
 Nothing outside `src/core/vegas/` references a vendor field name. Adapters map

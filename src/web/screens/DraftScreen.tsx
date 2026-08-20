@@ -272,6 +272,62 @@ export function DraftScreen({
   positionRef.current = position;
   const controllerRef = useRef<DraftRefreshController | null>(null);
 
+  /**
+   * Put a board on screen.
+   *
+   * Pulled out of `load` because it now runs twice for one visit: once with
+   * whatever the session already had, so a revisited board is there in the next
+   * frame, and again a round trip later if the server's answer has moved on.
+   * Both paths have to do exactly the same things to the screen, so there is
+   * one copy of them.
+   */
+  const applyBoard = useCallback(
+    (next: DraftBoard, pos: string) => {
+      /*
+       * The ref first, and it is not a duplicate of the state below.
+       *
+       * The refresh controller reads the board through this ref rather than
+       * capturing it, which is how "is it my pick" stays current between one
+       * poll and the next without restarting the controller. State is for
+       * rendering; the ref is what anything outside React's render cycle reads.
+       */
+      boardRef.current = next;
+      setBoard(next);
+      /*
+       * The server's order is now the current one.
+       *
+       * Cleared on every load, including a quiet poll: a board rebuilt after
+       * a pick landed carries the stored queue order, so keeping a local
+       * override would pin the list to a sequence from before the drag was
+       * confirmed — and would keep a failed drag on screen indefinitely.
+       */
+      setQueueOrder(null);
+      /*
+       * A player who has just been drafted cannot stay expanded.
+       *
+       * Everything else the reader has set up — the filter, the search, the
+       * scroll, the queue — survives untouched, because none of it is derived
+       * from the board. This one is: it names a row, and the row is gone.
+       */
+      setExpanded((current) =>
+        current && !next.recommendations.some((rec) => rec.playerId === current) ? null : current,
+      );
+      setUpdatedAt(Date.now());
+      setError(null);
+      setCachedAt(null);
+      /*
+       * Keep the last good board where a reload can find it.
+       *
+       * Only the unfiltered board is worth remembering, and only that one is
+       * remembered: a cache keyed by chip would store six copies of largely
+       * the same rows, and the value of this is "the board exists at all in a
+       * dead zone", not "your RB filter survived".
+       */
+      if (draftId && pos === ALL_FILTER) rememberBoardSoon(draftId, next);
+    },
+    [draftId],
+  );
+
   const load = useCallback(
     async (pos: string, options: { quiet?: boolean } = {}) => {
       if (!draftId) return;
@@ -286,40 +342,26 @@ export function DraftScreen({
       if (!options.quiet) setLoading(true);
       try {
         const filter = pos === QUEUE_FILTER ? '&queued=1' : pos === ALL_FILTER ? '' : `&position=${pos}`;
-        const next = await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`);
-        boardRef.current = next;
-        setBoard(next);
-        /*
-         * The server's order is now the current one.
-         *
-         * Cleared on every load, including a quiet poll: a board rebuilt after
-         * a pick landed carries the stored queue order, so keeping a local
-         * override would pin the list to a sequence from before the drag was
-         * confirmed — and would keep a failed drag on screen indefinitely.
-         */
-        setQueueOrder(null);
-        /*
-         * A player who has just been drafted cannot stay expanded.
-         *
-         * Everything else the reader has set up — the filter, the search, the
-         * scroll, the queue — survives untouched, because none of it is derived
-         * from the board. This one is: it names a row, and the row is gone.
-         */
-        setExpanded((current) =>
-          current && !next.recommendations.some((rec) => rec.playerId === current) ? null : current,
-        );
-        setUpdatedAt(Date.now());
-        setError(null);
-        setCachedAt(null);
-        /*
-         * Keep the last good board where a reload can find it.
-         *
-         * Only the unfiltered board is worth remembering, and only that one is
-         * remembered: a cache keyed by chip would store six copies of largely
-         * the same rows, and the value of this is "the board exists at all in a
-         * dead zone", not "your RB filter survived".
-         */
-        if (pos === ALL_FILTER) rememberBoardSoon(draftId, next);
+        const next = await api.get<DraftBoard>(`/api/drafts/${draftId}/board?limit=${BOARD_ROWS}${filter}`, {
+          /*
+           * A quiet poll asks the server, always.
+           *
+           * It exists to find out whether a pick has landed, and answering it
+           * from a cache would be answering "has anything changed" with "here
+           * is what you already had". Only a visit to the screen reads through
+           * the cache — that is the one place where showing the last known
+           * board immediately is worth more than a fresh one shortly.
+           */
+          fresh: options.quiet,
+          /*
+           * The board the visit painted from cache, corrected. Applied through
+           * the same function, so a background correction and a foreground load
+           * leave the screen in identical states — and only when the answer has
+           * actually moved, so a poll that finds nothing new redraws nothing.
+           */
+          onFresh: (fresh) => applyBoard(fresh, pos),
+        });
+        applyBoard(next, pos);
       } catch (err) {
         /*
          * A quiet load reports upwards instead of painting a banner.
@@ -362,7 +404,7 @@ export function DraftScreen({
         if (!options.quiet) setLoading(false);
       }
     },
-    [draftId],
+    [draftId, applyBoard],
   );
 
   /** The latest `load`, reachable from the controller without restarting it. */
@@ -480,7 +522,18 @@ export function DraftScreen({
     }
 
     const controller = createDraftRefreshController({
-      sync: () => api.post<DraftSyncResult>(`/api/drafts/${draftId}/sync`),
+      /*
+       * A poll wearing a POST's clothes, and it says so.
+       *
+       * This runs every few seconds for as long as Draft is open. Writes empty
+       * the session cache, which is right for a write and ruinous on a timer:
+       * it would mean Team, Players and Matchup could never hold anything for
+       * longer than one tick, and every tab switch during a draft — the moment
+       * the app most needs to feel instant — would go back to waiting on the
+       * network. What this sync actually changes is the board, and the board is
+       * re-read from the server, not from cache, by `applyChange` below.
+       */
+      sync: () => api.post<DraftSyncResult>(`/api/drafts/${draftId}/sync`, undefined, { invalidates: false }),
       /*
        * The expensive half, reached only when the fingerprint moved.
        *

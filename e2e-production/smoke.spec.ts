@@ -356,10 +356,47 @@ test.describe('the deployed app', () => {
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
+    const unfiltered = await settledIds(page);
+
     const queueFilter = page.getByTestId('queue-filter');
     test.skip((await queueFilter.count()) === 0, 'no queue filter on this deployment');
     await queueFilter.click();
     await expect(queueFilter).toHaveAttribute('aria-pressed', 'true');
+
+    /*
+     * Wait for the *queued* board, not merely for a settled one.
+     *
+     * `aria-pressed` flips the moment the chip is tapped; the rows it asks for
+     * arrive a request later. `settledIds` returns as soon as two reads 300ms
+     * apart agree, and over a real network they agree on the board that is
+     * still on screen — the unfiltered one. This test then measured "did a sort
+     * re-order the queue" against a list that was never the queue.
+     *
+     * It is not hypothetical. On the deploy of #89 that is exactly what
+     * happened: `before` captured 200 unfiltered rows, the queued board landed
+     * empty a moment later, and every sort was compared against a list of
+     * players that had never been queued. Two widths failed and a third was
+     * flaky, and nothing was wrong with the deployment — the queue is simply
+     * empty there, which is a `test.skip`, not a failure.
+     *
+     * If the list never stops matching the unfiltered board, the queue *is* the
+     * whole board — everything starred — and reading it now is correct. Hence a
+     * wait rather than an assertion.
+     */
+    await page
+      .waitForFunction(
+        (previous) => {
+          const ids = [...document.querySelectorAll('[data-testid="recommendation-row"]')].map(
+            (row) => row.getAttribute('data-player-id') ?? '',
+          );
+          return ids.length !== previous.length || ids.some((id, i) => id !== previous[i]);
+        },
+        unfiltered,
+        { timeout: 20_000 },
+      )
+      .catch(() => {
+        /* The queue is the whole board. `before` below is already the queue. */
+      });
 
     const before = await settledIds(page);
     test.skip(before.length < 2, 'fewer than two players queued on this deployment');

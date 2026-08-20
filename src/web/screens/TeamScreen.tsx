@@ -123,7 +123,7 @@ export function TeamScreen({
   const loadRoster = useCallback(async () => {
     if (!selected) return;
     try {
-      setRoster(await api.get<RosterResponse>(`/api/leagues/${selected.id}/roster`));
+      setRoster(await api.get<RosterResponse>(`/api/leagues/${selected.id}/roster`, { onFresh: setRoster }));
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
     }
@@ -132,7 +132,11 @@ export function TeamScreen({
   const loadLineup = useCallback(async () => {
     if (!selected) return;
     try {
-      setLineup(await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup?mode=${mode}`));
+      setLineup(
+        await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup?mode=${mode}`, {
+          onFresh: setLineup,
+        }),
+      );
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
     }
@@ -148,7 +152,7 @@ export function TeamScreen({
   const loadWaivers = useCallback(async () => {
     if (!selected) return;
     try {
-      setWaivers(await api.get<WaiverAdvice>(`/api/leagues/${selected.id}/waivers`));
+      setWaivers(await api.get<WaiverAdvice>(`/api/leagues/${selected.id}/waivers`, { onFresh: setWaivers }));
     } catch {
       setWaivers(null);
     }

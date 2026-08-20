@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
+import type { CacheOptions } from '../sessionCache.ts';
 import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { Empty, SignedValue } from '../components/common.tsx';
@@ -140,36 +141,64 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 
   /** One page of the list. `offset` 0 replaces; anything else appends. */
   const fetchPage = useCallback(
-    async (offset: number): Promise<PlayersPage> => {
+    async (offset: number, options: CacheOptions<PlayersPage> = {}): Promise<PlayersPage> => {
       const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
       return api.get<PlayersPage>(
         `/api/players?q=${encodeURIComponent(query)}${filter}&limit=${PAGE_SIZE}&offset=${offset}`,
+        options,
       );
     },
     [query, position],
   );
+
+  /**
+   * Put a first page on screen.
+   *
+   * Runs twice for one visit — once with whatever the session already had, and
+   * again if the server's answer has moved on — so the two paths cannot drift.
+   */
+  const applyFirstPage = useCallback((res: PlayersPage) => {
+    setPlayers(res.players);
+    // Older deployments send neither field; treating a full page as "there
+    // may be more" degrades to one extra request rather than to a truncated
+    // list, which is the right way round.
+    setHasMore(res.hasMore ?? res.players.length >= PAGE_SIZE);
+  }, []);
+
+  /*
+   * The debounce is for typing, and only for typing.
+   *
+   * It exists so that a query being typed does not fire a request per
+   * keystroke. Arriving on the screen is not typing: there is one query, it is
+   * whatever the screen opened with, and waiting 220ms to ask about it put a
+   * fifth of a second of blank list in front of every single visit — including
+   * a revisit whose answer was already in hand. First run asks immediately;
+   * every change after it waits.
+   */
+  const typed = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     const handle = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetchPage(0);
+        const res = await fetchPage(0, {
+          onFresh: (fresh) => {
+            if (!cancelled) applyFirstPage(fresh);
+          },
+        });
         if (cancelled) return;
-        setPlayers(res.players);
-        // Older deployments send neither field; treating a full page as "there
-        // may be more" degrades to one extra request rather than to a truncated
-        // list, which is the right way round.
-        setHasMore(res.hasMore ?? res.players.length >= PAGE_SIZE);
+        applyFirstPage(res);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }, 220);
+    }, typed.current ? 220 : 0);
+    typed.current = true;
     return () => {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [fetchPage]);
+  }, [fetchPage, applyFirstPage]);
 
   /**
    * The next page, when the reader reaches the end of this one.
