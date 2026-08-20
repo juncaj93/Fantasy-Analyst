@@ -296,14 +296,35 @@ function favicon(art) {
  */
 const ZOOM = 1.13;
 
-/** Crops the centre 1/zoom of a square image. */
-function centreCrop(art, zoom) {
-  if (zoom === 1) return art;
+/**
+ * How far to slide the crop window down the source before cropping it,
+ * in source pixels. 0 keeps the crop centred; positive trades the top of
+ * the frame for the bottom, which is what "raise the logo" means once the
+ * icon is already full bleed — there is no headroom to add, only a choice
+ * of which edge gives it up.
+ *
+ * 72 is not a taste setting either: at ZOOM = 1.13 the crop window is
+ * 1110px of a 1254px square, leaving 144px of slack split 72/72 above and
+ * below when centred. Sliding the window down by the full 72px spends all
+ * of it — the window's bottom edge lands exactly on the source's bottom
+ * edge — which is the most of "The Junculator" and the trophy this crop
+ * can show without cropping past the image itself. It costs a small strip
+ * of the hairline at the top, which is the trade this was asked for.
+ *
+ * Re-measure alongside ZOOM if either changes.
+ */
+const VERTICAL_SHIFT = 72;
+
+/** Crops the centre 1/zoom of a square image, slid down by `shift` source
+ * pixels and clamped so the window never runs past the source's edges. */
+function centreCrop(art, zoom, shift = 0) {
+  if (zoom === 1 && shift === 0) return art;
   const side = Math.round(art.width / zoom);
-  const off = Math.round((art.width - side) / 2);
+  const xOff = Math.round((art.width - side) / 2);
+  const yOff = Math.max(0, Math.min(art.width - side, xOff + shift));
   const rgba = Buffer.alloc(side * side * 4);
   for (let y = 0; y < side; y++) {
-    const from = ((y + off) * art.width + off) * 4;
+    const from = ((y + yOff) * art.width + xOff) * 4;
     art.rgba.copy(rgba, y * side * 4, from, from + side * 4);
   }
   return { width: side, height: side, rgba };
@@ -317,7 +338,7 @@ if (source.width !== source.height) {
   // different thing: a declared, measured zoom on artwork already square.
   throw new Error(`artwork is ${source.width}x${source.height} — crop it square first`);
 }
-const art = centreCrop(source, ZOOM);
+const art = centreCrop(source, ZOOM, VERTICAL_SHIFT);
 console.log(`source ${sourcePath}  ${source.width}x${source.height}  zoom ${ZOOM} -> ${art.width}x${art.width}`);
 
 mkdirSync(OUT, { recursive: true });
