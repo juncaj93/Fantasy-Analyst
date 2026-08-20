@@ -60,7 +60,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       return;
     }
     try {
-      setAdvice(await api.get<WaiverAdvice>(`/api/leagues/${selected.id}/waivers`));
+      setAdvice(await api.get<WaiverAdvice>(`/api/leagues/${selected.id}/waivers`, { onFresh: setAdvice }));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
