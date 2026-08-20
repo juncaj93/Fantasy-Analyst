@@ -265,11 +265,17 @@ test.describe('the deployed app', () => {
   });
 
   /**
-   * The draft board is the reason the app exists, so its four numbers are
-   * checked as text rather than as a screenshot: Score, ADP, Val and Next, on
+   * The draft board is the reason the app exists, so its numbers are checked as
+   * text rather than as a screenshot: Score, the two market deltas and Next, on
    * the metrics line, with the tally beside the name.
+   *
+   * `Val` used to be one of them. The row prints market *consequence* now —
+   * `ADP +3` is three picks ahead of Sleeper's market, `DOG -22` is twenty-two
+   * picks past Underdog's — which is the subtraction a reader was doing against
+   * the pick on the clock anyway, and `Val` was a third answer to the same
+   * question. It moved to the expanded card with both raw markets.
    */
-  test('the draft board still reads Score · ADP · Val · Next', async ({ page }) => {
+  test('the draft board reads Score · ADP · DOG · Next as market deltas', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
 
@@ -281,8 +287,13 @@ test.describe('the deployed app', () => {
     const metrics = await rows.first().locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
     expect(metrics).toContain('ADP');
-    expect(metrics).toMatch(/\bVal\b/);
     expect(metrics).toMatch(/\bNext\b/);
+    expect(metrics, 'Val is still on the compact row').not.toMatch(/\bVal\b/);
+
+    // The ADP column is a signed whole number of picks, or an honest unknown —
+    // never a raw market position, which is what it used to be.
+    const adp = (await rows.first().getByTestId('adp-metric').innerText()).trim();
+    expect(adp, `the ADP column read "${adp}"`).toMatch(/^ADP\s+([+-]?\d+|unknown)$/);
 
     // The position is still written in letters, not only painted.
     const badge = (await rows.first().locator('.pos-pill').innerText()).trim();
