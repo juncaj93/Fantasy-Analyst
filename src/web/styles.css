@@ -3808,6 +3808,28 @@ label {
   }
 }
 
+/*
+ * An email address, which is a word to a line-breaker and a paragraph to a
+ * phone.
+ *
+ * Every address this app prints comes from outside it and has no length limit
+ * and no spaces, so any element holding one can push a page wider than the
+ * screen. That is not hypothetical: Setup's newsletter panel prints three of
+ * them — the app's own address, the sender of the last issue, and the sender
+ * being offered for approval — and two of the three were doing it.
+ *
+ * `anywhere` rather than `break-word` because only `anywhere` lowers the
+ * element's min-content width, and min-content is what a parent consults when
+ * deciding it cannot fit. `break-word` breaks a long word once the box is
+ * already narrow; it does not stop the box being made wide.
+ *
+ * Named as a class rather than repeated as an inline style — which is how the
+ * address field alone carried this fix while the other two went without.
+ */
+.address {
+  overflow-wrap: anywhere;
+}
+
 /* ================================================================= tables */
 
 table.compact {
@@ -3816,11 +3838,44 @@ table.compact {
   font-size: 0.8rem;
 }
 
+/*
+ * A cell that breaks rather than a page that widens.
+ *
+ * `width: 100%` above is a *preference* on a table, not a cap: under the auto
+ * layout algorithm a table is never narrower than its cells' min-content, and
+ * min-content for a run of text with no spaces in it is the whole run. An
+ * email address is such a run. So Setup's newsletter activity — which prints
+ * the address the last issue came from — grew its table to 383.6px inside a
+ * 342px column, and the page grew with it: 408px of document in a 390px
+ * viewport, 18px of horizontal scroll on a screen that should have none.
+ *
+ * The visible symptom was not the scrollbar. It was that `Parse / Preview` in
+ * the paste-tally sheet could not be tapped: with the page shifted, the
+ * textarea above it took the tap instead. Two tests had been failing on that
+ * for weeks, and were repeatedly written off — including by me — as an
+ * order-dependent quirk of the suite. The order dependence was real and was
+ * the *mechanism*: an earlier test accepts a long sender, which is what puts a
+ * 43-character unbreakable string into the table.
+ *
+ * `anywhere` rather than `break-word` because only `anywhere` reduces the
+ * cell's min-content contribution, and the min-content contribution is the
+ * entire bug. `break-word` would wrap the address once the column was narrow
+ * and do nothing to stop the column being wide in the first place.
+ *
+ * Not `table-layout: fixed`, which also cures it: fixed layout ignores content
+ * widths and splits the columns evenly, across all nine tables wearing this
+ * class. This keeps them sized as they are — the label column measured 113.5px
+ * against the value column's 228.5px before and after.
+ *
+ * And not `overflow-x: hidden` on the page, which hides the 18px rather than
+ * removing it, and would clip the address instead of wrapping it.
+ */
 table.compact th,
 table.compact td {
   text-align: left;
   padding: var(--sp-1) var(--sp-1);
   border-bottom: 1px solid var(--separator-soft);
+  overflow-wrap: anywhere;
 }
 
 table.compact th {

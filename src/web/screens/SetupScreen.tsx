@@ -797,7 +797,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
       {status.addressConfigured ? (
         <div className="card card-tight">
           <div className="faint">Your Fantasy Analyst email address</div>
-          <div style={{ fontSize: '1rem', fontWeight: 650, wordBreak: 'break-all' }} data-testid="newsletter-address">
+          <div className="address" style={{ fontSize: '1rem', fontWeight: 650 }} data-testid="newsletter-address">
             {status.address}
           </div>
           <div className="btn-row" style={{ marginTop: 6 }}>
@@ -833,8 +833,8 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
       {ignoredSender(status) ? (
         <div className="card card-tight" data-testid="offer-sender">
           <div>
-            Mail arrived from <strong>{ignoredSender(status)}</strong> and was ignored, because you have
-            not said it is expected.
+            Mail arrived from <strong className="address">{ignoredSender(status)}</strong> and was ignored,
+            because you have not said it is expected.
           </div>
           <button
             className="btn btn-primary btn-sm"
@@ -965,7 +965,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
               {status.lastReceivedAt ? (
                 <>
                   {formatAge(status.lastReceivedAt)}
-                  <div className="faint">
+                  <div className="faint address">
                     {status.lastReceivedFrom} · {status.lastReceivedStatus}
                   </div>
                 </>
