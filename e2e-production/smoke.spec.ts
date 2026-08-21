@@ -1106,6 +1106,49 @@ test.describe('the decision intelligence', () => {
   });
 
   /**
+   * The drafted roster, two players wide, on the deployed bundle.
+   *
+   * The layout is a grid whose columns are sized against the phone it is drawn
+   * on, so it is the kind of thing that can be right in the repository and
+   * wrong in production: a font that loads differently, a card that ends up a
+   * few pixels narrower, and a name is drawn through the rule into the cell
+   * beside it. Two geometric claims, which are the two a reader would notice —
+   * two players genuinely share a row, and no name escapes its own cell.
+   *
+   * Only meaningful while a draft is running, which is the only time this list
+   * is drawn. Asked of the roster rather than assumed, for the same reason the
+   * Start/Sit test above asks.
+   */
+  test('draws the drafted roster two players wide', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+
+    const cells = page.getByTestId('drafted-line');
+    const drafted = await cells.count();
+    test.skip(drafted === 0, 'this deployment is not mid-draft, so there is no drafted list');
+
+    // Every name inside its own cell, at whatever width this deployment drew.
+    for (const cell of await cells.all()) {
+      const [box, name, text] = await Promise.all([
+        cell.boundingBox(),
+        cell.locator('.player-name').boundingBox(),
+        cell.locator('.player-name').innerText(),
+      ]);
+      expect(name!.x + name!.width, `"${text}" runs past its cell`).toBeLessThanOrEqual(box!.x + box!.width + 1);
+    }
+
+    // And a group holding two or more puts two of them on a row.
+    for (const card of await page.locator('.roster-grid').all()) {
+      const group = await card.getByTestId('drafted-line').all();
+      if (group.length < 2) continue;
+      const [first, second] = await Promise.all([group[0]!.boundingBox(), group[1]!.boundingBox()]);
+      expect(Math.abs(first!.y - second!.y), 'two players share a row').toBeLessThan(2);
+      expect(first!.x + first!.width, 'and do not overlap').toBeLessThanOrEqual(second!.x + 1);
+      return;
+    }
+  });
+
+  /**
    * The refresh is a gesture now, and it still refuses a stranger.
    *
    * There is no button to look for: Team is pulled down to reload it, and the
