@@ -37,20 +37,32 @@ const KNOWN_COMPONENTS = new Set([
   'league_fit',
   'survival',
   'scarcity',
-  'news_30',
+  'news_30d',
   'market_expectation',
   'tier_cliff',
-  'news_7',
+  'news_7d',
   'need',
   'separation',
   'opportunity',
-  'concentration',
+  'team_concentration',
 ]);
 
+/**
+ * Whether any market priced this player.
+ *
+ * Deliberately the *blend* rather than `adp`. `adp` is Sleeper's number alone,
+ * and a player Underdog has priced and Sleeper has not is fully priced as far
+ * as this engine is concerned — reading `adp` here would call a third of a deep
+ * board unpriced and then assert nonsense about it. `marketBlend.adp` is the
+ * same field the engine's own comparator sorts on.
+ */
+const unpriced = (r) => r.marketBlend?.adp == null;
+
 const results = [];
+/** `detail` explains a failure, so it is printed only when there is one. */
 function check(name, ok, detail) {
   results.push({ name, state: ok ? 'PASS' : 'FAIL', detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? ` — ${detail}` : ''}`);
 }
 function skip(name, why) {
   results.push({ name, state: 'SKIP', detail: why });
@@ -86,15 +98,28 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
  * The single property everything else rests on. If the rows are not sorted by
  * `total`, then every explanation the card gives is an explanation of a number
  * that did not decide the position it is printed in.
+ *
+ * The order has one term ahead of the composite, and it is deliberate: a player
+ * no market has priced sorts after every player somebody has. His total is
+ * near zero — not because he is good, but because the component that would have
+ * had an opinion is absent — so it is not on the same scale and cannot be
+ * compared against a priced player's. So the property is "non-increasing in
+ * total *within* each group, and every unpriced player below every priced one",
+ * which is the engine's own comparator read back off the wire.
  */
 {
   const inversions = [];
   for (let i = 1; i < recs.length; i++) {
-    if (recs[i].total > recs[i - 1].total + 1e-9) {
-      inversions.push(`${recs[i].name} (${recs[i].total.toFixed(4)}) above ${recs[i - 1].name} (${recs[i - 1].total.toFixed(4)})`);
+    const prev = recs[i - 1];
+    const cur = recs[i];
+    if (unpriced(prev) && !unpriced(cur)) {
+      inversions.push(`priced ${cur.name} sorted below unpriced ${prev.name}`);
+    } else if (unpriced(prev) === unpriced(cur) && cur.total > prev.total + 1e-9) {
+      inversions.push(`${cur.name} (${cur.total.toFixed(4)}) sorted below ${prev.name} (${prev.total.toFixed(4)})`);
     }
   }
-  check('board order is non-increasing in total', inversions.length === 0, inversions.slice(0, 3).join('; '));
+  check('board order is the engine’s order', inversions.length === 0, inversions.slice(0, 3).join('; '));
+  console.log(`      ${recs.filter((r) => !unpriced(r)).length} priced, ${recs.filter(unpriced).length} unpriced`);
 }
 
 /*
@@ -106,7 +131,7 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
  * means something downstream is rescaling it against the pool.
  */
 {
-  const priced = recs.filter((r) => r.score !== null);
+  const priced = recs.filter((r) => r.score !== null && !unpriced(r));
   const bad = [];
   for (let i = 1; i < priced.length; i++) {
     if (priced[i].score > priced[i - 1].score) {
@@ -191,20 +216,26 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
  * lack a market and the live board does not.
  */
 {
-  const unpriced = recs.filter((r) => r.adp === null);
-  if (unpriced.length === 0) {
+  const nameless = recs.filter(unpriced);
+  if (nameless.length === 0) {
     skip('an unpriced player shows no Score', 'every player on this board is priced');
   } else {
-    const scored = unpriced.filter((r) => r.score !== null);
-    check('an unpriced player shows no Score', scored.length === 0, `${scored.length} of ${unpriced.length} carried a Score`);
+    const scored = nameless.filter((r) => r.score !== null);
+    check('an unpriced player shows no Score', scored.length === 0, `${scored.length} of ${nameless.length} carried a Score`);
 
-    // And he sits at the bottom rather than being lifted by the absence.
-    const positions = unpriced.map((r) => recs.indexOf(r));
-    const highest = Math.min(...positions);
+    // The converse matters just as much: a priced player must not be denied a
+    // Score, or the board goes quiet exactly where it is meant to speak.
+    const silent = recs.filter((r) => !unpriced(r) && r.score === null);
+    check('a priced player always shows a Score', silent.length === 0, `${silent.length} priced players had none`);
+
+    // And he sits at the tail rather than being lifted by the absence — the
+    // defect this rule was written for, where "we know nothing about him"
+    // rendered as a confident 83 above every priced player.
+    const highest = Math.min(...nameless.map((r) => recs.indexOf(r)));
     check(
       'an unpriced player is not lifted above priced ones',
-      highest >= recs.length - unpriced.length - 2,
-      `${unpriced.length} unpriced, highest at row ${highest + 1} of ${recs.length}`,
+      highest >= recs.length - nameless.length,
+      `${nameless.length} unpriced, highest at row ${highest + 1} of ${recs.length}`,
     );
   }
 }
@@ -218,16 +249,26 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
  * board that is correct on arrival was correct at composition too.
  */
 {
-  const draft = await get(`/api/drafts/${encodeURIComponent(draftId)}`);
-  const livePick = draft.json?.currentPick ?? draft.json?.draft?.currentPick ?? null;
-  if (livePick === null || livePick === undefined) {
-    skip('the board is answering for the live pick', 'the draft endpoint does not report a current pick');
+  const made = first.json?.boardPicks;
+  if (!Array.isArray(made)) {
+    skip('the board is answering for the pick the draft is on', 'this board carries no pick list');
   } else {
+    /*
+     * The completed picks travel with the board, composed from the same synced
+     * state, so `currentPick` must be one past the last of them. A board that
+     * disagrees with its own pick list was assembled from two different reads
+     * of the draft — which is the server-side form of the stale-answer defect
+     * Phase 5 rules out on the client.
+     */
+    const expected = made.length + 1;
     check(
-      'the board is answering for the live pick',
-      Math.abs(livePick - pick) <= 1,
-      `board says ${pick}, draft says ${livePick}`,
+      'the board is answering for the pick the draft is on',
+      expected === pick,
+      `board says pick ${pick} but carries ${made.length} completed picks`,
     );
+    const numbers = made.map((p) => p.pickNo);
+    const duplicated = numbers.length !== new Set(numbers).size;
+    check('no pick is recorded twice', !duplicated, `${numbers.length - new Set(numbers).size} duplicates`);
   }
 }
 
@@ -248,7 +289,11 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
   } else {
     const sameIds = again.length === recs.length && again.every((r, i) => r.playerId === recs[i].playerId);
     const sameTotals = sameIds && again.every((r, i) => Math.abs(r.total - recs[i].total) < 1e-9);
-    check('the same question twice gives the same answer', sameIds && sameTotals, sameIds ? 'order held, totals moved' : 'order changed');
+    check(
+      'the same question twice gives the same answer',
+      sameIds && sameTotals,
+      sameIds ? 'the order held but a total moved' : 'the order changed between two identical requests',
+    );
 
     /*
      * Ties specifically. Equal composites are the only place order is decided
@@ -307,22 +352,32 @@ console.log(`\nproduction board: ${recs.length} players at pick ${pick}, round $
  * 10. The positional family stays inside its cap.
  *
  * Four components describe the same thing from four angles — how thin the
- * position is. Capped jointly, they are context; uncapped they would quietly
- * become the largest term on the board and turn every ranking into a positional
- * ranking. The cap is enforced on weights, so this reads it back off the board.
+ * position is. Capped jointly they are context; uncapped they would claim
+ * eighteen picks of ADP for structure alone and turn every ranking into a
+ * positional ranking.
+ *
+ * The cap is on the family's summed *contribution*, not on its summed weight:
+ * the four weights add to 0.9 by design and it is the product that is scaled
+ * back. Reading the weights instead would report a violation on every board
+ * that has none. The tolerance is for `round3`, which the capping runs through.
  */
 {
   const FAMILY = ['scarcity', 'tier_cliff', 'separation', 'opportunity'];
-  let worst = { name: null, weight: 0 };
+  let worst = { name: null, sum: 0 };
   for (const r of recs) {
-    const weight = (r.components ?? []).filter((c) => FAMILY.includes(c.key)).reduce((t, c) => t + Math.abs(c.weight), 0);
-    if (weight > worst.weight) worst = { name: r.name, weight };
+    const sum = Math.abs(
+      (r.components ?? [])
+        .filter((c) => FAMILY.includes(c.key) && !c.unknown)
+        .reduce((t, c) => t + c.contribution, 0),
+    );
+    if (sum > worst.sum) worst = { name: r.name, sum };
   }
   check(
     'the positional family stays inside its 0.5 cap',
-    worst.weight <= 0.5 + 1e-6,
-    `heaviest is ${worst.name} at ${worst.weight.toFixed(4)}`,
+    worst.sum <= 0.5 + 5e-3,
+    `heaviest is ${worst.name} at ${worst.sum.toFixed(4)}`,
   );
+  console.log(`      heaviest positional structure on this board: ${worst.name} at ${worst.sum.toFixed(4)} of 0.5`);
 }
 
 const failed = results.filter((r) => r.state === 'FAIL');
