@@ -110,7 +110,17 @@ test.describe('the navigation bar', () => {
     await expect(bar).toContainText('Demo Dynasty');
     await expect(bar.getByTestId('draft-status')).toContainText('#3');
     await expect(bar.getByTestId('draft-status')).toContainText('R1');
-    await expect(bar.getByTestId('draft-refresh')).toBeVisible();
+    /*
+     * The bar's actions are the board and the sort, and nothing else.
+     *
+     * The refresh glyph that used to sit here is gone — pulling the screen down
+     * reloads it, which costs no glass on the one screen where a row is a
+     * player. What the bar still has to carry is the live state, which is what
+     * everything above this line checks.
+     */
+    await expect(bar.getByTestId('draft-refresh')).toHaveCount(0);
+    await expect(bar.getByTestId('draft-board-open')).toBeVisible();
+    await expect(bar.getByTestId('draft-sort')).toBeVisible();
   });
 });
 
