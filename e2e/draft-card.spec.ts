@@ -435,7 +435,7 @@ test.describe('the expanded card is a preview, not an article', () => {
     await expect(row.getByTestId('injury-current')).toHaveCount(0);
 
     const short = (await row.boundingBox())!.height;
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
     await page.waitForTimeout(400);
 
     await expect(row.getByTestId('market-detail')).toBeVisible();
@@ -443,7 +443,7 @@ test.describe('the expanded card is a preview, not an article', () => {
     expect((await row.boundingBox())!.height, 'asking for everything showed nothing more').toBeGreaterThan(short);
 
     // And it closes again, back to the preview.
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
     await page.waitForTimeout(400);
     await expect(row.getByTestId('market-detail')).toHaveCount(0);
   });

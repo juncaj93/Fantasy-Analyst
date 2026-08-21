@@ -2545,10 +2545,22 @@ body,
  * elsewhere use — the affordance for "there is more of this" is already spelled
  * one way in this app and a second spelling would be a second thing to learn.
  */
-.explain-compact .detail-more {
-  min-height: 28px;
-  padding: 0;
-  white-space: nowrap;
+/*
+ * The blurb is the target that expands the blurb.
+ *
+ * A whole-width tap area rather than a link, because what the reader is aiming
+ * at is the sentence they are already reading. It is a `role="button"` with a
+ * keyboard handler rather than a real `<button>` for one reason: the outlook
+ * inside it contains its own controls on other screens, and a button may not
+ * contain a button.
+ */
+.outlook-toggle-target {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.outlook-toggle-target:active {
+  opacity: 0.6;
 }
 
 .detail-more::after {
@@ -4034,20 +4046,14 @@ table.compact tr:last-child td {
 }
 
 /*
- * Bench is depth, not a hole in the lineup, so the eye is given somewhere to
- * separate the two — a hairline instead of the interpunct every other pair
- * gets. It is the same line, still one row tall, and still scrolls with the
- * rest at 360px.
+ * Bench takes the same separator as everything else on the line.
+ *
+ * It used to get a hairline rule instead of the interpunct, on the argument
+ * that depth is a different kind of fact from a hole in the lineup. Read on the
+ * screen rather than in the reasoning, it was one mark in a row of six that did
+ * not match the other five — the eye stopped on it, found nothing there, and
+ * moved on. A strip of counts should look like one strip.
  */
-.roster-progress .slot-bench::before {
-  content: '';
-  display: inline-block;
-  width: 1px;
-  height: 0.72em;
-  background: var(--border-strong);
-  vertical-align: -0.05em;
-  margin-right: var(--sp-2);
-}
 
 /*
  * What the market expects of him this season.

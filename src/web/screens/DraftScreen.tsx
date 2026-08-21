@@ -39,7 +39,7 @@ import {
   formatShortAge,
   positionCardClass,
 } from '../components/common.tsx';
-import { NavBar, SearchFilterRow, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+import { NavBar, PullToRefresh, SearchFilterRow, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 /* One shared answer to "which players does this filter mean". */
 import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
@@ -784,7 +784,17 @@ export function DraftScreen({
   const checkedAt = refreshState?.lastCheckedAt ?? updatedAt;
 
   return (
-    <>
+    /*
+     * The gesture that reloads the board, in place of a control that did.
+     *
+     * There was a glyph at the trailing end of the bar. It is gone: pulling the
+     * screen down is the gesture every iPhone reader already has, it costs no
+     * glass on the one screen where a row is a player, and it cannot be tapped
+     * by accident while scrolling a long board. The same handler runs — see
+     * `refreshNow` — so an unlocked reader still pulls picks from Sleeper and a
+     * locked one still gets the board, with the same single-flight guard.
+     */
+    <PullToRefresh onRefresh={refreshNow} label="Draft" testId="draft-pull">
       {/*
         The board, over everything, reading the state this screen already has.
 
@@ -810,29 +820,16 @@ export function DraftScreen({
         testId="draft-nav"
         title={
           /*
-            The league, and the way into the board.
+            The league, and only the league.
 
-            The glyph sits *in* the title line rather than in the bar's actions,
-            because it is about this league's draft rather than about this
-            screen, and because the actions end is already the refresh control's.
-            It costs no row and no height: the button is shorter than the line it
-            sits on, so the bar is exactly as tall as it was before this existed.
+            The way into the board used to be a small glyph inside this line,
+            tucked against the name — which read as decoration on the title
+            rather than as a control, and was the smallest target on the screen.
+            It has moved to the bar's actions beside the sort, where the other
+            board-wide controls are, and grown to a real one. See `trailing`.
           */
-          <span className="nav-title-row">
-            <span className="nav-title-name" data-testid="board-league-name">
-              {board.league.name}
-            </span>
-            <button
-              type="button"
-              className="title-icon-btn"
-              data-testid="draft-board-open"
-              aria-label="Open draft board"
-              aria-haspopup="dialog"
-              aria-expanded={boardOpen}
-              onClick={() => setBoardOpen(true)}
-            >
-              <GridIcon size={15} />
-            </button>
+          <span className="nav-title-name" data-testid="board-league-name">
+            {board.league.name}
           </span>
         }
         subtitle={
@@ -880,6 +877,25 @@ export function DraftScreen({
             players, which is a different question and keeps its own row.
           */
           <span className="nav-trailing-group">
+            {/*
+              The way into the board, at a size a thumb can find.
+
+              Left of the sort because that is the order the reader meets them
+              in — *which board* before *ordered how* — and because the brief
+              locks it there. It is a real control now rather than a 15px glyph
+              riding on the title line.
+            */}
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="draft-board-open"
+              aria-label="Open draft board"
+              aria-haspopup="dialog"
+              aria-expanded={boardOpen}
+              onClick={() => setBoardOpen(true)}
+            >
+              <GridIcon size={19} />
+            </button>
             <SortControl
               value={sort}
               onChange={setSort}
@@ -899,23 +915,6 @@ export function DraftScreen({
               */
               dogAvailable={board.dogState?.available ?? hasDogCoverage(board.recommendations)}
             />
-            <button
-              type="button"
-              className="icon-btn"
-              data-testid="draft-refresh"
-              aria-label={
-                unlocked
-                  ? 'Refresh draft from Sleeper'
-                  : 'Refresh the board. Unlock in Setup to pull new picks from Sleeper.'
-              }
-              aria-busy={refreshing}
-              disabled={refreshing}
-              onClick={() => void refreshNow()}
-            >
-              <span className={refreshing ? 'icon-spin' : undefined} aria-hidden="true">
-                ↻
-              </span>
-            </button>
           </span>
         }
       />
@@ -1134,7 +1133,7 @@ export function DraftScreen({
           ))}
         </div>
       )}
-    </>
+    </PullToRefresh>
   );
 }
 
@@ -2106,11 +2105,39 @@ function DraftPlayerDetail({
       */}
       <MarketRaw rec={rec} currentPick={currentPick} />
       {/*
-        Two lines by default — clamped in the stylesheet rather than cut here,
-        so the text is whole and the truncation is the browser's, with the
-        ellipsis that says so. `everything` hands it the full version.
+        Two lines by default, and the text is its own control.
+
+        Clamped in the stylesheet rather than cut here, so the paragraph in the
+        DOM is the one the provider wrote and the ellipsis is the browser's.
+        What changed is what expands it: there was a `Full detail` link under
+        the card, and the reader had to find a second target to read a sentence
+        they were already looking at. Tapping the prose expands the prose. That
+        is the affordance every truncated block on a phone has, it needs no
+        label, and it gives the card its last row back.
+
+        `stopPropagation`, because the row beneath is a toggle and reading more
+        of a blurb is not "collapse this player".
       */}
-      <SeasonOutlook detail={detail} failed={failed} heading={everything} whole={everything} />
+      <div
+        className="outlook-toggle-target"
+        data-testid="outlook-expand"
+        role="button"
+        tabIndex={0}
+        aria-expanded={everything}
+        aria-label={everything ? 'Show less about him' : 'Show more about him'}
+        onClick={(e) => {
+          e.stopPropagation();
+          setEverything((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          setEverything((v) => !v);
+        }}
+      >
+        <SeasonOutlook detail={detail} failed={failed} heading={everything} whole={everything} />
+      </div>
 
       {everything ? (
         <>
@@ -2127,29 +2154,14 @@ function DraftPlayerDetail({
       ) : null}
 
       {/*
-        Last season and the way in, sharing a line.
+        Last season, on the card's last line and alone on it.
 
-        Two short things that both belong at the bottom, and stacking them
-        spends a row of the card on air. The stat line is left, the control is
-        right, which is the arrangement every grouped list on this phone already
-        uses for "here is the summary, here is the way in".
+        The `Full detail` link that used to share this row is gone: the blurb
+        above expands itself now, which is one fewer control and one fewer thing
+        to explain.
       */}
       <div className="detail-foot">
         <LastSeasonLine detail={detail} failed={failed} position={rec.position} compact />
-        <button
-          type="button"
-          className="link-button detail-more"
-          data-testid="detail-more"
-          aria-expanded={everything}
-          onClick={(e) => {
-            // The row underneath is a toggle; asking for the rest of the card
-            // is not "collapse this player".
-            e.stopPropagation();
-            setEverything((v) => !v);
-          }}
-        >
-          {everything ? 'Show less' : 'Full detail'}
-        </button>
       </div>
     </div>
   );

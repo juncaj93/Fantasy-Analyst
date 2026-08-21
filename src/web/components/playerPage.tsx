@@ -194,6 +194,7 @@ export function PlayerSheet({
         player={player}
         {...(context === undefined ? {} : { context })}
         initialSection={initialSection}
+        snapshot
         {...(onOpenFull === undefined
           ? {}
           : {
@@ -225,6 +226,7 @@ export function PlayerDossier({
   player,
   context,
   initialSection = 'overview',
+  snapshot = false,
   footer,
 }: {
   player: PlayerSummary;
@@ -237,6 +239,12 @@ export function PlayerDossier({
    */
   context?: React.ReactNode;
   initialSection?: Section;
+  /**
+   * Stack every section instead of putting them behind a segmented control.
+   *
+   * What a sheet does. See the note where it is read.
+   */
+  snapshot?: boolean;
   /** A way further in, when the caller has one to offer. */
   footer?: React.ReactNode;
 }) {
@@ -354,17 +362,44 @@ export function PlayerDossier({
         </div>
       ) : null}
 
-      <div className="control-row">
-        <SegmentedControl
-          label="Player sections"
-          value={section}
-          onChange={setSection}
-          segments={SECTIONS}
-          testId="player-page-sections"
-          compact
-        />
-      </div>
+      {/*
+        One scroll in a sheet; four segments on a page.
 
+        A sheet is a glance — the reader tapped a name and wants to know who he
+        is — and asking them to choose a tab first is asking a question before
+        answering one. So everything is stacked in the order it is wanted: what
+        is said about him, what is wrong with him, what is expected, what the
+        market thinks, and the ledger underneath. The page keeps its segments,
+        because that is the deep read and the ledger there runs long enough that
+        a reader looking for the market should not have to scroll past it.
+      */}
+      {snapshot ? null : (
+        <div className="control-row">
+          <SegmentedControl
+            label="Player sections"
+            value={section}
+            onChange={setSection}
+            segments={SECTIONS}
+            testId="player-page-sections"
+            compact
+          />
+        </div>
+      )}
+
+      {snapshot ? (
+        <div className="player-page-body" data-testid="player-page-snapshot">
+          <Overview
+            detail={detail}
+            detailFailed={detailFailed}
+            signal={signal}
+            position={player.position}
+            evidenceCount={file ? file.evidence.length : null}
+          />
+          {detailFailed ? null : <SeasonOutlook detail={detail} failed={detailFailed} />}
+          <Market file={file} player={player} knowsMarket={knowsMarket} />
+          <Evidence file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} limit={2} />
+        </div>
+      ) : (
       <div className="player-page-body" data-testid={`player-page-${section}`}>
         {section === 'overview' ? (
           <Overview
@@ -400,6 +435,7 @@ export function PlayerDossier({
           <Evidence file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} />
         ) : null}
       </div>
+      )}
 
       {footer}
     </>
@@ -594,17 +630,36 @@ function Market({
  * changes no tally anywhere: the counts beside each chip are printed from the
  * same list, so a reader can always see what they are not looking at.
  */
-function Evidence({ file, quotedEvidenceIds }: { file: PlayerFile | null; quotedEvidenceIds: string[] }) {
+function Evidence({
+  file,
+  quotedEvidenceIds,
+  limit,
+}: {
+  file: PlayerFile | null;
+  quotedEvidenceIds: string[];
+  /**
+   * How many items a snapshot shows before it stops.
+   *
+   * The sheet is a glance and the ledger is not: a player with forty news items
+   * would turn a snapshot into the thing the snapshot exists instead of. The
+   * newest few are the ones that change a decision; the rest are a tap away on
+   * the page, which says so rather than truncating in silence.
+   */
+  limit?: number;
+}) {
   const [lens, setLens] = useState<'all' | 'positive' | 'negative'>('all');
   const quoted = useMemo(() => new Set(quotedEvidenceIds), [quotedEvidenceIds]);
 
   if (!file) return <SkeletonRows rows={5} testId="player-page-evidence-skeleton" />;
   const items = file.evidence;
   const effective = (e: EvidenceItem) => e.userOverride?.polarity ?? e.polarity;
-  const shown = lens === 'all' ? items : items.filter((e) => effective(e) === lens);
+  const all = lens === 'all' ? items : items.filter((e) => effective(e) === lens);
+  const shown = limit == null ? all : all.slice(0, limit);
+  const withheld = all.length - shown.length;
 
   return (
     <>
+      {limit == null ? (
       <div className="control-row">
         <SegmentedControl
           label="Filter evidence"
@@ -619,8 +674,9 @@ function Evidence({ file, quotedEvidenceIds }: { file: PlayerFile | null; quoted
           ]}
         />
       </div>
+      ) : null}
       <div className="detail-label" data-testid="evidence-heading">
-        Evidence timeline ({shown.length})
+        {limit == null ? `Evidence timeline (${shown.length})` : 'Latest news'}
       </div>
       {items.length === 0 ? (
         <Empty>No evidence recorded for him yet.</Empty>
@@ -629,6 +685,15 @@ function Evidence({ file, quotedEvidenceIds }: { file: PlayerFile | null; quoted
       ) : (
         shown.map((e) => <EvidenceRow key={e.id} item={e} quoted={quoted.has(e.id)} />)
       )}
+      {/*
+        What was left out, counted rather than hidden. A snapshot that quietly
+        showed two of forty items would be a snapshot the reader could not trust.
+      */}
+      {withheld > 0 ? (
+        <div className="faint" data-testid="evidence-withheld">
+          {withheld} older item{withheld === 1 ? '' : 's'} on his full profile.
+        </div>
+      ) : null}
     </>
   );
 }

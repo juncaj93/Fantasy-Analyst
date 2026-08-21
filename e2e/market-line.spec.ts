@@ -223,7 +223,7 @@ test.describe('what the line is made of', () => {
      * a different question and a much longer answer, so it waits until it is
      * asked for. `draft-market-delta.spec.ts` owns the resting line.
      */
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
 
     const detail = page.getByTestId('market-detail');
     await expect(detail).toBeVisible();
@@ -388,7 +388,7 @@ test.describe('receptions and market-implied points', () => {
     const row = rows.first();
     await row.click();
     // Behind the card's one control, with the rest of the provenance.
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
 
     /*
      * Retrying assertions rather than one read of the text.

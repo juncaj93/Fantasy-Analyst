@@ -267,7 +267,17 @@ test.describe('a weekly command centre, on one screen', () => {
 });
 
 test.describe('waiver upgrades', () => {
-  test.beforeEach(async ({ page }) => openTeam(page));
+  /*
+   * A post-draft section, like the mode chips and Compare above it.
+   *
+   * Offering free agents to a manager whose next transaction is a draft pick is
+   * a question nobody has yet, so Team stops drawing this — and `Changes to
+   * consider` with it — until the draft is over. See `inSeason`.
+   */
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await openTeam(page);
+  });
 
   /**
    * The row is a shape, and it is asserted as one.
