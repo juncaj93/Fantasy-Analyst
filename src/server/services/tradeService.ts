@@ -111,9 +111,32 @@ export class TradeService {
      * unnamed seat produces a line about the pick alone.
      */
     const provenance = await this.draftProvenance(league);
+
+    /*
+     * Who holds him now, by name.
+     *
+     * `ownership` already says *whether* somebody else has him, which is enough
+     * to sort a board into targets and adds. It is not enough to act on: a
+     * trade is a conversation with a person, and "somebody in your league has
+     * him" is not a person. The rosters this method already loaded carry the
+     * seat's name, so this costs no request — it is a second read of a list
+     * that is three lines above.
+     *
+     * Null wherever Sleeper has not named the seat, and for a free agent, and
+     * for your own players. Attributing a player to the wrong manager is the
+     * worst thing on this screen to get wrong, so an unnamed seat produces no
+     * name rather than `Roster 4`.
+     */
+    const ownerByPlayer = new Map<string, string>();
+    for (const roster of rosters) {
+      if (roster.isMine || !roster.ownerName) continue;
+      for (const playerId of roster.playerIds) ownerByPlayer.set(playerId, roster.ownerName);
+    }
+
     const withProvenance = ranked.map((suggestion) => ({
       ...suggestion,
       draft: provenance.get(suggestion.playerId) ?? null,
+      owner: ownerByPlayer.get(suggestion.playerId) ?? null,
     }));
 
     return {

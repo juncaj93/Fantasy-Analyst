@@ -106,9 +106,16 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         testId="trades-nav"
         title="Trades"
         subtitle={
-          board.league
-            ? `${board.league.name} — newsletter evidence, last 30 days leading`
-            : 'No league selected'
+          /*
+            The league, and not a description of the method.
+
+            This read `… — newsletter evidence, last 30 days leading`, which is
+            a sentence about where the numbers come from, printed above a list
+            of players, on every visit. The columns below are labelled `30d` and
+            `Life`; a reader who wants to know what feeds them taps a row. What
+            is left is the one thing the bar has to say: which league this is.
+          */
+          board.league ? board.league.name : 'No league selected'
         }
       />
 
@@ -153,7 +160,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
                 <span>{section.label}</span>
                 <span className="section-title-meta">
                   <span className="section-count">{section.players.length}</span>
-                  {shared ? <Confidence level={shared} /> : null}
+                  {shared ? <Confidence level={shared} compact /> : null}
                 </span>
               </div>
               <div className="dense-group" role="list" aria-label={section.label}>
@@ -257,17 +264,32 @@ function TradeRow({
           { label: '30d', value: <SignedValue net={w.last30} /> },
           { label: 'Life', value: <SignedValue net={w.lifetime} /> },
         ]}
-        {...(showConfidence
+        /*
+          Who holds him, and how sure this is — one short line, no sentence.
+
+          The owner is the fact the whole screen is for: a trade is a
+          conversation with a person, and a board that says a player is worth
+          asking about without saying who to ask is a board you have to leave to
+          use. Absent for a free agent and wherever Sleeper has not named the
+          seat, which is honest — no `Roster 4`.
+
+          Confidence sits at the end of that line as a word rather than a
+          sentence, and only where the section's own header cannot say it once
+          for every row underneath. See the note there.
+        */
+        {...(suggestion.owner || showConfidence
           ? {
-              /*
-                Only where it varies. A section whose rows all share a
-                confidence says so in its own header — see the note there — and
-                repeating it down the edge of every row is a pattern the eye
-                follows instead of the names.
-              */
               note: (
-                <RowNote trailing={<Confidence level={suggestion.confidence} />}>
-                  <span className="faint">{suggestion.label}</span>
+                <RowNote
+                  {...(showConfidence
+                    ? { trailing: <Confidence level={suggestion.confidence} compact /> }
+                    : {})}
+                >
+                  {suggestion.owner ? (
+                    <span data-testid="trade-owner">{suggestion.owner}</span>
+                  ) : (
+                    <span className="faint">{suggestion.label}</span>
+                  )}
                 </RowNote>
               ),
             }

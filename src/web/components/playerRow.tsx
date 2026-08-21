@@ -133,7 +133,18 @@ export function CompactPlayerRow({
       </span>
 
       {metrics && metrics.length > 0 ? (
-        <span className="dense-row-metrics">
+        /*
+          How many columns there are decides whether they are a grid or a
+          cluster.
+
+          Four equal columns is what makes a list of players scannable: the
+          reader runs an eye down `ADP` and it is in the same place on every
+          row. Two of them under the same rule is not a grid, it is two numbers
+          at opposite ends of the card with a hand's width of nothing between —
+          which is what Trades looked like once its row came down to `30d` and
+          `Life`. Below three they sit together at the leading edge instead.
+        */
+        <span className="dense-row-metrics" data-columns={metrics.length}>
           {metrics.map((m) => (
             <span
               key={m.label}

@@ -2331,6 +2331,16 @@ body,
 }
 
 /*
+ * Two numbers are a cluster, not a grid. See the note where this is set.
+ */
+.dense-row-metrics[data-columns='1'],
+.dense-row-metrics[data-columns='2'] {
+  grid-auto-columns: max-content;
+  justify-content: start;
+  gap: var(--sp-4);
+}
+
+/*
  * A column that has to hold whatever the trailing edge holds — a movement
  * badge, a chevron's worth of nothing — without stretching its neighbours.
  */
@@ -3017,6 +3027,23 @@ body,
 
 .dense-row-note .badge-confidence-low {
   color: var(--warn);
+}
+
+/*
+ * The compact form gets its capsule back, quietly.
+ *
+ * The note above explains why the badge gave one up: `low confidence` in a
+ * capsule on every row was the loudest thing on the screen. The compact form is
+ * one short word, which is small enough to sit in a capsule without becoming
+ * that — and a bare word beside two signed numbers reads as a third metric,
+ * which is exactly what a capsule stops. Tinted surface, no border, no colour
+ * of its own except the amber `low` keeps.
+ */
+.dense-row-note .badge-confidence-compact {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+  font-weight: 560;
 }
 
 /*
