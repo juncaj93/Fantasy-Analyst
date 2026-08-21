@@ -130,8 +130,17 @@ test.describe('shell', () => {
       for (const inset of [0, INSET]) {
         const g = await geometry(page, inset);
         expect(g.gapBelowNav, `inset ${inset}: the page owns only the gap it declared`).toBe(g.intendedGap);
-        // And the gap is a hairline on a flat screen, never a strip of page.
-        if (inset === 0) expect(g.gapBelowNav).toBeLessThanOrEqual(8);
+        /*
+         * And it stays a gap on a flat screen, never a strip of page.
+         *
+         * The ceiling was 8, which was the old six-pixel float plus room to
+         * breathe. The toolbar pass raised the float to ten deliberately: at six
+         * the shadow had nowhere to fall and the bar read as pushed down rather
+         * than hovering, which is most of what made it look pasted on. The
+         * ceiling moves with it and keeps its job — twelve is still a gap, and a
+         * bar that drifted into a band of empty page still fails here.
+         */
+        if (inset === 0) expect(g.gapBelowNav).toBeLessThanOrEqual(12);
       }
     });
 

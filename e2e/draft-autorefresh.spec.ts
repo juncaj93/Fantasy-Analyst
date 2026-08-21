@@ -21,6 +21,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { pullToRefresh } from './helpers.ts';
 
 /** The five-second cadence, plus room for a slow CI machine to get there. */
 const POLL_WINDOW = 7_000;
@@ -331,15 +332,15 @@ test.describe('draft auto-refresh', () => {
     await expect.poll(() => sleeper.syncs(), { timeout: 5_000 }).toBeGreaterThanOrEqual(1);
 
     const before = sleeper.syncs();
-    const refresh = page.getByTestId('draft-refresh');
-    await refresh.click();
-    await refresh.dispatchEvent('click');
-    await refresh.dispatchEvent('click');
-    await expect(refresh).toBeEnabled();
+    // Pulls now, not taps: the glyph is gone and the gesture reloads the board.
+    // The single-flight guard it inherits is what this test is about.
+    await pullToRefresh(page, 'draft-pull');
+    await pullToRefresh(page, 'draft-pull');
+    await pullToRefresh(page, 'draft-pull');
 
-    // Three taps, and the cadence running underneath: at most one request each
+    // Three pulls, and the cadence running underneath: at most one request each
     // and never two at once.
-    expect(await probe(page).then((p) => p?.['inFlight'])).toBe(false);
+    await expect.poll(async () => (await probe(page))?.['inFlight'], { timeout: 10_000 }).toBe(false);
     expect(sleeper.syncs() - before).toBeLessThanOrEqual(3);
     await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
   });
@@ -366,7 +367,8 @@ test.describe('draft auto-refresh', () => {
 
     await page.waitForTimeout(POLL_WINDOW + 3_000);
     expect(syncs, 'a finished draft is polled once and then left alone').toBe(1);
-    // The manual control is still there — the route is still reachable.
-    await expect(page.getByTestId('draft-refresh')).toBeVisible();
+    // The manual way in is still there — a finished draft stops polling, it
+    // does not stop being refreshable.
+    await expect(page.getByTestId('draft-pull')).toBeVisible();
   });
 });
