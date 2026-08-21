@@ -47,6 +47,131 @@ test.describe('setup overview', () => {
 });
 
 /**
+ * Setup does not scroll sideways *with the newsletter panel populated either*.
+ *
+ * The test above checks the overview, where every panel is closed, and it
+ * passed throughout the months this defect was live. What it could not see: the
+ * newsletter activity table prints the address the last issue arrived from, an
+ * address is a run of text with no spaces in it, and a table under the auto
+ * layout algorithm is never narrower than the longest such run. `width: 100%`
+ * does not cap that — it is a preference, not a maximum. So a long sender grew
+ * the table to 383.6px inside a 342px column and the document to 408px inside a
+ * 390px viewport.
+ *
+ * Eighteen pixels of horizontal scroll is not, in itself, what a user notices.
+ * What they notice is that `Parse / Preview` in the paste-tally sheet cannot be
+ * tapped, because the shifted page puts the textarea over it — which is what
+ * the two tests further down this file had been failing on, and what had been
+ * repeatedly dismissed, including by me, as an order-dependent quirk of the
+ * suite rather than the product defect it was.
+ *
+ * So this asserts both halves: no overflow, and the button still takes its own
+ * tap. The state is built here rather than inherited from whichever tests ran
+ * first, because a regression that depends on execution order is how the
+ * original went unnoticed.
+ */
+test.describe('setup with a populated newsletter', () => {
+  test('does not scroll sideways, and the paste-tally button still takes its tap', async ({
+    page,
+  }, testInfo) => {
+    /*
+     * A sender whose *domain* is long and has no hyphen in it.
+     *
+     * Both halves matter. The address is masked before it reaches the client —
+     * `w***@…` — and masking replaces only the local part, so the domain is
+     * what sets the width either way. And a hyphen is a line-break
+     * opportunity: the first version of this fixture used
+     * `long-newsletter-domain.example`, which wrapped itself and passed
+     * against the unfixed layout, proving nothing. The address that exposed
+     * the defect in the wild had no hyphens.
+     *
+     * Unique per project because all four share one dev server and this is
+     * real ingested mail.
+     */
+    const slug = testInfo.project.name.replace(/[^a-z0-9]/gi, '');
+    await page.goto('/');
+    const res = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId: `overflow-regression-${slug}`,
+        from: `weekly@${slug}newsletterdeliverydomain.example`,
+        subject: 'Week 1 Notes',
+        date: new Date().toISOString(),
+        html: '<p>Bijan Robinson was named the starter.</p>',
+      },
+    });
+    expect(res.ok()).toBeTruthy();
+
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    const activity = page.getByTestId('newsletter-activity');
+    await expect(activity).toBeVisible();
+    // The address really is on screen: an assertion about wrapping is worthless
+    // if the thing that has to wrap was never rendered.
+    await expect(activity).toContainText('newsletterdeliverydomain.example');
+
+    /*
+     * The measurement names what overflowed, not just that something did.
+     *
+     * "Setup scrolls sideways by 18px" sends the next reader hunting through a
+     * page of panels; "TABLE.compact[newsletter-activity] reaches 407.6 in a
+     * 390 viewport" is the bug. Worth the few lines: the defect this test
+     * exists for went unexplained for months.
+     */
+    const measured = await page.evaluate(() => {
+      const doc = document.documentElement;
+      const table = document.querySelector('[data-testid="newsletter-activity"]')!.getBoundingClientRect();
+      const offenders: string[] = [];
+      for (const el of document.querySelectorAll('*')) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.right > doc.clientWidth + 0.5) {
+          const id = el.getAttribute('data-testid');
+          offenders.push(
+            `${el.tagName}${id ? `[${id}]` : `.${String(el.className).split(' ')[0]}`} ` +
+              `x=${r.left.toFixed(0)} w=${r.width.toFixed(1)} right=${r.right.toFixed(1)}`,
+          );
+        }
+      }
+      return {
+        overflow: doc.scrollWidth - doc.clientWidth,
+        viewport: doc.clientWidth,
+        tableRight: table.right,
+        offenders: offenders.slice(0, 6),
+      };
+    });
+    expect(
+      measured.overflow,
+      `Setup scrolls sideways by ${measured.overflow}px in a ${measured.viewport}px viewport. ` +
+        `Overflowing: ${measured.offenders.join(' | ') || 'nothing measurable'}`,
+    ).toBeLessThanOrEqual(1);
+    // And the table is inside the viewport rather than merely not scrolling it.
+    expect(measured.tableRight).toBeLessThanOrEqual(measured.viewport + 1);
+
+    /*
+     * The interaction the overflow actually broke.
+     *
+     * A short timeout on purpose: Playwright retries an intercepted click for
+     * the full test timeout, so the default would turn a layout regression into
+     * a thirty-second stall before failing. Four seconds is far longer than a
+     * sheet takes to settle and short enough to read as what it is.
+     */
+    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+    const toggle = message.getByTestId('newsletter-message-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.click();
+    await message.getByTestId('chat-tally-panel').getByTestId('open-paste-tally').click();
+
+    const sheet = page.getByTestId('paste-tally-sheet');
+    await expect(sheet).toBeVisible();
+    await sheet
+      .getByTestId('paste-tally-input')
+      .fill(['NEWSLETTER_TALLY_V1', 'not a tally at all', 'END_NEWSLETTER_TALLY'].join('\n'));
+    await sheet.getByTestId('paste-tally-check').click({ timeout: 4000 });
+    // It answered, which is only possible if the tap reached the button.
+    await expect(sheet.getByTestId('paste-tally-preview')).toBeVisible();
+  });
+});
+
+/**
  * Appearance.
  *
  * The preference lives on the device, so these run against a fresh context's
@@ -286,6 +411,32 @@ test.describe('newsletter setup', () => {
     await expect(preview).toContainText('Needs review');
     await expect(preview).toContainText('not in the player list');
 
+    /*
+     * Revise the paste before applying it, and apply only the row that resolved.
+     *
+     * The preview above is where the unresolvable row has to be named, and it
+     * is named. Writing it is a different matter: an applied unmatched tally is
+     * global state — the draft board carries a three-line warning about it,
+     * which pushes the list down and costs two players above the fold, and two
+     * density tests measure exactly that. Four projects share one dev server
+     * here, so whichever of them applied one would fail the other three.
+     *
+     * That is not hypothetical and it is not old news: this test used to time
+     * out at `Parse / Preview` — see the horizontal-overflow defect fixed
+     * alongside this — so it never reached the apply and never wrote the row.
+     * Fixing the layout is what let it finish, and what made this matter.
+     *
+     * Re-previewing after an edit is also the honest flow: the apply button
+     * writes the block that was previewed, so changing the text has to mean
+     * previewing it again.
+     */
+    await sheet
+      .getByTestId('paste-tally-input')
+      .fill(['NEWSLETTER_TALLY_V1', `Marcus Vance | +2 | ${reason}`, 'END_NEWSLETTER_TALLY'].join('\n'));
+    await sheet.getByTestId('paste-tally-check').click();
+    await expect(preview).toContainText('Ready to apply');
+    await expect(preview).not.toContainText('Needs review');
+
     await sheet.getByTestId('paste-tally-apply').click();
     await expect(panel).toContainText('applied');
 
@@ -302,6 +453,7 @@ test.describe('newsletter setup', () => {
     await again.getByTestId('paste-tally-check').click();
     await expect(again.getByTestId('paste-tally-preview')).toContainText('Nothing would change');
     await expect(again.getByTestId('paste-tally-apply')).toBeDisabled();
+
   });
 
   test('says plainly when a paste is not a tally', async ({ page }) => {
