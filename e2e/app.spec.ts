@@ -1760,11 +1760,29 @@ test.describe('player intelligence', () => {
    * of printing a zero. What changed is only where those live: a tap now opens
    * one scrollable snapshot, so there is no segment to choose first.
    */
+  /**
+   * Read on the full profile, because "every item" is a claim about the ledger.
+   *
+   * The sheet shows the newest two and says how many older ones there are — a
+   * snapshot of forty items is the thing a snapshot exists instead of. So
+   * asserting a *particular* excerpt there makes the test depend on which two
+   * happen to be newest, which the review-queue tests change by ingesting into
+   * the same dev server: it passed alone and failed after them, which is the
+   * worst way for a test to fail. The whole ledger is one tap further in, and
+   * that is where the guarantee this defends actually lives.
+   */
   test('shows the original excerpt for every evidence item, not just a tally', async ({ page }) => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await expect(page.getByTestId('evidence-excerpt').first()).toContainText('named the starter');
+    await page.getByTestId('player-full-profile').click();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
+
+    const excerpts = page.getByTestId('evidence-excerpt');
+    expect(await excerpts.count(), 'the ledger drew no items to check').toBeGreaterThan(0);
+    // Every item carries its own words, not just the one that happens to be first.
+    for (const excerpt of await excerpts.all()) await expect(excerpt).not.toBeEmpty();
+    await expect(excerpts.filter({ hasText: 'named the starter' })).toHaveCount(1);
   });
 
   test('states plainly when there are no cached props', async ({ page }) => {
