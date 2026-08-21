@@ -414,3 +414,68 @@ console.log('\n=== 8. why did this player move? ===\n');
     console.log('   reading the ranking code again.');
   }
 }
+
+// ------------------- 9. unknown market data, and the invariants (Phases 11/14)
+
+/*
+ * A late board is full of players nobody has priced. The question is not
+ * whether they rank well — it is whether "unknown" is being read as a number.
+ * A missing ADP treated as 0 is the best pick on the board; treated as a huge
+ * number it is the worst; treated as unknown it is neither.
+ */
+console.log('\n=== 9. players the market never priced ===\n');
+{
+  const pool = board(CURRENT);
+  const unpriced = pool.slice(0, 3).map((e) => ({ ...e, adp: null, dogAdp: null, adpRank: null }));
+  const mixed = [...pool.slice(3), ...unpriced];
+  const recs = rank(mixed, CURRENT, NEXT);
+
+  const ids = new Set(unpriced.map((e) => e.player.id));
+  const positions = recs.map((r, i) => ({ i, r })).filter((x) => ids.has(x.r.playerId));
+  console.log(`   ${unpriced.length} unpriced players placed at ranks: ${positions.map((p) => p.i + 1).join(', ')}`);
+  console.log(`   board size: ${recs.length}`);
+
+  const bad = recs.filter((r) => !Number.isFinite(r.total) || (r.score != null && !Number.isFinite(r.score)));
+  console.log(`   non-finite totals or scores anywhere on the board: ${bad.length}`);
+
+  const anyTop = positions.some((p) => p.i < 5);
+  console.log(`   any unpriced player in the top five: ${anyTop ? 'YES — investigate' : 'no'}`);
+  for (const p of positions) {
+    const mv = p.r.components.find((c) => c.key === 'market_value');
+    const sc = p.r.components.find((c) => c.key === 'scarcity');
+    console.log(
+      `     ${p.r.playerId.padEnd(8)} score ${String(p.r.score).padStart(4)}  market_value ${mv?.contribution ?? 0}` +
+        ` (unknown: ${mv?.unknown})  scarcity ${sc?.contribution ?? 0} (unknown: ${sc?.unknown})`,
+    );
+  }
+  console.log('\n   Unknown must be marked unknown and contribute nothing, rather than');
+  console.log('   scoring as zero — zero is a *value*, and on a signed component it is');
+  console.log('   the middle of the range rather than the absence of one.');
+}
+
+console.log('\n=== 10. the invariants, stated as checks ===\n');
+{
+  const pool = board(CURRENT);
+  const recs = rank(pool, CURRENT, NEXT);
+
+  const monotonic = recs.every((r, i) => i === 0 || r.total <= recs[i - 1].total);
+  console.log(`   composite never rises going down the board:      ${monotonic}`);
+
+  const scoreMonotonic = recs
+    .filter((r) => r.score != null)
+    .every((r, i, list) => i === 0 || r.score <= list[i - 1].score);
+  console.log(`   displayed Score never rises going down:          ${scoreMonotonic}`);
+
+  const finite = recs.every((r) => Number.isFinite(r.total));
+  console.log(`   every composite is a finite number:              ${finite}`);
+
+  const sums = recs.every((r) => {
+    const summed = r.components.reduce((t, c) => t + c.contribution, 0);
+    return Math.abs(summed - r.total) < 0.02;
+  });
+  console.log(`   components sum to the composite they explain:    ${sums}`);
+
+  const ids = recs.map((r) => r.playerId);
+  console.log(`   no player appears twice:                         ${new Set(ids).size === ids.length}`);
+  console.log(`   every available player is ranked:                ${ids.length === pool.length}`);
+}
