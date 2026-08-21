@@ -16,7 +16,23 @@
 import { expect, test, type Page } from '@playwright/test';
 import { inSeason } from './helpers.ts';
 
+/**
+ * Team, once the draft is over — which is the only state this file is about.
+ *
+ * Every describe here is about a lineup: which slots are recommended, what the
+ * weekly card says about a starter, how two players compare. None of those
+ * questions exists mid-draft, and the screen now says so by drawing the drafted
+ * roster and no lineup at all — see `team-draft-mode.spec.ts`, which asserts
+ * that absence. The demo league is permanently mid-draft, so standing in the
+ * season is something this file has to ask for, and it asks here rather than in
+ * eight separate `beforeEach` blocks.
+ *
+ * The last line is what makes it worth centralising: `starters-title` is only
+ * on the post-draft screen, so a caller that forgot `inSeason` used to fail
+ * here with `element(s) not found` and no hint as to why.
+ */
 async function openTeam(page: Page) {
+  await inSeason(page);
   await page.goto('/');
   await page.getByTestId('tab-team').click();
   await expect(page.getByTestId('league-card').first()).toBeVisible();
@@ -169,7 +185,6 @@ test.describe('a weekly command centre, on one screen', () => {
    * every number below it is the deployment's own.
    */
   test.beforeEach(async ({ page }) => {
-    await inSeason(page);
     await openTeam(page);
   });
 
@@ -275,7 +290,6 @@ test.describe('waiver upgrades', () => {
    * consider` with it — until the draft is over. See `inSeason`.
    */
   test.beforeEach(async ({ page }) => {
-    await inSeason(page);
     await openTeam(page);
   });
 
@@ -543,7 +557,6 @@ test.describe('the weekly card', () => {
 test.describe('the comparison tool', () => {
   // Compare is a post-draft control — see `inSeason`.
   test.beforeEach(async ({ page }) => {
-    await inSeason(page);
     await openTeam(page);
   });
 
@@ -708,7 +721,6 @@ async function pullToRefresh(page: Page) {
 test.describe('mode and refresh', () => {
   // The mode chips are post-draft controls — see `inSeason`.
   test.beforeEach(async ({ page }) => {
-    await inSeason(page);
     await openTeam(page);
   });
 

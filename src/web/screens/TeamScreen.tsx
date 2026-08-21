@@ -81,6 +81,8 @@ interface RosterResponse {
   remaining: number;
   openStarters: OpenSlot[];
   picksMade: number;
+  /** One line of draft advice, derived server-side from roster need. */
+  bestMove?: { text: string; positions: string[]; kind: string } | null;
   found: boolean;
 }
 
@@ -453,7 +455,7 @@ export function TeamScreen({
               */}
               {roster.live ? <LiveDraftRoster roster={roster} /> : null}
 
-              {hasRecommendation ? (
+              {hasRecommendation && !roster.live ? (
                 <>
                   <div className="section-title" data-testid="starters-title">
                     Recommended starters
@@ -501,12 +503,27 @@ export function TeamScreen({
                 the page asking to be *acted* on. The free-agent scan is a
                 different question and goes last.
               */}
-              <BenchSection
-                players={bench}
-                scoreOf={(playerId) => evaluations.get(playerId)?.score ?? null}
-                summary={benchSummary}
-                onOpen={(playerId) => openPlayer(playerId, { starting: false })}
-              />
+              {/*
+                Nothing about a week, while the week has not been reached.
+
+                A draft has no lineup and no bench: every player held is simply
+                held, which is what the list above already says. What was drawn
+                here mid-draft was a `Recommended starters` heading over eight
+                `Nobody eligible yet` rows and a `Bench (0)` under it — a screen
+                and a half of furniture answering a question nobody had asked,
+                between the roster and the bottom of the page.
+
+                The same flag governs all of it, so there is one answer on this
+                screen to "is a draft happening" rather than four.
+              */}
+              {roster.live ? null : (
+                <BenchSection
+                  players={bench}
+                  scoreOf={(playerId) => evaluations.get(playerId)?.score ?? null}
+                  summary={benchSummary}
+                  onOpen={(playerId) => openPlayer(playerId, { starting: false })}
+                />
+              )}
 
               {/*
                 Neither of these exists yet while a draft is running.
@@ -1553,6 +1570,7 @@ function LiveDraftRoster({
     remaining: number;
     openStarters: OpenSlot[];
     picksMade: number;
+    bestMove?: { text: string; positions: string[]; kind: string } | null;
     /** Seats in the draft, so a client can format a pick it was handed raw. */
     teams?: number;
   };
@@ -1594,6 +1612,28 @@ function LiveDraftRoster({
             Every starting slot is covered.
           </div>
         )}
+        {/*
+          What to do about it, under a rule.
+
+          The line above is the state — which slots are unfilled — and this is
+          the move that follows from it. They are close enough to be confused
+          for one sentence, so the rule separates them, and the mark says this
+          one is the app talking rather than the draft reporting.
+
+          Computed on the server from the same need breakdown the board already
+          uses. See core/draft/bestMove.ts: this element prints a sentence, it
+          does not decide one.
+        */}
+        {roster.bestMove ? (
+          <div className="best-move" data-testid="best-move" data-kind={roster.bestMove.kind}>
+            <span className="best-move-mark" aria-hidden="true">
+              ★
+            </span>
+            <span>
+              <strong>Best move:</strong> {roster.bestMove.text}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {/*
@@ -1610,22 +1650,17 @@ function LiveDraftRoster({
               {position} ({roster.counts[position]})
             </div>
             {/*
-              Two players per row, because one was spending a phone on air.
+              One player per line, and the line is short.
 
-              A drafted player is a name, a club and the pick he cost — three
-              short things that were taking a full-width row each, with most of
-              that width empty between the name and the mark on its right. Mid
-              draft this is the list you check between picks, and a roster of
-              nine filled a screen and a half of it.
-
-              Two columns halve the width, and the cell spends two lines rather
-              than one: at 360px a column is about 160px, and a name, a club
-              and a pick on one line there would mean shrinking the type —
-              which is the trade this pass is not making. Two lines of readable
-              text in half the width still costs less than one line of readable
-              text across all of it.
+              This was two players per row for one deployment, on the argument
+              that a name, a club and a pick cost a third of a phone's width and
+              the rest was air. Half a phone turned out not to be enough for a
+              name — most cells truncated — and a cell that took two lines to
+              hold three short things read as a grid of boxes rather than as a
+              roster. The density it was after is bought in `.roster-list` by
+              making the row shorter instead of narrower.
             */}
-            <div className="list-card roster-grid">
+            <div className="list-card roster-list">
               {roster.drafted
                 .filter((p) => (p.position || 'UNKNOWN') === position)
                 .map((p) => (

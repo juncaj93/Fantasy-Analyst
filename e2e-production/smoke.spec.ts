@@ -858,6 +858,27 @@ test.describe('the season features', () => {
       expect(text, `the header still prints "${gone}"`).not.toContain(gone);
     }
 
+    /*
+     * A lineup is a question about a week, so a deployment mid-draft has none —
+     * Team draws the drafted roster instead, and that is the intended state
+     * rather than a missing one. Asserted rather than skipped past, the same way
+     * the Start/Sit test above handles it: during a draft the starters are gone
+     * *and* the drafted roster is there, and only a deployment with neither is
+     * genuinely nothing to check.
+     */
+    const drafting = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
+      return roster?.live === true;
+    });
+    if (drafting) {
+      await expect(page.getByTestId('starter-row')).toHaveCount(0);
+      await expect(page.getByTestId('drafted-line').first()).toBeVisible();
+      return;
+    }
+
     test.skip((await settled(page, 'starter-row')) === 0, 'no roster on this deployment');
 
     // Every slot drawn is a slot this league actually starts, and every filled
@@ -1119,33 +1140,46 @@ test.describe('the decision intelligence', () => {
    * is drawn. Asked of the roster rather than assumed, for the same reason the
    * Start/Sit test above asks.
    */
-  test('draws the drafted roster two players wide', async ({ page }) => {
+  test('draws the drafted roster as one dense column', async ({ page }) => {
     await page.goto('/');
     await open(page, 'team');
 
-    const cells = page.getByTestId('drafted-line');
-    const drafted = await cells.count();
+    const rows = page.getByTestId('drafted-line');
+    const drafted = await rows.count();
     test.skip(drafted === 0, 'this deployment is not mid-draft, so there is no drafted list');
 
-    // Every name inside its own cell, at whatever width this deployment drew.
-    for (const cell of await cells.all()) {
+    // Every name inside its own row, at whatever width this deployment drew.
+    for (const row of await rows.all()) {
       const [box, name, text] = await Promise.all([
-        cell.boundingBox(),
-        cell.locator('.player-name').boundingBox(),
-        cell.locator('.player-name').innerText(),
+        row.boundingBox(),
+        row.locator('.player-name').boundingBox(),
+        row.locator('.player-name').innerText(),
       ]);
-      expect(name!.x + name!.width, `"${text}" runs past its cell`).toBeLessThanOrEqual(box!.x + box!.width + 1);
+      expect(name!.x + name!.width, `"${text}" runs past its row`).toBeLessThanOrEqual(box!.x + box!.width + 1);
     }
 
-    // And a group holding two or more puts two of them on a row.
-    for (const card of await page.locator('.roster-grid').all()) {
-      const group = await card.getByTestId('drafted-line').all();
-      if (group.length < 2) continue;
-      const [first, second] = await Promise.all([group[0]!.boundingBox(), group[1]!.boundingBox()]);
-      expect(Math.abs(first!.y - second!.y), 'two players share a row').toBeLessThan(2);
-      expect(first!.x + first!.width, 'and do not overlap').toBeLessThanOrEqual(second!.x + 1);
-      return;
-    }
+    /*
+     * One column, and denser than a regular-season row.
+     *
+     * A grid is sized against the phone it is drawn on, so "one column" is
+     * exactly the kind of claim that can be right in the repository and wrong
+     * in production. Every row sharing a left edge is what says it, and the
+     * per-player height is what says the density survived the deployment.
+     */
+    const boxes = await Promise.all((await rows.all()).map((row) => row.boundingBox()));
+    const lefts = new Set(boxes.map((box) => Math.round(box!.x)));
+    expect(lefts.size, 'every row starts on the same edge — one column, not two').toBe(1);
+
+    const card = page.locator('.roster-list').first();
+    const height = (await card.boundingBox())!.height;
+    const players = await card.getByTestId('drafted-line').count();
+    expect(height / players, `${players} players in ${Math.round(height)}px`).toBeLessThan(38);
+
+    // And the one line of advice the draft card carries.
+    await expect(page.getByTestId('best-move')).toContainText('Best move:');
+    // With none of the weekly furniture underneath it.
+    await expect(page.getByTestId('starters-title')).toHaveCount(0);
+    await expect(page.getByTestId('bench-toggle')).toHaveCount(0);
   });
 
   /**

@@ -16,6 +16,8 @@ import { nflTeam } from '../core/nfl/teams.ts';
 import { queueSequence, reconcileQueue, reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
+import { computeNeed } from '../core/draft/need.ts';
+import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { normalizeMode } from '../core/startsit/mode.ts';
@@ -529,6 +531,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       remaining: liveRoster.remaining,
       openStarters: liveRoster.openStarters,
       picksMade: liveRoster.picksMade,
+      /*
+       * The one line of advice the draft card carries.
+       *
+       * Derived from the need breakdown the draft engine already computes from
+       * this league's own starting slots — not a second recommendation system
+       * living in the screen. Sent even when the draft is over, because that
+       * costs one small object and saves the client a branch; the card that
+       * shows it is only drawn while `live` is true.
+       */
+      bestMove: bestMove(computeNeed(shape, liveRoster.counts)),
       found: !!mine,
     });
   });
