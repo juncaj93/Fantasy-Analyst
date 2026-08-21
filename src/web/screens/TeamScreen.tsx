@@ -508,11 +508,27 @@ export function TeamScreen({
                 onOpen={(playerId) => openPlayer(playerId, { starting: false })}
               />
 
-              {lineup?.found ? <LineupCard lineup={lineup} /> : null}
+              {/*
+                Neither of these exists yet while a draft is running.
 
-              {waiverBoard ? (
-                <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
-              ) : null}
+                `Changes to consider` compares your lineup to the recommended
+                one — of a roster that is half unpicked, for a week that has not
+                started. `Waiver upgrades` offers free agents to a manager whose
+                next transaction is a draft pick. Both were drawn through the
+                whole draft, under the roster, answering questions nobody had
+                yet; the same flag that hides the mode chips and Compare hides
+                them, so there is one answer on this screen to "is a draft
+                happening".
+              */}
+              {roster.live ? null : (
+                <>
+                  {lineup?.found ? <LineupCard lineup={lineup} /> : null}
+
+                  {waiverBoard ? (
+                    <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
+                  ) : null}
+                </>
+              )}
             </>
           )}
         </>

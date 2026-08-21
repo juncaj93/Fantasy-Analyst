@@ -56,15 +56,23 @@ test.describe('the control', () => {
     await expect(control.locator('button')).toHaveCount(3);
   });
 
-  test('sits beside the refresh control without adding a row', async ({ page }) => {
+  test('sits beside the board control without adding a row', async ({ page }) => {
     await openDraft(page);
     const overlap = await page.evaluate(() => {
       const sort = document.querySelector('[data-testid="draft-sort"]')!.getBoundingClientRect();
-      const refresh = document.querySelector('[data-testid="draft-refresh"]')!.getBoundingClientRect();
+      /*
+       * The bar's other action, which used to be the refresh glyph.
+       *
+       * That glyph is gone — the board reloads by pull now — and the way into
+       * the draft board took its place, moving out of the title line where it
+       * was a 15px mark reading as decoration on the league's name. What this
+       * test is about is unchanged: the sort shares that row rather than adding
+       * one of its own.
+       */
+      const other = document.querySelector('[data-testid="draft-board-open"]')!.getBoundingClientRect();
       const nav = document.querySelector('[data-testid="draft-nav"]')!.getBoundingClientRect();
       return {
-        // Same line as the refresh glyph: their vertical spans overlap.
-        sharesLine: sort.bottom > refresh.top && refresh.bottom > sort.top,
+        sharesLine: sort.bottom > other.top && other.bottom > sort.top,
         // And inside the bar that was already there.
         insideNav: sort.top >= nav.top - 1 && sort.bottom <= nav.bottom + 1,
       };

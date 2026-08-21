@@ -210,7 +210,8 @@ test.describe('a trade suggestion is a row', () => {
     const kase = page.getByTestId('trade-case');
     await expect(kase).toBeVisible();
     await expect(kase).toContainText('Why');
-    await expect(page.getByTestId('player-page-sections')).toBeVisible();
+    // One scroll rather than four segments — see `the player dossier` below.
+    await expect(page.getByTestId('player-page-snapshot')).toBeVisible();
     // The list was never unmounted, which is the whole reason for the sheet.
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
 
@@ -253,8 +254,19 @@ test.describe('the player dossier', () => {
     // The identity is drawn, not spelled: the position pill and the club's mark.
     await expect(sheet.locator('.player-page-ident .pos-pill')).toBeVisible();
 
-    const labels = await page.getByTestId('player-page-sections').locator('button').allInnerTexts();
-    expect(labels.map((l) => l.trim())).toEqual(['Overview', 'Outlook', 'Market', 'Evidence']);
+    /*
+     * Every section, on one surface, without choosing a tab first.
+     *
+     * The sheet used to carry the page's segmented control. A reader who taps a
+     * name is asking who this is, and a segmented control answers by asking
+     * them a question back — so the sheet stacks the lot in the order it is
+     * wanted and the segments stay on the pushed page, which is the deep read.
+     */
+    await expect(page.getByTestId('player-page-sections')).toHaveCount(0);
+    const snapshot = page.getByTestId('player-page-snapshot');
+    await expect(snapshot).toBeVisible();
+    await expect(snapshot.getByTestId('player-page-windows')).toBeVisible();
+    await expect(snapshot.getByTestId('evidence-heading')).toBeVisible();
 
     // It dismisses without touching the list, which is still exactly there.
     await page.keyboard.press('Escape');
@@ -309,17 +321,28 @@ test.describe('the player dossier', () => {
     await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
   });
 
-  test('never scrolls sideways, on any section', async ({ page }) => {
+  /**
+   * The snapshot is one scroll, and it is a vertical one.
+   *
+   * This used to step through the four segments. There are none in a sheet now,
+   * so it scrolls the surface instead — every section is on it, and any one of
+   * them that overflowed would show up at some point on the way down.
+   */
+  test('never scrolls sideways, anywhere down the snapshot', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
     await page.getByTestId('player-search-row').first().click();
-    for (const section of ['Overview', 'Outlook', 'Market', 'Evidence']) {
-      await page.getByTestId('player-page-sections').getByRole('button', { name: section }).click();
-      await page.waitForTimeout(150);
+    const body = page.locator('.sheet-body');
+    await expect(body).toBeVisible();
+
+    const height = await body.evaluate((el) => el.scrollHeight);
+    for (let top = 0; top <= height; top += 200) {
+      await body.evaluate((el, y) => el.scrollTo({ top: y }), top);
+      await page.waitForTimeout(80);
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
-      expect(overflow, `${section} overflows by ${overflow}px`).toBeLessThanOrEqual(1);
+      expect(overflow, `the snapshot overflows by ${overflow}px at ${top}px down`).toBeLessThanOrEqual(1);
     }
   });
 });

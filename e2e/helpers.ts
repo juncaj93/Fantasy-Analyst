@@ -32,3 +32,21 @@ export async function inSeason(page: Page): Promise<void> {
     await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
   });
 }
+
+/**
+ * Pull a screen down far enough to refresh it.
+ *
+ * The gesture replaced the refresh buttons, so the specs that used to tap one
+ * do this instead. Moved by steps rather than in one jump because the control
+ * damps the movement and arms only past a threshold — a single `mouse.move` to
+ * the end point is one event, and one event is not a pull.
+ */
+export async function pullToRefresh(page: Page, testId: string): Promise<void> {
+  const box = (await page.getByTestId(testId).boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + 40;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
+  await page.mouse.up();
+}

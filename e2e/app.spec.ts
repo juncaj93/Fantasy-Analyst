@@ -8,7 +8,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { inSeason } from './helpers.ts';
+import { inSeason, pullToRefresh } from './helpers.ts';
 
 /**
  * Wait for a disclosure to finish opening before reading its text.
@@ -130,8 +130,17 @@ test.describe('shell', () => {
       for (const inset of [0, INSET]) {
         const g = await geometry(page, inset);
         expect(g.gapBelowNav, `inset ${inset}: the page owns only the gap it declared`).toBe(g.intendedGap);
-        // And the gap is a hairline on a flat screen, never a strip of page.
-        if (inset === 0) expect(g.gapBelowNav).toBeLessThanOrEqual(8);
+        /*
+         * And it stays a gap on a flat screen, never a strip of page.
+         *
+         * The ceiling was 8, which was the old six-pixel float plus room to
+         * breathe. The toolbar pass raised the float to ten deliberately: at six
+         * the shadow had nowhere to fall and the bar read as pushed down rather
+         * than hovering, which is most of what made it look pasted on. The
+         * ceiling moves with it and keeps its job — twelve is still a gap, and a
+         * bar that drifted into a band of empty page still fails here.
+         */
+        if (inset === 0) expect(g.gapBelowNav).toBeLessThanOrEqual(12);
       }
     });
 
@@ -685,12 +694,11 @@ test.describe('draft room', () => {
    * *selection* is shown: the provider's own sentences, in the provider's own
    * order, and the card says it has been shortened and offers the rest.
    *
-   * "The rest" is the Draft card's one control, `detail-more`, rather than a
-   * link belonging to the paragraph. The compact card governs the outlook along
-   * with everything else it holds back — see `DraftPlayerDetail` — so a second
-   * control inside the prose would be a second answer to the same question. On
-   * Players and the player page the outlook still governs itself, which
-   * `players.spec.ts` covers.
+   * "The rest" is the blurb itself. The Draft card holds its outlook back to two
+   * clamped lines and expands on a tap anywhere on the prose — the affordance
+   * every truncated block on a phone has — which is why there is no link under
+   * it and no control inside the paragraph. On Players and the player page the
+   * outlook still governs itself, which `players.spec.ts` covers.
    */
   test('shortens a long outlook to the provider’s own sentences, and offers the rest', async ({ page }) => {
     const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Owen Fitzgerald' }).first();
@@ -714,7 +722,7 @@ test.describe('draft room', () => {
     }
 
     // A cut quotation that admits it, and gives the rest back.
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
     const whole = (await outlook.innerText()).split(' — ')[0]!.trim();
     expect(whole).toBe(stored.fullText);
     expect(whole.length).toBeGreaterThan(short.length);
@@ -754,7 +762,7 @@ test.describe('draft room', () => {
     // snapshot: a heading over two clamped lines names prose that already names
     // itself.
     await expect(withOutlook.getByText(/season outlook/i)).toHaveCount(0);
-    await withOutlook.getByTestId('detail-more').click();
+    await withOutlook.getByTestId('outlook-expand').click();
     await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
     await withOutlook.locator('.row-button').click();
 
@@ -815,7 +823,7 @@ test.describe('draft room', () => {
     // One tap further in than it used to be: the compact card rests at four
     // short blocks and the injury detail is part of what its control reveals.
     // The row's own availability badge is what survives at a glance.
-    await row.getByTestId('detail-more').click();
+    await row.getByTestId('outlook-expand').click();
     await expect(row.getByTestId('injury-conflict')).toContainText(/disagree/i);
     await expect(row.getByTestId('injury-current')).toContainText(/knee/i);
     // And it says where it came from, so the freshness can be judged.
@@ -833,7 +841,7 @@ test.describe('draft room', () => {
     const hurt = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
     await hurt.scrollIntoViewIfNeeded();
     await hurt.click();
-    await hurt.getByTestId('detail-more').click();
+    await hurt.getByTestId('outlook-expand').click();
     await expect(hurt.getByTestId('injury-context')).toContainText('Major injury history: ACL');
     // One line, not a paragraph, and it does not restate the outlook.
     await revealed(hurt.getByTestId('injury-context'));
@@ -849,7 +857,7 @@ test.describe('draft room', () => {
     const fit = page.locator('[data-testid="recommendation-row"]', { hasText: 'Kai Brennan' }).first();
     await fit.scrollIntoViewIfNeeded();
     await fit.click();
-    await fit.getByTestId('detail-more').click();
+    await fit.getByTestId('outlook-expand').click();
     await expect(fit.getByTestId('injury-context')).toHaveCount(0);
     await expect(fit.getByText('Injury context')).toHaveCount(0);
   });
@@ -1247,20 +1255,24 @@ test.describe('draft room', () => {
 
   /**
    * The Sleeper sync is stubbed here on purpose. What is being checked is the
-   * contract between the button and the app — one request per tap, the board
+   * contract between the gesture and the app — one request per pull, the board
    * rebuilt afterwards, the last good state kept when it fails — not Sleeper's
    * availability from CI.
    */
-  test('offers a refresh control rather than a live/pause switch', async ({ page }) => {
-    const refresh = page.getByTestId('draft-refresh');
-    await expect(refresh).toBeVisible();
-    await expect(refresh).toHaveAccessibleName(/refresh/i);
+  test('refreshes by gesture rather than by a button or a live/pause switch', async ({ page }) => {
+    /*
+     * The glyph is gone from the bar, and nothing replaced it.
+     *
+     * A row on this screen is a player, and the gesture costs none: pulling a
+     * list down to reload it is the one every iPhone reader already has, and it
+     * cannot be hit by accident on the way down a long board.
+     */
+    await expect(page.getByTestId('draft-refresh')).toHaveCount(0);
+    await expect(page.getByTestId('draft-pull')).toBeVisible();
 
-    const box = await refresh.boundingBox();
-    expect(box!.width, 'must be tappable one-handed').toBeGreaterThanOrEqual(44);
-
-    // The control no longer implies the user maintains a connection.
+    // Neither the old control nor anything implying the reader holds a connection.
     const buttons = (await page.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    expect(buttons).not.toContain('refresh');
     expect(buttons).not.toContain('live');
     expect(buttons).not.toContain('pause');
   });
@@ -1301,16 +1313,25 @@ test.describe('draft room', () => {
     });
 
     const syncsBefore = syncs;
-    const refresh = page.getByTestId('draft-refresh');
-    await refresh.click();
-    // Repeated taps while it is working must not queue a second sync.
-    await refresh.dispatchEvent('click');
-    await refresh.dispatchEvent('click');
-    await expect(refresh).toBeEnabled();
+    // Repeated pulls while it is working must not queue a second sync. The
+    // control is single-flight, which is the property this test is about and
+    // which the gesture inherits unchanged from the button it replaced.
+    await pullToRefresh(page, 'draft-pull');
+    await pullToRefresh(page, 'draft-pull');
+    await pullToRefresh(page, 'draft-pull');
+
+    /*
+     * Polled rather than read straight after the gesture.
+     *
+     * A tap returned a promise the test could await through the control's
+     * disabled state; a pull is a sequence of pointer events that finishes
+     * before the work it starts does. So the assertions wait for the work.
+     */
+    await expect.poll(() => syncs - syncsBefore, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => boards, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
 
     expect(mostAtOnce, 'never two Sleeper syncs in flight at once').toBe(1);
-    expect(syncs - syncsBefore, 'three taps do not become three requests').toBeLessThanOrEqual(2);
-    expect(boards, 'the board is rebuilt from the new state').toBeGreaterThanOrEqual(1);
+    expect(syncs - syncsBefore, 'three pulls do not become three requests').toBeLessThanOrEqual(2);
     // The list is never blanked while refreshing.
     await expect(page.getByTestId('recommendation-row').first()).toBeVisible();
     await expect(page.getByTestId('draft-updated')).toContainText(/just now|ago/);
@@ -1326,7 +1347,7 @@ test.describe('draft room', () => {
       }),
     );
 
-    await page.getByTestId('draft-refresh').click();
+    await pullToRefresh(page, 'draft-pull');
 
     const note = page.getByTestId('draft-refresh-note');
     await expect(note).toContainText('Sleeper did not respond');
@@ -1512,6 +1533,9 @@ test.describe('team, ADP import and start/sit', () => {
   });
 
   test('recommends a whole lineup and never offers to apply it', async ({ page }) => {
+    // A post-draft section: comparing a lineup to the recommended one is a
+    // question about a week that has not started. See `inSeason`.
+    await openTeamInSeason(page);
     const card = page.getByTestId('lineup-card');
     await expect(card).toBeVisible();
     await expect(page.getByTestId('lineup-verdict')).toBeVisible();
@@ -1633,11 +1657,21 @@ test.describe('player intelligence', () => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
 
-    // The windows are on the page the reader lands on…
+    /*
+     * One scroll, no tabs.
+     *
+     * A tap opens the sheet, and the sheet is a snapshot: the windows, the
+     * latest news and the market all on one surface in the order they are
+     * wanted. The segmented control this used to click belongs to the pushed
+     * page, which is the deep read — `opens a player as his own page` below
+     * walks all four of its sections.
+     */
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-sections')).toHaveCount(0);
+
     await expect(page.getByTestId('player-page-windows')).toContainText('7d');
     await expect(page.getByTestId('player-page-windows')).toContainText('Lifetime');
-    // …and the ledger is one tap further, entire.
-    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
+    // The ledger is on the same surface, newest first and counted honestly.
     await expect(page.getByTestId('evidence-heading')).toBeVisible();
     await expect(page.getByTestId('evidence-item').first()).toBeVisible();
   });
@@ -1718,17 +1752,43 @@ test.describe('player intelligence', () => {
     }
   });
 
+  /*
+   * Both of these open the snapshot sheet rather than clicking a tab.
+   *
+   * The provenance guarantee is unchanged and is what they still check — an
+   * item carries the words it came from, and an absent market says so instead
+   * of printing a zero. What changed is only where those live: a tap now opens
+   * one scrollable snapshot, so there is no segment to choose first.
+   */
+  /**
+   * Read on the full profile, because "every item" is a claim about the ledger.
+   *
+   * The sheet shows the newest two and says how many older ones there are — a
+   * snapshot of forty items is the thing a snapshot exists instead of. So
+   * asserting a *particular* excerpt there makes the test depend on which two
+   * happen to be newest, which the review-queue tests change by ingesting into
+   * the same dev server: it passed alone and failed after them, which is the
+   * worst way for a test to fail. The whole ledger is one tap further in, and
+   * that is where the guarantee this defends actually lives.
+   */
   test('shows the original excerpt for every evidence item, not just a tally', async ({ page }) => {
     await page.getByLabel('Search players').fill('vance');
     await page.locator('[data-testid="player-search-row"][data-player-id="1001"]').click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await page.getByTestId('player-full-profile').click();
     await page.getByTestId('player-page-sections').getByRole('button', { name: 'Evidence' }).click();
-    await expect(page.getByTestId('evidence-excerpt').first()).toContainText('named the starter');
+
+    const excerpts = page.getByTestId('evidence-excerpt');
+    expect(await excerpts.count(), 'the ledger drew no items to check').toBeGreaterThan(0);
+    // Every item carries its own words, not just the one that happens to be first.
+    for (const excerpt of await excerpts.all()) await expect(excerpt).not.toBeEmpty();
+    await expect(excerpts.filter({ hasText: 'named the starter' })).toHaveCount(1);
   });
 
   test('states plainly when there are no cached props', async ({ page }) => {
     await page.getByLabel('Search players').fill('whitfield');
     await page.locator('[data-testid="player-search-row"][data-player-id="1011"]').click();
-    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Market' }).click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
     await expect(page.getByText(/Prop data unavailable/)).toBeVisible();
   });
 });
