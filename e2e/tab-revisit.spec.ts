@@ -48,7 +48,15 @@ test.describe('returning to a tab opened earlier in the session', () => {
     const before = await page.getByTestId('recommendation-row').first().innerText();
 
     await switchTo(page, 'team');
-    await expect(page.getByTestId('starters-title')).toBeVisible();
+    /*
+     * The league card, not the starters heading, as the sign that Team drew.
+     *
+     * These tests only need to know the tab rendered, and the heading is no
+     * longer a fact about that: a lineup is a question about a week, so during
+     * a draft Team draws the drafted roster and no starters at all. The card is
+     * on both versions of the screen.
+     */
+    await expect(page.getByTestId('league-card').first()).toBeVisible();
 
     /*
      * Every board request from here on is held open. The old behaviour cannot
@@ -69,7 +77,7 @@ test.describe('returning to a tab opened earlier in the session', () => {
   test('Team comes back without a blocking load', async ({ page }) => {
     await openApp(page);
     await switchTo(page, 'team');
-    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.getByTestId('league-card').first()).toBeVisible();
 
     await switchTo(page, 'draft');
     await expect(page.getByTestId('board-list')).toBeVisible();
@@ -80,7 +88,7 @@ test.describe('returning to a tab opened earlier in the session', () => {
     });
 
     await switchTo(page, 'team');
-    await expect(page.getByTestId('starters-title')).toBeVisible({ timeout: 1500 });
+    await expect(page.getByTestId('league-card').first()).toBeVisible({ timeout: 1500 });
   });
 
   test('Players comes back without a blocking load', async ({ page }) => {
@@ -106,7 +114,7 @@ test.describe('returning to a tab opened earlier in the session', () => {
     const before = await first.innerText();
 
     await switchTo(page, 'team');
-    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.getByTestId('league-card').first()).toBeVisible();
 
     /*
      * The other half of stale-while-revalidate. Showing what you had is only
@@ -172,7 +180,7 @@ test.describe('a late confirmation never lands on the wrong filter', () => {
     // Leave and come back, so the revisit is served from cache and confirmed
     // behind the screen — and hold that confirmation open.
     await switchTo(page, 'team');
-    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await expect(page.getByTestId('league-card').first()).toBeVisible();
 
     /*
      * Only the *unfiltered* request is held. Delaying both would prove nothing:

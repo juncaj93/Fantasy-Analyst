@@ -1503,6 +1503,10 @@ test.describe('team, ADP import and start/sit', () => {
   });
 
   test('lists recommended starters by slot, then the bench', async ({ page }) => {
+    // A lineup is a question about a week, so the draft has to be over for one
+    // to be drawn at all — see `openTeamInSeason`, and the draft-mode view in
+    // `team-draft-mode.spec.ts` which asserts its absence during a draft.
+    await openTeamInSeason(page);
     await expect(page.getByTestId('starters-title')).toBeVisible();
     // Seven slots: QB, RB, RB, WR, WR, TE, FLEX — the league's own shape.
     expect(await page.getByTestId('starter-row').count()).toBe(7);
