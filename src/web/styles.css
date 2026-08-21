@@ -2137,6 +2137,30 @@ body,
   font-weight: 720;
 }
 
+/*
+ * A Score the row next to this one also shows.
+ *
+ * A faint inset field behind the number, so a run of equal Scores reads as one
+ * block. It says the only thing that is true about them: they are the same
+ * number. Nothing is added to the row — no word, no chip, no second line — and
+ * a row without a neighbour on its Score is drawn exactly as it was.
+ *
+ * Deliberately not a colour, a badge or an arrow. The board already spends its
+ * colour on things a reader acts on, and "these two agree" is not an alert; it
+ * is the absence of a difference, which is what a flat field says and a badge
+ * would not.
+ *
+ * The `title` and the accessible name carry the sentence for anyone who wants
+ * it, because a field on its own is a hint rather than a statement — and the
+ * app's rule is that a visual cue is never the only cue.
+ */
+.score-value[data-level='true'] {
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  margin: 0 -1px;
+}
+
 /* Positive/negative always pair colour with a glyph + word. */
 .sig {
   font-weight: 620;
