@@ -5826,11 +5826,20 @@ table.compact tr:last-child td {
  * This is the one card on the page that earns being a card, so it keeps the
  * larger radius and its surface. It just stops being half a screen tall.
  */
+/*
+ * Vertical padding at `--sp-1`, not `--sp-2`.
+ *
+ * The odds row underneath is a button and therefore at least `--tap` tall,
+ * which is a rule and stays one: it carries about nineteen pixels of slack
+ * around its own content. That slack is already the card's bottom breathing
+ * room, so eight more pixels of padding under it is the same gap paid for
+ * twice — and this card's job is to leave the lineup room on one screen.
+ */
 .matchup-score {
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
   margin-bottom: var(--sp-2);
 }
 
@@ -5841,6 +5850,19 @@ table.compact tr:last-child td {
   gap: var(--sp-1) var(--sp-2);
 }
 
+/*
+ * A side of the scoreboard: the name on the outside, the numbers on the inside.
+ *
+ * The name stays hard against the card's outer edge, where a reader's eye goes
+ * to find out whose column this is. The score and the projection go the other
+ * way, to the edge nearest the `vs` — so `69.10` and `79.00` sit a couple of
+ * centimetres apart instead of a phone's width apart, which is the difference
+ * between reading them as one comparison and reading them as two facts.
+ *
+ * They are still their own column and still aligned as a column: the score and
+ * the projection under it share an edge, so the decimal points line up and the
+ * pair reads as one block rather than two loose numbers.
+ */
 .matchup-team {
   min-width: 0;
   display: flex;
@@ -5848,8 +5870,34 @@ table.compact tr:last-child td {
   gap: 1px;
 }
 
-.matchup-team[data-align='end'] {
+.matchup-team[data-align='start'] {
+  align-items: flex-end;
   text-align: right;
+}
+
+.matchup-team[data-align='end'] {
+  align-items: flex-start;
+  text-align: left;
+}
+
+/*
+ * …except the name, which goes back to the outer edge.
+ *
+ * `align-self` rather than a second rule on the column, because the name is the
+ * one child that does not follow the column's direction — and `max-width: 100%`
+ * so a long team name still truncates against the column instead of widening
+ * it.
+ */
+.matchup-team[data-align='start'] .matchup-team-name,
+.matchup-team[data-align='start'] .matchup-team-record {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.matchup-team[data-align='end'] .matchup-team-name,
+.matchup-team[data-align='end'] .matchup-team-record {
+  align-self: flex-end;
+  max-width: 100%;
 }
 
 /* The fantasy team's name. One line, truncated — a manager's team name is
@@ -5916,11 +5964,12 @@ table.compact tr:last-child td {
  */
 .matchup-win {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: var(--sp-2);
+  gap: 3px;
   width: 100%;
-  margin-top: var(--sp-2);
+  /* No margin: the tap target's own slack is the separation. */
+  margin-top: 0;
   padding: 0;
   background: none;
   border: 0;
@@ -5938,16 +5987,33 @@ button.matchup-win:active {
   opacity: 0.6;
 }
 
+/*
+ * The two percentages, meeting in the middle with the word between them.
+ *
+ * Three content-sized tracks centred as a group, rather than two values pinned
+ * to the card's edges: `44% win 56%` is one phrase and it is laid out as one.
+ * The values keep equal tracks so the centre word does not shift sideways when
+ * a percentage goes from one digit to two.
+ */
+.matchup-win-values {
+  display: grid;
+  grid-template-columns: 3.2em auto 3.2em;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--sp-1);
+}
+
 .matchup-win-value {
   font-size: 0.78rem;
   font-weight: 680;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
   white-space: nowrap;
+  text-align: right;
 }
 
 .matchup-win-value-end {
-  text-align: right;
+  text-align: left;
 }
 
 .matchup-win-word {

@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type LeagueSummary, type MatchupResponse, type MatchupPlayerView } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, Sheet, SkeletonRows } from '../components/native.tsx';
-import { BenchSection, DetailRow, HeroCarousel, MatchupStatus, ScoreCard, SlotRow } from '../components/matchup.tsx';
+import { BenchSection, DetailRow, InsightList, MatchupStatus, ScoreCard, SlotRow } from '../components/matchup.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { MODE_LABEL } from '../../core/startsit/mode.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -160,7 +160,13 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         <>
           <ScoreCard forecast={forecast} {...(forecast.degraded ? {} : { onExplain: () => setOddsOpen(true) })} />
 
-          <HeroCarousel insights={forecast.insights} onOpenPlayer={setOpenPlayer} openable={openable} />
+          {/*
+            No Live Insights element here, which the lock is explicit about: the
+            main matchup page carries no such card or button. The insights
+            themselves are not gone — they are a section of the sheet behind the
+            win probability, one tap from the number they are about. See
+            `InsightList`.
+          */}
 
           <div className="section-title" data-testid="starters-title">
             Starters
@@ -201,7 +207,13 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       ) : null}
 
       {oddsOpen && forecast ? (
-        <OddsSheet forecast={forecast} players={players} onClose={() => setOddsOpen(false)} onOpenPlayer={setOpenPlayer} />
+        <OddsSheet
+          forecast={forecast}
+          players={players}
+          onClose={() => setOddsOpen(false)}
+          onOpenPlayer={setOpenPlayer}
+          openable={openable}
+        />
       ) : null}
     </PullToRefresh>
   );
@@ -222,11 +234,14 @@ function OddsSheet({
   players,
   onClose,
   onOpenPlayer,
+  openable,
 }: {
   forecast: NonNullable<MatchupResponse['forecast']>;
   players: Map<string, MatchupPlayerView>;
   onClose: () => void;
   onOpenPlayer: (playerId: string) => void;
+  /** Whether tapping through to this player would show anything. */
+  openable: (playerId: string) => boolean;
 }) {
   const decision = forecast.decision;
   const name = (id: string) => players.get(id)?.name ?? id;
@@ -256,6 +271,16 @@ function OddsSheet({
           {forecast.freshness.level} · {forecast.freshness.detail}
         </DetailRow>
       ) : null}
+
+      {/*
+        The insights, where the entry point on the main screen used to lead.
+
+        They sit above the swings deliberately: an insight is the engine saying
+        what is happening now, and the leverage list is what could still change
+        it. A reader who opened this sheet by tapping a win probability is
+        asking both questions in that order.
+      */}
+      <InsightList insights={forecast.insights} onOpenPlayer={(id) => { onClose(); onOpenPlayer(id); }} openable={openable} />
 
       {forecast.leverage.length > 0 ? (
         <>

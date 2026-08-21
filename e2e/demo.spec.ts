@@ -201,7 +201,8 @@ test.describe('the scenarios render the production screens', () => {
       await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
       await expect(page.getByTestId('matchup-actual-mine')).toBeVisible();
       await expect(page.getByTestId('matchup-actual-theirs')).toBeVisible();
-      await expect(page.getByTestId('insight-entry-label')).toBeVisible();
+      // And no Live Insights element, which the lock keeps off this page.
+      await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
       // Every starting slot, both sides, off the league's own roster positions.
       await expect(page.getByTestId('matchup-row')).toHaveCount(8);
       await expect(page.getByTestId('demo-scenario')).toContainText(name, { ignoreCase: true });
