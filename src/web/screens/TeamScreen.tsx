@@ -1609,11 +1609,33 @@ function LiveDraftRoster({
             <div className="section-title">
               {position} ({roster.counts[position]})
             </div>
-            <div className="list-card">
+            {/*
+              Two players per row, because one was spending a phone on air.
+
+              A drafted player is a name, a club and the pick he cost — three
+              short things that were taking a full-width row each, with most of
+              that width empty between the name and the mark on its right. Mid
+              draft this is the list you check between picks, and a roster of
+              nine filled a screen and a half of it.
+
+              Two columns halve the width, and the cell spends two lines rather
+              than one: at 360px a column is about 160px, and a name, a club
+              and a pick on one line there would mean shrinking the type —
+              which is the trade this pass is not making. Two lines of readable
+              text in half the width still costs less than one line of readable
+              text across all of it.
+            */}
+            <div className="list-card roster-grid">
               {roster.drafted
                 .filter((p) => (p.position || 'UNKNOWN') === position)
                 .map((p) => (
                   <div key={p.playerId} className="roster-line" data-testid="drafted-line">
+                    {/*
+                      No position pill here, on either edge. The card's own
+                      heading — `TE (2)` — has already said the position, and in
+                      a column half a phone wide a pill is a fifth of the room
+                      the name needs. See the note on the trailing cluster.
+                    */}
                     <span className="player-name">{p.name}</span>
                     {/*
                       His availability, against his name — the same placement

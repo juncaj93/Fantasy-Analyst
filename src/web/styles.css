@@ -4430,6 +4430,144 @@ table.compact tr:last-child td {
   min-height: 38px;
 }
 
+/*
+ * The drafted roster, two players wide.
+ *
+ * One player per full-width row was spending a phone screen on air: a name, a
+ * club and a pick cost maybe a third of the width, and the rest was the gap
+ * that pushed the club to the far edge. Mid draft this is the list checked
+ * between picks, so what it costs vertically is most of what it costs.
+ *
+ * `minmax(0, 1fr)` rather than `1fr`: a grid track's default minimum is `auto`,
+ * which is the widest thing inside it, so a long name would refuse to shrink
+ * and push the column past half — and with `overflow: hidden` on the card, off
+ * it. Zero as the floor is what lets the ellipsis inside the name do its job.
+ *
+ * `auto-fit` rather than a flat `repeat(2, …)` so a group holding one player
+ * collapses the empty track and gives him the whole width back. `QB (1)` in a
+ * half-width column would be a two-line cell where the old full-width row was
+ * one line — the pass paying for itself on the big groups and losing it again
+ * on the small ones. The 140px floor is what caps it at two columns: the card
+ * is under 400px wide inside its padding at every width this app draws for.
+ */
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+/*
+ * `.list-card > * + *` draws a rule above every child but the first, which in
+ * one column is the line between two rows and in two columns is a line above
+ * the right-hand cell of the first row and nothing above the left. Undo it and
+ * say it per axis instead: a rule above everything from the second row down,
+ * and a rule down the left of the right-hand column.
+ */
+.roster-grid > * + * {
+  border-top: none;
+}
+
+.roster-grid > *:nth-child(n + 3) {
+  border-top: 1px solid var(--separator-soft);
+}
+
+.roster-grid > *:nth-child(even) {
+  border-left: 1px solid var(--separator-soft);
+}
+
+/*
+ * Two lines to the cell, not one.
+ *
+ * At 360px a column is about 160px, and a pill, a name, a club and a pick on
+ * one line there means shrinking the type — the trade this pass is not making.
+ * Wrapping the trailing cluster onto its own line keeps every glyph at the size
+ * it is everywhere else, and two lines in half the width still costs a third
+ * less than one line across all of it.
+ *
+ * A grid rather than a wrapping flex row, because wrapping is the wrong
+ * question: a flex line places items at their content width and moves the ones
+ * that do not fit to the next line, so a long name jumps below the tag beside
+ * it instead of truncating — three lines, and the tag orphaned above the name
+ * it describes. A grid track with a floor of zero shrinks instead, which is
+ * what an ellipsis is for.
+ *
+ * Two tracks on the first row: the name, sized to its text but free to shrink,
+ * and the availability tag, which keeps the slack so it sits against the last
+ * letter rather than out at the edge. The trailing cluster spans both, which
+ * is also what puts it on a row of its own.
+ */
+.roster-grid .roster-line {
+  display: grid;
+  /*
+   * Both tracks content-sized, with `justify-content: start` parking the
+   * leftover to the right of them rather than sharing it out.
+   *
+   * Not `minmax(0, 1fr)` on the tag's track: an `fr` track is the one that
+   * holds the slack, so the tag came out as a capsule the width of the rest of
+   * the row — it is a badge, not a field. And not `justify-items: start` to
+   * cure that, because a start-justified item is sized to its own text rather
+   * than to its track, which is exactly the constraint the name's ellipsis
+   * needs; long names ran straight through the column rule instead of
+   * truncating. Two `auto` tracks with a floor of zero on the name gives both:
+   * the tag reaches its content width and stops, and the name takes whatever
+   * is left and clips at it.
+   */
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  justify-content: start;
+  gap: 1px var(--sp-2);
+  /*
+   * Narrower sides than a full-width row. `--sp-3` twice is 24px, which is a
+   * seventh of a 168px cell and comes straight off the name — and the column
+   * rule beside it is already doing the separating that the padding does on a
+   * row that reaches both edges of the card. Vertically it is `--sp-1`,
+   * because the column rules and the row rules already separate one cell from
+   * the next and a two-line cell does not need padding to look like a block.
+   */
+  padding: var(--sp-1) var(--sp-2);
+}
+
+/*
+ * The trailing cluster on the second row, in the first track only.
+ *
+ * Spanning it across both tracks is the obvious way to say "own line", and it
+ * is wrong: a spanning item's width is shared out over the tracks it covers,
+ * so the club and the pick were inflating the tag's column by forty pixels —
+ * on cells with no tag at all, where that column should have been nothing.
+ * The name paid for it. Saying `grid-row: 2` gets the same line without the
+ * item having an opinion about the column beside it.
+ */
+.roster-grid .roster-line .row-value {
+  grid-row: 2;
+  grid-column: 1;
+  margin-left: 0;
+  justify-content: flex-start;
+}
+
+/*
+ * The club's mark keeps its size here, and it is the tallest thing in the cell.
+ *
+ * Alone on a second line beside a 0.7rem pick, 22px is what sets the cell's
+ * height, and shrinking it to 16 was worth about three and a half pixels a
+ * player. It is not on offer: one mark size across every screen is a rule this
+ * app states and defends — see `the marks are the same size on every screen` in
+ * team-logo.spec.ts — and three pixels is not the price of an exception to it.
+ *
+ * A player with nobody beside him keeps the row he always had.
+ *
+ * The second line is the price of a narrow column, and an only child has no
+ * narrow column — the track beside him collapsed. So he goes back to one flex
+ * line with the club and the pick on the trailing edge, which is both a line
+ * shorter and the layout every other single-value row on this screen uses.
+ */
+.roster-grid > .roster-line:only-child {
+  display: flex;
+}
+
+.roster-grid > .roster-line:only-child .row-value {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
 .pick-no {
   font-size: 0.7rem;
   color: var(--text-faint);
