@@ -72,9 +72,71 @@ test.describe('the real matchup', () => {
     await expect(bar).toHaveAttribute('aria-label', /% to win/);
   });
 
-  test('shows one insight entry point', async ({ page }) => {
-    await expect(page.getByTestId('insight-entry')).toHaveCount(1);
-    await expect(page.getByTestId('insight-entry-label')).not.toBeEmpty();
+  /**
+   * The scoreboard is compact, and compactness is geometry.
+   *
+   * Three claims the lock makes about this card, each of which a later edit can
+   * undo while every other test here still passes:
+   *
+   *   1. **the scores meet near the middle.** They used to sit at the card's
+   *      outer edges — two halves of one comparison a phone's width apart.
+   *   2. **the percentages do too**, for the same reason, with one bar under
+   *      them rather than squeezed between them.
+   *   3. **the names stay outside.** Pulling the numbers in is only a gain if
+   *      whose column this is stays where the eye looks for it.
+   *
+   * Everything is measured against the card's own width, so it holds at all
+   * four widths this suite runs rather than encoding one of them.
+   */
+  test('draws a compact scoreboard, numbers in and names out', async ({ page }) => {
+    const geometry = await page.getByTestId('matchup-score').evaluate((card) => {
+      const box = card.getBoundingClientRect();
+      const at = (sel: string) => card.querySelector(sel)!.getBoundingClientRect();
+      const mine = at('[data-testid="matchup-actual-mine"]');
+      const theirs = at('[data-testid="matchup-actual-theirs"]');
+      const winMine = at('[data-testid="matchup-win-mine"]');
+      const winTheirs = at('[data-testid="matchup-win-theirs"]');
+      const bar = at('[data-testid="matchup-win-bar"]');
+      const names = [...card.querySelectorAll('.matchup-team-name')].map((n) => n.getBoundingClientRect());
+      return {
+        width: box.width,
+        scoreGap: (theirs.left - mine.right) / box.width,
+        winGap: (winTheirs.left - winMine.right) / box.width,
+        barWidth: bar.width / box.width,
+        barBelow: bar.top > winMine.bottom,
+        nameLeft: (names[0]!.left - box.left) / box.width,
+        nameRight: (box.right - names[1]!.right) / box.width,
+        bars: card.querySelectorAll('[data-testid="matchup-win-bar"]').length,
+      };
+    });
+
+    // The two scores, and the two percentages, close to the centre.
+    expect(geometry.scoreGap, 'the scores sit near the middle').toBeLessThan(0.3);
+    expect(geometry.winGap, 'the percentages sit near the middle').toBeLessThan(0.3);
+
+    // One bar, under them, across the card — not one squeezed between them.
+    expect(geometry.bars, 'one win bar, not two').toBe(1);
+    expect(geometry.barBelow, 'the bar is beneath the percentages').toBe(true);
+    expect(geometry.barWidth, 'the bar has the width of the card').toBeGreaterThan(0.8);
+
+    // And the names still hard against the outer edges.
+    expect(geometry.nameLeft, 'the left name stays on the left edge').toBeLessThan(0.08);
+    expect(geometry.nameRight, 'the right name stays on the right edge').toBeLessThan(0.08);
+  });
+
+  /**
+   * No Live Insights element on the matchup page, and no insight lost.
+   *
+   * The lock is explicit in both directions: no such card or button occupies
+   * the main matchup page, and the feature and its data may stay. So the
+   * absence is asserted here and the presence is asserted where they moved to —
+   * `shows every insight in the sheet behind the odds`, below.
+   */
+  test('shows no Live Insights element on the page itself', async ({ page }) => {
+    await expect(page.getByTestId('insight-entry')).toHaveCount(0);
+    await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
+    // Nor the words, in any element the screen happens to draw.
+    await expect(page.getByTestId('matchup-pull')).not.toContainText(/live insight/i);
   });
 
   /**
@@ -345,60 +407,81 @@ test.describe('the states of an afternoon', () => {
   });
 
   /**
-   * The carousel is gone, and this is what replaced it.
+   * The insights left the page, and none of them left the app.
    *
-   * It advanced itself on a timer and carried two arrows and a row of dots,
-   * above the fold, on the screen where the starting lineup is what a reader
-   * came to scan — and none of that chrome said anything about the matchup. The
-   * card now shows the highest-priority insight and opens the rest.
+   * This began as a carousel above the lineup — self-advancing, two arrows, a
+   * row of dots — then became a single tappable row reading `Live insights · 2`
+   * on the one screen whose stated job is fitting a starting lineup onto a
+   * phone. The lock removes the visible element entirely and keeps the feature,
+   * so both halves are checked here: nothing on the matchup page names them,
+   * and every one of them is in the sheet behind the win probability, still in
+   * priority order and each still leading to its own player.
    */
-  test('shows one insight and opens the rest in a sheet, with no carousel chrome', async ({ page }) => {
+  test('shows every insight in the sheet behind the odds, and none on the page', async ({ page }) => {
     await serve(page, response());
 
-    /*
-     * One entry point, and it does not narrate.
-     *
-     * It used to be a card carrying the first insight's own sentence above the
-     * lineup — the most volatile paragraph in the app, holding the space the
-     * starter rows needed on the one screen whose stated job is fitting a
-     * lineup onto a phone. What is left says how many there are and opens them.
-     */
-    await expect(page.getByTestId('insight-entry')).toHaveCount(1);
-    await expect(page.getByTestId('insight-entry-label')).toHaveText('Live insights · 2');
-    // It names none of them on the page itself.
-    await expect(page.getByTestId('insight-entry')).not.toContainText('Need roughly');
+    // Not the entry point, not the carousel chrome, not the words.
+    for (const id of ['insight-entry', 'insight-entry-label', 'insight-sheet', 'hero-dot', 'hero-prev', 'hero-next', 'hero-pager', 'hero-action']) {
+      await expect(page.getByTestId(id), `${id} is on the matchup page`).toHaveCount(0);
+    }
+    await expect(page.getByTestId('matchup-pull')).not.toContainText(/live insight/i);
+    await expect(page.getByTestId('matchup-pull')).not.toContainText('Need roughly');
 
-    // None of the carousel chrome survives, and none has come back.
-    await expect(page.getByTestId('hero-dot')).toHaveCount(0);
-    await expect(page.getByTestId('hero-prev')).toHaveCount(0);
-    await expect(page.getByTestId('hero-next')).toHaveCount(0);
-    await expect(page.getByTestId('hero-pager')).toHaveCount(0);
-    await expect(page.getByTestId('hero-action')).toHaveCount(0);
-    await expect(page.getByTestId('insight-entry')).not.toContainText('View details');
-
-    // Every insight is still there, in priority order, one tap away.
-    await page.getByTestId('insight-entry').click();
-    const sheet = page.getByTestId('insight-sheet');
+    // And all of them one tap away, behind the number they are about.
+    await page.getByTestId('matchup-win').click();
+    const sheet = page.getByTestId('odds-sheet');
     await expect(sheet).toBeVisible();
     await expect(sheet.getByTestId('insight-row')).toHaveCount(2);
     await expect(sheet.getByTestId('insight-row').first()).toContainText('Need roughly');
   });
 
   /**
-   * One insight leads straight to its player: a sheet holding a single row the
-   * reader has already read is a tap that achieves nothing.
+   * An insight still leads to its player, from where it now lives.
+   *
+   * The row was tappable when it sat in its own sheet and it is tappable in
+   * this one: the sheet closes and the player's card opens over the matchup.
+   * A list of players you cannot open is a list, not an insight.
    */
-  test('opens the player directly when there is only one insight', async ({ page }) => {
+  test('opens the player an insight names', async ({ page }) => {
+    /*
+     * A card for the man the first insight is about.
+     *
+     * The base fixture carries `cards: {}`, which is a legitimate state — a
+     * player Sleeper rosters that the dictionary has not synced has nothing to
+     * open — and it is the state in which an insight row is deliberately not a
+     * button. That makes it the wrong fixture for this claim: a click on a
+     * non-button asserts nothing, which is how the test this replaced managed
+     * to pass while proving nothing. So the card exists here.
+     */
     const body = response();
-    (body.forecast.insights as unknown[]).length = 1;
+    (body as { cards: Record<string, unknown> }).cards = {
+      m1: {
+        playerId: 'm1',
+        name: 'J. Allen',
+        position: 'QB',
+        team: 'BUF',
+        headline: { verdict: 'start', label: 'Start', detail: null, tone: 'take' },
+        confidence: 'high',
+        score: 25.6,
+        opponent: 'NE',
+        lines: [],
+        props: [],
+        drivers: [],
+        conflicts: [],
+        changes: [],
+        pending: [],
+      },
+    };
     await serve(page, body);
 
-    const card = page.getByTestId('insight-entry');
-    await expect(card).toBeVisible();
-    await expect(page.getByTestId('hero-pager')).toHaveCount(0);
-    await card.click();
-    // The player's own sheet, not the list of insights.
-    await expect(page.getByTestId('insight-sheet')).toHaveCount(0);
+    await page.getByTestId('matchup-win').click();
+    const row = page.getByTestId('odds-sheet').getByTestId('insight-row').first();
+    // A button, because there is something behind it — the rule this rests on.
+    await expect(row).toHaveRole('button');
+    await row.click();
+
+    await expect(page.getByTestId('odds-sheet')).toHaveCount(0);
+    await expect(page.getByTestId('weekly-sheet')).toBeVisible();
   });
 
   test('replaces the live state with FINAL and drops the odds bar', async ({ page }) => {
@@ -428,8 +511,8 @@ test.describe('the states of an afternoon', () => {
       ),
     );
     await expect(page.getByTestId('matchup-state')).toHaveText('FINAL');
-    // The insight itself lives in the sheet the entry point opens, not on the page.
-    await expect(page.getByTestId('insight-entry-label')).toHaveText('Live insight');
+    // No insight element on a settled page either — the same rule as a live one.
+    await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
     // The odds are gone: a settled matchup has a result, not a probability.
     await expect(page.getByTestId('matchup-win')).toHaveCount(0);
     await expect(page.getByTestId('matchup-proj-mine')).toHaveCount(0);

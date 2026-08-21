@@ -34,7 +34,6 @@ import { useState, type ReactNode } from 'react';
 import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
 import { TeamLogo } from './common.tsx';
 import { ChevronIcon } from './icons.tsx';
-import { Sheet } from './native.tsx';
 
 /* --------------------------------------------------------------- score card */
 
@@ -200,10 +199,28 @@ function WinBar({
   const theirsPct = 100 - minePct;
   const label = `${mineName} ${minePct}% to win, ${theirsName} ${theirsPct}%`;
 
+  /*
+    The two percentages on one line and the bar on the next, rather than the
+    bar between them.
+
+    Flanking the bar put `44%` and `56%` at the outer edges of the card, which
+    is the width of a phone apart — two halves of one comparison as far from
+    each other as the layout allows, and the bar squeezed into what was left.
+    Meeting in the middle is how the pair reads as a pair, and it gives the bar
+    the full width of the card, which is what makes a few points of difference
+    visible at all. The word `win` is said once, between them, because it was
+    the same word twice.
+  */
   const content = (
     <>
-      <span className="matchup-win-value" data-testid="matchup-win-mine">
-        {minePct}% <span className="matchup-win-word">win</span>
+      <span className="matchup-win-values">
+        <span className="matchup-win-value" data-testid="matchup-win-mine">
+          {minePct}%
+        </span>
+        <span className="matchup-win-word">win</span>
+        <span className="matchup-win-value matchup-win-value-end" data-testid="matchup-win-theirs">
+          {theirsPct}%
+        </span>
       </span>
       <span
         className="matchup-win-track"
@@ -215,9 +232,6 @@ function WinBar({
         data-testid="matchup-win-bar"
       >
         <span className="matchup-win-fill" style={{ width: `${minePct}%` }} />
-      </span>
-      <span className="matchup-win-value matchup-win-value-end" data-testid="matchup-win-theirs">
-        {theirsPct}% <span className="matchup-win-word">win</span>
       </span>
     </>
   );
@@ -240,29 +254,23 @@ function WinBar({
 /* ------------------------------------------------------------ live insight */
 
 /**
- * The one insight that matters most, as a compact card that opens.
+ * Every live insight, as a list — and never on the matchup screen itself.
  *
- * This was a carousel, and everything that made it one has gone. It advanced
- * itself on a seven-second timer, carried a previous arrow, a next arrow and a
- * row of dots, and spent a whole line of the card on chrome — above the fold,
- * on the screen where the starting lineup is the thing a reader came to scan.
- * None of that chrome said anything about the matchup.
+ * This started as a carousel above the lineup: it advanced itself on a
+ * seven-second timer, carried two arrows and a row of dots, and spent a whole
+ * line on chrome that said nothing about the matchup. A pass cut it down to a
+ * single tappable row reading `Live insights · 2`, which was better and still
+ * cost a row of the one screen whose whole purpose is fitting a starting
+ * lineup onto a phone.
  *
- * What replaced it is the simplest thing that keeps every insight reachable:
- *
- *  - **one card, and it is the highest-priority insight.** The list arrives in
- *    priority order, so "first" is a decision the engine already made.
- *  - **the whole card is the target.** A chevron says so, in the grammar the
- *    rest of the app already uses for a row that leads somewhere; the reader no
- *    longer has to hit a small link inside a large card.
- *  - **nothing moves on its own.** A card that rotates while it is being read
- *    is worse than a static one, and with the dots gone there would be nothing
- *    to say it had rotated.
- *  - **the others are one tap away, not one swipe away.** More than one insight
- *    and the card opens a sheet listing all of them, each leading to its own
- *    player. A gesture is never the only way to anything here.
+ * The lock is explicit that no Live Insights card or button appears on the main
+ * matchup page, and equally explicit that the feature and its data may stay.
+ * Both hold here: the entry point is gone and the insights are a section of the
+ * sheet behind the win probability, which is where a reader who wants to know
+ * what is moving their odds already goes. Nothing was deleted and nothing is
+ * behind a gesture — each row still leads to its own player.
  */
-export function HeroCarousel({
+export function InsightList({
   insights,
   onOpenPlayer,
   openable,
@@ -278,144 +286,50 @@ export function HeroCarousel({
    */
   openable: (playerId: string) => boolean;
 }) {
-  /*
-   * Which insight is showing, and by default it is simply the first.
-   *
-   * This used to be a carousel: it advanced itself on a timer, carried two
-   * arrows and a row of dots, and spent a line of the card on chrome that told
-   * the reader nothing about their matchup. All of that has gone. The list
-   * arrives in priority order, so the card shows the one that matters most and
-   * the rest are one tap away — see the sheet below.
-   */
-  const [sheetOpen, setSheetOpen] = useState(false);
-
-  const count = insights.length;
-  if (count === 0) return null;
-  const insight = insights[0]!;
-
-  /*
-   * What tapping the card does, in the order a reader would expect.
-   *
-   * More than one insight and the card opens the list, because that is the only
-   * way the others are reachable and a gesture must never be the only way to
-   * anything. Exactly one that leads to a player, and the card is that player's
-   * card and opens him directly — a sheet containing a single row the reader
-   * has already read is a tap that achieves nothing.
-   */
-  const opensPlayer = count === 1 && insight.playerId != null && openable(insight.playerId);
-  const opensSheet = count > 1;
-  const tappable = opensPlayer || opensSheet;
-
-  /*
-   * A way in, not a thing to read.
-   *
-   * This was a card carrying the insight itself — `Need roughly 24.7 more from
-   * S. Brandt to reach 28% win odds` — above the lineup, on the one screen
-   * whose whole purpose is fitting a starting lineup onto a phone. It read as
-   * the page's headline while being the page's least durable sentence: it is
-   * recomputed every time anybody scores, it is a projection about a
-   * projection, and it was displacing the rows a reader came to compare.
-   *
-   * What is left is an entry point. It names how many insights there are and
-   * opens them; it does not narrate. The insights themselves are unchanged and
-   * every one of them is still reachable — in the sheet, where a paragraph can
-   * be a paragraph.
-   */
-  const card = (
-    <>
-      <span className="insight-entry-label" data-testid="insight-entry-label">
-        {count === 1 ? 'Live insight' : `Live insights · ${count}`}
-      </span>
-      {tappable ? (
-        <span className="hero-chevron" aria-hidden="true">
-          <ChevronIcon />
-        </span>
-      ) : null}
-    </>
-  );
+  if (insights.length === 0) return null;
 
   return (
     <>
-      {tappable ? (
-        <button
-          type="button"
-          className="insight-entry"
-          data-testid="insight-entry"
-          data-kind={insight.kind}
-          data-urgency={insight.urgency}
-          data-count={count}
-          aria-label={
-            opensSheet
-              ? `${insight.headline}. ${count} live insights — open the list.`
-              : `${insight.headline}. Open the player.`
-          }
-          onClick={() => (opensSheet ? setSheetOpen(true) : onOpenPlayer(insight.playerId!))}
-        >
-          {card}
-        </button>
-      ) : (
-        <div
-          className="insight-entry"
-          data-testid="insight-entry"
-          data-kind={insight.kind}
-          data-urgency={insight.urgency}
-          data-count={count}
-        >
-          {card}
-        </div>
-      )}
-
-      {/*
-        Every insight, once the reader asks for them.
-
-        A sheet rather than a carousel: they arrive as a list, which is what
-        they are, and each one leads to its own player. Nothing auto-advances
-        and nothing is behind a swipe only.
-      */}
-      {sheetOpen ? (
-        <Sheet title="Live insights" onClose={() => setSheetOpen(false)} testId="insight-sheet">
-          <div className="dense-group" role="list" aria-label="Live insights">
-            {insights.map((candidate) => {
-              const canOpen = candidate.playerId != null && openable(candidate.playerId);
-              const body = (
-                /*
-                  Wrapped, because the row is a flex container and two bare
-                  spans inside one become two columns rather than two lines.
-                */
-                <span className="insight-row-body">
-                  <span className="insight-row-headline">{candidate.headline}</span>
-                  {candidate.detail ? <span className="insight-row-detail">{candidate.detail}</span> : null}
-                </span>
-              );
-              return (
-                <div role="listitem" key={candidate.key}>
-                  {canOpen ? (
-                    <button
-                      type="button"
-                      className="insight-row"
-                      data-testid="insight-row"
-                      data-kind={candidate.kind}
-                      onClick={() => {
-                        setSheetOpen(false);
-                        onOpenPlayer(candidate.playerId!);
-                      }}
-                    >
-                      {body}
-                      <span className="dense-chevron" aria-hidden="true">
-                        <ChevronIcon />
-                      </span>
-                    </button>
-                  ) : (
-                    <div className="insight-row insight-row-static" data-testid="insight-row" data-kind={candidate.kind}>
-                      {body}
-                    </div>
-                  )}
+      <div className="detail-label" style={{ marginTop: 12 }}>
+        {insights.length === 1 ? 'Live insight' : 'Live insights'}
+      </div>
+      <div className="dense-group" role="list" aria-label="Live insights">
+        {insights.map((candidate) => {
+          const canOpen = candidate.playerId != null && openable(candidate.playerId);
+          const body = (
+            /*
+              Wrapped, because the row is a flex container and two bare spans
+              inside one become two columns rather than two lines.
+            */
+            <span className="insight-row-body">
+              <span className="insight-row-headline">{candidate.headline}</span>
+              {candidate.detail ? <span className="insight-row-detail">{candidate.detail}</span> : null}
+            </span>
+          );
+          return (
+            <div role="listitem" key={candidate.key}>
+              {canOpen ? (
+                <button
+                  type="button"
+                  className="insight-row"
+                  data-testid="insight-row"
+                  data-kind={candidate.kind}
+                  onClick={() => onOpenPlayer(candidate.playerId!)}
+                >
+                  {body}
+                  <span className="dense-chevron" aria-hidden="true">
+                    <ChevronIcon />
+                  </span>
+                </button>
+              ) : (
+                <div className="insight-row insight-row-static" data-testid="insight-row" data-kind={candidate.kind}>
+                  {body}
                 </div>
-              );
-            })}
-          </div>
-        </Sheet>
-      ) : null}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

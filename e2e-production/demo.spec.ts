@@ -157,8 +157,36 @@ test.describe('Demo Mode on the deployed site', () => {
     await expect(page.getByTestId('matchup-score')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
     await expect(page.getByTestId('matchup-win-mine')).toBeVisible();
-    await expect(page.getByTestId('insight-entry-label')).toBeVisible();
     await expect(page.getByTestId('matchup-row')).toHaveCount(8);
+
+    /*
+     * No Live Insights element, and the insights themselves still reachable.
+     *
+     * Both halves matter in production and they fail differently: a stale
+     * bundle would still draw the entry point, and a wrongly-pruned one would
+     * drop the data. So the page is checked for the element's absence and the
+     * sheet behind the odds for the rows' presence.
+     */
+    await expect(page.getByTestId('insight-entry')).toHaveCount(0);
+    await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
+    await page.getByTestId('matchup-win').click();
+    await expect(page.getByTestId('odds-sheet')).toBeVisible();
+    await expect(page.getByTestId('odds-sheet').getByTestId('insight-row').first()).toBeVisible();
+
+    /*
+     * And the scoreboard is the compact one: the two scores meet near the
+     * middle rather than sitting at the card's outer edges. Measured as the gap
+     * between them against the card's own width, so it holds at any width the
+     * suite runs — a stale bundle drawing the old layout puts them a whole card
+     * apart and fails this.
+     */
+    await page.getByTestId('odds-sheet').getByRole('button', { name: /done/i }).click();
+    const gap = await page.getByTestId('matchup-score').evaluate((card) => {
+      const mine = card.querySelector('[data-testid="matchup-actual-mine"]')!.getBoundingClientRect();
+      const theirs = card.querySelector('[data-testid="matchup-actual-theirs"]')!.getBoundingClientRect();
+      return (theirs.left - mine.right) / card.getBoundingClientRect().width;
+    });
+    expect(gap, 'the two scores sit near the middle of the card').toBeLessThan(0.3);
   });
 
   /**
