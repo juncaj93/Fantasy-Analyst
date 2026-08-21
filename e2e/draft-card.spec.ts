@@ -172,6 +172,55 @@ test.describe('the numbers keep the line', () => {
     await expect(cliffRow(page).getByTestId('survival')).toBeVisible();
   });
 
+  /**
+   * A Score the row next to it also shows is drawn as shared.
+   *
+   * The board prints Score as a whole number, and near the top it prints the
+   * same one several times: on the seeded board ranks 2 and 3 are both 85 and
+   * ranks 7 to 10 are all 74. That is the shape of the thing rather than a
+   * rounding accident — those composites are hundredths of a point apart — and
+   * it is why a player can slide several places while his Score never moves.
+   *
+   * So the rows that share a number say so. What is checked is the rule, not
+   * one board's numbers: every row whose neighbour shows its Score is marked,
+   * every row whose neighbours do not is not, and the marked ones say in words
+   * how many they are level with. A treatment that marked everything, or
+   * nothing, or that marked equal Scores which are not adjacent, fails this.
+   */
+  test('says which Scores are shared with the row next door', async ({ page }) => {
+    await openDraft(page);
+    const rows = page.getByTestId('recommendation-row');
+    await expect(rows.first()).toBeVisible();
+
+    const board = await rows.evaluateAll((els) =>
+      els.map((el) => {
+        const value = el.querySelector('.score-value');
+        return {
+          text: (value?.textContent ?? '').trim(),
+          level: value?.getAttribute('data-level') === 'true',
+          label: value?.getAttribute('aria-label') ?? null,
+        };
+      }),
+    );
+    expect(board.length, 'the seeded board has rows on it').toBeGreaterThan(3);
+
+    // The mark is exactly "a neighbour shows this number".
+    for (const [i, row] of board.entries()) {
+      const shared = board[i - 1]?.text === row.text || board[i + 1]?.text === row.text;
+      // An unpriced player prints a dash and is never level with anybody.
+      const priced = /^\d+$/.test(row.text);
+      expect(row.level, `row ${i + 1} (Score ${row.text}) is marked ${row.level}`).toBe(shared && priced);
+    }
+
+    // At least one run exists on this board, and it says what it means.
+    const marked = board.filter((row) => row.level);
+    expect(marked.length, 'the seeded board has a run of equal Scores').toBeGreaterThan(0);
+    expect(marked[0]!.label).toMatch(/level with \d+ other/);
+
+    // And it is not the whole board, which would say nothing.
+    expect(marked.length).toBeLessThan(board.length);
+  });
+
   test('the board does not scroll sideways because of it', async ({ page }) => {
     await openDraft(page);
     await expect(cliffRow(page)).toBeVisible();

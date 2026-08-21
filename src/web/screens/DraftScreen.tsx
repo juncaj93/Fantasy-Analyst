@@ -69,6 +69,7 @@ import { survivalBand } from '../../core/draft/survival.ts';
  * both live in core so they can be checked without a browser.
  */
 import { annotateTiers, tierCliffWarning, type TierBreak } from '../../core/draft/tierBoard.ts';
+import { levelRunSize, levelWithNeighbour } from '../../core/draft/levelScores.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
 import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
@@ -1096,6 +1097,8 @@ export function DraftScreen({
               <RecommendationRow
                 rank={item.rank}
                 rec={item.rec}
+                level={item.level}
+                levelRun={item.levelRun}
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
                 currentPick={board.currentPick}
@@ -1464,6 +1467,10 @@ interface BoardItem {
   rank: number;
   divider: boolean;
   breakReason: TierBreak | null;
+  /** Whether the row above or below shows the same Score. See `levelScores`. */
+  level: boolean;
+  /** How many rows share that Score in this run, counting this one. */
+  levelRun: number;
 }
 
 /**
@@ -1492,12 +1499,36 @@ interface BoardItem {
  * boundary to be about.
  */
 function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
-  if (!enabled) return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false, breakReason: null }));
-  return annotateTiers(
+  /*
+   * Level-with-neighbour is read off the sequence the reader is looking at,
+   * after the sort and before any divider is inserted. It is a statement about
+   * two adjacent rows showing the same number, which is true under whichever
+   * sort produced them; a divider between two of them changes nothing about
+   * whether their Scores are equal.
+   */
+  const level = (rows: DraftRecommendation[]) => {
+    const scores = rows.map((rec) => rec.score);
+    const flags = levelWithNeighbour(scores);
+    return (index: number) => ({ level: flags[index] ?? false, levelRun: levelRunSize(scores, index) });
+  };
+
+  if (!enabled) {
+    const at = level(recs);
+    return recs.map((rec, i) => ({ rec, rank: i + 1, divider: false, breakReason: null, ...at(i) }));
+  }
+  const annotated = annotateTiers(
     recs,
     (rec) => rec.tierCliff.tierIndex,
     (rec) => rec.score,
-  ).map(({ row, rank, divider, breakReason }) => ({ rec: row, rank, divider, breakReason }));
+  );
+  const at = level(annotated.map(({ row }) => row));
+  return annotated.map(({ row, rank, divider, breakReason }, i) => ({
+    rec: row,
+    rank,
+    divider,
+    breakReason,
+    ...at(i),
+  }));
 }
 
 /**
@@ -1707,6 +1738,8 @@ function MarketProvenance({
 
 function RecommendationRow({
   rank,
+  level,
+  levelRun,
   rec,
   expanded,
   showCliffProximity,
@@ -1730,6 +1763,10 @@ function RecommendationRow({
   offset = 0,
 }: {
   rank: number;
+  /** Whether an adjacent row shows the same Score. See `levelScores`. */
+  level: boolean;
+  /** How many rows share it, counting this one. */
+  levelRun: number;
   rec: DraftRecommendation;
   expanded: boolean;
   /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
@@ -1893,15 +1930,45 @@ function RecommendationRow({
         */}
         <div className="player-row-bottom">
           <div className="player-row-metrics">
-            <span className="metric" data-testid="score-metric">
+            {/*
+              Score, and whether anybody next to him is on the same one.
+
+              `data-level` is set when the row above or below shows this exact
+              number, and it draws the value on a faint inset field so a run of
+              them reads as one block rather than as three separate verdicts
+              that happen to agree.
+
+              It is not extra precision, which was the obvious idea and the
+              wrong one. Score is `round(100 · logistic((total + 2.5) / 1.6))`,
+              so the top of a real board — composites of 1.1310, 1.1310, 1.1130
+              — sits at 90.63, 90.63 and 90.54. Printing `90.6` against `90.5`
+              would dress nine hundredths of a point as a difference worth
+              acting on. The truthful thing to say about those three rows is
+              that they are level, and this says it.
+
+              What it buys is the movement. A player can slide from first to
+              fifth while his Score never moves, because the players around him
+              are all on the same number and the order among them is a
+              tie-break that shifts as the clock advances. Correct, and it
+              reads as arbitrary until the screen admits the number is shared.
+            */}
+            <span className="metric" data-testid="score-metric" data-level={level ? 'true' : 'false'}>
               Score{' '}
               <strong
                 className="score-value"
+                data-level={level ? 'true' : 'false'}
                 title={
                   rec.score == null
                     ? `No market has priced him, so his composite (raw ${rec.total}) is not comparable with a priced player's`
-                    : `Composite recommendation strength, 0-100 (raw ${rec.total})`
+                    : level
+                      ? `Composite recommendation strength, 0-100 (raw ${rec.total}). Level on Score with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'} here — the order between them is a tie-break, not a verdict.`
+                      : `Composite recommendation strength, 0-100 (raw ${rec.total})`
                 }
+                {...(level
+                  ? {
+                      'aria-label': `Score ${rec.score}, level with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'}`,
+                    }
+                  : {})}
               >
                 {/*
                   A dash rather than a number, for the same reason ADP, Val and
