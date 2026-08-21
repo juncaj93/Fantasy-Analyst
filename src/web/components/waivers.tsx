@@ -17,7 +17,7 @@
  */
 
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
-import { Badge, PositionBadge } from './common.tsx';
+import { Badge, PositionBadge, PositionPill, TeamLogo } from './common.tsx';
 import { Sheet } from './native.tsx';
 
 /**
@@ -49,66 +49,72 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
       aria-label={`${row.name}, ${row.strength.label}, ${row.fit.label}`}
       onClick={onOpen}
     >
+      {/*
+        Name first, with the position against it and the club beside that —
+        the same order every other row in this app now uses, and the order the
+        lock asks for here: player, position, club, then the verdict on the
+        trailing edge.
+      */}
       <div className="player-row-top">
+        <PositionPill position={row.position} />
         <span className="player-name">{row.name}</span>
-        {/*
-          The same fixed-width field the draft board uses, so the club marks
-          line up down this list too — see `--row-meta`.
-        */}
         <span className="player-row-meta">
           {row.statusFlag ? <Badge tone="warn">{row.statusFlag.split(' ')[0]}</Badge> : null}
         </span>
-        <PositionBadge position={row.position} team={row.team} />
-      </div>
+        <TeamLogo team={row.team} />
+        {/*
+          The verdict, and it still gives way before the name does.
 
-      <div className="player-row-metrics">
-        <span className={`tag tag-${row.strength.level === 'strong' ? 'take' : row.strength.level === 'solid' ? 'calm' : 'risky'}`}>
+          The labels are short enough to fit now — see `STRENGTH_LABEL` — but a
+          longer one should never be what clips a player's name, so the badge
+          keeps the floor that lets it shrink first.
+        */}
+        <span
+          className={`tag waiver-strength tag-${row.strength.level === 'strong' ? 'take' : row.strength.level === 'solid' ? 'calm' : 'risky'}`}
+          data-testid="waiver-strength"
+          title={row.strength.label}
+        >
           {row.strength.label}
         </span>
-        <span className="metric" data-testid="waiver-fit">
+      </div>
+
+      {/*
+        Tags, then one line.
+
+        This card used to be three lines of prose under the header — `High
+        pressure · 7 of 11 rivals need the position`, `stronger market
+        expectation (13.5 vs 9.2 pts)`, a cost and a fit scattered between
+        them — and a reader had to assemble the claim from four places. The
+        tags are the recurring shapes: what he is, how wanted he is, which way
+        he is moving. The line under them is the arithmetic: what he costs, who
+        else wants him, what he is worth.
+      */}
+      <div className="tag-row" data-testid="waiver-tags">
+        <span className="tag" data-testid="waiver-fit">
           {row.fit.label}
         </span>
-        <span className="metric" data-testid="waiver-short-term">
-          Week <strong>{row.shortTerm.label}</strong>
-        </span>
-        {/*
-          The three fields the league-intelligence pass owns. Each one is either
-          its real value or a dash that explains itself; none of them is ever a
-          plausible-looking guess.
-        */}
-        <span className="metric" data-testid="waiver-cost">
-          Cost{' '}
-          {row.faab ? (
-            <strong>{formatFaab(row.faab)}</strong>
-          ) : (
-            <UnknownField what="Expected cost" />
-          )}
-        </span>
-        {row.multiWeek ? (
-          <span className="metric" data-testid="waiver-multi-week">
-            {row.multiWeek.label}
-          </span>
-        ) : null}
+        {row.multiWeek ? <span className="tag">{row.multiWeek.label}</span> : null}
         {row.competition ? (
-          <span className="metric" data-testid="waiver-competition">
+          <span className="tag" data-testid="waiver-competition">
             {row.competition.label}
-            {/*
-              The named summary rides in the metric that was already there.
-
-              `3 likely bidders · Joe, Ryan +1` is the count the row showed plus
-              the two names, on the same line — the row does not grow, which is
-              the constraint the whole feature is bounded by.
-            */}
-            {row.competition.detail ? (
-              <span className="faint"> · {row.competition.detail}</span>
-            ) : null}
           </span>
         ) : null}
       </div>
 
-      <div className="player-row-metrics">
-        <span className="metric faint" data-testid="waiver-why">
-          {row.why}
+      <div className="waiver-summary" data-testid="waiver-summary">
+        <span data-testid="waiver-cost">
+          Est. cost{' '}
+          {row.faab ? <strong>{formatFaab(row.faab)}</strong> : <UnknownField what="Expected cost" />}
+        </span>
+        {row.competition?.detail ? <span> · {row.competition.detail}</span> : null}
+        {/*
+          One unbreakable phrase. `Proj. +6.5 pts` wrapping to leave `pts`
+          alone on a second line is the sort of thing that makes a compact card
+          look accidental.
+        */}
+        <span data-testid="waiver-short-term" style={{ whiteSpace: 'nowrap' }}>
+          {' '}
+          · Proj. <strong>{row.shortTerm.label}</strong>
         </span>
       </div>
     </button>
@@ -265,11 +271,16 @@ export function WaiverDetailSheet({
                 {row.bid.trending}
               </div>
             ) : null}
-            {row.bid.disagreement?.line ? (
-              <div className="faint" data-testid="faab-disagreement">
-                {row.bid.disagreement.line}
-              </div>
-            ) : null}
+            {/*
+              The disagreement sentence is not printed here.
+
+              `Both the room and our own read like him, which is the expensive
+              version of being right` is a good sentence and it is a paragraph
+              on a sheet the lock asks to be decision-first. What it says is
+              already carried by the two numbers above it — the recommended bid
+              and the do-not-exceed — which is what somebody about to bid is
+              reading. It is still on the row's data for anything that wants it.
+            */}
           </div>
         ) : null}
 
@@ -279,12 +290,36 @@ export function WaiverDetailSheet({
           </div>
         ) : null}
 
+        {/*
+          Why we like him: three rows, each a short verdict and its evidence.
+
+          The engine writes these as `Market rising — 13.5 vs 9.2 pts expected`,
+          so the em dash is already the seam between the claim and the number
+          behind it. Splitting on it gives the pill and the support without the
+          screen inventing either.
+
+          Three, not all of them. A sheet that lists every reason the engine
+          found is the engine's working rather than an argument, and the ones
+          after the third are the ones it thought least of.
+        */}
         {row.reasons.length > 0 ? (
-          <ul className="reason-list" data-testid="waiver-reasons">
-            {row.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <>
+            <div className="detail-label" style={{ marginTop: 12 }}>
+              Why we like him
+            </div>
+            <ul className="reason-list" data-testid="waiver-reasons">
+              {row.reasons.slice(0, 3).map((reason) => {
+                const [claim, ...rest] = reason.split(' — ');
+                const support = rest.join(' — ');
+                return (
+                  <li key={reason}>
+                    <span className="tag">{claim}</span>
+                    {support ? <span className="faint"> {support}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         ) : null}
 
         <div className="faint">Advisory only — add, drop or bid in Sleeper. This app never makes a transaction.</div>

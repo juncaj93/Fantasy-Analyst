@@ -80,6 +80,16 @@ export interface WaiverAdvice {
   notes: string[];
   /** How many unrostered players were actually scored. */
   considered: number;
+  /**
+   * How many were not — unscorable, ruled out, or already kicked off.
+   *
+   * A number, not a note. It used to be pushed into `notes`, which is the list
+   * the Waivers screen prints, so a page whose job is to recommend two players
+   * closed with the engine reporting how much work it had done. That is
+   * diagnostics: true, occasionally useful, and never the reason anybody opened
+   * this screen. It stays available here for whatever wants to show it.
+   */
+  skipped: number;
   threshold: number;
 }
 
@@ -209,12 +219,6 @@ export function recommendWaiverUpgrades(opts: {
     });
   }
 
-  if (playable.length < evaluated.length) {
-    notes.push(
-      `${evaluated.length - playable.length} available player(s) were skipped as unscorable, ruled out or already kicked off`,
-    );
-  }
-
   return {
     upgrades,
     headline:
@@ -223,6 +227,7 @@ export function recommendWaiverUpgrades(opts: {
         : null,
     notes,
     considered: evaluated.length,
+    skipped: evaluated.length - playable.length,
     threshold: base,
   };
 }
@@ -270,36 +275,49 @@ function upgradeReasons(candidate: StartSitEvaluation, current: StartSitEvaluati
   const reasons: string[] = [];
 
   if (current == null) {
-    reasons.push('fills a slot nobody on your roster can start');
+    reasons.push('Fills a slot nobody on your roster can start');
   } else if (current.statusFlag && !candidate.statusFlag) {
-    reasons.push('healthier');
+    reasons.push('Healthier than the man he replaces');
   }
 
+  /*
+   * Said the way a reader would say it.
+   *
+   * These strings are printed on the waiver card and in its sheet, and they
+   * used to read as the engine describing its own inputs: `stronger market
+   * expectation (13.5 vs 9.2 pts)`, `role trending up`. The numbers behind them
+   * are worth keeping — they are the whole reason to believe the sentence — so
+   * the phrase leads with what it means and the figures follow it.
+   */
   const mine = candidate.expectation.points;
   const theirs = current?.expectation.points ?? null;
   if (mine != null && theirs != null && mine > theirs) {
-    reasons.push(`stronger market expectation (${mine.toFixed(1)} vs ${theirs.toFixed(1)} pts)`);
+    reasons.push(`Market rising — ${mine.toFixed(1)} vs ${theirs.toFixed(1)} pts expected`);
   } else if (mine != null && theirs == null) {
-    reasons.push(`carries a market expectation (${mine.toFixed(1)} pts)`);
+    reasons.push(`Market priced — ${mine.toFixed(1)} pts expected`);
   }
 
   if (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate') {
-    reasons.push('role trending up');
+    reasons.push('Role increasing');
   }
 
   const news = candidate.components.find((c) => c.key === 'news_recent');
-  if (news && !news.unknown && news.value > 0) reasons.push(`positive recent news (${news.display})`);
+  if (news && !news.unknown && news.value > 0) reasons.push(`Recent news — ${news.display}`);
 
+  /*
+   * The movement headline as it was written, rather than de-capitalised.
+   *
+   * It was lower-cased to sit inside a sentence-cased list of fragments. The
+   * list is now a set of short statements that each begin with a capital, so
+   * `Multiple markets rising` belongs beside them exactly as the movement
+   * engine phrased it.
+   */
   if (candidate.movement.direction === 'up' && candidate.movement.headline) {
-    reasons.push(lowerFirst(candidate.movement.headline));
+    reasons.push(candidate.movement.headline);
   }
 
-  if (reasons.length === 0) reasons.push('scores higher on the evidence available');
+  if (reasons.length === 0) reasons.push('Scores higher on the evidence available');
   return reasons;
-}
-
-function lowerFirst(sentence: string): string {
-  return sentence.charAt(0).toLowerCase() + sentence.slice(1);
 }
 
 function round2(v: number): number {

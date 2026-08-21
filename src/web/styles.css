@@ -2870,6 +2870,27 @@ body,
   padding-left: 16px;
 }
 
+/*
+ * The waiver sheet's reasons are rows, not bullets.
+ *
+ * Each one leads with a pill — `Market rising`, `Role increasing` — and a
+ * bullet in front of a pill is two markers doing one marker's job. The pill is
+ * the thing the eye lands on, so it starts the line.
+ */
+[data-testid='waiver-reasons'] {
+  list-style: none;
+  padding-left: 0;
+  margin-top: var(--sp-1);
+}
+
+[data-testid='waiver-reasons'] li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-1);
+  line-height: 1.35;
+}
+
 .reason-list li {
   font-size: 0.82rem;
   margin-bottom: 2px;
@@ -3922,6 +3943,41 @@ table.compact tr:last-child td {
  * loudest treatment is reserved for the two states that stop a reader:
  * take-now and avoid.
  */
+/*
+ * The verdict badge shrinks before the player's name does.
+ *
+ * It sits after the name in a flex row where the name is the item with the
+ * slack, so without a floor of its own the badge would hold its full width and
+ * the name would clip first. `min-width: 0` lets it be squeezed and its own
+ * ellipsis finish the job.
+ */
+.waiver-strength {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+}
+
+/*
+ * The one line under a waiver card's tags.
+ *
+ * What he costs, who else wants him, what he is worth — in that order, because
+ * that is the order the question is asked in. It replaced three lines of prose
+ * that said the same things separately, and it is deliberately one wrapping
+ * line rather than a grid: the three facts are one sentence about one claim.
+ */
+.waiver-summary {
+  margin-top: var(--sp-1);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.waiver-summary strong {
+  color: var(--text);
+  font-weight: 680;
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;

@@ -221,8 +221,23 @@ export const SOLID_MULTIPLE = 1.35;
  * *add* is a button that looks like it adds him. Nothing in this app transacts,
  * and the labels are held to the same rule as the controls.
  */
+/*
+ * The verdict, in words that fit the badge it is printed in.
+ *
+ * `Strongly recommended` was nineteen characters on the widest element of a
+ * card that has to work at 360px, and it took its room from the player's name.
+ * These say the same thing in twelve.
+ *
+ * Not `Strong claim`, which was the first attempt and is a word this screen may
+ * not use: the whole card is a button, and `offers nothing that would make a
+ * claim` reads every control on the page for `add`, `drop`, `claim`, `bid` and
+ * `submit`. A badge inside a tappable row saying `claim` reads as an offer to
+ * make one, which is exactly the promise this app does not make.
+ *
+ * Nothing about the threshold behind them changed — see `strengthOf`.
+ */
 const STRENGTH_LABEL: Record<WaiverStrength, string> = {
-  strong: 'Strongly recommended',
+  strong: 'Highly rated',
   solid: 'Recommended',
   speculative: 'Worth a look',
 };
@@ -321,7 +336,16 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
     },
     shortTerm: {
       gain: candidate.gain,
-      label: `+${candidate.gain} pts`,
+      /*
+       * One decimal, everywhere this number is printed.
+       *
+       * The engine's gain carries whatever precision the subtraction produced,
+       * so the board was showing `+6.46 pts` on one card and `+5.7 pts` on the
+       * next — two different claims about how precisely this is known, from the
+       * same calculation. It is a projection of a projection; the second
+       * decimal is noise wearing the clothes of a measurement.
+       */
+      label: `+${candidate.gain.toFixed(1)} pts`,
       over: upgrade.currentName,
     },
     multiWeek: candidate.multiWeek ?? null,
