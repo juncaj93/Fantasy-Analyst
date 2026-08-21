@@ -71,7 +71,13 @@ function evidence(over: Partial<EvidenceItem> = {}): EvidenceItem {
   } as EvidenceItem;
 }
 
-const signalFrom = (items: EvidenceItem[]) => aggregatePlayerSignal('subject', items, new Date(NOW));
+/*
+ * Pinned to a fixed `now`, so the recency windows are the same on every run.
+ * Passing a bare Date here type-checks as an options object with no properties
+ * and silently defaults to the wall clock — which would make the seven-day
+ * assertions below quietly time-dependent.
+ */
+const signalFrom = (items: EvidenceItem[]) => aggregatePlayerSignal('subject', items, { now: NOW });
 
 function player(id: string, adp: number, signal: AvailablePlayerInput['signal']): AvailablePlayerInput {
   return {

@@ -1544,4 +1544,77 @@ test.describe('the decision intelligence', () => {
     const allCertain = late.every((r) => r.survival! >= 0.99);
     expect(allCertain, 'every deep player reads as a certainty, which is the calibration bug').toBe(false);
   });
+  /**
+   * Phase 18 of the ranking-integrity audit, against the deployed board.
+   *
+   * Everything else in that audit is fixture proof: a synthetic board, a seeded
+   * simulator, a known pool. This is the one check that can only be made here —
+   * that the *live* board is deterministic for a fixed draft state, and that the
+   * Score the reader sees is the Score the server ranked by.
+   *
+   * Read-only, and deliberately so: it asks the same question twice and
+   * compares the answers. It makes no write of any kind and cannot disturb a
+   * draft in progress.
+   */
+  test('answers the same question twice the same way', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+
+    const twice = await page.evaluate(async () => {
+      const { leagues = [] } = await (await fetch('/api/leagues')).json();
+      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
+      if (!league?.draftId) return null;
+      const read = async () => {
+        const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
+        return {
+          currentPick: data.currentPick ?? null,
+          rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
+            id: r['playerId'],
+            score: r['score'],
+            total: r['total'],
+          })),
+        };
+      };
+      const a = await read();
+      const b = await read();
+      return { a, b };
+    });
+    test.skip(!twice || twice.a.rows.length === 0, 'no league selected on this deployment');
+
+    type Row = { id: string; score: number | null; total: number | null };
+    const a = twice!.a.rows as Row[];
+    const b = twice!.b.rows as Row[];
+
+    console.log(`live determinism — pick ${twice!.a.currentPick}; ${a.length} rows read twice`);
+
+    /*
+     * Skipped rather than failed when a pick lands between the two reads. That
+     * is the board doing its job, not a fault, and on a live draft it is a
+     * genuine possibility — the check is about a *fixed* state.
+     */
+    test.skip(twice!.a.currentPick !== twice!.b.currentPick, 'a pick landed between the two reads');
+
+    expect(b.map((r) => r.id), 'the same draft state produced two different orders').toEqual(
+      a.map((r) => r.id),
+    );
+    expect(b.map((r) => r.total)).toEqual(a.map((r) => r.total));
+
+    /*
+     * And the displayed Score agrees with the ranking. A row whose Score is
+     * higher than the row above it would mean the board is sorted by something
+     * other than the number it is showing — the exact confusion this audit was
+     * opened to rule out.
+     */
+    const scored = a.map((r) => r.score).filter((s): s is number => typeof s === 'number');
+    for (let i = 1; i < scored.length; i++) {
+      expect(scored[i]!, `row ${i + 1} scores above the row before it`).toBeLessThanOrEqual(scored[i - 1]!);
+    }
+
+    // Nothing may be NaN or Infinity, however sparse the market is for a player.
+    for (const row of a) {
+      if (row.total != null) expect(Number.isFinite(row.total), `${row.id} has a non-finite total`).toBe(true);
+      if (row.score != null) expect(Number.isFinite(row.score), `${row.id} has a non-finite score`).toBe(true);
+    }
+  });
 });

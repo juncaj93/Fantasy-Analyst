@@ -299,3 +299,118 @@ console.log('\n=== 6. exact ties near the top, and what decides them ===\n');
   console.log('\n   A tie broken by arrival order is stable for one board and arbitrary');
   console.log('   between two. If any mover above is a genuine tie, that is the finding.');
 }
+
+
+// ---------------- 7. one-pick sensitivity across the whole draft (Phase 13)
+
+/*
+ * Measurement 3 showed the clock moving ten receivers of thirty at pick 241.
+ * On its own that number means nothing: it could be normal, or it could be the
+ * late board being hypersensitive. So the same experiment is run early, middle
+ * and late, and the distribution of movement is reported rather than one count.
+ */
+console.log('\n=== 7. one pick, at three depths ===\n');
+console.log('   depth   pick  moved/top25  worst  mean|Δrank|  mean|Δcomposite|  new top-1?');
+for (const [label, pick, next] of [
+  ['early', 13, 16],
+  ['middle', 121, 124],
+  ['late', 241, 244],
+]) {
+  const pool = board(pick);
+  const was = rank(pool, pick, next);
+  // A real pick: the best available player goes, and the clock advances.
+  const now = rank(pool.filter((e) => e.player.id !== was[0].playerId), pick + 1, next);
+  const at = new Map(now.map((r, i) => [r.playerId, i]));
+  const wasRec = new Map(was.map((r) => [r.playerId, r]));
+
+  const top = was.slice(1, 26); // skip the drafted player himself
+  let moved = 0;
+  let worst = 0;
+  let totalRank = 0;
+  let totalComposite = 0;
+  top.forEach((rec, i) => {
+    const to = at.get(rec.playerId);
+    if (to == null) return;
+    const delta = Math.abs(to - i);
+    if (delta > 0) moved++;
+    worst = Math.max(worst, delta);
+    totalRank += delta;
+    const before = wasRec.get(rec.playerId);
+    const after = now.find((r) => r.playerId === rec.playerId);
+    if (before && after) totalComposite += Math.abs(after.total - before.total);
+  });
+  const newLeader = now[0].playerId !== was[1].playerId;
+  console.log(
+    `   ${label.padEnd(7)} ${String(pick).padStart(4)}  ${String(moved).padStart(7)}/25` +
+      `  ${String(worst).padStart(5)}  ${(totalRank / top.length).toFixed(2).padStart(11)}` +
+      `  ${(totalComposite / top.length).toFixed(4).padStart(16)}  ${newLeader ? 'yes' : 'no'}`,
+  );
+}
+console.log('\n   `worst` is the number to watch. A pick should shuffle neighbours, not');
+console.log('   throw a player across the board; a double-digit jump would be the');
+console.log('   hypersensitivity the brief is asking about.');
+
+// ------------------------------------- 8. why is this player here? (Phase 15)
+
+/*
+ * The diagnostic the brief asks for, and the reason it is worth having: when a
+ * player moves, this says which components moved him instead of leaving the
+ * next reader to reverse-engineer it from a screenshot.
+ */
+function explain(rec) {
+  return {
+    rank: null,
+    score: rec.score,
+    total: rec.total,
+    components: Object.fromEntries(rec.components.map((c) => [c.key, c.contribution])),
+  };
+}
+
+function compare(beforeRecs, afterRecs, playerId) {
+  const b = beforeRecs.find((r) => r.playerId === playerId);
+  const a = afterRecs.find((r) => r.playerId === playerId);
+  if (!b || !a) return null;
+  const from = beforeRecs.findIndex((r) => r.playerId === playerId) + 1;
+  const to = afterRecs.findIndex((r) => r.playerId === playerId) + 1;
+  const eb = explain(b);
+  const ea = explain(a);
+  const changed = [];
+  const unchanged = [];
+  for (const key of new Set([...Object.keys(eb.components), ...Object.keys(ea.components)])) {
+    const delta = (ea.components[key] ?? 0) - (eb.components[key] ?? 0);
+    if (Math.abs(delta) >= 0.0005) changed.push([key, delta]);
+    else unchanged.push(key);
+  }
+  changed.sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]));
+  return { playerId, from, to, eb, ea, changed, unchanged };
+}
+
+console.log('\n=== 8. why did this player move? ===\n');
+{
+  const pool = board(CURRENT);
+  const was = rank(pool, CURRENT, NEXT);
+  const now = rank(pool.filter((e) => e.player.id !== was[0].playerId), CURRENT + 1, NEXT);
+
+  // The biggest faller in the top ten, which is the case a reader notices.
+  const at = new Map(now.map((r, i) => [r.playerId, i]));
+  const faller = was
+    .slice(1, 11)
+    .map((r, i) => ({ id: r.playerId, from: i + 1, to: (at.get(r.playerId) ?? i) + 1 }))
+    .sort((a, b) => b.to - b.from - (a.to - a.from))[0];
+
+  const report = compare(was.slice(1), now, faller.id);
+  if (report) {
+    console.log(`   Player: ${report.playerId}`);
+    console.log(`   Rank:   ${report.from} -> ${report.to}`);
+    console.log(`   Score:  ${report.eb.score} -> ${report.ea.score}   (displayed)`);
+    console.log(`   Total:  ${report.eb.total.toFixed(4)} -> ${report.ea.total.toFixed(4)}   (internal)`);
+    console.log('\n   Changed:');
+    for (const [key, delta] of report.changed) {
+      console.log(`     ${key.padEnd(20)} ${delta >= 0 ? '+' : ''}${delta.toFixed(4)}`);
+    }
+    console.log(`\n   Unchanged: ${report.unchanged.join(', ')}`);
+    console.log('\n   That list is the whole answer. A component missing from "Changed"');
+    console.log('   provably did not move him, which is what makes this quicker than');
+    console.log('   reading the ranking code again.');
+  }
+}
