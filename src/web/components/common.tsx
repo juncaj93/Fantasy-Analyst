@@ -301,9 +301,25 @@ export function Badge({
  * only level that changes what a reader does, so it is the only one that gets
  * any colour.
  */
-export function Confidence({ level }: { level: string }) {
+export function Confidence({ level, compact = false }: { level: string; compact?: boolean }) {
   const cls = level === 'low' ? 'badge badge-confidence badge-confidence-low' : 'badge badge-confidence';
-  return <span className={cls}>{level} confidence</span>;
+  if (!compact) return <span className={cls}>{level} confidence</span>;
+  /*
+   * The word alone, where a sentence would be a third of the row.
+   *
+   * A list of trade ideas repeats this on every line, and `low confidence`
+   * down the edge of ten rows is a pattern the eye follows instead of the
+   * names. The compact form drops the noun and keeps it in the accessible
+   * name, so a reader listening still hears what `Low` is low *about* —
+   * without which a bare word beside two signed numbers reads as a third
+   * metric.
+   */
+  const word = level.charAt(0).toUpperCase() + level.slice(1);
+  return (
+    <span className={`${cls} badge-confidence-compact`} aria-label={`${level} confidence`} title={`${level} confidence`}>
+      {word}
+    </span>
+  );
 }
 
 export function Notice({

@@ -1366,6 +1366,14 @@ export interface RepairStatus {
 export interface TradeSuggestion {
   /** Where this league drafted him, when it did. */
   draft?: DraftProvenance | null;
+  /**
+   * The manager who holds him, by name.
+   *
+   * A trade is a conversation with a person, and `ownership: 'other'` is not a
+   * person. Null for a free agent, for your own players, and wherever Sleeper
+   * has not named the seat — never a stand-in like `Roster 4`.
+   */
+  owner?: string | null;
   playerId: string;
   name: string;
   position: string;
