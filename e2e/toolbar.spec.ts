@@ -673,4 +673,39 @@ test.describe('Matchup, once the draft is finished', () => {
     expect(bar.width, 'the bar has outgrown the screen').toBeLessThanOrEqual(bar.viewportWidth - 16);
     expect(bar.left, 'the bar is no longer centred').toBeGreaterThan(0);
   });
+
+  /**
+   * …and the seventh destination costs the bar height, on purpose, once.
+   *
+   * At 374px and under, a seven-destination bar takes two points off the pill's
+   * own padding — `--toolbar-pad` goes to 3 — so the bar is 52 rather than 56.
+   * That is a deliberate trade with its reasoning written at the rule: the
+   * targets are untouched and the bar keeps its gutter from both screen edges.
+   *
+   * It is asserted here because nothing local was watching it. The number is
+   * real and intended, and the only thing that noticed when the live league
+   * gained its seventh destination was the production smoke suite, which was
+   * still holding the six-destination floor. A number this deliberate should
+   * fail on a laptop rather than after a deploy.
+   *
+   * The fingertip floor is checked above and is not what gives here.
+   */
+  test('spends the seventh destination out of the pill rather than the targets', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    const bar = await toolbar(page);
+    const count = await page.locator('.tabbar button').count();
+    expect(count).toBe(7);
+
+    const expected = bar.viewportWidth <= 374 ? 52 : 56;
+    expect(bar.height, `a seven-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(expected);
+
+    // The padding is where it came from, and the target is not.
+    for (const tab of ['draft', 'matchup', 'setup'] as const) {
+      const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
+      expect(box.height, `${tab} gave up a fingertip`).toBeGreaterThanOrEqual(44);
+    }
+  });
 });

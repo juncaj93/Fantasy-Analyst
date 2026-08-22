@@ -212,7 +212,26 @@ test.describe('the deployed app', () => {
     expect(bar.width, `the bar is ${bar.width}px on a ${bar.viewportWidth}px screen`).toBeLessThanOrEqual(
       bar.viewportWidth - 40,
     );
-    expect(bar.height).toBeGreaterThanOrEqual(54);
+    /*
+     * How tall a pill is depends on how many destinations it carries.
+     *
+     * This asserted a flat 54 floor, which was right for the six-destination
+     * bar it was written against and went stale when the seventh arrived.
+     * Seven at 374px or less deliberately spends two points of the pill's *own*
+     * padding either side — `--toolbar-pad` drops to 3, and the rule says why:
+     * the bar has to stay a compact object with a real gutter on a 360px screen,
+     * and its padding is the only thing left that is not a thumb's problem. The
+     * bar is 52 there rather than 56, by design.
+     *
+     * The floor that matters is not this one and is not being moved: every
+     * destination is asserted at 44 by 44 at the top of this same test, at every
+     * width, and `toolbar.spec.ts` asserts it in both directions. This band only
+     * says the bar is still a pill rather than a band or a sliver, so it takes
+     * the number the design actually produces for each case rather than one
+     * number for both.
+     */
+    const floor = expected.length >= 7 && bar.viewportWidth <= 374 ? 52 : 54;
+    expect(bar.height, `the bar is ${bar.height}px with ${expected.length} destinations`).toBeGreaterThanOrEqual(floor);
     expect(bar.height).toBeLessThanOrEqual(64);
   });
 
