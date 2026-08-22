@@ -708,4 +708,67 @@ test.describe('Matchup, once the draft is finished', () => {
       expect(box.height, `${tab} gave up a fingertip`).toBeGreaterThanOrEqual(44);
     }
   });
+
+  /**
+   * The `VS` stays inside its ring, at both weights.
+   *
+   * Matchup is the one glyph in the bar drawn as a mark *inside* another mark,
+   * and selecting a tab redraws all of them at `stroke-width: 2.15`. That is
+   * where this can fail without anybody editing the icon: the ring thickens
+   * inwards and the letters thicken outwards in the same moment, so a pair with
+   * comfortable air at rest can close the gap on both sides the instant the tab
+   * is tapped, and the `VS` becomes a blot in a circle.
+   *
+   * Read off the rendered boxes rather than off the path data, because what
+   * matters is where the ink lands after the group's scale, the viewBox and the
+   * bar's 22px have all been applied — none of which the numbers in the file
+   * mention. Asserted at whatever width the project is running.
+   */
+  test('draws the VS clear of its ring whether the tab is selected or not', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    const clearance = async () =>
+      page.getByTestId('tab-matchup').evaluate((tab) => {
+        const svg = tab.querySelector('svg')!;
+        const ring = svg.querySelector('circle')!;
+        const letters = svg.querySelector('g')!;
+        const box = ring.getBoundingClientRect();
+        const geometry = letters.getBoundingClientRect();
+
+        /*
+         * Both rects are the *geometry*, without the stroke — so the ink is
+         * half a stroke either side of each of them, and the letters carry a
+         * different half from the ring: they are inside a scaled group, and a
+         * scale divides the stroke along with everything else. Read both
+         * scales off the rendered matrices rather than the file, so the check
+         * measures what the browser drew and not what the source intended.
+         */
+        const declared = Number.parseFloat(getComputedStyle(svg).strokeWidth);
+        const ringStroke = declared * svg.getScreenCTM()!.a;
+        const letterStroke = declared * letters.getScreenCTM()!.a;
+
+        const inner = box.width / 2 - ringStroke / 2;
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        const reach = Math.hypot(
+          Math.max(Math.abs(geometry.x - cx), Math.abs(geometry.right - cx)) + letterStroke / 2,
+          Math.max(Math.abs(geometry.y - cy), Math.abs(geometry.bottom - cy)) + letterStroke / 2,
+        );
+        return { stroke: +ringStroke.toFixed(2), gap: +(inner - reach).toFixed(2) };
+      });
+
+    const resting = await clearance();
+    expect(resting.gap, `the resting VS clears its ring by ${resting.gap}px`).toBeGreaterThan(0.4);
+
+    await page.getByTestId('tab-matchup').click();
+    await expect(page.getByTestId('tab-matchup')).toHaveAttribute('aria-current', 'page');
+    const selected = await clearance();
+
+    // The selected glyph really is the heavier one — otherwise the check above
+    // would be passing twice on the same drawing.
+    expect(selected.stroke, 'selecting a tab draws it heavier').toBeGreaterThan(resting.stroke);
+    expect(selected.gap, `the selected VS clears its ring by ${selected.gap}px`).toBeGreaterThan(0.2);
+  });
 });

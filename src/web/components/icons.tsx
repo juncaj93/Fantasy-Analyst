@@ -138,21 +138,44 @@ export function WaiverIcon({ size = 24, className }: IconProps) {
 }
 
 /**
- * Matchup: two sides of one thing, and a line between them.
+ * Matchup: `VS`, in a ring.
  *
- * Deliberately not a shield, a trophy or a football. Every other mark in this
- * bar is a shape rather than a picture, and at 22px a football is a brown oval
- * that reads as a full stop. Two blocks facing each other across a divider is
- * the shape of a head-to-head, and it is distinguishable from the roster's
- * stacked rows and the trade's crossing arrows at a glance — which is the only
- * job a tab glyph has.
+ * Still not a shield, a trophy or a football — every other mark in this bar is
+ * a shape rather than a picture, and at 22px a football is a brown oval that
+ * reads as a full stop. This was two blocks facing each other across a divider,
+ * which is a diagram of a head-to-head; `VS` in a ring is the two words for it,
+ * and a reader does not have to work out which. The ring is the same closed
+ * outline the search glyph and the setup steps are drawn with, so it arrives in
+ * the family rather than from outside it.
+ *
+ * **The letters are drawn, and drawn inside a scaled group.** Drawn, because
+ * `<text>` is at the mercy of whichever font the platform hands it — which is
+ * the whole reason this file exists. In a group, because of the weight: at the
+ * bar's 1.7 a five-point letter is a blot rather than a letterform, and the
+ * `VS` wants roughly three quarters of the ring's stroke to read as type beside
+ * it. A `scale()` divides the stroke along with the geometry, so that ratio is
+ * expressed once and survives the one thing the tab bar does to these glyphs —
+ * selecting a tab redraws it at `stroke-width: 2.15`, and the letters thicken
+ * with the ring instead of staying behind at their own fixed number.
+ *
+ * The ring is 16.9 across against the draft board's 17.5 and the roster's 16.75,
+ * so it sits inside the family's box rather than filling its own: a closed
+ * circle at the full width reads larger than an open shape at the same width,
+ * and the bar's rhythm is what the eye notices first.
+ *
+ * The letters are sized off the *selected* weight rather than the resting one,
+ * which is the constraint that is easy to miss: at 2.15 the ring grows inwards
+ * and the `VS` grows outwards at the same moment, and a pair that has room to
+ * spare at rest can close the gap on both sides the instant the tab is tapped.
  */
 export function MatchupIcon({ size = 24, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
-      <rect x="3.25" y="7" width="6.5" height="10" rx="2" />
-      <rect x="14.25" y="7" width="6.5" height="10" rx="2" />
-      <path d="M12 5.5v13" />
+      <circle cx="12" cy="12" r="8.45" />
+      <g transform="translate(12 12) scale(0.74)">
+        <path d="M-6.12 -4.22 -3.19 4.22 -0.27 -4.22" />
+        <path d="M6.12 -1.94C6.12 -3.54 4.64 -4.22 3.72 -4.22C2.29 -4.22 1.5 -3.21 1.5 -1.86C1.5 1.01 6.12 -0.68 6.12 2.03C6.12 3.21 4.6 4.22 3.72 4.22C2.29 4.22 1.5 3.38 1.5 2.03" />
+      </g>
     </svg>
   );
 }

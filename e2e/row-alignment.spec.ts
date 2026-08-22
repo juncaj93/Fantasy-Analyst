@@ -285,6 +285,102 @@ test.describe('the identity cluster', () => {
   });
 
   /**
+   * The rank, the pill and the club as one group rather than a number and a
+   * group.
+   *
+   * The rank slot used to be three tabular digits wide with the row's own 8px
+   * gap after it, so on the ranks anybody looks at — one digit, sometimes two —
+   * the row opened with a number, most of an empty box, and only then the
+   * player. The gap between the rank and the pill was roughly five times the
+   * gap between the pill and the club's mark, which is what made the leading
+   * edge read as a rank *column* with a dead zone rather than as the head of
+   * the identity.
+   *
+   * Measured off the glyph rather than the box, for the same reason the column
+   * assertion above is: the box can be the right size while the digits inside
+   * it sit nowhere near the pill. And bounded rather than pinned to a number,
+   * because the exact figure is a font metric — what the rule actually says is
+   * that the two gaps inside the group are the same order of size.
+   */
+  async function identityGaps(page: Page, rowTestId: string) {
+    return page.locator(`[data-testid="${rowTestId}"]`).evaluateAll((rows) =>
+      rows.slice(0, 13).map((row) => {
+        const rank = row.querySelector('.rank');
+        const pill = row.querySelector('.pos-pill');
+        const mark = row.querySelector('.team-logo, .team-code');
+        if (!rank?.firstChild || !pill || !mark) return null;
+        const range = document.createRange();
+        range.selectNodeContents(rank);
+        const glyph = range.getBoundingClientRect();
+        const pillBox = pill.getBoundingClientRect();
+        return {
+          rank: (rank.textContent ?? '').trim(),
+          toPill: pillBox.left - glyph.right,
+          pillToMark: mark.getBoundingClientRect().left - pillBox.right,
+        };
+      }),
+    );
+  }
+
+  for (const [screen, rowTestId, open] of [
+    ['the draft board', 'recommendation-row', openDraft],
+    [
+      'Players',
+      'player-search-row',
+      async (page: Page) => {
+        await page.goto('/');
+        await page.getByTestId('tab-players').click();
+        await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
+      },
+    ],
+  ] as const) {
+    test(`keeps the rank tight against the identity it leads on ${screen}`, async ({ page }) => {
+      await open(page);
+      const rows = (await identityGaps(page, rowTestId)).filter((r) => r != null);
+      expect(rows.length, `${screen} should be drawing identity clusters`).toBeGreaterThan(4);
+
+      for (const row of rows) {
+        expect(row.toPill, `rank "${row.rank}" is ${row.toPill}px from its pill`).toBeGreaterThan(0);
+        /*
+         * Three times the gap the group's other seam uses is the outer edge of
+         * "the same order of size" — one digit of slack in a two-digit slot is
+         * most of it, and there is nowhere else for that slack to go while the
+         * rank stays anchored to the row's own left column.
+         */
+        expect(row.toPill, `rank "${row.rank}" opens a dead zone before its pill`).toBeLessThanOrEqual(
+          row.pillToMark * 3.5,
+        );
+      }
+    });
+  }
+
+  /**
+   * …and the rhythm survives the boundary, which is where a fixed slot hides.
+   *
+   * A slot sized for the widest rank a list can reach looks correct on the rows
+   * that nearly fill it and wrong on the rows that do not, so rows either side
+   * of ten are compared with each other rather than each against a constant.
+   */
+  test('with the same rhythm either side of rank ten', async ({ page }) => {
+    await openDraft(page);
+    const rows = (await identityGaps(page, 'recommendation-row')).filter((r) => r != null);
+    const single = rows.filter((r) => /^\d$/.test(r.rank));
+    const double = rows.filter((r) => /^\d\d$/.test(r.rank));
+    expect(single.length, 'the board should reach rank 9').toBeGreaterThan(4);
+    expect(double.length, 'and past rank 10').toBeGreaterThan(0);
+
+    // Each digit count is internally identical — no per-rank nudging.
+    expect(new Set(single.map((r) => Math.round(r.toPill))).size).toBe(1);
+    expect(new Set(double.map((r) => Math.round(r.toPill))).size).toBe(1);
+
+    // And the step between them is one digit of the rank's own type, which is
+    // the whole of what a left-anchored slot can cost.
+    const step = single[0]!.toPill - double[0]!.toPill;
+    expect(step, `rank ${single[0]!.rank} sits ${step}px further from its pill than rank ${double[0]!.rank}`)
+      .toBeLessThanOrEqual(9);
+  });
+
+  /**
    * The worst row the data can produce, and nothing on it hides anything else.
    *
    * A long name, a three-character availability code and a two-digit negative
