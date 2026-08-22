@@ -519,7 +519,13 @@ describe('API with seeded data', () => {
   it('orders the players list by Sleeper rank nudged by the tally', async () => {
     const body = await json<{
       tallyWeight: number;
-      players: { name: string; draftRank: number | null; adjustedRank: number | null; movement: number }[];
+      players: {
+        name: string;
+        draftRank: number | null;
+        adjustedRank: number | null;
+        movement: number;
+        signal: { raw: { net: number } } | null;
+      }[];
     }>(get('/api/players'));
 
     expect(body.tallyWeight).toBe(0.5);
@@ -532,11 +538,18 @@ describe('API with seeded data', () => {
     expect(ranks.indexOf(null)).toBe(ranks.some((r) => r == null) ? rankedPart.length : -1);
 
     // Movement is reported, and is exactly the half-pick-per-point rule.
+    //
+    // Measured against the rule itself rather than against `draftRank -
+    // adjustedRank`, which is the same number only while the display floor is
+    // not in play. For an early pick with a large tally the printed rank stops
+    // at 0.5 and the subtraction stops with it, so asserting on it quietly
+    // required movement to shrink exactly where the tally was strongest.
     for (const p of body.players) {
       if (p.draftRank == null || p.adjustedRank == null) {
         expect(p.movement).toBe(0);
       } else {
-        expect(p.movement).toBeCloseTo(p.draftRank - p.adjustedRank, 5);
+        const net = p.signal?.raw.net ?? 0;
+        expect(p.movement).toBeCloseTo(body.tallyWeight * net, 5);
       }
     }
   });
