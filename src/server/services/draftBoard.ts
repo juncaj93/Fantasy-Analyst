@@ -17,6 +17,8 @@ import { InjuryService } from './injuryService.ts';
 import { RepairService } from './repairService.ts';
 import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
+import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
+import { scoringKey } from '../../core/startWho/scoring.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -45,6 +47,7 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
   const adp = new AdpRepo(db);
   const evidence = new EvidenceRepo(db);
   const seasonMarkets = new SeasonMarketsRepo(db);
+  const projections = new PreseasonProjectionsRepo(db);
 
   return {
     leagues: {
@@ -63,6 +66,17 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
     evidence: { getSignals: (ids) => evidence.getSignals(ids) },
     flags: () => new PlayerFlagsRepo(db).all(),
     seasonMarkets: (ids) => seasonMarkets.latestForPlayers(seasonFor(), ids),
+    /*
+     * Scoped to the league's own scoring before anything else, so a snapshot
+     * captured under other rules cannot reach the board at all. Empty is the
+     * right answer there — not the nearest snapshot, which would be wrong by
+     * fifty points on every quarterback and right on everybody else.
+     */
+    preseasonPoints: async (ids, scoring) => {
+      const snapshot = await projections.latest(seasonFor(), scoringKey(scoring));
+      if (!snapshot) return new Map<string, number>();
+      return projections.pointsForSnapshot(snapshot.id, ids);
+    },
     marketSnapshot: async () => {
       const snapshot = await seasonMarkets.latestSnapshot(seasonFor());
       return snapshot

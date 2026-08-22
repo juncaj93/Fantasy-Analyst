@@ -20,6 +20,7 @@ import { Sheet } from './native.tsx';
 import {
   InjuryDetail,
   LastSeasonLine,
+  PreseasonProjectionLine,
   NewsletterTakeaway,
   ProfileFlags,
   SeasonOutlook,
@@ -209,6 +210,7 @@ function WeeklyPlayerDetail({ playerId, position }: { playerId: string; position
       <NewsletterTakeaway detail={detail} />
       <SeasonOutlook detail={detail} failed={failed} />
       <LastSeasonLine detail={detail} failed={failed} position={position} />
+      <PreseasonProjectionLine detail={detail} />
       <InjuryDetail detail={detail} />
       <ProfileFlags detail={detail} />
     </div>

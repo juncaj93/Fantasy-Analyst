@@ -34,6 +34,7 @@ import {
   type MarketBaselineBlend,
   type MarketFormat,
 } from './marketBaseline.ts';
+import { preseasonPointsPool, preseasonPointsScore } from './preseasonPoints.ts';
 import {
   marketExpectationScore,
   marketStandings,
@@ -195,6 +196,15 @@ export interface AvailablePlayerInput {
    */
   seasonMarkets?: { market: SeasonMarketKey; line: number | null; bookCount?: number }[];
   /**
+   * An imported preseason projection for him, in this league's own points.
+   *
+   * A market-derived estimate of the same thing `seasonMarkets` measures, from
+   * a source that read the markets and did the scoring arithmetic itself. Used
+   * only where the raw lines are silent — see `preseasonPoints.ts` for why the
+   * two are alternatives rather than additions.
+   */
+  preseasonPoints?: number | null;
+  /**
    * The chance the room leaves him until your next pick, when the caller has
    * simulated it.
    *
@@ -351,6 +361,15 @@ export interface DraftRecommendation {
    * presented as one book's number, and `derived` is how a renderer knows.
    */
   marketProps: PropSummary | null;
+  /**
+   * The imported preseason projection for him, in this league's own points.
+   *
+   * Historical context by nature: it is what a market-derived model expected of
+   * him before the season, under the scoring the snapshot was captured with.
+   * Null when no snapshot covers him — never zero, which would read as a
+   * projection of nothing.
+   */
+  preseasonPoints: number | null;
   /**
    * Why that number is a good one for his position, and whether the draft
    * market agrees. Explanation only; see `marketStrategy.ts`.
@@ -648,6 +667,22 @@ export function rankAvailablePlayers(
    * receiver and exceptional for a tight end — so the comparison pool is built
    * here rather than per player.
    */
+  /*
+   * The imported preseason projections, grouped by position once for the board.
+   *
+   * A standing needs the same peer set every time it is asked; rebuilding it
+   * per row would make a player's score depend on which rows were on screen.
+   * Built from every candidate rather than from the ones the raw lines missed,
+   * so the comparison pool is the position rather than the leftovers.
+   */
+  const preseasonPool = preseasonPointsPool(
+    available.flatMap((entry) =>
+      entry.preseasonPoints == null
+        ? []
+        : [{ playerId: entry.player.id, position: entry.player.position, points: entry.preseasonPoints }],
+    ),
+  );
+
   const baselines = new Map<string, MarketBaseline>();
   const poolByPosition = new Map<string, MarketBaseline[]>();
   /*
@@ -805,12 +840,37 @@ export function rankAvailablePlayers(
     // nothing rather than zero, because "nobody has quoted him" is not "the
     // market expects nothing of him".
     const baseline = baselines.get(player.id) ?? null;
-    const marketScore = marketExpectationScore(baseline, poolByPosition.get(player.position) ?? []);
+    const rawScore = marketExpectationScore(baseline, poolByPosition.get(player.position) ?? []);
+
+    /*
+     * The imported preseason projection, and only where the raw lines are not.
+     *
+     * Both answer the same question — how much the market expects of him this
+     * season — so they fill one slot rather than two. Letting each contribute
+     * would pay a player twice for the coincidence of being covered twice, and
+     * would make a player only one source covers look worse than he is.
+     *
+     * The raw lines win where they exist, because a line a book is taking bets
+     * on is a stronger fact than a model's estimate derived from lines. Where
+     * they are silent the projection answers, on the same scale and through the
+     * same weight, and where neither speaks the component stays unknown.
+     */
+    const projectedScore =
+      rawScore == null
+        ? preseasonPointsScore(
+            { position: player.position, points: entry.preseasonPoints ?? null },
+            preseasonPool,
+          )
+        : null;
+    const marketScore = rawScore ?? projectedScore;
+    const fromProjection = rawScore == null && projectedScore != null;
+
     components.push({
       key: 'market_expectation',
       label: 'Season market',
-      display:
-        baseline?.points == null
+      display: fromProjection
+        ? `${entry.preseasonPoints} preseason pts projected · from the imported preseason market projection`
+        : baseline?.points == null
           ? 'no season market for this player'
           : `${baseline.points} pts implied · ${baseline.note}`,
       score: marketScore ?? 0,
@@ -978,6 +1038,7 @@ export function rankAvailablePlayers(
       marketBaseline: baseline,
       marketHeadline: props?.headline ?? null,
       marketProps: props,
+      preseasonPoints: entry.preseasonPoints ?? null,
       marketStrategy: strategy,
       tierCliff: cliff,
       avoid,

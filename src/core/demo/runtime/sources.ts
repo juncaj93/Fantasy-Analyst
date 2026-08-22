@@ -72,6 +72,13 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
       },
     },
     flags: async () => data.flags,
+    /*
+     * The demo world imports no preseason projection snapshot, so the board it
+     * builds has none — which is the honest rehearsal of a league that has not
+     * pasted one, and leaves the market component reading the demo's own season
+     * lines exactly as it did before.
+     */
+    preseasonPoints: async () => new Map<string, number>(),
     seasonMarkets: async (ids) => {
       const out: typeof data.seasonMarkets = new Map();
       for (const id of ids) {

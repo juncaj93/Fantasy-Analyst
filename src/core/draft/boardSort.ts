@@ -28,7 +28,7 @@
  */
 
 /** The three orderings, and the ids the control uses. */
-export const SORT_MODES = ['score', 'adp', 'dog'] as const;
+export const SORT_MODES = ['score', 'adp', 'dog', 'pts'] as const;
 export type SortMode = (typeof SORT_MODES)[number];
 
 export const DEFAULT_SORT_MODE: SortMode = 'score';
@@ -38,6 +38,7 @@ export const SORT_LABELS: Record<SortMode, string> = {
   score: 'Score',
   adp: 'ADP',
   dog: 'DOG',
+  pts: 'PTS',
 };
 
 /** What each mode means, for the accessible name and the tooltip. */
@@ -45,6 +46,7 @@ export const SORT_DESCRIPTIONS: Record<SortMode, string> = {
   score: 'Sort by Fantasy Analyst score, the full composite ranking',
   adp: 'Sort by Sleeper ADP, earliest first',
   dog: 'Sort by raw Underdog ADP, earliest first',
+  pts: 'Sort by preseason market projection points, highest first',
 };
 
 /** The least a row must carry to be sorted. Anything richer also works. */
@@ -60,6 +62,14 @@ export interface SortableRow {
   adp: number | null;
   /** Raw Underdog ADP. */
   dogAdp: number | null;
+  /**
+   * The imported preseason projection, in this league's points.
+   *
+   * Null when no snapshot covers him, or when the only snapshots were captured
+   * under other scoring — which is not a lower number, it is no number, and
+   * sorts with the rest of the unpriced at the bottom.
+   */
+  preseasonPoints?: number | null;
   name: string;
 }
 
@@ -109,6 +119,25 @@ export function sortBoard<T extends SortableRow>(rows: readonly T[], mode: SortM
      * server sent, which is the promise "Score is the default" is making.
      */
     return out.sort(byComposite);
+  }
+
+  /*
+   * Points sort the other way up.
+   *
+   * ADP and DOG are draft positions, where the smallest number is the top of
+   * the board. A projection is a quantity, where the largest is — so this is
+   * the one mode that descends, and reading it as an ascending market position
+   * would put the worst projected players first while looking entirely normal.
+   */
+  if (mode === 'pts') {
+    return out.sort((a, b) => {
+      const av = usable(a.preseasonPoints);
+      const bv = usable(b.preseasonPoints);
+      if (av == null && bv == null) return byComposite(a, b);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return bv - av || byComposite(a, b);
+    });
   }
 
   const valueOf = (row: T): number | null => (mode === 'dog' ? row.dogAdp : row.adp);
@@ -208,6 +237,11 @@ export function reorderByIds<T extends { playerId: string }>(rows: readonly T[],
  */
 export function hasDogCoverage(rows: readonly SortableRow[]): boolean {
   return rows.some((row) => usable(row.dogAdp) != null);
+}
+
+/** Whether the PTS mode has anything to order by, on the same principle. */
+export function hasPreseasonPointsCoverage(rows: readonly SortableRow[]): boolean {
+  return rows.some((row) => usable(row.preseasonPoints) != null);
 }
 
 /**
