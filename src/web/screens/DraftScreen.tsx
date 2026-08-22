@@ -89,6 +89,8 @@ import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
  * browser to check. See dragReorder.ts.
  */
 import { LONG_PRESS_MS, moveItem, pressVerdict, rowOffset, targetIndex } from '../../core/draft/dragReorder.ts';
+/* How the queue's grip tells pull-to-refresh the drag is taken. See the note there. */
+import { NO_PULL_ATTRIBUTE } from '../gestures.ts';
 import {
   DEFAULT_SORT_MODE,
   SORT_DESCRIPTIONS,
@@ -794,7 +796,22 @@ export function DraftScreen({
      * `refreshNow` — so an unlocked reader still pulls picks from Sleeper and a
      * locked one still gets the board, with the same single-flight guard.
      */
-    <PullToRefresh onRefresh={refreshNow} label="Draft" testId="draft-pull">
+    <PullToRefresh
+      onRefresh={refreshNow}
+      label="Draft"
+      testId="draft-pull"
+      /*
+        Off while a row is actually being carried.
+
+        The grip already refuses to start a pull — see `NO_PULL_ATTRIBUTE` on it
+        — and this covers the one case that cannot: the press may drift eight
+        pixels, which arms a pull, while still being under the ten the reorder
+        allows, so the long press can fire with the surface already moving.
+        `drag` is non-null from the moment the row is picked up, and turning
+        this off drops anything in flight and springs the list back.
+      */
+      enabled={drag == null}
+    >
       {/*
         The board, over everything, reading the state this screen already has.
 
@@ -1828,6 +1845,14 @@ function RecommendationRow({
             column. `touch-action: none` is what actually lets the drag cancel
             the scroll; without it the browser has already committed the gesture
             by the time the first move arrives.
+
+            `data-no-pull` is the same claim made to the other gesture on this
+            screen. A reorder and a pull-to-refresh start identically — a finger
+            down near the top of the board, moving down — and the reader was
+            getting both: the list slid under the finger while the row was being
+            carried, and letting go reloaded the board out from under the
+            reorder. The grip says the drag is its own before either can start.
+            See `usePullToRefresh`, rule 2.
           */}
           {reorderable ? (
             <span
@@ -1835,6 +1860,7 @@ function RecommendationRow({
               data-testid="queue-drag-handle"
               aria-hidden="true"
               style={{ touchAction: 'none' }}
+              {...{ [NO_PULL_ATTRIBUTE]: '' }}
               onPointerDown={onReorderStart}
               /* The row underneath is a toggle; picking it up is not opening it. */
               onClick={(event) => event.stopPropagation()}

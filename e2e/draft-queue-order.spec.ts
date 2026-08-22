@@ -285,3 +285,133 @@ test.describe('the queue order', () => {
     expect(await metricsOf()).toEqual(before);
   });
 });
+
+/**
+ * The two gestures that start the same way, and which one wins.
+ *
+ * Reported: dragging a queued player was being mistaken for pull-to-refresh.
+ * Both begin identically — a finger down near the top of the board, moving down
+ * — and the screen was running both at once: the list slid down under the
+ * finger while the row was being carried, and letting go reloaded the board out
+ * from under the reorder.
+ *
+ * There is no arbitrating that after the fact, so the grip claims the drag
+ * before either can start (`data-no-pull`), and the screen takes the gesture
+ * back for the window the attribute cannot cover — a press may drift the eight
+ * pixels that arm a pull while staying inside the ten a press allows. Both
+ * halves are asserted here, and so is the thing neither may cost: that an
+ * ordinary pull still refreshes.
+ */
+test.describe('reordering and refreshing', () => {
+  test.afterEach(async ({ page }) => {
+    await emptyQueue(page);
+  });
+
+  /** How far the surface has been pulled, and what the indicator is saying. */
+  async function pull(page: Page): Promise<{ state: string | null; px: number }> {
+    return {
+      state: await page.getByTestId('draft-pull').getAttribute('data-pull-state'),
+      px: await page.getByTestId('pull-indicator').evaluate((el) => Math.round(el.getBoundingClientRect().height)),
+    };
+  }
+
+  test('a reorder drag never arms the refresh', async ({ page }) => {
+    const queued = await queueTopPlayers(page, 4);
+    await openQueue(page);
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    const rows = page.locator('[data-testid="recommendation-row"]');
+    const grip = await rows.first().getByTestId('queue-drag-handle').boundingBox();
+    const x = grip!.x + grip!.width / 2;
+    const y = grip!.y + grip!.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(LONG_PRESS_MS + 250);
+
+    /*
+     * Dragged well past the trigger, in steps, from the very top of the page —
+     * which is the only state in which a pull is possible at all, and therefore
+     * the only state in which this test means anything.
+     */
+    const seen: string[] = [];
+    for (const dy of [10, 40, 80, 130, 190, 260]) {
+      await page.mouse.move(x, y + dy);
+      await page.waitForTimeout(50);
+      const { state, px } = await pull(page);
+      seen.push(`${state}@${px}px`);
+    }
+    await page.mouse.up();
+
+    expect(new Set(seen), `the board moved under the drag: ${seen.join(', ')}`).toEqual(new Set(['idle@0px']));
+    // …and the reorder it was competing with actually happened.
+    await expect.poll(async () => (await order(page))[0], { timeout: 5000 }).not.toBe(queued[0]);
+  });
+
+  /**
+   * And a swipe across the row does not arm it either.
+   *
+   * The rule the pull used to engage on was "eight pixels of movement, some of
+   * it downwards", which a sideways gesture with a little drift satisfies. The
+   * arithmetic is pinned in `tests/pullToRefresh.test.ts`; this is the same
+   * claim where the reader meets it.
+   */
+  test('nor does a mostly-sideways drag from the top of the board', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    const row = await page.locator('[data-testid="recommendation-row"]').first().boundingBox();
+    const x = row!.x + 30;
+    const y = row!.y + row!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (const [dx, dy] of [
+      [20, 3],
+      [60, 6],
+      [120, 9],
+      [180, 11],
+    ]) {
+      await page.mouse.move(x + dx!, y + dy!);
+      await page.waitForTimeout(40);
+    }
+    const during = await pull(page);
+    await page.mouse.up();
+
+    expect(during, `a sideways swipe pulled the board ${during.px}px`).toEqual({ state: 'idle', px: 0 });
+  });
+
+  /**
+   * The gesture the whole thing exists for still works.
+   *
+   * Every guard above is a way of *not* refreshing, so the one claim that keeps
+   * them honest is that a deliberate pull from the ordinary board still arms
+   * and still fires. Without this, disabling pull-to-refresh outright would
+   * pass the rest of this describe block.
+   */
+  test('but a deliberate pull from the board still refreshes it', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    const surface = await page.getByTestId('draft-pull').boundingBox();
+    const x = surface!.x + surface!.width / 2;
+    const y = surface!.y + 40;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (const dy of [12, 60, 120, 190]) {
+      await page.mouse.move(x, y + dy);
+      await page.waitForTimeout(40);
+    }
+    const armed = await pull(page);
+    await page.mouse.up();
+
+    expect(armed.state, 'a full pull should reach the trigger').toBe('armed');
+    expect(armed.px).toBeGreaterThan(0);
+    // And it runs: the spinner takes over, then the surface comes back to rest.
+    await expect
+      .poll(async () => (await pull(page)).state, { timeout: 8000 })
+      .toBe('idle');
+    await expect(page.getByTestId('board-list')).toBeVisible();
+  });
+});
