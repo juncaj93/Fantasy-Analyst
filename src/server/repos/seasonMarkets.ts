@@ -7,6 +7,7 @@
  * is what a future "the market has been climbing since July" would be built on.
  */
 
+import { resolveSeasonLines, type SnapshotLine } from '../../core/seasonImport/gapFill.ts';
 import type { PlayerSeasonMarket } from '../../core/vegas/season.ts';
 import type { SeasonMarketKey, SeasonMarketSet } from '../../core/vegas/types.ts';
 import { chunk, MAX_BOUND_PARAMS, parseJson, toJson, type Database } from '../db.ts';
@@ -106,42 +107,87 @@ export class SeasonMarketsRepo {
     return snapshotId;
   }
 
-  /** The newest season market lines for a set of players. */
+  /**
+   * The season market lines for a set of players, across every snapshot held.
+   *
+   * Deliberately not "the latest snapshot's rows". Once season lines can arrive
+   * by hand as well as by fetch, a season holds several captures, and picking
+   * one of them wholesale silently deletes coverage: a small Thursday capture
+   * of forty players would replace a Monday capture of two hundred, and the
+   * other hundred and sixty would lose their line to a snapshot that never
+   * mentioned them. The choice is made per player and per market instead, by
+   * `resolveSeasonLines` — which prefers a named primary source, fills only
+   * genuine gaps from anything else, and never averages two books into a number
+   * neither of them published.
+   *
+   * `bookCount` rides along because the card shows quantities summed from more
+   * than one market, and "how many books stand behind this line" is the first
+   * question a reader asks once a number stops being a single quote.
+   */
   async latestForPlayers(
     season: string,
     playerIds: string[],
+    opts: { primarySource?: string | null } = {},
   ): Promise<Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>> {
     const out = new Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>();
-    const snapshot = await this.latestSnapshot(season);
-    if (!snapshot || playerIds.length === 0) return out;
+    if (playerIds.length === 0) return out;
 
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 1)) {
+    const books = new Map<string, number>();
+    const lines: SnapshotLine[] = [];
+
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
       const placeholders = batch.map(() => '?').join(',');
       /*
-       * `book_count` rides along because the card now shows quantities this app
-       * summed from more than one market, and "how many books stand behind each
-       * line" is the question a reader asks the moment a number stops being a
-       * single quote. It is one more column on a query that was already running.
+       * A fetched snapshot has no capture columns — they belong to the hand
+       * import — so its own provider and fetch time stand in. That keeps one
+       * ordering rule over both kinds rather than two rules that could disagree
+       * about which line is newer.
        */
       const rows = await this.db
         .prepare(
-          `SELECT player_id, market, line, book_count FROM player_props
-            WHERE snapshot_id = ? AND scope = 'season' AND player_id IN (${placeholders})`,
+          `SELECT p.id AS row_id, p.player_id, p.market, p.line, p.book_count,
+                  COALESCE(s.capture_source, s.provider) AS source,
+                  COALESCE(s.captured_at, s.fetched_at) AS captured_at,
+                  s.id AS snapshot_id
+             FROM player_props p
+             JOIN prop_snapshots s ON s.id = p.snapshot_id
+            WHERE s.scope = 'season' AND s.season = ?
+              AND p.scope = 'season' AND p.player_id IN (${placeholders})`,
         )
-        .bind(snapshot.id, ...batch)
+        .bind(season, ...batch)
         .all<Record<string, unknown>>();
+
       for (const r of rows.results) {
-        const playerId = String(r['player_id']);
-        const books = r['book_count'] == null ? 0 : Number(r['book_count']);
-        const entry = {
+        const line = r['line'] == null ? null : Number(r['line']);
+        // A row with no line carries no opinion to choose between, and letting
+        // it into the resolution could see it beat a real line on recency.
+        if (line == null) continue;
+        const key = `${String(r['player_id'])}|${String(r['market'])}|${String(r['snapshot_id'])}`;
+        const count = r['book_count'] == null ? 0 : Number(r['book_count']);
+        books.set(key, Number.isFinite(count) && count > 0 ? count : 0);
+        lines.push({
+          playerId: String(r['player_id']),
           market: String(r['market']) as SeasonMarketKey,
-          line: r['line'] == null ? null : Number(r['line']),
-          bookCount: Number.isFinite(books) && books > 0 ? books : undefined,
-        };
-        const list = out.get(playerId);
-        if (list) list.push(entry);
-        else out.set(playerId, [entry]);
+          line,
+          overPrice: null,
+          underPrice: null,
+          source: String(r['source'] ?? ''),
+          capturedAt: String(r['captured_at'] ?? ''),
+          snapshotId: Number(r['snapshot_id']),
+        });
       }
+    }
+
+    for (const chosen of resolveSeasonLines(lines, { primarySource: opts.primarySource ?? null })) {
+      const count = books.get(`${chosen.playerId}|${chosen.market}|${chosen.snapshotId}`) ?? 0;
+      const entry = {
+        market: chosen.market,
+        line: chosen.line,
+        bookCount: count > 0 ? count : undefined,
+      };
+      const list = out.get(chosen.playerId);
+      if (list) list.push(entry);
+      else out.set(chosen.playerId, [entry]);
     }
     return out;
   }

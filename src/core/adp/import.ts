@@ -56,8 +56,19 @@ const POS_KEYS = ['position', 'pos', 'slotname', 'positionname', 'player_positio
 const FIRST_KEYS = ['firstname', 'first_name'];
 const LAST_KEYS = ['lastname', 'last_name'];
 
-/** RFC4180-ish CSV parser: quoted fields, escaped quotes, CRLF, embedded commas. */
-export function parseCsv(text: string): string[][] {
+/**
+ * RFC4180-ish delimited-text parser: quoted fields, escaped quotes, CRLF, and
+ * embedded delimiters.
+ *
+ * The delimiter is a parameter because a comma is only one of the three shapes
+ * this app actually receives. A table copied out of a browser arrives on the
+ * clipboard as **tab**-separated, and the canonical preseason block is
+ * pipe-separated — and a comma-only reader does not fail on either of those, it
+ * reads the whole line as one field and reports a file with no columns, which
+ * looks exactly like a file with no data. Defaulted, so every existing caller
+ * is untouched.
+ */
+export function parseCsv(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -79,7 +90,7 @@ export function parseCsv(text: string): string[][] {
       inQuotes = true;
       continue;
     }
-    if (ch === ',') {
+    if (ch === delimiter) {
       row.push(field);
       field = '';
       continue;
