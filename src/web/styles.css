@@ -306,6 +306,33 @@
   --row-meta: 56px;
 
   /*
+   * The rank slot, and the gap between it and the identity cluster it leads.
+   *
+   * `1  QB  🏈  Name` is one group — a player's place in the list, then who he
+   * is — and it only reads as one if the gaps inside it are the same size. The
+   * slot used to be 22px, which is three tabular digits at `.rank`'s size, so
+   * on the ranks anybody actually looks at (one digit, sometimes two) most of
+   * that box was empty and the row opened with a number, a hand's width of
+   * nothing, and only then the player. The gap that followed was the row's own
+   * 8px on top of it.
+   *
+   * Two digits is the slot now, and the gap after it is `--sp-1` — the same
+   * `--sp-1` that separates the pill from the club's mark, so the three
+   * elements are evenly spaced rather than one being marooned.
+   *
+   * A floor rather than a fixed width, because a draft board runs to 400 rows
+   * and `100` has to fit somewhere. Below the floor the slot cannot narrow, so
+   * every rank from 1 to 99 puts its pill, its club and its name on exactly the
+   * same x — which is the alignment `e2e/row-alignment.spec.ts` is about. Past
+   * 99 the slot grows by a digit and takes the cluster with it, which is the
+   * one honest trade: a three-digit rank is a hundred rows into a scroll, and
+   * the alternative is reserving its width on every row above it, which is the
+   * empty space this removed.
+   */
+  --rank-slot: 16px;
+  --rank-gap: var(--sp-1);
+
+  /*
    * The spacing rhythm: 4, 8, 12, 16, 20, 24, with a 2px hairline step for the
    * gaps inside a single line of type. Everything on screen is a multiple of
    * one of these, which is most of what "consistent" means to an eye.
@@ -1628,7 +1655,13 @@ body,
 .player-row-top {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  /*
+   * Named rather than written inline, so the rank can cancel its share of it
+   * and pay `--rank-gap` instead without either number having to be repeated in
+   * two places to stay true. See `.rank:has(+ .player-identity)`.
+   */
+  --row-gap: var(--sp-2);
+  gap: var(--row-gap);
 }
 
 /*
@@ -1659,6 +1692,29 @@ body,
   width: 22px;
   text-align: left;
   flex: none;
+}
+
+/*
+ * The rank that leads a player's identity, which is a tighter thing than a rank
+ * that leads anything else.
+ *
+ * Selected by what follows it rather than by the screen it is on: the rule is
+ * "a number standing immediately in front of the position/club/name cluster",
+ * and both lists that draw that cluster get it from one place. A `.rank` doing
+ * some other job — the tick in the compare sheet, which is a mark in a column
+ * and not the head of a group — keeps the wider box above.
+ *
+ * The gap is set here rather than by the row, because the row's `gap` is also
+ * the rhythm for its *other* five seams — the name, the tally field, the
+ * chevron — and narrowing it would have pulled all of them in as well.
+ * Cancelling it for this one item and paying `--rank-gap` instead moves the
+ * identity cluster left as a whole and leaves the spacing inside it, and
+ * everything after it, exactly as it was. See `--rank-slot`.
+ */
+.rank:has(+ .player-identity) {
+  width: auto;
+  min-width: var(--rank-slot);
+  margin-inline-end: calc(var(--rank-gap) - var(--row-gap, 0px));
 }
 
 /*
@@ -2422,8 +2478,12 @@ body,
    * ten points, and on a 360px phone ten points is two or three letters of the
    * only thing on the row that cannot be abbreviated. Everything on either side
    * of a gap here is a fixed-width field, so nothing else changes size.
+   *
+   * Named for the same reason `.player-row-top`'s is — the rank cancels its own
+   * share of it. See `.rank:has(+ .player-identity)`.
    */
-  gap: 6px;
+  --row-gap: 6px;
+  gap: var(--row-gap);
 }
 
 /*
