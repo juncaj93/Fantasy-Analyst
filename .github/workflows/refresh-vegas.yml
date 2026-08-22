@@ -1,0 +1,107 @@
+name: Refresh Vegas lines
+
+# Ask production to fetch this week's betting lines, once, on demand.
+#
+# The scheduled cadence is Saturday 23:00 and Sunday 15:00 UTC, which is the
+# right rhythm for a season and the wrong one for the two occasions this exists
+# for: proving a provider change actually works, and topping up before a
+# decision that will not wait for Saturday.
+#
+# It spends quota, so it goes through exactly the same gate the cron does — the
+# budget guard, the per-event cooldown and the endpoint's own rate limit all
+# apply. A refusal is reported as the answer, not as a failure: "the budget said
+# no" is the guard doing its job.
+#
+# Prints what came back — events, rows, entities spent, and where the month
+# stands — because a refresh nobody can see the result of is a refresh nobody
+# can trust.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Site to refresh (defaults to the live one)'
+        required: false
+        default: 'https://fantasy-analyst.juncaj93.workers.dev'
+
+concurrency:
+  group: refresh-vegas
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Before, so the change the refresh makes is visible rather than asserted.
+      - name: What the provider looks like now
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/setup/status" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const v = JSON.parse(s).vegas ?? {};
+              console.log('provider     :', v.provider);
+              console.log('live         :', v.live);
+              console.log('events stored:', v.events);
+              console.log('last refresh :', v.lastRefreshedAt ?? 'never');
+              console.log('budget       :', v.budget?.used, 'of', v.budget?.limit,
+                          '(' + v.budget?.state + ', source=' + v.budget?.source + ')');
+              console.log('season       :', JSON.stringify(v.season));
+              const step = (JSON.parse(s).steps ?? []).find(x => x.id === 'vegas');
+              console.log('Setup says   :', step?.state, '—', step?.summary);
+            })"
+
+      - name: Refresh
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt)
+          if [ "$login" != "200" ]; then
+            echo "::error::Could not unlock the app (HTTP $login)."
+            exit 1
+          fi
+
+          code=$(curl -s -o /tmp/result.json -w '%{http_code}' -X POST "$URL/api/vegas/refresh" \
+            -H 'content-type: application/json' -b /tmp/cookies.txt \
+            --data-binary '{}' --max-time 120)
+          echo "refresh: HTTP $code"
+          cat /tmp/result.json
+          echo
+          # 429 is the endpoint's own rate limiter answering, and a budget
+          # refusal comes back inside a 200. Both are the guards doing their
+          # job, so neither is a failure of this workflow. Anything else is.
+          case "$code" in
+            200) ;;
+            429) echo "::notice::Refused by the refresh cooldown — that is the rate limiter working, not a fault." ;;
+            *) echo "::error::The refresh call failed (HTTP $code)."; exit 1 ;;
+          esac
+
+      - name: What it looks like afterwards
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/setup/status" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const v = JSON.parse(s).vegas ?? {};
+              console.log('events stored:', v.events);
+              console.log('last refresh :', v.lastRefreshedAt ?? 'never');
+              console.log('budget       :', v.budget?.used, 'of', v.budget?.limit,
+                          '(' + v.budget?.state + ', source=' + v.budget?.source + ')');
+              console.log('by source    :', JSON.stringify(v.budget?.bySource));
+              const step = (JSON.parse(s).steps ?? []).find(x => x.id === 'vegas');
+              console.log('Setup says   :', step?.state, '—', step?.summary);
+            })"
+
+          echo
+          echo '--- where the month went ---'
+          curl -s "$URL/api/vegas/budget"
+          echo
