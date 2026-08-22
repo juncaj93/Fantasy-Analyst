@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { rankAvailablePlayers, type AvailablePlayerInput } from '../src/core/draft/engine.ts';
+import { DEFAULT_WEIGHTS, rankAvailablePlayers, type AvailablePlayerInput } from '../src/core/draft/engine.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { player } from './helpers/players.ts';
 import type { SeasonMarketKey } from '../src/core/vegas/types.ts';
@@ -134,6 +134,108 @@ describe('exactly one market-derived opinion reaches the ranking', () => {
     );
     expect(b.contribution).toBe(a.contribution);
     expect(b.score).toBe(a.score);
+  });
+});
+
+describe('the projection is bounded, not inert', () => {
+  /*
+   * Two claims that are easy to confuse, and only one of them is true.
+   *
+   * False: "the projection can never reorder the board." A second opinion that
+   * cannot move anybody is not a signal, and the whole reason to import one is
+   * that it should separate players the rest of the board cannot tell apart.
+   *
+   * True: it is bounded. It may break ties and reshuffle a tight cluster; it
+   * may not overturn a recommendation that is materially stronger on
+   * everything else. ±0.2 is the ceiling, and it is the market component's own
+   * existing weight rather than a new one.
+   */
+
+  /** Same ADP for all four, so only the projection can separate them. */
+  const clustered = (points: number[]) =>
+    backs(points.map((p) => ({ adp: 20, adpRank: 20, preseasonPoints: p })));
+
+  it('reorders a tightly clustered group', () => {
+    // Input order is best-to-worst by name; the projection is worst-to-best.
+    // If the projection did nothing, the output would come back in input order.
+    const ranked = rankAvailablePlayers(clustered([212.4, 238.7, 253.1, 292.0]), CTX);
+    expect(ranked.map((r) => r.name)).toEqual([
+      'Derrick Henry',
+      'Christian McCaffrey',
+      'Bijan Robinson',
+      'Jahmyr Gibbs',
+    ]);
+  });
+
+  it('spends at most its own weight, best projection to worst', () => {
+    /*
+     * The ceiling, measured where it is actually enforced.
+     *
+     * Deliberately *not* asserted on `total`. Separation and opportunity are
+     * second-pass components: they read the composite the first pass produced,
+     * so every first-pass component — market value and the news scores just as
+     * much as this one — echoes a little into them, and the spread between the
+     * best and worst projection here comes out around 0.47 rather than 0.40.
+     * That is the engine's existing shape, not the projection escaping. What is
+     * bounded is what this component is allowed to spend, and it is bounded
+     * here.
+     */
+    const ranked = rankAvailablePlayers(clustered([212.4, 238.7, 253.1, 292.0]), CTX);
+    const spent = ranked.map((r) => marketComponent(r).contribution);
+    expect(Math.max(...spent) - Math.min(...spent)).toBeCloseTo(
+      2 * DEFAULT_WEIGHTS.marketExpectation,
+      9,
+    );
+    for (const c of spent) {
+      expect(Math.abs(c)).toBeLessThanOrEqual(DEFAULT_WEIGHTS.marketExpectation + 1e-9);
+    }
+  });
+
+  it('cannot overturn a materially stronger recommendation', () => {
+    // Gibbs has fallen fifteen picks past his ADP and carries the worst
+    // projection on the board; the other three are priced where they are being
+    // taken and projected well. The bargain still comes out first, because the
+    // strongest possible projection is worth about four picks of ADP.
+    const ranked = rankAvailablePlayers(
+      backs([
+        { adp: 5, adpRank: 5, preseasonPoints: 212.4 },
+        { adp: 20, adpRank: 20, preseasonPoints: 253.1 },
+        { adp: 21, adpRank: 21, preseasonPoints: 280.1 },
+        { adp: 22, adpRank: 22, preseasonPoints: 292.0 },
+      ]),
+      { ...CTX, currentPick: 20, nextPick: 33 },
+    );
+    expect(ranked[0]!.name).toBe('Jahmyr Gibbs');
+    // And he is last on the projection, so it is genuinely pulling against him.
+    expect(marketComponent(ranked[0]!).contribution).toBeLessThan(0);
+  });
+
+  it('rides the weight the market component already had', () => {
+    // No new weight, and nothing else retuned to make room for one.
+    expect(DEFAULT_WEIGHTS).toEqual({
+      marketValue: 1,
+      need: 0.1,
+      scarcity: 0.2,
+      leagueFit: 0.25,
+      newsLifetime: 0.35,
+      news30: 0.2,
+      news7: 0.12,
+      survivalUrgency: 0.22,
+      marketExpectation: 0.2,
+      myGuy: 0.5,
+      avoid: 0.3,
+      tierCliff: 0.15,
+    });
+  });
+
+  it('contributes no more than the weight, on the real imported numbers', () => {
+    const ranked = rankAvailablePlayers(clustered([212.4, 238.7, 253.1, 292.0]), CTX);
+    for (const rec of ranked) {
+      const market = marketComponent(rec);
+      expect(Math.abs(market.contribution)).toBeLessThanOrEqual(
+        DEFAULT_WEIGHTS.marketExpectation + 1e-9,
+      );
+    }
   });
 });
 

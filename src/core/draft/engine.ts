@@ -106,10 +106,19 @@ export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   survivalUrgency: 0.22,
   // A second opinion on how good the player is, from people with money on it —
   // and deliberately a smaller voice than the draft market itself. At full
-  // strength this is about four picks of ADP: enough to separate two players
-  // the board rates the same, never enough to reorder the board on its own.
+  // strength this is about four picks of ADP, and the honest description of
+  // that is *bounded*, not inert: it is expected to reorder players the rest of
+  // the board rates alike, and it cannot outweigh a materially stronger
+  // recommendation. ±0.2 against roughly 3.6 of total weight is the ceiling on
+  // what this component itself spends — separation and opportunity run in a
+  // second pass over the composite, so a little of it echoes there, exactly as
+  // it does for every other first-pass component.
+  //
   // It is also scaled by coverage, so a baseline built from one market out of
-  // three moves a player less than a complete one.
+  // three moves a player less than a complete one. Where no raw season line
+  // exists, an imported preseason projection fills the same slot on the same
+  // scale — see `preseasonPoints.ts`; the ceiling is unchanged because the
+  // weight is the same one.
   marketExpectation: 0.2,
   // At full strength (★★★) this contributes 0.5 — about ten picks of ADP, the
   // "modest reach" the brief asks for and no more.
