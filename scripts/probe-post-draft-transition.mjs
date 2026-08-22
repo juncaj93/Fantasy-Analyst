@@ -299,14 +299,45 @@ const main = async () => {
     console.log(`  failed (${sleeperMatchups.status}): ${sleeperMatchups.error}`);
   }
 
-  // Weeks 1..3, so "the app picked the wrong week" is distinguishable from
-  // "Sleeper has not published a schedule".
-  head('SLEEPER matchup availability, weeks 1-3');
-  for (const w of [1, 2, 3]) {
+  // Weeks 1..4, so "the app picked the wrong week" is distinguishable from
+  // "Sleeper has not published a schedule" — and so a wrong week is visible as a
+  // wrong *opponent* rather than as an argument about an integer.
+  head('SLEEPER matchup availability and my opponent, weeks 1-4');
+  const users = await getJson(`${SLEEPER}/league/${leagueId}/users`, 'users');
+  const nameByUser = new Map(
+    users.ok && Array.isArray(users.body) ? users.body.map((u) => [u.user_id, u.display_name ?? u.username]) : [],
+  );
+  const ownerByRoster = new Map(
+    rosters.ok && Array.isArray(rosters.body) ? rosters.body.map((r) => [r.roster_id, nameByUser.get(r.owner_id) ?? '?']) : [],
+  );
+  for (const w of [1, 2, 3, 4]) {
     const r = await getJson(`${SLEEPER}/league/${leagueId}/matchups/${w}`, `matchups ${w}`);
     const rows = r.ok && Array.isArray(r.body) ? r.body : [];
     const paired = rows.filter((m) => m.matchup_id != null).length;
-    console.log(`    week ${w}: ${rows.length} row(s), ${paired} with a matchup_id`);
+    const mineRow = myRosterId == null ? null : rows.find((m) => m.roster_id === myRosterId);
+    const theirs = mineRow?.matchup_id == null
+      ? null
+      : rows.find((m) => m.matchup_id === mineRow.matchup_id && m.roster_id !== myRosterId);
+    console.log(
+      `    week ${w}: ${rows.length} row(s), ${paired} paired` +
+        `  | my opponent: roster ${theirs?.roster_id ?? '-'} (${theirs ? (ownerByRoster.get(theirs.roster_id) ?? '?') : 'none'})`,
+    );
+  }
+
+  // The app, asked for week 1 by name. If week 1 answers with a *different*
+  // opponent from the week the app chose on its own, the week it chose is wrong.
+  head(`APP /api/leagues/${leagueId}/matchup?week=1`);
+  const week1 = await getJson(`${APP}/api/leagues/${leagueId}/matchup?week=1`, 'matchup w1');
+  if (week1.ok) {
+    const m = week1.body;
+    show('week', m.week);
+    show('found', m.found);
+    show('mine', m.forecast?.teams?.mine?.name ?? '(none)');
+    show('theirs', m.forecast?.teams?.theirs?.name ?? '(none)');
+    show('mine projectedFinal', m.forecast?.teams?.mine?.projectedFinal ?? 'null');
+    show('freshness', JSON.stringify(m.forecast?.freshness ?? {}));
+  } else {
+    console.log(`  failed (${week1.status}): ${week1.error}`);
   }
 
   // ------------------------------------------------------------ the comparison
