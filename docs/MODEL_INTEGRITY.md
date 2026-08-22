@@ -425,3 +425,49 @@ Three things were considered and rejected:
   carries usage, practice and role information that the missing line would not
   have carried, so it still has something to say. It says it with lowered
   confidence and a stated reason instead.
+
+## Recency windows: findings from the stale-window correction
+
+Two facts found while correcting the derived signal's recency windows, both
+recorded here rather than acted on, because neither is a correctness defect and
+each is a product decision of its own.
+
+### The draft board's 7-day news term is inert, and has been
+
+`player_signal_cache` has never had a `recent7_items` column, so `getSignals`
+has always reconstructed `last7` with `items: 0`. `newsComponent` treats an item
+count of zero as "no evidence" — `unknown: true`, contribution exactly zero — so
+`news_7d` has never contributed anything on the draft board, whatever its weight
+says. It is live only on `GET /api/players/:id`, which aggregates from the
+ledger instead of reading the cache.
+
+`docs/DRAFT_CONTRIBUTION_MAP.md` lists `news_7d` at 0.12. That number is the
+weight it would carry if the term were populated, not a contribution the board
+has ever made. The map is accurate about intent and misleading about effect.
+
+This was left exactly as it was when the windows were corrected. Populating the
+count would switch a scoring term on and reorder the board, which is a decision
+about draft scoring rather than about dates, and nothing in the defect being
+fixed called for it. Whoever takes it up should decide deliberately whether
+seven days of news deserves a vote on a draft pick at all — the module header in
+`trades/engine.ts` argues the opposite case for drafting, that a draft is a bet
+on a season and the lifetime record is the better evidence — and should expect
+the board to move when it lands.
+
+### `refreshAllSignals` has no caller
+
+`EvidenceRepo.refreshAllSignals` rebuilds the cache for every player with
+evidence and nothing invokes it, from the app, a script, or a workflow. It is
+reachable only from a test.
+
+This stopped being load-bearing when `getSignals` began computing the recency
+windows on read: no answer depends on those stored columns any more. But
+`recent7_net`, `recent30_net` and `recent30_items` still drift from the moment
+they are written, and they are still the only record of what the windows were.
+Anything that comes to read them directly — a report, a migration, a probe —
+will read something that was true once.
+
+Two ways to settle it, neither urgent: give it a caller (a scheduled rebuild
+alongside the other daily refreshes), or stop writing time-relative columns
+altogether and let the read path own them entirely. The second is tidier and
+the larger change.

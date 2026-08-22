@@ -500,8 +500,9 @@ export class EvidenceRepo {
         `INSERT INTO player_signal_cache (
            player_id, raw_positive, raw_negative, raw_net, raw_items,
            recent7_net, recent30_net, recent30_items, season_net,
-           pending_count, mixed_count, category_breakdown_json, last_evidence_at, updated_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           pending_count, mixed_count, carried_over_items,
+           category_breakdown_json, last_evidence_at, updated_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(player_id) DO UPDATE SET
            raw_positive = excluded.raw_positive,
            raw_negative = excluded.raw_negative,
@@ -513,6 +514,7 @@ export class EvidenceRepo {
            season_net = excluded.season_net,
            pending_count = excluded.pending_count,
            mixed_count = excluded.mixed_count,
+           carried_over_items = excluded.carried_over_items,
            category_breakdown_json = excluded.category_breakdown_json,
            last_evidence_at = excluded.last_evidence_at,
            updated_at = excluded.updated_at`,
@@ -529,6 +531,7 @@ export class EvidenceRepo {
         signal.seasonToDate.net,
         signal.pendingCount,
         signal.mixedCount,
+        signal.carriedOverItems,
         toJson(signal.categoryBreakdown),
         signal.lastEvidenceAt,
         signal.updatedAt,
@@ -564,35 +567,98 @@ export class EvidenceRepo {
     return rows.results.map((r) => String(r['player_id'])).filter(Boolean);
   }
 
-  async getSignals(playerIds: string[]): Promise<Map<string, PlayerSignal>> {
+  /**
+   * The derived signal for a set of players, correct as of *now*.
+   *
+   * The time-independent parts — the lifetime record, the category breakdown,
+   * the review counts — come from the cache, which is what a cache is for. The
+   * two recency windows do not, and that is the point of this method.
+   *
+   * `recent7_net` and `recent30_net` are stored as numbers, but a recency
+   * window is not a fact about a player: it is a fact about a player *and
+   * today's date*. `refreshSignal` computes them with `now` set to the moment
+   * it runs, and it only runs on ingest, import and review — so a player whose
+   * evidence has not been touched since keeps whichever windows were true on
+   * the day his last row landed, for as long as nothing touches him again.
+   *
+   * That is not a cache going slightly out of date. It is a value that was only
+   * ever true for one day being served indefinitely: a tally imported on the
+   * 13th was still reported as "this week" on the 22nd, on the trade board, the
+   * draft board, Start/Sit and the Team roster alike, because every one of them
+   * reads this method.
+   *
+   * So the windows are recomputed here from the ledger, off the
+   * `(player_id, source_date)` index, and the stored columns are left for
+   * `refreshSignal` to keep writing — they remain a true record of what was
+   * true when they were written, and nothing reads them for a current answer.
+   */
+  async getSignals(playerIds: string[], opts: { now?: string | Date } = {}): Promise<Map<string, PlayerSignal>> {
     const out = new Map<string, PlayerSignal>();
     if (playerIds.length === 0) return out;
+
     for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
       const placeholders = batch.map(() => '?').join(',');
-      const rows = await this.db
-        .prepare(`SELECT * FROM player_signal_cache WHERE player_id IN (${placeholders})`)
-        .bind(...batch)
-        .all<Record<string, unknown>>();
-      for (const r of rows.results) {
-        out.set(String(r['player_id']), {
-          playerId: String(r['player_id']),
+      const [cached, ledger] = await Promise.all([
+        this.db
+          .prepare(`SELECT * FROM player_signal_cache WHERE player_id IN (${placeholders})`)
+          .bind(...batch)
+          .all<Record<string, unknown>>(),
+        this.db
+          .prepare(
+            `SELECT * FROM evidence_items WHERE player_id IN (${placeholders})
+               AND review_status IN ('auto_applied','accepted','corrected')`,
+          )
+          .bind(...batch)
+          .all<EvidenceRow>(),
+      ]);
+
+      const byPlayer = new Map<string, EvidenceItem[]>();
+      for (const row of ledger.results) {
+        const item = toItem(row);
+        // An override can re-file a row under a different player, and the
+        // window it lands in has to follow it.
+        const pid = item.userOverride?.playerId ?? item.playerId;
+        const list = byPlayer.get(pid);
+        if (list) list.push(item);
+        else byPlayer.set(pid, [item]);
+      }
+
+      for (const r of cached.results) {
+        const playerId = String(r['player_id']);
+        const recent = aggregatePlayerSignal(playerId, byPlayer.get(playerId) ?? [], { now: opts.now });
+        out.set(playerId, {
+          playerId,
           raw: {
             positive: Number(r['raw_positive'] ?? 0),
             negative: Number(r['raw_negative'] ?? 0),
             net: Number(r['raw_net'] ?? 0),
             items: Number(r['raw_items'] ?? 0),
           },
-          last7: { positive: 0, negative: 0, net: Number(r['recent7_net'] ?? 0), items: 0 },
-          last30: {
-            positive: 0,
-            negative: 0,
-            net: Number(r['recent30_net'] ?? 0),
-            items: Number(r['recent30_items'] ?? 0),
-          },
+          /*
+           * The 7-day window, current — but still without an item count.
+           *
+           * That zero is not an oversight and not laziness: the cache has never
+           * had a `recent7_items` column, so every cache-fed caller has always
+           * seen `items: 0` here, and `draft/engine.ts` reads exactly that to
+           * decide whether its `news_7d` component knows anything at all. An
+           * item count of zero makes the component `unknown` and worth nothing,
+           * which means the draft board's 7-day news term is, and always has
+           * been, inert.
+           *
+           * Filling it in would switch that term on and reorder the draft
+           * board. That may well be the right thing to do, but it is a decision
+           * about draft scoring rather than about dates, and nothing in the
+           * defect being fixed here calls for it. So the count stays as the
+           * board has always seen it and the change is confined to the numbers
+           * that were actually wrong.
+           */
+          last7: { ...recent.last7, items: 0 },
+          last30: recent.last30,
           seasonToDate: { positive: 0, negative: 0, net: Number(r['season_net'] ?? 0), items: 0 },
           categoryBreakdown: parseJson(r['category_breakdown_json'], {}),
           pendingCount: Number(r['pending_count'] ?? 0),
           mixedCount: Number(r['mixed_count'] ?? 0),
+          carriedOverItems: recent.carriedOverItems,
           lastEvidenceAt: (r['last_evidence_at'] as string | null) ?? null,
           updatedAt: String(r['updated_at'] ?? ''),
         });

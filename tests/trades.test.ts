@@ -44,6 +44,7 @@ const signal = (over: Partial<TradeWindows> = {}) => {
     categoryBreakdown: {},
     pendingCount: 0,
     mixedCount: 0,
+    carriedOverItems: 0,
     lastEvidenceAt: null,
     updatedAt: '2026-08-13T00:00:00.000Z',
   };

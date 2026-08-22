@@ -1,0 +1,13 @@
+-- How much of a player's record is carried over rather than observed.
+--
+-- A backfilled running tally covers several earlier issues and is carried
+-- across as one evidence row, so its source date is when the summary was
+-- imported rather than when the news happened. `aggregate.ts` therefore keeps
+-- it out of the 7-day window, and this column records how many such rows a
+-- player has so a reader can tell "quiet week" from "his whole record is a
+-- carried tally".
+--
+-- Derived, like every other column in this table: it is recomputed from the
+-- ledger by `refreshSignal`, never written by hand. Existing rows default to 0
+-- and are corrected the next time the player's signal is rebuilt.
+ALTER TABLE player_signal_cache ADD COLUMN carried_over_items INTEGER NOT NULL DEFAULT 0;

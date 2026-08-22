@@ -597,6 +597,12 @@ export interface PlayerSignal {
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
   pendingCount: number;
   mixedCount: number;
+  /**
+   * Counted items carrying a period rather than a moment — a backfilled running
+   * tally. They are kept out of `last7`, so this is what tells a zero there
+   * apart from a genuinely quiet week.
+   */
+  carriedOverItems: number;
   lastEvidenceAt: string | null;
 }
 
