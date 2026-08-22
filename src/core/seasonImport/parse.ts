@@ -46,12 +46,23 @@ export interface ParsedSnapshot {
   malformed: { rowNumber: number; reason: string; text: string }[];
   /** Provenance the canonical block carried in its own META line, if any. */
   meta: { season?: string; source?: string; capturedAt?: string };
+  /**
+   * The header labels exactly as the source wrote them.
+   *
+   * Kept because the headers are evidence in their own right: a table with a
+   * `Projections` column and a `Comps` column is a projection model's output
+   * whatever its rows say, and that has to be answerable even when the rows
+   * were never readable in the first place.
+   */
+  columns: string[];
 }
 
 export class SnapshotFormatError extends Error {
   constructor(
     message: string,
     readonly format: SnapshotFormat,
+    /** Headers seen, so a caller can say *why* the shape was wrong. */
+    readonly columns: string[] = [],
   ) {
     super(message);
     this.name = 'SnapshotFormatError';
@@ -207,7 +218,7 @@ function parseCanonical(text: string): ParsedSnapshot {
     });
   });
 
-  return { format: 'canonical', rows, malformed, meta };
+  return { format: 'canonical', rows, malformed, meta, columns: [] };
 }
 
 /** Read a delimited table by its header row. */
@@ -219,18 +230,21 @@ function parseDelimited(text: string, delimiter: string, format: SnapshotFormat)
     throw new SnapshotFormatError(
       'the pasted table has no rows under its header — copy the table including its header row',
       format,
+      grid[0] ?? [],
     );
   }
 
-  const headers = grid[0]!.map((h) => HEADER_ALIASES[headerKey(h)] ?? null);
+  const labels = grid[0]!;
+  const headers = labels.map((h) => HEADER_ALIASES[headerKey(h)] ?? null);
   const missing: string[] = [];
   if (!headers.includes('player')) missing.push('a player-name column');
   if (!headers.includes('market')) missing.push('a market column');
   if (!headers.includes('line')) missing.push('a line column');
   if (missing.length > 0) {
     throw new SnapshotFormatError(
-      `could not find ${missing.join(', ')} in the header row: ${grid[0]!.join(delimiter === '\t' ? ' | ' : delimiter)}`,
+      `could not find ${missing.join(', ')} in the header row: ${labels.join(delimiter === '\t' ? ' | ' : delimiter)}`,
       format,
+      labels,
     );
   }
 
@@ -260,7 +274,7 @@ function parseDelimited(text: string, delimiter: string, format: SnapshotFormat)
     });
   });
 
-  return { format, rows, malformed, meta: {} };
+  return { format, rows, malformed, meta: {}, columns: labels };
 }
 
 /**

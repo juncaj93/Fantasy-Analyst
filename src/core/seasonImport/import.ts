@@ -22,7 +22,22 @@
 import { normalizePosition, normalizeTeam, resolvePlayer, type MatchCandidate, type PlayerIndex } from '../identity/index.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 import { lookupSeasonMarket, looksLikeWeeklyMagnitude } from './markets.ts';
-import { parseSnapshot, type RawSnapshotRow, type SnapshotFormat } from './parse.ts';
+import { assessColumns, assessSnapshot, type PlausibilityReport } from './plausibility.ts';
+import { parseSnapshot, SnapshotFormatError, type RawSnapshotRow, type SnapshotFormat } from './parse.ts';
+
+/**
+ * Refused because of what the snapshot *is*, not how it is written.
+ *
+ * Separate from `SnapshotFormatError` because the two need opposite responses:
+ * a format problem is fixed by copying the table again, and this one is fixed
+ * by going to a different page entirely.
+ */
+export class SnapshotRejectedError extends Error {
+  constructor(readonly report: PlausibilityReport) {
+    super(report.explanation);
+    this.name = 'SnapshotRejectedError';
+  }
+}
 
 /** One row that survived validation, with its identity decision attached. */
 export interface ResolvedSnapshotRow {
@@ -54,6 +69,8 @@ export interface SnapshotImportInput {
   source: string;
   /** The date the numbers were captured, not the date they were pasted. */
   capturedAt: string;
+  /** The sportsbook behind the lines, when the source names one. */
+  book?: string | null;
 }
 
 export interface SnapshotImport {
@@ -61,6 +78,9 @@ export interface SnapshotImport {
   season: string;
   source: string;
   capturedAt: string;
+  book: string | null;
+  /** Whether this reads as a market or a model, and on what evidence. */
+  plausibility: PlausibilityReport;
   rows: ResolvedSnapshotRow[];
   rejected: RejectedRow[];
   /** Markets present in the input, as internal keys. */
@@ -140,7 +160,22 @@ export function buildSnapshotImport(
   index: PlayerIndex,
   input: SnapshotImportInput,
 ): SnapshotImport {
-  const parsed = parseSnapshot(text);
+  let parsed;
+  try {
+    parsed = parseSnapshot(text);
+  } catch (err) {
+    /*
+     * A projection export never gets as far as a row: it is one row per player
+     * with a column per stat, so it is refused for having no market column long
+     * before anything reads a line. That refusal is true and useless, so the
+     * headers get their own hearing first.
+     */
+    if (err instanceof SnapshotFormatError) {
+      const byColumns = assessColumns(err.columns);
+      if (byColumns) throw new SnapshotRejectedError(byColumns);
+    }
+    throw err;
+  }
 
   // The block's own META wins over the form when the form was left empty: the
   // assistant reply carries the provenance it was given, and retyping it is a
@@ -203,10 +238,24 @@ export function buildSnapshotImport(
     });
   }
 
+  /*
+   * The whole-snapshot judgement, made before anything is returned and on the
+   * rows as they were written rather than on what survived normalisation. A
+   * model's export is refused outright: warning about it would put the decision
+   * on somebody mid-import, and a warning in that position gets clicked past.
+   */
+  const plausibility = assessSnapshot({
+    rows: parsed.rows,
+    columns: parsed.columns,
+    book: input.book ?? null,
+  });
+  if (plausibility.verdict === 'model') throw new SnapshotRejectedError(plausibility);
+
   const markets = [...new Set(rows.map((r) => r.market))];
   const uniquePlayers = new Set(rows.map((r) => r.playerId ?? `name:${r.sourcePlayerName.toLowerCase()}`)).size;
 
   const warnings: string[] = [];
+  if (plausibility.verdict === 'unclear') warnings.push(plausibility.explanation);
   const weekly = rows.filter((r) => looksLikeWeeklyMagnitude(r.market, r.line));
   if (rows.length > 0 && weekly.length > rows.length / 2) {
     warnings.push(
@@ -221,6 +270,8 @@ export function buildSnapshotImport(
     season,
     source,
     capturedAt,
+    book: (input.book ?? '').trim() || null,
+    plausibility,
     rows,
     rejected,
     markets,

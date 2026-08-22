@@ -218,6 +218,9 @@ Josh Allen,Passing TDs,1.5`,
 Ja'Marr Chase,Receiving Yards,1425.5
 Bijan Robinson,Rushing Yards,1250.5`,
     );
-    expect(out.warnings).toEqual([]);
+    // Asserted on the magnitude warning specifically rather than on the list
+    // being empty: this fixture carries no prices and no book, so it also earns
+    // the "cannot be proven to be market data" caveat, and that one is correct.
+    expect(out.warnings.filter((w) => /weekly prop table|smaller than a whole season/i.test(w))).toEqual([]);
   });
 });
