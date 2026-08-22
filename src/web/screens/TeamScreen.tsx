@@ -519,7 +519,7 @@ export function TeamScreen({
               {roster.live ? null : (
                 <BenchSection
                   players={bench}
-                  scoreOf={(playerId) => evaluations.get(playerId)?.score ?? null}
+                  projectionOf={(playerId) => evaluations.get(playerId)?.projection ?? null}
                   summary={benchSummary}
                   onOpen={(playerId) => openPlayer(playerId, { starting: false })}
                 />
@@ -686,7 +686,7 @@ function StarterCard({
        */
       aria-label={
         `${slot.name}, recommended starter at ${slot.slot}` +
-        `${slot.score == null ? '' : `, projected ${slot.score.toFixed(1)} points`}` +
+        `${slot.projection == null ? '' : `, projected ${slot.projection.toFixed(1)} points`}` +
         `${slot.locked ? ', locked' : ''}` +
         `${!slot.alreadyStarting && !slot.locked ? ', not in your Sleeper lineup' : ''}` +
         `${player?.status ? `, ${player.status}` : ''}`
@@ -753,10 +753,17 @@ function StarterCard({
           The projection carries its weight in type rather than in a label: it is
           the only number on the row, it is tabular so eight of them line up down
           the column, and the word "projected" is in the accessible name.
+
+          It is `projection` and never `score`. The score is the comparable
+          number this slot was won with — with no market published it is a
+          handful of adjustments, and printing it here put Jalen Hurts at 3.15
+          points against a published week-one figure of 20.98. A dash is the
+          honest answer when nobody has priced him; see
+          `core/startsit/projection.ts`.
         */}
         <span className="row-value">
           <span className="proj" data-testid="starter-proj" title="Projected points">
-            {slot.score == null ? '—' : slot.score.toFixed(1)}
+            {slot.projection == null ? '—' : slot.projection.toFixed(1)}
           </span>
           <TeamLogo team={player?.team ?? ''} />
         </span>
@@ -778,7 +785,16 @@ function StarterCard({
  * badge stays, because "which position is this" is still a fact worth knowing
  * about a bench player.
  */
-function BenchCard({ player, score, onOpen }: { player: RosterPlayer; score: number | null; onOpen: () => void }) {
+function BenchCard({
+  player,
+  projection,
+  onOpen,
+}: {
+  player: RosterPlayer;
+  /** The weekly projection, never the ranking score — see `StarterCard`. */
+  projection: number | null;
+  onOpen: () => void;
+}) {
   return (
     <button
       className="player-row bench-row"
@@ -786,7 +802,7 @@ function BenchCard({ player, score, onOpen }: { player: RosterPlayer; score: num
       data-starter="false"
       data-position={(player.position ?? '').toUpperCase()}
       data-player-id={player.playerId}
-      aria-label={`${player.name}, bench${score == null ? '' : `, projected ${score.toFixed(1)} points`}`}
+      aria-label={`${player.name}, bench${projection == null ? '' : `, projected ${projection.toFixed(1)} points`}`}
       onClick={onOpen}
     >
       <div className="player-row-top">
@@ -796,7 +812,7 @@ function BenchCard({ player, score, onOpen }: { player: RosterPlayer; score: num
           <InjuryTag status={player.status} />
         </span>
         <span className="proj" title="Projected points">
-          {score == null ? '—' : score.toFixed(1)}
+          {projection == null ? '—' : projection.toFixed(1)}
         </span>
         <PositionBadge position={player.position} team={player.team} />
       </div>
@@ -820,12 +836,13 @@ function BenchCard({ player, score, onOpen }: { player: RosterPlayer; score: num
  */
 function BenchSection({
   players,
-  scoreOf,
+  projectionOf,
   summary,
   onOpen,
 }: {
   players: RosterPlayer[];
-  scoreOf: (playerId: string) => number | null;
+  /** The weekly projection for a bench player, or null when unknown. */
+  projectionOf: (playerId: string) => number | null;
   /** `1 strong alternative` / `No better option`, or nothing worth saying. */
   summary: string | null;
   onOpen: (playerId: string) => void;
@@ -851,7 +868,7 @@ function BenchSection({
       {open ? (
         <div data-testid="bench-rows">
           {players.map((p) => (
-            <BenchCard key={p.playerId} player={p} score={scoreOf(p.playerId)} onOpen={() => onOpen(p.playerId)} />
+            <BenchCard key={p.playerId} player={p} projection={projectionOf(p.playerId)} onOpen={() => onOpen(p.playerId)} />
           ))}
         </div>
       ) : null}

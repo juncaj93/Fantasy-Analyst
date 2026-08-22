@@ -7,10 +7,22 @@
  * ways: hide it too early and the user loses their board mid-draft, hide it too
  * late and a sixth of the toolbar is a museum.
  *
- * **A completed draft is not the regular season.** That is the tempting signal
- * and it is wrong — leagues finish drafting in July and then wait a month, and
- * during that month the board is still what people open the app for. So the
- * draft's own status is used only to rule the transition *out*, never in.
+ * **A completed draft is not the regular season — but it is the end of the
+ * board.** Those are two different statements and this module used to conflate
+ * them. The season phase is still preseason for the month between a July draft
+ * and week one, and every date-shaped question here still answers accordingly;
+ * what changes at the final pick is that the Draft *tab* has nothing left to
+ * decide. The board exists to help make picks, the picks are made, and a sixth
+ * of the most valuable strip of glass in the app is too much to spend on a
+ * record of them. So `phase` ignores the draft's status and `draftVisible` does
+ * not.
+ *
+ * The safe direction is unchanged and is the reason the rule is stated as it
+ * is: the tab goes only when Sleeper has *positively said* this league's draft
+ * is finished. A draft nobody has told us about, one still to open, one paused
+ * mid-round — all of them keep the board. Hiding a board a user still needs
+ * costs them their draft; showing one they have finished with costs a strip of
+ * glass.
  *
  * Sleeper's own state is preferred over any date arithmetic. `/state/nfl` says
  * which season type is running and which week it is, which is the same answer
@@ -49,6 +61,28 @@ export interface SeasonPhaseResolution {
 const IN_SEASON_STATUSES = new Set(['in_season']);
 const FINISHED_STATUSES = new Set(['complete', 'completed', 'post_season', 'postseason']);
 
+/** Sleeper draft statuses, lower-cased, that mean every pick is in. */
+const COMPLETE_DRAFT_STATUSES = new Set(['complete', 'completed', 'done']);
+
+/**
+ * Is every pick in?
+ *
+ * The lowest-level home for this, because three separate decisions turn on it
+ * and they must not be able to disagree: whether the Draft tab is still a
+ * destination (here), which lifecycle state the app is in (`season/lifecycle`),
+ * and whether the Sleeper sync should go back for the rosters the draft
+ * produced (`server/services/sleeperSync`). One of them believing `done` counts
+ * while another does not is how an app ends up announcing a finished draft over
+ * a roster it never fetched.
+ *
+ * Anything not positively a completion is false — including unknown, absent and
+ * a status Sleeper has not used before. See the module docblock for why that
+ * direction is the safe one.
+ */
+export function isDraftComplete(status: string | null | undefined): boolean {
+  return COMPLETE_DRAFT_STATUSES.has(String(status ?? '').trim().toLowerCase());
+}
+
 export function resolveSeasonPhase(input: {
   state?: NflState | null;
   league?: { season?: string | null; status?: string | null } | null;
@@ -59,6 +93,16 @@ export function resolveSeasonPhase(input: {
   const stateSeason = numeric(state?.season);
   const type = (state?.seasonType ?? '').trim().toLowerCase();
   const week = typeof state?.week === 'number' && Number.isFinite(state.week) ? state.week : null;
+  /*
+   * Whether this league's draft is finished.
+   *
+   * Read once here rather than at each return, because it modifies exactly one
+   * field — `draftVisible` — in exactly one phase. Every branch that already
+   * hides the tab hides it for a stronger reason than this and is untouched.
+   */
+  const draftDone = isDraftComplete(input.draft?.status);
+  /** Preseason with the board still worth opening. */
+  const preseasonDraftVisible = !draftDone;
 
   /*
    * A league from a season the NFL has moved past.
@@ -108,8 +152,10 @@ export function resolveSeasonPhase(input: {
     if (type === 'pre' || (type === 'regular' && (week ?? 0) < 1)) {
       return {
         phase: 'preseason',
-        draftVisible: true,
-        reason: 'the regular season has not started yet',
+        draftVisible: preseasonDraftVisible,
+        reason: draftDone
+          ? 'your draft is finished — the board has nothing left to decide'
+          : 'the regular season has not started yet',
         assumed: false,
       };
     }
@@ -128,17 +174,18 @@ export function resolveSeasonPhase(input: {
   }
 
   /*
-   * Everything else is preseason, including a finished draft.
+   * A finished draft, with nothing known about the season.
    *
-   * Named explicitly rather than left to the fall-through, because "the draft is
-   * done, so hide the board" is the mistake this module exists to not make.
+   * Still preseason — the phase is a fact about the calendar and a draft ending
+   * does not start a season. The board goes, though, and this branch is named
+   * explicitly rather than left to the fall-through so the two halves of that
+   * sentence are visible together.
    */
-  const draftStatus = (input.draft?.status ?? '').trim().toLowerCase();
-  if (draftStatus === 'complete') {
+  if (draftDone) {
     return {
       phase: 'preseason',
-      draftVisible: true,
-      reason: 'the draft is finished, but the regular season has not started',
+      draftVisible: false,
+      reason: 'your draft is finished — the board has nothing left to decide',
       assumed: false,
     };
   }

@@ -21,6 +21,7 @@ import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { normalizeMode } from '../core/startsit/mode.ts';
+import { weeklyProjection, type ProjectableEvaluation } from '../core/startsit/projection.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { normalizeName } from '../core/identity/normalize.ts';
@@ -599,13 +600,46 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * that file changing.
      */
     const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
-    const withIntelligence = <T extends { playerId: string }>(evaluations: T[]): T[] =>
+    /*
+     * The intelligence pass, and the projection.
+     *
+     * `score` stays exactly what it was — the comparable number the optimiser
+     * ranked with. `projection` is the weekly forecast, which exists only when a
+     * market does; the bench rows on the Team screen read it, and they read the
+     * same function the starters' slots and the Matchup screen read. See
+     * `core/startsit/projection.ts` for why printing the score instead was
+     * showing Jalen Hurts at 3.15 points.
+     */
+    const withIntelligence = <T extends { playerId: string } & ProjectableEvaluation>(
+      evaluations: T[],
+    ): (T & { projection: number | null })[] =>
       evaluations.map((evaluation) => {
         const extra = intelligence.get(evaluation.playerId);
-        return extra ? { ...evaluation, ...extra } : evaluation;
+        return { ...evaluation, ...(extra ?? {}), projection: weeklyProjection(evaluation) };
       });
 
     const unknownPlayers = mine.playerIds.length - inputs.length;
+    /*
+     * A column of dashes should say why it is a column of dashes.
+     *
+     * The projections go blank exactly when no betting market has been read for
+     * anybody — a deployment with no odds provider configured, or a week the
+     * provider has not priced yet. Without a sentence the screen reads as
+     * broken; with one it reads as honest, which is what it is. Said only when
+     * *nothing* is projectable, because a note beside a mostly-full column would
+     * be noise.
+     */
+    const filledSlots = recommendation.slots.filter((s) => s.playerId);
+    const projectable = filledSlots.filter((s) => s.projection != null);
+    const notes = [...recommendation.notes];
+    if (filledSlots.length > 0 && projectable.length === 0) {
+      notes.push(
+        'No betting market has been read for these players yet, so there is no projection to show — the lineup below is still ranked on everything else that is known.',
+      );
+    }
+    if (unknownPlayers > 0) {
+      notes.push(`${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`);
+    }
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
@@ -622,9 +656,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       starters: withIntelligence(recommendation.starters),
       bench: withIntelligence(recommendation.bench),
       undecidable: withIntelligence(recommendation.undecidable),
-      notes: unknownPlayers > 0
-        ? [...recommendation.notes, `${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`]
-        : recommendation.notes,
+      notes,
     });
   });
 

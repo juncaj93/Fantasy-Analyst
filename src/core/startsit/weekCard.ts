@@ -35,6 +35,8 @@
  * rather than one per side of the wire.
  */
 
+import { weeklyProjection } from './projection.ts';
+
 /** A labelled line of the card. The value is already formatted for reading. */
 export interface WeeklyLine {
   key: string;
@@ -99,6 +101,12 @@ export interface WeeklyEvaluationLike {
     coverage: number;
     contributions?: { market: string; line: number | null; points: number; detail: string }[];
   };
+  /**
+   * The scored components, so the card can report a projection rather than the
+   * ranking score. See `projection.ts`: the two are the same number only when a
+   * market exists, and the card prints the word "Proj".
+   */
+  components?: { key: string; value: number; unknown: boolean }[];
   role?: { trend: string; label: string; detail: string; games: number };
   usage?: { display: string; unknown: boolean };
   matchup?: { display: string; unknown: boolean; rating: string };
@@ -249,7 +257,15 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
     team: evaluation.team,
     headline: headlineFor(evaluation, context, locked),
     confidence: evaluation.confidence,
-    score: evaluation.score,
+    /*
+     * The projection, not the ranking score — the card prints it under "Proj".
+     *
+     * `headlineFor` below still reads `evaluation.score`, and correctly: "not
+     * enough data to rank him" is a question about the comparison, and a player
+     * can be perfectly rankable against his own bench while nobody has published
+     * a market that would make a projection of him honest.
+     */
+    score: weeklyProjection(evaluation),
     opponent: evaluation.opponent ?? null,
     lines,
     props,

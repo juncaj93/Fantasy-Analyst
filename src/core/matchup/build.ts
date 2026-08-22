@@ -48,6 +48,7 @@ import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY } from '../slee
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
+import { weeklyProjection } from '../startsit/projection.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
 import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
@@ -436,7 +437,7 @@ function toPlayer(
     slot,
     starting,
     side,
-    projection: activeProjection(evaluation),
+    projection: weeklyProjection(evaluation),
     actual: Number.isFinite(actual) ? actual : 0,
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',
@@ -446,41 +447,14 @@ function toPlayer(
 }
 
 /**
- * The engine's score with the availability component taken back out.
+ * The projection, under the name this module has always exported it by.
  *
- * The one place §3's "do not double-count correlated signals" is enforced for
- * this feature. The start/sit score already prices a Questionable designation
- * as points off; the matchup model prices the same fact as a probability of not
- * playing. Both would be the same designation charged twice, and the version
- * that survives is the mixture — because a distribution with a real inactive
- * branch says something a shaved mean cannot: that his floor is zero.
- *
- * A player the engine could not score stays null. Not zero: an unscorable
- * player is a gap in coverage and a player projected zero is a prediction, and
- * the model treats them completely differently.
+ * The definition moved to `core/startsit/projection.ts` when the Team screen
+ * turned out to need exactly the same rule and was reading the raw start/sit
+ * score instead — printing a projection built entirely of adjustments for
+ * players nobody had priced. One definition, one number, both screens.
  */
-export function activeProjection(evaluation: StartSitEvaluation | undefined): number | null {
-  if (!evaluation || evaluation.score == null) return null;
-  /*
-   * No market expectation, no projection.
-   *
-   * The start/sit score is the Vegas expectation plus a handful of bounded
-   * adjustments, and the engine will hand back a non-null score when *any*
-   * component is known — including when the only thing known is that the player
-   * is Doubtful. Subtracting that penalty back out then produces a projection of
-   * about zero for somebody nobody has priced, which reads on a card as "he is
-   * expected to score nothing" when the truth is "we do not know".
-   *
-   * The adjustments alone are worth a few points either way and are not a
-   * forecast of a week. So the market's number is the thing that makes a
-   * projection exist, and its absence is reported as absent — counted in the
-   * freshness line, and enough of them degrade the forecast entirely.
-   */
-  if (evaluation.expectation.points == null) return null;
-  const availability = evaluation.components.find((c) => c.key === 'status');
-  const penalty = availability && !availability.unknown ? availability.value : 0;
-  return Math.max(0, Math.round((evaluation.score - penalty) * 100) / 100);
-}
+export { weeklyProjection as activeProjection };
 
 /** `9-5`, when Sleeper's roster settings carry a record. */
 function recordOf(settings: Record<string, unknown> | null | undefined): string | null {

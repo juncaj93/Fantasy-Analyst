@@ -333,9 +333,12 @@ describe('the eight lifecycle states', () => {
 
     const done = resolveLifecycle({ state: state('pre', 0), league: { season: '2027' }, draft: { status: 'complete' } });
     expect(done.lifecycle).toBe('post_draft');
-    // A finished draft is not the regular season: the board is still what
-    // people open the app for during the month afterwards.
-    expect(done.draftVisible).toBe(true);
+    // A finished draft is still not the regular season — the phase says so —
+    // but the board has nothing left to decide and leaves the bar with the
+    // final pick rather than with week one.
+    expect(done.phase).toBe('preseason');
+    expect(done.draftVisible).toBe(false);
+    expect(open.draftVisible).toBe(true);
   });
 
   it('reaches the regular season and hides the board', () => {
@@ -400,8 +403,15 @@ describe('the eight lifecycle states', () => {
     });
     expect(done.lifecycle).toBe('post_draft');
     expect(done.matchupVisible).toBe(true);
-    // Both, for the one stretch of the year the bar carries seven.
-    expect(done.draftVisible).toBe(true);
+    /*
+     * The seasonal slot turns over on the same event.
+     *
+     * Draft and Waivers share one slot and the toolbar picks between them on
+     * `draftVisible` alone, so a finished draft hands that slot to Waivers at
+     * the same moment it opens Matchup — the wire is now the only way the
+     * roster changes, which is exactly when Waivers starts being useful.
+     */
+    expect(done.draftVisible).toBe(false);
   });
 
   it('keeps Matchup through the season and drops it when the league is over', () => {

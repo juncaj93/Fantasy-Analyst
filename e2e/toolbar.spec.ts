@@ -595,9 +595,12 @@ test.describe('reduced motion', () => {
 /**
  * Matchup, once the draft is finished.
  *
- * The third seasonal destination, and the one that makes the bar carry seven
- * for the only stretch of the year it ever does — between a draft finishing and
- * week one, when Draft has not left yet and Matchup has already arrived.
+ * The third seasonal destination, and the one that takes the bar to seven.
+ *
+ * All three seasonal slots settle on the same event. Draft leaves at the final
+ * pick — the board exists to help make picks and the picks are made — Waivers
+ * takes the slot it shares with it, and Matchup arrives because there is at
+ * last a team to project. Six becomes seven and stays there.
  *
  * Seven is the number this bar was explicitly built not to wrap at, so the two
  * things asserted here are the ones that would break: no label goes to a second
@@ -606,7 +609,15 @@ test.describe('reduced motion', () => {
  * suite at four of them.
  */
 test.describe('Matchup, once the draft is finished', () => {
-  /** Answer the overview as if the draft were complete and week one pending. */
+  /**
+   * Answer the overview as if the draft were complete and week one pending.
+   *
+   * Both halves are overridden, and they have to be: the toolbar reads
+   * `season.draftVisible` for the Draft/Waivers slot and `lifecycle` for
+   * Matchup, so a fixture that moved only one of them would describe a bar the
+   * server can no longer produce. They agree by construction in
+   * `core/sleeper/phase.ts`; this keeps the fixture honest about that.
+   */
   async function postDraft(page: Page) {
     await page.route('**/api/overview', async (route) => {
       const response = await route.fetch();
@@ -614,10 +625,16 @@ test.describe('Matchup, once the draft is finished', () => {
       await route.fulfill({
         json: {
           ...body,
+          season: {
+            ...(body.season ?? {}),
+            phase: 'preseason',
+            draftVisible: false,
+            reason: 'your draft is finished — the board has nothing left to decide',
+          },
           lifecycle: {
             ...(body.lifecycle ?? {}),
             lifecycle: 'post_draft',
-            draftVisible: true,
+            draftVisible: false,
             matchupVisible: true,
           },
         },
@@ -631,7 +648,7 @@ test.describe('Matchup, once the draft is finished', () => {
     await expect(page.getByTestId('tab-matchup')).toHaveCount(0);
   });
 
-  test('arrives beside Team once the draft is complete', async ({ page }) => {
+  test('arrives beside Team once the draft is complete, and Draft leaves with it', async ({ page }) => {
     await postDraft(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
@@ -645,7 +662,13 @@ test.describe('Matchup, once the draft is finished', () => {
           .join(''),
       ),
     );
-    expect(labels).toEqual(['Draft', 'Team', 'Matchup', 'Trades', 'Players', 'Review', 'Setup']);
+    /*
+     * Three things happen on the final pick and this is all of them: Draft
+     * leaves, Waivers takes its slot, and Matchup arrives. The bar still carries
+     * seven, which is why the layout assertions below are unchanged.
+     */
+    expect(labels).toEqual(['Team', 'Matchup', 'Waivers', 'Trades', 'Players', 'Review', 'Setup']);
+    await expect(page.getByTestId('tab-draft')).toHaveCount(0);
   });
 
   test('carries seven without wrapping a label or shrinking a target', async ({ page }) => {
@@ -653,7 +676,7 @@ test.describe('Matchup, once the draft is finished', () => {
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
 
-    for (const tab of ['draft', 'team', 'matchup', 'trades', 'players', 'review', 'setup'] as const) {
+    for (const tab of ['team', 'matchup', 'waivers', 'trades', 'players', 'review', 'setup'] as const) {
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} is ${box.height}px tall`).toBeGreaterThanOrEqual(44);
       expect(box.width, `${tab} is ${box.width}px wide`).toBeGreaterThanOrEqual(44);
@@ -702,8 +725,10 @@ test.describe('Matchup, once the draft is finished', () => {
     const expected = bar.viewportWidth <= 374 ? 52 : 56;
     expect(bar.height, `a seven-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(expected);
 
-    // The padding is where it came from, and the target is not.
-    for (const tab of ['draft', 'matchup', 'setup'] as const) {
+    // The padding is where it came from, and the target is not. Sampled at both
+    // ends of the bar and in the middle, which is where a seventh destination
+    // would show up if it were being paid for out of the targets.
+    for (const tab of ['team', 'matchup', 'setup'] as const) {
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} gave up a fingertip`).toBeGreaterThanOrEqual(44);
     }

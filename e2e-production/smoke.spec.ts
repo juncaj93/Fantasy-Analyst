@@ -101,6 +101,27 @@ async function expectedTabs(page: Page): Promise<readonly Tab[]> {
 }
 
 /**
+ * Skip when this deployment has no draft board to reach.
+ *
+ * Draft leaves the bar the moment this league's draft completes — the board
+ * exists to help make picks and the picks are made — and everything below that
+ * reaches the board reaches it by tapping that destination. So these checks are
+ * real for as long as there is a draft to read and honestly inapplicable
+ * afterwards, which is a skip rather than a failure.
+ *
+ * Stated once here rather than inline at each call, because there are fourteen
+ * of them and thirteen were missing it: this file is not run by CI, so the
+ * first thing that would have reported the omission is production going red
+ * minutes after a merge. That has happened twice before, for exactly this
+ * reason.
+ */
+async function requireDraftBoard(page: Page): Promise<void> {
+  const tabs = await expectedTabs(page);
+  test.skip(!tabs.includes('draft'), 'this league has finished drafting, so the board has left the bar');
+}
+
+
+/**
  * Wait for a list to answer before deciding it is empty.
  *
  * These tests skip themselves when a deployment has no league connected, which
@@ -269,6 +290,7 @@ test.describe('the deployed app', () => {
    */
   test('Draft opens with a search button beside the filters, not a search row', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
 
     const controls = page.getByTestId('draft-search-controls');
@@ -329,6 +351,7 @@ test.describe('the deployed app', () => {
    */
   test('the draft board reads Score · ADP · DOG · Next as market deltas', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
 
     const rows = page.getByTestId('recommendation-row');
@@ -374,6 +397,7 @@ test.describe('the deployed app', () => {
    */
   test('the queue keeps its own order under every sort', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -432,6 +456,7 @@ test.describe('the deployed app', () => {
 
   test('the board starts high on the page and shows several players', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
     const count = await settled(page, 'recommendation-row');
@@ -460,6 +485,7 @@ test.describe('the deployed app', () => {
    */
   test('a tier-cliff warning costs its card no height', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -499,6 +525,7 @@ test.describe('the deployed app', () => {
 
   test('a player card opens in place and closes again', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
@@ -686,6 +713,7 @@ test.describe('the deployed app', () => {
 
   test('the board can be searched, and the search can be cleared', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
 
     const rows = page.getByTestId('recommendation-row');
@@ -734,6 +762,7 @@ test.describe('the deployed app', () => {
    */
   test('never states an injury total that contradicts games played', async ({ page, request }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
@@ -1297,6 +1326,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     // The app does not land on Draft, and a test that looked for rows without
     // going there would skip itself on every run and report nothing.
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -1353,6 +1383,7 @@ test.describe('the decision intelligence', () => {
    */
   test('Score, ADP and DOG reorder the deployed board without touching a number', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -1418,6 +1449,7 @@ test.describe('the decision intelligence', () => {
    */
   test('carries market context on a quarterback, a back, a receiver and a tight end', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -1554,6 +1586,7 @@ test.describe('the decision intelligence', () => {
    */
   test('never draws a lower Score above a higher one, at any position', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
@@ -1625,6 +1658,7 @@ test.describe('the decision intelligence', () => {
    */
   test('does not report late-round survival as a certainty', async ({ page }) => {
     await page.goto('/');
+    await requireDraftBoard(page);
     await open(page, 'draft');
     test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
