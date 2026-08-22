@@ -471,3 +471,39 @@ Two ways to settle it, neither urgent: give it a caller (a scheduled rebuild
 alongside the other daily refreshes), or stop writing time-relative columns
 altogether and let the read path own them entirely. The second is tidier and
 the larger change.
+
+### Three trade rows explain themselves only in the negative
+
+`trades/engine.ts:explain` builds a reasons list and a counterpoints list, and
+there is one shape of player for whom every branch lands in the second: a
+30-day net of exactly zero with a non-zero week. The opening branch files "nothing
+in the last 30 days" as a counterpoint; the week branch compares its sign
+against `Math.sign(0)`, never matches, and files "this week points the other
+way"; the lifetime branch compares against the same zero and files itself as
+disagreeing too. The row survives `rankTrades` because its 7-day window is not
+empty, so it reaches the board carrying three objections and no case.
+
+Live on 2026-08-22 this was Jameson Williams, Kyler Murray and Patrick Mahomes.
+The verdict on each is `hold_mixed`, which is honest, and the counterpoints are
+individually true — a player really can have a month that nets out while the
+week moves. What is wrong is only that the card has no sentence saying so, and
+"points the other way" is a strange thing to say about a zero.
+
+It predates the recency work and was not touched by it. Whoever picks it up
+should decide what a net-zero month deserves to say for itself, rather than
+adding a reason for the sake of symmetry.
+
+### The trade-board probe reports success it did not have
+
+`scripts/probe-trade-board.mjs` prints `all N rows carry an explanation`
+unconditionally, immediately after the loop that may have just printed a `FAIL`
+line for each row without one. The exit code is right — `failures` is counted
+and the process exits 1 — so the workflow does go red, and the failures are
+listed directly above. But a reader skimming the tail of the log is told the
+check passed by the last line about it.
+
+The same file also prints an `ok` line for the Trade-target ordering sweep
+outside the loop that checks it. Both are reporting bugs in the audit tooling
+rather than in the app, and both make a green-looking log less trustworthy than
+the exit status. Worth fixing before the probe is used as evidence by anyone who
+did not write it.
