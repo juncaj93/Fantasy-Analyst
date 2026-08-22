@@ -1,0 +1,117 @@
+name: Re-read the selected league from Sleeper
+
+# Make the app catch up with Sleeper now, through its own endpoints.
+#
+# The app keeps itself level with Sleeper on its own — a draft sync brings the
+# rosters a finished draft produced, and pulling down on Team re-reads the whole
+# league — so this is not part of any normal day. It exists for the two moments
+# when somebody needs that to happen without a phone in their hand: verifying a
+# deploy that changed how the app syncs, and recovering after an outage that
+# lasted through a lifecycle change.
+#
+# **It calls the same two endpoints the app itself calls**, in the same order,
+# with no privileged access of any kind: `/api/drafts/:id/sync` is exactly what
+# the Draft screen posts when it mounts, and `/api/leagues/:id/sync` is what the
+# pull-to-refresh on Team reaches. Nothing here touches the database directly,
+# names a league, or writes a roster — the ids come from the app's own status,
+# so this is as true of whichever league is selected next season as it is today.
+#
+# It prints what the roster looked like before and after, which is the only
+# reason to run it rather than simply waiting.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Which deployment to re-sync'
+        required: false
+        default: 'https://fantasy-analyst.juncaj93.workers.dev'
+
+concurrency:
+  group: resync-league
+  cancel-in-progress: false
+
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+    env:
+      URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Ask the app which league and draft it is looking at
+        id: ids
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/setup/status" -o /tmp/status.json
+          node -e "
+            const fs = require('fs');
+            let s; try { s = JSON.parse(fs.readFileSync('/tmp/status.json','utf8')); } catch {
+              console.log('::error::the app did not return a readable status'); process.exit(1);
+            }
+            if (!s.league?.id) { console.log('::error::no league is selected'); process.exit(1); }
+            console.log('league:', s.league.name, '(' + s.league.id + ')', '| draft:', s.league.draftId ?? '(none)');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              'league=' + s.league.id + '\ndraft=' + (s.league.draftId ?? '') + '\n');
+          "
+
+      - name: What the Team screen says now
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/leagues/${{ steps.ids.outputs.league }}/roster" -o /tmp/before.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/before.json','utf8'));
+            console.log('  found:', r.found, '| live:', r.live,
+                        '| starters:', (r.starters||[]).length,
+                        '| bench:', (r.bench||[]).length,
+                        '| drafted:', (r.drafted||[]).length);
+          "
+
+      - name: Unlock, then ask the app to sync — the same calls the app makes
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+          DRAFT: ${{ steps.ids.outputs.draft }}
+          LEAGUE: ${{ steps.ids.outputs.league }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/c.txt)
+          [ "$login" = "200" ] || { echo "::error::could not unlock ($login)"; exit 1; }
+
+          if [ -n "$DRAFT" ]; then
+            echo "=== POST /api/drafts/\$DRAFT/sync — what the Draft screen posts on mount ==="
+            curl -s -X POST "$URL/api/drafts/$DRAFT/sync" -b /tmp/c.txt -o /tmp/draft.json
+            node -e "
+              const r = JSON.parse(require('fs').readFileSync('/tmp/draft.json','utf8'));
+              if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+              console.log('  status:', r.status, '| picks:', r.picks,
+                          '| rosters adopted:', r.rostersAdopted);
+            "
+          fi
+
+          echo "=== POST /api/leagues/\$LEAGUE/sync — what pull-to-refresh reaches ==="
+          curl -s -X POST "$URL/api/leagues/$LEAGUE/sync" -b /tmp/c.txt -o /tmp/league.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/league.json','utf8'));
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+            console.log('  rosters:', r.rosters, '| drafts:', r.drafts);
+          "
+
+      - name: What the Team screen says now
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/leagues/${{ steps.ids.outputs.league }}/roster" -o /tmp/after.json
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/after.json','utf8'));
+            console.log('  found:', r.found, '| live:', r.live,
+                        '| starters:', (r.starters||[]).length,
+                        '| bench:', (r.bench||[]).length,
+                        '| drafted:', (r.drafted||[]).length);
+            for (const p of (r.starters||[]).slice(0, 12)) {
+              console.log('   ', p.position, p.name);
+            }
+          "
