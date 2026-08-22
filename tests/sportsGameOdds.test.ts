@@ -9,7 +9,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { SportsGameOddsProvider } from '../src/core/vegas/sportsGameOddsProvider.ts';
+import { providerTeamId, SportsGameOddsProvider } from '../src/core/vegas/sportsGameOddsProvider.ts';
+import { NFL_TEAMS } from '../src/core/nfl/teams.ts';
 import { VegasProviderError } from '../src/core/vegas/types.ts';
 
 /** One quote, in the provider's own shape. */
@@ -261,5 +262,68 @@ describe('failures are named', () => {
     await provider.getUpcomingNFLGames();
     expect(provider.getQuotaStatus().remaining).toBe(2431);
     expect(provider.getQuotaStatus().lastRequestAt).toBeTruthy();
+  });
+});
+
+describe('team ids are translated, not passed through', () => {
+  /*
+   * The bug this suite exists for: the refresh service collects team codes off
+   * the user's rostered players, which are Sleeper's, and the provider's filter
+   * only answers to its own. `teamID=SF` returns 200 with an empty list —
+   * measured against the live API — which every layer above reads as "no
+   * fixtures", and which is billed an entity all the same.
+   */
+  it('sends the provider its own id for a Sleeper code', async () => {
+    const { provider, calls } = providerFor({ data: [EVENT] });
+    await provider.getPropsForTeams(['SF']);
+    expect(calls[0]).toContain('teamID=SAN_FRANCISCO_49ERS_NFL');
+    expect(calls[0]).not.toContain('teamID=SF&');
+  });
+
+  it('keys the result by the code the caller asked with', async () => {
+    // The caller holds Sleeper codes and nothing else; handing back the
+    // provider's id would break the mapping from a rostered player to an event.
+    const { provider } = providerFor({ data: [EVENT] });
+    const result = await provider.getPropsForTeams(['SF']);
+    expect(result.results[0]?.teamId).toBe('SF');
+  });
+
+  it('covers all thirty-two clubs the app knows about', async () => {
+    // A gap here is invisible in production: those players simply never get an
+    // event, which looks exactly like a bye.
+    const codes = NFL_TEAMS.map((t) => t.code);
+    expect(codes).toHaveLength(32);
+    for (const code of codes) {
+      expect(providerTeamId(code), `no provider id for ${code}`).toMatch(/_NFL$/);
+    }
+  });
+
+  it('knows the one code the two vocabularies disagree on', () => {
+    // Sleeper says LAR, the provider says LA. This single exception is why the
+    // mapping is a table rather than a naming rule.
+    expect(providerTeamId('LAR')).toBe('LOS_ANGELES_RAMS_NFL');
+    expect(providerTeamId('LAC')).toBe('LOS_ANGELES_CHARGERS_NFL');
+  });
+
+  it('passes an id that is already the provider\'s through untouched', () => {
+    expect(providerTeamId('SAN_FRANCISCO_49ERS_NFL')).toBe('SAN_FRANCISCO_49ERS_NFL');
+  });
+
+  it('reports an unplaceable code instead of spending an entity on it', async () => {
+    const { provider, calls } = providerFor({ data: [EVENT] });
+    const result = await provider.getPropsForTeams(['SF', 'XXX']);
+    // One request, not two: the unknown code is never sent, because sending it
+    // would cost a billed entity to be told nothing.
+    expect(calls).toHaveLength(1);
+    expect(result.requests).toBe(1);
+    expect(result.unmapped).toEqual(['XXX']);
+  });
+
+  it('does not silently drop a team it could not place', async () => {
+    const { provider } = providerFor({ data: [] });
+    const result = await provider.getPropsForTeams(['NOT_A_TEAM']);
+    expect(result.results).toHaveLength(0);
+    // The distinction that matters: nothing came back AND we never asked.
+    expect(result.unmapped).toEqual(['NOT_A_TEAM']);
   });
 });

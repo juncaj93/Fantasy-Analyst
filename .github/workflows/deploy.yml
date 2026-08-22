@@ -126,6 +126,29 @@ jobs:
           # Piped in, never echoed. Overwrites cleanly on every run.
           printf '%s' "${{ secrets.APP_PASSPHRASE }}" | npx wrangler secret put APP_PASSPHRASE
 
+      # The odds provider's key, on the same principle as the passphrase: a
+      # deployment should not need anyone to open a terminal.
+      #
+      # `wrangler.toml` selects the provider and this makes its key reachable.
+      # Without both, the Worker builds a provider that reports itself
+      # unconfigured — which Setup now says plainly, but which is a live site
+      # fetching nothing, so it is worth not shipping in the first place.
+      #
+      # Skipped rather than failed when the secret is absent: a fork or a fresh
+      # clone deploying with VEGAS_PROVIDER = "mock" needs no key, and a deploy
+      # that refused for the want of one would be refusing to do the job it was
+      # asked to do.
+      - name: Store the odds provider key
+        run: |
+          set -uo pipefail
+          if [ -z "${{ secrets.SPORTSGAMEODDS_API_KEY }}" ]; then
+            echo "::warning::SPORTSGAMEODDS_API_KEY is not set, so no odds key was published. If wrangler.toml selects sportsgameodds, Setup will report the key as missing."
+            exit 0
+          fi
+          # Piped in, never echoed. Overwrites cleanly on every run.
+          printf '%s' "${{ secrets.SPORTSGAMEODDS_API_KEY }}" | npx wrangler secret put SPORTSGAMEODDS_API_KEY
+          echo "Odds provider key published to the Worker."
+
       - name: Check the deployed site actually works
         id: verify
         run: |

@@ -16,9 +16,16 @@
  *     five fields are also present on the quote itself;
  *   - the line is `bookOverUnder` and the price is `bookOdds`, both strings,
  *     with `fair*` equivalents as the provider's own de-vigged view;
- *   - `byBookmaker` is empty on the free plan, so a quote is one consensus
- *     number rather than a spread of books. That is reported honestly as a
- *     single book rather than dressed up as agreement between several.
+ *   - `byBookmaker` was empty on the free plan when this adapter was written,
+ *     and is not any more: an August 2026 probe of regular-season fixtures
+ *     returned named books (fanduel, draftkings, caesars) on many quotes. The
+ *     adapter still reports one book, deliberately — `bookOverUnder` is the
+ *     provider's own consensus and using it understates how many opinions are
+ *     behind a line, which is the safe direction to be wrong in. Reading the
+ *     per-book spread is a real improvement and a real change to what
+ *     `bookCount` and `consensusMethod` mean, so it is its own piece of work;
+ *   - the team filter answers only to this provider's team ids, never to
+ *     Sleeper's codes. See `PROVIDER_TEAM_IDS`.
  *
  * The key is read from the worker environment and never leaves the server.
  */
@@ -64,13 +71,86 @@ const INBOUND_MARKETS: Record<string, MarketKey> = {
 const GAME_ENTITIES = new Set(['all', 'side1', 'side2', 'home', 'away']);
 
 /**
+ * Sleeper's team code -> this provider's team id.
+ *
+ * The rest of the app speaks Sleeper, because Sleeper is the source of truth
+ * for who is on the roster. This provider speaks `SAN_FRANCISCO_49ERS_NFL`, and
+ * its `teamID` filter matches on nothing else: `teamID=SF` answers 200 with an
+ * empty list, which is indistinguishable from "no fixtures this week" at every
+ * layer above this one — and is still billed one entity. That is precisely the
+ * kind of silent mismatch this adapter's header exists to warn about, so the
+ * translation lives here, where the vendor's vocabulary is already allowed.
+ *
+ * Taken from the provider's own `/v2/teams?leagueID=NFL` rather than derived by
+ * upshouting a club name, because a naming rule inferred from a sample is a
+ * guess and this is a fact. `scripts/probe-sgo-team-table.mjs` prints it; the
+ * read costs 34 entities, which is why the answer is a literal here rather than
+ * a lookup the app repeats.
+ *
+ * Thirty-one of the thirty-two codes are identical in both vocabularies. The
+ * Rams are the exception — Sleeper says `LAR`, the provider says `LA` — and one
+ * exception is the whole reason this is a table and not a `+ '_NFL'`.
+ */
+const PROVIDER_TEAM_IDS: Record<string, string> = {
+  ARI: 'ARIZONA_CARDINALS_NFL',
+  ATL: 'ATLANTA_FALCONS_NFL',
+  BAL: 'BALTIMORE_RAVENS_NFL',
+  BUF: 'BUFFALO_BILLS_NFL',
+  CAR: 'CAROLINA_PANTHERS_NFL',
+  CHI: 'CHICAGO_BEARS_NFL',
+  CIN: 'CINCINNATI_BENGALS_NFL',
+  CLE: 'CLEVELAND_BROWNS_NFL',
+  DAL: 'DALLAS_COWBOYS_NFL',
+  DEN: 'DENVER_BRONCOS_NFL',
+  DET: 'DETROIT_LIONS_NFL',
+  GB: 'GREEN_BAY_PACKERS_NFL',
+  HOU: 'HOUSTON_TEXANS_NFL',
+  IND: 'INDIANAPOLIS_COLTS_NFL',
+  JAX: 'JACKSONVILLE_JAGUARS_NFL',
+  KC: 'KANSAS_CITY_CHIEFS_NFL',
+  LAC: 'LOS_ANGELES_CHARGERS_NFL',
+  LAR: 'LOS_ANGELES_RAMS_NFL',
+  LV: 'LAS_VEGAS_RAIDERS_NFL',
+  MIA: 'MIAMI_DOLPHINS_NFL',
+  MIN: 'MINNESOTA_VIKINGS_NFL',
+  NE: 'NEW_ENGLAND_PATRIOTS_NFL',
+  NO: 'NEW_ORLEANS_SAINTS_NFL',
+  NYG: 'NEW_YORK_GIANTS_NFL',
+  NYJ: 'NEW_YORK_JETS_NFL',
+  PHI: 'PHILADELPHIA_EAGLES_NFL',
+  PIT: 'PITTSBURGH_STEELERS_NFL',
+  SEA: 'SEATTLE_SEAHAWKS_NFL',
+  SF: 'SAN_FRANCISCO_49ERS_NFL',
+  TB: 'TAMPA_BAY_BUCCANEERS_NFL',
+  TEN: 'TENNESSEE_TITANS_NFL',
+  WAS: 'WASHINGTON_COMMANDERS_NFL',
+};
+
+/**
+ * The provider's id for a team, from whichever vocabulary the caller had.
+ *
+ * A caller that already holds a provider id — a stored event, a retry — gets it
+ * back untouched, so this is safe to apply to anything. A code it cannot place
+ * returns null rather than a guess: an unrecognised code sent as a filter costs
+ * an entity and returns nothing, which is worse than not asking.
+ */
+export function providerTeamId(team: string | null | undefined): string | null {
+  const raw = (team ?? '').trim();
+  if (!raw) return null;
+  if (raw.toUpperCase().endsWith('_NFL')) return raw.toUpperCase();
+  return PROVIDER_TEAM_IDS[raw.toUpperCase()] ?? null;
+}
+
+/**
  * Their season-long `statID` -> our season market key.
  *
  * Written from the same source as the weekly map — the live API — and none of
  * these has ever been seen in a response. That is deliberate: the provider's
- * own market catalogue (`/v2/markets?leagueID=NFL`) lists 148 active markets
- * across periods `game`, `1h`, `2h`, `1q`–`4q` and `reg`, and not one season
- * period among them, so there is currently nothing to match. The names follow
+ * own market catalogue (`/v2/markets?leagueID=NFL`) listed 148 active markets
+ * when this was written and lists 344 as of August 2026, across periods `game`,
+ * `1h`, `2h`, `1q`–`4q` and `reg` — and still not one season period among them.
+ * The catalogue growing is more ways to bet on a game, not the first way to bet
+ * on a season, so there is still nothing here to match. The names follow
  * the catalogue's own scheme, so if a season period ever appears this map is
  * where it lands, and until then `getSeasonPlayerMarkets` returns an empty set
  * with a reason rather than an error.
@@ -264,8 +344,10 @@ export class SportsGameOddsProvider implements VegasProvider {
         // The provider quotes each side separately and this row is the over, so
         // the under price is genuinely absent rather than zero.
         underPrice: null,
-        // `byBookmaker` is empty on the free plan: this is the provider's own
-        // consensus, and calling it anything else would overstate it.
+        // The provider's own consensus number, called one book because that is
+        // what it is. `byBookmaker` does now carry named books on many quotes;
+        // until their spread is actually read, one is the honest count — it
+        // understates the agreement behind a line rather than inventing it.
         book: this.name,
       });
     }
@@ -307,14 +389,30 @@ export class SportsGameOddsProvider implements VegasProvider {
     const maxEvents = opts.maxEvents ?? 12;
 
     const results: { teamId: string; set: RawPropSet }[] = [];
+    const unmapped: string[] = [];
     const seen = new Set<string>();
     let requests = 0;
     let entities = 0;
 
     for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
       if (results.length >= maxEvents) break;
+
+      /*
+       * Callers speak Sleeper; the filter only answers to this provider's ids.
+       *
+       * A code that cannot be placed is collected and skipped rather than sent
+       * as-is. Sending it would cost an entity and come back empty, which reads
+       * downstream as "this team has no fixtures" — a wrong answer that is also
+       * paid for. Reported back so it can be said out loud instead.
+       */
+      const providerId = providerTeamId(teamId);
+      if (!providerId) {
+        unmapped.push(teamId);
+        continue;
+      }
+
       const body = await this.request<{ data?: SgoEvent[] }>(
-        `/events?leagueID=NFL&type=match&teamID=${encodeURIComponent(teamId)}` +
+        `/events?leagueID=NFL&type=match&teamID=${encodeURIComponent(providerId)}` +
           `&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=4`,
       );
       requests++;
@@ -324,11 +422,14 @@ export class SportsGameOddsProvider implements VegasProvider {
       for (const event of events) {
         if (!event.eventID || seen.has(event.eventID) || event.status?.cancelled) continue;
         seen.add(event.eventID);
+        // Keyed by the code the caller asked with, not the id we translated to:
+        // that pairing is how a rostered player's team becomes an event id, and
+        // the caller only holds the one vocabulary.
         results.push({ teamId, set: this.toPropSet(event, event.eventID, wanted) });
       }
     }
 
-    return { results, requests, entities };
+    return { results, requests, entities, unmapped };
   }
 
   /**

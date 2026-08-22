@@ -2,14 +2,34 @@
 
 ## Current state
 
-`VEGAS_PROVIDER = "mock"` is the default. `MockVegasProvider` produces stable,
-deterministic, obviously-synthetic lines and never touches the network, so
-development and tests cost no quota.
+`VEGAS_PROVIDER = "sportsgameodds"`. `SportsGameOddsProvider` is implemented and
+tested **against the live API's real payloads**, captured by
+`scripts/probe-sportsgameodds.mjs` and `scripts/probe-vegas-integrity.mjs`
+running through the Probe workflow.
 
-`SportsGameOddsProvider` is implemented and tested **against the live API's
-real payloads**, captured by `scripts/probe-sportsgameodds.mjs` running through
-the Probe workflow. It is not enabled yet — see "What the free plan actually
-charges for" and "Enabling SportsGameOdds" below.
+`MockVegasProvider` remains the default for anything with no key: it produces
+stable, deterministic, obviously-synthetic lines and never touches the network,
+so development and tests cost no quota.
+
+### What was actually keeping this on mock
+
+Two things, and neither was the provider's coverage:
+
+1. **The Worker never had the key.** The repository secret existed — the probes
+   authenticated with it — but `deploy.yml` published only `APP_PASSPHRASE`, so
+   the Worker's `SPORTSGAMEODDS_API_KEY` was always undefined. Flipping the var
+   alone would have produced a provider that reported itself unconfigured. The
+   Deploy workflow now publishes it, on the same principle as the passphrase.
+2. **Roster teams were being sent in the wrong vocabulary.** `rosterTeams()`
+   collects Sleeper's codes (`SF`) and handed them straight to the provider's
+   `teamID` filter, which only answers to its own (`SAN_FRANCISCO_49ERS_NFL`).
+   Measured on 22 August 2026: `teamID=SF` returns `200` with an empty list;
+   `teamID=SAN_FRANCISCO_49ERS_NFL` returns the fixtures. Every discovery
+   request would have been billed an entity and answered with nothing, and
+   every screen above would have shown what a bye week shows. `PROVIDER_TEAM_IDS`
+   in the adapter now translates, from the provider's own `/v2/teams` rather
+   than from a naming rule — thirty-one codes are identical and the Rams are
+   not (`LAR` here, `LA` there).
 
 `OddsApiProvider` (The Odds API) is implemented and tested against recorded
 payload shapes, and remains the fallback. It is **not enabled**, because the
@@ -31,9 +51,13 @@ written from the docs would have failed silently:
   also present on the quote itself.
 - **The line is `bookOverUnder` and the price is `bookOdds`**, both strings.
   `fairOverUnder` / `fairOdds` are the provider's own de-vigged view.
-- **`byBookmaker` is empty on the free plan.** A quote is one consensus number,
-  so the adapter reports a single book rather than dressing it up as agreement
-  between several.
+- **`byBookmaker` was empty on the free plan, and is not any more.** The August
+  2026 probe of regular-season fixtures returned named books — `fanduel`,
+  `draftkings`, `caesars` — on many quotes. The adapter still reports one book,
+  deliberately: `bookOverUnder` is the provider's own consensus, so calling it
+  one understates how many opinions stand behind a line, which is the safe
+  direction. Reading the per-book spread would change what `bookCount` and
+  `consensusMethod` mean and is its own piece of work.
 - **An unfiltered `leagueID=NFL` query answers with novelty events** — the first
   probe came back with Puppy Bowl XX and "sex of the winning touchdown scorer".
   Real games are `type=match`.
@@ -59,6 +83,22 @@ not by assumption, on 14 August 2026:
 - **The market catalogue settles it.** `/v2/markets?leagueID=NFL` returns 148
   active markets across periods `game`, `1h`, `2h`, `1q`–`4q` and `reg`. Not one
   season period, and nothing season-shaped in any market name.
+
+Re-established on **22 August 2026**, eight days before the draft and with the
+regular season on sale, by `scripts/probe-vegas-integrity.mjs` — because "no
+season markets in mid-August" and "no season markets ever" are different claims
+and only the second one is worth building on:
+
+- the catalogue has grown to **344 markets** and the periods are still
+  `game`, `1h`, `1q`, `2h`, `2q`, `3q`, `4q`, `reg`. **No season period, and no
+  market whose name is season-shaped**;
+- `type=prop` and `type=tournament` are still both empty for the NFL;
+- an event dated after the regular season ends is an ordinary `match`;
+- across every query, **zero** quotes at a season-length period.
+
+So the growth in the catalogue is more ways to bet on a game, not the first way
+to bet on a season. The draft gets no season baseline from this provider, and
+Setup says so rather than showing an empty number.
 
 So the app asks, stores what comes back, and shows nothing when nothing does.
 `SportsGameOddsProvider.getSeasonPlayerMarkets` returns an empty set carrying
@@ -211,26 +251,39 @@ player card reads the database.
 `GET /api/vegas/budget` reports where the month went, by source, with the plan
 the next refresh would run. Setup shows the same numbers in words.
 
-## Enabling SportsGameOdds
+## How SportsGameOdds is enabled
 
-The repository secret `SPORTSGAMEODDS_API_KEY` already exists and is valid —
-the probes authenticated with it. To turn the provider on:
+`VEGAS_PROVIDER = "sportsgameodds"` in `wrangler.toml`, and the Deploy workflow
+publishes the repository secret `SPORTSGAMEODDS_API_KEY` to the Worker. Both are
+needed; neither requires a terminal.
 
-1. Make the key available to the Worker:
-   ```bash
-   npx wrangler secret put SPORTSGAMEODDS_API_KEY
-   ```
-2. Set `VEGAS_PROVIDER = "sportsgameodds"` in `wrangler.toml` and redeploy.
+A deployment with the var set and the key missing is a real state and is now a
+*named* one: the provider reports itself unconfigured, Setup says the key is
+missing, and nothing is fetched or invented in the meantime.
 
-**It is still `mock`, and the reason is now a narrow one.** Every quota gate the
-activation checklist asks for exists and is tested: measured accounting, a
-targeted request shape, a simulated month at 8% of the allowance, a hard stop, a
-stale-cache fallback, deduplication, and a schedule that cannot fetch the slate.
-What has not happened is a real NFL Sunday. The whole strategy rests on mapping
-Sleeper's team abbreviations onto this provider's team ids, on kickoff times
-being right, and on the plan's staleness arithmetic behaving on a live slate —
-and the preseason cannot test any of that. Flipping the switch is now a
-one-line change whose blast radius is bounded by a budget that stops at 85%.
+The hold before this was that the strategy had never met a real slate — "the
+whole strategy rests on mapping Sleeper's team abbreviations onto this
+provider's team ids, on kickoff times being right". That turned out to be the
+right thing to worry about: the abbreviation mapping **was** wrong, and it is
+the defect described under "What was actually keeping this on mock". The
+mapping is now taken from the provider's own team list and covered by a test
+that fails if any of the 32 clubs stops resolving.
+
+What is still only checked against preseason and early-season payloads is the
+plan's staleness arithmetic over a live Sunday. The blast radius is bounded by
+a budget that stops at 85%, and a refusal is never an error: the last stored
+lines keep serving, marked stale.
+
+### Player matching, measured
+
+From the same 22 August probe, using the app's own `PlayerIndex` and
+`resolvePlayer` against the Sleeper dictionary rather than a re-implementation:
+91 provider names across four regular-season fixtures, **82 matched (90%), 1
+ambiguous, 8 unmatched**. All eight unmatched are kickers, which
+`EXCLUDED_POSITIONS` deliberately keeps out of the dictionary — so among
+positions the app actually ranks the rate is **82 of 83**. The one ambiguous
+name was Cameron Ward. Nothing unresolved is dropped silently: a quote whose
+name does not resolve is stored with a null player id so it can be audited.
 
 `docs/STATUS.md` carries the same summary; this file is where the numbers live.
 
