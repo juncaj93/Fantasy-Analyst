@@ -132,6 +132,7 @@ describe('naming rivals does not move the price', () => {
       headline: null,
       notes: [],
       considered: 1,
+      skipped: 0,
       threshold: 0,
     };
 

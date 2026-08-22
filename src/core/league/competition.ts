@@ -129,6 +129,14 @@ export function assessCompetition(opts: {
   expectedLow: number | null;
   /** False in a priority league, where money is not the constraint. */
   bidding: boolean;
+  /**
+   * The position being competed for, so the count can name it.
+   *
+   * `7 of 11 teams need TE` is the fact; `7 of 11 rivals need the position`
+   * was the same fact asking the reader to remember which position they were
+   * looking at. Optional because the phrase still works without it.
+   */
+  position?: string | null;
 }): CompetitionAssessment {
   const needy = opts.needs.filter((n) => n.level !== 'covered');
 
@@ -152,12 +160,20 @@ export function assessCompetition(opts: {
   );
 
   const priced = needy.length - bidders.length;
+  /*
+   * `teams`, not `rivals`.
+   *
+   * They are the other managers in the league, and on a screen whose job is to
+   * price a claim, what matters about them is that they are eleven teams with
+   * the same hole — not that they are adversaries.
+   */
+  const what = opts.position ? `need ${opts.position.toUpperCase()}` : 'need the position';
   const detail =
     opts.needs.length === 0
       ? null
       : priced > 0
-        ? `${needy.length} of ${opts.needs.length} rivals need the position; ${priced} cannot afford the going rate`
-        : `${needy.length} of ${opts.needs.length} rivals need the position`;
+        ? `${needy.length} of ${opts.needs.length} teams ${what}; ${priced} cannot afford the going rate`
+        : `${needy.length} of ${opts.needs.length} teams ${what}`;
 
   return {
     ...levelFor(bidders.length),
@@ -178,7 +194,14 @@ export function levelFor(bidders: number): { level: CompetitionLevel; label: str
   if (bidders === 0) return { level: 'low', label: 'Nobody else needs him' };
   if (bidders === 1) return { level: 'low', label: 'Low competition' };
   if (bidders <= 3) return { level: 'medium', label: 'Likely 2–3 bidders' };
-  return { level: 'high', label: 'High pressure' };
+  /*
+   * `High demand`, not `High pressure`.
+   *
+   * Pressure is what the reader feels; demand is what the league is doing. The
+   * card is describing the market for a player, and the pill beside it — with
+   * `7 of 11 teams need TE` under it — is the reason the bid has to be higher.
+   */
+  return { level: 'high', label: 'High demand' };
 }
 
 /** Nothing is known — the honest answer when rosters or positions are missing. */

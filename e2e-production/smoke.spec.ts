@@ -927,7 +927,36 @@ test.describe('the season features', () => {
   test('the comparison picker opens and reaches beyond the roster', async ({ page }) => {
     await page.goto('/');
     await open(page, 'team');
-    test.skip((await page.getByTestId('compare-open').count()) === 0, 'no league on this deployment');
+
+    /*
+     * Ask the roster, do not read the screen.
+     *
+     * Compare is a post-draft control: mid-draft Team draws the drafted roster
+     * and no comparison at all. Counting the button to decide whether to skip
+     * looks equivalent and is not — the count can land before the roster
+     * response does, on the render that has not yet learned a draft is running.
+     * The test then declines to skip, the roster arrives, the view swaps, and
+     * the click fails with `element was detached from the DOM` three times over.
+     *
+     * That is exactly what it did on a deployment where the same test skipped
+     * correctly at another width in the same run: timing, not width. Asking the
+     * API which screen this is has no such window, and it is what the Start/Sit
+     * test above already does.
+     */
+    const drafting = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
+      return roster?.live === true;
+    });
+    test.skip(drafting === null, 'no league on this deployment');
+    if (drafting) {
+      // The intended state, asserted rather than skipped past.
+      await expect(page.getByTestId('compare-open')).toHaveCount(0);
+      return;
+    }
+    await expect(page.getByTestId('compare-open')).toBeVisible();
 
     await page.getByTestId('compare-open').click();
     await expect(page.getByTestId('compare-sheet')).toBeVisible();

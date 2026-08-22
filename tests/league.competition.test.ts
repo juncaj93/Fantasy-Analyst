@@ -99,7 +99,7 @@ describe('the count that feeds the price model', () => {
     );
   };
 
-  it('calls four funded needy teams high pressure', () => {
+  it('calls four funded needy teams high demand', () => {
     const assessment = assessCompetition({
       needs: fourNeedy(),
       budgets: wallets({ 2: 50, 3: 50, 4: 50, 5: 50 }),
@@ -109,7 +109,7 @@ describe('the count that feeds the price model', () => {
     expect(assessment.needyTeams).toBe(4);
     expect(assessment.bidders).toHaveLength(4);
     expect(assessment.level).toBe('high');
-    expect(assessment.label).toBe('High pressure');
+    expect(assessment.label).toBe('High demand');
   });
 
   it('drops needy teams who cannot afford the going rate, and says how many', () => {

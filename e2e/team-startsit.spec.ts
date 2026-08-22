@@ -325,7 +325,16 @@ test.describe('waiver upgrades', () => {
     await expect(row).toContainText(top!.name);
     await expect(row.getByTestId('waiver-fit')).toContainText(/Upgrades|Fills/);
     await expect(row.getByTestId('waiver-short-term')).toContainText('pts');
-    await expect(row.getByTestId('waiver-why')).not.toBeEmpty();
+    /*
+     * The third line was `waiver-why` — one reason, in the engine's own words,
+     * under two lines of metrics. The card says it in tags and one summary line
+     * now, so what is checked is that the summary is there and carries the
+     * three things it is for: what he costs, who else wants him, what he is
+     * worth. The reasons themselves moved into the sheet, where
+     * `e2e/waivers.spec.ts` holds them.
+     */
+    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost/);
+    await expect(row.getByTestId('waiver-summary')).toContainText(/Proj\./);
   });
 
   /**

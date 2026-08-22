@@ -112,6 +112,7 @@ export function waiverLeagueIntel(opts: {
               // nobody is excluded for affordability.
               expectedLow: opts.prices?.low ?? null,
               bidding,
+              position: candidate.position,
             });
       competition.set(candidate.playerId, assessed);
 

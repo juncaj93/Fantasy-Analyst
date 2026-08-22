@@ -61,7 +61,7 @@ describe('an unfilled slot', () => {
     expect(upgrade.need).toBe('unfilled');
     expect(upgrade.currentPlayerId).toBeNull();
     expect(upgrade.candidates[0]!.name).toBe('Free Passer');
-    expect(upgrade.candidates[0]!.reasons.join(' · ')).toContain('fills a slot nobody on your roster can start');
+    expect(upgrade.candidates[0]!.reasons.join(' · ')).toContain('Fills a slot nobody on your roster can start');
     // An empty slot has no bar: any playable body is an improvement on nobody.
     expect(upgrade.bar).toBe(0);
   });
@@ -117,7 +117,7 @@ describe('who may be recommended', () => {
     expect(te!.currentName).toBe('End One');
     expect(te!.need).toBe('upgrade');
     expect(te!.candidates[0]!.gain).toBeGreaterThanOrEqual(MEANINGFUL_UPGRADE_GAIN);
-    expect(te!.candidates[0]!.reasons.join(' ')).toContain('stronger market expectation');
+    expect(te!.candidates[0]!.reasons.join(' ')).toContain('Market rising');
   });
 
   it('says nothing about a trivial edge', () => {
@@ -187,7 +187,16 @@ describe('moves that cannot be made', () => {
     const names = advice.upgrades.flatMap((u) => u.candidates.map((c) => c.name));
     expect(names).not.toContain('Kicked Off End');
     expect(names).toContain('Later End');
-    expect(advice.notes.join(' ')).toMatch(/kicked off/);
+    /*
+     * Counted, not narrated.
+     *
+     * This used to read the sentence the advice pushed into `notes`, which the
+     * Waivers screen printed under the recommendations — engine bookkeeping on
+     * a page for choosing between two players. The count is still here, as a
+     * number, and it is still the thing worth asserting: somebody was left out
+     * and the engine knows how many.
+     */
+    expect(advice.skipped).toBeGreaterThan(0);
   });
 
   it('gives no advice about a slot whose player is already playing', () => {
@@ -255,7 +264,7 @@ describe('the same intelligence as everywhere else', () => {
       candidates: [candidate('fa', 'Free End', 'TE', 20, { signal: signalWithNet(5) })],
     });
     expect(newsy.upgrades[0]!.candidates[0]!.gain).toBeGreaterThan(strong.upgrades[0]!.candidates[0]!.gain);
-    expect(newsy.upgrades[0]!.candidates[0]!.reasons.join(' ')).toContain('positive recent news');
+    expect(newsy.upgrades[0]!.candidates[0]!.reasons.join(' ')).toContain('Recent news');
   });
 
   it('reports the size of the pool it actually looked at', () => {

@@ -281,7 +281,7 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     // Three rosters carry one tight end; nobody is short at receiver.
     expect(te!.competition!.level).toBe('high');
     expect(wr!.competition!.level).toBe('low');
-    expect(te!.competition!.detail).toMatch(/rivals need the position/);
+    expect(te!.competition!.detail).toMatch(/teams need [A-Z]{1,3}/);
 
     // And the multi-week supplier answers for both, off measured usage.
     for (const c of [te!, wr!]) {

@@ -122,6 +122,85 @@ test.describe('the waivers page', () => {
   });
 
   /**
+   * A card is a header, a row of tags and one line — not four lines of prose.
+   *
+   * What it replaced said the same things in scattered sentences: `High
+   * pressure · 7 of 11 rivals need the position` on one line, `stronger market
+   * expectation (13.5 vs 9.2 pts)` on another, a cost and a fit between them.
+   * The claims here are the shape rather than the wording, so a card that grows
+   * a fourth explanatory line fails them whatever that line says.
+   */
+  test('says it in tags and one line', async ({ page }) => {
+    const row = page.getByTestId('waiver-row').first();
+    await expect(row).toBeVisible();
+
+    // The identity, in the order this app now uses everywhere.
+    await expect(row.locator('.pos-pill')).toHaveCount(1);
+    await expect(row.getByTestId('team-logo')).toHaveCount(1);
+    await expect(row.getByTestId('waiver-strength')).toBeVisible();
+
+    // Recurring tags, not sentences.
+    const tags = await row.getByTestId('waiver-tags').locator('.tag').allInnerTexts();
+    expect(tags.length, 'the card carries compact tags').toBeGreaterThan(1);
+    for (const tag of tags) {
+      expect(tag.length, `"${tag}" is a tag, not a sentence`).toBeLessThan(24);
+    }
+
+    // And one summary line carrying cost, competition and the projection.
+    const summary = await row.getByTestId('waiver-summary').innerText();
+    expect(summary).toMatch(/Est\. cost/);
+    expect(summary).toMatch(/Proj\. \+?\d+\.\d pts/);
+    // One decimal, always — `+6.46 pts` beside `+5.7 pts` was two different
+    // claims about how precisely the same calculation is known.
+    expect(summary).not.toMatch(/\d\.\d\d/);
+  });
+
+  /**
+   * The engine's own bookkeeping is not on the recommendation page.
+   *
+   * `31 available player(s) were skipped as unscorable, ruled out or already
+   * kicked off` closed this screen: true, occasionally useful, and never the
+   * reason anybody opened it. The count still exists on the advice — see
+   * `skipped` — it is simply not printed here.
+   */
+  test('does not report on its own work', async ({ page }) => {
+    const text = await page.locator('main').innerText();
+    for (const phrase of ['skipped as unscorable', 'were skipped', 'players checked', 'never makes a transaction']) {
+      expect(text, `the page still says "${phrase}"`).not.toContain(phrase);
+    }
+  });
+
+  /**
+   * The machine phrasing is gone from both the card and its sheet.
+   *
+   * These are the strings the lock names: engine-side descriptions of engine
+   * inputs, printed at a reader. Checked in one place so a later change that
+   * reintroduces any of them has one test to fail rather than none.
+   */
+  test('says it in English, on the card and in the sheet', async ({ page }) => {
+    const forbidden = ['stronger market expectation', 'role trending up', 'High pressure', 'rivals need'];
+    const page_text = await page.locator('main').innerText();
+    for (const phrase of forbidden) {
+      expect(page_text, `the card says "${phrase}"`).not.toContain(phrase);
+    }
+
+    await page.getByTestId('waiver-row').first().click();
+    const sheet = page.getByTestId('waiver-detail');
+    await expect(sheet).toBeVisible();
+    const sheetText = await sheet.innerText();
+    for (const phrase of forbidden) {
+      expect(sheetText, `the sheet says "${phrase}"`).not.toContain(phrase);
+    }
+
+    // Why we like him: at most three rows, each led by a pill.
+    const reasons = sheet.getByTestId('waiver-reasons').locator('li');
+    const count = await reasons.count();
+    expect(count).toBeGreaterThan(0);
+    expect(count, 'a sheet is an argument, not the engine’s working').toBeLessThanOrEqual(3);
+    await expect(reasons.first().locator('.tag')).toHaveCount(1);
+  });
+
+  /**
    * The rule this page exists to keep.
    *
    * Expected cost, likely competition and multi-week value are facts about the
