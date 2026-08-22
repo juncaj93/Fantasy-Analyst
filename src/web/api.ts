@@ -1031,6 +1031,13 @@ export interface StartSitEvaluation {
     unknown: boolean;
   }[];
   score: number | null;
+  /**
+   * The weekly fantasy projection, or null when there is not an honest one.
+   *
+   * Optional for the same reason as `LineupSlot.projection`: an older server
+   * does not send it, and absent means unknown rather than "use the score".
+   */
+  projection?: number | null;
   confidence: string;
   confidenceReasons: string[];
   /** `Questionable · hamstring · practised fully`, or null when healthy. */
@@ -1131,7 +1138,16 @@ export interface LineupSlot {
   playerId: string | null;
   name: string | null;
   position: string | null;
+  /** The comparable start/sit score the optimiser ranked with. Not a forecast. */
   score: number | null;
+  /**
+   * The weekly fantasy projection, or null when there is not an honest one.
+   *
+   * Optional because a deployment older than this one does not send it, and
+   * absent is read as "unknown" rather than falling back to `score` — falling
+   * back is exactly the bug this field exists to end.
+   */
+  projection?: number | null;
   alreadyStarting: boolean;
   locked: boolean;
   /** The two to four things that decided this player. Absent on older servers. */

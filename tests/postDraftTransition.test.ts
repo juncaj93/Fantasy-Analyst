@@ -316,9 +316,16 @@ describe('the transition out of a completed draft', () => {
     const ov = await overview();
     expect(ov.lifecycle.lifecycle).toBe('post_draft');
     expect(ov.lifecycle.matchupVisible).toBe(true);
-    // Still preseason, so the board stays reachable — a finished draft is not
-    // the signal that retires it. See core/sleeper/phase.ts.
-    expect(ov.lifecycle.draftVisible).toBe(true);
+    /*
+     * The bar turns over on the final pick.
+     *
+     * Draft goes because the picks are made, and the phase stays preseason
+     * because a draft ending does not start a season — the two facts travel
+     * separately and both are asserted, because conflating them is the mistake
+     * `core/sleeper/phase.ts` is written to avoid.
+     */
+    expect(ov.lifecycle.draftVisible).toBe(false);
+    expect(ov.season.draftVisible).toBe(false);
     expect(ov.season.phase).toBe('preseason');
 
     const after = await roster();

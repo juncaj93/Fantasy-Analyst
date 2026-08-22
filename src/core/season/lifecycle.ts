@@ -22,7 +22,7 @@
  * new dates written down, because no dates were written down.
  */
 
-import { resolveSeasonPhase, type NflState, type SeasonPhase } from '../sleeper/phase.ts';
+import { isDraftComplete, resolveSeasonPhase, type NflState, type SeasonPhase } from '../sleeper/phase.ts';
 
 /**
  * The eight states, in the order a season passes through them.
@@ -89,23 +89,16 @@ export interface LifecycleInput {
 const LIVE_DRAFT_STATUSES = new Set(['drafting', 'in_progress', 'live']);
 /** Statuses that mean a draft exists and is waiting to start. */
 const OPEN_DRAFT_STATUSES = new Set(['pre_draft', 'predraft', 'paused']);
-const COMPLETE_DRAFT_STATUSES = new Set(['complete', 'completed', 'done']);
-
-/**
- * Is every pick in?
+/*
+ * "Every pick is in" is decided in exactly one place, and it is not this one.
  *
- * Exported because two very different pieces of code have to agree on it, and a
- * disagreement between them is not a cosmetic bug. This module reads it to move
- * the app into `post_draft` — which takes Team out of draft mode and puts
- * Matchup in the bar — and the Sleeper sync reads it to decide that the rosters
- * the draft produced are now worth fetching. If one of them thought `done` was
- * a completed draft and the other did not, the navigation would announce a
- * finished draft over a roster the app had never gone back for, which is exactly
- * the split this predicate exists to make impossible.
+ * It lives beside the season phase, which is the lowest module that needs it,
+ * and is re-exported here because the Sleeper sync has imported it from this
+ * path since the post-draft roster repair. Three decisions turn on the answer —
+ * the tab, the lifecycle state and whether to re-read the rosters — and two
+ * copies of the status list is how they start disagreeing.
  */
-export function isDraftComplete(status: string | null | undefined): boolean {
-  return COMPLETE_DRAFT_STATUSES.has(String(status ?? '').trim().toLowerCase());
-}
+export { isDraftComplete } from '../sleeper/phase.ts';
 
 export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
   const phase = resolveSeasonPhase({
@@ -189,10 +182,20 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
 
   // Preseason, split three ways by what the draft is doing.
   if (isDraftComplete(draftStatus)) {
+    /*
+     * The one moment both seasonal slots turn over at once.
+     *
+     * Draft leaves because the picks are made, Waivers takes its slot because
+     * the wire is now the only way the roster changes, and Matchup arrives
+     * because there is finally a team to project. Kept identical to
+     * `resolveSeasonPhase`'s answer rather than decided again here — the toolbar
+     * reads one of these two and must not be able to get a different answer
+     * depending on which.
+     */
     return {
       lifecycle: 'post_draft',
       phase: phase.phase,
-      draftVisible: true,
+      draftVisible: false,
       matchupVisible: true,
       draftLive: false,
       reason: 'your draft is done — the season has not started',

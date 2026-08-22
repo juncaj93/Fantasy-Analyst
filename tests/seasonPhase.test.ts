@@ -35,20 +35,63 @@ describe('before the regular season', () => {
    * A finished draft is not a started season, and treating it as one takes the
    * board away weeks early.
    */
-  it('keeps Draft after the draft has completed', () => {
+  /*
+   * These two used to assert the opposite, and the change is a product decision
+   * rather than a bug fix: the board exists to help make picks, and once the
+   * picks are made it is a record rather than a tool. The phase is still
+   * preseason — a draft ending does not start a season — and every other
+   * consumer of `phase` is unaffected. Only the tab goes.
+   */
+  it('drops Draft once this league’s draft is complete, while staying preseason', () => {
     const resolved = resolveSeasonPhase({
       state: { season: '2026', seasonType: 'pre', week: 3 },
       league: { season: '2026', status: 'drafting' },
       draft: { status: 'complete' },
     });
-    expect(resolved.draftVisible).toBe(true);
-    expect(resolved.reason).toMatch(/has not started/);
+    expect(resolved.phase).toBe('preseason');
+    expect(resolved.draftVisible).toBe(false);
+    expect(resolved.reason).toMatch(/draft is finished/);
   });
 
-  it('keeps Draft with a completed draft and no NFL state at all', () => {
+  it('drops Draft on a completed draft with no NFL state at all', () => {
     const resolved = resolveSeasonPhase({ draft: { status: 'complete' } });
     expect(resolved.phase).toBe('preseason');
-    expect(resolved.draftVisible).toBe(true);
+    expect(resolved.draftVisible).toBe(false);
+    expect(resolved.assumed).toBe(false);
+  });
+
+  /*
+   * The safe direction, stated as tests.
+   *
+   * Everything that is not positively a completed draft keeps the board — a
+   * draft still to open, one paused mid-round, one Sleeper has said nothing
+   * about, and a status nobody has seen before. Hiding a board a user still
+   * needs costs them their draft.
+   */
+  it('keeps Draft for every draft state that is not finished', () => {
+    const preseason = { season: '2026', seasonType: 'pre', week: 3 } as const;
+    for (const status of ['pre_draft', 'paused', 'drafting', 'unknown', '', null, undefined]) {
+      const resolved = resolveSeasonPhase({
+        state: preseason,
+        league: { season: '2026', status: null },
+        draft: { status: status ?? null },
+      });
+      expect(resolved.draftVisible, `draft status ${JSON.stringify(status)}`).toBe(true);
+    }
+    // And with no draft object at all.
+    expect(resolveSeasonPhase({ state: preseason, league: { season: '2026' } }).draftVisible).toBe(true);
+  });
+
+  it('accepts every spelling Sleeper uses for a finished draft', () => {
+    const preseason = { season: '2026', seasonType: 'pre', week: 3 } as const;
+    for (const status of ['complete', 'completed', 'done', 'COMPLETE', ' Complete ']) {
+      const resolved = resolveSeasonPhase({
+        state: preseason,
+        league: { season: '2026', status: null },
+        draft: { status },
+      });
+      expect(resolved.draftVisible, `draft status ${JSON.stringify(status)}`).toBe(false);
+    }
   });
 
   /**

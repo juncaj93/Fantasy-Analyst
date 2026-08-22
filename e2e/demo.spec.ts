@@ -162,10 +162,21 @@ test.describe('the scenarios render the production screens', () => {
     expect(await page.getByTestId('recommendation-row').count()).toBeGreaterThan(0);
   });
 
-  test('post-draft moves the app to Team, with the draft still reachable', async ({ page }) => {
+  /*
+   * The scenario is the whole transition, so it asserts the whole bar.
+   *
+   * Draft has left — the picks are made and the board has nothing to decide —
+   * Waivers has taken the slot the two of them share, and Matchup has arrived.
+   * The app lands on Team rather than on a destination that is no longer there,
+   * which is the `draftVisible` effect in `App.tsx` doing its job.
+   */
+  test('post-draft lands on Team, with Draft gone and Waivers and Matchup in its place', async ({ page }) => {
     await openScenario(page, 'post-draft-roster');
     await expect(page.getByTestId('tab-team')).toBeVisible();
-    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    await expect(page.getByTestId('tab-draft')).toHaveCount(0);
+    await expect(page.getByTestId('tab-waivers')).toBeVisible();
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+    await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
     await tab(page, 'team');
     await expect(page.locator('.nav-bar').first()).toBeVisible();
   });

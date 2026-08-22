@@ -18,6 +18,7 @@ import type { ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
 import type { StartSitMode } from './mode.ts';
+import { weeklyProjection } from './projection.ts';
 
 export interface LineupSlot {
   /** Slot label as the league defines it: 'QB', 'RB', 'FLEX', 'SUPER_FLEX'. */
@@ -28,7 +29,22 @@ export interface LineupSlot {
   playerId: string | null;
   name: string | null;
   position: string | null;
+  /**
+   * The comparable start/sit score this slot was won with.
+   *
+   * A ranking number, and only that. It is the sum of whichever components were
+   * known, so with no market published it is a handful of adjustments — fine for
+   * deciding who starts, wrong to print as a forecast. See {@link projection}.
+   */
   score: number | null;
+  /**
+   * The weekly fantasy projection, or null when there is not an honest one.
+   *
+   * Carried beside the score rather than derived on the screen, so the Team
+   * screen and the Matchup screen cannot end up meaning different things by the
+   * same word — see `core/startsit/projection.ts`.
+   */
+  projection: number | null;
   /** True when the player already occupies a starting spot in Sleeper. */
   alreadyStarting: boolean;
   /** True when this player's game has kicked off and the slot is now fixed. */
@@ -232,6 +248,9 @@ export function recommendLineup(
       name: player?.name ?? null,
       position: player?.position ?? null,
       score: player?.score ?? null,
+      // After the replacement-risk pass, which appends a component and re-sums
+      // the score — so the projection is taken from the finished evaluation.
+      projection: weeklyProjection(player),
       alreadyStarting: player ? currentStarters.has(player.playerId) : false,
       locked: player ? lockedIds.has(player.playerId) : false,
       drivers: player?.drivers ?? [],
