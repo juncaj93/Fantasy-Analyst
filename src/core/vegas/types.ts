@@ -181,6 +181,18 @@ export interface TeamPropsResult {
   requests: number;
   /** Entities billed — one per event returned, and at least one per request. */
   entities: number;
+  /**
+   * Teams the adapter could not name in its provider's vocabulary, so did not
+   * ask about.
+   *
+   * Optional because an adapter whose vendor shares the caller's vocabulary has
+   * nothing to report. Present because the alternative — sending a code the
+   * provider does not recognise — costs a billed entity and answers with an
+   * empty list, which is indistinguishable from "no fixtures" everywhere above
+   * the adapter. A team that was never asked about is a different fact from a
+   * team with no game, and it must be able to reach the surface.
+   */
+  unmapped?: string[];
 }
 
 export interface QuotaStatus {
