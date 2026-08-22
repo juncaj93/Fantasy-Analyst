@@ -91,6 +91,22 @@ const LIVE_DRAFT_STATUSES = new Set(['drafting', 'in_progress', 'live']);
 const OPEN_DRAFT_STATUSES = new Set(['pre_draft', 'predraft', 'paused']);
 const COMPLETE_DRAFT_STATUSES = new Set(['complete', 'completed', 'done']);
 
+/**
+ * Is every pick in?
+ *
+ * Exported because two very different pieces of code have to agree on it, and a
+ * disagreement between them is not a cosmetic bug. This module reads it to move
+ * the app into `post_draft` — which takes Team out of draft mode and puts
+ * Matchup in the bar — and the Sleeper sync reads it to decide that the rosters
+ * the draft produced are now worth fetching. If one of them thought `done` was
+ * a completed draft and the other did not, the navigation would announce a
+ * finished draft over a roster the app had never gone back for, which is exactly
+ * the split this predicate exists to make impossible.
+ */
+export function isDraftComplete(status: string | null | undefined): boolean {
+  return COMPLETE_DRAFT_STATUSES.has(String(status ?? '').trim().toLowerCase());
+}
+
 export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
   const phase = resolveSeasonPhase({
     state: input.state,
@@ -172,7 +188,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
   }
 
   // Preseason, split three ways by what the draft is doing.
-  if (COMPLETE_DRAFT_STATUSES.has(draftStatus)) {
+  if (isDraftComplete(draftStatus)) {
     return {
       lifecycle: 'post_draft',
       phase: phase.phase,
