@@ -82,8 +82,16 @@ test.describe('the real matchup', () => {
    *      outer edges — two halves of one comparison a phone's width apart.
    *   2. **the percentages do too**, for the same reason, with one bar under
    *      them rather than squeezed between them.
-   *   3. **the names stay outside.** Pulling the numbers in is only a gain if
-   *      whose column this is stays where the eye looks for it.
+   *   3. **the names sit over their own scores.** Pulling the numbers in is
+   *      only a gain if whose number this is stays obvious, and the manager's
+   *      name was doing the opposite of that: pinned to the card's outer edge
+   *      while the score sat at the inner one, so a label and the thing it
+   *      labels were at opposite ends of the column. Across the card that read
+   *      as two names on the outside and two numbers in the middle, neither
+   *      pair belonging to the other. This claim replaces "the names stay
+   *      outside", which was the same test's original third clause and is the
+   *      arrangement the punch list asked to be corrected. The first two are
+   *      untouched.
    *
    * Everything is measured against the card's own width, so it holds at all
    * four widths this suite runs rather than encoding one of them.
@@ -98,14 +106,16 @@ test.describe('the real matchup', () => {
       const winTheirs = at('[data-testid="matchup-win-theirs"]');
       const bar = at('[data-testid="matchup-win-bar"]');
       const names = [...card.querySelectorAll('.matchup-team-name')].map((n) => n.getBoundingClientRect());
+      const middle = (r: DOMRect) => r.left + r.width / 2;
       return {
         width: box.width,
         scoreGap: (theirs.left - mine.right) / box.width,
         winGap: (winTheirs.left - winMine.right) / box.width,
         barWidth: bar.width / box.width,
         barBelow: bar.top > winMine.bottom,
-        nameLeft: (names[0]!.left - box.left) / box.width,
-        nameRight: (box.right - names[1]!.right) / box.width,
+        nameOverScoreLeft: Math.abs(middle(names[0]!) - middle(mine)),
+        nameOverScoreRight: Math.abs(middle(names[1]!) - middle(theirs)),
+        nameAboveScore: names[0]!.bottom <= mine.top + 1,
         bars: card.querySelectorAll('[data-testid="matchup-win-bar"]').length,
       };
     });
@@ -119,9 +129,10 @@ test.describe('the real matchup', () => {
     expect(geometry.barBelow, 'the bar is beneath the percentages').toBe(true);
     expect(geometry.barWidth, 'the bar has the width of the card').toBeGreaterThan(0.8);
 
-    // And the names still hard against the outer edges.
-    expect(geometry.nameLeft, 'the left name stays on the left edge').toBeLessThan(0.08);
-    expect(geometry.nameRight, 'the right name stays on the right edge').toBeLessThan(0.08);
+    // And each manager's name directly over the score that is theirs.
+    expect(geometry.nameAboveScore, 'the name sits above the score, not beside it').toBe(true);
+    expect(geometry.nameOverScoreLeft, 'the left name is off its score').toBeLessThanOrEqual(1);
+    expect(geometry.nameOverScoreRight, 'the right name is off its score').toBeLessThanOrEqual(1);
   });
 
   /**
@@ -609,3 +620,210 @@ test.describe('the states of an afternoon', () => {
     await expect(sheet).toContainText('medium');
   });
 });
+
+/**
+ * The scoreboard, read as a pair.
+ *
+ * Two refinements with one subject: making the card say *whose* number is
+ * which, and *which way it is going*, without spending another pixel of a
+ * screen whose job is fitting a starting lineup onto a phone.
+ */
+test.describe('the scoreboard', () => {
+  /** Where a thing's middle is, to the pixel the eye can see. */
+  async function centres(page: Page, side: 'mine' | 'theirs') {
+    return page.getByTestId(`matchup-team-${side}`).evaluate((column) => {
+      const middle = (sel: string) => {
+        const el = column.querySelector(sel);
+        if (!el) return null;
+        const box = el.getBoundingClientRect();
+        return Math.round(box.left + box.width / 2);
+      };
+      const name = column.querySelector('.matchup-team-name');
+      return {
+        name: middle('.matchup-team-name'),
+        score: middle('.matchup-team-score'),
+        right: Math.round(column.getBoundingClientRect().right),
+        clipped: name ? name.scrollWidth > name.clientWidth + 1 : false,
+      };
+    });
+  }
+
+  /**
+   * The manager's name over the manager's score.
+   *
+   * It used to be pinned to the card's outer edge while the score sat at the
+   * inner one — a label and the thing it labels at opposite ends of the column,
+   * which across the card read as two names on the outside and two numbers in
+   * the middle, neither pair belonging to the other.
+   */
+  test('centres each manager over the score that is theirs', async ({ page }) => {
+    await serve(page, response());
+    const mine = await centres(page, 'mine');
+    const theirs = await centres(page, 'theirs');
+
+    expect(Math.abs(mine.name! - mine.score!), 'the left label is off its score').toBeLessThanOrEqual(1);
+    expect(Math.abs(theirs.name! - theirs.score!), 'the right label is off its score').toBeLessThanOrEqual(1);
+  });
+
+  /**
+   * …and the two of them balanced about the `vs`.
+   *
+   * Symmetry is the claim, so symmetry is what is measured: the gap from the
+   * card's left edge to the left pair should match the gap from the right pair
+   * to its right edge.
+   */
+  test('and balances the two sides about the centre', async ({ page }) => {
+    await serve(page, response());
+    const card = (await page.getByTestId('matchup-score').boundingBox())!;
+    const mine = await centres(page, 'mine');
+    const theirs = await centres(page, 'theirs');
+
+    const leftGap = mine.score! - card.x;
+    const rightGap = card.x + card.width - theirs.score!;
+    expect(Math.abs(leftGap - rightGap), `${Math.round(leftGap)}px against ${Math.round(rightGap)}px`).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * A joke of a team name truncates rather than moving the score.
+   *
+   * Managers name their teams whatever they like and the length is unbounded.
+   * The one thing that may not happen is the label widening its column and
+   * pushing the two scores apart — the numbers meeting near the middle is what
+   * makes them legible as one comparison.
+   */
+  test('truncates a long manager name instead of shifting the scoreboard', async ({ page }) => {
+    await serve(page, response());
+    const before = await centres(page, 'mine');
+
+    await serve(
+      page,
+      response({}, {
+        teams: {
+          mine: {
+            rosterId: 1,
+            side: 'mine',
+            name: 'The Astonishingly Long Name Of A Team That Will Not Fit Anywhere',
+            avatar: null,
+            record: null,
+            actual: 107,
+            projectedFinal: 125.9,
+            winProbability: 0.18,
+          },
+          theirs: {
+            rosterId: 2,
+            side: 'theirs',
+            name: 'Juncer’s Hog Format',
+            avatar: null,
+            record: null,
+            actual: 124.2,
+            projectedFinal: 139.6,
+            winProbability: 0.82,
+          },
+        },
+      }),
+    );
+
+    const after = await centres(page, 'mine');
+    expect(after.clipped, 'the long name should be truncating').toBe(true);
+    expect(after.score, 'the score moved to make room for a team name').toBe(before.score);
+    // And the card is still a card: nothing has escaped it sideways.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  /**
+   * The bar says which way it is going, from our side and no other input.
+   *
+   * It was one accent blue at 68% and at 16%, which made it a picture of a
+   * percentage rather than a reading of one. Asserted as the semantic attribute
+   * rather than as a colour value, because what must be right is the *rule*;
+   * which green is a stylesheet's business, and it has a light and a dark one.
+   */
+  for (const [probability, tone] of [
+    [0.68, 'ahead'],
+    [0.5, 'even'],
+    [0.16, 'behind'],
+    [0.999, 'ahead'],
+    [0.001, 'behind'],
+  ] as const) {
+    test(`colours the bar ${tone} when our side is on ${Math.round(probability * 100)}%`, async ({ page }) => {
+      await serve(page, response({}, { teams: teamsAt(probability) }));
+      const bar = page.getByTestId('matchup-win-bar');
+      await expect(bar).toHaveAttribute('data-tone', tone);
+      await expect(bar).toHaveAttribute('aria-valuenow', String(Math.round(probability * 100)));
+    });
+  }
+
+  /**
+   * The colour and the printed number can never disagree.
+   *
+   * 50.4% is printed as `50%`, and a green bar beside a number saying even
+   * would be the card contradicting itself in the two millimetres between them.
+   * The tone is read off the same rounded integer the reader sees.
+   */
+  test('goes by the number on screen rather than the raw probability', async ({ page }) => {
+    for (const [probability, tone] of [
+      [0.504, 'even'],
+      [0.496, 'even'],
+      [0.506, 'ahead'],
+      [0.494, 'behind'],
+    ] as const) {
+      await serve(page, response({}, { teams: teamsAt(probability) }));
+      await expect(page.getByTestId('matchup-win-mine')).toContainText(`${Math.round(probability * 100)}%`);
+      await expect(page.getByTestId('matchup-win-bar')).toHaveAttribute('data-tone', tone);
+    }
+  });
+
+  /**
+   * And none of it costs the card any height.
+   *
+   * The compaction was measured and merged in #122, and a label that grew into
+   * a heading or a bar that grew a border would give it straight back. The two
+   * numbers are what this card actually measures on `main`: 111px without a
+   * record line and 126px with one, at every width the suite runs. Both are
+   * unchanged by the manager chips and the coloured bar — the chip is smaller
+   * type than the heading it replaced and sits in a row that already existed.
+   */
+  test('stays as compact as the pass that compacted it', async ({ page }) => {
+    await serve(page, response());
+    const withRecord = (await page.getByTestId('matchup-score').boundingBox())!;
+    expect(Math.round(withRecord.height), `the scoreboard has grown to ${Math.round(withRecord.height)}px`).toBeLessThanOrEqual(126);
+    // The bench is untouched by any of this and still folds.
+    await expect(page.getByTestId('bench-toggle')).toBeVisible();
+
+    // …and the shape most weeks actually have, with no record line on it.
+    await serve(page, response({}, { teams: teamsAt(0.18, { record: null }) }));
+    const plain = (await page.getByTestId('matchup-score').boundingBox())!;
+    expect(Math.round(plain.height), `the scoreboard has grown to ${Math.round(plain.height)}px`).toBeLessThanOrEqual(111);
+  });
+});
+
+/** Both sides of the scoreboard, with our win probability set to `mine`. */
+function teamsAt(mine: number, over: Record<string, unknown> = {}) {
+  return {
+    mine: {
+      rosterId: 1,
+      side: 'mine',
+      name: 'Ceedeez Nuts',
+      avatar: null,
+      record: '9-5',
+      actual: 107,
+      projectedFinal: 125.9,
+      winProbability: mine,
+      ...over,
+    },
+    theirs: {
+      rosterId: 2,
+      side: 'theirs',
+      name: 'Juncer’s Hog Format',
+      avatar: null,
+      record: '9-5',
+      actual: 124.2,
+      projectedFinal: 139.6,
+      winProbability: 1 - mine,
+      ...over,
+    },
+  };
+}
