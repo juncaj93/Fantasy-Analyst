@@ -27,8 +27,19 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 [vars]
-# "mock" (default, no network, no quota) or "the-odds-api".
-VEGAS_PROVIDER = "mock"
+# "mock" (no network, no quota), "sportsgameodds" or "the-odds-api".
+#
+# Live on SportsGameOdds. The hold until now was that the strategy had never
+# met a real slate; it has now been checked against one, and the check found
+# the thing that would have made the switch look like a provider with no data:
+# roster teams were being sent as Sleeper's codes (SF) and the provider's team
+# filter only answers to its own (SAN_FRANCISCO_49ERS_NFL), returning an empty
+# list — billed — for every team. The adapter now translates.
+#
+# The key must reach the Worker as a secret; the Deploy workflow publishes it.
+# Without it the provider reports itself unconfigured, Setup says the key is
+# missing, and no line is invented in the meantime.
+VEGAS_PROVIDER = "sportsgameodds"
 
 # The dedicated address your FF Newsletter is subscribed to. Fill this in AFTER
 # you set up Cloudflare Email Routing (docs/SETUP.md, step 5). The app shows this
@@ -41,6 +52,9 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #   APP_PASSPHRASE   login passphrase for the private tool
 #   SESSION_SECRET   random 32+ byte string used to sign session cookies
 #   ODDS_API_KEY     only when VEGAS_PROVIDER = "the-odds-api"
+#   SPORTSGAMEODDS_API_KEY  when VEGAS_PROVIDER = "sportsgameodds" (the Deploy
+#                    workflow publishes this from the repository secret of the
+#                    same name, so it does not need putting by hand)
 
 [triggers]
 # Every 5 minutes -> injury check. Almost always a conditional 304 with no body

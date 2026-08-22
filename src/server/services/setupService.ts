@@ -228,6 +228,14 @@ export class SetupService {
 
     const unresolved = snapshot ? snapshot.rowCount - snapshot.matchedCount : 0;
 
+    const vegasState = describeVegas({
+      provider: this.vegas.name,
+      configured: this.vegas.isConfigured(),
+      events: vegasFreshness.events,
+      fetchedAt: vegasFreshness.fetchedAt,
+      budgetState: budget.state,
+    });
+
     const steps: SetupStep[] = [
       {
         id: 'sleeper',
@@ -281,12 +289,9 @@ export class SetupService {
       {
         id: 'vegas',
         title: 'Vegas lines',
-        state: 'off',
-        summary:
-          this.vegas.name === 'mock'
-            ? 'Using practice data — real betting lines are not connected yet'
-            : `Live provider: ${this.vegas.name}`,
-        action: null,
+        state: vegasState.state,
+        summary: vegasState.summary,
+        action: vegasState.action,
       },
     ];
 
@@ -327,10 +332,7 @@ export class SetupService {
         live: this.vegas.name !== 'mock' && this.vegas.isConfigured(),
         lastRefreshedAt: vegasFreshness.fetchedAt,
         events: vegasFreshness.events,
-        note:
-          this.vegas.name === 'mock'
-            ? 'Practice data only. Start/sit advice will say when a real line is missing rather than guessing.'
-            : 'Live betting lines are connected.',
+        note: vegasState.note,
         budget: {
           state: budget.state,
           used: budget.used,
@@ -412,6 +414,93 @@ export class SetupService {
     }
     return { total, processed, quarantined };
   }
+}
+
+/** How stale a stored snapshot has to be before Setup stops calling it current. */
+const VEGAS_STALE_HOURS = 36;
+
+/**
+ * What Setup says about the odds provider, in the six states it can be in.
+ *
+ * Previously two: mock, and "Live betting lines are connected" for everything
+ * else. The second was asserted from the provider's *name* alone, so a
+ * deployment configured for a real provider but missing its key — the exact
+ * state a bad rollout produces — reported that live lines were connected while
+ * `live` was false and nothing had ever been fetched. A status screen exists to
+ * be believed, and that is the one failure it has to be able to name.
+ *
+ * Pure, and separate from `status()`, so each state can be asserted directly
+ * rather than by assembling a whole SetupStatus around it.
+ */
+export function describeVegas(input: {
+  provider: string;
+  configured: boolean;
+  events: number;
+  fetchedAt: string | null;
+  budgetState: string;
+}): { state: StepState; summary: string; action: string | null; note: string } {
+  if (input.provider === 'mock') {
+    return {
+      state: 'off',
+      summary: 'Using practice data — real betting lines are not connected yet',
+      action: null,
+      note: 'Practice data only. Start/sit advice will say when a real line is missing rather than guessing.',
+    };
+  }
+
+  if (!input.configured) {
+    return {
+      state: 'warn',
+      summary: `${input.provider} is selected, but its API key is missing — no lines are being fetched`,
+      action: `Add the ${input.provider} key to the deployment, then redeploy.`,
+      note: 'No betting lines are being fetched. Nothing is shown as a line until a real one arrives.',
+    };
+  }
+
+  if (input.budgetState === 'exhausted') {
+    return {
+      state: 'warn',
+      summary: `${input.provider} connected — this month's request allowance is used up`,
+      action: 'Nothing to do; the allowance resets at the start of next month.',
+      note: 'The stored lines keep being shown and are marked stale. No new ones are fetched until the allowance resets.',
+    };
+  }
+
+  const ageHours = input.fetchedAt ? (Date.now() - Date.parse(input.fetchedAt)) / 3_600_000 : null;
+
+  // Connected and asking, but the answer so far is nothing. Said plainly: it is
+  // a normal state out of season and a real fault in it, and either way it is
+  // not the same thing as being connected and fed.
+  if (input.events === 0 || ageHours == null || !Number.isFinite(ageHours)) {
+    return {
+      state: 'warn',
+      summary: `${input.provider} connected — no lines stored yet`,
+      action: 'Lines arrive on the scheduled refresh, or from "Refresh Vegas lines".',
+      note: 'Connected, but nothing has been stored yet. Anything without a line is shown as unknown rather than as a zero.',
+    };
+  }
+
+  if (ageHours > VEGAS_STALE_HOURS) {
+    return {
+      state: 'warn',
+      summary: `${input.provider} connected — ${input.events} game(s) stored, last updated ${describeAge(ageHours)}`,
+      action: 'The next scheduled refresh will update them.',
+      note: 'These lines are old enough to be treated as stale, and start/sit lowers its confidence accordingly.',
+    };
+  }
+
+  return {
+    state: 'ok',
+    summary: `${input.provider} connected — ${input.events} game(s) stored, updated ${describeAge(ageHours)}`,
+    action: null,
+    note: 'Live betting lines are connected. A player with no market is shown as unknown, never as a zero.',
+  };
+}
+
+function describeAge(hours: number): string {
+  if (hours < 1) return 'in the last hour';
+  if (hours < 24) return `${Math.round(hours)} hour(s) ago`;
+  return `${Math.round(hours / 24)} day(s) ago`;
 }
 
 function newsletterState(status: NewsletterStatus): StepState {

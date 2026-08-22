@@ -292,6 +292,18 @@ export class VegasRefreshService {
       });
 
       /*
+       * A team the adapter could not name is said out loud, not swallowed.
+       *
+       * It is the one failure here that produces no error and no data: those
+       * players simply never get an event, and every screen above shows the
+       * same blank a bye week shows. Reported so that "we did not ask" can be
+       * told apart from "there is no game".
+       */
+      for (const team of result.unmapped ?? []) {
+        sink.errors.push(`no ${this.provider.name} team id for "${team}"; its games were not fetched`);
+      }
+
+      /*
        * The team we asked about is the mapping.
        *
        * Reading it back out of the payload would work for one vendor and fail
