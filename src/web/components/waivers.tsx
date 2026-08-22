@@ -17,7 +17,7 @@
  */
 
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
-import { Badge, PositionBadge, PositionPill, TeamLogo } from './common.tsx';
+import { Badge, PlayerIdentity, PositionBadge } from './common.tsx';
 import { Sheet } from './native.tsx';
 
 /**
@@ -50,18 +50,18 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
       onClick={onOpen}
     >
       {/*
-        Name first, with the position against it and the club beside that —
-        the same order every other row in this app now uses, and the order the
-        lock asks for here: player, position, club, then the verdict on the
-        trailing edge.
+        Who he is, then what the app makes of him — the same order every other
+        row in this app now uses. The club's mark has moved out of the trailing
+        edge and into the identity cluster with the position and the name (see
+        `PlayerIdentity`), which leaves the verdict alone on the right where it
+        is the one thing being weighed.
       */}
       <div className="player-row-top">
-        <PositionPill position={row.position} />
+        <PlayerIdentity position={row.position} team={row.team} />
         <span className="player-name">{row.name}</span>
         <span className="player-row-meta">
           {row.statusFlag ? <Badge tone="warn">{row.statusFlag.split(' ')[0]}</Badge> : null}
         </span>
-        <TeamLogo team={row.team} />
         {/*
           The verdict, and it still gives way before the name does.
 

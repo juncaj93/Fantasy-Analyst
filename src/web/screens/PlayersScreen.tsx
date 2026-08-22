@@ -559,28 +559,33 @@ function PlayerRow({
         onOpen={onOpen}
         testId="player-search-row"
         /*
-          Four columns, and the movement gets one of its own.
+          Two numbers clustered at the leading edge, which is how the draft
+          board's own second line reads.
 
-          It was merged into the ADP cell to stop a value truncating, and that
-          fixed the width at the cost of the reading: `ADP 2.1▲1.6` is two
-          numbers with nothing between them, which is exactly the collision the
-          brief calls out by name. Label, value and movement are three different
-          things and they now sit in three different places.
+          This was three equal columns — `21d`, `ADP`, and a movement arrow —
+          spread across the width of the row, and the spread was the problem:
+          three numbers at three alignments, a rank on the leading edge and a
+          heart, a club mark and a chevron on the trailing one, all at the same
+          visual weight. A player index that looks like a spreadsheet is harder
+          to read than one that looks like the draft board, and the draft board
+          was already the answer.
 
-          What made room for the fourth column was taking the pending-review
-          chip off the row entirely. It is not needed to scan a list of players
-          — the Review tab already carries the count as a badge, and the
-          player's own page still says his tally is incomplete — so it moved one
-          tap deeper and every row is exactly two lines again.
+          The movement column is the one that went, and it went because it was
+          not a third reading. `movement` is Sleeper's own draft rank minus the
+          rank after the tally nudge — and both of those are already printed on
+          this row, as `ADP` and as the number on the leading edge. `1 · ADP 2.1
+          · ▲1.6` is a subtraction the reader can see being done. Nothing is
+          lost: the arrow is still on his page, in the metric grid at the top and
+          again under Market, where a reader who wants to know how far the
+          research moved him is already looking.
         */
         metrics={[
           /*
-            Three columns, not four. `Life` used to lead this line and it was
-            the same number as the tally beside the name on the line above —
-            the row printing its loudest signal twice, once labelled and once
-            not. What is left is the reading the label could not give you: how
-            he has moved lately, where the market has him, and which way that
-            has been going.
+            `Life` used to lead this line and it was the same number as the
+            tally beside the name on the line above — the row printing its
+            loudest signal twice, once labelled and once not. What is left is
+            the reading the label could not give you: how he has moved lately,
+            and where the market has him.
           */
           { label: '21d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
           {
@@ -594,17 +599,6 @@ function PlayerRow({
                   —
                 </span>
               ),
-          },
-          {
-            label: '',
-            testId: 'players-movement',
-            value: player.movement ? (
-              <span className={player.movement > 0 ? 'tally tally-pos' : 'tally tally-neg'}>
-                {player.movement > 0 ? `▲ ${player.movement}` : `▼ ${Math.abs(player.movement)}`}
-              </span>
-            ) : (
-              <span className="faint">—</span>
-            ),
           },
         ]}
       />

@@ -1,16 +1,19 @@
 /**
- * The trailing edge of a player row, and the tag that no longer sits on it.
+ * The columns a player row is built on, and the tag that no longer sits on one.
  *
- * Two changes, one place on the screen.
- *
- * The club marks used to land at slightly different distances from the right
+ * The club marks used to land at slightly different distances from the *right*
  * edge depending on how wide the number beside them was — a two-character tally
  * pushed the mark one way, a three-character one the other, and a row with no
  * tally at all a third. Nothing was wrong with any single row; the *column* was
  * ragged, which reads as a rendering fault to somebody who could not say what
- * was wrong with it. The fix is layout — a fixed field — and this file asserts
- * the outcome rather than the CSS: every mark on the board starts at the same
- * x, to the pixel.
+ * was wrong with it.
+ *
+ * The marks have since moved to the leading edge, into the identity cluster
+ * with the position and the name, and the claim survives the move intact: every
+ * mark on a list starts at the same x, to the pixel. What holds it there is
+ * different — a fixed pill width rather than a fixed trailing field — and the
+ * trailing field is still doing its own job for the tally and the availability
+ * tag, so both mechanisms are asserted below.
  *
  * And the AVOID chip is gone from the cards. The tally it was describing is
  * still beside the name, negative sign and all, which is what the reader
@@ -22,6 +25,34 @@ import { expect, test, type Page } from '@playwright/test';
 async function openDraft(page: Page) {
   await page.goto('/');
   await expect(page.getByTestId('board-list')).toBeVisible();
+}
+
+/**
+ * Position, then club, then name — the order every list in the app opens with.
+ *
+ * Read as geometry rather than as a DOM order, because the DOM can be right
+ * while the layout is not: a `row-reverse` or an `order` property would put the
+ * pill last on screen with the markup unchanged. What a reader sees is three
+ * boxes left to right, and that is what is checked.
+ */
+async function identityReadsLeftToRight(page: Page, rowTestId: string, atLeast = 5) {
+  const rows = await page.locator(`[data-testid="${rowTestId}"]`).evaluateAll((all) =>
+    all.slice(0, 12).map((row) => {
+      const box = (sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
+      const pill = box('.pos-pill');
+      const mark = box('.team-logo, [data-testid="team-code"]');
+      const name = box('.player-name');
+      return pill && mark && name
+        ? { pill: pill.right, markLeft: mark.left, markRight: mark.right, name: name.left }
+        : null;
+    }),
+  );
+  const drawn = rows.filter((r): r is NonNullable<typeof r> => r != null);
+  expect(drawn.length, `${rowTestId} should be drawing identity clusters`).toBeGreaterThanOrEqual(atLeast);
+  for (const r of drawn) {
+    expect(r.pill, 'the pill ends before the club begins').toBeLessThanOrEqual(r.markLeft + 1);
+    expect(r.markRight, 'and the club ends before the name begins').toBeLessThanOrEqual(r.name + 1);
+  }
 }
 
 /** Where each club mark begins, rounded to the pixel the eye can see. */
@@ -67,6 +98,79 @@ test.describe('the club marks line up', () => {
     const edges = await markLeftEdges(page, '[data-testid="player-search-row"]');
     expect(edges.length).toBeGreaterThan(4);
     expect(new Set(edges).size).toBe(1);
+  });
+});
+
+/**
+ * One identity, four screens.
+ *
+ * The point of moving the club's mark off the trailing edge was never the
+ * trailing edge — it was that a reader who learns to read a player on the draft
+ * board should not have to learn again on Players, on Trades or on Waivers.
+ * Position, club, name, in that order, on all four, as one cluster. A screen
+ * that quietly keeps its own arrangement is exactly the divergence this replaced.
+ */
+test.describe('the identity cluster', () => {
+  test('reads position, club, name on the draft board', async ({ page }) => {
+    await openDraft(page);
+    await identityReadsLeftToRight(page, 'recommendation-row');
+  });
+
+  test('and on Players', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-players').click();
+    await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
+    await identityReadsLeftToRight(page, 'player-search-row');
+  });
+
+  /*
+   * Three rather than five, and only here.
+   *
+   * Trades lists players the newsletter has an opinion about, so how many rows
+   * exist is a property of the evidence rather than of the layout — the seed
+   * carries three. Skipping when the fixture is small would be a test that
+   * quietly stops running; asking for what the fixture actually has is a test
+   * that keeps working.
+   */
+  test('and on Trades', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-trades').click();
+    await expect(page.locator('[data-testid="trade-row"]').first()).toBeVisible();
+    await identityReadsLeftToRight(page, 'trade-row', 3);
+  });
+
+  /**
+   * And on Waivers, which draws the same cluster from its own component.
+   *
+   * A different file builds this row — the waiver card is not a
+   * `CompactPlayerRow` — so "one identity everywhere" is a claim about two
+   * implementations agreeing rather than about one being reused, and it is
+   * worth checking rather than assuming.
+   */
+  test('and on Waivers', async ({ page }) => {
+    await page.goto('/?demo=waivers-tuesday-active');
+    await page.getByTestId('tab-waivers').click();
+    await expect(page.locator('[data-testid="waiver-row"]').first()).toBeVisible();
+    await identityReadsLeftToRight(page, 'waiver-row', 2);
+  });
+
+  /**
+   * The mark is smaller inside a name than it is standing on its own.
+   *
+   * At 22px beside a 16px name it was the loudest object in the row, which is
+   * how a decoration stops being one. The size is scoped to the cluster rather
+   * than changed in the token, so a mark that is *not* inside a name — a
+   * matchup lineup row, a player's own page — is still the size the token was
+   * chosen for.
+   */
+  test('draws the club quietly enough to be part of the name', async ({ page }) => {
+    await openDraft(page);
+    const [mark, name] = await Promise.all([
+      page.locator('[data-testid="recommendation-row"] .team-logo').first().boundingBox(),
+      page.locator('[data-testid="recommendation-row"] .player-name').first().boundingBox(),
+    ]);
+    expect(mark!.width, 'the club is no louder than the name it qualifies').toBeLessThanOrEqual(name!.height + 1);
+    expect(mark!.width, 'and is still big enough to recognise').toBeGreaterThanOrEqual(12);
   });
 
   /**

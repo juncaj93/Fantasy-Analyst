@@ -22,7 +22,7 @@
 
 import type { ReactNode } from 'react';
 import { ChevronIcon } from './icons.tsx';
-import { CompactTally, InjuryTag, PositionPill, TeamLogo, positionAccentClass } from './common.tsx';
+import { CompactTally, InjuryTag, PlayerIdentity, positionAccentClass } from './common.tsx';
 
 /** One labelled number in the row's second line. */
 export interface RowMetric {
@@ -43,8 +43,9 @@ export function CompactPlayerRow({
   tally,
   rank,
   leading,
+  trailing,
+  trailingBelow,
   metrics,
-  note,
   onOpen,
   testId,
 }: {
@@ -62,13 +63,22 @@ export function CompactPlayerRow({
   rank?: ReactNode;
   /** A control that belongs to the row itself — the heart, a star, a grip. */
   leading?: ReactNode;
-  metrics?: RowMetric[];
   /**
-   * One short line under the numbers, composed by the caller — usually with
-   * {@link RowNote}, which truncates the sentence and lets a qualifier sit at
-   * the end of it.
+   * The far end of the identity line, and the far end of the numbers under it.
+   *
+   * Two slots rather than one, because what wants to go there is a *stack*: on
+   * Trades, who holds the player over how sure the suggestion is. Written as a
+   * third line it cost the row a line and read as a sentence; written as a
+   * third column it read as a dense table. Hung off the ends of the two lines
+   * the row already has, it costs nothing and lands where a reader looks for
+   * the answer to "and whose is he".
+   *
+   * Both truncate rather than push: a long team name gives way before the
+   * player's own name does.
    */
-  note?: ReactNode;
+  trailing?: ReactNode;
+  trailingBelow?: ReactNode;
+  metrics?: RowMetric[];
   onOpen: () => void;
   testId: string;
 }) {
@@ -96,17 +106,20 @@ export function CompactPlayerRow({
       {/*
         The locked order, and it is the same on every screen in the app.
 
-        Rank, then the **position pill**, then the name, then whatever qualifies
-        the *player* — his tally and his availability — and only then the club
-        and the way in. The pill moved here from the trailing edge, which is the
-        whole rule: it is fixed-width, so it puts every name in the list on one
-        column, and a reader running down a list of forty is answering "which
-        position" before "who" more often than the other way round.
+        Rank, then **who he is** — the position pill, the club's mark and the
+        name, as one cluster — then whatever qualifies him, and only then the
+        way in.
 
-        Anything that qualifies the player sits to the right of his name, and
-        anything that belongs to the row as an object — the heart, the star —
-        sits with the club on the trailing side, where it is out of the path the
-        eye takes down the names.
+        The club used to sit at the far right, which put the three facts that
+        identify a player at three different places on the row: position on the
+        leading edge, name in the middle, club on the trailing edge beside a
+        control that has nothing to do with him. Everything that says *who* is
+        now on one side in the order a reader asks for it, and the trailing edge
+        is the row's own controls and nothing else. See `PlayerIdentity`.
+
+        Anything that qualifies the player still sits to the right of his name —
+        his tally, his availability — because those are readings about him
+        rather than parts of his name.
       */}
       <span className="dense-row-top">
         {rank !== undefined ? (
@@ -114,7 +127,7 @@ export function CompactPlayerRow({
             {rank}
           </span>
         ) : null}
-        <PositionPill position={position} />
+        <PlayerIdentity position={position} {...(team === undefined ? {} : { team })} />
         <span className="player-name">{name}</span>
         {/*
           The tally and the availability tag share one fixed-width field, so
@@ -125,8 +138,8 @@ export function CompactPlayerRow({
           {tally === undefined ? null : <CompactTally net={tally} label="Lifetime research tally" />}
           <InjuryTag status={status} />
         </span>
+        {trailing ? <span className="dense-row-aside">{trailing}</span> : null}
         {leading}
-        {team === undefined ? null : <TeamLogo team={team} />}
         <span className="dense-chevron" aria-hidden="true">
           <ChevronIcon />
         </span>
@@ -144,7 +157,11 @@ export function CompactPlayerRow({
           which is what Trades looked like once its row came down to `30d` and
           `Life`. Below three they sit together at the leading edge instead.
         */
-        <span className="dense-row-metrics" data-columns={metrics.length}>
+        <span
+          className="dense-row-metrics"
+          data-columns={metrics.length}
+          data-aside={trailingBelow ? 'yes' : 'no'}
+        >
           {metrics.map((m) => (
             <span
               key={m.label}
@@ -155,23 +172,9 @@ export function CompactPlayerRow({
               <span className="dense-metric-value">{m.value}</span>
             </span>
           ))}
+          {trailingBelow ? <span className="dense-metrics-aside">{trailingBelow}</span> : null}
         </span>
       ) : null}
-
-      {note ? <span className="dense-row-note">{note}</span> : null}
     </button>
-  );
-}
-
-/**
- * The row's second line as it is written when a screen has nothing to put in a
- * column — a single free-form line rather than an empty grid.
- */
-export function RowNote({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) {
-  return (
-    <>
-      <span>{children}</span>
-      {trailing}
-    </>
   );
 }

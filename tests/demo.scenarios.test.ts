@@ -158,6 +158,73 @@ describe('the draft scenarios rank a real board', () => {
   });
 });
 
+/**
+ * The Team card mid-draft, in every mode a scenario can be in.
+ *
+ * The card is one sentence now — the live-status and slot-coverage prose above
+ * it went — so a scenario whose roster response omits `bestMove` has no card at
+ * all rather than a card missing its last line. Demo Mode's contract is that it
+ * drives the production screens with fixture data, and this is the assertion
+ * that keeps the two responses the same shape.
+ *
+ * The second claim is the one worth more: the sentence is derived from the
+ * league's own starting slots, so it is not a Best Ball feature that a Best
+ * Ball screenshot happened to be taken of. `draft-best-ball` and the standard
+ * draft scenarios each get whatever their own roster shape produces, and
+ * `bestMove` never sees a format flag — see core/draft/bestMove.ts.
+ */
+describe('the draft-mode Team card carries advice in every draft mode', () => {
+  const DRAFTS = ['draft-early', 'draft-mid', 'draft-late', 'draft-best-ball'];
+
+  for (const id of DRAFTS) {
+    it(`${id} answers the roster with a move to make`, async () => {
+      const runtime = await runtimeFor(id);
+      const scenario = findScenario(id)!;
+      const res = await runtime.request('GET', `/api/leagues/${scenario.leagueId}/roster`);
+      expect(res.status).toBe(200);
+
+      const body = res.body as {
+        live: boolean;
+        bestMove?: { text: string; positions: string[]; kind: string } | null;
+        counts: Record<string, number>;
+        openStarters: unknown[];
+      };
+
+      expect(body.live, 'the draft scenarios are live drafts').toBe(true);
+      expect(body.bestMove?.text, 'and every one of them names a move').toBeTruthy();
+      expect(['starter', 'flex', 'depth']).toContain(body.bestMove!.kind);
+      // The counts the sentence is derived from are still sent, and still real.
+      expect(body.counts).toBeTruthy();
+      expect(Array.isArray(body.openStarters)).toBe(true);
+    });
+  }
+
+  /**
+   * Best Ball gets the same treatment as everything else, and no more.
+   *
+   * `draft-best-ball` is a different league with a different roster shape, so
+   * what it must not do is produce a sentence *because* it is Best Ball — the
+   * shape is the whole input. This asserts the derivation rather than the
+   * string: whatever the sentence names, the roster it names it about is this
+   * scenario's, and the positions it names are positions this league starts.
+   */
+  it('derives the Best Ball scenario’s move from that league’s own slots', async () => {
+    const runtime = await runtimeFor('draft-best-ball');
+    const scenario = findScenario('draft-best-ball')!;
+    const res = await runtime.request('GET', `/api/leagues/${scenario.leagueId}/roster`);
+    const body = res.body as {
+      bestMove: { text: string; positions: string[] };
+      rosterShape: { slots?: Record<string, number> } & Record<string, unknown>;
+    };
+
+    expect(body.bestMove.text.length).toBeGreaterThan(0);
+    const shape = JSON.stringify(body.rosterShape);
+    for (const position of body.bestMove.positions) {
+      expect(shape, `${position} is not a slot this league starts`).toContain(position);
+    }
+  });
+});
+
 describe('no draft order is a warning, not an empty board', () => {
   it('sleeper-adp-unavailable still ranks and says why it is a poor substitute', async () => {
     const board = (

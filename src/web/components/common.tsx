@@ -225,18 +225,60 @@ export function PositionBadge({ position, team }: { position: string | null; tea
 }
 
 /**
+ * Who the player is, as one cluster: position, club, and then his name.
+ *
+ * The rule this settles is the one the app kept getting two answers to. The
+ * pill has sat left of the name since the row pass; the club's mark sat at the
+ * far right, beside the star on Draft and beside the chevron on Players — so a
+ * reader assembling "who is this" had to take the position from one end of the
+ * row, the name from the middle and the club from the other end, and the
+ * trailing edge carried a mark and a control that have nothing to do with each
+ * other. Everything that says *who* is now on the leading side, in the order a
+ * reader asks for it, and the trailing edge is left to the one control that
+ * acts on the row.
+ *
+ * The mark is smaller here than it is anywhere it stands alone, and that is the
+ * whole of what makes the cluster read as one thing rather than as three: at
+ * 22px beside a 16px name it is the loudest object in the row, and at 16px it
+ * is a qualifier on the name the way the pill is. The size is scoped to this
+ * component rather than changed in the token, because a club's mark that is
+ * *not* inside a name — a matchup lineup row, a player's own page — is still
+ * doing the job the token was sized for. That is the same trick `.dboard-meta`
+ * already plays on the board grid.
+ *
+ * `flex: none`, so the cluster is a fixed column: with the pill at one width
+ * (see {@link PositionPill}) every name in a list starts on the same x, which
+ * is what the pill moving left was for in the first place.
+ *
+ * The name is *not* rendered here. It is the row's own flex child, so it keeps
+ * the shrink-and-truncate behaviour that stops a long name pushing anything off
+ * the row — putting it inside a `flex: none` cluster would take that away.
+ */
+export function PlayerIdentity({ position, team }: { position: string | null; team?: string | null }) {
+  return (
+    <span className="player-identity">
+      <PositionPill position={position} />
+      {team === undefined ? null : <TeamLogo team={team} />}
+    </span>
+  );
+}
+
+/**
  * The position, alone, in letters.
  *
  * Split out of {@link PositionBadge} because the row rule separated the two
  * marks it used to carry together: the pill belongs immediately *left* of the
  * player's name, where it is the first thing read and lands on the same column
- * on every row of every list, and the club's mark belongs on the trailing edge
- * beside whatever number that screen is about. A badge holding both could only
- * ever sit at one end.
+ * on every row of every list. The club's mark has since joined it there — see
+ * {@link PlayerIdentity} — which is what finally made the pill's width matter.
  *
- * A fixed minimum width, because the point of putting it left of the name is
- * that the names line up: `QB` and `DEF` must occupy the same column or the
- * rule buys nothing.
+ * A fixed width, because the point of putting it left of the name is that the
+ * names line up: `QB` and `DEF` must occupy the same column or the rule buys
+ * nothing. It was a *minimum* width, which was almost the same thing and not
+ * quite — `WR` measures 27.4px against everything else's 26px, so a board of
+ * forty players started its names on two different columns, and once the club's
+ * mark followed the pill it would have started them on two as well. The box is
+ * now the column and the letters are centred in it.
  */
 export function PositionPill({ position }: { position: string | null }) {
   const pos = (position ?? '').toUpperCase();

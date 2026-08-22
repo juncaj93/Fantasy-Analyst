@@ -33,8 +33,7 @@ import {
   Empty,
   InjuryTag,
   Notice,
-  PositionPill,
-  TeamLogo,
+  PlayerIdentity,
   Unknown,
   formatShortAge,
   positionCardClass,
@@ -1845,7 +1844,17 @@ function RecommendationRow({
           ) : (
             <span className="rank">{rank}</span>
           )}
-          <PositionPill position={rec.position} />
+          {/*
+            Who he is, as one cluster: position, club, name.
+
+            The club's mark used to sit at the far right beside the star, which
+            put the three facts that identify a player at three places on the
+            row and put a mark that describes him next to a control that acts on
+            the row. See `PlayerIdentity` — this is the same cluster Players,
+            Trades and Waivers now open with, and it is the whole reason the
+            trailing edge has one object on it instead of two.
+          */}
+          <PlayerIdentity position={rec.position} team={rec.team} />
           <span className="player-name">{rec.name}</span>
           {/*
             The tally, beside the name it is about.
@@ -1866,17 +1875,17 @@ function RecommendationRow({
             <InjuryTag status={rec.status} />
           </span>
           {/*
-            The star sits with the club rather than beside the rank.
+            The star, alone on the trailing edge.
 
-            The position pill took the slot to the left of the name — see
-            `CompactPlayerRow`, which is where that rule is written down — and
-            the row is better for it: the marks that qualify the *player* are
-            now all on one side of his name and the controls that act on the
-            row are all on the other, instead of a bookmark toggle sitting in
-            the middle of the identity.
+            It shared that edge with the club's mark, which was two objects
+            answering two unrelated questions in one place — *who is this* and
+            *do I want to remember him*. The mark has gone left into the
+            identity cluster, and what is left here is the one control on the
+            row, with the whole trailing column to itself. A bookmark toggle is
+            worth finding without looking, and now it is the only thing there
+            to find.
           */}
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
-          <TeamLogo team={rec.team} />
         </div>
 
         {/*

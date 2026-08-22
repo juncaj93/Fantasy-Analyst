@@ -1589,42 +1589,32 @@ function LiveDraftRoster({
   return (
     <>
       {/*
-        Live, but quietly so: a dot and a word, not a coloured banner. What is
-        still missing is the sentence worth reading here, so it gets the type.
+        The advice, and nothing else.
+
+        This card used to open with a status block: a `LIVE DRAFT` dot, a count
+        of picks made and slots filled and left, and a sentence saying either
+        which starting slots were still open or that they all were covered. All
+        of it was true and none of it was worth the height. A reader looking at
+        this screen is mid-draft, on the clock, and already knows they are
+        drafting; the roster underneath is the count, group heading by group
+        heading; and "which slots are open" is the *input* to the sentence
+        below rather than a second reading of it — the card was showing its own
+        working above its answer.
+
+        So what is left is the answer. One line, one mark, no rule to separate
+        it from anything, and the card is drawn at all only when there is a move
+        to name. The counts and the open-slot breakdown are untouched in the
+        roster response and still feed the recommendation.
+
+        Computed on the server from the need breakdown the draft engine derives
+        from **this league's own starting slots** — see core/draft/bestMove.ts
+        and `computeNeed`. Nothing here, and nothing there, asks whether the
+        draft is Best Ball: the roster shape is the input, so a Best Ball board,
+        a redraft board and a league with two flexes each get the sentence their
+        own shape produces. This element prints it; it does not decide it.
       */}
-      <div className="card card-tight" data-testid="live-draft-card">
-        <div className="header-row">
-          <span className="live-dot">Live draft</span>
-          <span className="faint">
-            {roster.picksMade} {roster.picksMade === 1 ? 'pick' : 'picks'} · {roster.filled} filled ·{' '}
-            {roster.remaining} left
-          </span>
-        </div>
-        {roster.openStarters.length > 0 ? (
-          <div className="muted" style={{ marginTop: 4 }}>
-            Still need:{' '}
-            <strong>
-              {roster.openStarters.map((o) => `${o.count > 1 ? `${o.count} ` : ''}${o.slot}`).join(', ')}
-            </strong>
-          </div>
-        ) : (
-          <div className="muted" style={{ marginTop: 4 }}>
-            Every starting slot is covered.
-          </div>
-        )}
-        {/*
-          What to do about it, under a rule.
-
-          The line above is the state — which slots are unfilled — and this is
-          the move that follows from it. They are close enough to be confused
-          for one sentence, so the rule separates them, and the mark says this
-          one is the app talking rather than the draft reporting.
-
-          Computed on the server from the same need breakdown the board already
-          uses. See core/draft/bestMove.ts: this element prints a sentence, it
-          does not decide one.
-        */}
-        {roster.bestMove ? (
+      {roster.bestMove ? (
+        <div className="card card-tight" data-testid="live-draft-card">
           <div className="best-move" data-testid="best-move" data-kind={roster.bestMove.kind}>
             <span className="best-move-mark" aria-hidden="true">
               ★
@@ -1633,8 +1623,8 @@ function LiveDraftRoster({
               <strong>Best move:</strong> {roster.bestMove.text}
             </span>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {/*
         One card per position group holding one line per player, rather than one
@@ -1666,11 +1656,29 @@ function LiveDraftRoster({
                 .map((p) => (
                   <div key={p.playerId} className="roster-line" data-testid="drafted-line">
                     {/*
-                      No position pill here, on either edge. The card's own
-                      heading — `TE (2)` — has already said the position, and in
-                      a column half a phone wide a pill is a fifth of the room
-                      the name needs. See the note on the trailing cluster.
+                      The club, first, on the same x as every other club on the
+                      roster.
+
+                      It used to sit on the trailing edge next to the pick, on
+                      the argument that a number and the badge of the team
+                      behind it are one thought. They are — but the badge is a
+                      fact about the *player*, and pairing it with the pick put
+                      the two things that identify him at opposite ends of a row
+                      whose only other content is his name. On the leading edge
+                      it starts a column: run an eye down a twenty-two man
+                      roster and the clubs are a list, which is how a manager
+                      notices he has taken four Eagles.
+
+                      Still no position pill, on either edge. The card's own
+                      heading — `TE (2)` — has already said the position, and
+                      the prior pass took it out of this treatment deliberately.
+                      The mark is drawn at the same inline size the player rows
+                      use, so a club is one size everywhere it sits inside a
+                      name.
                     */}
+                    <span className="roster-line-club">
+                      <TeamLogo team={p.team} />
+                    </span>
                     <span className="player-name">{p.name}</span>
                     {/*
                       His availability, against his name — the same placement
@@ -1679,16 +1687,14 @@ function LiveDraftRoster({
                     */}
                     <InjuryTag status={p.status} />
                     {/*
-                      The club and the pick, as one cluster on the trailing edge.
+                      And the pick, alone on the trailing edge.
 
-                      The position pill used to sit here too, which put three
-                      things on the right of a row whose group heading — `RB (1)`
-                      — has already said the position. Reading it again on every
-                      line is a reading that buys nothing, and it was what forced
-                      the logo away from the number it belongs with.
+                      One value on the right of the row, on one column, on every
+                      line: the reader can run down the picks as easily as down
+                      the clubs, which they could not do while the mark was
+                      shifting the number sideways by however wide the mark was.
                     */}
                     <span className="row-value">
-                      <TeamLogo team={p.team} />
                     {/*
                       `1.04` while the draft runs, `#8` once it is over.
 
