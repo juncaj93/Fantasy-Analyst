@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
 import { NavBar, SkeletonRows } from '../components/native.tsx';
-import { CompactPlayerRow, RowNote } from '../components/playerRow.tsx';
+import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { unwindOne } from '../tabReset.ts';
@@ -265,38 +265,53 @@ function TradeRow({
           { label: 'Life', value: <SignedValue net={w.lifetime} /> },
         ]}
         /*
-          Who holds him, and how sure this is — one short line, no sentence.
+          Who holds him, and how sure this is — on the trailing edge, stacked.
 
           The owner is the fact the whole screen is for: a trade is a
           conversation with a person, and a board that says a player is worth
           asking about without saying who to ask is a board you have to leave to
           use. Absent for a free agent and wherever Sleeper has not named the
-          seat, which is honest — no `Roster 4`.
+          seat, which is honest — no `Roster 4`; that case falls back to what the
+          board already calls the row, `Add / waiver target`.
 
-          Confidence sits at the end of that line as a word rather than a
-          sentence, and only where the section's own header cannot say it once
-          for every row underneath. See the note there.
+          It was a third line under the numbers, and the room for it came from
+          the club's mark leaving the trailing edge for the player's name — see
+          `PlayerIdentity`. A name belongs beside the name it answers, so the
+          owner now sits at the end of the identity line and the confidence at
+          the end of the numbers, which is one fewer line than before and puts
+          the two quiet facts in a column of their own rather than in a
+          sentence. Nothing about either value changed.
         */
-        {...(suggestion.owner || showConfidence
-          ? {
-              note: (
-                <RowNote
-                  {...(showConfidence
-                    ? { trailing: <Confidence level={suggestion.confidence} compact /> }
-                    : {})}
-                >
-                  {suggestion.owner ? (
-                    <span data-testid="trade-owner">{suggestion.owner}</span>
-                  ) : (
-                    <span className="faint">{suggestion.label}</span>
-                  )}
-                </RowNote>
-              ),
-            }
-          : {})}
+        trailing={
+          <span data-testid="trade-owner" data-ownership={suggestion.ownership} title={holderOf(suggestion)}>
+            {suggestion.owner ?? <span className="faint">{holderOf(suggestion)}</span>}
+          </span>
+        }
+        {...(showConfidence ? { trailingBelow: <Confidence level={suggestion.confidence} compact /> } : {})}
       />
     </div>
   );
+}
+
+/**
+ * Whose he is, in the fewest words that are true.
+ *
+ * The name where Sleeper has named the seat, and otherwise the state the board
+ * already knows him by. It is deliberately not `suggestion.label`, which was
+ * what the row printed here before: that string is the *section's* own heading —
+ * `Add / waiver target` under a section called `Add / waiver target`, on every
+ * row — so it filled the column without answering its question.
+ *
+ * Nothing is invented. `ownership` is a fact the board computes from the
+ * league's rosters, and each of the three states has exactly one honest reading:
+ * you have him, somebody has him, or nobody does. A player on a roster Sleeper
+ * has not named a manager for reads `Rostered` rather than `Roster 4`, which is
+ * the same rule the owner field itself follows.
+ */
+function holderOf(suggestion: TradeSuggestion): string {
+  if (suggestion.owner) return suggestion.owner;
+  if (suggestion.ownership === 'mine') return 'You';
+  return suggestion.ownership === 'free' ? 'Free agent' : 'Rostered';
 }
 
 /**

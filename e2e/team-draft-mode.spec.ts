@@ -58,14 +58,48 @@ test.describe('the drafted roster', () => {
       expect(box!.y, 'no two players share a row').toBeGreaterThan(boxes[i - 1]!.y + 1);
     }
 
-    // The club and the pick on the name's line, not under it.
+    // The pick on the name's line, not under it.
     const first = rows[0]!;
     const [name, value] = await Promise.all([
       first.locator('.player-name').boundingBox(),
       first.locator('.row-value').boundingBox(),
     ]);
-    expect(Math.abs(name!.y - value!.y), 'the club sits on the name’s line').toBeLessThan(8);
-    expect(value!.x, 'and on the trailing edge, as one cluster').toBeGreaterThan(name!.x + name!.width);
+    expect(Math.abs(name!.y - value!.y), 'the pick sits on the name’s line').toBeLessThan(8);
+    expect(value!.x, 'and on the trailing edge').toBeGreaterThan(name!.x + name!.width);
+  });
+
+  /**
+   * The club leads the line and the pick ends it, each on its own column.
+   *
+   * The mark used to sit on the trailing edge paired with the pick, which put
+   * the two facts that identify a player — his club and his name — at opposite
+   * ends of a row that holds almost nothing else, and let the width of the mark
+   * push the pick sideways line by line. Both are columns now, and both are
+   * asserted here because either one drifting is invisible on a single row and
+   * obvious down twenty-two of them.
+   */
+  test('lines the clubs up on the left and the picks up on the right', async ({ page }) => {
+    const columns = await page.getByTestId('drafted-line').evaluateAll((rows) => {
+      const box = (row: Element, sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
+      return rows.map((row) => {
+        const mark = box(row, '.team-logo, [data-testid="team-code"]');
+        const name = box(row, '.player-name');
+        const pick = box(row, '[data-testid="roster-row-label"]');
+        return {
+          markLeft: mark ? Math.round(mark.left) : null,
+          markEnd: mark ? mark.right : null,
+          nameLeft: name ? name.left : null,
+          pickRight: pick ? Math.round(pick.right) : null,
+        };
+      });
+    });
+
+    expect(columns.length).toBeGreaterThan(1);
+    expect(new Set(columns.map((c) => c.markLeft)).size, 'every club starts on one x').toBe(1);
+    expect(new Set(columns.map((c) => c.pickRight)).size, 'every pick ends on one x').toBe(1);
+    for (const c of columns) {
+      expect(c.markEnd!, 'the club ends before the name begins').toBeLessThanOrEqual(c.nameLeft! + 1);
+    }
   });
 
   /**
@@ -113,6 +147,37 @@ test.describe('the drafted roster', () => {
 
     const card = page.getByTestId('live-draft-card');
     expect((await card.boundingBox())!.height, 'the draft card stays compact').toBeLessThan(140);
+  });
+
+  /**
+   * …and carries nothing else.
+   *
+   * The card opened with a `Live draft` dot, a count of picks made, slots
+   * filled and slots left, and a sentence naming the open starting slots or
+   * saying there were none. All true, none of it worth the height: a reader on
+   * this screen is mid-draft and knows it, the roster underneath is the count
+   * group heading by group heading, and the open slots are the *input* to the
+   * advice rather than a second reading of it.
+   *
+   * The counts themselves are untouched on the roster response and still feed
+   * the recommendation — this asserts they are not printed, not that they are
+   * gone. `computeNeed` still receives every one of them.
+   */
+  test('and no live-status or slot-coverage prose above it', async ({ page }) => {
+    const card = page.getByTestId('live-draft-card');
+    const text = (await card.innerText()).replace(/\s+/g, ' ');
+
+    expect(text, 'the card is the advice and nothing else').toMatch(/^★? ?Best move:/);
+    for (const gone of ['Live draft', 'filled', 'left', 'Still need', 'Every starting slot is covered']) {
+      expect(text, `"${gone}" is still on the card`).not.toContain(gone);
+    }
+    await expect(card.locator('.live-dot')).toHaveCount(0);
+
+    // The numbers behind it are still being sent, and still feed the sentence.
+    const roster = await (await page.request.get('/api/leagues/demo-league/roster')).json();
+    expect(typeof roster.filled, 'the roster still reports how many slots are filled').toBe('number');
+    expect(Array.isArray(roster.openStarters), 'and which starters are open').toBe(true);
+    expect(roster.bestMove?.text, 'which is what the sentence is derived from').toBeTruthy();
   });
 
   /**

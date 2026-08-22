@@ -1697,11 +1697,39 @@ body,
  * always present, so the colour is an accelerator for scanning and never the
  * thing carrying the meaning.
  */
+/*
+ * The player-identity cluster: the position, the club, and the name after them.
+ *
+ * `--team-logo` is overridden rather than changed at the root, because the mark
+ * is only too loud *here*. Standing alone on a matchup row or a player's page it
+ * is the thing being looked at and 22px is right; inside a name it is a
+ * qualifier, and at 22px beside a 16px name it was the loudest object in the
+ * row. Same override, same reason, as `.dboard-meta`.
+ *
+ * The gap is half the row's, which is what makes three objects read as one
+ * cluster rather than as three items in a list: everything else on the line is
+ * separated by more than this.
+ */
+.player-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  --team-logo: 16px;
+}
+
 .pos-pill {
   display: inline-block;
-  min-width: 26px;
+  /*
+   * One column, not a floor. See `PositionPill`: `WR` measures 27.4px where
+   * every other code measures 26, which is invisible while the pill is the only
+   * fixed thing on the leading edge and is a ragged column the moment the club's
+   * mark follows it. Padding is tight and `overflow` is left visible so a wider
+   * engine spills into the cluster's gap rather than clipping `DEF`.
+   */
+  width: 32px;
   text-align: center;
-  padding: 1px 4px;
+  padding: 1px 2px;
   border-radius: var(--radius-sm);
   font-size: 0.6rem;
   font-weight: 800;
@@ -2372,6 +2400,50 @@ body,
   grid-column: span 2;
 }
 
+/*
+ * The two-level trailing stack: something at the end of the identity line, and
+ * something under it at the end of the numbers.
+ *
+ * On Trades this is the owner over the confidence, and the pair is the reason
+ * the row lost a line rather than gaining one. Both are pushed to the trailing
+ * edge and both truncate before anything else does — a manager who has called
+ * his team something long gives way to the player's own name, never the other
+ * way round.
+ */
+.dense-row-aside {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 560;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+/*
+ * A numbers line with something hung off its end stops being a grid.
+ *
+ * The columns exist so the eye can run down one of them; an occupant that has
+ * to sit at the far edge is not a column and cannot be given one without
+ * stretching the numbers away from each other. Flex, with the metrics clustered
+ * at the leading edge exactly as a two-column line already sits, and the aside
+ * pushed to the other end.
+ */
+.dense-row-metrics[data-aside='yes'] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+}
+
+.dense-metrics-aside {
+  margin-left: auto;
+  flex: none;
+  padding-left: var(--sp-2);
+}
+
 .dense-metric {
   display: flex;
   align-items: baseline;
@@ -2402,31 +2474,6 @@ body,
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/*
- * One short sentence under the numbers, where a row has something to say.
- *
- * Capped at a single line on purpose. A reason that needs two lines is a reason
- * that belongs on the player's own page, and a list where some rows are three
- * lines and some are five has lost the rhythm that made it scannable.
- */
-.dense-row-note {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-1);
-  margin-top: 2px;
-  font-size: 0.73rem;
-  color: var(--text-dim);
-  min-width: 0;
-}
-
-.dense-row-note > span:first-child {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The chevron that says this row leads somewhere. Quiet, and never the label. */
@@ -3060,7 +3107,7 @@ body,
  * gives up its capsule entirely and becomes small muted text — the amber is
  * kept only for `low`, which is the one level that changes what a reader does.
  */
-.dense-row-note .badge-confidence {
+.dense-metrics-aside .badge-confidence {
   font-size: 0.66rem;
   font-weight: 500;
   flex: none;
@@ -3070,7 +3117,7 @@ body,
   color: var(--text-faint);
 }
 
-.dense-row-note .badge-confidence-low {
+.dense-metrics-aside .badge-confidence-low {
   color: var(--warn);
 }
 
@@ -3084,7 +3131,7 @@ body,
  * which is exactly what a capsule stops. Tinted surface, no border, no colour
  * of its own except the amber `low` keeps.
  */
-.dense-row-note .badge-confidence-compact {
+.dense-metrics-aside .badge-confidence-compact {
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--surface-inset);
@@ -3284,11 +3331,19 @@ button:disabled {
   font-weight: 600;
   letter-spacing: 0.02em;
   /*
-   * Tight, because three of these plus the refresh glyph share one end of the
+   * Tight, because three of these plus the board control share one end of the
    * bar on a 360px phone. The row itself is a full-height tap target, so the
    * narrow padding costs legibility rather than reachability.
+   *
+   * Tight is not the same as cramped, and this was the wrong side of the line:
+   * three words in a track barely wider than the words read as a control that
+   * had been squeezed rather than one that had been sized. Two points either
+   * side of each segment — six on the control — is enough for the selected
+   * face to look like a face with the word inside it, and it is still nowhere
+   * near a full-width control. The league title and the board glyph keep the
+   * rest of the bar; checked at 360, where the margin is smallest.
    */
-  padding: 5px 7px;
+  padding: 5px 9px;
   min-height: 30px;
   line-height: 1;
   cursor: pointer;
@@ -3320,10 +3375,10 @@ button:disabled {
   opacity: 0.6;
 }
 
-/* The narrowest phones: the words stay, the padding goes. */
+/* The narrowest phones: the words stay, and most of the padding does too. */
 @media (max-width: 375px) {
   .sort-chip {
-    padding: 5px 5px;
+    padding: 5px 7px;
     font-size: 0.64rem;
   }
 }
@@ -4594,8 +4649,14 @@ table.compact tr:last-child td {
 }
 
 /*
- * The club and the pick as one cluster on the trailing edge — a tight pair, not
- * two columns with the width of a phone between them.
+ * The pick, alone on the trailing edge, on one column down the whole roster.
+ *
+ * This used to hold the club's mark as well, as a tight pair — the argument
+ * being that a number and the badge of the team behind it are one thought. The
+ * badge has moved to the leading edge, where it is part of the player's
+ * identity rather than of his pick, and what that bought is this: the pick is
+ * now the only thing on the right of the row, so it starts at the same x on
+ * every line instead of being nudged sideways by however wide the mark was.
  */
 .roster-list .roster-line .row-value {
   margin-left: auto;
@@ -4603,12 +4664,31 @@ table.compact tr:last-child td {
 }
 
 /*
- * The draft card's one line of advice, under a rule.
+ * The club's mark at the head of a roster line.
  *
- * Above it the card reports the draft — picks made, slots still open. This is
- * the app's own sentence about what to do next, and the two read as one
- * paragraph without something between them. A hairline and a mark is the least
- * that separates them; a second card would cost a card.
+ * Same override, same reason, as `.player-identity`: inside a name a club is a
+ * qualifier and 22px makes it the loudest thing on a 30px row. Fixed width so
+ * the names after it line up whether the mark is a logo, a three-letter
+ * fallback, or `FA`.
+ */
+.roster-line-club {
+  --team-logo: 16px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+}
+
+/*
+ * The draft card's one line of advice, and the whole of the card.
+ *
+ * It sat under a hairline, below a block reporting picks made and slots still
+ * open — the rule was there because the state and the advice read as one
+ * paragraph without something between them. The state has gone: a reader
+ * mid-draft knows they are drafting, and the open slots were the input to this
+ * sentence rather than a second reading of it. With nothing above it the rule
+ * separates the line from the top of its own card, so both it and the margin go.
  *
  * `align-items: start` so the mark sits on the first line of a sentence that
  * wraps to two at 360px rather than floating in the middle of the block.
@@ -4617,9 +4697,6 @@ table.compact tr:last-child td {
   display: flex;
   align-items: start;
   gap: var(--sp-1);
-  margin-top: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--separator-soft);
   font-size: 0.82rem;
   line-height: 1.35;
   color: var(--text);

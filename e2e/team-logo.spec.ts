@@ -89,6 +89,16 @@ test.describe('the club mark on a player row', () => {
     expect(Math.abs(mark!.width - mark!.height)).toBeLessThan(1);
   });
 
+  /**
+   * The mark leads the name now, and still never collides with it.
+   *
+   * This asserted the mark was to the *right* of the name, because the club sat
+   * on the trailing edge beside the star. It has moved into the identity
+   * cluster — position, club, name, in the order a reader asks for them — so
+   * the same claim is the same claim with the sides swapped: the mark ends
+   * before the name begins, and the name still gets enough of the row to be a
+   * name. Neither number was relaxed on the way.
+   */
   test('never lets a mark push the player name off the row', async ({ page }) => {
     await openDraft(page);
 
@@ -96,10 +106,41 @@ test.describe('the club mark on a player row', () => {
       const name = await row.locator('.player-name').boundingBox();
       const mark = await row.getByTestId('team-logo').boundingBox();
       if (!name || !mark) continue;
-      // The name ends before the trailing cluster starts.
-      expect(name.x + name.width).toBeLessThanOrEqual(mark.x + 1);
+      // The mark ends before the name starts.
+      expect(mark.x + mark.width).toBeLessThanOrEqual(name.x + 1);
       expect(name.width).toBeGreaterThan(60);
     }
+  });
+
+  /**
+   * And the cluster is a column, not a cluster-shaped thing.
+   *
+   * The whole reason the pill went from a minimum width to a fixed one: with
+   * the club's mark following it, a `WR` pill 1.4px wider than a `QB` one would
+   * start every receiver's mark — and every receiver's name — on its own
+   * column. Forty rows of that reads as a rendering fault to somebody who could
+   * not say what was wrong with it.
+   */
+  test('starts every mark and every name on one column', async ({ page }) => {
+    await openDraft(page);
+
+    const columns = await page.getByTestId('recommendation-row').evaluateAll((rows) => {
+      const left = (row: Element, sel: string) => {
+        const el = row.querySelector(sel);
+        return el ? Math.round(el.getBoundingClientRect().left) : null;
+      };
+      return {
+        marks: [...new Set(rows.map((r) => left(r, '.team-logo, [data-testid="team-code"]')).filter((x) => x != null))],
+        names: [...new Set(rows.map((r) => left(r, '.player-name')).filter((x) => x != null))],
+        positions: [...new Set(rows.map((r) => (r.querySelector('.pos-pill')?.textContent ?? '').trim()))],
+      };
+    });
+
+    expect(columns.marks, `marks started at ${columns.marks.join(', ')}`).toHaveLength(1);
+    expect(columns.names, `names started at ${columns.names.join(', ')}`).toHaveLength(1);
+    // …and the board really does mix positions, so a uniform one could not pass
+    // this by accident. `WR` is the wide one, and it is what broke this before.
+    expect(columns.positions.length).toBeGreaterThan(1);
   });
 });
 

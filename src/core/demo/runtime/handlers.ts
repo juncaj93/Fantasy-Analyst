@@ -31,6 +31,10 @@ import { buildMatchupResponse } from '../../matchup/build.ts';
 import { myGuy } from '../../draft/decisions.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../../draft/playerOrder.ts';
 import { buildLiveRoster } from '../../draft/liveRoster.ts';
+/* The draft card's one sentence, and the need breakdown it reads. Same two
+   functions the live roster route calls — see the note where it is used. */
+import { bestMove } from '../../draft/bestMove.ts';
+import { computeNeed } from '../../draft/need.ts';
 import { compareStartSit } from '../../startsit/engine.ts';
 import { recommendLineup } from '../../startsit/lineup.ts';
 import { waiverMultiWeekFor, weeklyIntelligence } from '../../contracts/integration.ts';
@@ -296,6 +300,25 @@ function roster(data: ScenarioData) {
     remaining: live.remaining,
     openStarters: live.openStarters,
     picksMade: live.picksMade,
+    /*
+     * The one line of advice the draft card carries — the same call the live
+     * route makes, on this scenario's own roster shape.
+     *
+     * It was missing here, and the omission was invisible for as long as the
+     * card had other things on it: Demo Mode drew a `Live draft` dot, the pick
+     * counts and the coverage sentence, and simply never reached the sentence
+     * underneath. Trimming the card to the advice alone is what surfaced it —
+     * a demo draft had no card at all.
+     *
+     * That is a demo defect rather than a product one. Demo Mode's whole
+     * contract is that it drives the production screens with fixture data, so a
+     * response missing a field the real one sends is a scenario the reader
+     * cannot see the product through. Same import, same derivation from
+     * `computeNeed` and the league's own starting slots — see
+     * core/draft/bestMove.ts — so a Best Ball scenario, a redraft scenario and
+     * a league with two flexes each get the sentence their own shape produces.
+     */
+    bestMove: bestMove(computeNeed(shape, live.counts)),
     found: !!mine,
   };
 }
