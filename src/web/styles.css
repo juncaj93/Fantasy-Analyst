@@ -4976,10 +4976,10 @@ table.compact tr:last-child td {
  * The reader's first question is *who do I start*, and the answer to it should
  * not require a scroll.
  *
- * So the row is the identity line and nothing else: slot, name, the tags that
- * change what to do, the projection, the club. Everything the row stopped
- * saying is in the sheet it opens, which is where it can be read properly
- * rather than clipped to fit.
+ * So the row is the identity line and nothing else: position and club, name,
+ * the tags that change what to do, and the projection on the trailing edge.
+ * Everything the row stopped saying is in the sheet it opens, which is where it
+ * can be read properly rather than clipped to fit.
  *
  * **The tap target is not what shrinks.** `.player-row` keeps its 44px minimum
  * and its padding; what goes is the content that made the row three times that
@@ -5066,6 +5066,25 @@ table.compact tr:last-child td {
 }
 
 /*
+ * …and its slot chip stands in the identity column, not beside it.
+ *
+ * A filled row leads with `PlayerIdentity` — a 32px pill, the cluster's 4px
+ * gap, a 16px club mark — so every name on the screen begins 52px in. The empty
+ * row has no player and therefore no cluster, and its chip's own 34px left the
+ * sentence after it starting eighteen points short of every name above and
+ * below it: one list, two leading edges, on exactly the rows where a reader is
+ * already scanning for what is missing.
+ *
+ * Written as the sum it is rather than as `52px`, so that if the pill or the
+ * mark is ever resized this follows instead of silently going ragged. It is
+ * scoped to the empty row: `.slot-label` itself is shared, and its own width is
+ * still the right one wherever it leads a row on its own.
+ */
+.slot-group > [data-starter='empty'] .slot-label {
+  min-width: calc(32px + var(--sp-1) + 16px);
+}
+
+/*
  * The tags, in a field of their own between the name and the numbers.
  *
  * `flex: none` so a long tag never squeezes the projection, and the name — the
@@ -5113,14 +5132,22 @@ table.compact tr:last-child td {
 }
 
 /*
- * The projection and the club, as one cluster.
+ * The trailing field: the row's one value, on its own.
  *
- * A number and the badge of the team that will produce it are one thought, and
- * they used to sit at opposite ends of a stretch of empty row with a position
- * pill between them — which read as two unrelated things separated by a third.
- * `gap` here is the only distance between them, and it is small on purpose:
- * everything else on the row is separated by more than this, so these two read
- * as belonging together.
+ * This used to hold the club's mark as well, on the argument that a number and
+ * the badge of the team that will produce it are one thought. They are — which
+ * is why the mark went to the *leading* edge to stand with the position, where
+ * "who is this" is assembled.
+ *
+ * What the pairing could never fix is that only the *starters* were in this
+ * field at all. A bench row put its number in the open and then a position
+ * badge after it, and a badge is as wide as the letters in it — so the two
+ * halves of one roster quoted their values in two columns that moved against
+ * each other by however long `DEF` is. Both halves are in here now.
+ *
+ * One item, `margin-left: auto`, and `.proj`'s fixed field: a dash sits exactly
+ * where a number would, on every row of both. `gap` stays for the day something
+ * legitimately joins it.
  */
 .row-value {
   display: inline-flex;

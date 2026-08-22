@@ -43,8 +43,8 @@ import {
   formatAge,
   InjuryTag,
   Notice,
+  PlayerIdentity,
   PositionBadge,
-  PositionPill,
   TeamLogo,
   Unknown,
   positionAccentClass,
@@ -599,20 +599,43 @@ export function TeamScreen({
 }
 
 /**
+ * What the number on the trailing edge of a Team row is, in words.
+ *
+ * It is the same answer in every game state, which is the point of having one
+ * function say it: Team draws a **projection** pregame, live and after the
+ * final whistle, because it never reads Sleeper's running points at all — those
+ * belong to Matchup, which takes them from `players_points`. A bare number in a
+ * compact row cannot say which of the two it is, so the word travels with it in
+ * the tooltip and in the row's accessible name.
+ *
+ * The unavailable case says so out loud rather than going quiet. `—` is legible
+ * to somebody looking at the row; to somebody listening to it, an aria-label
+ * that simply omits the number is a row that sounds like it has no opinion
+ * instead of one that has said it does not know.
+ */
+function projectionTitle(projection: number | null | undefined): string {
+  return projection == null ? 'No projection yet — no betting market has priced him' : 'Projected points';
+}
+
+function spokenProjection(projection: number | null | undefined): string {
+  return projection == null ? ', projection unavailable' : `, projected ${projection.toFixed(1)} points`;
+}
+
+/**
  * One recommended starter, in the slot the league actually starts.
  *
  * The row is **neutral**, and that is deliberate: the wash belongs to the draft
  * board and to nothing else, so that a tinted row anywhere in this app means
- * "you are on Draft". Position colour still reaches this row — through the slot
- * chip on the leading edge, which is the thing that actually says which spot
- * this is. See `positionAccentClass`, which hands over the hue and not the fill.
+ * "you are on Draft". Position colour still reaches this row — through the pill
+ * on the leading edge. See `positionAccentClass`, which hands over the hue and
+ * not the fill.
  *
- * Left to right the row is a sentence: which spot, who is in it and whether he
- * is fit, then what he is worth and who he plays for. The availability tag sits
- * against the name because it qualifies the *player* — a `Q` at the far edge of
- * a row reads as a fact about the projection beside it — and the projection and
- * the logo sit together as one cluster, because a number and the badge of the
- * team that will produce it are one thought.
+ * Left to right the row is a sentence: who he is, whether he is fit, anything
+ * about the *slot* that his position has not already said, and then what he is
+ * worth. The availability tag sits against the name because it qualifies the
+ * *player* — a `Q` at the far edge of a row reads as a fact about the number
+ * beside it — and the trailing field holds that number alone, on the column the
+ * bench below quotes its own in.
  */
 function StarterCard({
   slot,
@@ -686,7 +709,7 @@ function StarterCard({
        */
       aria-label={
         `${slot.name}, recommended starter at ${slot.slot}` +
-        `${slot.projection == null ? '' : `, projected ${slot.projection.toFixed(1)} points`}` +
+        spokenProjection(slot.projection) +
         `${slot.locked ? ', locked' : ''}` +
         `${!slot.alreadyStarting && !slot.locked ? ', not in your Sleeper lineup' : ''}` +
         `${player?.status ? `, ${player.status}` : ''}`
@@ -694,25 +717,23 @@ function StarterCard({
       onClick={onOpen}
     >
       <div className="player-row-top">
-        <span className="slot-label">{slot.slot}</span>
-        <span className="player-name">{slot.name}</span>
         {/*
-          His own position, but only where the slot has not already said it.
+          Who he is, in the order every other list in this app opens with.
 
-          The row rule puts the position immediately beside the name, and on
-          every other screen that is a pill on the left. Here the left column is
-          the lineup *slot*, which is the more useful fact on a lineup screen
-          and is already fixed-width and already coloured by position — so the
-          alignment the rule exists for is intact and a second `QB` beside `QB`
-          would be the row saying one thing twice.
+          Position, club, name — the rule `PlayerIdentity` settles and that
+          `e2e/row-alignment.spec.ts` already holds Draft, Players, Trades and
+          Waivers to. Team was the one list that did not follow it: it led with
+          the lineup *slot* and put the club at the far trailing edge beside the
+          number, so a reader assembling "who is this" took the position from one
+          end of the row and the club from the other — and the bench below it led
+          with `BN`, which is not a position at all and lined up with nothing.
 
-          A FLEX is the case that is not covered: the chip cannot name what he
-          plays, and on the one row where the reader most needs to know whether
-          this is a back or a receiver, nothing was saying so.
+          The cluster is `flex: none` with a fixed-width pill, so every name on
+          the screen starts on the same x whether it is a starter or a bench
+          player, and the bench opening underneath cannot shift the column.
         */}
-        {position && position.toUpperCase() !== slot.slot.toUpperCase() ? (
-          <PositionPill position={position} />
-        ) : null}
+        <PlayerIdentity position={position} team={player?.team ?? ''} />
+        <span className="player-name">{slot.name}</span>
         {/*
           Availability against the name, because it is about him.
 
@@ -724,11 +745,24 @@ function StarterCard({
         */}
         <InjuryTag status={player?.status} />
         {/*
-          Then the two tags that are about the *slot* rather than the player: the
-          spot is settled, or Sleeper does not agree yet. They keep the trailing
-          side, where a reader scanning names is not made to read past them.
+          The tags that are about the *slot* rather than the player.
+
+          The slot is named only when it is not already the position on the
+          leading edge. A back in an RB spot would be the row saying `RB` twice;
+          a back in a FLEX spot is the one case where the slot carries something
+          the pill cannot, and it is the row where a reader most needs it. So the
+          chip appears on exactly the rows that need it and nowhere else, which
+          also keeps it off the bench — where there is no slot to name.
+
+          These sit after the name rather than on the leading edge precisely so
+          the identity columns stay identical between a starter and a bench row.
         */}
         <span className="row-tags">
+          {position && position.toUpperCase() !== slot.slot.toUpperCase() ? (
+            <span className="tag tag-calm tag-mini" data-testid="slot-tag" title={`Starting at ${slot.slot}`}>
+              {slot.slot}
+            </span>
+          ) : null}
           {slot.locked ? (
             <span className="tag tag-calm tag-mini" data-testid="locked-tag">
               Locked
@@ -741,18 +775,15 @@ function StarterCard({
           ) : null}
         </span>
         {/*
-          The projection and the badge of the team that will produce it, as one
-          cluster.
+          The trailing edge is the number and nothing else.
 
-          They used to sit at opposite ends of a stretch of empty row with the
-          position pill between them, which made a number and its team read as
-          two unrelated things. The pill is gone from this row entirely: the slot
-          chip on the leading edge already says which spot this is, and printing
-          the position twice on a row eight rows long is eight wasted readings.
-
-          The projection carries its weight in type rather than in a label: it is
-          the only number on the row, it is tabular so eight of them line up down
-          the column, and the word "projected" is in the accessible name.
+          The club's mark used to share this field. It has gone to the leading
+          edge with the rest of his identity, which is where a reader assembles
+          "who is this" — so what is left here is one value in one fixed field,
+          and it is the same field the bench below quotes its own number in. It
+          was not: a bench row put its number in the open with a position badge
+          after it, and a badge is as wide as the letters in it, so the two
+          halves of one roster ran their values down two different columns.
 
           It is `projection` and never `score`. The score is the comparable
           number this slot was won with — with no market published it is a
@@ -760,12 +791,16 @@ function StarterCard({
           points against a published week-one figure of 20.98. A dash is the
           honest answer when nobody has priced him; see
           `core/startsit/projection.ts`.
+
+          It is a *projection* in every state, and never a live score: this
+          screen does not read Sleeper's running points at all — that is the
+          Matchup screen's job. The word is in the tooltip and in the row's
+          accessible name so the bare number cannot be mistaken for one.
         */}
         <span className="row-value">
-          <span className="proj" data-testid="starter-proj" title="Projected points">
+          <span className="proj" data-testid="starter-proj" title={projectionTitle(slot.projection)}>
             {slot.projection == null ? '—' : slot.projection.toFixed(1)}
           </span>
-          <TeamLogo team={player?.team ?? ''} />
         </span>
       </div>
       {consequence ? (
@@ -781,9 +816,13 @@ function StarterCard({
  * A backup: the same row, on the ordinary surface.
  *
  * No card tint, and that absence is the whole point — it is what makes the
- * tinted cards above read as an answer rather than as decoration. The position
- * badge stays, because "which position is this" is still a fact worth knowing
- * about a bench player.
+ * tinted cards above read as an answer rather than as decoration.
+ *
+ * Everything else about the row is deliberately identical to a starter's:
+ * `PlayerIdentity`, then the name, then the value in `.row-value`, in the same
+ * fields at the same widths. A bench that lines up with the lineup above it is
+ * the whole reason the fold is safe to open — the columns do not move when it
+ * does, so opening it adds rows rather than rearranging the screen.
  */
 function BenchCard({
   player,
@@ -795,26 +834,49 @@ function BenchCard({
   projection: number | null;
   onOpen: () => void;
 }) {
+  const position = player.position ?? '';
   return (
     <button
       className="player-row bench-row"
       data-testid="bench-row"
       data-starter="false"
-      data-position={(player.position ?? '').toUpperCase()}
+      data-position={position.toUpperCase()}
       data-player-id={player.playerId}
-      aria-label={`${player.name}, bench${projection == null ? '' : `, projected ${projection.toFixed(1)} points`}`}
+      aria-label={
+        `${player.name}${position ? `, ${position}` : ''}, on your bench` +
+        spokenProjection(projection) +
+        `${player.status ? `, ${player.status}` : ''}`
+      }
       onClick={onOpen}
     >
       <div className="player-row-top">
-        <span className="slot-label">BN</span>
+        {/*
+          His position, and not `BN`.
+
+          `BN` is where he is sitting, which the section he is inside already
+          says — and it occupied the one column on the row that every other list
+          in the app uses for what he *plays*. So the bench told the reader the
+          same thing eight times and never once said which of the eight was a
+          receiver, while the club's mark sat at the far trailing edge next to a
+          number it has nothing to do with. Both facts are now on the leading
+          edge, in the same cluster, at the same widths as the starters above.
+        */}
+        <PlayerIdentity position={position} team={player.team ?? ''} />
         <span className="player-name">{player.name}</span>
-        <span className="row-tags">
-          <InjuryTag status={player.status} />
+        {/*
+          Against the name, exactly as on a starter — a direct child of the row
+          rather than wrapped, so the seam either side of it is the row's own gap
+          on both. There is no `.row-tags` here because there is nothing to put
+          in it: `Locked` and `Not in Sleeper` are facts about a lineup slot, and
+          a bench player has none.
+        */}
+        <InjuryTag status={player.status} />
+        {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
+        <span className="row-value">
+          <span className="proj" data-testid="bench-proj" title={projectionTitle(projection)}>
+            {projection == null ? '—' : projection.toFixed(1)}
+          </span>
         </span>
-        <span className="proj" title="Projected points">
-          {projection == null ? '—' : projection.toFixed(1)}
-        </span>
-        <PositionBadge position={player.position} team={player.team} />
       </div>
     </button>
   );

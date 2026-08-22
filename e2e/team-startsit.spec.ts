@@ -79,7 +79,8 @@ test.describe('the recommended lineup, at a glance', () => {
       const own = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
       // Transparent is the group's surface showing through, which is the point.
       expect([surface, 'rgba(0, 0, 0, 0)'], `a starter paints ${own}`).toContain(own);
-      await expect(card.locator('.slot-label')).not.toBeEmpty();
+      // The chip is on the leading edge, and it names what he plays.
+      await expect(card.locator('.player-identity .pos-pill')).toHaveText(position);
     }
 
     await page.getByTestId('bench-toggle').click();
@@ -104,16 +105,43 @@ test.describe('the recommended lineup, at a glance', () => {
     await expect(page.getByTestId('starters-title')).toContainText(/starters/i);
 
     const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
-    // The slot is on the face of the card, and it is not a colour.
-    await expect(starter.locator('.slot-label')).not.toBeEmpty();
+    /*
+     * The slot has left the face of the card except where it says something the
+     * position pill cannot — a back in a FLEX — so the accessible name is now
+     * the one place it is always spoken, and that is what is asserted. What the
+     * face carries instead is the position, checked in the test above.
+     */
     await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
     // The projection is spoken as a projection rather than left as a bare number.
     await expect(starter).toHaveAttribute('aria-label', /projected [\d.]+ points/i);
 
+    /*
+     * …and the rows that have no projection say so, rather than going quiet.
+     *
+     * `—` is legible to somebody looking at the row. To somebody listening to
+     * it, an accessible name that simply omitted the number was a row that
+     * sounded like it had no opinion instead of one that had said it does not
+     * know — and "does not know" is the whole claim this screen makes when no
+     * market has priced a player.
+     */
+    const unpriced = page.locator('[data-testid="starter-row"][data-starter="true"]', {
+      has: page.locator('[data-testid="starter-proj"]', { hasText: '—' }),
+    });
+    expect(await unpriced.count(), 'the demo lineup has an unpriced starter').toBeGreaterThan(0);
+    await expect(unpriced.first()).toHaveAttribute('aria-label', /projection unavailable/i);
+
     await page.getByTestId('bench-toggle').click();
     const bench = page.getByTestId('bench-row').first();
-    await expect(bench.locator('.slot-label')).toContainText('BN');
-    await expect(bench).toHaveAttribute('aria-label', /bench/i);
+    /*
+     * `BN` used to be printed where every other list in the app prints the
+     * position, which told the reader where he is sitting — something the
+     * section heading above already says — in the column that should have been
+     * telling them what he plays. The row now says the position; "bench" is in
+     * the accessible name, where the section heading's job is done properly.
+     */
+    await expect(bench.locator('.pos-pill')).not.toBeEmpty();
+    await expect(bench.locator('.pos-pill')).not.toHaveText('BN');
+    await expect(bench).toHaveAttribute('aria-label', /on your bench/i);
   });
 
   /**

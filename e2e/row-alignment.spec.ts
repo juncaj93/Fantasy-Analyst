@@ -21,10 +21,28 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { inSeason } from './helpers.ts';
 
 async function openDraft(page: Page) {
   await page.goto('/');
   await expect(page.getByTestId('board-list')).toBeVisible();
+}
+
+/**
+ * Team's lineup, which only exists once the draft is done.
+ *
+ * The demo league is permanently mid-draft, so this asks for the season the way
+ * `team-startsit.spec.ts` does. The bench is opened here rather than in each
+ * test because every claim in this file about Team is a claim about starters and
+ * bench sharing one geometry, and a closed bench draws no rows to compare.
+ */
+async function openTeam(page: Page) {
+  await inSeason(page);
+  await page.goto('/');
+  await page.getByTestId('tab-team').click();
+  await expect(page.getByTestId('starters-title')).toBeVisible();
+  await page.getByTestId('bench-toggle').click();
+  await expect(page.getByTestId('bench-row').first()).toBeVisible();
 }
 
 /**
@@ -102,13 +120,19 @@ test.describe('the club marks line up', () => {
 });
 
 /**
- * One identity, four screens.
+ * One identity, five screens.
  *
  * The point of moving the club's mark off the trailing edge was never the
  * trailing edge — it was that a reader who learns to read a player on the draft
- * board should not have to learn again on Players, on Trades or on Waivers.
- * Position, club, name, in that order, on all four, as one cluster. A screen
- * that quietly keeps its own arrangement is exactly the divergence this replaced.
+ * board should not have to learn again on Players, on Trades, on Waivers or on
+ * Team. Position, club, name, in that order, on all five, as one cluster. A
+ * screen that quietly keeps its own arrangement is exactly the divergence this
+ * replaced.
+ *
+ * Team was the last holdout, and it was the loudest one: it led with the lineup
+ * *slot* and put the club at the far trailing edge beside the number, so "who is
+ * this" was assembled from both ends of the row — and its bench led with `BN`,
+ * which is not a position and lined up with nothing.
  */
 test.describe('the identity cluster', () => {
   test('reads position, club, name on the draft board', async ({ page }) => {
@@ -152,6 +176,25 @@ test.describe('the identity cluster', () => {
     await page.getByTestId('tab-waivers').click();
     await expect(page.locator('[data-testid="waiver-row"]').first()).toBeVisible();
     await identityReadsLeftToRight(page, 'waiver-row', 2);
+  });
+
+  /**
+   * And on Team, for both halves of the roster.
+   *
+   * Two row types on one screen rather than one, and they are asserted
+   * separately because they are drawn by two different components — a starter
+   * is a tinted slot card, a bench player a plain row — and "they agree" is the
+   * whole claim. The counts are what the demo roster actually carries: three
+   * slots fill, and what is left over sits on the bench.
+   */
+  test('and on Team, for a starter', async ({ page }) => {
+    await openTeam(page);
+    await identityReadsLeftToRight(page, 'starter-row', 3);
+  });
+
+  test('and on Team, for a bench player', async ({ page }) => {
+    await openTeam(page);
+    await identityReadsLeftToRight(page, 'bench-row', 1);
   });
 
   /**
@@ -441,6 +484,266 @@ test.describe('the identity cluster', () => {
       // The name gave the space up, and is still a name.
       expect(row.nameTruncates, 'the name should be the thing that truncates').toBe(true);
       expect(row.nameWidth).toBeGreaterThan(60);
+    }
+  });
+});
+
+/**
+ * Team's lineup and its bench are one list, not two that happen to be adjacent.
+ *
+ * This is the claim that the `BN` label made impossible. A starter's leading
+ * column was a slot name and a bench player's was the word `BN`, both in a 34px
+ * box, while the club's mark sat at the far trailing edge of both — so the two
+ * halves of a roster lined up with each other and with nothing else in the app,
+ * and the position, the one fact a reader scans a roster for, was on the bench
+ * rows nowhere at all.
+ *
+ * Both halves now draw `PlayerIdentity`, so the assertions here are about the
+ * seam between them: same identity column, same value column, and the fold
+ * opening without moving either.
+ */
+test.describe('Team starters and bench share one geometry', () => {
+  const FILLED = '[data-testid="starter-row"][data-starter="true"], [data-testid="bench-row"]';
+
+  /** The x each row's identity begins at, and the x its value ends at. */
+  async function columns(page: Page) {
+    return page.evaluate((selector) => {
+      return [...document.querySelectorAll(selector)].map((row) => {
+        const box = (sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const pill = box('.pos-pill');
+        const name = box('.player-name');
+        const proj = box('.proj');
+        return {
+          who: (row.querySelector('.player-name')?.textContent ?? '').trim(),
+          bench: row.getAttribute('data-starter') === 'false',
+          pill: pill ? Math.round(pill.left) : null,
+          name: name ? Math.round(name.left) : null,
+          value: proj ? Math.round(proj.right) : null,
+          text: (row.querySelector('.proj')?.textContent ?? '').trim(),
+        };
+      });
+    }, FILLED);
+  }
+
+  test('draws every pill, name and value on one column', async ({ page }) => {
+    await openTeam(page);
+    const rows = await columns(page);
+    expect(rows.length, 'the roster should be drawing filled rows').toBeGreaterThan(3);
+    expect(rows.some((r) => r.bench), 'and some of them on the bench').toBe(true);
+    expect(rows.some((r) => !r.bench), 'and some of them in the lineup').toBe(true);
+
+    for (const key of ['pill', 'name', 'value'] as const) {
+      const edges = rows.map((r) => r[key]);
+      expect(edges.every((e) => e != null), `every row draws its ${key}`).toBe(true);
+      expect(new Set(edges).size, `the ${key} column runs at ${[...new Set(edges)].join(', ')}`).toBe(1);
+    }
+  });
+
+  /**
+   * Opening the fold adds rows; it does not rearrange the ones above it.
+   *
+   * A bench whose leading column differs from the lineup's makes the whole list
+   * appear to shift the moment it opens, even though nothing above it moved —
+   * which is the reading the old `BN` column produced, and the reason this is
+   * measured across the toggle rather than only after it.
+   */
+  test('and opening the bench does not move the starters', async ({ page }) => {
+    await inSeason(page);
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+
+    const before = await columns(page);
+    expect(before.length, 'starters are drawn before the fold opens').toBeGreaterThan(2);
+    expect(before.every((r) => !r.bench), 'and no bench rows are').toBe(true);
+
+    await page.getByTestId('bench-toggle').click();
+    await expect(page.getByTestId('bench-row').first()).toBeVisible();
+    const after = (await columns(page)).filter((r) => !r.bench);
+
+    expect(after.map((r) => r.who)).toEqual(before.map((r) => r.who));
+    for (const [i, row] of after.entries()) {
+      expect(row.pill, `${row.who}'s pill moved when the bench opened`).toBe(before[i]!.pill);
+      expect(row.name, `${row.who}'s name moved when the bench opened`).toBe(before[i]!.name);
+      expect(row.value, `${row.who}'s value moved when the bench opened`).toBe(before[i]!.value);
+    }
+  });
+
+  /**
+   * The column is reserved, and never filled with a number nobody computed.
+   *
+   * The alignment above would be trivial to buy by printing `0.0` wherever a
+   * projection is missing, and that is the one way of buying it this app has
+   * already refused once: a market that has not priced a player is a dash, not a
+   * zero. See `core/startsit/projection.ts`.
+   */
+  test('without inventing a projection for the players who have none', async ({ page }) => {
+    await openTeam(page);
+    const values = (await columns(page)).map((r) => r.text);
+    expect(values.length).toBeGreaterThan(3);
+    for (const text of values) {
+      expect(text, 'a value is a real figure or an honest dash').toMatch(/^(—|-?\d+\.\d)$/);
+    }
+  });
+
+  /**
+   * An empty slot starts its sentence where the names start.
+   *
+   * These rows carry no player and so no identity cluster, and their slot chip's
+   * own width left the line after it beginning short of every name above and
+   * below — one list with two leading edges, on exactly the rows a reader is
+   * already scanning for what is missing. The demo roster fills three of seven
+   * slots, so there are always four of them to measure.
+   */
+  test('and an empty slot keeps the same leading edge', async ({ page }) => {
+    await openTeam(page);
+    const edges = await page.evaluate(() => {
+      const left = (el: Element | null | undefined) => (el ? Math.round(el.getBoundingClientRect().left) : null);
+      return {
+        names: [
+          ...new Set(
+            [...document.querySelectorAll('[data-testid="starter-row"][data-starter="true"] .player-name')].map(
+              (n) => Math.round(n.getBoundingClientRect().left),
+            ),
+          ),
+        ],
+        empties: [
+          ...new Set(
+            [...document.querySelectorAll('[data-starter="empty"] .empty-slot-line')].map((n) =>
+              Math.round(n.getBoundingClientRect().left),
+            ),
+          ),
+        ],
+        chip: left(document.querySelector('[data-starter="empty"] .slot-label')),
+        pill: left(document.querySelector('[data-testid="starter-row"][data-starter="true"] .pos-pill')),
+      };
+    });
+
+    expect(edges.names, 'the filled rows agree with each other').toHaveLength(1);
+    expect(edges.empties.length, 'the demo roster leaves slots empty').toBeGreaterThan(0);
+    expect(edges.empties, 'the empty rows agree with each other').toHaveLength(1);
+    expect(edges.empties[0], `empty slots start at ${edges.empties[0]}, names at ${edges.names[0]}`).toBe(
+      edges.names[0],
+    );
+    // …and the chip that stands in for the identity starts where a pill would.
+    expect(edges.chip).toBe(edges.pill);
+  });
+
+  /**
+   * The worst roster the data can produce, on the narrowest phone.
+   *
+   * A hyphenated surname, a `DEF` in the widest pill the app draws, a status
+   * code beside the name and a player nobody has priced are four things the demo
+   * roster does not happen to contain at once and a real league does. Injected
+   * rather than waited for, for the same reason the draft board's equivalent is:
+   * a fixture that happens to carry the case today is a test that quietly stops
+   * running when the fixture changes.
+   *
+   * The claim is that the name is what yields. Everything else on the row is a
+   * fixed field, so a row that cannot fit must truncate the one thing that is
+   * still legible truncated — and must not buy the space by pushing itself off
+   * the side of the screen.
+   */
+  test('holds the columns with long names, a DEF pill and a missing projection', async ({ page }) => {
+    const LONG = 'Bartholomew Vandersteen-Whitfield Jr.';
+    /*
+     * This one route does `inSeason`'s job as well as its own, and it has to.
+     *
+     * Playwright runs the *last* matching handler first and this one fulfills
+     * rather than falling through, so a stress route installed alongside
+     * `inSeason` would be one of two handlers where only one can win: install it
+     * first and it never runs, install it second and `live` is never overridden
+     * and the screen is the mid-draft one. `route.fetch()` goes to the network
+     * rather than through the other handlers, so composing them is not an option
+     * either. Hence one handler, saying both things.
+     */
+    await page.route('**/api/leagues/*/roster*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      let n = 0;
+      const stress = (players: Record<string, unknown>[]) =>
+        players.map((p) => ({
+          ...p,
+          name: LONG,
+          status: 'Questionable',
+          // One DEF, which is the widest code the pill has to hold.
+          ...(n++ === 0 ? { position: 'DEF' } : {}),
+        }));
+      await route.fulfill({
+        response,
+        body: JSON.stringify({
+          ...body,
+          // …the season, as `inSeason` sets it.
+          live: false,
+          drafted: [],
+          starters: stress(body.starters as Record<string, unknown>[]),
+          bench: stress(body.bench as Record<string, unknown>[]),
+        }),
+      });
+    });
+    /*
+     * The starters' names come from here, not from the roster.
+     *
+     * A starter row prints `slot.name` — the recommendation's own answer — and
+     * takes only the position, the club and the availability from the roster
+     * entry beside it. Stressing the roster alone left the lineup drawing the
+     * fixture's short names under a test claiming to have made them long, which
+     * is the failure mode this whole file exists to catch.
+     *
+     * One slot also loses its projection, which is the dash's own case.
+     */
+    await page.route('**/api/leagues/*/lineup*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      let unpriced = false;
+      body.slots = (body.slots as Record<string, unknown>[]).map((s) => {
+        if (!s.playerId) return s;
+        // The first *filled* slot, which is not necessarily the first slot:
+        // the demo league's QB spot has nobody eligible for it.
+        const strip = !unpriced && (unpriced = true);
+        return { ...s, name: LONG, ...(strip ? { projection: null } : {}) };
+      });
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+    await page.getByTestId('bench-toggle').click();
+    await expect(page.getByTestId('bench-row').first()).toBeVisible();
+
+    const rows = await columns(page);
+    expect(rows.length).toBeGreaterThan(3);
+    expect(rows.every((r) => r.who.startsWith('Bartholomew')), 'the stress fixture is what is on screen').toBe(true);
+    expect(
+      await page.locator(`${FILLED} .pos-pill`).filter({ hasText: 'DEF' }).count(),
+      'and one of them is a DEF',
+    ).toBe(1);
+    expect(rows.some((r) => r.text === '—'), 'the unpriced starter reads as a dash').toBe(true);
+
+    for (const key of ['pill', 'name', 'value'] as const) {
+      expect(new Set(rows.map((r) => r[key])).size, `the ${key} column went ragged`).toBe(1);
+    }
+
+    // Nothing widened the page, and the name is the thing that gave way.
+    const width = page.viewportSize()!.width;
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+
+    const yielded = await page.locator(FILLED).evaluateAll((all) =>
+      all.map((row) => {
+        const clipped = (sel: string) => {
+          const el = row.querySelector(sel);
+          return el ? el.scrollWidth > el.clientWidth + 1 : null;
+        };
+        const name = row.querySelector('.player-name')?.getBoundingClientRect();
+        return { name: clipped('.player-name'), pill: clipped('.pos-pill'), value: clipped('.proj'), width: name?.width ?? 0 };
+      }),
+    );
+    for (const row of yielded) {
+      expect(row.name, 'the name should be the thing that truncates').toBe(true);
+      expect(row.pill, 'the position is being clipped').toBe(false);
+      expect(row.value, 'the value is being clipped').toBe(false);
+      expect(row.width, 'and it is still a name afterwards').toBeGreaterThan(60);
     }
   });
 });
