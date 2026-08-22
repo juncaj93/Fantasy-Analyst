@@ -194,6 +194,70 @@ test.describe('the identity cluster', () => {
     }
     expect(fields.some((t) => t === ''), 'some rows leave the field empty').toBe(true);
   });
+
+  /**
+   * The worst row the data can produce, and nothing on it hides anything else.
+   *
+   * A long name, a three-character availability code and a two-digit negative
+   * tally is a combination the seeded board does not happen to contain and a
+   * real league does: `OUT` beside `-12` on somebody with a hyphenated surname.
+   * The field was `flex: 0 1 auto` with `min-width: 0`, which made it the first
+   * thing to give way rather than the last — so it shrank below its own contents
+   * and drew the `OUT` **underneath the star**, sixteen pixels of it at 360, on
+   * the one control on the row.
+   *
+   * Neither half of the field may truncate instead: `-12` clipped to `-1` is
+   * not a smaller reading of the number, it is a different one. The name is the
+   * thing that yields, and it still has to be a name afterwards.
+   *
+   * Injected rather than waited for, because a fixture that happens to contain
+   * the case today is a test that stops running when the fixture changes.
+   */
+  test('keeps a status tag off the star when the name is long and the tally wide', async ({ page }) => {
+    const LONG = 'Bartholomew Vandersteen-Whitfield Jr.';
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recommendations = (body.recommendations as Record<string, unknown>[]).map((rec, i) =>
+        i < 3 ? { ...rec, name: LONG, status: 'Out', position: 'DEF', newsLifetimeNet: -12 } : rec,
+      );
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+    await openDraft(page);
+
+    const worst = await page.locator('[data-testid="recommendation-row"]').evaluateAll((rows) =>
+      rows.slice(0, 3).map((row) => {
+        const box = (sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const clipped = (sel: string) => {
+          const el = row.querySelector(sel);
+          return el ? el.scrollWidth > el.clientWidth + 1 : null;
+        };
+        const meta = box('.player-row-meta');
+        const tag = box('[data-testid="injury-tag"]');
+        const star = box('[data-testid="queue-control"]');
+        const name = box('.player-name');
+        return {
+          tagOverStar: tag && star ? Math.round(tag.right - star.left) : null,
+          spill: meta && tag ? Math.round(tag.right - meta.right) : null,
+          tallyClipped: clipped('[data-testid="compact-tally"]'),
+          tagClipped: clipped('[data-testid="injury-tag"]'),
+          nameWidth: name ? Math.round(name.width) : null,
+          nameTruncates: clipped('.player-name'),
+        };
+      }),
+    );
+
+    expect(worst).toHaveLength(3);
+    for (const row of worst) {
+      expect(row.tagOverStar, `the tag reaches ${row.tagOverStar}px past the star`).toBeLessThanOrEqual(0);
+      expect(row.spill, 'the field is drawing outside its own box').toBeLessThanOrEqual(0);
+      expect(row.tallyClipped, 'the tally is being clipped rather than the name').toBe(false);
+      expect(row.tagClipped, 'the status tag is being clipped').toBe(false);
+      // The name gave the space up, and is still a name.
+      expect(row.nameTruncates, 'the name should be the thing that truncates').toBe(true);
+      expect(row.nameWidth).toBeGreaterThan(60);
+    }
+  });
 });
 
 test.describe('the AVOID tag', () => {

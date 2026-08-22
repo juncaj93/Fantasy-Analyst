@@ -2123,15 +2123,6 @@ body,
 }
 
 /*
- * The fixed field between the name and the club — see `--row-meta`.
- *
- * `flex: 0 0` rather than a minimum: a minimum would let a wide occupant push
- * the club's mark left and put that one row out of line with its neighbours,
- * which is the exact fault this is here to fix. In the rare case the contents
- * are wider than the field they overflow into the name's ellipsis instead,
- * where the reader loses a character rather than the column losing its edge.
- */
-/*
  * What qualifies the player, immediately after his name.
  *
  * This was a fixed-width field pinned to the trailing edge, which kept the
@@ -2140,21 +2131,30 @@ body,
  * than about the man. The rule is that a status belongs to the name: `Christian
  * McCaffrey  Q` is one unit and has to look like one.
  *
- * The alignment it was bought with is not given up. The field is now sized by
- * its contents and takes the row's slack as a trailing margin, so everything
- * after it — the star, the club's mark, the chevron — is pushed to the same
- * edge on every row exactly as before; the name gives up the space instead,
- * which it can, because it is the one thing here that truncates.
+ * The alignment it was bought with is not given up. The field is sized by its
+ * contents and takes the row's slack as a trailing margin, so everything after
+ * it — the star, the club's mark, the chevron — is pushed to the same edge on
+ * every row exactly as before; the name gives up the space instead, which it
+ * can, because it is the one thing here that truncates.
+ *
+ * `flex: none` is what makes that last sentence true, and it was `0 1 auto`.
+ * With `min-width: 0` beside it the field was the *first* thing to shrink, not
+ * the last, and its contents then spilled out of a box narrower than they were:
+ * a long name with both a tally and a status drew the `OUT` underneath the star
+ * — 16 pixels of it, measured at 360, on a control a thumb is meant to find.
+ * Nothing here truncates and nothing here should, because `-12` clipped to `-1`
+ * is not a smaller reading of the number, it is a different one. So the field
+ * keeps its width and the name yields, which is the arrangement the paragraph
+ * above already described.
  */
 .player-row-meta {
-  flex: 0 1 auto;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: var(--sp-1);
   margin-right: auto;
   min-width: 0;
-  overflow: visible;
 }
 
 .tally-pos {
