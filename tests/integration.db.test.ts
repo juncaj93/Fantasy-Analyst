@@ -25,6 +25,15 @@ const SOURCES = [
   { id: 'ff', label: 'FF Newsletter', fromPatterns: ['@ffnewsletter.example'], subjectPatterns: [], enabled: true },
 ];
 
+/** The 7-day net as the cache column holds it, rather than as `getSignals` answers. */
+async function storedRecent7(db: NodeSqliteDatabase, playerId: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT recent7_net FROM player_signal_cache WHERE player_id = ?')
+    .bind(playerId)
+    .first<{ recent7_net: number }>();
+  return Number(row?.recent7_net ?? 0);
+}
+
 function newsletterMessage(html = CLEAN_NEWSLETTER, messageId = 'msg-1') {
   return toEmailMessage({
     messageId,
@@ -520,6 +529,62 @@ describe('EvidenceRepo review flow', () => {
     await repo.refreshAllSignals();
     const signals = await repo.getSignals([target.playerId]);
     expect(signals.get(target.playerId)?.raw.items).toBeGreaterThan(0);
+  });
+
+  /**
+   * A recency window is a fact about a player *and today*, so a number written
+   * once cannot keep answering for it.
+   *
+   * `refreshSignal` runs on ingest, import and review and nowhere else, so a
+   * player nobody has touched since keeps whichever windows were true the day
+   * his last row landed. A tally imported on the 13th was still being reported
+   * as "this week" on the 22nd — on the trade board, the draft board, Start/Sit
+   * and the Team roster alike, because all four read `getSignals`.
+   */
+  it('reports recency windows as of now, not as of the last time the cache was written', async () => {
+    // Accepted as directional, so the window carries a number that can be seen
+    // to move rather than a zero that would prove nothing either way.
+    const target = (await repo.listPending())[0]!;
+    await repo.applyReview(Number(target.id), 'correct', { polarity: 'positive', magnitude: 2 });
+
+    // Write the cache on the day the evidence landed, when it is inside both
+    // windows — exactly what an ingest does.
+    const item = (await repo.listForPlayer(target.playerId)).find((i) => i.id === target.id)!;
+    const landed = Date.parse(item.sourceDate);
+    const written = await repo.refreshSignal(target.playerId, {
+      now: new Date(landed + 86_400_000).toISOString(),
+    });
+    expect(written.last7.net).not.toBe(0);
+
+    // Read it back on that same day: the window still holds the row.
+    const sameDay = new Date(landed + 86_400_000).toISOString();
+    expect((await repo.getSignals([target.playerId], { now: sameDay })).get(target.playerId)!.last7.net).toBe(
+      written.last7.net,
+    );
+
+    // Ask again a fortnight later, having touched nothing. The stored column
+    // still says what it said; the answer must not.
+    const later = new Date(landed + 14 * 86_400_000).toISOString();
+    const fresh = (await repo.getSignals([target.playerId], { now: later })).get(target.playerId)!;
+    const stored = await storedRecent7(db, target.playerId);
+
+    expect(stored).toBe(written.last7.net);
+    expect(fresh.last7.net).toBe(0);
+    // The lifetime record is time-independent and must not have moved.
+    expect(fresh.raw.net).toBe(written.raw.net);
+    expect(fresh.raw.items).toBe(written.raw.items);
+  });
+
+  it('follows an override to the player it reassigns a row to when windowing', async () => {
+    const target = (await repo.listPending())[0]!;
+    await repo.applyReview(Number(target.id), 'correct', { playerId: '3', polarity: 'positive', magnitude: 2 });
+    await repo.refreshAllSignals();
+
+    const item = (await repo.listForPlayer('3'))[0]!;
+    const signals = await repo.getSignals(['3'], {
+      now: new Date(Date.parse(item.sourceDate) + 86_400_000).toISOString(),
+    });
+    expect(signals.get('3')?.last30.net).toBe(2);
   });
 
   it('returns null when reviewing a non-existent item', async () => {
