@@ -55,6 +55,15 @@ export interface EffectiveEvidence {
   /** Signed contribution to the tally. */
   delta: number;
   counted: boolean;
+  /**
+   * Does this row describe a *period* rather than a moment?
+   *
+   * A backfilled running tally covers several earlier issues and is carried
+   * across as one item, so its `sourceDate` is when the summary was imported,
+   * not when the news happened. The distinction matters only to windows short
+   * enough that the difference is provable — see `aggregate.ts`.
+   */
+  spansPriorIssues: boolean;
 }
 
 export interface SignalWindow {
@@ -74,6 +83,14 @@ export interface PlayerSignal {
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
   /** Items awaiting review; excluded from every window above. */
   pendingCount: number;
+  /**
+   * Counted items that carry a period rather than a moment.
+   *
+   * Lets a reader tell "no news this week" from "his whole record is a carried
+   * tally, so this week has nothing to say about him" — two very different
+   * statements that a bare `last7.net` of zero would otherwise collapse.
+   */
+  carriedOverItems: number;
   mixedCount: number;
   lastEvidenceAt: string | null;
   updatedAt: string;

@@ -500,8 +500,9 @@ export class EvidenceRepo {
         `INSERT INTO player_signal_cache (
            player_id, raw_positive, raw_negative, raw_net, raw_items,
            recent7_net, recent30_net, recent30_items, season_net,
-           pending_count, mixed_count, category_breakdown_json, last_evidence_at, updated_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           pending_count, mixed_count, carried_over_items,
+           category_breakdown_json, last_evidence_at, updated_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(player_id) DO UPDATE SET
            raw_positive = excluded.raw_positive,
            raw_negative = excluded.raw_negative,
@@ -513,6 +514,7 @@ export class EvidenceRepo {
            season_net = excluded.season_net,
            pending_count = excluded.pending_count,
            mixed_count = excluded.mixed_count,
+           carried_over_items = excluded.carried_over_items,
            category_breakdown_json = excluded.category_breakdown_json,
            last_evidence_at = excluded.last_evidence_at,
            updated_at = excluded.updated_at`,
@@ -529,6 +531,7 @@ export class EvidenceRepo {
         signal.seasonToDate.net,
         signal.pendingCount,
         signal.mixedCount,
+        signal.carriedOverItems,
         toJson(signal.categoryBreakdown),
         signal.lastEvidenceAt,
         signal.updatedAt,
@@ -593,6 +596,7 @@ export class EvidenceRepo {
           categoryBreakdown: parseJson(r['category_breakdown_json'], {}),
           pendingCount: Number(r['pending_count'] ?? 0),
           mixedCount: Number(r['mixed_count'] ?? 0),
+          carriedOverItems: Number(r['carried_over_items'] ?? 0),
           lastEvidenceAt: (r['last_evidence_at'] as string | null) ?? null,
           updatedAt: String(r['updated_at'] ?? ''),
         });

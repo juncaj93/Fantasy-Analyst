@@ -20,6 +20,27 @@ import type {
 const COUNTED_STATUSES = new Set(['auto_applied', 'accepted', 'corrected']);
 
 /**
+ * Origins whose rows describe a period rather than a moment.
+ *
+ * `rule_id` is already how the ledger records where a row came from, so this
+ * needs no new column on `evidence_items` — see `newsletter/aiTally.ts`, which
+ * names the convention.
+ *
+ * Only the backfill importer qualifies. A weekly tally row is one issue's
+ * reading of one player and its date is exactly when that news happened; the
+ * deterministic parser's rows are single sentences from a dated newsletter.
+ * The backfill importer is the one path that deliberately compresses "several
+ * earlier issues" into a single item, and it says so on every row it writes.
+ *
+ * Known gap, stated rather than hidden: an identity repair re-files an existing
+ * row under `user_identity_repair` and keeps its magnitude, so a repaired
+ * *backfill* row loses this marker and looks like a moment again. Fixing that
+ * means changing what the repair path records, which is a ledger rule and not
+ * this module's to change.
+ */
+export const CARRIED_OVER_RULE_IDS: ReadonlySet<string> = new Set(['tally-backfill']);
+
+/**
  * Recent-evidence windows, in days.
  *
  * Seven days is momentum; thirty is the trend. Thirty rather than the previous
@@ -43,6 +64,7 @@ export function effectiveEvidence(item: EvidenceItem): EffectiveEvidence {
     sourceDate: item.sourceDate,
     delta: counted ? sign * magnitude : 0,
     counted,
+    spansPriorIssues: item.ruleId !== null && CARRIED_OVER_RULE_IDS.has(item.ruleId),
   };
 }
 
@@ -84,6 +106,7 @@ export function aggregatePlayerSignal(
 
   let pendingCount = 0;
   let mixedCount = 0;
+  let carriedOverItems = 0;
   let lastEvidenceAt: string | null = null;
 
   for (const item of items) {
@@ -102,8 +125,22 @@ export function aggregatePlayerSignal(
 
     add(raw, e);
 
+    if (e.spansPriorIssues) carriedOverItems++;
+
     const ageDays = Number.isFinite(ts) ? (nowMs - ts) / 86_400_000 : Number.POSITIVE_INFINITY;
-    if (ageDays <= RECENCY_WINDOWS.last7) add(last7, e);
+    /*
+     * The week believes only what happened in it.
+     *
+     * Seven days cannot contain several weekly issues, so a carried tally is
+     * provably not 7-day evidence however recently it was imported — and the
+     * import date is all its `sourceDate` records.
+     *
+     * Thirty days is left alone deliberately: "several earlier issues" *may*
+     * fit inside a month, and excluding a row from a window it might genuinely
+     * belong to asserts a fact the ledger does not have — the same error as
+     * counting it in the week, pointing the other way.
+     */
+    if (ageDays <= RECENCY_WINDOWS.last7 && !e.spansPriorIssues) add(last7, e);
     if (ageDays <= RECENCY_WINDOWS.last30) add(last30, e);
     if (seasonStartMs == null || (Number.isFinite(ts) && ts >= seasonStartMs)) add(seasonToDate, e);
 
@@ -123,6 +160,7 @@ export function aggregatePlayerSignal(
     categoryBreakdown,
     pendingCount,
     mixedCount,
+    carriedOverItems,
     lastEvidenceAt,
     updatedAt: new Date(nowMs).toISOString(),
   };
@@ -156,6 +194,7 @@ export function emptySignal(playerId: string, now = new Date().toISOString()): P
     categoryBreakdown: {},
     pendingCount: 0,
     mixedCount: 0,
+    carriedOverItems: 0,
     lastEvidenceAt: null,
     updatedAt: now,
   };

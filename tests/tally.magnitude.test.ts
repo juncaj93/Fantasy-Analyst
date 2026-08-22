@@ -194,10 +194,9 @@ describe('the imported tally, end to end', () => {
     await service.importTallyDocument(DOC, IMPORT);
 
     const repo = new EvidenceRepo(db);
-    // Three days after the document: inside both windows.
+    // Three days after the document: inside the 30-day window.
     let signal = await repo.refreshSignal('jsn', { now: '2026-08-16T00:00:00.000Z' });
     expect(signal.raw.net).toBe(11);
-    expect(signal.last7.net).toBe(11);
     expect(signal.last30.net).toBe(11);
 
     // Ten days after: out of the 7-day window, still inside 30.
@@ -210,6 +209,34 @@ describe('the imported tally, end to end', () => {
     signal = await repo.refreshSignal('jsn', { now: '2026-10-12T00:00:00.000Z' });
     expect(signal.raw.net).toBe(11);
     expect(signal.last30.net).toBe(0);
+  });
+
+  /**
+   * The same principle, one level further down.
+   *
+   * The assertion this replaces read `last7 === 11` three days after the
+   * document, which looks right and is the very confusion the test's own title
+   * objects to. `2026-08-13` is not when JSN earned eleven points — it is the
+   * day somebody finished adding up issues one to four. The document's date is
+   * the *end* of the period it describes, so it dates the row without dating
+   * the news, and seven days cannot hold four issues.
+   *
+   * Thirty days can, which is why the assertions above are untouched.
+   */
+  it('never counts a carried tally as this week, however fresh the import', async () => {
+    await service.importTallyDocument(DOC, IMPORT);
+    const repo = new EvidenceRepo(db);
+
+    // The day after the document, when the row is as fresh as it will ever be.
+    const signal = await repo.refreshSignal(ID_BY_NAME.get('Puka Nacua')!, {
+      now: '2026-08-14T00:00:00.000Z',
+    });
+    expect(signal.last7.net).toBe(0);
+    expect(signal.last7.items).toBe(0);
+    // Every point is still on the record, and still inside the month.
+    expect(signal.raw.net).toBe(13);
+    expect(signal.last30.net).toBe(13);
+    expect(signal.carriedOverItems).toBe(1);
   });
 
   it('leaves an item the user corrected exactly as they set it', async () => {
