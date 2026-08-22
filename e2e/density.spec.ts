@@ -228,6 +228,45 @@ test.describe('a trade suggestion is a row', () => {
     );
     expect(overflow, `the page overflows by ${overflow}px`).toBeLessThanOrEqual(1);
   });
+
+  /**
+   * And it can be asked again, which until now it could not.
+   *
+   * The suggestions are a server answer computed from newsletter evidence and
+   * the league's rosters — both of which move while the reader is not looking —
+   * and the only way to re-read them was to leave the tab and come back. Team,
+   * Draft, Matchup and Waivers all take the gesture already; there is no drag,
+   * no reorder and no form on this screen to compete with it.
+   */
+  test('re-reads the board when it is pulled down', async ({ page }) => {
+    // No button for it, here or anywhere: the gesture replaced those.
+    const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
+    expect(labels).not.toContain('refresh');
+
+    let asked = 0;
+    await page.route('**/api/trades*', async (route) => {
+      asked += 1;
+      await route.continue();
+    });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const surface = await page.getByTestId('trades-pull').boundingBox();
+    const x = surface!.x + surface!.width / 2;
+    const y = surface!.y + 40;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (const dy of [12, 60, 120, 190]) {
+      await page.mouse.move(x, y + dy);
+      await page.waitForTimeout(40);
+    }
+    await expect(page.getByTestId('trades-pull')).toHaveAttribute('data-pull-state', 'armed');
+    await page.mouse.up();
+
+    await expect.poll(() => asked, { timeout: 8000 }).toBeGreaterThan(0);
+    // The surface comes back to rest, and the board is still a board.
+    await expect(page.getByTestId('trades-pull')).toHaveAttribute('data-pull-state', 'idle');
+    await expect(page.getByTestId('trade-row').first()).toBeVisible();
+  });
 });
 
 /**

@@ -111,6 +111,31 @@ export function pullState(distance: number, refreshing: boolean, trigger = PULL_
   return pullReleases(distance, trigger) ? 'armed' : 'pulling';
 }
 
+/**
+ * Whether this movement is a deliberate pull, so far.
+ *
+ * The mirror of {@link engageDecision}, measured downwards, and it exists
+ * because the pull used to ask only "has the finger moved eight pixels, and was
+ * any of it downwards" — which is true of almost every gesture on a phone. A
+ * swipe across the filter chips with eleven pixels of downward drift in a
+ * hundred and eighty of sideways started the page moving; so did the first
+ * moments of a diagonal scroll. Neither is somebody asking for a refresh.
+ *
+ * So the vertical component has to beat the horizontal one by the same ratio
+ * the back-swipe asks of its own axis. `wait` is the honest answer under the
+ * engage distance: a few pixels in any direction is a thumb resting.
+ *
+ * `scroll` is returned for an upward drag too, and is final either way — a
+ * gesture given up on must not be reclaimed halfway down the screen.
+ */
+export function pullDecision(dx: number, dy: number): 'wait' | 'pull' | 'scroll' {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < ENGAGE_DISTANCE && ay < ENGAGE_DISTANCE) return 'wait';
+  if (dy > 0 && ay > ax * DIRECTION_RATIO) return 'pull';
+  return 'scroll';
+}
+
 /** Whether a touch began close enough to the leading edge to mean "back". */
 export function startsAtEdge(clientX: number, zone: number = EDGE_ZONE): boolean {
   return clientX >= 0 && clientX <= zone;
@@ -563,30 +588,54 @@ export interface PullToRefresh {
 }
 
 /**
+ * The attribute a control uses to say "this drag is mine".
+ *
+ * Put on the queue's grip. A pointer that goes down on it, or on anything
+ * inside it, never starts a pull — see rule 2 below.
+ */
+export const NO_PULL_ATTRIBUTE = 'data-no-pull';
+
+/**
  * Pull down from the top of a screen to reload it.
  *
  * The one gesture an iPhone user tries without being told, and the reason both
- * of this screen's refresh buttons could be deleted. Four rules make it behave
+ * of this screen's refresh buttons could be deleted. Five rules make it behave
  * like the system's own rather than like a `div` that moves:
  *
  *  1. **The page owns the gesture until the page is at its top.** A drag that
  *     starts anywhere below `scrollTop: 0` is a scroll and is never taken; a
- *     drag that starts at the top and goes *up* is a scroll too, and is handed
- *     back the moment the direction is clear. This is the same rule the sheet
- *     drag uses, for the same reason: a gesture that competes with scrolling
- *     loses, and takes the reader's patience with it.
+ *     drag that starts at the top and is not clearly, deliberately downwards is
+ *     a scroll too, and is handed back the moment the direction is clear — see
+ *     {@link pullDecision}. This is the same rule the sheet drag uses, for the
+ *     same reason: a gesture that competes with scrolling loses, and takes the
+ *     reader's patience with it.
  *
- *  2. **One refresh at a time.** A ref, checked before anything is started,
+ *  2. **A control that owns its own drag wins outright.** The queue's rows
+ *     reorder by long-pressing a grip and dragging, and both gestures start the
+ *     same way: a finger going down near the top of the screen and moving down.
+ *     The reader was getting both — the list slid under the finger while the row
+ *     was being carried, and letting go reloaded the board out from under the
+ *     reorder. Nothing arbitrates that after the fact, so the grip says so
+ *     before it starts: a pointer that goes down inside a
+ *     `{@link NO_PULL_ATTRIBUTE}` element is not a pull and never becomes one.
+ *
+ *     `enabled` is the second half of the same rule and covers the gap the
+ *     first cannot: a press may drift far enough to arm a pull (eight pixels)
+ *     while still counting as a press (ten), and the long press then fires with
+ *     the surface already moving. A screen that knows a drag has started takes
+ *     the gesture back by disabling this, and anything in flight is dropped.
+ *
+ *  3. **One refresh at a time.** A ref, checked before anything is started,
  *     rather than the state that paints the spinner — state lands a render
  *     later, and the second pull happens in between. A pull during a refresh
  *     moves nothing and requests nothing; the spinner already on screen is the
  *     honest answer to "is it working".
  *
- *  3. **It reuses the screen's own reload.** `onRefresh` is whatever the screen
+ *  4. **It reuses the screen's own reload.** `onRefresh` is whatever the screen
  *     already does, so there is exactly one refresh path in the app and this
  *     cannot drift from it. Nothing here polls, schedules or retries.
  *
- *  4. **Nothing calls `preventDefault`.** `overscroll-behavior` in the
+ *  5. **Nothing calls `preventDefault`.** `overscroll-behavior` in the
  *     stylesheet is what stops the browser bouncing the whole document under
  *     the gesture; the arbitration stays the browser's.
  */
@@ -600,10 +649,26 @@ export function usePullToRefresh({
   /** How far the surface under this gesture is scrolled. Injected for tests. */
   scrollTop?: () => number;
 }): PullToRefresh {
-  const drag = useRef<{ pointerId: number; startY: number; engaged: boolean } | null>(null);
+  const drag = useRef<{ pointerId: number; startX: number; startY: number; engaged: boolean } | null>(null);
   const running = useRef(false);
   const [distance, setDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+
+  /*
+   * A gesture in flight when the screen takes the gesture back.
+   *
+   * Rule 2's second half. Dropping the drag alone would leave the surface held
+   * open at whatever it had reached, so the distance goes with it — the list
+   * springs back to where it belongs and the row being carried is the only
+   * thing moving. A refresh already *running* is left alone: it has been
+   * requested and cancelling a request nobody asked to cancel is worse than
+   * letting it finish.
+   */
+  useEffect(() => {
+    if (enabled) return;
+    drag.current = null;
+    setDistance((current) => (current === 0 ? current : 0));
+  }, [enabled]);
 
   const run = useCallback(() => {
     // The guard is the ref, not `refreshing`: two pulls inside one render would
@@ -627,7 +692,15 @@ export function usePullToRefresh({
       if (!enabled || running.current) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (scrollTop() > 0) return;
-      drag.current = { pointerId: e.pointerId, startY: e.clientY, engaged: false };
+      /*
+       * A control that has claimed this drag keeps it. Asked of the *target*
+       * rather than of the surface, because the surface is the whole screen and
+       * this event has bubbled all the way up it — by the time it arrives here
+       * the only record of where the finger actually landed is `e.target`.
+       */
+      const target = e.target;
+      if (target instanceof Element && target.closest(`[${NO_PULL_ATTRIBUTE}]`)) return;
+      drag.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, engaged: false };
     },
     [enabled, scrollTop],
   );
@@ -636,13 +709,16 @@ export function usePullToRefresh({
     (e: ReactPointerEvent) => {
       const state = drag.current;
       if (!state || state.pointerId !== e.pointerId) return;
+      const dx = e.clientX - state.startX;
       const dy = e.clientY - state.startY;
 
       if (!state.engaged) {
-        if (Math.abs(dy) < ENGAGE_DISTANCE) return;
-        // Upwards, or the reader has scrolled away from the top in the
-        // meantime: this was a scroll all along.
-        if (dy < 0 || scrollTop() > 0) {
+        const decision = pullDecision(dx, dy);
+        if (decision === 'wait') return;
+        // Not a deliberate pull — upwards, or mostly sideways — or the reader
+        // has scrolled away from the top in the meantime: this was a scroll all
+        // along, and that verdict is final.
+        if (decision === 'scroll' || scrollTop() > 0) {
           drag.current = null;
           setDistance(0);
           return;

@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
-import { NavBar, SkeletonRows } from '../components/native.tsx';
+import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
@@ -96,7 +96,27 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   }
 
   return (
-    <>
+    /*
+     * Pull down to re-read the board.
+     *
+     * The gesture Team, Draft, Matchup and Waivers already have, and this is the
+     * screen that most obviously wanted it: the suggestions are a server answer
+     * computed from newsletter evidence and the league's rosters, both of which
+     * move while the reader is not looking, and until now the only way to ask
+     * again was to leave the tab and come back.
+     *
+     * It is safe here in a way it is not everywhere. There is no drag, no
+     * reorder and no form on this screen, so nothing competes for a downward
+     * gesture from the top; and `load` is the screen's own single fetch, so the
+     * gesture adds no second path to `/api/trades` — see `usePullToRefresh`,
+     * which is single-flight on top of that.
+     *
+     * Players and Setup deliberately do not get this. Players is a paginated,
+     * searchable list with a load-more observer, where a refresh means
+     * discarding fetched pages and the reader's place in them; Setup is a form.
+     * Review re-reads itself after every grading action already.
+     */
+    <PullToRefresh onRefresh={load} label="Trades" testId="trades-pull">
       {/*
         The card that said "Trades" and then where the ideas come from was a
         title and a caption in a box, above a screen whose title is Trades. The
@@ -203,7 +223,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           has written about recently are left out rather than listed as holds.
         </div>
       ) : null}
-    </>
+    </PullToRefresh>
   );
 }
 
