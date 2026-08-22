@@ -91,6 +91,40 @@ export function nflTeamName(input: string | null | undefined): string | null {
   return nflTeam(input)?.name ?? null;
 }
 
+const BY_NAME = new Map<string, string>();
+for (const team of NFL_TEAMS) {
+  BY_NAME.set(nameKey(team.name), team.code);
+  // The nickname alone, which is how a table with a narrow column writes it.
+  // "Football Team" and the like are historical and belong in the alias table
+  // rather than here; this is only the last word of a current club's name.
+  const nickname = team.name.split(' ').pop() ?? '';
+  if (nickname) BY_NAME.set(nameKey(nickname), team.code);
+}
+
+function nameKey(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The Sleeper code for a team written any way a source might write it.
+ *
+ * `normalizeTeam` folds one abbreviation onto another and is deliberately not
+ * changed here: it strips everything but letters, so "Detroit Lions" becomes
+ * `DETROITLIONS` and resolves to nothing. Sources that write the club out in
+ * full are common enough — a copied web table almost always does — that the
+ * lookup is worth having, and it belongs where the club list already lives.
+ *
+ * Tries the abbreviation first so an existing caller's behaviour is unchanged,
+ * then the full name, then the nickname. Returns '' rather than a guess.
+ */
+export function nflTeamCode(input: string | null | undefined): string {
+  const raw = (input ?? '').trim();
+  if (!raw) return '';
+  const code = normalizeTeam(raw);
+  if (BY_CODE.has(code)) return code;
+  return BY_NAME.get(nameKey(raw)) ?? '';
+}
+
 /**
  * The team mark's URL, or `null` when there is nothing to draw.
  *
