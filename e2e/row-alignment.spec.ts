@@ -196,6 +196,95 @@ test.describe('the identity cluster', () => {
   });
 
   /**
+   * One column down the left of the whole list.
+   *
+   * The rank, the line of numbers under it, and the row's own leading edge have
+   * to be the same x — on every row, whether the rank is one digit or two.
+   *
+   * The rank used to be right-aligned inside its fixed box, which put the
+   * digits on one edge and therefore made them *begin* on two: `1` started
+   * seven points right of `10`, and neither started where the secondary line
+   * did. It read as correct from row ten down purely because a two-digit rank
+   * nearly fills the box, which is exactly the shape of failure to check for —
+   * so the assertion is over rows either side of ten rather than over the list
+   * as a whole.
+   *
+   * Measured off the text itself with a range, not off the element's box: a box
+   * can sit on the right column while the glyph inside it does not, which is
+   * the entire bug.
+   */
+  async function leftColumn(page: Page, rowTestId: string, secondarySelector: string) {
+    return page.locator(`[data-testid="${rowTestId}"]`).evaluateAll(
+      (rows, secondary) =>
+        rows.slice(0, 13).map((row) => {
+          const rank = row.querySelector('.rank');
+          let glyph: number | null = null;
+          if (rank?.firstChild) {
+            const range = document.createRange();
+            range.selectNodeContents(rank);
+            glyph = Math.round(range.getBoundingClientRect().left);
+          }
+          const line = row.querySelector(secondary);
+          return {
+            rank: (rank?.textContent ?? '').trim(),
+            glyph,
+            line: line ? Math.round(line.getBoundingClientRect().left) : null,
+          };
+        }),
+      secondarySelector,
+    );
+  }
+
+  for (const [screen, rowTestId, secondary, open] of [
+    ['the draft board', 'recommendation-row', '.player-row-bottom', openDraft],
+    [
+      'Players',
+      'player-search-row',
+      '.dense-row-metrics',
+      async (page: Page) => {
+        await page.goto('/');
+        await page.getByTestId('tab-players').click();
+        await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
+      },
+    ],
+  ] as const) {
+    test(`anchors the rank and the numbers under it to one column on ${screen}`, async ({ page }) => {
+      await open(page);
+      const rows = await leftColumn(page, rowTestId, secondary);
+      expect(rows.length, `${screen} should be drawing rows`).toBeGreaterThan(4);
+
+      const drawn = rows.filter((r) => r.glyph != null && r.line != null);
+      expect(drawn.length).toBeGreaterThan(4);
+
+      for (const row of drawn) {
+        expect(row.glyph, `rank "${row.rank}" starts at ${row.glyph}, its numbers at ${row.line}`).toBe(row.line);
+      }
+      // One anchor for the whole list, not one per digit count.
+      expect(new Set(drawn.map((r) => r.glyph)).size, 'the rank column is ragged').toBe(1);
+    });
+  }
+
+  /**
+   * …and specifically across the boundary that used to hide it.
+   *
+   * Rows 1-9 against rows 10+ is the comparison the old layout passed by
+   * accident on one side and failed on the other, so it is asserted by name
+   * rather than left to the sweep above to happen to cover.
+   */
+  test('and one-digit ranks land on the same edge as two-digit ones', async ({ page }) => {
+    await openDraft(page);
+    const rows = await leftColumn(page, 'recommendation-row', '.player-row-bottom');
+
+    const single = rows.filter((r) => /^\d$/.test(r.rank));
+    const double = rows.filter((r) => /^\d\d$/.test(r.rank));
+    expect(single.length, 'the board should reach rank 9').toBeGreaterThan(4);
+    expect(double.length, 'and past rank 10').toBeGreaterThan(0);
+
+    expect(single[0]!.glyph, `rank ${single[0]!.rank} against rank ${double[0]!.rank}`).toBe(double[0]!.glyph);
+    expect(single[0]!.line).toBe(double[0]!.line);
+  });
+
+  /**
    * The worst row the data can produce, and nothing on it hides anything else.
    *
    * A long name, a three-character availability code and a two-digit negative

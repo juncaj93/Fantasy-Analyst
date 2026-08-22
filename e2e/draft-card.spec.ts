@@ -221,6 +221,76 @@ test.describe('the numbers keep the line', () => {
     expect(marked.length).toBeLessThan(board.length);
   });
 
+  /**
+   * The Score's colour is on the number, and only on the number.
+   *
+   * `Score` is the same word on every row, so colouring it would paint the
+   * board rather than the reading. The numeral is what differs and what a
+   * reader glances at, so it is the thing allowed to say strong, fair or weak —
+   * and the arithmetic behind which is which lives in `tests/scoreBand.test.ts`,
+   * where a distribution can be stated exactly. What is checked here is the
+   * wiring: the band reaches the numeral, the word beside it does not take it,
+   * and the sibling metrics keep the colours they earn from their own signs.
+   */
+  test('colours the Score number without colouring the word beside it', async ({ page }) => {
+    await openDraft(page);
+    const rows = page.getByTestId('recommendation-row');
+    await expect(rows.first()).toBeVisible();
+
+    const board = await rows.evaluateAll((els) =>
+      els.map((el) => {
+        const metric = el.querySelector('[data-testid="score-metric"]');
+        const value = el.querySelector('.score-value');
+        return {
+          text: (value?.textContent ?? '').trim(),
+          band: value?.getAttribute('data-band') ?? null,
+          label: value?.getAttribute('aria-label') ?? null,
+          valueColour: value ? getComputedStyle(value).color : null,
+          // The label's own colour, read off the element that holds the word.
+          wordColour: metric ? getComputedStyle(metric).color : null,
+          bodyColour: getComputedStyle(document.body).color,
+        };
+      }),
+    );
+    expect(board.length).toBeGreaterThan(3);
+
+    /** Which colours each band was actually painted in, across the board. */
+    const painted = new Map<string, Set<string>>();
+    for (const row of board) {
+      const priced = /^\d+$/.test(row.text);
+      expect(row.band, `Score "${row.text}" carries no band`).toBeTruthy();
+      expect(['strong', 'fair', 'weak', 'unknown']).toContain(row.band!);
+      // An unpriced player prints a dash, and a dash is not a verdict.
+      expect(row.band === 'unknown', `"${row.text}" is banded ${row.band}`).toBe(!priced);
+      if (!priced) continue;
+
+      painted.set(row.band!, (painted.get(row.band!) ?? new Set()).add(row.valueColour!));
+      // …and it says the band in words, for anyone not looking at the colour.
+      expect(row.label, `Score ${row.text} does not say its band`).toMatch(/strong|fair|weak/);
+      // The word beside it keeps the secondary colour it has on every row.
+      expect(row.wordColour, `the word "Score" took the number's colour`).not.toBe(row.valueColour);
+    }
+
+    /*
+     * The colour is a function of the band, and the bands are different colours.
+     *
+     * This is the assertion that has to do the work, and the obvious weaker
+     * version does not: "the number is a different colour from the word beside
+     * it" was already true before any of this existed, because a value and its
+     * label were always two greys. What must hold is that the *band* is what
+     * decides — every row in a band painted alike, and no two bands painted the
+     * same. Delete the three rules from the stylesheet and this fails; nothing
+     * else here does.
+     */
+    expect(painted.size, `the board only reached ${[...painted.keys()].join('/')}`).toBeGreaterThan(1);
+    const perBand = new Map<string, string>();
+    for (const [band, colours] of painted) {
+      expect(colours.size, `${band} was painted ${[...colours].join(' and ')}`).toBe(1);
+      perBand.set(band, [...colours][0]!);
+    }
+    expect(new Set(perBand.values()).size, `two bands share a colour: ${[...perBand].join(', ')}`).toBe(perBand.size);
+  });
+
   test('the board does not scroll sideways because of it', async ({ page }) => {
     await openDraft(page);
     await expect(cliffRow(page)).toBeVisible();

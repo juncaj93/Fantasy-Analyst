@@ -69,6 +69,8 @@ import { survivalBand } from '../../core/draft/survival.ts';
  */
 import { annotateTiers, tierCliffWarning, type TierBreak } from '../../core/draft/tierBoard.ts';
 import { levelRunSize, levelWithNeighbour } from '../../core/draft/levelScores.ts';
+/* How strong a Score is, against the board on screen. Presentation only. */
+import { scoreBandLabel, scoreBands, type ScoreBand } from '../../core/draft/scoreBand.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
 import { seasonMarketLabel } from '../../core/vegas/season.ts';
 import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
@@ -1115,6 +1117,7 @@ export function DraftScreen({
                 rec={item.rec}
                 level={item.level}
                 levelRun={item.levelRun}
+                band={item.band}
                 showCliffProximity={!isSinglePosition}
                 horizonPick={board.waitHorizonPick}
                 currentPick={board.currentPick}
@@ -1487,6 +1490,8 @@ interface BoardItem {
   level: boolean;
   /** How many rows share that Score in this run, counting this one. */
   levelRun: number;
+  /** How strong the Score is, against this board. See `scoreBand`. */
+  band: ScoreBand;
 }
 
 /**
@@ -1522,10 +1527,27 @@ function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardI
    * sort produced them; a divider between two of them changes nothing about
    * whether their Scores are equal.
    */
+  /*
+   * The Score's band is read off the same sequence, and for the same reason.
+   *
+   * "Strong" is a claim about this player against the board the reader is
+   * actually looking at, so the pool has to be the rows on screen after the
+   * filter and the search — a tight-end board asks whether he is a strong tight
+   * end. Computed once here rather than per row, so every number on one board
+   * is read against one distribution and cannot drift between rows.
+   *
+   * See core/draft/scoreBand.ts. It reads scores and returns a word; it has no
+   * way to reach the order, the composite or anything the engine decided.
+   */
   const level = (rows: DraftRecommendation[]) => {
     const scores = rows.map((rec) => rec.score);
     const flags = levelWithNeighbour(scores);
-    return (index: number) => ({ level: flags[index] ?? false, levelRun: levelRunSize(scores, index) });
+    const bands = scoreBands(scores);
+    return (index: number) => ({
+      level: flags[index] ?? false,
+      levelRun: levelRunSize(scores, index),
+      band: bands[index] ?? 'unknown',
+    });
   };
 
   if (!enabled) {
@@ -1756,6 +1778,7 @@ function RecommendationRow({
   rank,
   level,
   levelRun,
+  band,
   rec,
   expanded,
   showCliffProximity,
@@ -1783,6 +1806,8 @@ function RecommendationRow({
   level: boolean;
   /** How many rows share it, counting this one. */
   levelRun: number;
+  /** How strong that Score is against this board. Colours the numeral only. */
+  band: ScoreBand;
   rec: DraftRecommendation;
   expanded: boolean;
   /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
@@ -1987,23 +2012,46 @@ function RecommendationRow({
               tie-break that shifts as the clock advances. Correct, and it
               reads as arbitrary until the screen admits the number is shared.
             */}
+            {/*
+              The word stays neutral and the number carries the colour.
+
+              `Score` is a label — it is the same word on every row and colouring
+              it would paint the board rather than the reading. The numeral is
+              the thing that differs, so it is the thing that is allowed to say
+              strong, fair or weak; see `scoreBand`, and `.score-value` for the
+              tokens. Nothing else on the line takes a colour from this: ADP,
+              DOG and Next keep the ones they already earn from their own signs.
+            */}
             <span className="metric" data-testid="score-metric" data-level={level ? 'true' : 'false'}>
               Score{' '}
               <strong
                 className="score-value"
                 data-level={level ? 'true' : 'false'}
+                /*
+                  `unknown` rather than nothing when there is no Score, so the
+                  stylesheet has one attribute to answer and the dash keeps the
+                  muted treatment it already had.
+                */
+                data-band={band}
                 title={
                   rec.score == null
                     ? `No market has priced him, so his composite (raw ${rec.total}) is not comparable with a priced player's`
                     : level
-                      ? `Composite recommendation strength, 0-100 (raw ${rec.total}). Level on Score with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'} here — the order between them is a tie-break, not a verdict.`
-                      : `Composite recommendation strength, 0-100 (raw ${rec.total})`
+                      ? `Composite recommendation strength, 0-100 (raw ${rec.total}) — ${scoreBandLabel(band)} against this board. Level on Score with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'} here — the order between them is a tie-break, not a verdict.`
+                      : `Composite recommendation strength, 0-100 (raw ${rec.total}) — ${scoreBandLabel(band)} against this board`
                 }
-                {...(level
-                  ? {
-                      'aria-label': `Score ${rec.score}, level with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'}`,
-                    }
-                  : {})}
+                /*
+                  The band in words, for a reader who is listening rather than
+                  looking. The app's rule is that colour is never the only cue,
+                  and here it is the third: the number itself says most of it.
+                */
+                {...(rec.score == null
+                  ? {}
+                  : {
+                      'aria-label': level
+                        ? `Score ${rec.score}, ${scoreBandLabel(band)}, level with ${levelRun - 1} other${levelRun - 1 === 1 ? '' : 's'}`
+                        : `Score ${rec.score}, ${scoreBandLabel(band)}`,
+                    })}
               >
                 {/*
                   A dash rather than a number, for the same reason ADP, Val and
