@@ -100,6 +100,23 @@ export function ScoreCard({
 function TeamColumn({ team, align, final }: { team: MatchupTeamView; align: 'start' | 'end'; final: boolean }) {
   return (
     <div className="matchup-team" data-align={align} data-testid={`matchup-team-${team.side}`}>
+      {/*
+        Whose column this is, as a chip over the number rather than a heading
+        beside it.
+
+        The name used to be pinned to the card's outer edge while the score sat
+        at the inner one, which put a label and the thing it labels a couple of
+        centimetres apart with nothing between them — two names hard against the
+        outside of the card and two numbers meeting in the middle, so neither
+        pair read as belonging to the other. It is a label, so it goes over what
+        it labels, and it takes the quietest treatment that still reads as one:
+        a small tinted capsule, no border, no colour of its own.
+
+        It never widens the column. `min-width: 0` in the stylesheet keeps a
+        joke of a team name from contributing to the column's width — it
+        truncates against the score instead, which is the one thing on this card
+        that may not move.
+      */}
       <div className="matchup-team-name" title={team.name}>
         {team.name}
       </div>
@@ -230,6 +247,27 @@ function WinBar({
         aria-valuemax={100}
         aria-label={label}
         data-testid="matchup-win-bar"
+        /*
+          Which way it is going, from our side's number and no other input.
+
+          The bar was one accent blue whether the afternoon was being won or
+          lost, which made it a picture of a percentage rather than a reading of
+          it — the same object, the same colour, at 68% and at 16%. Green ahead,
+          red behind, and neither at exactly even, because a colour that means
+          "winning" has to have something it does not mean.
+
+          Read from `minePct` rather than from the raw probability so the colour
+          and the printed number can never disagree: 50.4% rounds to `50%` on
+          screen, and a bar that was green beside a number saying even would be
+          the card contradicting itself in the two millimetres between them.
+
+          The colour is an accelerator and never the carrier. Both percentages
+          are printed above it, the `role="meter"` carries the value, and the
+          accessible name says it in words — see §38. This is the fourth way of
+          saying the same thing, for the reader who takes it in before reading
+          anything.
+        */
+        data-tone={minePct > 50 ? 'ahead' : minePct < 50 ? 'behind' : 'even'}
       >
         <span className="matchup-win-fill" style={{ width: `${minePct}%` }} />
       </span>

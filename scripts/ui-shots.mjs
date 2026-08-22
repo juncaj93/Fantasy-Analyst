@@ -200,15 +200,33 @@ const browser = await launch.launch(
   ENGINE === 'chromium' && CHROMIUM_CANDIDATES[0] ? { executablePath: CHROMIUM_CANDIDATES[0] } : {},
 );
 
+/*
+ * One login for the whole run, reused by every width.
+ *
+ * This logged in per context, which is four attempts for the four widths — and
+ * the server allows eight in five minutes, per IP, deliberately (see
+ * `RateLimiter` in server/http/auth.ts; it is a feature, not something to
+ * weaken). Running this beside the e2e suite against one long-lived dev server
+ * therefore spent most of the budget and made `auth.setup.ts` fail with a 429
+ * in a suite that was otherwise green — a development aid poisoning the tests.
+ *
+ * The session is taken once and handed to each context as storage state, which
+ * is exactly what `e2e/auth.setup.ts` does and for the same reason.
+ */
+const signIn = await browser.newContext();
+const login = await signIn.request.post(`${BASE}/api/auth/login`, { data: { passphrase: PASSPHRASE } });
+if (login.status() !== 200) throw new Error(`login failed: ${login.status()}`);
+const storageState = await signIn.request.storageState();
+await signIn.close();
+
 const report = {};
 for (const width of WIDTHS) {
   const context = await browser.newContext({
     viewport: { width, height: width >= 430 ? 932 : width >= 390 ? 844 : width >= 375 ? 812 : 800 },
     deviceScaleFactor: 2,
     hasTouch: true,
+    storageState,
   });
-  const login = await context.request.post(`${BASE}/api/auth/login`, { data: { passphrase: PASSPHRASE } });
-  if (login.status() !== 200) throw new Error(`login failed: ${login.status()}`);
 
   for (const name of wanted) {
     const screen = SCREENS[name];

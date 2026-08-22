@@ -266,6 +266,24 @@
   --matchup-points-w: 42px;
 
   /*
+   * The width each side of the scoreboard takes, named once.
+   *
+   * Same argument as the row column above, one size up. The widest total a
+   * scoring week produces is six characters, and tabular figures make every
+   * six-character total exactly 81px at the score's size; `199.9 proj` and
+   * `no forecast` are both comfortably under it. Ninety-two leaves the manager's
+   * chip about a dozen characters before it truncates.
+   *
+   * Fixed rather than sized by its contents, and that is the whole point. The
+   * chip has to sit centred over the score, so the column has to be a column —
+   * with `min-content` the *name* fed the track, so one manager calling his team
+   * something long pushed his own score away from the middle and the two sides
+   * stopped being mirrors of each other. Nothing else on this card is allowed to
+   * move because of what somebody called their team.
+   */
+  --matchup-side-w: 92px;
+
+  /*
    * The width reserved for whatever sits between a player's name and his club.
    *
    * A signed tally is one, two or three characters wide and an availability tag
@@ -5996,69 +6014,78 @@ table.compact tr:last-child td {
 }
 
 /*
- * A side of the scoreboard: the name on the outside, the numbers on the inside.
+ * A side of the scoreboard: one stack, on the edge nearest the `vs`.
  *
- * The name stays hard against the card's outer edge, where a reader's eye goes
- * to find out whose column this is. The score and the projection go the other
- * way, to the edge nearest the `vs` — so `69.10` and `79.00` sit a couple of
- * centimetres apart instead of a phone's width apart, which is the difference
- * between reading them as one comparison and reading them as two facts.
+ * The block hugs the inner edge, so `69.10` and `79.00` sit a couple of
+ * centimetres apart instead of a phone's width apart — which is the difference
+ * between reading them as one comparison and reading them as two facts. That
+ * has not changed and must not: it is the whole reason the numbers are legible
+ * as a pair.
  *
- * They are still their own column and still aligned as a column: the score and
- * the projection under it share an edge, so the decimal points line up and the
- * pair reads as one block rather than two loose numbers.
+ * What has changed is what the name does. It used to be pinned to the card's
+ * *outer* edge while the score sat at the inner one, so a label and the thing
+ * it labels were at opposite ends of the column with nothing in between — and
+ * across the card that read as two names on the outside and two numbers in the
+ * middle, neither pair belonging to the other. Everything in the column now
+ * shares a centre: the name over the score over the projection, one stack per
+ * side, mirrored about the `vs`.
+ *
+ * The column is a fixed width — see `--matchup-side-w` — because of the one
+ * thing that cannot be allowed to happen: a long team name widening it and
+ * pushing the score off the centre. Sized by its contents it would, and the two
+ * sides would stop being mirrors the moment one manager called his team
+ * something longer than the other did.
  */
 .matchup-team {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--matchup-side-w);
+  justify-items: center;
   gap: 1px;
+  text-align: center;
 }
 
+/* Hard against the `vs`, on both sides. */
 .matchup-team[data-align='start'] {
-  align-items: flex-end;
-  text-align: right;
+  justify-content: end;
 }
 
 .matchup-team[data-align='end'] {
-  align-items: flex-start;
-  text-align: left;
+  justify-content: start;
 }
 
 /*
- * …except the name, which goes back to the outer edge.
+ * The fantasy team's name, as a chip over the score it belongs to.
  *
- * `align-self` rather than a second rule on the column, because the name is the
- * one child that does not follow the column's direction — and `max-width: 100%`
- * so a long team name still truncates against the column instead of widening
- * it.
+ * The quietest thing that still reads as a label rather than as another value:
+ * a tinted capsule with no border and no colour of its own, at a size that
+ * cannot compete with the number under it. A manager's team name is frequently
+ * a joke of unbounded length, so it stays one line and truncates — against the
+ * column the score sits in, never by widening the card.
  */
-.matchup-team[data-align='start'] .matchup-team-name,
-.matchup-team[data-align='start'] .matchup-team-record {
-  align-self: flex-start;
-  max-width: 100%;
-}
-
-.matchup-team[data-align='end'] .matchup-team-name,
-.matchup-team[data-align='end'] .matchup-team-record {
-  align-self: flex-end;
-  max-width: 100%;
-}
-
-/* The fantasy team's name. One line, truncated — a manager's team name is
-   frequently a joke of unbounded length and it must not wrap the card. */
 .matchup-team-name {
-  font-size: 0.86rem;
-  font-weight: 640;
-  color: var(--text);
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.74rem;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  color: var(--text-dim);
+  background: var(--surface-inset);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .matchup-team-record {
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.7rem;
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Sleeper's score: the largest thing on the screen, because it is the only
@@ -6182,7 +6209,28 @@ button.matchup-win:active {
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--accent);
-  transition: width var(--dur) var(--ease);
+  transition: width var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+/*
+ * Ahead, behind, or neither.
+ *
+ * The same two tokens every other positive/negative state in this app uses, so
+ * a green bar here is the same green as a `+6` tally and needs no learning.
+ * Mixed rather than used neat: `--pos` and `--neg` are tuned for text on a page
+ * ground, and a six-pixel bar of either at full strength is the most saturated
+ * object on a card whose subject is two numbers. Softened enough to be a
+ * reading rather than an alarm, and still unmistakable at a glance.
+ *
+ * Even keeps the accent, which is the honest colour for "this is a quantity"
+ * — the state the bar was drawn in before it knew which way it was going.
+ */
+.matchup-win-track[data-tone='ahead'] .matchup-win-fill {
+  background: color-mix(in srgb, var(--pos) 88%, var(--surface));
+}
+
+.matchup-win-track[data-tone='behind'] .matchup-win-fill {
+  background: color-mix(in srgb, var(--neg) 88%, var(--surface));
 }
 
 /*
