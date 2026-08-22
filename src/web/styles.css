@@ -1634,10 +1634,22 @@ body,
 /*
  * The row's place in the list, on the leading edge.
  *
- * Fixed width and tabular for the same reason the trailing field is fixed: a
- * board that runs from `1` to `120` would otherwise start its names at three
- * different x positions depending on how far down it had been scrolled.
- * Right-aligned so the digits end on one edge and the names begin on one edge.
+ * Fixed width and tabular so a board that runs from `1` to `120` starts every
+ * name on one x whatever the rank is — that part has never changed and is what
+ * the fixed width is for.
+ *
+ * **Left-aligned, and it was right-aligned.** Right-aligned put the digits on
+ * one edge, which sounds like the same thing and is the opposite of it: `1` and
+ * `10` then *begin* seven points apart, so the row's leading edge was one place
+ * for the one-digit ranks, another for the two-digit ones, and a third for the
+ * line of numbers underneath — which starts at the row's own inset. Three
+ * columns where the eye expects one, and it read as correct on rows 10 and up
+ * purely because a two-digit rank nearly fills the box.
+ *
+ * Left-aligned there is one anchor: the rank's first digit, the secondary
+ * line's first character and the row's content edge are the same x on every
+ * row of both lists. Nothing else moves — the box is the same width, so the
+ * pills and the names are exactly where they were.
  */
 .rank {
   font-size: 0.7rem;
@@ -1645,7 +1657,7 @@ body,
   font-weight: 620;
   font-variant-numeric: tabular-nums;
   width: 22px;
-  text-align: right;
+  text-align: left;
   flex: none;
 }
 
@@ -2181,6 +2193,41 @@ body,
 .score-value {
   color: var(--text);
   font-weight: 720;
+}
+
+/*
+ * How strong the Score is, on the numeral and nowhere else.
+ *
+ * The word `Score` beside it stays the secondary text colour, because it is the
+ * same word on every row: colouring it would paint the board rather than the
+ * reading. The number is the thing that differs, so the number is the thing
+ * that gets to speak.
+ *
+ * The three semantic tokens the whole app already uses, so a green Score is the
+ * same green as a positive tally and needs no learning — and no new hue is
+ * invented for this. They are used neat rather than mixed: this is type on the
+ * page ground, which is exactly what `--pos`, `--warn` and `--neg` were tuned
+ * for, and both appearances define all three.
+ *
+ * Which band a number is in is decided in `core/draft/scoreBand.ts` — absolute
+ * anchors blended with where this board actually sits — and it is stated in the
+ * row's title and accessible name as a word. The colour is the third cue after
+ * the number itself, never the first and never the only one.
+ *
+ * `unknown` is deliberately absent: an unpriced player draws a dash, and a dash
+ * keeps the muted treatment `Unknown` already gives it. Painting it any of the
+ * three would be a verdict on a number nobody computed.
+ */
+.score-value[data-band='strong'] {
+  color: var(--pos);
+}
+
+.score-value[data-band='fair'] {
+  color: var(--warn);
+}
+
+.score-value[data-band='weak'] {
+  color: var(--neg);
 }
 
 /*
