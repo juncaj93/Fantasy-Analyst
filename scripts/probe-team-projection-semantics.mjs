@@ -1,16 +1,22 @@
 /**
  * What the number beside a player on Team actually is.
  *
- * Production shows roughly a point and a half where a weekly fantasy projection
- * would be in the teens. This prints the whole chain for every starter — the
- * value the screen renders, the market expectation underneath it, and every
- * component that was summed to produce it — beside the same player's published
- * weekly projection, so "the base is missing and the adjustments are being shown
- * as a total" is something to read rather than to argue about.
+ * Production showed roughly a point and a half where a weekly fantasy projection
+ * would be in the teens. This prints the whole chain for every starter — what
+ * the screen renders, the ranking score beside it, the market expectation
+ * underneath both, and every component that was summed — next to the same
+ * player's published weekly projection, so "the base is missing and the
+ * adjustments are being shown as a total" is something to read rather than to
+ * argue about.
+ *
+ * `proj` and `score` are printed as two columns on purpose. They are two
+ * different questions — what he is expected to score, and how he ranks against
+ * the rest of the roster — and the defect this probe found was one of them
+ * being printed under the other's heading. Where there is no market they should
+ * now read `— 3.15`: no projection, still rankable.
  *
  * It also prints what the Matchup screen says for the same players, because the
- * two screens are supposed to mean the same thing by "projected" and currently
- * do not.
+ * two screens must mean the same thing by "projected".
  *
  * **Read-only.** Every request is a GET the public site already answers, plus
  * public Sleeper reads. Nothing logs in, nothing writes, nothing touches D1.
@@ -71,7 +77,7 @@ const main = async () => {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
 
   head('EVERY RECOMMENDED STARTER, DECOMPOSED');
-  console.log('  slot       player                    screen  market   sum-of-known-components');
+  console.log('  slot       player                    proj    score   market   sum-of-known-components');
   const rows = [];
   for (const slot of lu.slots ?? []) {
     const e = slot.playerId ? byId.get(slot.playerId) : null;
@@ -81,10 +87,11 @@ const main = async () => {
     }
     const known = (e.components ?? []).filter((c) => !c.unknown);
     const sum = known.reduce((a, c) => a + (c.value ?? 0), 0);
-    rows.push({ playerId: e.playerId, name: e.name, score: slot.score });
+    rows.push({ playerId: e.playerId, name: e.name, score: slot.score, projection: slot.projection ?? null });
     console.log(
       `  ${String(slot.slot).padEnd(10)} ${String(e.name).padEnd(24)} ` +
-        `${String(slot.score ?? '—').padStart(6)}  ${String(e.expectation?.points ?? 'null').padStart(6)}   ${sum.toFixed(2)}`,
+        `${String(slot.projection ?? '—').padStart(6)}  ${String(slot.score ?? '—').padStart(6)}  ` +
+        `${String(e.expectation?.points ?? 'null').padStart(6)}   ${sum.toFixed(2)}`,
     );
     console.log(
       `             components kept: ` +
@@ -137,13 +144,13 @@ const main = async () => {
   }
 
   head('SIDE BY SIDE — the starters');
-  console.log('  player                    Team screen   Matchup   Sleeper(half)  Sleeper(ppr)');
+  console.log('  player                    Team proj   Team score   Matchup   Sleeper(half)  Sleeper(ppr)');
   for (const r of rows) {
     const s = publishedById.get(String(r.playerId)) ?? {};
     const mp = mineProj.has(r.playerId) ? mineProj.get(r.playerId) : '—';
     console.log(
-      `  ${String(r.name).padEnd(24)} ${String(r.score ?? '—').padStart(9)} ${String(mp ?? 'null').padStart(9)} ` +
-        `${String(s.pts_half_ppr ?? '—').padStart(13)} ${String(s.pts_ppr ?? '—').padStart(13)}`,
+      `  ${String(r.name).padEnd(24)} ${String(r.projection ?? '—').padStart(9)} ${String(r.score ?? '—').padStart(12)} ` +
+        `${String(mp ?? 'null').padStart(9)} ${String(s.pts_half_ppr ?? '—').padStart(13)} ${String(s.pts_ppr ?? '—').padStart(13)}`,
     );
   }
 
