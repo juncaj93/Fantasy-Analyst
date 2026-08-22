@@ -139,7 +139,7 @@ export async function buildMatchupResponse(
 
   const state = await sources.nflState();
   const context = resolveSeasonContext({ state, league: { season: league.season }, now });
-  const week = resolveWeek(opts.week ?? null, context.week);
+  const week = resolveWeek(opts.week ?? null, context.week, context.seasonType);
 
   const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
   const base = {
@@ -497,16 +497,41 @@ function numeric(value: unknown): number | null {
 }
 
 /**
+ * Season types in which `/state/nfl`'s week is not a fantasy week at all.
+ *
+ * **Sleeper's `week` counts within the season type, and only `regular` counts
+ * the weeks a fantasy schedule is made of.** Through August it is the
+ * *preseason* week — `season_type: "pre", week: 2` on 22 August 2026 — and
+ * that number is not week two of anything a league plays. Reading it as one is
+ * the mistake both functions below used to make, and it is a category error
+ * rather than an off-by-one: the two counters happen to share a range, so the
+ * result is a plausible wrong week rather than a visible failure.
+ *
+ * `post` is deliberately absent. Sleeper keeps counting fantasy weeks through
+ * the NFL postseason and this app has no production evidence that it does
+ * otherwise, so that case is left exactly as it was.
+ */
+const NO_REGULAR_WEEK = new Set(['pre', 'off']);
+
+/**
  * Which week to show.
  *
- * Sleeper's own week, clamped into the range a matchup can exist in. Week 0 is
- * the state Sleeper reports through the preseason, and asking for matchups in
- * it returns nothing useful — so the dead zone shows week one, which is the
- * schedule a reader in August actually wants to look at.
+ * Sleeper's own week, clamped into the range a matchup can exist in — but only
+ * when Sleeper's own week is a regular-season week. Before the season starts
+ * there is no current week to show, and the honest answer is week one: the
+ * first week that will ever be played, and the schedule a reader in August is
+ * actually asking about.
+ *
+ * This used to lean on a `Math.max(1, …)` clamp and a belief that Sleeper
+ * reports week 0 throughout the preseason. It does not — it reports the
+ * preseason week — so the clamp caught only the days before the first preseason
+ * game, and from then until kickoff the app showed a real matchup from the
+ * wrong week, against an opponent the user does not play first.
  */
-export function resolveWeek(requested: number | null, current: number | null): number {
+export function resolveWeek(requested: number | null, current: number | null, seasonType: string | null): number {
   const asked = requested != null && Number.isFinite(requested) ? Math.floor(requested) : null;
   if (asked != null && asked >= 1 && asked <= 22) return asked;
+  if (NO_REGULAR_WEEK.has(String(seasonType ?? '').trim().toLowerCase())) return 1;
   const now = current != null && Number.isFinite(current) ? Math.floor(current) : 1;
   return Math.min(22, Math.max(1, now));
 }
@@ -518,8 +543,16 @@ export function resolveWeek(requested: number | null, current: number | null): n
  * kickoff is unknown and the clock would otherwise have to be inferred forever.
  * Sleeper has moved on to a later week, so nothing in this one can still be
  * playing — which is a fact from a source rather than a guess from a calendar.
+ *
+ * The comparison is only meaningful between two regular-season weeks, for the
+ * reason {@link NO_REGULAR_WEEK} gives. In the preseason nothing has been
+ * played, so nothing is settled — without this, preseason week two would rule
+ * week one finished and the screen would show a real fixture as a final score
+ * of nil-nil.
  */
 export function isWeekSettled(currentWeek: number | null, week: number, seasonType: string | null): boolean {
-  if (seasonType === 'post' || seasonType === 'off') return true;
+  const type = String(seasonType ?? '').trim().toLowerCase();
+  if (type === 'post' || type === 'off') return true;
+  if (type === 'pre') return false;
   return currentWeek != null && Number.isFinite(currentWeek) && week < currentWeek;
 }

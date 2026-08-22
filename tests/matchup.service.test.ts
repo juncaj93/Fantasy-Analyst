@@ -492,13 +492,30 @@ describe('the pieces the service resolves for itself', () => {
   });
 
   it('takes the week from Sleeper and refuses one outside the season', () => {
-    expect(resolveWeek(null, 12)).toBe(12);
-    expect(resolveWeek(5, 12)).toBe(5);
-    // The preseason dead zone: Sleeper reports week 0, and week one is the
-    // schedule anybody looking in August actually wants.
-    expect(resolveWeek(null, 0)).toBe(1);
-    expect(resolveWeek(99, 12)).toBe(12);
-    expect(resolveWeek(null, null)).toBe(1);
+    expect(resolveWeek(null, 12, 'regular')).toBe(12);
+    expect(resolveWeek(5, 12, 'regular')).toBe(5);
+    expect(resolveWeek(99, 12, 'regular')).toBe(12);
+    expect(resolveWeek(null, null, 'regular')).toBe(1);
+  });
+
+  /*
+   * This test used to assert that the preseason reports week 0.
+   *
+   * It does not. Production on 22 August 2026 answered `season_type: "pre",
+   * week: 2` — the *preseason* week — and the old `Math.max(1, …)` clamp passed
+   * it straight through as a fantasy week, so the Matchup screen opened on week
+   * two and named the opponent this league plays second. Sleeper's week counts
+   * within the season type, and only `regular` counts fantasy weeks.
+   */
+  it('shows week one before the regular season starts, whatever the preseason counter says', () => {
+    expect(resolveWeek(null, 2, 'pre')).toBe(1);
+    expect(resolveWeek(null, 0, 'pre')).toBe(1);
+    expect(resolveWeek(null, 4, 'off')).toBe(1);
+    // An explicitly requested week is still the reader's own question.
+    expect(resolveWeek(6, 2, 'pre')).toBe(6);
+    // Unknown season type keeps the old clamp: nothing is known, nothing changes.
+    expect(resolveWeek(null, 0, null)).toBe(1);
+    expect(resolveWeek(null, 9, null)).toBe(9);
   });
 
   it('treats a week Sleeper has moved past as settled', () => {
@@ -506,6 +523,13 @@ describe('the pieces the service resolves for itself', () => {
     expect(isWeekSettled(12, 12, 'regular')).toBe(false);
     expect(isWeekSettled(1, 18, 'post')).toBe(true);
     expect(isWeekSettled(null, 3, 'regular')).toBe(false);
+  });
+
+  it('settles nothing in the preseason, because nothing has been played', () => {
+    // The same category error, in the other direction: preseason week two would
+    // have ruled week one finished and drawn a real fixture as a final 0–0.
+    expect(isWeekSettled(2, 1, 'pre')).toBe(false);
+    expect(isWeekSettled(4, 3, 'pre')).toBe(false);
   });
 });
 

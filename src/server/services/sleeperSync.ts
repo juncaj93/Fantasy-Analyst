@@ -8,6 +8,7 @@
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import { draftStateFingerprint } from '../../core/sleeper/draftFingerprint.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
+import { isDraftComplete } from '../../core/season/lifecycle.ts';
 import {
   toCanonicalPlayers,
   toDraftPickRecords,
@@ -15,6 +16,7 @@ import {
   toLeagueRecord,
   toRosterRecords,
 } from '../../core/sleeper/transform.ts';
+import type { DraftRecord } from '../../core/sleeper/types.ts';
 import { nowIso, type Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
@@ -158,6 +160,8 @@ export class SleeperSyncService {
     picks: number;
     lastPickNo: number;
     fingerprint: string;
+    /** True when this sync also went back for the rosters the draft produced. */
+    rostersAdopted: boolean;
   }> {
     const [draft, picks] = await Promise.all([
       this.client.getDraft(draftId),
@@ -170,10 +174,13 @@ export class SleeperSyncService {
     const pickRecords = toDraftPickRecords(draftId, picks, record.teams);
     await this.leagues.upsertPicks(pickRecords);
 
+    const rostersAdopted = await this.adoptCompletedDraftRosters(record);
+
     return {
       status: record.status,
       picks: pickRecords.length,
       lastPickNo: pickRecords.length > 0 ? pickRecords[pickRecords.length - 1]!.pickNo : 0,
+      rostersAdopted,
       fingerprint: draftStateFingerprint({
         draftId,
         status: record.status,
@@ -185,6 +192,73 @@ export class SleeperSyncService {
         })),
       }),
     };
+  }
+
+  /**
+   * The rosters a finished draft produced, fetched in the same breath as the
+   * status that finished it.
+   *
+   * **The draft's status and the roster it produced are one fact, and this is
+   * where they stop being able to disagree.** Sleeper's roster endpoint reports
+   * empty squads until a draft ends and becomes authoritative the moment it
+   * does — see core/draft/liveRoster.ts — so the pre-draft rows this app stores
+   * are correct right up until the last pick lands and wrong for ever
+   * afterwards. Nothing used to go back for them: `replaceRosters` is only
+   * reached through {@link syncLeague}, which runs when a league is selected or
+   * when somebody pulls down on the Team screen, and neither of those is "a
+   * draft ended". The nightly cron syncs players, statistics and the NFL's own
+   * state, and no league at all.
+   *
+   * Meanwhile *this* method's write is exactly what flips the app into its
+   * post-draft state: `/api/overview` reads the stored draft's status to put
+   * Matchup in the toolbar, and the Team screen reads it to leave draft mode.
+   * So the app announced a finished draft, took away the drafted-players list
+   * that was standing in for the roster, and put in its place a lineup built
+   * from roster rows that were still empty — a Team page that says you own
+   * nobody, hours after a draft in which you took twenty-three players.
+   *
+   * Adopting them here makes the transition atomic in the only sense that
+   * matters to a reader: no request can observe the completed status without
+   * the roster behind it having been fetched too.
+   *
+   * **Written as a state check rather than an edge.** "The status just changed
+   * to complete" would fire once and never again, so a Sleeper outage during
+   * that one poll would stitch the app permanently into the broken state this
+   * exists to prevent. Asking instead whether the stored rosters still look
+   * pre-draft means every later sync re-offers the repair, and the app heals
+   * itself on the next poll, the next app open, or the next league that needs
+   * it. When there is nothing to heal it costs one indexed read, and during a
+   * live draft — the only time this is called often — it costs nothing at all,
+   * because the status check fails first.
+   *
+   * Failure is swallowed on purpose and logged. A draft board that already has
+   * its picks must not go dark because the league endpoint was briefly
+   * unavailable, and the next sync will try again.
+   */
+  private async adoptCompletedDraftRosters(draft: DraftRecord): Promise<boolean> {
+    if (!isDraftComplete(draft.status) || !draft.leagueId) return false;
+
+    /*
+     * The pre-draft signature: not one roster in the league holds a player.
+     *
+     * A completed draft has put players on every squad, so this is unambiguous
+     * — and it is deliberately asked of the whole league rather than of the
+     * user's own roster, because the opponent names the Matchup screen prints
+     * and the ownership the waiver board reads come from the same rows.
+     */
+    const rosters = await this.leagues.listRosters(draft.leagueId);
+    if (rosters.some((r) => r.playerIds.length > 0)) return false;
+
+    const startedAt = nowIso();
+    try {
+      await this.syncLeague(draft.leagueId);
+      return true;
+    } catch (err) {
+      await this.settings
+        .logSync('league', 'error', `post-draft roster adoption failed: ${String(err)}`, startedAt)
+        .catch(() => undefined);
+      return false;
+    }
   }
 
   /** Recommended poll interval in seconds, based on draft status. */
