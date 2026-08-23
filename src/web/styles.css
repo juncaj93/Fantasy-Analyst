@@ -2268,12 +2268,20 @@ body,
   flex: none;
   /*
    * Tabular, so `+11` and `+44` are the same width and a re-sorted board does
-   * not shuffle sideways under the reader; right-aligned inside the field so
-   * the sign hangs left and the digits end on one edge.
+   * not shuffle sideways under the reader.
+   *
+   * **No reserved field any more, and that was the whole bug.** It used to be
+   * `min-width: 3ch` with the digits right-aligned inside, which put the box a
+   * fixed 5px after the name and then floated the number to the far side of
+   * it: `+5` is two characters in a three-character field, so it drew a third
+   * of a character further right than `+11` did. The box was aligned and the
+   * *ink* was not, which is the only thing a reader can see — `Chase   +5`
+   * beside `Jefferson +11`, drifting by name and by tally with no rule behind
+   * it. The tally is sized by its own text now and sits one space after the
+   * name on every row. Nothing after it moves either way: `.player-row-meta`
+   * still hands the row's whole slack to the trailing edge.
    */
   font-variant-numeric: tabular-nums;
-  min-width: 3ch;
-  text-align: right;
 }
 
 /*
@@ -2314,7 +2322,7 @@ body,
    *
    * The rule this field exists for is that a status belongs to the name —
    * `Christian McCaffrey  Q` is one unit and has to look like one — and the
-   * tally beside it is the same kind of footnote. The row's 8px gap is the
+   * tally beside it is the same kind of footnote. The row's own gap is the
    * spacing between *separate* things on the line, and it was putting the same
    * distance between the name and its own annotations as between the identity
    * cluster and the name.
@@ -2324,10 +2332,45 @@ body,
    * sized and still `flex: none`, and the trailing `auto` margin still hands
    * every row's slack to the same place — so the star and the chevron land on
    * the column they always did, and the name is still the one thing that
-   * truncates. The tally keeps its 3ch tabular field, so a re-sorted board
-   * still does not shuffle sideways.
+   * truncates.
+   *
+   * This is the dense rows' number. The draft board says the same thing more
+   * exactly and overrides it directly below.
    */
   margin-left: -3px;
+}
+
+/*
+ * Exactly one space — the one the name would have had if the tally were the
+ * next word of it.
+ *
+ * `Ja'Marr Chase +5` is how a person writes this down, and the row should read
+ * the way it is written. A flex gap cannot say that: it is a fixed number of
+ * pixels chosen once, and the number that looks right beside a 16px name is not
+ * the number that looks right anywhere else. So the gap is cancelled outright
+ * and a real space is rendered in its place, in the row's own font — which
+ * makes the distance the same thing the reader already knows the width of, at
+ * every width the app runs at, without a magic constant to keep true.
+ *
+ * The negative right margin cancels the field's own 4px, so the space is
+ * followed immediately by the tally rather than by a space *and* a gap. The 4px
+ * between the tally and the status pill is untouched: `+5` and `Q` are two
+ * marks and are allowed to look like two.
+ *
+ * The rows built on `.player-row-top` — the draft board and the waiver card —
+ * and nothing else. The dense rows on Players, Trades and Waivers' lists run a
+ * 6px gap and have never reserved a field for the tally, so their spacing was
+ * already constant by row and there is nothing there to correct; changing them
+ * too would be a second, unasked-for adjustment riding along with this one.
+ */
+.player-row-top > .player-row-meta {
+  margin-left: calc(-1 * var(--row-gap));
+}
+
+.player-row-top > .player-row-meta::before {
+  content: ' ';
+  white-space: pre;
+  margin-right: calc(-1 * var(--sp-1));
 }
 
 .tally-pos {

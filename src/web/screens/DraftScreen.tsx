@@ -14,7 +14,6 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   InjuryDetail,
   LastSeasonLine,
-  PreseasonProjectionLine,
   NewsletterTakeaway,
   ProfileFlags,
   SeasonOutlook,
@@ -2348,15 +2347,18 @@ function DraftPlayerDetail({
       ) : null}
 
       {/*
-        Last season, on the card's last line and alone on it.
+        The market and last season, on the card's last line and alone on it.
 
         The `Full detail` link that used to share this row is gone: the blurb
         above expands itself now, which is one fewer control and one fewer thing
-        to explain.
+        to explain. What used to be a second line under it — the preseason
+        figure with its source, its capture date and the league's scoring
+        profile spelled out beside it — is one metric in the same band now. See
+        `LastSeasonLine`: nothing about the number changed, and the provenance
+        travels with it in the title and the accessible text.
       */}
       <div className="detail-foot">
-        <LastSeasonLine detail={detail} failed={failed} position={rec.position} compact />
-        <PreseasonProjectionLine detail={detail} />
+        <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
       </div>
     </div>
   );

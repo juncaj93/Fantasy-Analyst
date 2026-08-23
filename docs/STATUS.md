@@ -1442,6 +1442,52 @@ API's own stored words, reading order matching visual order in the grid, no
 sideways scroll anywhere down either card, and both lists rendered in the order
 their API returned.
 
+## Milestone — the last micro-polish before the audit (done)
+
+Three corrections, deliberately the smallest pass in the repository, and the
+last Claude UI implementation pass before the read-only Codex UI/UX audit.
+
+**`Market - 247 Pts`, and the pipeline is no longer on the card.** The expanded
+player's preseason figure used to be printed as `Preseason 292 PTS` with
+`StartWho · Aug 22 · Half PPR, 6pt pass TD` on the line beside it — four facts
+about where a number came from, on a card a reader opened to find out about a
+player. The reading is four words and a number now. Nothing was thrown away and
+nothing was softened: the whole sentence is on the metric's title and in its
+accessible text, and it still opens with the word *preseason*, because a
+historical number that could be read as a live weekly line is the most expensive
+kind of wrong.
+
+**One band instead of two lines.** `Market - 247 Pts · 2025 · 17 GP · WR2
+half-PPR` wraps as one line at every width the app is tested at, where the
+market reading and the season used to be a line each. The year is the first
+token of the readings it labels on every screen now, rather than a heading over
+them on the wider cards — a heading that had also become wrong, since `2025`
+standing over a projection for the season about to be played files it under the
+season already behind it. The draft card lost between 8 and 27 pixels of height
+at 360 and gained nothing; the shared band on Players and Trades, which prints
+these readings as its own metric cells, was not touched.
+
+**The draft tally sits exactly one space after the name.** `Ja'Marr Chase +5`,
+and the same distance whether the name is long or short and whether the tally is
+two characters or three. The root cause was a reserved three-character field
+with the digits right-aligned inside it: the *box* was a fixed 5px from the
+name, so every box measurement said the spacing was constant, while `+5` drew
+about a third of a character further right than `+11` did. The field is gone,
+the row's gap in front of the tally is cancelled, and a real space is rendered
+in its place — so the distance is one space in the row's own font rather than a
+pixel constant that stops being true at the next size. Everything after it is
+where it was: `.player-row-meta` still hands the row's whole slack to the
+trailing edge, so the star and the chevron never moved.
+
+Checks: typecheck, the whole unit suite, and the browser suite at 430, 390, 375
+and 360. The tally spacing is now asserted from the *ink* rather than from the
+boxes — a `Range` over the text nodes, since box geometry is exactly what could
+not see this bug — against a space measured in the row's live font, and required
+to be identical across rows. The card assertions require the wording whole, name
+each rejected spelling, and require the band to be one line high. The Players
+`ALL · QB · RB · WR · TE · FLX · DEF` order was verified and left alone; no
+ranking, formula, ordering or data semantics were touched.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against
