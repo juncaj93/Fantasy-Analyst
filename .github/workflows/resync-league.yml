@@ -9,12 +9,13 @@ name: Re-read the selected league from Sleeper
 # deploy that changed how the app syncs, and recovering after an outage that
 # lasted through a lifecycle change.
 #
-# **It calls the same two endpoints the app itself calls**, in the same order,
-# with no privileged access of any kind: `/api/drafts/:id/sync` is exactly what
-# the Draft screen posts when it mounts, and `/api/leagues/:id/sync` is what the
-# pull-to-refresh on Team reaches. Nothing here touches the database directly,
-# names a league, or writes a roster — the ids come from the app's own status,
-# so this is as true of whichever league is selected next season as it is today.
+# **It calls the same endpoints the app itself calls**, in the same order, with
+# no privileged access of any kind: `/api/drafts/:id/sync` is exactly what the
+# Draft screen posts when it mounts, and `/api/leagues/:id/sync` and
+# `/api/startsit/refresh` are the two calls a pull down on Team makes. Nothing
+# here touches the database directly, names a league, or writes a roster — the
+# ids come from the app's own status, so this is as true of whichever league is
+# selected next season as it is today.
 #
 # It prints what the roster looked like before and after, which is the only
 # reason to run it rather than simply waiting.
@@ -99,6 +100,24 @@ jobs:
             const r = JSON.parse(require('fs').readFileSync('/tmp/league.json','utf8'));
             if (r.error) { console.log('::error::' + r.error); process.exit(1); }
             console.log('  rosters:', r.rosters, '| drafts:', r.drafts);
+          "
+
+          # …and the all-source refresh the gesture *also* reaches, which is the
+          # one that brings the published weekly projections down. Separate from
+          # the sync above because they are two calls in the app as well: the
+          # gesture posts this and then re-reads. Reported, never fatal — a
+          # deployment with no odds provider answers "blocked" here quite
+          # legitimately, and this workflow exists to re-read a league.
+          echo "=== POST /api/startsit/refresh — the rest of what pull-to-refresh reaches ==="
+          curl -s -X POST "$URL/api/startsit/refresh" -b /tmp/c.txt \
+            -H 'content-type: application/json' --data '{}' -o /tmp/refresh.json
+          node -e "
+            let r; try { r = JSON.parse(require('fs').readFileSync('/tmp/refresh.json','utf8')); } catch {
+              console.log('  (no readable report)'); process.exit(0);
+            }
+            if (r.error) { console.log('  refused:', r.error); process.exit(0); }
+            console.log('  ' + (r.headline ?? '(no headline)'));
+            for (const s of r.sources ?? []) console.log('   ', s.source + ':', s.outcome, '—', s.detail);
           "
 
       - name: What the Team screen says now
