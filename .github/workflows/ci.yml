@@ -160,10 +160,41 @@ jobs:
           fi
           npx playwright install webkit
 
-      # This is the one that can hang. Twenty minutes of *testing* is a stuck
-      # browser however long apt took beforehand.
+      # This is the one that can hang. Twenty-five minutes of *testing* is a
+      # stuck browser however long the setup took beforehand.
+      #
+      # Twenty until the suite outgrew it, and this is a capacity correction
+      # rather than a number inflated to cover a queue — the distinction the
+      # job timeout above spends three paragraphs on, and it is worth making
+      # again because the evidence here is unusually clean.
+      #
+      # What was measured, twice, on two different commits: `webkit-iphone-430`
+      # was killed mid-run with **no test having failed** — once at test 527 of
+      # 547, once at 514 of 554 — while the other three widths finished the
+      # whole suite green. The last run's passing widths came in at roughly
+      # 18m30s to 19m of testing, so three of four were already inside ninety
+      # seconds of the ceiling and the fourth simply landed on a slower runner.
+      # On main the night before, 390 finished in 19m02s: fifty-eight seconds
+      # of headroom on a suite that has grown by two features since.
+      #
+      # So the ceiling had stopped measuring what it was written to measure. A
+      # browser that is genuinely stuck still fails here well inside the hour;
+      # what it had started catching instead was a suite that legitimately
+      # takes longer than it used to, on a runner that happened to be slow —
+      # and the signal for that is indistinguishable from a real hang, which is
+      # exactly what makes it expensive.
+      #
+      # Twenty-five, and the job ceiling above stays at thirty-five: setup is a
+      # checkout and an `npm ci`, the browser arrives with the image, so 25 + ~2
+      # still leaves the job's own limit doing its job. Nothing else moved — no
+      # assertion loosened, no test skipped, no retry added.
+      #
+      # This buys time; it does not buy capacity. Sharding each width across two
+      # runners is the answer that scales, and it is in `docs/STATUS.md` under
+      # recommended next work rather than here, because it is a workflow project
+      # and not a line in a file.
       - run: npx playwright test --project=${{ matrix.project }}
-        timeout-minutes: 20
+        timeout-minutes: 25
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

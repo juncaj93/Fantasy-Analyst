@@ -11,9 +11,11 @@
  * may not fetch, compute, rank or decide — it arranges what it is handed.
  */
 
-import { useEffect, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useEdgeSwipeBack, usePullToRefresh, useSheetDrag, useStandaloneMode } from '../gestures.ts';
+import { useOverlay } from '../overlay.ts';
+import { useKeyboardInset } from '../viewport.ts';
 import { BackChevronIcon, ChevronIcon } from './icons.tsx';
 
 /* ---------------------------------------------------------- navigation bar */
@@ -455,9 +457,17 @@ export function SearchFilterRow({
  * A modal sheet.
  *
  * Rises from the bottom, dims what is behind it, and can be pulled back down —
- * but only from the top of its own content, so scrolling inside it never turns
- * into dismissing it by accident. Escape and the backdrop close it too, because
- * a gesture must never be the only way out of anything.
+ * from the grip, from the header, and from its content whenever that content is
+ * already at its top, which is the rule every native sheet follows. Escape and
+ * the backdrop close it too, because a gesture must never be the only way out
+ * of anything.
+ *
+ * Everything a covering layer owes the app — the page behind held still, the
+ * app behind taken out of the reading order, focus in and focus back, Escape
+ * reaching the top layer and no other — belongs to `useOverlay` and is
+ * identical here, on the draft board, and on anything added later. The gesture
+ * itself belongs to `useSheetDrag`. This component is the arrangement of a
+ * grip, a title and a body, and nothing else.
  *
  * Nothing destructive is ever put in one of these: a sheet that can be flicked
  * away is for reference and for choices that can be made again.
@@ -473,48 +483,52 @@ export function Sheet({
   children: ReactNode;
   testId?: string;
 }) {
+  const surface = useRef<HTMLDivElement | null>(null);
   const drag = useSheetDrag({ onDismiss: onClose });
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
+  const { lift } = useOverlay({ container: surface, onDismiss: onClose });
   /*
-   * The page behind holds still.
+   * The keyboard, and the room it takes.
    *
-   * The other half of the dismissal bug: a sheet is modal, and a modal surface
-   * whose backdrop scrolls when you drag on it is not modal — the reader drags
-   * to close and watches the list underneath move instead, which reads as the
-   * gesture being broken rather than as scrolling. Locking the body is also
-   * what makes the scroll position survive: nothing moved, so nothing has to be
-   * restored.
-   *
-   * The previous value is put back rather than assumed to be empty, because the
-   * draft board's own overlay does the same thing and the two can be open at
-   * once.
+   * A sheet is pinned to the bottom of the *layout* viewport, and iOS does not
+   * shrink that for the keyboard — it shrinks the visual one. So a sheet with a
+   * field in it, which is two of Setup's, drew its own action button underneath
+   * the keyboard the moment the reader tapped into the box: visible in a
+   * screenshot, unreachable by a thumb. The inset is nought on anything without
+   * a software keyboard, which is every browser this app is tested in, so this
+   * costs nothing anywhere it is not needed.
    */
-  useEffect(() => {
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, []);
+  const keyboard = useKeyboardInset();
 
   return createPortal(
     <>
-      <div className="sheet-backdrop" data-testid="sheet-backdrop" onClick={onClose} />
+      <div
+        className="sheet-backdrop"
+        data-testid="sheet-backdrop"
+        style={{ ['--overlay-lift' as string]: String(lift) }}
+        onClick={onClose}
+      />
       <div
         className="sheet"
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
         data-testid={testId ?? 'sheet'}
-        ref={drag.sheetRef}
+        data-dragging={drag.dragging ? 'yes' : 'no'}
+        style={{
+          ['--overlay-lift' as string]: String(lift),
+          ['--sheet-keyboard' as string]: `${keyboard}px`,
+        }}
+        /*
+         * Focusable by `useOverlay` and by nothing else. A dialog that takes
+         * focus on its own container is announced as the dialog, with its
+         * label; one that focuses its first button is announced as that button,
+         * and the reader arrives without being told what has opened.
+         */
+        tabIndex={-1}
+        ref={(node) => {
+          surface.current = node;
+          drag.sheetRef(node);
+        }}
         {...drag.handlers}
       >
         <div className="sheet-grip" aria-hidden="true" data-testid="sheet-grip" />

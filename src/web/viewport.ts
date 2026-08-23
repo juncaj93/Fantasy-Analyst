@@ -51,20 +51,33 @@ export function keyboardIsOpen(layoutHeight: number, visual: VisualViewportLike 
 }
 
 /**
- * Live answer to "is the keyboard up", for as long as the component is mounted.
+ * How much room a *keyboard* is taking, in pixels — nought when there is none.
+ *
+ * {@link occludedHeight} with the threshold applied, which is the difference
+ * between "the page is covered" and "the page is covered by something worth
+ * moving for". A bar or a sheet that shifted by the few tens of pixels Safari's
+ * own chrome moves through would twitch its way down every scroll.
+ */
+export function keyboardInset(layoutHeight: number, visual: VisualViewportLike | null): number {
+  return keyboardIsOpen(layoutHeight, visual) ? occludedHeight(layoutHeight, visual) : 0;
+}
+
+/**
+ * Live answer to "how much of the page is the keyboard covering", for as long
+ * as the component is mounted.
  *
  * Listens rather than polls, and only to the two events the platform fires for
  * this. A browser with no `visualViewport` — every desktop test runner among
- * them — answers false forever, which is the correct answer there: there is no
+ * them — answers nought forever, which is the correct answer there: there is no
  * software keyboard to make room for.
  */
-export function useKeyboardOpen(): boolean {
-  const [open, setOpen] = useState(false);
+export function useKeyboardInset(): number {
+  const [inset, setInset] = useState(0);
 
   useEffect(() => {
     const visual = window.visualViewport;
     if (!visual) return;
-    const check = () => setOpen(keyboardIsOpen(window.innerHeight, visual));
+    const check = () => setInset(keyboardInset(window.innerHeight, visual));
     check();
     visual.addEventListener('resize', check);
     visual.addEventListener('scroll', check);
@@ -74,5 +87,10 @@ export function useKeyboardOpen(): boolean {
     };
   }, []);
 
-  return open;
+  return inset;
+}
+
+/** The same question as a yes or no, for anything that only needs to move once. */
+export function useKeyboardOpen(): boolean {
+  return useKeyboardInset() > 0;
 }

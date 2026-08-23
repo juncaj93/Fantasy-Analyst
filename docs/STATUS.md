@@ -1467,3 +1467,15 @@ their API returned.
    the ladder, the gaps and the ratios per position; nothing draws them.
 5. **Re-reading everything at once**, rather than one newsletter at a time.
    Worth doing only once real issues have accumulated.
+6. **Shard the WebKit matrix, and look at gate efficiency as a whole.** Each
+   width currently runs the entire browser suite on one runner, and the suite
+   has grown to roughly nineteen minutes of testing per width — close enough to
+   its ceiling that a slow runner reads as a failure with no test having failed.
+   That happened twice while the sheet-dismissal work was being gated, and the
+   step's budget was raised from twenty minutes to twenty-five to cover it. That
+   is time, not capacity: the next few features spend it. Splitting each width
+   across two runners halves the wall clock and makes the ceiling mean "stuck"
+   again, and it is worth doing alongside a wider look at what the gate spends —
+   which specs overlap, and which of them need all four widths rather than one.
+   Deliberately deferred to a workflow-optimisation pass after the Codex UI
+   audit rather than solved inside a product change.

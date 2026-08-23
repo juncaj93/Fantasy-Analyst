@@ -21,11 +21,15 @@ import {
   DIRECTION_RATIO,
   EDGE_ZONE,
   ENGAGE_DISTANCE,
+  VELOCITY_WINDOW,
   completesBack,
   dimOpacity,
   engageDecision,
+  sheetCandidate,
+  sheetDecision,
   sheetDismisses,
   startsAtEdge,
+  velocityOver,
 } from '../src/web/gestures.ts';
 
 describe('where a back gesture may start', () => {
@@ -114,6 +118,112 @@ describe('when a sheet is dismissed', () => {
 
   it('springs back from a small pull', () => {
     expect(sheetDismisses(20, height, 0.05)).toBe(false);
+  });
+});
+
+/**
+ * The rules that decide whether a movement on a sheet is a dismissal.
+ *
+ * Two questions rather than one, and the split is the whole design. The browser
+ * wants to know who owns a touch on the *first* move, long before there is
+ * enough of it to be sure of anything — so {@link sheetCandidate} answers that
+ * one weakly and reversibly, and {@link sheetDecision} takes the real decision a
+ * few pixels later. Getting these the wrong way round is what made a sheet
+ * dismissable only from its grip.
+ */
+describe('what a movement on a sheet is', () => {
+  it('waits while there is not enough of it to tell', () => {
+    expect(sheetDecision(0, 0)).toBe('wait');
+    expect(sheetDecision(ENGAGE_DISTANCE - 1, ENGAGE_DISTANCE - 1)).toBe('wait');
+  });
+
+  it('is a drag once downward clearly beats sideways', () => {
+    expect(sheetDecision(4, 40)).toBe('drag');
+    expect(sheetDecision(0, 20)).toBe('drag');
+  });
+
+  it('releases a sideways swipe that happened to drift downwards', () => {
+    // The reported bug: a swipe across a row of chips threw the sheet away.
+    expect(sheetDecision(180, 9)).toBe('release');
+    expect(sheetDecision(-180, 9)).toBe('release');
+    expect(sheetDecision(20, 20 / DIRECTION_RATIO)).toBe('release');
+  });
+
+  it('never reads an upward drag as a dismissal, however large', () => {
+    expect(sheetDecision(0, -300)).toBe('release');
+    expect(sheetDecision(2, -40)).toBe('release');
+  });
+});
+
+describe('whether a movement could still become a dismissal', () => {
+  it('holds the gesture open on the very first downward pixel', () => {
+    // Well under the engage distance, which is the entire point: the browser
+    // asks before there is enough movement for `sheetDecision` to answer.
+    expect(sheetCandidate(0, 1)).toBe(true);
+    expect(sheetCandidate(1, 2)).toBe(true);
+  });
+
+  it('hands back anything upward or already more sideways than down', () => {
+    expect(sheetCandidate(0, 0)).toBe(false);
+    expect(sheetCandidate(0, -1)).toBe(false);
+    expect(sheetCandidate(6, 3)).toBe(false);
+    expect(sheetCandidate(-6, 3)).toBe(false);
+  });
+
+  it('is weaker than the decision it precedes, and deliberately so', () => {
+    // Everything the decision would call a drag is a candidate first. The
+    // reverse does not hold, and must not: a candidate is reversible.
+    const drags = [
+      [0, 20],
+      [4, 40],
+      [-4, 40],
+    ] as const;
+    for (const [dx, dy] of drags) {
+      expect(sheetDecision(dx, dy)).toBe('drag');
+      expect(sheetCandidate(dx, dy)).toBe(true);
+    }
+  });
+});
+
+describe('how fast the finger was going', () => {
+  it('is nothing at all when there is only one reading', () => {
+    expect(velocityOver([])).toBe(0);
+    expect(velocityOver([{ x: 10, t: 0 }])).toBe(0);
+  });
+
+  it('measures a flick across the window rather than between two events', () => {
+    const samples = [
+      { x: 0, t: 0 },
+      { x: 30, t: 30 },
+      { x: 60, t: 60 },
+    ];
+    expect(velocityOver(samples)).toBeCloseTo(1);
+  });
+
+  it('ignores movement older than the window', () => {
+    // A slow drag, a long pause, then a short push: the pause is not a flick,
+    // and the old sample must not be allowed to average it into one.
+    const samples = [
+      { x: 0, t: 0 },
+      { x: 200, t: VELOCITY_WINDOW + 100 },
+      { x: 210, t: VELOCITY_WINDOW + 110 },
+    ];
+    expect(velocityOver(samples)).toBeCloseTo(1);
+  });
+
+  it('reports a stall as a stall rather than as an enormous number', () => {
+    // Two readings in the same millisecond used to divide by one and report a
+    // flick, which is how a sheet dismissed itself from a twitch.
+    expect(velocityOver([{ x: 0, t: 5 }, { x: 40, t: 5 }])).toBe(0);
+  });
+
+  it('is negative for movement back up, so a reversed drag cannot dismiss', () => {
+    expect(
+      velocityOver([
+        { x: 100, t: 0 },
+        { x: 40, t: 60 },
+      ]),
+    ).toBeLessThan(0);
   });
 });
 

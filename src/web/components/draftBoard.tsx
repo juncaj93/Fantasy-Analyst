@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DraftBoard } from '../api.ts';
+import { useOverlay } from '../overlay.ts';
 import { TeamLogo } from './common.tsx';
 import { CloseIcon, CompressIcon, ExpandIcon } from './icons.tsx';
 import {
@@ -52,6 +53,8 @@ export function DraftBoardOverlay({ board, onClose }: { board: DraftBoard; onClo
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cornerRef = useRef<HTMLDivElement | null>(null);
+  /** The layer itself, which is what owns focus while the board is up. */
+  const layerRef = useRef<HTMLDivElement | null>(null);
 
   const grid = useMemo<DraftBoardGrid>(
     () =>
@@ -210,33 +213,19 @@ export function DraftBoardOverlay({ board, onClose }: { board: DraftBoard; onClo
     scroller.scrollTop = Math.max(0, cell.offsetTop - anchor.dy);
   }, [mode]);
 
-  /* Escape closes it, the same as every other layer in this app. */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  /**
-   * The page underneath keeps its place.
+  /*
+   * Escape, the page held still behind it, the app behind taken out of the
+   * reading order, and focus in and back again — all four from the same place
+   * a sheet gets them.
    *
-   * The board is a full-screen layer, so the page behind it must not scroll —
-   * and must be exactly where it was when the layer goes. Locking the body is
-   * what stops a flick at the end of the grid turning into the Draft page
-   * quietly sliding to the top behind it; restoring the offset explicitly is
-   * what survives the browsers that forget it anyway.
+   * The board had its own copies of the first two, and both were subtly wrong
+   * in the same way every hand-rolled copy is. Its Escape listener fired even
+   * when a sheet was open over it, so one key closed both; its scroll lock set
+   * `overflow: hidden` on the body, which iOS Safari does not honour, so a
+   * flick at the end of the grid still slid the Draft page underneath. Neither
+   * is a draft problem, which is why neither is solved here any more.
    */
-  useEffect(() => {
-    const y = window.scrollY;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
-      window.scrollTo({ top: y, behavior: 'auto' });
-    };
-  }, []);
+  const { lift } = useOverlay({ container: layerRef, onDismiss: onClose });
 
   const columns = grid.managers.length;
   const composition = new Map(grid.composition.map((c) => [c.slot, compositionLine(c)]));
@@ -249,6 +238,10 @@ export function DraftBoardOverlay({ board, onClose }: { board: DraftBoard; onClo
       aria-label={`${board.league.name} draft board`}
       data-testid="draft-board"
       data-mode={mode}
+      style={{ ['--overlay-lift' as string]: String(lift) }}
+      /* Focusable by `useOverlay` and by nothing else — see the sheet. */
+      tabIndex={-1}
+      ref={layerRef}
     >
       <div className="dboard-bar">
         <button type="button" className="icon-btn" aria-label="Close draft board" data-testid="board-close" onClick={onClose}>
