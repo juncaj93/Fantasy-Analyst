@@ -37,6 +37,9 @@ import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { InjuryService } from './injuryService.ts';
 import { SleeperSyncService } from './sleeperSync.ts';
+import { SleeperProjectionService } from './sleeperProjectionService.ts';
+import { resolveWeek } from '../../core/matchup/build.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
 import { UsageService } from './usageService.ts';
 import { VegasRefreshService } from './vegasRefresh.ts';
 
@@ -160,10 +163,34 @@ export class StartSitRefreshService {
     }
     try {
       const result = await new SleeperSyncService(this.db, sleeper).syncLeague(league.id);
+      /*
+       * And, on the same tap, the published projections — from the same source.
+       *
+       * Not a sixth entry in the report. This is Sleeper, it is fetched from
+       * Sleeper, and a status line that named it separately would imply a feed
+       * that can fail on its own and be worth telling the user about; it cannot
+       * and is not. It fills a column that is otherwise blank until the next
+       * cron, and it has its own twelve-hour gate, so the ordinary tap declines
+       * it for the price of one indexed read.
+       *
+       * Its outcome never changes this source's. A projection that could not be
+       * fetched is a dash on a screen; a roster that could not be re-read is the
+       * lineup being wrong, and reporting the first as though it were the second
+       * would teach the reader to ignore the line.
+       */
+      let projections = '';
+      try {
+        const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
+        const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+        const report = await new SleeperProjectionService(this.db, sleeper).refresh(league.season, week);
+        if (report.outcome === 'fetched') projections = `, ${report.rows} projection(s)`;
+      } catch {
+        // Deliberately silent — see above.
+      }
       return {
         source: 'sleeper',
         outcome: 'updated',
-        detail: `${result.rosters} roster(s) re-read`,
+        detail: `${result.rosters} roster(s) re-read${projections}`,
         freshAt: now.toISOString(),
       };
     } catch (err) {

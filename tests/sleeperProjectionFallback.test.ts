@@ -553,6 +553,7 @@ describe('no recommendation engine can reach the fallback', () => {
         'server/repos/sleeperProjections.ts',
         'server/services/sleeperProjectionService.ts',
         'server/services/matchupService.ts',
+        'server/services/startSitRefresh.ts',
         'server/app.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
