@@ -35,7 +35,7 @@
  * rather than one per side of the wire.
  */
 
-import { weeklyProjection } from './projection.ts';
+import { weeklyProjection, type ProjectionSource } from './projection.ts';
 
 /** A labelled line of the card. The value is already formatted for reading. */
 export interface WeeklyLine {
@@ -64,6 +64,15 @@ export interface WeeklyCard {
   confidence: string;
   /** The projection this league's scoring produces, or null. */
   score: number | null;
+  /**
+   * Which of the two produced {@link score} — this app's market-derived number,
+   * or Rotowire's published one — and null when neither did.
+   *
+   * The card is where the source is said in full rather than subtly: a row has
+   * one number's worth of space and this has a line's, so this is the surface
+   * that spells out whose model the reader is looking at.
+   */
+  projectionSource: ProjectionSource | null;
   /** Who he faces, when the schedule is known. */
   opponent: string | null;
   /** At most five: role, matchup, market, availability, advanced. */
@@ -136,6 +145,15 @@ export interface WeeklyContext {
   alreadyStarting?: boolean;
   /** His game has kicked off; nothing about him can be changed now. */
   locked?: boolean;
+  /**
+   * Rotowire's published weekly figure for him, when the caller has one.
+   *
+   * Offered, never preferred: `weeklyProjection` takes this app's own
+   * market-derived number whenever there is one and reaches for this only when
+   * there is not. Absent means no fallback, which is the correct behaviour for
+   * any caller that has not gone looking for one.
+   */
+  published?: number | null;
 }
 
 /** How many prop lines are worth the space. Three is one glance. */
@@ -250,6 +268,16 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
   const conflicts = [...(evaluation.conflicts ?? [])];
   if (evaluation.injury?.conflictNote) conflicts.push(`Sources disagree — ${evaluation.injury.conflictNote}`);
 
+  /*
+   * The projection, not the ranking score — the card prints it under "Proj".
+   *
+   * `headlineFor` below still reads `evaluation.score`, and correctly: "not
+   * enough data to rank him" is a question about the comparison, and a player
+   * can be perfectly rankable against his own bench while nobody has published
+   * a market that would make a projection of him honest.
+   */
+  const projected = weeklyProjection(evaluation, context.published ?? null);
+
   return {
     playerId: evaluation.playerId,
     name: evaluation.name,
@@ -257,15 +285,8 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
     team: evaluation.team,
     headline: headlineFor(evaluation, context, locked),
     confidence: evaluation.confidence,
-    /*
-     * The projection, not the ranking score — the card prints it under "Proj".
-     *
-     * `headlineFor` below still reads `evaluation.score`, and correctly: "not
-     * enough data to rank him" is a question about the comparison, and a player
-     * can be perfectly rankable against his own bench while nobody has published
-     * a market that would make a projection of him honest.
-     */
-    score: weeklyProjection(evaluation),
+    score: projected.points,
+    projectionSource: projected.source,
     opponent: evaluation.opponent ?? null,
     lines,
     props,

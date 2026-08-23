@@ -4898,6 +4898,21 @@ table.compact tr:last-child td {
   gap: var(--sp-2);
 }
 
+/*
+ * Whose projection the number above is, when it is not this app's.
+ *
+ * The quietest type on the sheet, because it is a footnote and not a finding —
+ * but present, and in a sentence, because this is the surface with room for one.
+ * The dotted rule on the Team row is the same claim compressed to a mark; see
+ * `.proj[data-projection-source='sleeper']`.
+ */
+.weekly-provenance {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
 .weekly-lines {
   margin: 0;
   display: flex;
@@ -5129,6 +5144,27 @@ table.compact tr:last-child td {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   color: var(--text);
+}
+
+/*
+ * A number this app did not compute, marked and not shouted.
+ *
+ * Where no betting market has priced a player the figure is Rotowire's, by way
+ * of Sleeper, and it may not be drawn as though it were ours. But eight rows
+ * each carrying a source chip would be eight rows about provenance rather than
+ * about football, so the face of the row gets one thing: a dotted rule under
+ * the figure, the typographic convention for "there is more to this than the
+ * glyph". The words are in the tooltip, the accessible name, the sheet the row
+ * opens and the note above the list.
+ *
+ * `text-decoration` rather than a border, so it hugs the digits at whatever
+ * width they are instead of the fixed field they sit in — and so a `—`, which
+ * never carries this attribute, cannot pick up a rule under a dash.
+ */
+.proj[data-projection-source='sleeper'] {
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
 }
 
 /*

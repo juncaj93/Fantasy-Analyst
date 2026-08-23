@@ -315,7 +315,19 @@ export function TeamScreen({
   const weeklyCard = useMemo(() => {
     if (!weekly) return null;
     const evaluation = evaluations.get(weekly.playerId);
-    return evaluation ? buildWeeklyCard(evaluation, weekly.context) : null;
+    /*
+     * The sheet is handed the same published figure the row was.
+     *
+     * The card recomputes the projection from the evaluation rather than reading
+     * the row's answer, which is right — one function owns the word — but it
+     * means the fallback has to reach it too, or a row showing 20.9 would open a
+     * sheet showing nothing. The server already told us which of the two this
+     * number is, so where it said `sleeper` we hand the number straight back as
+     * the published figure; `weeklyProjection` still prefers a market over it
+     * and would ignore it if one existed.
+     */
+    const published = evaluation?.projectionSource === 'sleeper' ? (evaluation.projection ?? null) : null;
+    return evaluation ? buildWeeklyCard(evaluation, { ...weekly.context, published }) : null;
   }, [weekly, evaluations]);
 
   /**
@@ -519,7 +531,10 @@ export function TeamScreen({
               {roster.live ? null : (
                 <BenchSection
                   players={bench}
-                  projectionOf={(playerId) => evaluations.get(playerId)?.projection ?? null}
+                  projectionOf={(playerId) => ({
+                    points: evaluations.get(playerId)?.projection ?? null,
+                    source: evaluations.get(playerId)?.projectionSource ?? null,
+                  })}
                   summary={benchSummary}
                   onOpen={(playerId) => openPlayer(playerId, { starting: false })}
                 />
@@ -612,13 +627,33 @@ export function TeamScreen({
  * to somebody looking at the row; to somebody listening to it, an aria-label
  * that simply omits the number is a row that sounds like it has no opinion
  * instead of one that has said it does not know.
+ *
+ * ## And whose number it is
+ *
+ * Some of these are not this app's. Where no betting market has priced a player,
+ * the value is Rotowire's published weekly projection by way of Sleeper — a
+ * display-only fallback that no recommendation here is built on. Both functions
+ * below therefore take the source and say it, because a borrowed number rendered
+ * as though it were ours is the one failure the whole chain exists to prevent.
+ *
+ * On the face of the row the mark is deliberately quiet: a dotted underline
+ * under the figure and nothing else, because eight rows each shouting a
+ * provenance would drown the number they are about. The words are in the
+ * tooltip, in the accessible name, in the sheet the row opens and in the note
+ * above the list. See `core/startsit/projection.ts`.
  */
-function projectionTitle(projection: number | null | undefined): string {
-  return projection == null ? 'No projection yet — no betting market has priced him' : 'Projected points';
+type RowProjectionSource = 'market' | 'sleeper' | null | undefined;
+
+function projectionTitle(projection: number | null | undefined, source: RowProjectionSource): string {
+  if (projection == null) return 'No projection yet — no betting market has priced him';
+  if (source === 'sleeper') return "Projected points · Rotowire's published figure, via Sleeper";
+  return 'Projected points · from betting markets';
 }
 
-function spokenProjection(projection: number | null | undefined): string {
-  return projection == null ? ', projection unavailable' : `, projected ${projection.toFixed(1)} points`;
+function spokenProjection(projection: number | null | undefined, source: RowProjectionSource): string {
+  if (projection == null) return ', projection unavailable';
+  const whose = source === 'sleeper' ? ", Rotowire's published figure via Sleeper" : '';
+  return `, projected ${projection.toFixed(1)} points${whose}`;
 }
 
 /**
@@ -709,7 +744,7 @@ function StarterCard({
        */
       aria-label={
         `${slot.name}, recommended starter at ${slot.slot}` +
-        spokenProjection(slot.projection) +
+        spokenProjection(slot.projection, slot.projectionSource) +
         `${slot.locked ? ', locked' : ''}` +
         `${!slot.alreadyStarting && !slot.locked ? ', not in your Sleeper lineup' : ''}` +
         `${player?.status ? `, ${player.status}` : ''}`
@@ -798,7 +833,12 @@ function StarterCard({
           accessible name so the bare number cannot be mistaken for one.
         */}
         <span className="row-value">
-          <span className="proj" data-testid="starter-proj" title={projectionTitle(slot.projection)}>
+          <span
+            className="proj"
+            data-testid="starter-proj"
+            data-projection-source={slot.projectionSource ?? 'none'}
+            title={projectionTitle(slot.projection, slot.projectionSource)}
+          >
             {slot.projection == null ? '—' : slot.projection.toFixed(1)}
           </span>
         </span>
@@ -827,11 +867,14 @@ function StarterCard({
 function BenchCard({
   player,
   projection,
+  projectionSource,
   onOpen,
 }: {
   player: RosterPlayer;
   /** The weekly projection, never the ranking score — see `StarterCard`. */
   projection: number | null;
+  /** Whose projection it is. Travels with the number, always — see `projectionTitle`. */
+  projectionSource: RowProjectionSource;
   onOpen: () => void;
 }) {
   const position = player.position ?? '';
@@ -844,7 +887,7 @@ function BenchCard({
       data-player-id={player.playerId}
       aria-label={
         `${player.name}${position ? `, ${position}` : ''}, on your bench` +
-        spokenProjection(projection) +
+        spokenProjection(projection, projectionSource) +
         `${player.status ? `, ${player.status}` : ''}`
       }
       onClick={onOpen}
@@ -873,7 +916,12 @@ function BenchCard({
         <InjuryTag status={player.status} />
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
-          <span className="proj" data-testid="bench-proj" title={projectionTitle(projection)}>
+          <span
+            className="proj"
+            data-testid="bench-proj"
+            data-projection-source={projectionSource ?? 'none'}
+            title={projectionTitle(projection, projectionSource)}
+          >
             {projection == null ? '—' : projection.toFixed(1)}
           </span>
         </span>
@@ -903,8 +951,14 @@ function BenchSection({
   onOpen,
 }: {
   players: RosterPlayer[];
-  /** The weekly projection for a bench player, or null when unknown. */
-  projectionOf: (playerId: string) => number | null;
+  /**
+   * The weekly projection for a bench player and whose it is, or unknown.
+   *
+   * One function returning both rather than two returning halves, because a row
+   * that could be handed a number without its provenance is a row that could
+   * print somebody else's model as this app's.
+   */
+  projectionOf: (playerId: string) => { points: number | null; source: RowProjectionSource };
   /** `1 strong alternative` / `No better option`, or nothing worth saying. */
   summary: string | null;
   onOpen: (playerId: string) => void;
@@ -930,7 +984,13 @@ function BenchSection({
       {open ? (
         <div data-testid="bench-rows">
           {players.map((p) => (
-            <BenchCard key={p.playerId} player={p} projection={projectionOf(p.playerId)} onOpen={() => onOpen(p.playerId)} />
+            <BenchCard
+              key={p.playerId}
+              player={p}
+              projection={projectionOf(p.playerId).points}
+              projectionSource={projectionOf(p.playerId).source}
+              onOpen={() => onOpen(p.playerId)}
+            />
           ))}
         </div>
       ) : null}
@@ -1373,7 +1433,7 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         </div>
       ))}
 
-      <details className="disclosure">
+      <details className="disclosure" data-testid="lineup-details">
         <summary>Recommended lineup in full</summary>
 
         {rest.length > 0 ? (

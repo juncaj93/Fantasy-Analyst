@@ -49,11 +49,27 @@ export function WeeklyCardSheet({
           <PositionBadge position={card.position} team={card.team} />
           <Confidence level={card.confidence} />
           {card.score == null ? null : (
-            <span className="metric" data-testid="weekly-score">
+            <span className="metric" data-testid="weekly-score" data-projection-source={card.projectionSource ?? 'none'}>
               Proj <strong>{card.score.toFixed(1)}</strong>
             </span>
           )}
         </div>
+
+        {/*
+          Whose projection that is, said in words rather than in a dotted rule.
+
+          The row this sheet opens from has one number's worth of space and marks
+          a borrowed figure with an underline; here there is a line to spare, so
+          here is where the claim is actually made. Drawn only for the fallback:
+          "from betting markets" on every other card would be a sentence about
+          the ordinary case, printed forty times a week.
+        */}
+        {card.projectionSource === 'sleeper' ? (
+          <p className="weekly-provenance" data-testid="weekly-projection-source">
+            Projection published by Rotowire, via Sleeper — shown because no betting market has priced him. It is not
+            used to rank this lineup.
+          </p>
+        ) : null}
 
         {/*
           The conclusion, and it is the lineup's conclusion. Loud, because a

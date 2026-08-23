@@ -18,7 +18,7 @@ import type { ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
 import type { StartSitMode } from './mode.ts';
-import { weeklyProjection } from './projection.ts';
+import { weeklyProjection, type ProjectionSource } from './projection.ts';
 
 export interface LineupSlot {
   /** Slot label as the league defines it: 'QB', 'RB', 'FLEX', 'SUPER_FLEX'. */
@@ -43,8 +43,21 @@ export interface LineupSlot {
    * Carried beside the score rather than derived on the screen, so the Team
    * screen and the Matchup screen cannot end up meaning different things by the
    * same word — see `core/startsit/projection.ts`.
+   *
+   * **Display only, and it may not be this app's own number.** Where no betting
+   * market has priced the player this falls back to Rotowire's published weekly
+   * figure, which is why {@link projectionSource} exists and why nothing in this
+   * module reads either field back.
    */
   projection: number | null;
+  /**
+   * Which of the two produced {@link projection}, or null when neither did.
+   *
+   * Not decoration: a screen that draws the number without naming the source is
+   * a screen claiming somebody else's model as this app's, so the two travel
+   * together from here to the row.
+   */
+  projectionSource: ProjectionSource | null;
   /** True when the player already occupies a starting spot in Sleeper. */
   alreadyStarting: boolean;
   /** True when this player's game has kicked off and the slot is now fixed. */
@@ -141,6 +154,17 @@ export function recommendLineup(
     mode?: StartSitMode;
     /** Reference time, injected so tests are deterministic. */
     now?: string | Date;
+    /**
+     * Rotowire's published weekly figure per player, for the display fallback.
+     *
+     * Read **only** when filling {@link LineupSlot.projection}, which is a value
+     * this function prints and never one it reasons with. Everything that
+     * decides a lineup — the scoring, the assignment, the preference and
+     * placement passes, the swaps, the confidence — runs before this map is
+     * touched and would produce identical output with it empty. There is a test
+     * that holds that claim; see `sleeperProjectionFallback.test.ts`.
+     */
+    published?: ReadonlyMap<string, number>;
   } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
@@ -241,6 +265,9 @@ export function recommendLineup(
 
   const filled: LineupSlot[] = slots.map((s, index) => {
     const player = assignment.get(index) ?? null;
+    // After the replacement-risk pass, which appends a component and re-sums
+    // the score — so the projection is taken from the finished evaluation.
+    const projected = weeklyProjection(player, player ? (opts.published?.get(player.playerId) ?? null) : null);
     return {
       slot: s.slot,
       accepts: s.accepts,
@@ -248,9 +275,8 @@ export function recommendLineup(
       name: player?.name ?? null,
       position: player?.position ?? null,
       score: player?.score ?? null,
-      // After the replacement-risk pass, which appends a component and re-sums
-      // the score — so the projection is taken from the finished evaluation.
-      projection: weeklyProjection(player),
+      projection: projected.points,
+      projectionSource: projected.source,
       alreadyStarting: player ? currentStarters.has(player.playerId) : false,
       locked: player ? lockedIds.has(player.playerId) : false,
       drivers: player?.drivers ?? [],
