@@ -213,13 +213,19 @@ export function tradeCandidatesFrom(data: ScenarioData): TradeCandidate[] {
  * the lineup counterfactual on a demo screen were produced by
  * `buildMatchupResponse` and not by anything resembling it.
  *
- * Three of the methods are worth naming. `matchups` hands back Sleeper's own
+ * Two of the methods are worth naming. `matchups` hands back Sleeper's own
  * rows verbatim, because the scoreboard is Sleeper's on a demo Sunday exactly
  * as it is on a real one. `previousForecast` answers null: a scenario is a
  * single instant with no history behind it, and inventing "what it said an hour
  * ago" would be the fixture asserting a change the reader never saw happen.
- * And `record` does nothing at all — the calibration ledger is a write, and §2
- * says a demo does not get to make one.
+ *
+ * There used to be a third — `record`, satisfied with a function that returned
+ * immediately, because the calibration ledger was a write and §2 says a demo
+ * does not get to make one. `MatchupSources` no longer carries a write for
+ * anybody to no-op: the ledger is a separate argument to
+ * `buildMatchupResponse`, the demo passes three arguments, and a demo write is
+ * now a thing this file has no way to express rather than a thing it declines
+ * to do.
  *
  * The cache is per-runtime rather than module state, so two scenarios open at
  * once cannot serve each other's afternoon.
@@ -239,7 +245,6 @@ export function matchupSourcesFrom(data: ScenarioData): MatchupSources {
     remember: (entry) => {
       memo = entry;
     },
-    record: async () => undefined,
     now: () => data.clock.now(),
   };
 }

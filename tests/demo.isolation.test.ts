@@ -183,17 +183,22 @@ describe('the demo cannot reach live truth even by accident', () => {
   });
 
   /**
-   * The matchup's sources are reads, and the one outward call does nothing.
+   * The matchup's sources are reads, and now there is no exception.
    *
-   * `MatchupSources` is the only injected interface in the app that carries a
-   * write: the live service records both sides of every forecast to the
-   * calibration ledger, because a probability model nobody grades is worth
-   * nothing. §2 forbids a demo from making that write, so the seam is satisfied
-   * with a recorder that returns — and this asserts that it is still the only
-   * write on the interface, so a second one added tomorrow fails here rather
-   * than shipping into a demo.
+   * `MatchupSources` used to be the one injected interface in the app carrying a
+   * write — `record`, the calibration ledger — satisfied in a demo by a recorder
+   * that returned immediately. That was enough for §2 and not enough for the
+   * final audit's F-01: the same seam was wired to a real ledger on the request
+   * path, so `GET /api/leagues/:id/matchup` wrote to the database, the
+   * method-based write guard classified it as safe, and a browser carrying the
+   * demo cookie wrote rows to the *live* calibration table by opening a screen.
+   *
+   * The ledger is now a separate argument to `buildMatchupResponse` and the demo
+   * passes three. So this asserts the stronger property the repair bought: the
+   * interface offers **no** write at all, and the demo's bag has no recorder to
+   * be inert — there is nothing there to call.
    */
-  it('the matchup interface offers exactly one write, and the demo no-ops it', async () => {
+  it('the matchup interface offers no write at all, and the demo carries none', async () => {
     const build = readFileSync(join(SRC, 'core', 'matchup', 'build.ts'), 'utf8');
     const start = build.indexOf('export interface MatchupSources {');
     expect(start, 'MatchupSources is declared').toBeGreaterThan(-1);
@@ -211,19 +216,24 @@ describe('the demo cannot reach live truth even by accident', () => {
     for (const forbidden of ['upsert', 'insert', 'save', 'delete', 'settle']) {
       expect(iface.toLowerCase(), `MatchupSources must not offer "${forbidden}"`).not.toContain(forbidden);
     }
+    /*
+     * `record` gets a declaration match rather than a substring one, because
+     * `LeagueRecord` and `RosterRecord` are read types this bag legitimately
+     * names and a bare `toContain` would fail on both. What must not come back
+     * is a *member* called record — `record(`, `record:` or `record?:`.
+     */
+    expect(iface, 'MatchupSources must not declare a record member').not.toMatch(/\brecord\s*[(?:]/);
 
     const { loadScenarioData } = await import('../src/core/demo/fixtures/index.ts');
     const { matchupSourcesFrom } = await import('../src/core/demo/runtime/sources.ts');
     const data = await loadScenarioData(findScenario('matchup-live-close')!);
     const sources = matchupSourcesFrom(data);
-    // It resolves, and it resolves to nothing — there is no ledger to write to.
-    await expect(
-      sources.record({
-        leagueId: 'x', season: '2026', week: 6,
-        forecast: {} as never,
-        mineRosterId: 9, theirsRosterId: 2, matchupId: 1, at: '2026-10-11T20:15:00.000Z',
-      }),
-    ).resolves.toBeUndefined();
+    // Not "it returns nothing" — it is not there. A demo cannot write a ledger
+    // because it holds no reference to one.
+    expect(Object.keys(sources)).not.toContain('record');
+    for (const [key, value] of Object.entries(sources)) {
+      expect(typeof value === 'function' || typeof value === 'object', `${key} is a read`).toBe(true);
+    }
   });
 
   it('no production module imports a demo fixture', () => {

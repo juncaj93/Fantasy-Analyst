@@ -163,6 +163,47 @@ export class MatchupRepo {
       .run();
   }
 
+  /**
+   * Weeks this league has forecasts for and no outcome, oldest first.
+   *
+   * The question settlement starts from. It exists because closing a week out
+   * used to be a side effect of somebody opening the Matchup screen during the
+   * few hours between the last whistle and Sleeper rolling the week over — so a
+   * week nobody happened to look at in that window kept its forecasts and never
+   * got an outcome, which for a table whose entire purpose is grading means the
+   * sample was collected and then thrown away.
+   */
+  async unsettledWeeks(leagueId: string): Promise<{ season: string; week: number }[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT DISTINCT season, week
+           FROM matchup_forecasts
+          WHERE league_id = ? AND settled_at IS NULL
+          ORDER BY season, week`,
+      )
+      .bind(leagueId)
+      .all<{ season: string; week: number }>();
+    return rows.results.map((r) => ({ season: r.season, week: r.week }));
+  }
+
+  /** The rosters still awaiting an outcome in one week, and who each played. */
+  async unsettledRosters(opts: {
+    leagueId: string;
+    season: string;
+    week: number;
+  }): Promise<{ rosterId: number; opponentRosterId: number | null }[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT roster_id AS rosterId, opponent_roster_id AS opponentRosterId
+           FROM matchup_forecasts
+          WHERE league_id = ? AND season = ? AND week = ? AND settled_at IS NULL
+          ORDER BY roster_id`,
+      )
+      .bind(opts.leagueId, opts.season, opts.week)
+      .all<{ rosterId: number; opponentRosterId: number | null }>();
+    return rows.results;
+  }
+
   /** The latest stored forecast for one roster's week, or null. */
   async latest(opts: {
     leagueId: string;

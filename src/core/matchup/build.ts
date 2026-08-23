@@ -84,11 +84,20 @@ export interface MatchupResponse {
 /**
  * Everything the assembly needs, and nothing that can reach live truth.
  *
- * Deliberately all reads bar one. `record` is the single outward call, and it
- * exists because a probability model that never writes down what it said can
- * never be graded — the live service writes both sides to the calibration
- * ledger, and Demo Mode supplies a recorder that returns immediately. No
- * method here can change a lineup, a roster or a league.
+ * Deliberately all reads, with no exception at all. There used to be one —
+ * `record`, the calibration ledger — and it is the reason this file is worth
+ * reading twice: a bag that can write is a bag that writes on whatever path
+ * happens to hold it, and the path holding this one was `GET
+ * /api/leagues/:id/matchup`. Method-based auth classified that request as safe
+ * and let it through, so opening a screen wrote to the database and a demo
+ * browser's read wrote to the *live* database.
+ *
+ * The write did not go away — a probability model that never writes down what
+ * it said can never be graded — it moved to {@link MatchupLedger}, which is a
+ * separate argument to {@link buildMatchupResponse} rather than a member of
+ * this interface. A caller that wants a read passes three arguments and cannot
+ * write; a caller that means to write passes four and is saying so. No method
+ * here can change a lineup, a roster, a league or a ledger.
  */
 export interface MatchupSources {
   leagues: {
@@ -126,17 +135,35 @@ export interface MatchupSources {
   /** The caller's memo of its own last response, for the fingerprint short-circuit. */
   cached(): { fingerprint: string; response: MatchupResponse } | null;
   remember(entry: { fingerprint: string; response: MatchupResponse }): void;
-  record(opts: {
-    leagueId: string;
-    season: string;
-    week: number;
-    forecast: MatchupForecast;
-    mineRosterId: number;
-    theirsRosterId: number;
-    matchupId: number | null;
-    at: string;
-  }): Promise<void>;
   now(): Date;
+}
+
+/** One forecast, as the calibration ledger stores it. Both sides of one week. */
+export interface MatchupObservation {
+  leagueId: string;
+  season: string;
+  week: number;
+  forecast: MatchupForecast;
+  mineRosterId: number;
+  theirsRosterId: number;
+  matchupId: number | null;
+  at: string;
+}
+
+/**
+ * Somewhere to write a forecast down, for whoever is entitled to write one.
+ *
+ * Deliberately a separate argument rather than a member of {@link
+ * MatchupSources}, and deliberately optional: the distinction between a read
+ * of this screen and a recording of it is now visible at every call site, in
+ * the argument count, instead of being a property of what a sources bag
+ * happened to be wired to.
+ *
+ * The live writer is `MatchupService.captureCalibration`, which runs on the
+ * worker's own clock. Nothing reachable over HTTP passes one.
+ */
+export interface MatchupLedger {
+  record(observation: MatchupObservation): Promise<void>;
 }
 
 /**
@@ -150,6 +177,7 @@ export async function buildMatchupResponse(
   sources: MatchupSources,
   leagueId: string,
   opts: { week?: number | null } = {},
+  ledger?: MatchupLedger,
 ): Promise<MatchupResponse> {
   const now = sources.now();
   const league = await sources.leagues.getLeague(leagueId);
@@ -269,7 +297,16 @@ export async function buildMatchupResponse(
    * response object and none of the work, which is no cache at all.
    */
   const fingerprint = forecastFingerprint(forecastInput);
-  const cached = sources.cached();
+  /*
+   * A recording call never reads the cache, and that is load-bearing.
+   *
+   * The short-circuit returns a response without ever reaching the forecast, so
+   * a capture that hit it would return a matchup and write nothing — silently,
+   * and only when a request had happened to warm the memo first. Deciding it
+   * here, off the presence of a ledger, makes that impossible for every caller
+   * rather than for the ones that remembered to pass an empty memo.
+   */
+  const cached = ledger ? null : sources.cached();
   if (cached && cached.fingerprint === fingerprint) {
     return { ...cached.response, cached: true };
   }
@@ -347,26 +384,28 @@ export async function buildMatchupResponse(
   sources.remember({ fingerprint: forecast.fingerprint, response });
 
   /*
-   * The forecast is offered to whoever asked for it, and they decide.
+   * And, only for a caller that brought somewhere to write it, the ledger.
    *
-   * Live, the service writes both sides to the calibration ledger — best
-   * effort, so a ledger write is never the reason a screen fails. Demo Mode
-   * supplies a recorder that does nothing, which is not a special case in this
-   * file: it is the same seam, satisfied by a caller that has nothing to write
-   * to.
+   * Best effort, so a ledger write is never the reason this call fails. There
+   * is no ledger on any request path — the endpoint calls this function with
+   * three arguments and Demo Mode calls it with three arguments, so neither can
+   * reach a database from here however the sources bag is wired. The one caller
+   * that passes a fourth is the worker's own scheduled capture.
    */
-  await sources
-    .record({
-      leagueId: league.id,
-      season: league.season,
-      week,
-      forecast,
-      mineRosterId: mine.rosterId,
-      theirsRosterId: theirsRow.roster_id,
-      matchupId: mineRow.matchup_id,
-      at: now.toISOString(),
-    })
-    .catch(() => undefined);
+  if (ledger) {
+    await ledger
+      .record({
+        leagueId: league.id,
+        season: league.season,
+        week,
+        forecast,
+        mineRosterId: mine.rosterId,
+        theirsRosterId: theirsRow.roster_id,
+        matchupId: mineRow.matchup_id,
+        at: now.toISOString(),
+      })
+      .catch(() => undefined);
+  }
 
   return response;
 }

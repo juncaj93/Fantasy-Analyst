@@ -412,7 +412,6 @@ describe('the matchup forecast is simulated without it', () => {
       previousForecast: async () => null,
       cached: () => null,
       remember: () => {},
-      record: async () => {},
       now: () => new Date('2026-09-17T15:00:00Z'),
       ...(published ? { publishedProjections: async () => published } : {}),
     };
