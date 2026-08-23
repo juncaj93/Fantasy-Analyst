@@ -26,10 +26,34 @@
  * unknown beats a plausible wrong number.
  *
  * So {@link sleeperScoringKey} answers `null` whenever the league's own settings
- * are not the ones the published totals assume, and a null key means no
- * fallback for that player. It is deliberately exact rather than tolerant: every
- * value below is Sleeper's own default, so an ordinary league matches and a
- * customised one is declined.
+ * are not the ones the published total assumes *for that player*, and a null key
+ * means no fallback for him. It is exact rather than tolerant: every value below
+ * is Sleeper's own default, so an ordinary league matches and a customised one
+ * is declined.
+ *
+ * ## Why the check is per position rather than per league
+ *
+ * The first version of this refused a whole league on any deviation, and the
+ * first real league it met scored six-point passing touchdowns and minus-two
+ * interceptions. Both of those are *passing* settings. A running back's
+ * projected passing line is zero, so Rotowire's published total for him is
+ * exactly right under that league's rules — and refusing it to avoid one wrong
+ * quarterback threw away three correct answers per wrong one.
+ *
+ * A published total is a single number and cannot be decomposed, so the question
+ * is not "does this league match Sleeper's defaults" but "do the settings this
+ * league changed touch the stat line this player is projected to produce". A
+ * quarterback is priced on passing, rushing and turnovers; everybody else on
+ * rushing, receiving and turnovers. Each position is therefore checked against
+ * the settings that actually move it, and refused on those alone.
+ *
+ * **What this cannot see.** `ScoringProfile` models nine values, so a league
+ * carrying bonuses outside that set — a hundred-yard rushing bonus, a
+ * first-down premium — matches here and is still playing a different game. That
+ * is a real limit and not a small one; it is accepted because the app's *own*
+ * projections are computed from the same nine, so this is at least consistent
+ * with what the rest of the codebase means by "this league's scoring". Widening
+ * the profile widens this check for free.
  */
 
 import type { ScoringProfile } from './scoring.ts';
@@ -56,7 +80,7 @@ export const SLEEPER_PROJECTION_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
  * Everything except the per-reception value, which is what distinguishes the
  * three totals from each other and is therefore matched separately.
  */
-const PUBLISHED_ASSUMPTIONS: Readonly<Record<string, number>> = {
+const PUBLISHED_ASSUMPTIONS = {
   pointsPerRushYard: 0.1,
   pointsPerRecYard: 0.1,
   pointsPerPassYard: 0.04,
@@ -65,7 +89,30 @@ const PUBLISHED_ASSUMPTIONS: Readonly<Record<string, number>> = {
   recTd: 6,
   interception: -1,
   fumbleLost: -2,
+} as const satisfies Partial<Record<keyof ScoringProfile, number>>;
+
+type AssumedSetting = keyof typeof PUBLISHED_ASSUMPTIONS;
+
+/**
+ * Which of those settings can move which player's published total.
+ *
+ * Turnovers and rushing are on both lists: a quarterback runs and fumbles, and
+ * so does everybody else. What separates them is that passing settings reach
+ * only the quarterback, and the reception value — matched separately, as the
+ * thing that picks between the three totals — reaches only the pass-catchers.
+ *
+ * A position this app does not draw from the feed, or one it was not told,
+ * is checked against everything. "We were not told" is not "it does not
+ * matter", and the conservative answer costs a fallback rather than credibility.
+ */
+const RELEVANT: Readonly<Record<string, readonly AssumedSetting[]>> = {
+  QB: ['pointsPerPassYard', 'passTd', 'interception', 'pointsPerRushYard', 'rushTd', 'fumbleLost'],
+  RB: ['pointsPerRushYard', 'rushTd', 'pointsPerRecYard', 'recTd', 'fumbleLost'],
+  WR: ['pointsPerRushYard', 'rushTd', 'pointsPerRecYard', 'recTd', 'fumbleLost'],
+  TE: ['pointsPerRushYard', 'rushTd', 'pointsPerRecYard', 'recTd', 'fumbleLost'],
 };
+
+const EVERYTHING = Object.keys(PUBLISHED_ASSUMPTIONS) as AssumedSetting[];
 
 /** Exact within a float's tolerance — these are settings, not measurements. */
 function same(a: number, b: number): boolean {
@@ -75,16 +122,15 @@ function same(a: number, b: number): boolean {
 /**
  * Which published total this league may read for this player, or null.
  *
- * Position matters for exactly one reason: a tight-end premium adds points per
- * reception for tight ends only, so a TE-premium league is playing Rotowire's
- * game at every position except tight end. Refusing the whole league would throw
- * away three correct answers to avoid one wrong one.
+ * Position decides two things: which of the assumed settings are checked at all
+ * (see {@link RELEVANT} — a six-point passing touchdown moves quarterbacks and
+ * nobody else), and whether a tight-end premium applies.
  *
- * In such a league an **unknown** position is refused along with a tight end's,
- * because it might be one. A caller that cannot say who it is asking about gets
- * the conservative answer rather than a number that is wrong for one position in
- * four — which is why the matchup path, whose source bag carries no positions,
- * simply has no fallback in a premium league.
+ * An **unknown** position is checked against every setting, and is refused a
+ * premium league's fallback along with the tight ends, because it might be one.
+ * A caller that cannot say who it is asking about gets the conservative answer
+ * rather than a number that might be wrong — which is why the matchup path,
+ * whose source bag carries no positions, is the strictest of the two callers.
  */
 export function sleeperScoringKey(
   profile: ScoringProfile | null | undefined,
@@ -92,17 +138,15 @@ export function sleeperScoringKey(
 ): SleeperScoringKey | null {
   if (!profile) return null;
 
-  for (const [key, expected] of Object.entries(PUBLISHED_ASSUMPTIONS)) {
-    if (!same(profile[key as keyof ScoringProfile] as number, expected)) return null;
+  const pos = String(position ?? '').trim().toUpperCase();
+  for (const key of RELEVANT[pos] ?? EVERYTHING) {
+    if (!same(profile[key] as number, PUBLISHED_ASSUMPTIONS[key])) return null;
   }
 
   // A tight end in a premium league scores more per catch than any published
   // total knows about. Everybody else in the same league is unaffected — but
   // "we were not told" is not "he is not a tight end".
-  if (profile.teBonus !== 0) {
-    const pos = String(position ?? '').trim().toUpperCase();
-    if (pos === '' || pos === 'TE') return null;
-  }
+  if (profile.teBonus !== 0 && (pos === '' || pos === 'TE')) return null;
 
   if (same(profile.ppr, 0)) return 'pts_std';
   if (same(profile.ppr, 0.5)) return 'pts_half_ppr';
