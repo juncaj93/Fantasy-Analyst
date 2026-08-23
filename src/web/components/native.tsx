@@ -474,11 +474,30 @@ export function SearchFilterRow({
  */
 export function Sheet({
   title,
+  accessibleLabel,
   onClose,
   children,
   testId,
 }: {
   title: ReactNode;
+  /**
+   * What the dialog is *called*, when what it is *headed* by cannot be read.
+   *
+   * A modal owes assistive technology a name, and the name a sheet has always
+   * used is its visible title — which works exactly as long as that title is a
+   * string. The player card's is not: it is a cluster of a position pill, a
+   * club mark, a name and an injury tag, because that is the identity grammar
+   * every row in the app uses and the expanded card is the same object. So the
+   * one sheet a reader opens most often announced itself as an unnamed dialog:
+   * they arrived inside a modal without being told whose card had opened.
+   *
+   * Hence a string beside the title rather than a rule about the title. The
+   * default below is unchanged and still covers every sheet headed by plain
+   * words; a caller whose heading is composed passes the words it composes.
+   * Give it the subject and nothing else — a name is what the dialog is, not a
+   * summary of what is in it.
+   */
+  accessibleLabel?: string;
   onClose: () => void;
   children: ReactNode;
   testId?: string;
@@ -511,7 +530,7 @@ export function Sheet({
         className="sheet"
         role="dialog"
         aria-modal="true"
-        aria-label={typeof title === 'string' ? title : undefined}
+        aria-label={accessibleLabel ?? (typeof title === 'string' ? title : undefined)}
         data-testid={testId ?? 'sheet'}
         data-dragging={drag.dragging ? 'yes' : 'no'}
         style={{

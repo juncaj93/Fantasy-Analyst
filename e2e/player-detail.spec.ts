@@ -115,6 +115,44 @@ async function expectRowGrammar(page: Page, expected: string[]): Promise<void> {
   }
 }
 
+/**
+ * One modal, announced as the player whose card it is.
+ *
+ * The four marks above are why this needs asserting rather than assuming. A
+ * sheet takes its accessible name from its visible title, and this title is
+ * that cluster — not a string — so the card claimed `role="dialog"` and
+ * `aria-modal` with no name at all: a reader listening to the app was put
+ * inside a modal without being told whose. Read through the role and the name
+ * rather than through the attribute, because what is being checked is what
+ * assistive technology computes, not which attribute happens to supply it.
+ *
+ * The expected name is taken from the visible name on the card, so the
+ * assertion cannot drift from the fixture, and it fails just as loudly if the
+ * name ever grows the pill, the club or the status back into it: a dialog's
+ * name is what has opened, not a summary of what is in it.
+ */
+async function expectNamedDialog(page: Page): Promise<void> {
+  const name = (await page.locator('.sheet-player-name').innerText()).trim();
+  expect(name, 'the card should be showing a player name to be named after').not.toBe('');
+
+  const dialogs = page.getByRole('dialog');
+  await expect(dialogs, 'a player card should be exactly one modal dialog').toHaveCount(1);
+  await expect(page.getByRole('dialog', { name }), `the modal is not announced as "${name}"`).toBeVisible();
+
+  // And still the dialog the reader was put *into*, rather than a named one beside it.
+  await expect(page.getByTestId('player-sheet')).toHaveAttribute('aria-modal', 'true');
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const el = document.activeElement;
+          return el === null ? false : el.closest('[data-testid="player-sheet"]') !== null;
+        }),
+      { message: 'focus never entered the named sheet' },
+    )
+    .toBe(true);
+}
+
 /** The band's labels, lower-cased: this is about readings, not about typography. */
 async function bandLabels(page: Page): Promise<string[]> {
   const labels = await page.getByTestId('player-page-metrics').locator('.stat-label').allInnerTexts();
@@ -177,6 +215,7 @@ test.describe('the expanded player, opened from Players', () => {
     await openPlayer(page, '1004');
 
     await expectRowGrammar(page, ['position', 'club', 'name', 'status']);
+    await expectNamedDialog(page);
 
     /*
      * The market pair Players alone can supply, then the readings both screens
