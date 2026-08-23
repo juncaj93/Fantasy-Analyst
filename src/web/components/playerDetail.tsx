@@ -18,7 +18,10 @@
 
 import { useEffect, useState } from 'react';
 import { api, type PlayerDetail } from '../api.ts';
-import { DetailLabel, Unknown } from './common.tsx';
+/* What Sleeper says about a player's availability right now. Never a ranking input. */
+import { injuryStatusTag } from '../../core/draft/injury.ts';
+import { DetailLabel, Unknown, formatDate } from './common.tsx';
+import { SkeletonRows } from './native.tsx';
 
 /**
  * Last season and this season's outlook, fetched when the card opens.
@@ -341,8 +344,45 @@ export function PreseasonProjectionLine({
  * rather than averaged away: two sources saying different things is a real
  * state of the world, and the reader is the one who should decide about it.
  */
-export function InjuryDetail({ detail }: { detail: PlayerDetail | null }) {
+export function InjuryDetail({
+  detail,
+  headerCarriesStatus = false,
+}: {
+  detail: PlayerDetail | null;
+  /**
+   * Whether the designation is already on the card, beside the name.
+   *
+   * Off by default, which is every caller that has no pill: Draft's expanded
+   * row and the Team/Matchup view both print the designation here or nowhere.
+   *
+   * On, the block loses its heading and its restatement of the label — the pill
+   * two lines up already says `OUT`, and a section titled `Out` whose body
+   * reads `Out` is the card saying one word three times. What survives is the
+   * part the pill cannot carry: the body part, the practice week, the
+   * provenance, and a disagreement between sources, which is a real state of
+   * the world and is never averaged away. When the line adds nothing beyond the
+   * designation, nothing is drawn at all.
+   */
+  headerCarriesStatus?: boolean;
+}) {
   if (!detail) return null;
+  const current = detail.injury;
+  /*
+   * What the pill cannot carry, rebuilt from the fields rather than trimmed off
+   * the line.
+   *
+   * `injuryLine` composes `Q · hamstring · limited → full`, and its first token
+   * is the designation — the very thing sitting beside the name two lines up.
+   * Cutting the string apart to remove it would be this file guessing at
+   * another module's formatting; the parts are on the payload, so they are read
+   * from there. What is left is the body part and the practice week, and when
+   * neither is known there is nothing here to say and nothing is drawn.
+   */
+  const beyondThePill = [
+    current?.bodyPart ? current.bodyPart.toLowerCase() : null,
+    current?.practice ?? null,
+  ].filter((part): part is string => part != null && part !== '');
+
   return (
     <>
       {detail.injuryContext ? (
@@ -354,7 +394,19 @@ export function InjuryDetail({ detail }: { detail: PlayerDetail | null }) {
         </>
       ) : null}
 
-      {detail.injury ? (
+      {headerCarriesStatus ? (
+        current && (beyondThePill.length > 0 || current.conflict) ? (
+          <div className="muted player-detail-injury" data-testid="injury-current">
+            {beyondThePill.join(' · ')}
+            {beyondThePill.length > 0 && current.provenance ? (
+              <span className="faint"> — {current.provenance}</span>
+            ) : null}
+            {current.conflict ? (
+              <div data-testid="injury-conflict">Sources disagree — {current.conflict}</div>
+            ) : null}
+          </div>
+        ) : null
+      ) : detail.injury ? (
         <>
           <DetailLabel>{detail.injury.label}</DetailLabel>
           <div className="muted" data-testid="injury-current">
@@ -367,6 +419,174 @@ export function InjuryDetail({ detail }: { detail: PlayerDetail | null }) {
             </div>
           ) : null}
         </>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The availability designation the header pill should carry, from either source.
+ *
+ * Two screens open the same expanded player and know different things about
+ * him. Players hands over Sleeper's own `status` from the row the reader
+ * tapped, which is why the pill is correct in the first frame. Trades hands
+ * over a suggestion, which carries a trade-shaped injury *category* and no
+ * designation at all — so before this, the identical player showed `OUT` on one
+ * surface and nothing on the other, which is the drift the shared card exists
+ * to stop.
+ *
+ * The detail payload both surfaces already fetch carries the reconciled
+ * designation, so it is the fallback: the row's own status wins while it says
+ * something, and `Active` — which Sleeper sends constantly and which is not a
+ * status worth a badge — falls through to it rather than suppressing it.
+ *
+ * Nothing here invents a status. Both inputs are read by `injuryStatusTag`,
+ * which knows one closed vocabulary and returns nothing for anything else.
+ */
+export function headerStatus(
+  rowStatus: string | null | undefined,
+  detail: PlayerDetail | null,
+): string | null {
+  if (injuryStatusTag(rowStatus)) return rowStatus ?? null;
+  return detail?.injury?.designation ?? null;
+}
+
+/**
+ * The sentence one piece of evidence offers, and never a sentence it does not.
+ *
+ * The same ladder `sentenceOf` walks in `core/evidence/takeaway.ts` — the
+ * user's own correction note, then the stored summary, then the excerpt — for
+ * the same reason: those are the three places the ledger holds words somebody
+ * actually wrote about this player, and anything else would be this file making
+ * a claim up. It is written out here rather than imported because the wire type
+ * the browser receives is a projection of the ledger row and carries none of
+ * the storage fields that function's signature requires.
+ *
+ * The excerpt is quoted rather than paraphrased and is never cut to fit:
+ * trimming a sentence is the cheapest way to change what it says.
+ */
+export function newsSentence(item: {
+  excerpt: string;
+  contextSummary: string | null;
+  userOverride: { note?: string } | null;
+}): { text: string; quoted: boolean } {
+  const note = item.userOverride?.note?.trim();
+  if (note) return { text: tidy(note), quoted: false };
+  const summary = item.contextSummary?.trim();
+  if (summary) return { text: tidy(summary), quoted: false };
+  return { text: tidy(item.excerpt ?? ''), quoted: true };
+}
+
+function tidy(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** How a polarity reads when it is not being read as a colour. */
+const POLARITY_WORD: Record<string, string> = {
+  positive: 'Positive',
+  negative: 'Negative',
+  mixed: 'Mixed',
+  neutral: 'Neutral',
+};
+
+/**
+ * The latest football, in the words the ledger already holds.
+ *
+ * This is the expanded card's news section, and it replaced a row of the
+ * evidence console: `▲ positive · mag 13 · uncategorised · Aug 12 ·
+ * auto_applied`, the excerpt, then `demo newsletter · rule: role-change ·
+ * confidence: high`. Every one of those tokens is real and every one of them is
+ * about the *classifier* rather than about the player — a reader who opened a
+ * card to find out what happened to him was being shown how the tally was
+ * computed instead.
+ *
+ * So the takeaway leads and the machinery goes. What is left is the sentence,
+ * when it happened, and a mark saying which way it cuts. Nothing is summarised,
+ * shortened or strengthened on the way — see {@link newsSentence} — and nothing
+ * is deleted from the ledger: the whole console, `mag` and `ruleId` and review
+ * status included, is one tap further in under Evidence, which is where the
+ * app's provenance promise actually lives.
+ *
+ * The source is printed only when it varies. On this surface it is very often
+ * one newsletter repeated down the list, and a name that is the same on every
+ * line qualifies nothing while costing every line the room to say something.
+ */
+export function LatestNews({
+  items,
+  quotedEvidenceIds,
+  limit,
+}: {
+  /** The whole ledger for this player, or null while it is being read. */
+  items: { id: string; sourceName: string; sourceDate: string; excerpt: string; contextSummary: string | null; polarity: string; userOverride: { polarity?: string; note?: string } | null }[] | null;
+  /** Items the takeaway above already quoted, marked rather than hidden. */
+  quotedEvidenceIds: string[];
+  /** How many of the newest to show before saying how many are left. */
+  limit: number;
+}) {
+  if (items == null) return <SkeletonRows rows={2} testId="player-news-skeleton" />;
+  const quoted = new Set(quotedEvidenceIds);
+  /*
+   * An empty ledger draws nothing at all, heading included.
+   *
+   * A card is a set of answers, and `Latest news / nothing yet` is a heading
+   * spending a line to report that a heading was not needed. Plenty of players
+   * have never been written about — that is the ordinary case in August, not a
+   * state worth announcing.
+   */
+  if (items.length === 0) return null;
+  const shown = items.slice(0, limit);
+  const withheld = items.length - shown.length;
+  // One name on every line is not provenance, it is a repeated word. Measured
+  // across the whole ledger rather than the two on screen, so the answer does
+  // not change as the list is scrolled or the limit is raised.
+  const varies = new Set(items.map((i) => i.sourceName)).size > 1;
+
+  return (
+    <>
+      <div className="detail-label" data-testid="evidence-heading">
+        Latest news
+      </div>
+      {shown.map((item) => {
+        const polarity = item.userOverride?.polarity ?? item.polarity;
+        const word = POLARITY_WORD[polarity] ?? 'Neutral';
+        const tone = polarity === 'positive' ? 'pos' : polarity === 'negative' ? 'neg' : polarity === 'mixed' ? 'mixed' : '';
+        const glyph = polarity === 'positive' ? '▲' : polarity === 'negative' ? '▼' : polarity === 'mixed' ? '◆' : '–';
+        const sentence = newsSentence(item);
+        return (
+          <div
+            key={item.id}
+            className={`evidence player-news ${tone}`}
+            data-testid="evidence-item"
+            data-polarity={polarity}
+          >
+            <div className="player-news-text">
+              {/*
+                A glyph rather than a colour, and the word beside it for
+                anyone not looking at either. The same arrangement
+                `CompactTally` uses where a line has no room for `▲ +6 pos`:
+                the mark survives greyscale, and the reading survives having
+                no screen at all.
+              */}
+              <span className="player-news-mark" aria-hidden="true">
+                {glyph}
+              </span>
+              <span className="sr-only">{word} news: </span>
+              {sentence.quoted ? <span data-testid="evidence-excerpt">“{sentence.text}”</span> : sentence.text}
+            </div>
+            <div className="player-news-when">
+              {formatDate(item.sourceDate)}
+              {varies ? ` · ${item.sourceName}` : ''}
+              {quoted.has(item.id) ? (
+                <span data-testid="evidence-quoted"> · quoted above</span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+      {withheld > 0 ? (
+        <div className="faint" data-testid="evidence-withheld">
+          {withheld} older item{withheld === 1 ? '' : 's'} on his full profile.
+        </div>
       ) : null}
     </>
   );

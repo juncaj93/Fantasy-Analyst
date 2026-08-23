@@ -22,11 +22,19 @@
  *    away here; this tab is the app's promise that a number can always be
  *    walked back to the sentence it came from.
  *
+ * Above all four, and above the sheet that has no segments at all, is one band
+ * of readings that is identical wherever the card was opened from — see
+ * `PlayerMetrics`. That band is what makes Players and Trades one product
+ * rather than two: the same figures, in the same order, under the same labels,
+ * with the two market columns Players alone can supply in front of them.
+ *
  * Nothing on this page computes anything. The tally windows, the categories and
  * the evidence arrive from `/api/players/:id`; the outlook, last season, the
- * injury and the profile arrive from `/api/players/:id/detail`. Two requests,
- * because the two fail independently and a missing outlook must not cost the
- * reader the ledger.
+ * preseason projection, the injury and the profile arrive from
+ * `/api/players/:id/detail`. Two requests, because the two fail independently
+ * and a missing outlook must not cost the reader the ledger — and both are made
+ * by `usePlayerRecord` in the frame that opens the card, so the header and the
+ * body are never two readings of the same player.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -36,6 +44,7 @@ import {
   DetailLabel,
   Empty,
   InjuryTag,
+  PlayerIdentity,
   PositionBadge,
   SignedValue,
   Stat,
@@ -45,11 +54,11 @@ import {
 import { ListGroup, ListRow, PushScreen, SegmentedControl, Sheet, SkeletonRows } from './native.tsx';
 import {
   InjuryDetail,
-  LastSeasonLine,
+  LatestNews,
   NewsletterTakeaway,
-  PreseasonProjectionLine,
   ProfileFlags,
   SeasonOutlook,
+  headerStatus,
 } from './playerDetail.tsx';
 
 /** The whole of this app's own record of one player. */
@@ -130,13 +139,21 @@ export function PlayerPage({
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, [player.id]);
 
+  const record = usePlayerRecord(player.id);
+
   return (
     <PushScreen
       title={player.name}
       subtitle={
+        /*
+          The identity grammar every list row uses, in a navigation bar's own
+          two-line arrangement: the pill, the club's mark, then the availability
+          tag. The name is the title above it because that is what a pushed bar
+          is, and the order of everything qualifying it is the row's order.
+        */
         <span className="player-page-ident">
           <PositionBadge position={player.position} team={player.team} />
-          <InjuryTag status={player.status} />
+          <InjuryTag status={headerStatus(player.status, record.detail)} />
         </span>
       }
       backLabel={backLabel}
@@ -146,6 +163,7 @@ export function PlayerPage({
     >
       <PlayerDossier
         player={player}
+        record={record}
         {...(context === undefined ? {} : { context })}
         initialSection={initialSection}
       />
@@ -182,23 +200,42 @@ export function PlayerSheet({
   context?: React.ReactNode;
   initialSection?: Section;
 }) {
+  const record = usePlayerRecord(player.id);
+
   return (
     <Sheet
       testId="player-sheet"
       onClose={onClose}
       title={
+        /*
+          The identity grammar, in the order the compact rows already use.
+
+          This line read name-first, with the pill, the club and the status
+          clustered after it — the row's own order reversed at exactly the
+          moment the reader has committed to one player. The comment under
+          `.sheet-player-title` even claimed it was "the same three marks, in
+          the same order, as every list row in the app", which is how a
+          convention stops being one: it is written down as though it holds
+          while the code says otherwise.
+
+          So: position, club, name, and whatever is wrong with him immediately
+          to the right of the name it qualifies. `PlayerIdentity` is the same
+          `flex: none` cluster the rows draw, so the pill lands on one column
+          and the club's mark stays 16px — a qualifier on the name rather than
+          the loudest object on the line. The name takes the slack and truncates
+          before anything after it is pushed off the sheet.
+        */
         <span className="sheet-player-title">
+          <PlayerIdentity position={player.position} {...(player.team === undefined ? {} : { team: player.team })} />
           <span className="sheet-player-name">{player.name}</span>
-          <span className="player-page-ident">
-            <PositionBadge position={player.position} team={player.team} />
-            <InjuryTag status={player.status} />
-            {trailing}
-          </span>
+          <InjuryTag status={headerStatus(player.status, record.detail)} />
+          {trailing ? <span className="sheet-player-aside">{trailing}</span> : null}
         </span>
       }
     >
       <PlayerDossier
         player={player}
+        record={record}
         {...(context === undefined ? {} : { context })}
         initialSection={initialSection}
         snapshot
@@ -216,27 +253,227 @@ export function PlayerSheet({
   );
 }
 
+/** The two requests behind an expanded player, and what they answer with. */
+export interface PlayerRecord {
+  file: PlayerFile | null;
+  detail: PlayerDetail | null;
+  detailFailed: boolean;
+}
+
+/**
+ * Everything about one player, asked for once.
+ *
+ * Lifted out of the dossier because the header needs it too: Trades opens a
+ * player it knows a trade verdict about and no availability designation, so the
+ * pill beside the name has to come from the detail payload — see
+ * {@link headerStatus} — and a header that fetched separately from the body
+ * would be two requests for one card and two chances to disagree.
+ *
+ * Two requests rather than one, and that has not changed: the ledger and the
+ * outlook fail independently, and a third party the network could not reach
+ * must never cost the reader the evidence.
+ */
+export function usePlayerRecord(playerId: string): PlayerRecord {
+  const [file, setFile] = useState<PlayerFile | null>(null);
+  const [detail, setDetail] = useState<PlayerDetail | null>(null);
+  const [detailFailed, setDetailFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFile(null);
+    setDetail(null);
+    setDetailFailed(false);
+    api
+      .get<PlayerFile>(`/api/players/${playerId}`)
+      .then((res) => {
+        if (!cancelled) setFile(res);
+      })
+      .catch(() => {
+        /* the sections that need it say so themselves */
+      });
+    api
+      .get<PlayerDetail>(`/api/players/${playerId}/detail`)
+      .then((res) => {
+        if (!cancelled) setDetail(res);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
+
+  return { file, detail, detailFailed };
+}
+
+/**
+ * The band across the top of every expanded player, on both screens.
+ *
+ * Six readings, in one order, wherever the card was opened from — and two more
+ * in front of them on a screen that deals in the draft market. That fixed order
+ * is the whole point: a reader who learns where the preseason number sits on
+ * Players must not have to learn again on Trades, and the two screens had drifted
+ * into printing four different things each.
+ *
+ * What is here is what the product intent asks for in the two seconds after a
+ * tap — how the research reads lately, what the market expected of him before
+ * the season, and what he actually did last year — and it is here *instead of*
+ * the four blocks that used to say the same things further down the card: a
+ * `News by window` grid repeating windows the band already carries, a `2025`
+ * heading over a line of two numbers, and a preseason line of its own.
+ *
+ * Two windows rather than four. `Season` and `Lifetime` are one reading apart
+ * early in a year and the band is not the ledger; the full four-window
+ * breakdown, with its item counts and its pending-review note, is one tap in on
+ * the pushed page where it always was.
+ *
+ * `Moved` went the same way and for the reason the compact row already
+ * established: it is `ADP` minus `Rank`, and both are printed either side of
+ * where it used to sit — a subtraction the reader can watch being done is not a
+ * third reading.
+ *
+ * A dash where a value is genuinely unknown, and no cell at all where the app
+ * has never been told anything: a player no snapshot covered has no `PTS` cell,
+ * because a dash under a label is a promise that the number exists somewhere.
+ * Nothing here is ever a zero standing in for an absence.
+ */
+function PlayerMetrics({
+  player,
+  signal,
+  detail,
+  knowsMarket,
+}: {
+  player: PlayerSummary;
+  signal: PlayerSignal | null;
+  detail: PlayerDetail | null;
+  /** False when the screen behind never had a draft order to hand over. */
+  knowsMarket: boolean;
+}) {
+  const projection = detail?.preseasonProjection ?? null;
+  const last = detail?.lastSeason ?? null;
+  const net = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+
+  return (
+    <div className="metric-grid" data-testid="player-page-metrics" data-mode={knowsMarket ? 'market' : 'tally'}>
+      {knowsMarket ? (
+        <>
+          <Stat
+            label="Rank"
+            value={player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
+            hint="This app's draft order for him, after the research tally"
+            spoken={`This app's draft rank: ${player.adjustedRank == null ? 'unknown' : Math.round(player.adjustedRank)}`}
+          />
+          <Stat
+            label="ADP"
+            value={player.draftRank == null ? '—' : player.draftRank}
+            hint="Where Sleeper's own draft order puts him"
+            spoken={`Sleeper draft rank: ${player.draftRank ?? 'unknown'}`}
+          />
+        </>
+      ) : null}
+
+      <Stat
+        label="7d"
+        value={signal ? <SignedValue net={signal.last7.net} /> : '—'}
+        hint="Research tally over the last 7 days"
+        spoken={`Research tally over the last 7 days: ${signal ? net(signal.last7.net) : 'unknown'}`}
+      />
+      <Stat
+        label="21d"
+        value={signal ? <SignedValue net={signal.last30.net} /> : '—'}
+        hint="Research tally over the last 21 days"
+        spoken={`Research tally over the last 21 days: ${signal ? net(signal.last30.net) : 'unknown'}`}
+      />
+      <Stat
+        label="Life"
+        value={signal ? <SignedValue net={signal.raw.net} /> : '—'}
+        hint="Lifetime research tally across every piece of evidence"
+        spoken={`Lifetime research tally: ${signal ? net(signal.raw.net) : 'unknown'}`}
+      />
+
+      {/*
+        `PTS`, and everywhere it is not three letters it says what it is.
+
+        The label is an abbreviation because a metric cell on a 360px phone is
+        an abbreviation or it is nothing. Everything else about the cell exists
+        so that the abbreviation cannot be read as a live number: the capture
+        date sits under the figure, the tooltip and the accessible name both
+        open with the word *preseason*, and neither ever says "projected to
+        score" in the present tense. In week nine this is history, and a card
+        that let it read as a current expectation would be the most expensive
+        kind of wrong — plausible.
+      */}
+      {projection ? (
+        <Stat
+          label="PTS"
+          testId="metric-preseason-pts"
+          value={Math.round(projection.points)}
+          note={formatDate(projection.capturedAt)}
+          hint={`Preseason market projection: ${Math.round(projection.points)} — captured ${projection.label}, scored as ${projection.scoringLabel}`}
+          spoken={`Preseason market-derived projected season fantasy points: ${Math.round(
+            projection.points,
+          )}, captured ${projection.label}, scored as ${projection.scoringLabel}`}
+        />
+      ) : null}
+
+      {/*
+        Last season, promoted out of the `2025` block it used to have to itself.
+
+        The two cells are drawn together or not at all, because they answer one
+        question. No stored row means the statistics have never been ingested
+        for him — the section stays away rather than implying an empty season —
+        and a stored row with nothing in it means he did not appear, which is a
+        dash. Sleeper will happily report an unplayed rookie as the 1,240th
+        receiver; that is his place in a directory, not a finish.
+      */}
+      {last ? (
+        <>
+          <Stat
+            label={`${last.season} GP`}
+            testId="metric-last-season-gp"
+            value={last.gamesPlayed ?? '—'}
+            hint={`Games played in ${last.season}`}
+            spoken={`${last.season} games played: ${last.gamesPlayed ?? 'unknown'}`}
+          />
+          <Stat
+            label={`${last.season} rank`}
+            testId="metric-last-season-rank"
+            value={last.positionRank ?? '—'}
+            hint={`${last.season} finish, ${last.scoring}`}
+            spoken={`${last.season} ${last.scoring} finish: ${last.positionRank ?? 'unknown'}`}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Everything this app knows about one player, with no opinion about framing.
  *
- * The same four numbers, the same segmented control and the same four subviews,
- * whether they arrive as a sheet rising over the list or as a pushed page. That
- * is the whole reason it is its own component: a player inspected from Players
- * and a player inspected from Trades have to be the same object, and so does a
- * player skimmed in a sheet and a player studied on his own page. Two copies of
- * this is how the app grows two answers to "what do we know about him".
+ * The same band, the same sections and the same order, whether they arrive as a
+ * sheet rising over the list or as a pushed page, and whether the reader came
+ * from Players or from Trades. That is the whole reason it is its own
+ * component: a player inspected from Players and a player inspected from Trades
+ * have to be the same object, and so does a player skimmed in a sheet and a
+ * player studied on his own page. Two copies of this is how the app grows two
+ * answers to "what do we know about him".
  *
  * It renders no chrome — no bar, no grip, no back control. What wraps it is the
- * caller's business: see `PlayerPage` and `PlayerSheet` directly below.
+ * caller's business: see `PlayerPage` and `PlayerSheet` directly above.
  */
 export function PlayerDossier({
   player,
+  record,
   context,
   initialSection = 'overview',
   snapshot = false,
   footer,
 }: {
   player: PlayerSummary;
+  /** The two answers, fetched by the caller so its header can read them too. */
+  record: PlayerRecord;
   /**
    * Why this reader is here, from the screen that sent them.
    *
@@ -256,44 +493,8 @@ export function PlayerDossier({
   footer?: React.ReactNode;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
-  const [file, setFile] = useState<PlayerFile | null>(null);
-  const [detail, setDetail] = useState<PlayerDetail | null>(null);
-  const [detailFailed, setDetailFailed] = useState(false);
+  const { file, detail, detailFailed } = record;
 
-  useEffect(() => {
-    let cancelled = false;
-    setFile(null);
-    setDetail(null);
-    setDetailFailed(false);
-    api
-      .get<PlayerFile>(`/api/players/${player.id}`)
-      .then((res) => {
-        if (!cancelled) setFile(res);
-      })
-      .catch(() => {
-        /* the sections that need it say so themselves */
-      });
-    api
-      .get<PlayerDetail>(`/api/players/${player.id}/detail`)
-      .then((res) => {
-        if (!cancelled) setDetail(res);
-      })
-      .catch(() => {
-        if (!cancelled) setDetailFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [player.id]);
-
-  /*
-   * The page starts at the top on arrival, and on arrival only.
-   *
-   * Pushing a screen and landing halfway down it is the single most disorienting
-   * thing a pushed navigation can do, and it is what happens by default when the
-   * list underneath was scrolled. Keyed on the player rather than run once, so
-   * moving from one player to another does the same thing.
-   */
   const signal = file?.signal ?? null;
   /*
    * Whether the screen behind this one deals in the draft market at all.
@@ -307,61 +508,7 @@ export function PlayerDossier({
 
   return (
     <>
-      {/*
-        The four numbers a reader came for, above everything else.
-
-        Which four depends on what the screen behind knows. Players hands over
-        the market — where Sleeper has him, where this app has him, and the gap
-        between the two — and those are the numbers somebody browsing a database
-        came for. Trades knows none of that, so a page opened from there would
-        have printed three dashes and one reading; it gets the tally in its four
-        windows instead, which is what its own rows were already talking about.
-
-        A dash rather than a zero wherever a value is genuinely unknown. That is
-        the rule the whole app is built on: a zero is a reading, and an unknown
-        is not.
-      */}
-      <div className="metric-grid" data-testid="player-page-metrics" data-mode={knowsMarket ? 'market' : 'tally'}>
-        {knowsMarket ? (
-          <>
-            <Stat
-              label="Rank"
-              value={player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
-              hint="This app's draft order for him, after the research tally"
-            />
-            <Stat
-              label="ADP"
-              value={player.draftRank == null ? '—' : player.draftRank}
-              hint="Where Sleeper's own draft order puts him"
-            />
-            <Stat
-              label="Moved"
-              value={
-                player.movement ? (
-                  <span className={player.movement > 0 ? 'tally tally-pos' : 'tally tally-neg'}>
-                    {player.movement > 0 ? `▲${player.movement}` : `▼${Math.abs(player.movement)}`}
-                  </span>
-                ) : (
-                  '—'
-                )
-              }
-              hint="Picks the research tally moved him, up or down"
-            />
-            <Stat
-              label="Tally"
-              value={signal ? <SignedValue net={signal.raw.net} /> : '—'}
-              hint="Lifetime research tally across every piece of evidence"
-            />
-          </>
-        ) : (
-          <>
-            <Stat label="7d" value={signal ? <SignedValue net={signal.last7.net} /> : '—'} hint="Research tally over the last 7 days" />
-            <Stat label="21d" value={signal ? <SignedValue net={signal.last30.net} /> : '—'} hint="Research tally over the last 21 days" />
-            <Stat label="Season" value={signal ? <SignedValue net={signal.seasonToDate.net} /> : '—'} hint="Research tally this season" />
-            <Stat label="Life" value={signal ? <SignedValue net={signal.raw.net} /> : '—'} hint="Lifetime research tally across every piece of evidence" />
-          </>
-        )}
-      </div>
+      <PlayerMetrics player={player} signal={signal} detail={detail} knowsMarket={knowsMarket} />
 
       {context ? (
         <div className="player-page-context" data-testid="player-page-context">
@@ -375,10 +522,10 @@ export function PlayerDossier({
         A sheet is a glance — the reader tapped a name and wants to know who he
         is — and asking them to choose a tab first is asking a question before
         answering one. So everything is stacked in the order it is wanted: what
-        is said about him, what is wrong with him, what is expected, what the
-        market thinks, and the ledger underneath. The page keeps its segments,
-        because that is the deep read and the ledger there runs long enough that
-        a reader looking for the market should not have to scroll past it.
+        is said about him, what is wrong with him, what is expected, and the
+        latest football underneath. The page keeps its segments, because that is
+        the deep read and the ledger there runs long enough that a reader
+        looking for the market should not have to scroll past it.
       */}
       {snapshot ? null : (
         <div className="control-row">
@@ -394,26 +541,37 @@ export function PlayerDossier({
       )}
 
       {snapshot ? (
+        /*
+          The expanded card, and what is deliberately not on it.
+
+          Three blocks left in this pass and none of them lost a fact. `Draft
+          market` printed Sleeper's rank, this app's rank and the movement
+          between them — the first two are in the band four lines up and the
+          third is their difference. `Categories` restated the tally by
+          category, which is the tally. `Vegas props` is a cached book line and
+          has no business under a heading a reader opened to find out about the
+          player: what the market expected of him is now `PTS`, said in the
+          band, in words that cannot be mistaken for a live number.
+
+          All three are one tap in, unchanged, under Market on his own page —
+          along with every window and the whole ledger. Nothing was deleted;
+          the card stopped being the place it all had to fit.
+        */
         <div className="player-page-body" data-testid="player-page-snapshot">
-          <Overview
-            detail={detail}
-            detailFailed={detailFailed}
-            signal={signal}
-            position={player.position}
-            evidenceCount={file ? file.evidence.length : null}
-          />
+          <Overview detail={detail} signal={signal} compact />
           {detailFailed ? null : <SeasonOutlook detail={detail} failed={detailFailed} />}
-          <Market file={file} player={player} knowsMarket={knowsMarket} />
-          <Evidence file={file} quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []} limit={2} />
+          <LatestNews
+            items={file ? file.evidence : null}
+            quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []}
+            limit={2}
+          />
         </div>
       ) : (
       <div className="player-page-body" data-testid={`player-page-${section}`}>
         {section === 'overview' ? (
           <Overview
             detail={detail}
-            detailFailed={detailFailed}
             signal={signal}
-            position={player.position}
             evidenceCount={file ? file.evidence.length : null}
             onGo={setSection}
           />
@@ -452,30 +610,43 @@ export function PlayerDossier({
 /** The two-second answer: what is said about him, and what is wrong with him. */
 function Overview({
   detail,
-  detailFailed,
   signal,
-  position,
   evidenceCount,
+  compact = false,
   onGo,
 }: {
   detail: PlayerDetail | null;
-  detailFailed: boolean;
   signal: PlayerSignal | null;
-  position: string | null;
   /** How many items the ledger holds, once it has been read. */
-  evidenceCount: number | null;
+  evidenceCount?: number | null;
+  /**
+   * Say only what the band above has not already said.
+   *
+   * What the expanded card takes. `News by window` is four tally windows under
+   * a heading, and three of the four are now cells in the band at the top of
+   * the same card — a grid that repeats the row above it is not a second
+   * reading, it is the card disagreeing with itself about where a number
+   * lives. The whole breakdown, with the item counts behind each window and the
+   * note about anything still waiting for review, is on the pushed page, which
+   * is the surface that exists for exactly that.
+   */
+  compact?: boolean;
   /** Moves to another section. Absent only if a caller wants Overview alone. */
   onGo?: (section: Section) => void;
 }) {
   return (
     <>
       <NewsletterTakeaway detail={detail} />
-      <LastSeasonLine detail={detail} failed={detailFailed} position={position} />
-      <PreseasonProjectionLine detail={detail} />
-      <InjuryDetail detail={detail} />
+      {/*
+        The designation is beside the name now, so this says only what a pill
+        two or three characters wide cannot: the body part, the practice week,
+        where it came from, and any disagreement between sources. See
+        `InjuryDetail`, which draws nothing at all when the line adds nothing.
+      */}
+      <InjuryDetail detail={detail} headerCarriesStatus />
       <ProfileFlags detail={detail} />
 
-      {signal ? (
+      {compact ? null : signal ? (
         <>
           <DetailLabel>News by window</DetailLabel>
           <div className="window-row" data-testid="player-page-windows">

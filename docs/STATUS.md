@@ -1373,6 +1373,75 @@ the intelligence is still one tap away, and nothing scrolls sideways. Lineup
 legality and the pull gesture are asserted unchanged.
 
 
+## Milestone — one expanded player, on Players and on Trades (done)
+
+The two screens opened the same component and did not read like it. A pass over
+what the expanded card actually says, and nothing about what either engine
+recommends: Players' ordering, the trade board's classification, confidence and
+order, Draft, Team/Matchup and the StartWho import are untouched, and the
+browser suite now asserts both lists are rendered in exactly the order their own
+API returned them.
+
+**The identity line runs the way every row runs.** Position pill, club's mark,
+name, availability tag — and the tag is against the name it qualifies rather
+than at the end of a cluster. The sheet had it reversed, with the name first,
+which meant the one surface where a reader has committed to a single player was
+the surface that changed the grammar they had just been reading. The comment in
+the stylesheet claimed the row's order all along; it is true now. A long name
+shrinks and truncates before anything to its right moves, which turned out to
+need one missing `min-width: 0` on `.sheet-title` — without it a hyphenated name
+pushed the status pill off the edge of the sheet at 390.
+
+**The tag appears on Trades, which never had one to pass.** A trade suggestion
+carries a trade-shaped injury category and no designation, so the same player
+showed `OUT` on Players and nothing on Trades. The detail payload both screens
+already fetch is now the fallback, so the pill is the same fact on both.
+
+**One band of readings, in one order, on both screens.** `7d`, `21d`, `Life`,
+`PTS`, `<season> GP`, `<season> rank` — with `Rank` and `ADP` in front of them on
+Players, which is the only screen that has them. `PTS` is the canonical StartWho
+preseason projection and is never allowed to read as a live number: the capture
+date sits under the figure, and the tooltip and the accessible name both open
+with the word *preseason*. Where nothing covers a player there is no cell at
+all; where the season was looked up and he did not appear there is a dash. Never
+a zero.
+
+**Four blocks left the card, and every one of them was saying something twice.**
+`News by window` repeated the tally windows now in the band; `2025` was a heading
+over two numbers now in the band; `Draft market` printed the rank, the ADP and
+their difference; `Categories` restated the tally by category. `Vegas props`
+went for a different reason — a cached book line is not what a reader opens a
+player for, and what the market expected of him is now `PTS`. Nothing was
+deleted: all of it is one tap in, unchanged, under Overview and Market on his
+own page, and the browser suite asserts that too. The injury designation stopped
+being printed a second time under a heading that restates it; what is left below
+the pill is the body part, the practice week and any disagreement between
+sources — and nothing at all when there is none of that.
+
+**Latest news reads like football.** The card was rendering the evidence console
+— `▲ positive · mag 13 · uncategorised · Aug 12 · auto_applied`, then the
+excerpt, then `rule: role-change · confidence: high`. Every token is true and
+every token is about the classifier. What shows now is the sentence the ledger
+already holds — the user's own correction note, then the stored summary, then
+the excerpt, quoted verbatim and never trimmed to fit, which is the same ladder
+the newsletter takeaway walks — with the date, a polarity mark and its word for
+anyone not looking at a colour. The source name is printed only when it varies,
+because one name repeated down a card qualifies nothing. The whole console is
+untouched under Evidence, which is where the provenance promise lives.
+
+The 2026 Season Outlook is unchanged, semantics and all.
+
+Checks at this milestone: typecheck, the whole unit suite, and the browser suite
+at 430, 390, 375 and 360 with a new `player-detail.spec.ts` — the identity order
+asserted by x-position so a `row-reverse` cannot satisfy it, the long-name
+truncation, the tag on Trades, `PTS` present and absent, last season present,
+dashed and absent, no label or figure clipped in the band at any width, the four
+removed blocks absent from the card and present on the page, no `mag N` and no
+`uncategorised`, the outlook preserved, the news sentence checked against the
+API's own stored words, reading order matching visual order in the grid, no
+sideways scroll anywhere down either card, and both lists rendered in the order
+their API returned.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against
