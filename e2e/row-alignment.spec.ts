@@ -739,11 +739,36 @@ test.describe('Team starters and bench share one geometry', () => {
         return { name: clipped('.player-name'), pill: clipped('.pos-pill'), value: clipped('.proj'), width: name?.width ?? 0 };
       }),
     );
+    /*
+     * The invariant is what may *not* give way, and it holds at every width.
+     *
+     * The pill and the value are fixed fields; clipping either loses a fact
+     * rather than shortening one, and `-1` where `-12` was is not a smaller
+     * reading of a number but a different one. The name is the only element on
+     * the row allowed to yield, and it has to still be a name afterwards.
+     */
     for (const row of yielded) {
-      expect(row.name, 'the name should be the thing that truncates').toBe(true);
       expect(row.pill, 'the position is being clipped').toBe(false);
       expect(row.value, 'the value is being clipped').toBe(false);
       expect(row.width, 'and it is still a name afterwards').toBeGreaterThan(60);
+    }
+
+    /*
+     * …and where the row genuinely runs out of room, it is the name that gave way.
+     *
+     * Asserted at 390 and below rather than everywhere, because at 430 this name
+     * *fits*: WebKit sets it fractionally narrower than Chromium does, so the
+     * row has nothing to yield and there is nothing to prove. Requiring
+     * truncation at every width made this test a measurement of a font metric —
+     * it passed on Chromium at 430 and failed on WebKit at 430, for a layout
+     * that was correct in both. The squeeze is guaranteed on the widths where a
+     * squeeze is guaranteed, which is where the claim was ever about layout.
+     */
+    if (width <= 390) {
+      expect(
+        yielded.every((row) => row.name === true),
+        `a ${LONG.length}-character name cannot fit at ${width}px, so it must truncate`,
+      ).toBe(true);
     }
   });
 });
