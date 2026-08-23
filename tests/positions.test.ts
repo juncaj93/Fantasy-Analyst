@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { EXCLUDED_POSITIONS, isExcludedPosition, toCanonicalPlayers } from '../src/core/sleeper/transform.ts';
 import { buildRosterShape, startablePositions } from '../src/core/sleeper/scoring.ts';
+import { offersFlexFilter, orderFilterChips } from '../src/core/sleeper/eligibility.ts';
 import { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { importAdpSnapshot } from '../src/core/adp/import.ts';
 import { AdpRepo } from '../src/server/repos/adp.ts';
@@ -107,6 +108,33 @@ describe('defences depend on the league, not on the app', () => {
   it('is startable the moment a league starts one', () => {
     const withDefence = buildRosterShape(['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN']);
     expect(startablePositions(withDefence).has('DEF')).toBe(true);
+  });
+
+  /**
+   * ...and when it is startable, its chip is the last one in the row.
+   *
+   * Asserted over what a board actually publishes rather than over a roster
+   * shape, because the draft screen builds its chips from `startablePositions`
+   * and `offersFlex` and from nothing else. A defence used to land between TE
+   * and FLX, in the middle of a row a reader scans for receivers.
+   */
+  it('is the last chip in the filter row, after FLX', () => {
+    const withDefence = startablePositions(buildRosterShape(['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN']));
+    expect(orderFilterChips(withDefence, offersFlexFilter(withDefence))).toEqual([
+      'QB',
+      'RB',
+      'WR',
+      'TE',
+      'FLX',
+      'DEF',
+    ]);
+
+    // Best ball, the far more common shape here: no defence slot, no defence
+    // chip, and a row that is exactly what it was before any of this.
+    const bestBall = startablePositions(
+      buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'BN', 'BN']),
+    );
+    expect(orderFilterChips(bestBall, offersFlexFilter(bestBall))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX']);
   });
 
   /**

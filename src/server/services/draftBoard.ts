@@ -19,10 +19,12 @@ import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { scoringKey } from '../../core/startWho/scoring.ts';
+import type { MyGuyLevel } from '../../core/draft/decisions.ts';
 import type { Database } from '../db.ts';
 import { AdpRepo } from '../repos/adp.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { DraftQueueRepo } from '../repos/draftQueue.ts';
 import { PlayerFlagsRepo } from '../repos/playerFlags.ts';
 import { PlayerRepo } from '../repos/players.ts';
 
@@ -64,7 +66,30 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
       valuesByPlayer: (snapshotId) => adp.valuesByPlayer(snapshotId),
     },
     evidence: { getSignals: (ids) => evidence.getSignals(ids) },
-    flags: () => new PlayerFlagsRepo(db).all(),
+    /*
+     * The two marks, composed: My Guy from the global table, the ★ queue from
+     * this draft's own. They arrive as one map because the board reads them as
+     * one thing per player, and they are stored apart because one of them is an
+     * opinion about a player and the other is a bookmark inside a draft.
+     */
+    flags: async (draftId) => {
+      const [levels, queue] = await Promise.all([
+        new PlayerFlagsRepo(db).all(),
+        new DraftQueueRepo(db).entries(draftId),
+      ]);
+      const out = new Map<string, { level: MyGuyLevel; queued: boolean; queueOrder: number | null }>();
+      for (const [playerId, flag] of levels) {
+        out.set(playerId, { level: flag.level, queued: false, queueOrder: null });
+      }
+      for (const entry of queue) {
+        out.set(entry.playerId, {
+          level: out.get(entry.playerId)?.level ?? 0,
+          queued: true,
+          queueOrder: entry.order,
+        });
+      }
+      return out;
+    },
     seasonMarkets: (ids) => seasonMarkets.latestForPlayers(seasonFor(), ids),
     /*
      * Scoped to the league's own scoring before anything else, so a snapshot

@@ -76,7 +76,7 @@ export function InjuryTag({ status }: { status: string | null | undefined }) {
   if (!tag) return null;
   return (
     <span
-      className={`injury-tag injury-${tag.tone}`}
+      className={`row-pill injury-tag injury-${tag.tone}`}
       data-testid="injury-tag"
       data-status={tag.code}
       title={tag.label}

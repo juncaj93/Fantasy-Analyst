@@ -16,7 +16,6 @@ import {
   needsCompaction,
   queueSequence,
   rankBetween,
-  reconcileQueue,
   removeFromQueue,
   reorderQueue,
   type QueueEntry,
@@ -176,30 +175,3 @@ describe('the sparse ladder holds up', () => {
   });
 });
 
-describe('a stored order and the live queue are reconciled without surprises', () => {
-  it('appends a player queued elsewhere after everyone already placed', () => {
-    const reconciled = reconcileQueue(QUEUE, ['a', 'b', 'c', 'd', 'new']);
-    expect(queueSequence(reconciled).at(-1)).toBe('new');
-  });
-
-  it('drops a stored rank for a player no longer queued', () => {
-    expect(queueSequence(reconcileQueue(QUEUE, ['a', 'c']))).toEqual(['a', 'c']);
-  });
-
-  it('preserves a hand-made order through a reconcile', () => {
-    const reordered = applied(QUEUE, reorderQueue(QUEUE, 'd', 0).writes);
-    expect(queueSequence(reconcileQueue(reordered, ['a', 'b', 'c', 'd']))).toEqual(['d', 'a', 'b', 'c']);
-  });
-
-  it('is idempotent', () => {
-    const once = reconcileQueue(QUEUE, ['a', 'b', 'c', 'd', 'new']);
-    const twice = reconcileQueue(once, queueSequence(once));
-    expect(queueSequence(twice)).toEqual(queueSequence(once));
-  });
-
-  it('orders a queue with no stored ranks at all, stably', () => {
-    const fresh = reconcileQueue([], ['c', 'a', 'b']);
-    expect(queueSequence(fresh)).toEqual(['a', 'b', 'c']);
-    expect(queueSequence(reconcileQueue([], ['c', 'a', 'b']))).toEqual(queueSequence(fresh));
-  });
-});

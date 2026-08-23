@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import type { CacheOptions } from '../sessionCache.ts';
-import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
+import { FLX_FILTER, orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
@@ -138,16 +138,13 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     if (!selected) return [];
     const startable = startablePositions(buildRosterShape(selected.rosterPositions));
     if (startable.size === 0) return [];
-    // FLX last: it is a view spanning three positions, not a fourth one, and a
-    // chip that reads like a position among the real ones invites exactly the
-    // confusion this filter must not cause. The positions themselves are in the
-    // order every fantasy site uses, shared with the draft board so the same
-    // chips cannot appear in two different orders on two screens.
-    return [
-      ALL_FILTER,
-      ...orderPositions(startable),
-      ...(offersFlexFilter(startable) ? [FLX_FILTER] : []),
-    ];
+    // `QB → RB → WR → TE → FLX → DEF`, from the one helper the draft board and
+    // the compare picker also call, so the same chips cannot appear in two
+    // different orders on two screens. FLX after its parts because it is a view
+    // spanning three positions rather than a fourth one; DEF after FLX because
+    // a defence is a team rather than a player and belongs at the end of a row
+    // a reader scans for receivers.
+    return [ALL_FILTER, ...orderFilterChips(startable)];
   }, [selected]);
 
   /** One page of the list. `offset` 0 replaces; anything else appends. */

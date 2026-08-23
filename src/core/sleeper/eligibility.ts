@@ -202,6 +202,54 @@ export function orderPositions(positions: Iterable<string>): string[] {
   return [...known, ...rest];
 }
 
+/**
+ * The positions a chip row draws *after* the FLX chip.
+ *
+ * One entry, and it is deliberately not the whole "not flex-eligible" set: a
+ * quarterback chip belongs where it has always been, at the front. This is the
+ * defence, which every fantasy site in existence draws at the end of the row —
+ * it is the one starting slot that is a team rather than a player, and a reader
+ * scanning for a receiver should never have to read past it.
+ *
+ * **K is deliberately absent.** The kicker sits where `POSITION_ORDER` already
+ * puts it, between TE and FLX, and moving it was not asked for and is not
+ * verifiable here: no league in this repository's fixtures or seeds starts one,
+ * so there is no in-product convention to read. Convention elsewhere would put
+ * K beside DEF at the end; adding `'K'` to this list is the whole change if
+ * that is what the product wants, and it is one line rather than a guess made
+ * on the way past.
+ */
+export const TRAILING_FILTER_POSITIONS = ['DEF'];
+
+/**
+ * The position chips a filter row draws, in the order it draws them.
+ *
+ * `orderPositions` answers "what order are positions read in" and is used for
+ * roster summaries too, where there is no FLX and no chip. This answers the
+ * narrower question a *filter row* asks, which has one more rule in it:
+ *
+ *   `QB → RB → WR → TE → FLX → DEF`
+ *
+ * FLX after its parts, for the reason it has always been last — it is a view
+ * spanning RB, WR and TE, not a fourth position, and a chip that reads like one
+ * sitting among the real ones invites exactly the confusion this filter must
+ * not cause. DEF after FLX because a defence is not a player and belongs at the
+ * end of the row, which is where every board a drafter has ever used puts it.
+ *
+ * Shared by the draft board, the players list and the compare picker, so the
+ * same chips cannot appear in two different orders on two screens. A league
+ * that starts no defence — Best Ball, most of them — is unaffected: the chip is
+ * not drawn at all, because a filter that can only ever return nothing is worse
+ * than no filter.
+ */
+export function orderFilterChips(positions: Iterable<string>, offersFlex?: boolean): string[] {
+  const ordered = orderPositions(positions);
+  const trailing = ordered.filter((p) => TRAILING_FILTER_POSITIONS.includes(p));
+  const leading = ordered.filter((p) => !TRAILING_FILTER_POSITIONS.includes(p));
+  const flex = (offersFlex ?? offersFlexFilter(ordered)) ? [FLX_FILTER] : [];
+  return [...leading, ...flex, ...trailing];
+}
+
 /** Every distinct slot this league starts, with what each accepts. */
 export function slotsOf(shape: RosterShape): { slot: string; accepts: string[] }[] {
   const out: { slot: string; accepts: string[] }[] = [];

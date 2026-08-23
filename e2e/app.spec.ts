@@ -1067,11 +1067,17 @@ test.describe('draft room', () => {
       /*
        * Read from the accessible name rather than the printed text. The chip
        * has a short spelling on the narrow phones — four labelled numbers and
-       * nineteen characters do not share 315px — and what it *means* is the
-       * part that may not change with the viewport.
+       * the full sentence do not share 315px — and what it *means* is the part
+       * that may not change with the viewport. The name is the whole sentence
+       * rather than the chip's own words, which matters more since the chip
+       * stopped printing "cliff": the count is what a reader sees and this is
+       * where a listener gets what the count is a count of.
        */
       for (const tag of await tags.all()) {
-        await expect(tag).toHaveAttribute('aria-label', /^Tier cliff, (last 1|2 left)$/);
+        await expect(tag).toHaveAttribute(
+          'aria-label',
+          /^(The last \w+ in the best group left on the board|Two \w+s left in the best group on the board)$/,
+        );
         await expect(tag).toHaveAttribute('data-remaining', /^[12]$/);
       }
 

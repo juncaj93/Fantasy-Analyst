@@ -55,11 +55,11 @@ const warned = (players: WarnablePlayer[]) =>
 
 describe('the tier-cliff warning', () => {
   it('marks the last player in the active tier', () => {
-    expect(tierCliffWarning(tier({ tierSize: 1 }))?.label).toBe('Tier cliff · last 1');
+    expect(tierCliffWarning(tier({ tierSize: 1 }))?.label).toBe('Tier · last 1');
   });
 
   it('marks both when two are left', () => {
-    expect(tierCliffWarning(tier({ tierSize: 2 }))?.label).toBe('Tier cliff · 2 left');
+    expect(tierCliffWarning(tier({ tierSize: 2 }))?.label).toBe('Tier · 2 left');
   });
 
   it('counts players remaining, never picks', () => {
@@ -70,7 +70,42 @@ describe('the tier-cliff warning', () => {
       expect(warning.label).not.toMatch(/away/);
       expect(warning.remaining).toBe(size);
       expect(warning.label).toContain(String(size));
-      expect(warning.short).toBe(`Cliff · ${size}`);
+      expect(warning.short).toBe(`Tier · ${size}`);
+    }
+  });
+
+  /**
+   * The chip no longer says "cliff", and the count is the whole message.
+   *
+   * The rule is unchanged — this is still the active tier down to its last one
+   * or two, detected by `tierCliffWarning` over the same tier model — but the
+   * word was doing the count's job in a more alarming register, on a chip that
+   * sits beside four numbers the reader came for. The count is dynamic in both
+   * spellings, so a rule that one day warns at three cannot leave a chip
+   * claiming two.
+   */
+  it('says the count without the adjective, in both spellings', () => {
+    for (const size of [1, 2]) {
+      const warning = tierCliffWarning(tier({ tierSize: size }))!;
+      for (const spelling of [warning.label, warning.short]) {
+        expect(spelling, `"${spelling}" still says cliff`).not.toMatch(/cliff/i);
+        expect(spelling).toMatch(/^Tier · /);
+        expect(spelling).toContain(String(size));
+      }
+    }
+  });
+
+  /**
+   * ...and the short spelling is never longer than the full one, which is the
+   * only thing the narrow-width rule in the stylesheet actually needs of it.
+   */
+  it('keeps the narrow spelling shorter than the wide one', () => {
+    for (const size of [1, 2]) {
+      const warning = tierCliffWarning(tier({ tierSize: size }))!;
+      expect(warning.short.length).toBeLessThanOrEqual(warning.label.length);
+      // Both are shorter than the nineteen characters the stylesheet's widths
+      // were measured against, so those measurements still hold.
+      expect(warning.label.length).toBeLessThanOrEqual(19);
     }
   });
 
@@ -104,7 +139,7 @@ describe('the tier-cliff warning', () => {
    */
   it('marks a lone player above an ordinary boundary, not only above an alarm', () => {
     const ordinary = tier({ tierSize: 1, tierEndsAtBoundary: true, tierEndsAtCliff: false });
-    expect(tierCliffWarning(ordinary)?.label).toBe('Tier cliff · last 1');
+    expect(tierCliffWarning(ordinary)?.label).toBe('Tier · last 1');
   });
 
   it('says nothing when the board ran out rather than the tier', () => {
@@ -137,24 +172,24 @@ describe('the reported quarterback board', () => {
   const qb = (available: number[]) => board('QB', available, NAMES);
 
   it('warns the lone player in the best tier left, and nobody else', () => {
-    expect(warned(qb(FULL))).toEqual(['top: Tier cliff · last 1']);
+    expect(warned(qb(FULL))).toEqual(['top: Tier · last 1']);
   });
 
   it('promotes the next tier once he is drafted, and warns both of them', () => {
     expect(warned(qb(FULL.slice(1)))).toEqual([
-      'second-a: Tier cliff · 2 left',
-      'second-b: Tier cliff · 2 left',
+      'second-a: Tier · 2 left',
+      'second-b: Tier · 2 left',
     ]);
   });
 
   it('counts down to the last of that tier', () => {
     // 63.4 drafted; 65.8 alone at the top of the position.
-    expect(warned(qb(FULL.filter((a) => a !== 55.3 && a !== 63.4)))).toEqual(['second-b: Tier cliff · last 1']);
+    expect(warned(qb(FULL.filter((a) => a !== 55.3 && a !== 63.4)))).toEqual(['second-b: Tier · last 1']);
   });
 
   it('promotes again when that tier is exhausted', () => {
     const left = FULL.filter((a) => a > 70);
-    expect(warned(qb(left))).toEqual(['third-a: Tier cliff · 2 left', 'third-b: Tier cliff · 2 left']);
+    expect(warned(qb(left))).toEqual(['third-a: Tier · 2 left', 'third-b: Tier · 2 left']);
   });
 
   it('says nothing at all while the best tier still has three in it', () => {
@@ -175,15 +210,15 @@ describe('drafting through a position', () => {
 
   it('starts with the singleton top tier warned alone', () => {
     expect(board('WR', LADDER).map((p) => p.tier.tierIndex)).toEqual([0, 1, 1, 2, 2]);
-    expect(at(LADDER)).toEqual(['A: Tier cliff · last 1']);
+    expect(at(LADDER)).toEqual(['A: Tier · last 1']);
   });
 
   it('warns both of the next tier once A is gone', () => {
-    expect(at([40, 42, 80, 82])).toEqual(['B: Tier cliff · 2 left', 'C: Tier cliff · 2 left']);
+    expect(at([40, 42, 80, 82])).toEqual(['B: Tier · 2 left', 'C: Tier · 2 left']);
   });
 
   it('warns the survivor once B is gone', () => {
-    expect(at([42, 80, 82])).toEqual(['C: Tier cliff · last 1']);
+    expect(at([42, 80, 82])).toEqual(['C: Tier · last 1']);
   });
 
   it('promotes the last tier once C is gone — and it has nothing below it', () => {
@@ -207,11 +242,11 @@ describe('the three-player threshold', () => {
   });
 
   it('speaks the moment there are two', () => {
-    expect(at([12, 14])).toEqual(['B: Tier cliff · 2 left', 'C: Tier cliff · 2 left']);
+    expect(at([12, 14])).toEqual(['B: Tier · 2 left', 'C: Tier · 2 left']);
   });
 
   it('and again at one', () => {
-    expect(at([14])).toEqual(['C: Tier cliff · last 1']);
+    expect(at([14])).toEqual(['C: Tier · last 1']);
   });
 });
 
@@ -245,9 +280,9 @@ describe('positions are independent', () => {
       ...board('WR', [40, 41, 42, 43, 70, 71], { 40: 'wr-a', 41: 'wr-b', 42: 'wr-c', 43: 'wr-d' }),
     ];
     expect(warned(players)).toEqual([
-      'qb-top: Tier cliff · last 1',
-      'te-a: Tier cliff · 2 left',
-      'te-b: Tier cliff · 2 left',
+      'qb-top: Tier · last 1',
+      'te-a: Tier · 2 left',
+      'te-b: Tier · 2 left',
     ]);
   });
 
@@ -308,7 +343,7 @@ describe('the regressions this rule must not allow back', () => {
   it('keeps a two-player second tier quiet while one player holds the first', () => {
     const players = board('QB', QB, { 55.3: 'top', 63.4: 'b', 65.8: 'c' });
     expect(players.find((p) => p.playerId === 'b')!.tier.tierSize).toBe(2);
-    expect(warned(players)).toEqual(['top: Tier cliff · last 1']);
+    expect(warned(players)).toEqual(['top: Tier · last 1']);
   });
 
   /** Mutation: restore the `away` copy. */
@@ -317,14 +352,14 @@ describe('the regressions this rule must not allow back', () => {
       const warning = tierCliffWarning(tier({ tierSize: size }))!;
       expect(`${warning.label} ${warning.short}`).not.toMatch(/away/i);
     }
-    expect(tierCliffWarning(tier({ tierSize: 1 }))!.label).toBe('Tier cliff · last 1');
-    expect(tierCliffWarning(tier({ tierSize: 2 }))!.label).toBe('Tier cliff · 2 left');
+    expect(tierCliffWarning(tier({ tierSize: 1 }))!.label).toBe('Tier · last 1');
+    expect(tierCliffWarning(tier({ tierSize: 2 }))!.label).toBe('Tier · 2 left');
   });
 
   /** Mutation: warn only the first of a two-player tier. */
   it('warns both members of a two-player active tier, not one', () => {
     const players = board('QB', QB.slice(1), { 63.4: 'b', 65.8: 'c' });
-    expect(warned(players)).toEqual(['b: Tier cliff · 2 left', 'c: Tier cliff · 2 left']);
+    expect(warned(players)).toEqual(['b: Tier · 2 left', 'c: Tier · 2 left']);
   });
 
   /** Mutation: raise the threshold to three. */

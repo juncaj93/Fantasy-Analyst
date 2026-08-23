@@ -118,6 +118,50 @@ test.describe('the compact row shows market consequence', () => {
     expect(tones.size, `every delta was ${[...tones]}`).toBeGreaterThan(1);
   });
 
+  /**
+   * The colour, which is a threshold on the printed number rather than on its
+   * sign.
+   *
+   * `+10` or lower is fair, `+11` to `+15` steep, above `+15` costly. Read off
+   * the rendered rows so the band the stylesheet paints and the digits the
+   * reader sees cannot come apart — a column that computed its colour from the
+   * raw ADP while printing the delta would pass every unit test and be wrong on
+   * every row.
+   */
+  test('bands the delta by how much the reach costs, not by its sign', async ({ page }) => {
+    await openDraft(page);
+    const cells = await page
+      .locator('[data-testid="adp-metric"] strong.delta, [data-testid="dog-metric"] strong.delta')
+      .evaluateAll((nodes) =>
+        nodes.map((n) => ({
+          band: n.getAttribute('data-band'),
+          picks: Number((n.textContent ?? '').trim()),
+          colour: getComputedStyle(n).color,
+        })),
+      );
+    expect(cells.length, 'no delta was actually rendered').toBeGreaterThan(4);
+
+    for (const { band, picks } of cells) {
+      expect(Number.isInteger(picks), `"${picks}" is not a whole number of picks`).toBe(true);
+      if (picks <= 10) expect(band, `${picks} should be fair`).toBe('fair');
+      else if (picks <= 15) expect(band, `${picks} should be steep`).toBe('steep');
+      else expect(band, `${picks} should be costly`).toBe('costly');
+    }
+
+    // One colour per band, and the bands that are on screen really do differ:
+    // a stylesheet that painted all three the same would satisfy the loop above.
+    const byBand = new Map<string, Set<string>>();
+    for (const { band, colour } of cells) {
+      if (!band) continue;
+      byBand.set(band, (byBand.get(band) ?? new Set()).add(colour));
+    }
+    for (const [band, colours] of byBand) {
+      expect(colours.size, `${band} was painted ${colours.size} different colours`).toBe(1);
+    }
+    const distinct = new Set([...byBand.values()].map((set) => [...set][0]));
+    expect(distinct.size, 'every band was painted the same colour').toBe(byBand.size);
+  });
+
   test('never fakes a delta for a market that has not priced him', async ({ page }) => {
     await openDraft(page);
     const unknowns = await page

@@ -2061,60 +2061,95 @@ body,
 }
 
 /*
- * `Tier cliff · 2 left`, tucked into the end of the metrics line.
+ * THE QUIET PILL, WHICH THE ROW'S TWO TAGS BOTH WEAR.
  *
- * Deliberately smaller and quieter than the numbers it sits beside: it
- * qualifies the row, it is not one of the four things the row is about. Amber
- * on its own tint, a small radius rather than a pill — a pill at this size
- * reads as a button — and no shadow. It never wraps: at the widths this app
- * supports it is either on the line or the card is too narrow for the board,
- * and the second has never happened.
+ * `Tier · 2 left` at the end of the metrics line, and `Q` / `OUT` beside the
+ * name. Both used to be a filled slab — a saturated background, inverted text
+ * and a shadow — standing 5.5:1 to 7.4:1 off the card they sat on. That is
+ * louder than the Score, which is the number the board is actually about, and
+ * a row where the annotation outshouts the reading is a row read in the wrong
+ * order.
+ *
+ * The slab existed for a real reason and the reason has expired. A chip painted
+ * in a hue can only ever be as visible as the card it lands on, and these land
+ * on six position tints; when the tints were a *wash* an amber chip on an amber
+ * receiver card lost its surface and its letters together. The wash is 9% now
+ * — `--pos-mix-draft`, "so the row is still white first" — so every card is
+ * within a couple of points of the list's own surface and there is no hue left
+ * to disappear into.
+ *
+ * So the pills stop carrying their own slab and go back to the app's own tag
+ * language — see `.tag`, `.tag-cliff`, `.tag-risky`: a tint, the hue as text, a
+ * hairline of the hue, a pill radius, no shadow. Measured on all six positions
+ * in both themes:
+ *
+ *   - the letters read 5.0:1 to 8.6:1 against the pill, and 5.5:1 to 7.9:1
+ *     against the *card* — so they are legible even where the tint is nearly
+ *     invisible, which the old white-on-slab text was not (1.02:1 to the card);
+ *   - the border stands 2.4:1 to 3.6:1 off the card, so the pill keeps a shape;
+ *   - the surface stands 1.03:1 to 1.17:1 off it, which is the whole point.
+ *
+ * `e2e/shell.spec.ts` measures all three on the running app rather than trusting
+ * this comment.
+ */
+.row-pill {
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+
+/*
+ * Neutral, because a count is not a warning.
+ *
+ * `Tier · 2 left` says how many are left in the best group still available. It
+ * is a fact about the board and it is worth seeing; it is not an alarm, and
+ * painting it red would put a warning colour on most of a thinning position and
+ * teach the reader to ignore the ones that are. The red-ish treatment below is
+ * reserved for a player who is actually not playing.
  */
 .player-row-cliff {
   justify-self: end;
   white-space: nowrap;
   font-size: 0.6rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.5;
-  padding: 0 4px;
+  padding: 0 6px;
   /* Reaches into the row's own right padding, which is decorative here and is
      worth three pixels to the line it is sharing. */
   margin-right: -3px;
-  border-radius: var(--radius-sm);
   /*
-   * Slate, and for the same reason the `Q` badge is slate.
+   * ...and gives back the two pixels the hairline costs.
    *
-   * This was amber on an amber tint, which is the mistake this app has now made
-   * twice. Measured, it was worse than it looked: the pale warning tint sat
-   * within 1.1:1 of *every* position card, so the chip's surface was invisible
-   * on all of them and only its text was doing any work — and on a receiver,
-   * washed in almost exactly that hue, the text went too.
-   *
-   * A chip painted in a hue can only ever be as visible as the card it lands
-   * on, and this one lands on six different ones. Slate is the only thing on
-   * this screen that is nobody's colour — not a position, not a semantic state
-   * — and it inverts between the themes, so the chip is dark on the pale tints
-   * and light on the dark ones. See `--status-neutral`.
-   *
-   * The warning is not carried by colour anyway: it says the word and the
-   * count. What the colour has to do is make sure the reader sees it at all.
+   * This chip had no border before and the metrics line is sized to it, so a
+   * real one would make a warned card a pixel taller than its neighbours —
+   * cliffs arrive in runs, so that is a visible stutter wherever a position is
+   * thinning out, and it is the exact thing `.player-row-bottom` exists to
+   * prevent. The `Q` badge beside the name needs none of this: it already
+   * carried a transparent border, so giving that border a colour costs nothing.
    */
-  background: var(--status-neutral);
-  color: var(--on-status-neutral);
-  box-shadow: var(--shadow-1);
+  margin-block: -1px;
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+  border-color: color-mix(in srgb, var(--text-dim) 55%, transparent);
 }
 
 /*
  * Which spelling of the warning this width can afford.
  *
  * Measured rather than chosen: the four metrics want up to 244px when a player
- * has a three-digit ADP and a three-digit Val, and the full nineteen-character
- * chip is 95px. Both spellings the chip can print — `Tier cliff · 2 left` and
- * `Tier cliff · last 1` — are that same nineteen characters, and neither
- * carries a `w`, so the measurement below is an upper bound for both. 390px of phone leaves 345px for the pair and fits; 375px
- * leaves 330px and does not. Below that the chip drops to `Cliff · 2`, which
- * is 50px and leaves the numbers room to spare on every board this app draws.
+ * has a three-digit ADP and a three-digit Val, and the full chip used to be 95px
+ * at nineteen characters — `Tier cliff · 2 left`. 390px of phone left 345px for
+ * the pair and fitted; 375px left 330px and did not, so below that the chip
+ * dropped to a short spelling.
+ *
+ * Both spellings got shorter when `cliff` came out of them: `Tier · 2 left` and
+ * `Tier · last 1` are thirteen characters against nineteen, and `Tier · 2`
+ * against `Cliff · 2`. Neither carries a `w`, so the old measurement is still an
+ * upper bound for both and the widths this was fitted at still hold with room
+ * to spare. The narrow rule is kept rather than deleted because the numbers
+ * beside it are the ones that must not give, and a chip that has already been
+ * measured against them is worth keeping measured.
  *
  * The sentence is not lost — `aria-label` and `title` carry it at every width,
  * so nothing that reads rather than looks ever sees the short form.
@@ -2348,16 +2383,39 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-.metric strong.delta-reach {
-  color: var(--neg);
-}
-
-.metric strong.delta-value {
+/*
+ * The colour is the *size* of the cost, not its sign.
+ *
+ * Every `+` used to be red and every `-` green, which sounds right and read
+ * wrong: most of a live board sits within a handful of picks of one market or
+ * the other, so a board of forty rows came up half red, and red that often is
+ * red the reader stops seeing. The colour now answers "is this reach worth
+ * stopping for" — `+10` or lower is not, `+11` to `+15` is worth a look, above
+ * `+15` is a real reach — computed from the number the row prints, so the
+ * colour and the digits are about the same quantity.
+ *
+ * `fair` takes the green and covers value as well as a small reach, which makes
+ * green the resting state of the column and the two warm bands the thing the
+ * eye is left to find. The three tokens are the app's own — the same green,
+ * amber and red as a Score and a tally — so none of it has to be learned.
+ *
+ * Nothing here is the only cue. The sign and the number are printed on every
+ * row and the title says the sentence, which is what a reader in greyscale, a
+ * reader who cannot separate the hues, and a screen reader all get.
+ *
+ * See `web/marketDelta.ts` for the thresholds and `MarketDeltaBand` for why the
+ * band is a separate thing from the tone.
+ */
+.metric strong.delta[data-band='fair'] {
   color: var(--pos);
 }
 
-.metric strong.delta-even {
-  color: var(--text-dim);
+.metric strong.delta[data-band='steep'] {
+  color: var(--warn);
+}
+
+.metric strong.delta[data-band='costly'] {
+  color: var(--neg);
 }
 
 /*
@@ -2876,57 +2934,55 @@ body,
  *
  * Sized to two or three characters and no more. The three tones are the three
  * decisions a drafter makes about a status — watch it, worry about it, he is
- * not playing — and each carries its word in the title and the accessible name.
+ * not playing — and each carries its word in the title and the accessible name,
+ * so the letter and not the colour is what says which.
+ *
+ * The quiet-pill geometry is in `.row-pill`, shared with the tier chip, and the
+ * note there explains why these stopped being filled slabs.
  */
 .injury-tag {
   flex: 0 0 auto;
   font-size: 0.58rem;
-  font-weight: 800;
+  font-weight: 750;
   letter-spacing: 0.03em;
   line-height: 1;
-  padding: 3px 5px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+  padding: 3px 6px;
   white-space: nowrap;
 }
 
 /*
- * Questionable: worth seeing, not worth alarm — and legible on every card.
+ * THREE SEVERITIES, AND ONLY ONE OF THEM IS RED.
  *
- * This was amber text on an amber tint, which is invisible on a receiver. The
- * WR cards are washed in almost exactly that hue, and `Q` is the tag that
- * appears on more players than any other, so the one status a reader sees most
- * was the one disappearing most. Nothing amber can fix that: a chip painted in
- * a hue can only ever be as visible as the card it lands on.
+ * `Q` is on more players than every other status combined. A board where the
+ * commonest tag is the loudest one is a board where the loudest thing means
+ * nothing, so Questionable is deliberately the neutral pill — the same one the
+ * tier count wears. It means "watch him", and watching him is not an emergency.
  *
- * So it stops being amber. Slate is nobody's colour here — not a position, not
- * a semantic state — and it inverts between the themes, so the chip is dark on
- * the pale tints and light on the dark ones. It cannot blend with any of the
- * six, and it stays the quietest of the three severities, which is right: this
- * is the one that means "watch him", not "he is not playing".
+ * Doubtful is amber, because it usually means no. Out, IR, PUP and suspended
+ * are the red-ish one, because he is not playing and that is the only status on
+ * this list that ends a decision rather than qualifying it.
  *
- * The three now differ in shape as well as colour — slate, amber, red — and the
- * letter still says which is which, so none of it rests on colour alone.
+ * The three differ in hue *and* in letter, and the letter is the carrier: `Q`,
+ * `D`, `OUT`, `IR`, `PUP`, `SUS`, each with its full word in `title` and in the
+ * accessible name. Nothing here rests on colour alone, which is what lets the
+ * colour be this quiet.
  */
 .injury-caution {
-  color: var(--on-status-neutral);
-  background: var(--status-neutral);
-  border-color: transparent;
-  box-shadow: var(--shadow-1);
+  color: var(--text-dim);
+  background: var(--surface-sunken);
+  border-color: color-mix(in srgb, var(--text-dim) 55%, transparent);
 }
 
-/* Doubtful: the same hue, filled, because it usually means no. */
 .injury-serious {
-  color: var(--on-accent);
-  background: var(--warn);
-  box-shadow: var(--shadow-1);
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
 }
 
-/* Out, IR, PUP, suspended: he is not playing. */
 .injury-out {
-  color: var(--on-accent);
-  background: var(--neg);
-  box-shadow: var(--shadow-1);
+  color: var(--neg);
+  background: var(--neg-tint);
+  border-color: color-mix(in srgb, var(--neg) 55%, transparent);
 }
 
 /*
@@ -7044,11 +7100,13 @@ div.matchup-result {
  * On a DOG board the warning gives before the numbers do.
  *
  * That order is the card's own, written down long before this: gaps first, then
- * the chip, then type, and nothing ever drops a metric. `Tier cliff · 2 left`
- * is nineteen characters and `Cliff · 2` is nine, and the ten it saves are
- * exactly what a fifth number needs on a 390px phone. The full spelling still
- * appears on anything wider, and the accessible name is the whole sentence at
- * every width — see `.player-row-cliff`, where that contract lives.
+ * the chip, then type, and nothing ever drops a metric. `Tier · 2 left` is
+ * thirteen characters and `Tier · 2` is eight, and the five it saves still
+ * cover what a fifth number needs on a 390px phone — the measurement was taken
+ * against the nineteen-character spelling this replaced, so the margin has only
+ * grown. The full spelling still appears on anything wider, and the accessible
+ * name is the whole sentence at every width — see `.player-row-cliff`, where
+ * that contract lives.
  */
 @media (max-width: 480px) {
   [data-testid='board-list'][data-dog='yes'] .cliff-full {

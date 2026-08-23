@@ -82,8 +82,15 @@ export interface DraftBoardSources {
   evidence: {
     getSignals(playerIds: string[]): Promise<Map<string, PlayerSignal>>;
   };
-  /** The user's own hearts and stars, for every player who has one. */
-  flags(): Promise<Map<string, BoardPlayerFlag>>;
+  /**
+   * The user's own hearts and stars, for every player carrying one.
+   *
+   * Takes the draft because half of it is draft-scoped and half of it is not:
+   * My Guy is an opinion about a player and is global, the ★ queue belongs to
+   * this draft and to no other. The source composes the two; a board cannot ask
+   * for "the queue" without saying whose. See `repos/draftQueue.ts`.
+   */
+  flags(draftId: string): Promise<Map<string, BoardPlayerFlag>>;
   /** Season-long market lines for the scored pool, from the newest snapshot. */
   /**
    * Imported preseason projections for these players, under this league's own
@@ -159,7 +166,9 @@ export interface BoardAdpValue {
 }
 
 export interface BoardPlayerFlag {
+  /** My Guy, global: he is still your guy in next year's league. */
   level: MyGuyLevel;
+  /** Starred **in this draft**. Never carried in from another one. */
   queued: boolean;
   /**
    * Where the reader dragged him in their own queue, sparsely ranked.
@@ -630,10 +639,14 @@ export async function buildDraftBoard(
    *
    * Read before the pool is cut rather than after: a player you queued in the
    * eleventh round is exactly the one you want the filter to surface, and
-   * scoring only the top of the board would hide him. The flag table is a
-   * shortlist by nature, so reading all of it costs nothing.
+   * scoring only the top of the board would hide him. Both marks are shortlists
+   * by nature, so reading all of them costs nothing.
+   *
+   * Scoped to this draft, which is the whole of the queue's correctness: the ★
+   * list belongs to the draft it was written in, and `draftId` is the only way
+   * to ask for it.
    */
-  const allFlags = await sources.flags();
+  const allFlags = await sources.flags(draftId);
   const queuedOnly = opts.queuedOnly === true;
   // Only positions this league starts. A league with no kicker slot should
   // never be shown a kicker, however Sleeper ranks them.

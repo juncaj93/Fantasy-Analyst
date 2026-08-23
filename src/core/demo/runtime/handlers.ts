@@ -590,7 +590,6 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
       movement,
       signal: data.signals.get(row.player.id) ?? null,
       myGuy: myGuy(data.flags.get(row.player.id)?.level ?? 0),
-      queued: data.flags.get(row.player.id)?.queued ?? false,
       ...(availabilityLeagueId
         ? { availability: availability.get(row.player.id) ?? ('available' as const) }
         : {}),
@@ -601,7 +600,7 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
 function playerFile(data: ScenarioData, playerId: string): DemoResponse {
   const player = data.players.find((p) => p.id === playerId);
   if (!player) return fail('player not found', 404);
-  const flag = data.flags.get(playerId) ?? { level: 0 as const, queued: false };
+  const flag = data.flags.get(playerId) ?? { level: 0 as const };
   return ok({
     player: {
       id: player.id,
@@ -623,8 +622,9 @@ function playerFile(data: ScenarioData, playerId: string): DemoResponse {
      */
     evidence: [],
     props: [],
+    // No `queued`: a queue belongs to a draft and a player file is not in one.
+    // The live route dropped the field for the same reason — see `app.ts`.
     myGuy: myGuy(flag.level),
-    queued: flag.queued,
   });
 }
 

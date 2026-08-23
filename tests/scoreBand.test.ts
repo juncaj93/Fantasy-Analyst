@@ -46,6 +46,44 @@ describe('the absolute anchors', () => {
   });
 
   /**
+   * The five numbers the thresholds are stated at, walked one at a time.
+   *
+   * Green from 80 to 100, amber from 60 to 79, red below 60 — and the boundary
+   * is *inclusive at the floor*, which is the half of a threshold that never
+   * gets written down and is exactly the half that gets it wrong. 60 is amber,
+   * not red; 80 is green, not amber.
+   *
+   * Read against an empty pool, which is what makes this a test of the anchors
+   * rather than of the blend: with fewer than four comparable Scores there is
+   * no distribution to have a shape, so the absolute band is the whole answer.
+   * The pool's contribution is bounded to one band either way and is tested on
+   * its own below — a 59 at the clear top of a spread board is drawn amber, and
+   * that is the board saying something true about a weak pool rather than the
+   * threshold moving.
+   */
+  it('answers the boundary at 59, 60, 79, 80 and 100', () => {
+    expect(scoreBand(59, [])).toBe('weak');
+    expect(scoreBand(60, [])).toBe('fair');
+    expect(scoreBand(79, [])).toBe('fair');
+    expect(scoreBand(80, [])).toBe('strong');
+    expect(scoreBand(100, [])).toBe('strong');
+
+    // The same five against a pool with no shape, because "whatever the board
+    // is doing" has to include a board that is doing nothing.
+    expect(scoreBand(59, FLAT)).toBe('weak');
+    expect(scoreBand(60, FLAT)).toBe('fair');
+    expect(scoreBand(79, FLAT)).toBe('fair');
+    expect(scoreBand(80, FLAT)).toBe('strong');
+    expect(scoreBand(100, FLAT)).toBe('strong');
+  });
+
+  /** The floors are named once, so the thresholds live in one place. */
+  it('puts the two floors at 80 and 60', () => {
+    expect(STRONG_FLOOR).toBe(80);
+    expect(FAIR_FLOOR).toBe(60);
+  });
+
+  /**
    * An unpriced player has no Score, and no Score is not a bad one.
    *
    * The board already draws him a dash rather than a number — see the note on

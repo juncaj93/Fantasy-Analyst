@@ -28,6 +28,18 @@
  *
  * Ranks are compacted back to a clean ladder only when they have to be — see
  * `needsCompaction`.
+ *
+ * ## One queue per draft
+ *
+ * Everything here operates on the entries it is handed and has no idea which
+ * draft they came from, which is the right ignorance: the *scoping* is a fact
+ * about storage, and it lives in `server/repos/draftQueue.ts`, where every read
+ * and write takes a draft id. A `reconcileQueue` used to sit at the bottom of
+ * this file, repairing a stored order against a separate list of who was
+ * actually starred. It is gone with the schema that needed it — membership and
+ * rank were two nullable columns that could disagree, and a `draft_queue` row
+ * carries a NOT NULL rank and *is* the membership, so there is nothing left to
+ * reconcile.
  */
 
 /** The distance between adjacent ranks in a freshly laid-out queue. */
@@ -188,35 +200,6 @@ export function removeFromQueue(entries: readonly QueueEntry[], removed: Iterabl
   return [...entries]
     .filter((e) => !gone.has(e.playerId))
     .sort((a, b) => a.order - b.order || a.playerId.localeCompare(b.playerId));
-}
-
-/**
- * Reconcile a stored order with the players actually in the queue right now.
- *
- * Two ways they drift apart, and both are ordinary rather than exceptional: a
- * player was queued somewhere that did not assign a rank (an older client, a
- * direct API call), or a player left the queue while this client was not
- * looking. Anything with a rank keeps it and stays where it is; anything
- * without one is appended, in a stable order, after everything that has one.
- */
-export function reconcileQueue(
-  entries: readonly QueueEntry[],
-  queuedNow: readonly string[],
-): QueueEntry[] {
-  const byId = new Map(entries.map((e) => [e.playerId, e]));
-  const known = queuedNow
-    .filter((id) => byId.has(id))
-    .map((id) => byId.get(id)!)
-    .sort((a, b) => a.order - b.order || a.playerId.localeCompare(b.playerId));
-
-  const unranked = queuedNow.filter((id) => !byId.has(id)).sort();
-  let next = known.length > 0 ? Math.max(...known.map((e) => e.order)) : 0;
-  const appended = unranked.map((playerId) => {
-    next += QUEUE_STEP;
-    return { playerId, order: next };
-  });
-
-  return [...known, ...appended];
 }
 
 function clamp(v: number, lo: number, hi: number): number {
