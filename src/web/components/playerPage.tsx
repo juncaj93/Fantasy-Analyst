@@ -43,7 +43,14 @@ import {
   formatDate,
 } from './common.tsx';
 import { ListGroup, ListRow, PushScreen, SegmentedControl, Sheet, SkeletonRows } from './native.tsx';
-import { InjuryDetail, LastSeasonLine, NewsletterTakeaway, ProfileFlags, SeasonOutlook } from './playerDetail.tsx';
+import {
+  InjuryDetail,
+  LastSeasonLine,
+  NewsletterTakeaway,
+  PreseasonProjectionLine,
+  ProfileFlags,
+  SeasonOutlook,
+} from './playerDetail.tsx';
 
 /** The whole of this app's own record of one player. */
 export interface PlayerFile {
@@ -464,6 +471,7 @@ function Overview({
     <>
       <NewsletterTakeaway detail={detail} />
       <LastSeasonLine detail={detail} failed={detailFailed} position={position} />
+      <PreseasonProjectionLine detail={detail} />
       <InjuryDetail detail={detail} />
       <ProfileFlags detail={detail} />
 

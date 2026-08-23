@@ -69,7 +69,7 @@ function row(
 describe('the three modes order by what they name', () => {
   it('defaults to Score', () => {
     expect(DEFAULT_SORT_MODE).toBe('score');
-    expect(SORT_MODES).toEqual(['score', 'adp', 'dog']);
+    expect(SORT_MODES).toEqual(['score', 'adp', 'dog', 'pts']);
   });
 
   it('Score uses the full composite, in the engine’s own order', () => {

@@ -614,6 +614,28 @@ function standing(value: number, sample: number[]): number {
 }
 
 /**
+ * Where a value sits among its peers, clamped to [-1, 1].
+ *
+ * Exported so that a second market-derived expectation can be put on **exactly**
+ * this scale rather than on one that merely resembles it. The two are
+ * alternatives for the same slot in the ranking — a raw season baseline where
+ * the lines exist, an imported preseason projection where they do not — and
+ * "the same scale" has to mean the same arithmetic, or the board would shift
+ * under a player for no reason but which source answered.
+ *
+ * Median-centred, so an average player scores zero and a player nobody priced
+ * contributes exactly what an average one does. That is the property the whole
+ * missing-is-not-zero rule rests on.
+ *
+ * Null below `MIN_COMPARABLE_PEERS`: a standing among two people is not a
+ * standing.
+ */
+export function positionalStanding(value: number, peers: number[]): number | null {
+  if (peers.length < MIN_COMPARABLE_PEERS) return null;
+  return round3(clamp(standing(value, peers), -1, 1));
+}
+
+/**
  * What the two markets each think of him, on one scale, for the expanded card.
  *
  * The scoring market and the draft market answer different questions — "how

@@ -273,6 +273,15 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
   /** The one-line form of it, e.g. "1,085 scrim yd · 8.5 TD". */
   marketHeadline: string | null;
   /**
+   * The imported preseason projection, in this league's own points.
+   *
+   * Historical by nature: what a market-derived model expected of him before
+   * the season, under the scoring its snapshot was captured with. Optional so a
+   * client on an older deployment simply shows nothing; null when no snapshot
+   * covers him, which the row draws as a dash rather than a zero.
+   */
+  preseasonPoints?: number | null;
+  /**
    * The same line taken apart, so the expanded card can show its workings.
    *
    * Optional so a client running against an older deployment simply shows the
@@ -409,6 +418,19 @@ export interface PlayerDetail {
   } | null;
   /** Why there is no outlook, when there is none. */
   outlookNote: string | null;
+  /**
+   * What a market-derived model projected for his season, before it began.
+   *
+   * Optional so an older deployment simply shows nothing. Always shown with its
+   * date and the scoring it was captured under: after week one the number is
+   * history, and a bare figure would read as a current expectation.
+   */
+  preseasonProjection?: {
+    points: number;
+    label: string;
+    scoringLabel: string;
+    capturedAt: string;
+  } | null;
   /**
    * `2025: missed 9 games with a toe injury` — one line about last season, or
    * a label like `Major injury history: ACL` when only the outlook named one.

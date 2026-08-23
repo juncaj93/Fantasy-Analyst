@@ -14,6 +14,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   InjuryDetail,
   LastSeasonLine,
+  PreseasonProjectionLine,
   NewsletterTakeaway,
   ProfileFlags,
   SeasonOutlook,
@@ -99,6 +100,7 @@ import {
   SORT_LABELS,
   SORT_MODES,
   hasDogCoverage,
+  hasPreseasonPointsCoverage,
   orderBoardRows,
   type SortMode,
 } from '../../core/draft/boardSort.ts';
@@ -774,6 +776,15 @@ export function DraftScreen({
    * available is the 41st best available whether or not you found him by
    * typing.
    */
+  /*
+   * Whether a preseason projection covers this board at all.
+   *
+   * Read from the whole board rather than per row, so the `PTS` column either
+   * exists for every row or for none. A column that appeared and vanished down
+   * the list would make a missing projection look like a rendering fault
+   * instead of the gap in a dataset that it is.
+   */
+  const ptsPresent = hasPreseasonPointsCoverage(board.recommendations);
   const rows = withTierDividers(ordered, isSinglePosition && !searching && sort === DEFAULT_SORT_MODE);
   const visible = searching ? rankByQuery(rows, query, (item) => item.rec.name) : rows;
 
@@ -933,6 +944,7 @@ export function DraftScreen({
                 honest fallback rather than assuming either way.
               */
               dogAvailable={board.dogState?.available ?? hasDogCoverage(board.recommendations)}
+              ptsAvailable={ptsPresent}
             />
           </span>
         }
@@ -1119,6 +1131,7 @@ export function DraftScreen({
                 levelRun={item.levelRun}
                 band={item.band}
                 showCliffProximity={!isSinglePosition}
+                ptsPresent={ptsPresent}
                 horizonPick={board.waitHorizonPick}
                 currentPick={board.currentPick}
                 marketSource={board.marketSource ?? null}
@@ -1367,11 +1380,14 @@ function SortControl({
   value,
   onChange,
   dogAvailable,
+  ptsAvailable,
   inactive,
 }: {
   value: SortMode;
   onChange: (mode: SortMode) => void;
   dogAvailable: boolean;
+  /** False when no imported projection covers this board under its scoring. */
+  ptsAvailable: boolean;
   /**
    * True in the ★ queue, where the reader's own order is what the list is in.
    *
@@ -1392,7 +1408,7 @@ function SortControl({
       data-inactive={inactive ? 'yes' : 'no'}
     >
       {SORT_MODES.map((mode) => {
-        const unavailable = mode === 'dog' && !dogAvailable;
+        const unavailable = (mode === 'dog' && !dogAvailable) || (mode === 'pts' && !ptsAvailable);
         return (
           <button
             key={mode}
@@ -1406,7 +1422,9 @@ function SortControl({
               inactive
                 ? `${SORT_DESCRIPTIONS[mode]}. Not applied in your queue, which stays in the order you set.`
                 : unavailable
-                  ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                  ? mode === 'dog'
+                    ? 'Sort by raw Underdog ADP. No Underdog ADP is currently available.'
+                    : 'Sort by preseason market projection points. No preseason projection has been imported for this league\u2019s scoring.'
                   : SORT_DESCRIPTIONS[mode]
             }
             onClick={() => onChange(mode)}
@@ -1782,6 +1800,7 @@ function RecommendationRow({
   rec,
   expanded,
   showCliffProximity,
+  ptsPresent,
   horizonPick,
   /**
    * The pick on the clock, straight from the board.
@@ -1812,6 +1831,8 @@ function RecommendationRow({
   expanded: boolean;
   /** Mixed-position boards tag the last of a tier; filtered ones draw the line. */
   showCliffProximity: boolean;
+  /** True when a preseason projection covers this board at all. */
+  ptsPresent: boolean;
   /** The pick survival is measured against — your next one after this. */
   horizonPick: number | null;
   /** The pick on the clock, which the market deltas are measured against. */
@@ -2095,6 +2116,7 @@ function RecommendationRow({
                 note={rec.marketDisagreement?.note ?? null}
               />
             )}
+            <PreseasonPointsMetric points={rec.preseasonPoints} present={ptsPresent} />
             <SurvivalMetric probability={rec.survivalProbability} horizonPick={horizonPick} />
           </div>
 
@@ -2312,6 +2334,7 @@ function DraftPlayerDetail({
       */}
       <div className="detail-foot">
         <LastSeasonLine detail={detail} failed={failed} position={rec.position} compact />
+        <PreseasonProjectionLine detail={detail} />
       </div>
     </div>
   );
@@ -2325,6 +2348,58 @@ function DraftPlayerDetail({
  * asking whether a player available now is available now is true of everybody.
  * It is named in the tooltip so nobody has to work out which pick was meant.
  */
+/**
+ * `PTS 292` — what a market-derived model projected for his season.
+ *
+ * Deliberately just the number and the label. The source count StartWho ships
+ * beside it (`5/5`) is not shown and never becomes a confidence badge: it says
+ * how many of somebody else's inputs agreed, which is a fact about their
+ * pipeline rather than about the player, and a coloured pill would give it
+ * authority the number has not earned.
+ *
+ * Unknown draws a dash rather than a zero, on the same rule as every other
+ * metric on this row: a player nobody projected has no projection, and zero
+ * would read as a projection of nothing.
+ *
+ * The accessible name carries the word "preseason", because after week one the
+ * abbreviation alone would let a historical number read as a current one.
+ */
+function PreseasonPointsMetric({
+  points,
+  /**
+   * Whether this board has a projection at all.
+   *
+   * Two different absences, and only one of them is worth a column. A board
+   * whose league has imported a snapshot shows `PTS —` for a player the
+   * snapshot does not name, because that is a real gap in a real dataset. A
+   * board with no snapshot has nothing to say about anybody, and printing a
+   * dash on every row would spend width on a permanent silence — on the same
+   * reasoning DOG already uses when Underdog has priced nobody.
+   */
+  present,
+}: {
+  points: number | null | undefined;
+  present: boolean;
+}) {
+  if (!present) return null;
+  if (points == null || !Number.isFinite(points)) {
+    return (
+      <span className="metric" data-testid="pts-metric">
+        PTS <Unknown what="preseason projection" />
+      </span>
+    );
+  }
+  const rounded = Math.round(points);
+  return (
+    <span className="metric" data-testid="pts-metric">
+      PTS{' '}
+      <strong title={`Preseason market projection, ${rounded} points`} aria-label={`Preseason market projection, ${rounded} points`}>
+        {rounded}
+      </strong>
+    </span>
+  );
+}
+
 function SurvivalMetric({ probability, horizonPick }: { probability: number | null; horizonPick: number | null }) {
   const band = survivalBand(probability);
   if (probability == null) {
