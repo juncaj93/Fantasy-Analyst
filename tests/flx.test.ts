@@ -183,18 +183,41 @@ describe('the order a filter row draws its chips in', () => {
   /**
    * The kicker question, answered rather than guessed at.
    *
-   * There is no K chip to order. `NON_PLAYING_SLOTS` drops a `K` roster slot
-   * before it can ever become a startable position — "the app has no opinion
-   * about them, so treating a kicker slot as a starting slot would produce a
-   * lineup row it could never fill" — so a league that starts a kicker draws
-   * exactly the same row as one that does not. Moving K was neither needed nor
-   * possible, and `TRAILING_FILTER_POSITIONS` is the one line that would change
-   * if kickers ever arrived.
+   * There is no K chip to order, whatever the rule says about one.
+   * `NON_PLAYING_SLOTS` drops a `K` roster slot before it can ever become a
+   * startable position — "the app has no opinion about them, so treating a
+   * kicker slot as a starting slot would produce a lineup row it could never
+   * fill" — so a league that starts a kicker draws exactly the same row as one
+   * that does not.
+   *
+   * The rule still names it, and that is deliberate: the answer to "where does
+   * a kicker go" is written down rather than left to be rediscovered the day
+   * kickers are modelled. Both halves are asserted here, because the inert one
+   * is the one somebody could delete believing it does nothing.
    */
   it('has no kicker chip to place, in a league that starts one', () => {
     expect(startablePositions(WITH_K_AND_DEF).has('K')).toBe(false);
     expect(orderFilterChips(startablePositions(WITH_K_AND_DEF))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX', 'DEF']);
-    expect(TRAILING_FILTER_POSITIONS).toEqual(['DEF']);
+    expect(TRAILING_FILTER_POSITIONS).toEqual(['K', 'DEF']);
+  });
+
+  /**
+   * ...and if one ever were startable, it would sit before the defence.
+   *
+   * Asserted on the helper directly rather than through a roster shape, since
+   * no roster shape can produce it. This is the line that stops the inert entry
+   * above from being a comment nobody has checked.
+   */
+  it('would draw a kicker after FLX and before the defence', () => {
+    expect(orderFilterChips(['DEF', 'K', 'QB', 'RB', 'WR', 'TE'])).toEqual([
+      'QB',
+      'RB',
+      'WR',
+      'TE',
+      'FLX',
+      'K',
+      'DEF',
+    ]);
   });
 
   it('honours a caller that has already been told whether FLX is offered', () => {

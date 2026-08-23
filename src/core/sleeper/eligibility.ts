@@ -203,23 +203,27 @@ export function orderPositions(positions: Iterable<string>): string[] {
 }
 
 /**
- * The positions a chip row draws *after* the FLX chip.
+ * The positions a chip row draws *after* the FLX chip, in the order it draws
+ * them.
  *
- * One entry, and it is deliberately not the whole "not flex-eligible" set: a
- * quarterback chip belongs where it has always been, at the front. This is the
- * defence, which every fantasy site in existence draws at the end of the row —
- * it is the one starting slot that is a team rather than a player, and a reader
- * scanning for a receiver should never have to read past it.
+ * Deliberately not the whole "not flex-eligible" set — a quarterback chip
+ * belongs where it has always been, at the front. These two are the positions a
+ * reader *browses occasionally* rather than compares: a kicker and a defence
+ * are each one slot filled once, usually against a schedule rather than against
+ * the rest of the pool. Sitting among the positions somebody is actually
+ * choosing between, they were something to read past on the way to FLX rather
+ * than something to reach, and every lineup page in the sport ends with them.
  *
- * **K is deliberately absent.** The kicker sits where `POSITION_ORDER` already
- * puts it, between TE and FLX, and moving it was not asked for and is not
- * verifiable here: no league in this repository's fixtures or seeds starts one,
- * so there is no in-product convention to read. Convention elsewhere would put
- * K beside DEF at the end; adding `'K'` to this list is the whole change if
- * that is what the product wants, and it is one line rather than a guess made
- * on the way past.
+ * Kicker before defence, which is the roster's own order.
+ *
+ * **The kicker entry is inert today, and kept anyway.** `NON_PLAYING_SLOTS`
+ * drops a `K` roster slot before it can become a startable position — "the app
+ * has no opinion about them" — so no chip row this app draws can contain one.
+ * It is here so the rule states where a kicker goes rather than leaving the
+ * next person to rediscover it, and so the day kickers are modelled the answer
+ * is already written down.
  */
-export const TRAILING_FILTER_POSITIONS = ['DEF'];
+export const TRAILING_FILTER_POSITIONS = ['K', 'DEF'];
 
 /**
  * The position chips a filter row draws, in the order it draws them.
@@ -233,20 +237,26 @@ export const TRAILING_FILTER_POSITIONS = ['DEF'];
  * FLX after its parts, for the reason it has always been last — it is a view
  * spanning RB, WR and TE, not a fourth position, and a chip that reads like one
  * sitting among the real ones invites exactly the confusion this filter must
- * not cause. DEF after FLX because a defence is not a player and belongs at the
- * end of the row, which is where every board a drafter has ever used puts it.
+ * not cause. Then the occasional positions, which is where a chip nobody is
+ * hunting for belongs — see {@link TRAILING_FILTER_POSITIONS}.
  *
  * Shared by the draft board, the players list and the compare picker, so the
- * same chips cannot appear in two different orders on two screens. A league
- * that starts no defence — Best Ball, most of them — is unaffected: the chip is
- * not drawn at all, because a filter that can only ever return nothing is worse
- * than no filter.
+ * same chips cannot appear in two different orders on two screens — and by the
+ * draft screen's roster strip, so the strip and the chips beneath it cannot
+ * disagree about where a defence goes. A league that starts no defence — Best
+ * Ball, most of them — is unaffected: the chip is not drawn at all, because a
+ * filter that can only ever return nothing is worse than no filter.
+ *
+ * The `ALL` chip is not here. It is not a position and not every caller draws
+ * one, so the screens prepend their own.
  */
 export function orderFilterChips(positions: Iterable<string>, offersFlex?: boolean): string[] {
   const ordered = orderPositions(positions);
-  const trailing = ordered.filter((p) => TRAILING_FILTER_POSITIONS.includes(p));
   const leading = ordered.filter((p) => !TRAILING_FILTER_POSITIONS.includes(p));
   const flex = (offersFlex ?? offersFlexFilter(ordered)) ? [FLX_FILTER] : [];
+  // Read from the constant rather than from `ordered`, so the order *between*
+  // the trailing chips is this rule's and not the reading order's.
+  const trailing = TRAILING_FILTER_POSITIONS.filter((p) => ordered.includes(p));
   return [...leading, ...flex, ...trailing];
 }
 
