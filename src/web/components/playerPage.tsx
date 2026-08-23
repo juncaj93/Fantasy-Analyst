@@ -206,6 +206,18 @@ export function PlayerSheet({
     <Sheet
       testId="player-sheet"
       onClose={onClose}
+      /*
+        The name the dialog is announced by, because the one it is headed by is
+        a cluster rather than a sentence.
+
+        The title below is JSX — pill, club, name, status — and a sheet can only
+        take its accessible name from a title it can read as a string, so this
+        card opened as an unnamed modal for anyone listening to it. The player's
+        name alone: the pill and the club are on the line the reader lands on,
+        and the status is a qualifier that changes between openings of the same
+        card. What has opened is a player.
+      */
+      accessibleLabel={player.name}
       title={
         /*
           The identity grammar, in the order the compact rows already use.
