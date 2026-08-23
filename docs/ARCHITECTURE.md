@@ -593,13 +593,30 @@ circularity guard in that file stays structural: the one number that could make
 the mode depend on the lineup — the simulated win probability — is produced
 after the suggestion and cannot reach it.
 
-**Calibration is written as it goes.** `matchup_forecasts` holds one row per
-roster per week — the first forecast written once and never updated, the latest
-one moving with the afternoon, the outcome filled in when the week settles.
-Keyed by season and week, stamped with the model version. A live win probability
-is a function of a Sunday that stops being obtainable the moment the games end;
-if nobody writes it down at the time, "is 70% actually 70%" is unanswerable
-forever rather than merely hard.
+**Calibration is written on a clock, and the screen is a pure read.**
+`matchup_forecasts` holds one row per roster per week — the first forecast
+written once and never updated, the latest one moving with the afternoon, the
+outcome filled in when the week settles. Keyed by season and week, stamped with
+the model version. A live win probability is a function of a Sunday that stops
+being obtainable the moment the games end; if nobody writes it down at the time,
+"is 70% actually 70%" is unanswerable forever rather than merely hard.
+
+The writer is the worker's `scheduled()` handler — a capture on the daily 09:00
+tick and on the two weekend ticks, and a settlement pass that closes out any
+week the season has moved past, reading the final scores from Sleeper rather
+than simulating them. `GET /api/leagues/:id/matchup` writes nothing at all.
+
+It used to. The final comprehensive audit's F-01 found the ledger being written
+from inside that GET, which was wrong twice over. The auditable half: both write
+guards classify a request by its method, so a hidden write behind a `GET` is
+invisible to the passphrase check *and* to the Demo Mode check — a demo browser
+was writing rows to the live calibration table by opening a screen. The quieter
+half: it made the calibration sample a function of browsing. `first_phase`
+recorded when somebody first *looked*, so a week nobody opened before kickoff
+produced no pregame sample at all, and settlement only happened if a request
+landed in the few hours between the last whistle and Sleeper rolling the week
+over. A cron looks every day whether or not anybody does, which is what makes
+`first_phase = 'pregame'` mean what the calibration report says it means.
 
 ### Endpoints
 

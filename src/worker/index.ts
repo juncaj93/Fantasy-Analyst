@@ -32,6 +32,7 @@ import { LeagueRepo } from '../server/repos/league.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
 import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
+import { MatchupService } from '../server/services/matchupService.ts';
 import { resolveWeek } from '../core/matchup/build.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
 
@@ -91,13 +92,20 @@ export default {
    *   Every 5 minutes  -> injury check (conditional; usually a 304 and no work)
    *                       plus, until it finishes, one step of last season's
    *                       history backfill
-   *   Sat 23:00 UTC    -> Vegas refresh
-   *   Sun 15:00 UTC    -> Vegas refresh
+   *   Sat 23:00 UTC    -> Vegas refresh, and a late pregame calibration capture
+   *   Sun 15:00 UTC    -> Vegas refresh, and a late pregame calibration capture
    *   Daily 09:00 UTC  -> Sleeper player dictionary, last season's statistics,
    *                       one injury check, per-game usage (weekly stats
    *                       settle when a game ends, so a daily check learns
-   *                       everything 288 of them would), and the season-long
-   *                       market lines the draft board prices against
+   *                       everything 288 of them would), the season-long
+   *                       market lines the draft board prices against, and the
+   *                       matchup calibration ledger — the forecast written
+   *                       down and finished weeks closed out
+   *
+   * The calibration ledger is on a clock at all because of the final audit's
+   * F-01: it used to be written from inside `GET /api/leagues/:id/matchup`, so
+   * a read mutated the database and the method-based write guard could not see
+   * it. See `refreshMatchupCalibration` below.
    *
    * The injury check is deliberately the odd one out. Everything else here is a
    * job that costs real work every time it runs, so it runs on a schedule
@@ -298,6 +306,7 @@ export default {
         console.error('league strategy refresh failed', err);
       }
 
+      await refreshMatchupCalibration(env, appEnv);
       await refreshPublishedProjections(env, appEnv);
       return;
     }
@@ -314,6 +323,17 @@ export default {
      * declines cheaply when what it holds is young; see `MAX_AGE_HOURS`.
      */
     await refreshPublishedProjections(env, appEnv);
+    /*
+     * And the calibration ledger, on the two clocks that bracket a Sunday.
+     *
+     * Saturday 23:00 UTC is the evening before the slate and Sunday 15:00 UTC is
+     * about 11am Eastern, an hour and a bit before the early kickoffs — the last
+     * moment a forecast for the main slate is still a pregame forecast. The
+     * nightly clock already captures every day including Sunday morning, so what
+     * these two add is a *late* pregame reading, made after Friday's injury
+     * report rather than before it.
+     */
+    await refreshMatchupCalibration(env, appEnv);
   },
 
   /**
@@ -414,6 +434,53 @@ export function parseRawEmail(raw: string): {
   };
 }
 
+
+/**
+ * The calibration ledger, which is now the only thing that writes to it.
+ *
+ * This is the second half of the final audit's F-01. Both of these used to
+ * happen inside `GET /api/leagues/:id/matchup`: opening the Matchup screen
+ * inserted the week's forecasts and, if the games happened to be over at that
+ * moment, settled them. A read that writes is a read the method-based auth
+ * guard cannot protect — a demo browser's GET wrote live rows — so the write
+ * moved here, where `scheduled()` is server-owned and unreachable over HTTP.
+ *
+ * Settlement first, so a week that has just finished is closed before this
+ * week's row is written; they touch different weeks, so the order is for
+ * reading rather than for correctness.
+ *
+ * Only the selected league, like every other league job on these clocks,
+ * because it is the only one anything reads. Separately caught, like every
+ * optional feed here: grading the model is a thing this app owes itself over a
+ * season, and it must never be the reason an injury check does not run.
+ *
+ * What it costs: two Sleeper requests and at most six D1 writes per run, three
+ * runs a day. The GET path it replaces could cost four writes per score change
+ * on a Sunday afternoon, once per polling client.
+ */
+async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promise<void> {
+  try {
+    const league = await new LeagueRepo(env.DB).getSelectedLeague();
+    if (!league) return;
+    const service = new MatchupService(env.DB, { sleeper: appEnv.sleeper });
+
+    const closed = await service.settleFinishedWeeks(league.id);
+    for (const week of closed.settled) {
+      console.log(`matchup calibration settled ${week.season} week ${week.week}: ${week.rosters} rosters`);
+    }
+    // Never silent about a cap: "nothing logged" has to mean "nothing left".
+    if (closed.pending > 0) {
+      console.log(`matchup calibration: ${closed.pending} finished weeks still unsettled, for the next run`);
+    }
+
+    const captured = await service.captureCalibration(league.id);
+    if (!captured.recorded) {
+      console.log(`matchup calibration: nothing to record for week ${captured.week ?? '?'}`);
+    }
+  } catch (err) {
+    console.error('matchup calibration refresh failed', err);
+  }
+}
 
 /**
  * Recompute only what a changed player actually touches.

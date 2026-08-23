@@ -20,7 +20,13 @@ import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { MatchupRepo, MIN_CALIBRATION_SAMPLE } from '../src/server/repos/matchup.ts';
 import { MATCHUP_MODEL_VERSION } from '../src/core/matchup/types.ts';
-import { buildSlotSpecs, resolveWeek, isWeekSettled, activeProjection } from '../src/server/services/matchupService.ts';
+import {
+  MatchupService,
+  buildSlotSpecs,
+  resolveWeek,
+  isWeekSettled,
+  activeProjection,
+} from '../src/server/services/matchupService.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { createTestDb } from './helpers/db.ts';
 import { UsageRepo } from '../src/server/repos/usage.ts';
@@ -265,9 +271,27 @@ describe('GET /api/leagues/:id/matchup', () => {
   });
 });
 
+/**
+ * The ledger, driven by the thing that is now allowed to write to it.
+ *
+ * These used to be driven by the endpoint — `await app(get('…/matchup'))`, and
+ * then a `SELECT` over the rows the read had left behind. That was the shape of
+ * the final audit's F-01: the assertions were right about the ledger and the
+ * ledger was being filled by a GET.
+ *
+ * The observations are the same and the writer is `captureCalibration`, which
+ * only the worker's scheduled handler calls. Purity of the read is proven in
+ * `matchup.readPurity.test.ts`; what is proven here is that the ledger still
+ * says what it always said.
+ */
 describe('the calibration ledger', () => {
   let db: NodeSqliteDatabase;
   const app = createApp();
+
+  /** The scheduled capture, over the same Sleeper the endpoint tests use. */
+  function capture(matchups: unknown, opts: { week?: number | null } = {}) {
+    return new MatchupService(db, { sleeper: sleeperServing(matchups) }).captureCalibration('demo-league', opts);
+  }
 
   beforeEach(async () => {
     db = await createTestDb();
@@ -275,7 +299,8 @@ describe('the calibration ledger', () => {
   });
 
   it('records both sides of the matchup, with the model version', async () => {
-    await app(get('/api/leagues/demo-league/matchup'), env(db, rows()));
+    const report = await capture(rows());
+    expect(report.recorded).toBe(true);
     const stored = await db.prepare('SELECT * FROM matchup_forecasts ORDER BY roster_id').all<Record<string, unknown>>();
     expect(stored.results).toHaveLength(2);
     for (const row of stored.results) {
@@ -294,15 +319,12 @@ describe('the calibration ledger', () => {
    * kickoff-minus-a-minute and would score suspiciously well.
    */
   it('never overwrites the first forecast, and does move the latest one', async () => {
-    await app(get('/api/leagues/demo-league/matchup'), env(db, rows()));
+    await capture(rows());
     const first = await db
       .prepare('SELECT first_win_probability AS p, latest_win_probability AS l FROM matchup_forecasts WHERE roster_id = 1')
       .first<{ p: number; l: number }>();
 
-    await app(
-      get('/api/leagues/demo-league/matchup'),
-      env(db, rows({ theirs: { points: 61.2, players_points: { '1010': 61.2 } } })),
-    );
+    await capture(rows({ theirs: { points: 61.2, players_points: { '1010': 61.2 } } }));
     const after = await db
       .prepare('SELECT first_win_probability AS p, latest_win_probability AS l FROM matchup_forecasts WHERE roster_id = 1')
       .first<{ p: number; l: number }>();
@@ -312,7 +334,7 @@ describe('the calibration ledger', () => {
   });
 
   it('reports its sample honestly and withholds a rate below the threshold', async () => {
-    await app(get('/api/leagues/demo-league/matchup'), env(db, rows()));
+    await capture(rows());
     const report = await (await app(get('/api/diagnostics/matchup-calibration'), env(db, rows()))).json();
     expect(report.minSample).toBe(MIN_CALIBRATION_SAMPLE);
     expect(report.buckets).toHaveLength(10);

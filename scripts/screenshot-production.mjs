@@ -7,6 +7,10 @@
  * never fails the job it runs in. It exists so that "does it look right on a
  * phone" can be answered by looking, from a machine that has one deployed site
  * and no phone. It is read-only — it opens screens and takes pictures.
+ *
+ * Genuinely read-only since the final audit's F-01: photographing the Matchup
+ * screen used to write forecast rows to the deployed database, because the GET
+ * behind it recorded to the calibration ledger.
  */
 
 import { chromium, webkit } from '@playwright/test';

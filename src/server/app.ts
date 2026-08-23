@@ -998,10 +998,15 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * probability, the insight cards, the lineup counterfactuals — is this app's
    * own model, built from the same start/sit engine every other screen uses.
    *
-   * A read, and a read that writes: it records what it forecast to the
-   * calibration ledger, because a probability model that never writes down what
-   * it said can never be graded. That write is best effort and can never fail
-   * the screen — see the service.
+   * A read, and nothing but a read.
+   *
+   * It used to record what it forecast to the calibration ledger on the way
+   * out, which the final audit caught as F-01: the write guard is method-based,
+   * so a `GET` was waved through as safe while it inserted and updated rows —
+   * including for a browser in Demo Mode, whose whole guarantee is that it
+   * cannot touch live data. Grading the model still matters, so the ledger did
+   * not go away; it moved to the worker's own clock, where a write is a write.
+   * See `MatchupService.captureCalibration`.
    */
   router.get('/api/leagues/:id/matchup', async (ctx) => {
     const league = await new LeagueRepo(ctx.env.db).getLeague(ctx.params['id']!);

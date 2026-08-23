@@ -1200,12 +1200,17 @@ starters projectable, there is no honest number to print: the scoreboard stays,
 the forecast says it is unavailable, and Sleeper's projection is never
 substituted under this app's name.
 
-**Calibration, from day one.** `matchup_forecasts` stores one row per roster per
-week — the first forecast written once and never touched, the latest one moving
-as the afternoon does, and the outcome filled in when the week ends. Keyed by
-season and week so 2026's week sixteen cannot collide with 2027's, stamped with
-the model version so a bucket cannot mix two models, and reported in ten-point
-bands that withhold a rate below twenty settled samples.
+**Calibration, from day one, and written by a clock.** `matchup_forecasts`
+stores one row per roster per week — the first forecast written once and never
+touched, the latest one moving as the afternoon does, and the outcome filled in
+when the week ends. Keyed by season and week so 2026's week sixteen cannot
+collide with 2027's, stamped with the model version so a bucket cannot mix two
+models, and reported in ten-point bands that withhold a rate below twenty
+settled samples. The writer is the worker's scheduled handler; the Matchup GET
+is a pure read and writes nothing. See ARCHITECTURE.md for why that split
+exists — it is the final audit's F-01, and it fixes both a write behind a `GET`
+that the method-based auth guard could not see and a calibration sample whose
+existence depended on somebody happening to open the screen before kickoff.
 
 **Seven destinations, for one stretch of the year.** Matchup arrives the day the
 draft completes, which is before Draft leaves, so the bar carries seven between

@@ -59,7 +59,7 @@ Four things, all of them "one implementation instead of two":
 | Change | Why |
 |---|---|
 | `core/draft/boardBuilder.ts` — the board assembly moved out of `server/services/draftBoard.ts` and is driven by a `DraftBoardSources` interface | So the demo runs the *same* board builder. `DraftBoardService` keeps its exact public API; every existing caller and test is untouched. |
-| `core/matchup/build.ts` — the matchup assembly moved out of `server/services/matchupService.ts` and is driven by a `MatchupSources` interface | Same reason, same shape. The service keeps the D1 reads, the Sleeper client, the per-database forecast cache and the calibration ledger, and satisfies the interface. Its exports and tests are untouched. |
+| `core/matchup/build.ts` — the matchup assembly moved out of `server/services/matchupService.ts` and is driven by a `MatchupSources` interface | Same reason, same shape. The service keeps the D1 reads, the Sleeper client, the per-database forecast cache and the calibration ledger, and satisfies the interface. Its exports and tests are untouched. The ledger is no longer part of that interface — see §4 — and is reached only from the worker's scheduled handler. |
 | `core/waivers/pricing.ts`, `core/waivers/intel.ts`, `core/roster/held.ts`, `core/roster/freeAgents.ts`, `core/trades/ladderInputs.ts` — assembly helpers moved out of `server/app.ts` | So a rehearsed bid and a live one are the same arithmetic, and a rehearsed waiver card carries the same competition and multi-week columns. Moved verbatim. |
 | `POST /api/demo/enter` · `exit` · `GET status`, and a write-refusing middleware | The second half of the mutation guard — see §3. |
 
@@ -128,10 +128,22 @@ and a real database, with a valid session attached), and `e2e/demo.spec.ts`
   structurally.
 - No production module imports a demo fixture. Also asserted structurally.
 - `DraftBoardSources` has no write method on it, so there is nothing to call.
-- `MatchupSources` has exactly one — `record`, the calibration ledger, because a
-  probability model nobody grades is worth nothing. The demo satisfies it with a
-  recorder that returns. Both facts are asserted: that the interface has gained
-  no second write, and that the demo's is inert.
+- `MatchupSources` has none either, and used to have one. `record` — the
+  calibration ledger, because a probability model nobody grades is worth nothing
+  — was satisfied in a demo by a recorder that returned immediately. That was
+  enough for this document and not enough in practice: the same seam was wired
+  to a real ledger on the request path, so a browser carrying `fa_demo=1` and
+  opening the Matchup screen wrote rows to the **live** calibration table. The
+  method-based write guard saw a `GET` and waved it through. That is the final
+  audit's F-01.
+
+  The ledger is now a separate argument to `buildMatchupResponse`, and the demo
+  passes three arguments. A demo write is a thing the runtime has no way to
+  express rather than a thing it declines to do. Asserted structurally: the
+  interface declares no write member, and the demo's bag carries no recorder.
+  The endpoint's purity is asserted separately, in
+  `tests/matchup.readPurity.test.ts`, including for a request carrying the demo
+  cookie.
 
 Two things are written to the browser, and only these:
 

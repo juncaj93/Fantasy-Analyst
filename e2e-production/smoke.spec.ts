@@ -15,6 +15,14 @@
  * answers to anyone, and the one write it does attempt is the one that must be
  * refused.
  *
+ * That sentence was not true until the final audit's F-01 was fixed. This suite
+ * navigates to Matchup, and `GET /api/leagues/:id/matchup` used to record both
+ * sides of its forecast to the calibration ledger — so every smoke run inserted
+ * and updated rows in the deployed database while describing itself as
+ * read-only. The write now lives on the worker's own clock. Nothing here
+ * exercises it, deliberately: a smoke suite that provoked a calibration write to
+ * prove the writer works would be mutating production to test a cron.
+ *
  *   PRODUCTION_URL=https://… npx playwright test --config playwright.production.config.ts
  *
  * ---------------------------------------------------------------------------
