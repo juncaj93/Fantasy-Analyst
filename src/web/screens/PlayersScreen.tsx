@@ -24,8 +24,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import type { CacheOptions } from '../sessionCache.ts';
-import { FLX_FILTER, offersFlexFilter, orderPositions } from '../../core/sleeper/eligibility.ts';
+import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
+import { ALL_FILTER, playerFilterChips } from '../playerFilters.ts';
 import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
@@ -60,8 +61,6 @@ interface PlayersPage {
   hasMore?: boolean;
   total?: number;
 }
-
-const ALL_FILTER = 'ALL';
 
 /**
  * How many players arrive per page.
@@ -136,18 +135,10 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const segments = useMemo(() => {
     if (!selected) return [];
-    const startable = startablePositions(buildRosterShape(selected.rosterPositions));
-    if (startable.size === 0) return [];
-    // FLX last: it is a view spanning three positions, not a fourth one, and a
-    // chip that reads like a position among the real ones invites exactly the
-    // confusion this filter must not cause. The positions themselves are in the
-    // order every fantasy site uses, shared with the draft board so the same
-    // chips cannot appear in two different orders on two screens.
-    return [
-      ALL_FILTER,
-      ...orderPositions(startable),
-      ...(offersFlexFilter(startable) ? [FLX_FILTER] : []),
-    ];
+    // The order — and why DEF is last rather than between TE and FLX — is
+    // `playerFilterChips`, which is asserted directly because the demo league
+    // has no defence slot for a browser test to find.
+    return playerFilterChips(startablePositions(buildRosterShape(selected.rosterPositions)));
   }, [selected]);
 
   /** One page of the list. `offset` 0 replaces; anything else appends. */
