@@ -21,9 +21,14 @@
  * **Read-only.** Every request is a GET the public site already answers, plus
  * public Sleeper reads. Nothing logs in, nothing writes, nothing touches D1.
  *
- * The Sleeper projection column is printed for comparison only. This app does
- * not read it and must not: a number labelled "Fantasy Analyst projected" that
- * is actually somebody else's is the one thing core/matchup/build.ts §33 forbids.
+ * The Sleeper columns are printed for comparison, and since the published
+ * fallback landed they are also the thing `source` is a claim about. Where
+ * `source` says `sleeper`, `Team proj` should equal `Sleeper(half)` in this
+ * league — that is the fallback working. Where it says `market`, the two are
+ * different numbers and are meant to be. What must never appear is a `market`
+ * figure that matches the published one to the decimal, which would mean
+ * somebody had wired the fallback into the engine; see
+ * core/startsit/projection.ts.
  *
  *   node scripts/probe-team-projection-semantics.mjs
  */
@@ -77,7 +82,7 @@ const main = async () => {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
 
   head('EVERY RECOMMENDED STARTER, DECOMPOSED');
-  console.log('  slot       player                    proj    score   market   sum-of-known-components');
+  console.log('  slot       player                    proj  source    score   market   sum-of-known-components');
   const rows = [];
   for (const slot of lu.slots ?? []) {
     const e = slot.playerId ? byId.get(slot.playerId) : null;
@@ -87,10 +92,17 @@ const main = async () => {
     }
     const known = (e.components ?? []).filter((c) => !c.unknown);
     const sum = known.reduce((a, c) => a + (c.value ?? 0), 0);
-    rows.push({ playerId: e.playerId, name: e.name, score: slot.score, projection: slot.projection ?? null });
+    rows.push({
+      playerId: e.playerId,
+      name: e.name,
+      score: slot.score,
+      projection: slot.projection ?? null,
+      source: slot.projectionSource ?? null,
+    });
     console.log(
       `  ${String(slot.slot).padEnd(10)} ${String(e.name).padEnd(24)} ` +
-        `${String(slot.projection ?? '—').padStart(6)}  ${String(slot.score ?? '—').padStart(6)}  ` +
+        `${String(slot.projection ?? '—').padStart(6)}  ${String(slot.projectionSource ?? '—').padEnd(8)}` +
+        `${String(slot.score ?? '—').padStart(6)}  ` +
         `${String(e.expectation?.points ?? 'null').padStart(6)}   ${sum.toFixed(2)}`,
     );
     console.log(
@@ -114,9 +126,21 @@ const main = async () => {
     show('found', matchup.body.found);
     show('mine projectedFinal', matchup.body.forecast?.teams?.mine?.projectedFinal ?? 'null');
     for (const s of matchup.body.forecast?.slots ?? []) {
-      if (s.mine?.playerId) mineProj.set(s.mine.playerId, s.mine.projection);
+      /*
+       * `projectedFinal`, and it took a wrong answer to learn that.
+       *
+       * This read `s.mine.projection` for its first several runs. `MatchupPlayerView`
+       * has no such field — the model publishes what it *concluded* about a player,
+       * not the input it concluded it from — so the column printed `undefined` for
+       * everybody and this line reported `0 of 9` about a property that does not
+       * exist. The conclusion happened to be right, because the market really was
+       * missing and `projectedFinal` really was null, which is exactly why it went
+       * unnoticed: a probe that measures nothing agrees with the truth whenever the
+       * truth is nothing.
+       */
+      if (s.mine?.playerId) mineProj.set(s.mine.playerId, s.mine.projectedFinal);
     }
-    show('slots with a projection', `${[...mineProj.values()].filter((v) => v != null).length} of ${mineProj.size}`);
+    show('slots with a projected final', `${[...mineProj.values()].filter((v) => v != null).length} of ${mineProj.size}`);
   } else {
     console.log(`  failed: ${matchup.error}`);
   }
@@ -144,13 +168,12 @@ const main = async () => {
   }
 
   head('SIDE BY SIDE — the starters');
-  console.log('  player                    Team proj   Team score   Matchup   Sleeper(half)  Sleeper(ppr)');
+  console.log('  player                    Team proj  source     Team score   Sleeper(half)  Sleeper(ppr)');
   for (const r of rows) {
     const s = publishedById.get(String(r.playerId)) ?? {};
-    const mp = mineProj.has(r.playerId) ? mineProj.get(r.playerId) : '—';
     console.log(
-      `  ${String(r.name).padEnd(24)} ${String(r.projection ?? '—').padStart(9)} ${String(r.score ?? '—').padStart(12)} ` +
-        `${String(mp ?? 'null').padStart(9)} ${String(s.pts_half_ppr ?? '—').padStart(13)} ${String(s.pts_ppr ?? '—').padStart(13)}`,
+      `  ${String(r.name).padEnd(24)} ${String(r.projection ?? '—').padStart(9)}  ${String(r.source ?? '—').padEnd(9)}` +
+        `${String(r.score ?? '—').padStart(11)} ${String(s.pts_half_ppr ?? '—').padStart(15)} ${String(s.pts_ppr ?? '—').padStart(13)}`,
     );
   }
 
