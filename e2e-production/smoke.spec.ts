@@ -634,6 +634,34 @@ test.describe('the deployed app', () => {
         expect(text, `"${gone}" is back on the expanded card`).not.toContain(gone);
       }
 
+      /*
+       * One modal, announced as the player whose card it is.
+       *
+       * The identity above is why this cannot be assumed. A sheet takes its
+       * accessible name from its visible title, and this title is that cluster
+       * rather than a string, so the card shipped for a long time claiming
+       * `role="dialog"` and `aria-modal` with no name at all: a reader
+       * listening to the deployed app was put inside a modal without being
+       * told whose card had opened.
+       *
+       * Checked through the role and the computed name rather than through the
+       * attribute, because what matters is what assistive technology works out
+       * — and checked here as well as in `e2e/player-detail.spec.ts` for this
+       * file's usual reason: `ci.yml` runs `e2e/` and never runs this, so the
+       * deployed build is the only place a broken name would otherwise show up
+       * silently. The expected name is read off the visible card, so it holds
+       * for whichever player production happens to show and fails just as
+       * loudly if the name grows the pill or the status back into it.
+       */
+      const named = (await page.locator('.sheet-player-name').innerText()).trim();
+      expect(named, 'the card should be showing a player name to be named after').not.toBe('');
+      await expect(page.getByRole('dialog'), 'a player card should be exactly one modal dialog').toHaveCount(1);
+      await expect(
+        page.getByRole('dialog', { name: named }),
+        `the modal is not announced as "${named}"`,
+      ).toBeVisible();
+      await expect(page.getByTestId('player-sheet')).toHaveAttribute('aria-modal', 'true');
+
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
