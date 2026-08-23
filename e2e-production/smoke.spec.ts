@@ -538,6 +538,125 @@ test.describe('the deployed app', () => {
     await first.locator('.row-button').click();
   });
 
+  /**
+   * The expanded player, on both screens, in the deployed build.
+   *
+   * This file's own preamble is the argument for having it here as well as in
+   * `e2e/player-detail.spec.ts`: `ci.yml` runs `e2e/` and never runs this, so a
+   * card that changes shape after a merge shows up first as production going
+   * red. The card *has* just changed shape, and these are the parts of it that
+   * are true of any deployment rather than of the demo seed — the order the
+   * identity is drawn in, the order the readings appear in, and the vocabulary
+   * that must not be on a player card at all.
+   *
+   * Nothing here assumes a projection, a season, an injury or a single item of
+   * evidence exists for whoever production happens to show first. It asserts
+   * the cells that *are* drawn are drawn in the fixed order, which is the claim
+   * that can actually regress.
+   */
+  test('opens one expanded player, in one identity order, on Players and on Trades', async ({ page }) => {
+    /** Left edges of the identity marks, in the order they are painted. */
+    const identity = () =>
+      page.locator('.sheet-player-title').evaluate((title) => {
+        const pick = (sel: string, mark: string) => {
+          const el = title.querySelector(sel) as HTMLElement | null;
+          return el ? { mark, x: el.getBoundingClientRect().left } : null;
+        };
+        return [
+          pick('.pos-pill', 'position'),
+          pick('.team-logo, .team-code', 'club'),
+          pick('.sheet-player-name', 'name'),
+          pick('[data-testid="injury-tag"]', 'status'),
+        ].filter((p): p is { mark: string; x: number } => p != null);
+      });
+
+    /**
+     * The band's labels, lower-cased — the stylesheet uppercases them, and this
+     * is an assertion about readings rather than about typography.
+     */
+    const band = async () =>
+      (await page.getByTestId('player-page-metrics').locator('.stat-label').allInnerTexts()).map((l) =>
+        l.trim().toLowerCase(),
+      );
+
+    /**
+     * The fixed order, with the cells this player has no data for removed.
+     *
+     * `Rank` and `ADP` only exist where the screen behind deals in the draft
+     * market; `PTS` only where a preseason snapshot covers him; the two season
+     * cells only where his statistics have been ingested. What may never happen
+     * is two of them swapping places.
+     */
+    const ORDER = ['rank', 'adp', '7d', '21d', 'life', 'pts'];
+    const inOrder = (labels: string[]) => {
+      const fixed = labels.filter((l) => ORDER.includes(l));
+      const season = labels.filter((l) => /^\d{4} (gp|rank)$/.test(l));
+      expect(fixed, `the band reordered itself: ${labels.join(' · ')}`).toEqual(
+        ORDER.filter((l) => fixed.includes(l)),
+      );
+      // The two season cells arrive together, after everything fixed, GP first.
+      if (season.length > 0) {
+        expect(season.map((l) => l.split(' ')[1])).toEqual(['gp', 'rank']);
+        expect(labels.indexOf(season[0]!)).toBeGreaterThan(labels.indexOf(fixed[fixed.length - 1]!));
+      }
+      // Whatever is on the band, none of it is a block that left the card.
+      expect(labels).not.toContain('moved');
+    };
+
+    const card = async () => {
+      const marks = await identity();
+      expect(marks.map((m) => m.mark).slice(0, 3), 'the identity is not in the row’s order').toEqual([
+        'position',
+        'club',
+        'name',
+      ]);
+      for (let i = 1; i < marks.length; i++) {
+        expect(marks[i]!.x, `${marks[i]!.mark} is drawn left of ${marks[i - 1]!.mark}`).toBeGreaterThan(
+          marks[i - 1]!.x,
+        );
+      }
+      inOrder(await band());
+
+      /*
+       * The card is not the evidence console.
+       *
+       * `mag 13`, `uncategorised`, the review status, the rule id and the
+       * confidence score are all real and all about the classifier. They belong
+       * under Evidence on the player's own page, which this file already opens
+       * elsewhere, and nowhere near a card somebody tapped to find out what
+       * happened to a footballer.
+       */
+      const text = await page.getByTestId('player-page-snapshot').innerText();
+      expect(text, 'the magnitude is back on the card').not.toMatch(/\bmag \d/);
+      expect(text, 'the category-debug label is back on the card').not.toContain('uncategorised');
+      expect(text).not.toContain('auto_applied');
+      for (const gone of ['News by window', 'Vegas props', 'Categories', 'Draft market']) {
+        expect(text, `"${gone}" is back on the expanded card`).not.toContain(gone);
+      }
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `the card overflows by ${overflow}px`).toBeLessThanOrEqual(1);
+    };
+
+    await page.goto('/');
+    await open(page, 'players');
+    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
+    await page.getByTestId('player-search-row').first().click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+    await card();
+    await page.keyboard.press('Escape');
+
+    await open(page, 'trades');
+    if ((await settled(page, 'trade-row')) === 0) return; // no board today; Players proved the card
+    await page.getByTestId('trade-row').first().click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+    await card();
+  });
+
   test('Setup reads as a settings screen, and every area opens and comes back', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');

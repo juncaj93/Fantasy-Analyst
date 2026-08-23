@@ -1377,7 +1377,20 @@ body,
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
+  /*
+   * Column dividers, and a real gap between rows.
+   *
+   * The band used to be one row of four and could keep `gap: 0`, with the
+   * hairline between cells coming from `.stat + .stat`. It is now up to eight
+   * cells — the market pair, the tally windows, the preseason figure and last
+   * season — which wraps to two rows on every phone, and two rows separated by
+   * nothing read as one block of numbers. The row gap separates them; the
+   * hairline still separates columns, and the rule below stops it appearing
+   * down the leading edge of the second row, where there is no column to its
+   * left.
+   */
+  row-gap: var(--sp-2);
+  column-gap: 0;
   /* Tight to the bar above it: a pushed page that opens on a band of empty
      ground reads as one that has not finished loading. */
   margin: 0 0 var(--sp-3);
@@ -1385,8 +1398,26 @@ body,
   border-bottom: 1px solid var(--separator-soft);
 }
 
+/* First in its row has nothing to its left, whichever row it is. */
+.metric-grid > .stat:nth-child(4n + 1) {
+  border-left: 0;
+  padding-left: 0;
+}
+
 .metric-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Three columns wrap on threes, so the rule above has to be undone and redone
+   here rather than inherited — a first-in-row cell is a count, not a class. */
+.metric-grid-3 > .stat:nth-child(4n + 1) {
+  border-left: 1px solid var(--separator-soft);
+  padding-left: var(--sp-2);
+}
+
+.metric-grid-3 > .stat:nth-child(3n + 1) {
+  border-left: 0;
+  padding-left: 0;
 }
 
 /*
@@ -1472,6 +1503,26 @@ body,
 
 .stat-value .sig {
   font-size: 0.9rem;
+}
+
+/*
+ * The second line of a cell: when a figure was captured, what it was scored as.
+ *
+ * Quieter than the label above the number, because it qualifies rather than
+ * names — and it exists for exactly one cell. `PTS` is a preseason projection,
+ * and a bare figure under a three-letter label in week nine reads as what the
+ * market expects of him now. The date is what makes it history at a glance,
+ * without spending a heading on saying so.
+ */
+.stat-note {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 /* ============================================================= player rows */
@@ -4044,6 +4095,59 @@ label {
   flex-wrap: wrap;
 }
 
+/*
+ * The same ledger item, on the expanded card rather than in the console.
+ *
+ * `.evidence` gives it the polarity rail it already had; this takes away
+ * everything that rail used to sit beside. The console row prints `mag 13`,
+ * the category, the review status, the rule id and the confidence, and every
+ * one of those is a fact about the classifier — correct, necessary under
+ * Evidence, and not what a reader opened a player card to find out.
+ *
+ * What is left is a sentence and a date, at reading size rather than at
+ * metadata size, which is the whole difference between a card and a debug view.
+ */
+.player-news {
+  margin-bottom: var(--sp-2);
+}
+
+.player-news-text {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+/* The direction, as a mark rather than as a colour. The word is in `.sr-only`
+   beside it, so the reading survives greyscale and a screen reader alike. */
+.player-news-mark {
+  font-size: 0.7rem;
+  margin-right: 4px;
+  color: var(--text-faint);
+}
+
+.player-news.pos .player-news-mark {
+  color: var(--pos);
+}
+
+.player-news.neg .player-news-mark {
+  color: var(--neg);
+}
+
+.player-news.mixed .player-news-mark {
+  color: var(--warn);
+}
+
+.player-news-when {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* What the pill beside the name could not carry, and nothing it could. */
+.player-detail-injury {
+  margin-top: var(--sp-1);
+}
+
 /* ============================================================ empty states */
 
 /*
@@ -5608,6 +5712,16 @@ table.compact tr:last-child td {
 
 .sheet-title {
   flex: 1;
+  /*
+   * Shrinkable, which `flex: 1` alone is not.
+   *
+   * A flex item refuses to go below the width of its own content unless it is
+   * told it may, and the whole truncation chain hangs off this one property:
+   * without it a long player name grew this box, the box pushed the
+   * availability tag past the sheet's edge, and the reader lost the one fact on
+   * the card that can change a decision before any of the numbers do.
+   */
+  min-width: 0;
   font-size: 1rem;
   font-weight: 660;
   letter-spacing: -0.018em;
@@ -5618,21 +5732,47 @@ table.compact tr:last-child td {
  *
  * The pushed page can afford a title and a subtitle under it. A sheet cannot —
  * every row it spends on itself is a row of the player it came to show — so the
- * identity is one line: the name, then the position pill, the club and the
- * availability tag as a cluster after it. The same three marks, in the same
- * order, as every list row in the app.
+ * identity is one line: the position pill, the club's mark, the name, and the
+ * availability tag against the name it qualifies. The same marks in the same
+ * order as every list row in the app, which is now true rather than merely
+ * written here: this line put the name first and the cluster after it, so the
+ * one screen where a reader has committed to a single player was the one screen
+ * that reversed the grammar they had just been reading.
+ *
+ * The gap matches the dense row's own — see `--row-gap` — so the cluster and
+ * the name sit at the same distance here as they do on the row the reader
+ * tapped.
  */
 .sheet-player-title {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   min-width: 0;
 }
 
+/*
+ * The name yields first, and it is the only thing that yields.
+ *
+ * `flex: 0 1 auto` with `min-width: 0` is what lets a long name shorten instead
+ * of pushing the availability tag off the end of the sheet — the same rule
+ * `.player-name` follows on every row. Without the `min-width` a flex item
+ * refuses to shrink below its content, and `Gutekunst-Vandagriff OUT` would
+ * overflow the header rather than truncate inside it.
+ */
 .sheet-player-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The reader's own control — the heart — at the far end, never in the name. */
+.sheet-player-aside {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 
 /*
