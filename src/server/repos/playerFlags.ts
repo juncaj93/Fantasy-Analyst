@@ -10,7 +10,7 @@
  * stops meaning anything outside the draft it was written in. Keyed by player
  * id alone it was one global list shown by whichever draft was open, so a
  * finished best-ball shortlist turned up in the next league's draft. It has its
- * own table now, keyed by draft — see `draftQueue.ts` and migration 0028.
+ * own table now, keyed by draft — see `draftQueue.ts` and migration 0029.
  *
  * Neither mark is evidence. The ledger records what newsletters said; this
  * records what the user thinks, and the two are shown separately because a
@@ -48,7 +48,7 @@ export class PlayerFlagsRepo {
 
     /*
      * `queued` and `queue_order` are still columns on this table and are
-     * deliberately never written. Migration 0028 emptied them and moved the
+     * deliberately never written. Migration 0029 emptied them and moved the
      * queue to `draft_queue`; the columns stay because dropping a column is the
      * one schema change D1 makes expensive, and a write that named them would
      * be the first step back towards a global queue.

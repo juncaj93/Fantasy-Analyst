@@ -237,7 +237,7 @@ describe('a queue belongs to one draft', () => {
  * fact the whole repair is about — and would reproduce the reported bug once
  * more, in a migration, where it would look like data rather than a defect.
  *
- * So 0028 retires them: copied into a table nothing reads, and cleared from the
+ * So 0029 retires them: copied into a table nothing reads, and cleared from the
  * live one. This is the test that says the failure is safe rather than silent.
  */
 describe('the legacy global queue is retired rather than guessed at', () => {
@@ -255,7 +255,7 @@ describe('the legacy global queue is retired rather than guessed at', () => {
     const files = readdirSync(dir)
       .filter((f) => f.endsWith('.sql'))
       .sort();
-    const cutover = files.indexOf('0028_queue_belongs_to_a_draft.sql');
+    const cutover = files.indexOf('0029_queue_belongs_to_a_draft.sql');
     expect(cutover, 'the migration under test is missing').toBeGreaterThan(0);
 
     const db = new NodeSqliteDatabase(':memory:');
@@ -351,7 +351,7 @@ describe('the legacy global queue is retired rather than guessed at', () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const db = await legacyDatabase();
-    const sql = readFileSync(fileURLToPath(new URL('../migrations/0028_queue_belongs_to_a_draft.sql', import.meta.url)), 'utf8');
+    const sql = readFileSync(fileURLToPath(new URL('../migrations/0029_queue_belongs_to_a_draft.sql', import.meta.url)), 'utf8');
     await db.exec(sql);
 
     const archived = await db.prepare('SELECT COUNT(*) AS n FROM retired_global_queue').first<{ n: number }>();
