@@ -2258,6 +2258,25 @@ body,
   gap: var(--sp-1);
   margin-right: auto;
   min-width: 0;
+  /*
+   * Three pixels closer to the name than the row's own gap.
+   *
+   * The rule this field exists for is that a status belongs to the name —
+   * `Christian McCaffrey  Q` is one unit and has to look like one — and the
+   * tally beside it is the same kind of footnote. The row's 8px gap is the
+   * spacing between *separate* things on the line, and it was putting the same
+   * distance between the name and its own annotations as between the identity
+   * cluster and the name.
+   *
+   * Only the gap in front of the field moves. The 4px between the tally and the
+   * status pill is `gap` above and is untouched, the field is still content-
+   * sized and still `flex: none`, and the trailing `auto` margin still hands
+   * every row's slack to the same place — so the star and the chevron land on
+   * the column they always did, and the name is still the one thing that
+   * truncates. The tally keeps its 3ch tabular field, so a re-sorted board
+   * still does not shuffle sideways.
+   */
+  margin-left: -3px;
 }
 
 .tally-pos {

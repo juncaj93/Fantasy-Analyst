@@ -217,6 +217,74 @@ test.describe('the identity cluster', () => {
   });
 
   /**
+   * The tally belongs to the name, and now sits like it.
+   *
+   * The row's own 8px gap is the distance between separate things on the line —
+   * the identity cluster and the name are separate things. The tally and the
+   * status pill are not: they are footnotes on the name, and putting the same
+   * 8px in front of them read as a third column rather than as an annotation.
+   * The field starts 5px after the name now.
+   *
+   * The measurement that matters more is the second one. Only the gap *in front
+   * of* the field moved; the 4px between the tally and the status pill is
+   * untouched, and a change that tightened both would have made the two marks
+   * one blur. Both are asserted here so a future tweak has to say which it
+   * meant.
+   *
+   * Run at every width the suite runs at, because a flex gap that survives 430
+   * and collapses at 360 is exactly the kind of thing this file exists to
+   * catch.
+   */
+  test('sits the tally against the name it is about, without crowding the status pill', async ({ page }) => {
+    /*
+     * Injected, because the seeded board happens to carry one tally.
+     *
+     * A spacing rule measured on a single row is a spacing rule measured on
+     * whatever that row happens to be. Both shapes are forced here — a tally on
+     * its own, and a tally with a status pill after it — because the second is
+     * the only one that can say the pill was not crowded.
+     */
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recommendations = (body.recommendations as Record<string, unknown>[]).map((rec, i) =>
+        i < 6
+          ? { ...rec, newsLifetimeNet: i % 2 === 0 ? 7 : -12, status: i % 3 === 0 ? 'Questionable' : null }
+          : rec,
+      );
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+    await openDraft(page);
+    const rows = await page.locator('[data-testid="recommendation-row"]').evaluateAll((nodes) =>
+      nodes.flatMap((row) => {
+        const box = (sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const name = box('.player-name');
+        const tally = box('[data-testid="compact-tally"]');
+        const tag = box('[data-testid="injury-tag"]');
+        if (!name || !tally) return [];
+        return [
+          {
+            beforeTally: Math.round(tally.left - name.right),
+            beforePill: tag ? Math.round(tag.left - tally.right) : null,
+          },
+        ];
+      }),
+    );
+
+    expect(rows.length, 'no row carried a tally to measure').toBeGreaterThan(3);
+    expect(
+      rows.some((r) => r.beforePill != null),
+      'no row carried a status pill after its tally',
+    ).toBe(true);
+    for (const row of rows) {
+      expect(row.beforeTally, 'the tally drifted away from the name').toBe(5);
+      if (row.beforePill != null) {
+        expect(row.beforePill, 'the status pill was crowded by the tally').toBe(4);
+      }
+    }
+  });
+
+  /**
    * Alignment is not padding.
    *
    * The field is reserved whether or not anything is in it, so the fix must not

@@ -202,8 +202,17 @@ describe('defences depend on the league, not on the app', () => {
       'Kansas City Chiefs',
       'San Francisco 49ers',
     ]);
-    // ...and the app says why they look thin, rather than leaving it a mystery.
-    expect(board.warnings.join(' ')).toContain('no draft order covers DEF');
+    /*
+     * ...and it no longer apologises for them above the list.
+     *
+     * The board used to warn "no draft order covers DEF in this ranking, so
+     * they are listed on news and roster need alone". That was accurate, and
+     * what it described has been removed rather than explained: a defence is
+     * ranked on the market alone now, so there is no news and no roster need to
+     * disclose. The row still says it is thin, on the row, where it is about a
+     * player rather than about a board.
+     */
+    expect(board.warnings.join(' ')).not.toContain('no draft order covers');
     for (const rec of board.recommendations) expect(rec.degraded).toBe(true);
 
     /*

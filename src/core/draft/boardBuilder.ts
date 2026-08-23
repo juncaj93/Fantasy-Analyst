@@ -16,7 +16,7 @@
  */
 
 import { rosterAlerts, type MyGuyLevel, type RosterAlert } from './decisions.ts';
-import { rankAvailablePlayers, type DraftRecommendation } from './engine.ts';
+import { DEFENCE_WEIGHTS, rankAvailablePlayers, type DraftRecommendation } from './engine.ts';
 import { computeNeed } from './need.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -459,6 +459,16 @@ export interface DraftBoardState {
 export const MAX_CANDIDATES = 300;
 
 /**
+ * The position the board has no opinion about.
+ *
+ * Named once so the two places that treat defences differently — the ranking
+ * split below, and nothing else — cannot drift apart on the spelling. Sleeper
+ * calls them `DEF`; `DST` never reaches here, because `toCanonicalPlayers`
+ * normalises the dump before any of this sees it.
+ */
+export const DEFENCE = 'DEF';
+
+/**
  * Build the board.
  *
  * `sources` decides where the facts come from; everything else here is the
@@ -677,27 +687,6 @@ export async function buildDraftBoard(
     (!queuedOnly || allFlags.get(player.id)?.queued === true);
 
   /*
-   * "Only ranked players" has to be asked per position, not once for the board.
-   *
-   * Dropping unranked players stops 2,500 names drowning a board that has a
-   * real ranking, and that is right — as long as the position has a ranking
-   * to be dropped from. No published ADP this project uses covers defences,
-   * so a single global test silently erased the entire position from a league
-   * that starts one: the filter chip appeared, the board came back empty, and
-   * nothing said why.
-   *
-   * So a position the ranking does not cover at all keeps its players. A
-   * position the ranking does cover keeps only the ranked ones, exactly as
-   * before.
-   */
-  const rankedByPosition = new Map<string, number>();
-  for (const p of allPlayers) {
-    if (!p.active || rankOf(p) == null) continue;
-    rankedByPosition.set(p.position, (rankedByPosition.get(p.position) ?? 0) + 1);
-  }
-  const positionIsRanked = (position: string): boolean => (rankedByPosition.get(position) ?? 0) > 0;
-
-  /*
    * Everyone eligible, whether or not the market has priced him.
    *
    * This used to keep a player only if his position had no ranking at all or
@@ -736,13 +725,24 @@ export async function buildDraftBoard(
       a.fullName.localeCompare(b.fullName),
   );
 
-  // Say it out loud, because those rows will look thin next to ranked ones.
-  const unrankedStartable = [...startable].filter((p) => !positionIsRanked(p)).sort();
-  if (unrankedStartable.length > 0 && rankedCount > 0) {
-    warnings.push(
-      `no draft order covers ${unrankedStartable.join(', ')} in this ranking, so they are listed on news and roster need alone`,
-    );
-  }
+  /*
+   * No warning for a position the ranking does not cover.
+   *
+   * This said "no draft order covers DEF in this ranking, so they are listed on
+   * news and roster need alone", above the board, in every league that starts a
+   * defence — which is most of them. It was accurate, and it was an apology for
+   * a behaviour that has been removed rather than explained: defences are now
+   * ranked on the market alone and on nothing else, so there is no news and no
+   * roster need to disclose. See `DEFENCE_WEIGHTS` and the split ranking pass
+   * below.
+   *
+   * DEF is the only position this ever fired for. Every other startable
+   * position is covered by every published draft order this app imports, and if
+   * one somehow were not, the row itself already says so — `ADP —` rather than a
+   * number, and `degraded` set — which is the honest place for it: on the player
+   * it is about, rather than in a banner over a board it mostly does not
+   * describe.
+   */
 
   // Sleeper ranks ~2,500 players; scoring all of them on every request is
   // work nobody reads, and it is far more than any draft will reach. The cap
@@ -909,19 +909,19 @@ export async function buildDraftBoard(
     }),
   });
 
-  const ranked = rankAvailablePlayers(
-    candidates.map((player) => ({
-      player,
-      adp: rankOf(player),
-      dogAdp: dogOf(player),
-      adpRank: importedValues.get(player.id)?.rank ?? null,
-      signal: signals.get(player.id) ?? null,
-      myGuyLevel: flags.get(player.id)?.level ?? 0,
-      seasonMarkets: seasonLines.get(player.id) ?? [],
-      preseasonPoints: preseasonPoints.get(player.id) ?? null,
-      nextPickSurvival: survivalFor(nextPick.byPlayer.get(player.id)),
-    })),
-    {
+  const rankInput = (player: CanonicalPlayer) => ({
+    player,
+    adp: rankOf(player),
+    dogAdp: dogOf(player),
+    adpRank: importedValues.get(player.id)?.rank ?? null,
+    signal: signals.get(player.id) ?? null,
+    myGuyLevel: flags.get(player.id)?.level ?? 0,
+    seasonMarkets: seasonLines.get(player.id) ?? [],
+    preseasonPoints: preseasonPoints.get(player.id) ?? null,
+    nextPickSurvival: survivalFor(nextPick.byPlayer.get(player.id)),
+  });
+
+  const rankingContext = {
       currentPick,
       nextPick: horizon?.pickNo ?? null,
       shape,
@@ -938,11 +938,84 @@ export async function buildDraftBoard(
       rosterPlayers: myRosterRecord
         ? live.players.map((p) => ({ position: p.position, team: p.team }))
         : undefined,
-      // 60/40, or 75/25 in a best-ball league. Sleeper's own settings decide.
-      marketFormat: marketFormatOf(format),
-    },
-  )
-    .slice(0, opts.limit ?? 50);
+    // 60/40, or 75/25 in a best-ball league. Sleeper's own settings decide.
+    marketFormat: marketFormatOf(format),
+  };
+
+  /*
+   * DEFENCES ARE RANKED APART, ON THE MARKET AND NOTHING ELSE.
+   *
+   * The board used to score them like everybody else and then apologise for it
+   * above the list: "no draft order covers DEF in this ranking, so they are
+   * listed on news and roster need alone". That sentence was accurate, and what
+   * it described is the problem — with no published draft order for defences,
+   * the only live inputs left were a news tally and a roster slot, so a
+   * newsletter sentence could float a defence up a draft board.
+   *
+   * A defence is an afterthought, and the app has no opinion about one: no news
+   * rule reads them, no Vegas market covers them, no preseason projection
+   * includes them. So they are ranked on the draft market alone, in a pass of
+   * their own with `DEFENCE_WEIGHTS`, and ordered strictly by Sleeper ADP —
+   * ascending, unpriced last, name to break the tie so the order is stable
+   * between two polls of an unchanged board.
+   *
+   * **A separate pass, not a filter inside the shared one.** Every pool-relative
+   * thing the engine computes — scarcity, the tier ladder, separation,
+   * opportunity cost — is grouped by position, so a defence never entered a
+   * non-defence player's arithmetic and removing it cannot change one. Ranking
+   * them apart makes that a fact about the call graph rather than a property to
+   * be re-checked: the field's ranking is the same call, on the same inputs, in
+   * the same context it always had. `tests/draft.defence.test.ts` asserts the
+   * field's output is byte-for-byte identical with the defences present and
+   * absent.
+   *
+   * Defences then follow the field, which is where an afterthought belongs and
+   * is also where they already were: with no ADP their composite sat near zero
+   * and the engine's own sort puts an unpriced player after every priced one.
+   */
+  const rankedField = rankAvailablePlayers(
+    candidates.filter((player) => player.position !== DEFENCE).map(rankInput),
+    rankingContext,
+  );
+
+  const rankedDefence = rankAvailablePlayers(
+    candidates
+      .filter((player) => player.position === DEFENCE)
+      .map((player) => ({
+        ...rankInput(player),
+        /*
+         * Stripped as well as unweighted, so the *card* says what the ordering
+         * says. A zero weight already stops these moving a defence, but the
+         * expanded card prints components and a DOG column, and a row whose
+         * numbers imply a reading the order does not use is worse than a row
+         * with fewer numbers on it.
+         */
+        dogAdp: null,
+        signal: null,
+        myGuyLevel: 0 as const,
+        seasonMarkets: [],
+        preseasonPoints: null,
+      })),
+    /*
+     * The roster is withheld as well as unweighted.
+     *
+     * `team_concentration` carries a weight of its own rather than reading the
+     * table above, so zeroing the table would leave your own drafted roster
+     * still nudging a defence — a roster-derived adjustment, which is precisely
+     * the kind this is meant to stop applying. With no roster the component
+     * scores nothing and says so, which is the same answer it gives before your
+     * first pick.
+     */
+    { ...rankingContext, rosterPlayers: undefined },
+    DEFENCE_WEIGHTS,
+  ).sort(
+    (a, b) =>
+      Number(a.adp == null) - Number(b.adp == null) ||
+      (a.adp ?? 0) - (b.adp ?? 0) ||
+      a.name.localeCompare(b.name),
+  );
+
+  const ranked = [...rankedField, ...rankedDefence].slice(0, opts.limit ?? 50);
 
   /*
    * How short the teams picking before your next turn are, per position.
