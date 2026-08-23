@@ -89,7 +89,10 @@ import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
-import { SeasonMarketService } from './services/seasonMarketService.ts';
+import { SeasonMarketService, seasonFor } from './services/seasonMarketService.ts';
+import { PreseasonProjectionService } from './services/preseasonProjectionService.ts';
+import { PreseasonProjectionsRepo } from './repos/preseasonProjections.ts';
+import { describeScoring, projectionScoringFrom, scoringKey } from '../core/startWho/scoring.ts';
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
 import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
 import type { NeedLevel } from '../core/league/competition.ts';
@@ -2166,6 +2169,94 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await service.status());
   });
 
+  /*
+   * The preseason projection, in and out.
+   *
+   * Deliberately not under `/api/vegas`, and named for what it is. A StartWho
+   * number is a projection somebody derived *from* betting markets under a
+   * stated set of scoring rules — not a line a book is taking bets on. Filing
+   * it beside the Vegas routes would make the two look interchangeable in the
+   * one place a future reader goes to find out whether they are, which is the
+   * confusion this whole path exists to avoid.
+   */
+
+  /**
+   * What is imported, under whose rules, and what else is on file.
+   *
+   * Read-only and cheap. `current` is the capture the board is actually
+   * reading — scoped to the selected league's own scoring, because a snapshot
+   * captured under other rules is not a worse answer, it is not an answer.
+   * `others` is everything else stored for the season, so a snapshot imported
+   * under the wrong profile is visible rather than merely inert.
+   */
+  router.get('/api/preseason-projection', async (ctx) => {
+    const leagues = new LeagueRepo(ctx.env.db);
+    const league = (await leagues.listLeagues()).find((l) => l.isSelected) ?? null;
+    const season = seasonFor();
+    const all = await new PreseasonProjectionsRepo(ctx.env.db).list(season);
+
+    if (!league) {
+      return jsonResponse({
+        season,
+        league: null,
+        scoringKey: null,
+        scoringLabel: null,
+        current: null,
+        others: all,
+      });
+    }
+
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const scoring = projectionScoringFrom(profile);
+    const key = scoringKey(scoring);
+    const current = all.find((s) => s.scoringKey === key) ?? null;
+    return jsonResponse({
+      season,
+      league: { id: league.id, name: league.name },
+      scoringKey: key,
+      scoringLabel: describeScoring(scoring),
+      current,
+      others: all.filter((s) => s.id !== current?.id),
+    });
+  });
+
+  /**
+   * Read the paste and say what it would do. Writes nothing.
+   *
+   * A POST because the snapshot is a body rather than a query, not because it
+   * changes anything: `preview` and `apply` are the same method behind a
+   * boolean, so what is reported here is what would be stored — the preview
+   * cannot drift from the import it previews.
+   */
+  router.post('/api/preseason-projection/preview', async (ctx) => {
+    const body = await ctx.json<{ content?: string; capturedAt?: string }>();
+    return preseasonProjectionImport(ctx, body, false);
+  });
+
+  /** Store it. An ordinary authenticated write, gated like every other POST. */
+  router.post('/api/preseason-projection/apply', async (ctx) => {
+    const body = await ctx.json<{ content?: string; capturedAt?: string }>();
+    return preseasonProjectionImport(ctx, body, true);
+  });
+
+  /**
+   * Forget one capture.
+   *
+   * Re-importing the same capture already replaces it in place, so this is not
+   * how a correction is made — it is how a snapshot imported under the wrong
+   * scoring profile stops sitting in the list looking like it might be used.
+   */
+  router.post('/api/preseason-projection/remove', async (ctx) => {
+    const body = await ctx.json<{ id?: number }>();
+    const id = Number(body?.id);
+    if (!Number.isInteger(id) || id <= 0) return errorResponse('a snapshot id is required', 400);
+    const repo = new PreseasonProjectionsRepo(ctx.env.db);
+    const found = (await repo.list(seasonFor())).some((s) => s.id === id);
+    if (!found) return errorResponse('no such snapshot for this season', 404);
+    await repo.remove(id);
+    return jsonResponse({ removed: id });
+  });
+
   /**
    * Manual refresh. Rate limited *and* budgeted.
    *
@@ -2340,6 +2431,52 @@ async function boundedFreeAgents(
  * for this player returns null and the card shows nothing; a pick whose seat
  * Sleeper never named still produces the pick, which is most of the value.
  */
+/**
+ * Preview and Apply, which differ by one boolean and nothing else.
+ *
+ * Written once so they cannot drift: a preview that parsed differently from
+ * the import it previews would be worse than no preview, because it would be
+ * believed. The league's own scoring is read here rather than accepted from
+ * the client — the profile decides what the numbers mean, so it is not
+ * something a paste is allowed to declare about itself.
+ */
+async function preseasonProjectionImport(
+  ctx: { env: { db: Database }; },
+  body: { content?: string; capturedAt?: string } | null,
+  commit: boolean,
+): Promise<Response> {
+  const content = (body?.content ?? '').trim();
+  if (!content) return errorResponse('paste the projection table first', 400);
+
+  const league = (await new LeagueRepo(ctx.env.db).listLeagues()).find((l) => l.isSelected) ?? null;
+  if (!league) {
+    return errorResponse(
+      'choose your league first — a projection is only meaningful under the scoring it was captured for',
+      409,
+    );
+  }
+
+  const service = new PreseasonProjectionService(ctx.env.db);
+  const request = {
+    content,
+    season: seasonFor(),
+    profile: buildScoringProfile(league.scoringSettings, league.rosterPositions),
+    capturedAt: body?.capturedAt ?? null,
+  };
+
+  try {
+    return jsonResponse(commit ? await service.apply(request) : await service.preview(request));
+  } catch (err) {
+    /*
+     * A refusal, not a crash. The parser throws when the paste is not a
+     * StartWho table at all — including when the plausibility guard recognises
+     * a projection dressed as betting lines — and that is a 400 the reader can
+     * act on rather than a 500 that says the app is broken.
+     */
+    return errorResponse(err instanceof Error ? err.message : String(err), 400);
+  }
+}
+
 async function draftProvenanceFor(
   db: Database,
   playerId: string,

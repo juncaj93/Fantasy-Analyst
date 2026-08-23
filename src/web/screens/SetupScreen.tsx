@@ -15,6 +15,8 @@ import {
   type RepairStatus,
   type AiTallyApplyOutcome,
   type AiTallyPreview,
+  type ProjectionImportResult,
+  type ProjectionStatus,
   type ReprocessPreview,
   type SetupStatus,
 } from '../api.ts';
@@ -215,6 +217,7 @@ export function SetupScreen({
       <ListGroup header="This app">
         <InstallPanel />
         <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
+        <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
         <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
       </ListGroup>
 
@@ -277,6 +280,262 @@ function AppearanceCard() {
         Dark stay exactly as you set them here, on this phone.
       </div>
     </div>
+  );
+}
+
+/**
+ * Preseason market projection: paste, preview, apply.
+ *
+ * The last mile of a path that was otherwise complete — parser, identity
+ * ladder, scoring-profile identity and storage all existed and none of them
+ * could be reached from a phone.
+ *
+ * Deliberately not filed under Vegas lines, and deliberately named for what it
+ * is. A StartWho number is a season points estimate somebody derived *from*
+ * betting markets under a stated set of rules; it is not a line a book is
+ * taking bets on. Putting the two behind one heading would make them look
+ * interchangeable in the one place a reader goes to find out whether they are.
+ *
+ * One row, one sheet, no data-engineering screen: what is loaded, a box to
+ * paste into, the counts before anything is written, and Apply.
+ */
+function PreseasonProjectionPanel({ unlocked, onDone }: { unlocked: boolean; onDone: () => void }) {
+  const [status, setStatus] = useState<ProjectionStatus | null>(null);
+  const [open, setOpen] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [preview, setPreview] = useState<ProjectionImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api.get<ProjectionStatus>('/api/preseason-projection'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (what: 'preview' | 'apply') => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.post<ProjectionImportResult>(`/api/preseason-projection/${what}`, {
+        content: pasted,
+      });
+      if (what === 'preview') {
+        setPreview(result);
+      } else {
+        setDone(`${result.label} imported — ${result.counts.matched} of ${result.counts.parsed} players matched.`);
+        setPreview(null);
+        setPasted('');
+        setOpen(false);
+        await load();
+        onDone();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forget = async (id: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/preseason-projection/remove', { id });
+      await load();
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const current = status?.current ?? null;
+
+  return (
+    <details className="list-details" data-testid="panel-preseason-projection">
+      <summary>Preseason market projection</summary>
+      <div className="list-details-body">
+        {done ? <Notice tone="ok">{done}</Notice> : null}
+        {error ? <Notice tone="error">{error}</Notice> : null}
+
+        <div className="faint" data-testid="projection-status">
+          {current ? (
+            <>
+              <strong>{current.label}</strong> — {current.players} players from {current.rows} rows, captured{' '}
+              {formatDate(current.capturedAt)} under {current.scoringLabel}.
+              {current.unresolved > 0
+                ? ` ${current.unresolved} name${current.unresolved === 1 ? '' : 's'} could not be matched and ${
+                    current.unresolved === 1 ? 'is' : 'are'
+                  } waiting in Review.`
+                : ''}
+            </>
+          ) : status?.scoringLabel ? (
+            <>
+              Nothing imported for {status.scoringLabel}. The Draft board shows <code>PTS —</code> until a snapshot
+              is pasted here, rather than a number it would have to invent.
+            </>
+          ) : (
+            <>Choose your league first — a projection only means anything under the scoring it was captured for.</>
+          )}
+        </div>
+
+        {/*
+          Captures on file under other rules.
+
+          Kept rather than discarded, and said out loud rather than hidden: a
+          snapshot imported against the wrong profile is inert, and an invisible
+          inert snapshot looks exactly like an import that failed.
+        */}
+        {(status?.others.length ?? 0) > 0 ? (
+          <div className="faint" style={{ marginTop: 6 }} data-testid="projection-others">
+            Also on file, under other scoring and so not used: {status!.others.map((s) => s.label).join(', ')}.
+          </div>
+        ) : null}
+
+        {unlocked ? (
+          <>
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => setOpen(true)}
+                data-testid="open-projection-paste"
+                disabled={!status?.scoringKey}
+              >
+                {current ? 'Replace snapshot' : 'Paste snapshot'}
+              </button>
+              {current ? (
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void forget(current.id)}
+                  data-testid="forget-projection"
+                >
+                  Forget it
+                </button>
+              ) : null}
+            </div>
+            <div className="faint" style={{ marginTop: 4 }}>
+              Copy the whole StartWho table and paste it below. Nothing is fetched or scraped; this is the only way
+              a projection gets in.
+            </div>
+          </>
+        ) : null}
+
+        {open ? (
+          <Sheet
+            title="Paste preseason projection"
+            onClose={() => setOpen(false)}
+            testId="projection-paste-sheet"
+          >
+            <textarea
+              style={{ display: 'block', minHeight: 76, maxHeight: '28vh' }}
+              rows={4}
+              value={pasted}
+              placeholder={'▸ Josh Allen\nQB1 · Buffalo Bills\n386.1'}
+              onChange={(e) => {
+                setPasted(e.target.value);
+                // A stale preview beside edited text is worse than none.
+                setPreview(null);
+              }}
+              data-testid="projection-paste-input"
+            />
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => void run('preview')}
+                disabled={busy || !pasted.trim()}
+                data-testid="projection-preview"
+              >
+                {busy ? 'Reading…' : 'Preview'}
+              </button>
+            </div>
+
+            {preview ? (
+              <div className="explain" style={{ marginTop: 8 }} data-testid="projection-preview-panel">
+                <div className="muted">
+                  {preview.source} · captured {formatDate(preview.capturedAt)}
+                  {preview.capturedFrom === 'declared' ? ' (no date in the paste — today assumed)' : ''} ·{' '}
+                  {preview.scoringLabel}
+                </div>
+
+                {/*
+                  The whole count, not just the good half. "218 matched" cannot
+                  answer "is this the right table"; "218 of 224" can.
+                */}
+                <div className="faint" style={{ marginTop: 6 }} data-testid="projection-counts">
+                  {preview.counts.parsed} rows parsed · {preview.counts.matched} matched ·{' '}
+                  {preview.counts.ambiguous + preview.counts.unmatched} unresolved · {preview.counts.rejected}{' '}
+                  rejected
+                </div>
+
+                {preview.scoringKey !== status?.scoringKey ? (
+                  <Notice tone="error">
+                    This was captured under {preview.scoringLabel}, which is not your league&rsquo;s scoring. It can
+                    be stored, but the board will not read it.
+                  </Notice>
+                ) : null}
+
+                {preview.warnings.map((w) => (
+                  <Notice key={w}>{w}</Notice>
+                ))}
+
+                {preview.replaces ? (
+                  <div className="faint" style={{ marginTop: 6 }}>
+                    Replaces {preview.replaces.label}, which was imported {formatAge(preview.replaces.importedAt)}.
+                  </div>
+                ) : null}
+
+                {preview.sample.length > 0 ? (
+                  <>
+                    <div className="section-title">Reads as</div>
+                    <ul style={{ paddingLeft: 16, margin: 0 }} data-testid="projection-sample">
+                      {preview.sample.map((s) => (
+                        <li key={s.name}>
+                          {s.name} {s.position ? `(${s.position})` : ''} — {s.points}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+
+                {preview.needsReview.length > 0 ? (
+                  <div className="faint" style={{ marginTop: 6 }} data-testid="projection-unresolved">
+                    {preview.needsReview.length} name{preview.needsReview.length === 1 ? '' : 's'} could not be
+                    matched — {preview.needsReview.slice(0, 4).map((r) => r.name).join(', ')}
+                    {preview.needsReview.length > 4 ? ' and others' : ''}. Applying files{' '}
+                    {preview.needsReview.length === 1 ? 'it' : 'them'} in Review; the rest import regardless.
+                  </div>
+                ) : null}
+
+                <div className="btn-row" style={{ marginTop: 8 }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => void run('apply')}
+                    disabled={busy || preview.counts.matched === 0}
+                    data-testid="projection-apply"
+                  >
+                    {busy ? 'Importing…' : 'Apply'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </Sheet>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
