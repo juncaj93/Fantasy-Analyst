@@ -34,6 +34,17 @@
  */
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
+/*
+ * Which league to ask about, when the selected one is not the interesting one.
+ *
+ * The deployment serves whichever league the user last chose, and that is
+ * usually right. It is wrong for this probe on the day they are looking at a
+ * league whose draft has not happened: every slot answers "nobody eligible",
+ * which is a true statement about that league and tells you nothing at all
+ * about what a projection means. Naming one is read-only, like everything else
+ * here — it changes which league is *asked about*, never which is selected.
+ */
+const LEAGUE_OVERRIDE = process.env.LEAGUE_ID || null;
 const SLEEPER = 'https://api.sleeper.app';
 
 async function getJson(url) {
@@ -55,12 +66,17 @@ const main = async () => {
 
   const setup = await getJson(`${APP}/api/setup/status`);
   if (!setup.ok) return console.log(`setup unreachable: ${setup.error}`);
-  const leagueId = setup.body.league?.id;
+  const leagueId = LEAGUE_OVERRIDE ?? setup.body.league?.id;
   const scoringLabel = setup.body.league?.scoringLabel;
   if (!leagueId) return console.log('no league selected');
 
   head('THE DEPLOYMENT');
-  show('league', `${setup.body.league?.name} (${leagueId})`);
+  show(
+    'league',
+    LEAGUE_OVERRIDE
+      ? `${leagueId} (named by LEAGUE_ID; the app has ${setup.body.league?.name} selected)`
+      : `${setup.body.league?.name} (${leagueId})`,
+  );
   show('scoring', scoringLabel);
   show('vegas provider', setup.body.vegas?.provider);
   show('vegas live', setup.body.vegas?.live);
@@ -80,6 +96,15 @@ const main = async () => {
 
   const evaluations = [...(lu.starters ?? []), ...(lu.bench ?? []), ...(lu.undecidable ?? [])];
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
+
+  if ((lu.slots ?? []).every((s) => !s.playerId)) {
+    console.log(
+      '\n  Every slot is empty. This league has no roster the engine can score —\n' +
+        '  its draft has not happened, or its players are not in the dictionary yet.\n' +
+        '  Nothing below is a statement about what a projection means; pass LEAGUE_ID\n' +
+        '  to ask about a league that has one.',
+    );
+  }
 
   head('EVERY RECOMMENDED STARTER, DECOMPOSED');
   console.log('  slot       player                    proj  source    score   market   sum-of-known-components');
