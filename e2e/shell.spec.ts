@@ -405,25 +405,61 @@ test.describe('the active tab, tapped again', () => {
 });
 
 /**
- * The status chip has to be readable on the card it lands on.
+ * THE ROW'S PILLS HAVE TO BE READABLE, AND QUIETER THAN THE NUMBERS.
  *
- * `Q` was amber on an amber tint, which is invisible on a receiver — the tag
- * that appears on more players than any other, disappearing on one position in
- * six. This measures the thing that was wrong: the chip against the card
- * underneath it, on every position the palette paints.
+ * Two claims, and the second one is why this test was rewritten rather than
+ * left alone. It used to measure the chip's *background* against the card and
+ * demand better than 3:1 — a sensible proxy while the chip was a filled slab,
+ * and a rule that mandates a filled slab forever. The slab was the complaint:
+ * `Q` and `Tier · 2 left` stood 5.5:1 to 7.4:1 off the card, louder than the
+ * Score, which is the number the board is actually about.
+ *
+ * So the measurement moves to what "readable" means. The letters are the
+ * carrier — every status prints its code and the tier chip prints its count —
+ * so the letters are what must clear WCAG, both against the pill and against
+ * the card underneath it, and the pill's own surface is then free to be a
+ * whisper. The border keeps the shape.
+ *
+ * Measured on every position the palette paints, in both themes, because a chip
+ * painted in a hue can only ever be as visible as the card it lands on and this
+ * one lands on six.
  */
-test.describe('injury tags', () => {
-  test('stand off every position colour, in both themes', async ({ page }) => {
+test.describe('the row pills', () => {
+  /** WCAG AA for small text. The letters carry the meaning, so they clear it. */
+  const READABLE = 4.5;
+  /** A pill that stands off the card by more than this is a slab again. */
+  const QUIET = 2;
+  /** ...and one whose edge is below this has no shape at all. */
+  const OUTLINED = 2;
+
+  test('read on every position colour, in both themes, without shouting', async ({ page }) => {
     await page.goto('/');
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
       await open(page, 'draft');
 
       const readings = await page.evaluate(() => {
-        /** `rgb(r g b)` and `color(srgb 0-1 …)` both, as 0-255. */
-        const channels = (value: string): number[] => {
-          const nums = (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
-          return value.startsWith('color(') ? nums.map((n) => n * 255) : nums;
+        /*
+         * Resolved by painting rather than by parsing.
+         *
+         * A position card's background is a `color-mix()`, and the engines do
+         * not agree about how to serialise one — Chromium hands back
+         * `oklab(0.96 0.003 0.027)`, which a naive "grab the first three
+         * numbers" reader turns into a near-black and a contrast figure that is
+         * confidently wrong. The pills' borders are `color-mix()` too. Filling
+         * a canvas and reading the pixel back asks the engine what colour it
+         * actually painted, which is the question.
+         */
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        const paint = (colour: string): number[] => {
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = '#000';
+          context.fillStyle = colour;
+          context.fillRect(0, 0, 1, 1);
+          const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+          return [r!, g!, b!];
         };
         const luminance = (rgb: number[]) => {
           const f = (c: number) => {
@@ -432,35 +468,74 @@ test.describe('injury tags', () => {
           };
           return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
         };
+        const contrast = (a: string, b: string) => {
+          const [x, y] = [luminance(paint(a)), luminance(paint(b))];
+          return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+        };
 
-        // Put the caution chip on one card of every position that is on screen,
-        // which is the only way to see it against all six.
+        /*
+         * Every pill the row can draw, put on one card of every position that
+         * is on screen — which is the only way to see all of them against all
+         * six. The classes are the real ones, so this measures the stylesheet
+         * rather than a copy of it.
+         */
+        const pills = [
+          ['injury Q', 'row-pill injury-tag injury-caution', 'Q'],
+          ['injury D', 'row-pill injury-tag injury-serious', 'D'],
+          ['injury OUT', 'row-pill injury-tag injury-out', 'OUT'],
+          ['tier', 'row-pill player-row-cliff', 'Tier \u00b7 2 left'],
+        ] as const;
+
         const rows = [...document.querySelectorAll('[data-testid="recommendation-row"]')];
-        const perPosition = new Map<string, Element>();
+        const seen = new Set<string>();
+        const out: {
+          position: string;
+          pill: string;
+          text: number;
+          textOnCard: number;
+          surface: number;
+          edge: number;
+        }[] = [];
+
         for (const row of rows) {
           const position = row.getAttribute('data-position') ?? '';
-          if (perPosition.has(position)) continue;
-          const probe = document.createElement('span');
-          probe.className = 'injury-tag injury-caution probe';
-          probe.textContent = 'Q';
-          row.querySelector('.player-row-top')!.append(probe);
-          perPosition.set(position, row);
-        }
+          if (seen.has(position)) continue;
+          seen.add(position);
+          const card = getComputedStyle(row).backgroundColor;
 
-        return [...perPosition.entries()].map(([position, row]) => {
-          const chip = row.querySelector('.probe')!;
-          const a = luminance(channels(getComputedStyle(chip).backgroundColor));
-          const b = luminance(channels(getComputedStyle(row).backgroundColor));
-          return {
-            position,
-            contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
-          };
-        });
+          for (const [name, className, text] of pills) {
+            const probe = document.createElement('span');
+            probe.className = `${className} probe`;
+            probe.textContent = text;
+            row.querySelector('.player-row-top')!.append(probe);
+            const style = getComputedStyle(probe);
+            out.push({
+              position,
+              pill: name,
+              text: contrast(style.color, style.backgroundColor),
+              textOnCard: contrast(style.color, card),
+              surface: contrast(style.backgroundColor, card),
+              edge: contrast(style.borderTopColor, card),
+            });
+            probe.remove();
+          }
+        }
+        return out;
       });
 
-      expect(readings.length, 'the board should show several positions').toBeGreaterThan(1);
-      for (const { position, contrast } of readings) {
-        expect(contrast, `Q is lost on ${position} in ${theme} (${contrast.toFixed(2)}:1)`).toBeGreaterThan(3);
+      expect(readings.length, 'the board should show several positions').toBeGreaterThan(4);
+      for (const r of readings) {
+        const where = `${r.pill} on ${r.position} in ${theme}`;
+        // Legible on the pill...
+        expect(r.text, `${where}: text on the pill is ${r.text.toFixed(2)}:1`).toBeGreaterThan(READABLE);
+        // ...and legible even where the pill's surface is nearly invisible,
+        // which the old white-on-slab lettering was not.
+        expect(r.textOnCard, `${where}: text on the card is ${r.textOnCard.toFixed(2)}:1`).toBeGreaterThan(READABLE);
+        // Quiet: this is the regression guard in the other direction. A pill
+        // that creeps back to a filled slab fails here rather than in review.
+        expect(r.surface, `${where}: the pill shouts at ${r.surface.toFixed(2)}:1`).toBeLessThan(QUIET);
+        // ...but still an object on the card rather than floating text.
+        expect(r.edge, `${where}: the pill has no visible edge (${r.edge.toFixed(2)}:1)`).toBeGreaterThan(OUTLINED);
       }
     }
     await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));

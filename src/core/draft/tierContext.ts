@@ -21,9 +21,9 @@ import type { TierCliff } from './tiers.ts';
 /**
  * Below this many left, the group is about to be gone rather than shrinking.
  *
- * The same number the collapsed board uses for its `Tier cliff · N away` tag,
- * shared so the row and the card it opens can never disagree about whether a
- * position is cliffing.
+ * The same number the collapsed board uses for its `Tier · N left` chip, shared
+ * so the row and the card it opens can never disagree about whether a position
+ * is cliffing.
  */
 export const CLIFF_IS_NEAR = 2;
 

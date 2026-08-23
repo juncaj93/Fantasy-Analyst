@@ -12,7 +12,9 @@ import {
   FLX_FILTER,
   POSITION_ORDER,
   isFlexEligible,
+  TRAILING_FILTER_POSITIONS,
   offersFlexFilter,
+  orderFilterChips,
   orderPositions,
   positionMatchesFilter,
   resolveComparisonSlot,
@@ -25,6 +27,18 @@ import { buildRosterShape, startablePositions } from '../src/core/sleeper/scorin
 const ONE_FLEX = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN']);
 const NO_FLEX = buildRosterShape(['QB', 'RB', 'WR', 'TE', 'BN', 'BN']);
 const SUPERFLEX = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'BN']);
+
+/**
+ * A normal redraft league that starts a defence, and a Best Ball one that does
+ * not. The two shapes the filter row has to get right, side by side.
+ *
+ * Best Ball is the case a defence chip must not appear in at all, and it is by
+ * far the more common of the two in this app's fixtures — which is exactly how
+ * a defence sitting in the middle of the row survived unnoticed.
+ */
+const WITH_DEF = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'DEF', 'BN', 'BN']);
+const BEST_BALL = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN']);
+const WITH_K_AND_DEF = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DEF', 'BN']);
 
 describe('normal flex eligibility', () => {
   it('is exactly RB, WR and TE', () => {
@@ -121,6 +135,98 @@ describe('the order positions are read in', () => {
 
   it('is one list, so no screen can invent a second order', () => {
     expect(POSITION_ORDER).toEqual(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
+  });
+});
+
+/**
+ * The filter row's order, which is the reading order plus two rules.
+ *
+ * `orderPositions` answers "what order are positions read in" and is used for
+ * roster summaries too. A *chip row* asks a narrower question, and the answer
+ * has FLX after its parts and the defence at the very end.
+ */
+describe('the order a filter row draws its chips in', () => {
+  it('is QB, RB, WR, TE, FLX, DEF in a league that starts a defence', () => {
+    expect(orderFilterChips(startablePositions(WITH_DEF))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX', 'DEF']);
+  });
+
+  /**
+   * The regression this exists for: DEF used to sit between TE and FLX, because
+   * the row was `orderPositions(startable)` with FLX appended, and
+   * `POSITION_ORDER` quite correctly reads the defence among the positions.
+   */
+  it('puts the defence after FLX, not among the positions', () => {
+    const chips = orderFilterChips(startablePositions(WITH_DEF));
+    expect(chips.indexOf('DEF')).toBe(chips.length - 1);
+    expect(chips.indexOf('DEF')).toBeGreaterThan(chips.indexOf(FLX_FILTER));
+  });
+
+  it('leaves a Best Ball league without a defence exactly as it was', () => {
+    expect(orderFilterChips(startablePositions(BEST_BALL))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX']);
+  });
+
+  /**
+   * The FLX chip is offered on flex-eligible *positions*, not on the presence of
+   * a flex slot — see `offersFlexFilter`, which is unchanged. A league starting
+   * one of each still gets the view, and this row is here so that reordering
+   * cannot quietly become a rule about which chips exist.
+   */
+  it('changes which order the chips are in and never which chips there are', () => {
+    expect(orderFilterChips(startablePositions(NO_FLEX))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX']);
+    for (const shape of [WITH_DEF, BEST_BALL, NO_FLEX, SUPERFLEX, ONE_FLEX]) {
+      const startable = startablePositions(shape);
+      const before = [...orderPositions(startable), ...(offersFlexFilter(startable) ? [FLX_FILTER] : [])];
+      expect([...orderFilterChips(startable)].sort()).toEqual([...before].sort());
+    }
+  });
+
+  /**
+   * The kicker question, answered rather than guessed at.
+   *
+   * There is no K chip to order, whatever the rule says about one.
+   * `NON_PLAYING_SLOTS` drops a `K` roster slot before it can ever become a
+   * startable position — "the app has no opinion about them, so treating a
+   * kicker slot as a starting slot would produce a lineup row it could never
+   * fill" — so a league that starts a kicker draws exactly the same row as one
+   * that does not.
+   *
+   * The rule still names it, and that is deliberate: the answer to "where does
+   * a kicker go" is written down rather than left to be rediscovered the day
+   * kickers are modelled. Both halves are asserted here, because the inert one
+   * is the one somebody could delete believing it does nothing.
+   */
+  it('has no kicker chip to place, in a league that starts one', () => {
+    expect(startablePositions(WITH_K_AND_DEF).has('K')).toBe(false);
+    expect(orderFilterChips(startablePositions(WITH_K_AND_DEF))).toEqual(['QB', 'RB', 'WR', 'TE', 'FLX', 'DEF']);
+    expect(TRAILING_FILTER_POSITIONS).toEqual(['K', 'DEF']);
+  });
+
+  /**
+   * ...and if one ever were startable, it would sit before the defence.
+   *
+   * Asserted on the helper directly rather than through a roster shape, since
+   * no roster shape can produce it. This is the line that stops the inert entry
+   * above from being a comment nobody has checked.
+   */
+  it('would draw a kicker after FLX and before the defence', () => {
+    expect(orderFilterChips(['DEF', 'K', 'QB', 'RB', 'WR', 'TE'])).toEqual([
+      'QB',
+      'RB',
+      'WR',
+      'TE',
+      'FLX',
+      'K',
+      'DEF',
+    ]);
+  });
+
+  it('honours a caller that has already been told whether FLX is offered', () => {
+    expect(orderFilterChips(['QB', 'RB', 'WR', 'TE', 'DEF'], false)).toEqual(['QB', 'RB', 'WR', 'TE', 'DEF']);
+    expect(orderFilterChips(['QB', 'DEF'], true)).toEqual(['QB', 'FLX', 'DEF']);
+  });
+
+  it('keeps a slot it has never heard of, after the positions and before nothing', () => {
+    expect(orderFilterChips(['DEF', 'QB', 'DL', 'WR'])).toEqual(['QB', 'WR', 'DL', 'FLX', 'DEF']);
   });
 });
 

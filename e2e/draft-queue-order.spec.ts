@@ -121,7 +121,9 @@ async function emptyQueue(page: Page) {
   if (!res.ok()) return;
   const board = (await res.json()) as { recommendations: { playerId: string }[] };
   for (const rec of board.recommendations ?? []) {
-    await page.request.post(`/api/players/${rec.playerId}/queue`, { data: { queued: false } });
+    await page.request.post('/api/drafts/demo-draft/queue', {
+      data: { playerId: rec.playerId, queued: false },
+    });
   }
 }
 

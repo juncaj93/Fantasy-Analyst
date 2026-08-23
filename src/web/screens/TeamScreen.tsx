@@ -52,7 +52,7 @@ import {
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
-import { FLX_FILTER, offersFlexFilter, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
+import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
 /*
  * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
  * detail and Trades so the three cannot disagree about which round pick 40 was.
@@ -1167,8 +1167,9 @@ function CompareSheet({
   const segments = useMemo(() => {
     const startable = startablePositions(buildRosterShape(rosterPositions));
     if (startable.size === 0) return [ALL_FILTER];
-    // FLX last, as everywhere else: a view over three positions, after them.
-    return [ALL_FILTER, ...orderPositions(startable), ...(offersFlexFilter(startable) ? [FLX_FILTER] : [])];
+    // The same row the draft board and the players list draw, from the same
+    // helper: positions, then FLX over three of them, then DEF at the end.
+    return [ALL_FILTER, ...orderFilterChips(startable)];
   }, [rosterPositions]);
 
   useEffect(() => {
@@ -1719,10 +1720,11 @@ function LiveDraftRoster({
    *
    * This was `Object.keys(...).sort()`, which is alphabetical — so a roster
    * opened with DEF above QB, and QB above RB, in an order no fantasy site has
-   * ever used. `orderPositions` is the same helper the draft board's chips and
-   * the Players filter already go through, so all three now read in one order
-   * and cannot drift apart again. Anything unexpected is kept and put last
-   * rather than dropped.
+   * ever used. `orderPositions` is the reading order every list in the app
+   * shares, and the chip rows layer their own two rules on top of it — see
+   * `orderFilterChips`. A roster summary has neither a FLX chip nor a row to
+   * scan for receivers, so it takes the plain order. Anything unexpected is
+   * kept and put last rather than dropped.
    */
   const positions = orderPositions(Object.keys(roster.counts));
   return (

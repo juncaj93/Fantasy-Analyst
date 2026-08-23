@@ -215,15 +215,25 @@ Four briefs arrived and all four are delivered, merged and deployed.
 They used to be one stored value. Starring a player on the draft board
 bookmarked him *and* moved him up the board; only the first was ever wanted.
 
-- `player_flags.queued` — written by the ★ on the draft board, read by the ★
-  filter, and **read by nothing else**. The board comes back in identical order
-  with identical totals whether the star is lit or not; a unit test and an e2e
-  test both assert it.
+- the ★ queue — written by the star on the draft board, read by the ★ filter,
+  and **read by nothing else**. The board comes back in identical order with
+  identical totals whether the star is lit or not; a unit test and an e2e test
+  both assert it.
 - `player_flags.level` — still My Guy, still written by the ♥ on the players
   list, still worth its bounded ranking boost.
 
 Migration `0009` moved existing flags to queue entries and dropped the boost
 they were silently applying.
+
+> **Superseded in the storage, not in the principle.** The queue lived in
+> `player_flags.queued` / `player_flags.queue_order` until migration `0029`,
+> keyed by player id alone — one global list shown by whichever draft was open,
+> which is how a finished best-ball shortlist turned up in the next league's
+> draft. It is `draft_queue`, keyed `(draft_id, player_id)`, from `0029` on, and
+> the routes moved to `/api/drafts/:id/queue` so there is no way to read or
+> write one without naming the draft. My Guy did not move: it is an opinion
+> about a player and outlives every draft he is in. See
+> `src/server/repos/draftQueue.ts` and `tests/queueScope.test.ts`.
 
 ### Tiers are a distribution now, not a threshold
 

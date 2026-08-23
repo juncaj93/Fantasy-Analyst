@@ -94,7 +94,8 @@ describe('the demo marker makes the server read-only', () => {
     '/api/drafts/demo-draft/adp-snapshot',
     '/api/adp/import',
     '/api/players/1001/my-guy',
-    '/api/players/1001/queue',
+    '/api/drafts/demo-draft/queue',
+    '/api/drafts/demo-draft/queue/reorder',
     '/api/players/season-stats/refresh',
     '/api/injuries/refresh',
     '/api/usage/refresh',
@@ -137,24 +138,45 @@ describe('the demo marker makes the server read-only', () => {
   });
 
   it('changes nothing in the database while it refuses', async () => {
-    const read = async () => {
-      const body = (await (await app(request('/api/players/1001'), env)).json()) as {
-        myGuy: { level: number };
-        queued: boolean;
-      };
-      return { myGuy: body.myGuy.level, queued: body.queued };
+    const myGuy = async () => {
+      const body = (await (await app(request('/api/players/1001'), env)).json()) as { myGuy: { level: number } };
+      return body.myGuy.level;
+    };
+    /*
+     * The queue is read through the draft it belongs to, because there is no
+     * other way to read one. The guard is a rule about requests rather than a
+     * list of paths, so moving these routes under `/api/drafts/:id` cannot have
+     * opened a hole — but a demo that could write a live draft's shortlist is
+     * exactly the contamination this file exists to rule out, so it is asserted
+     * on the new paths rather than assumed from the old ones.
+     */
+    const queue = async () => {
+      const res = await app(request('/api/drafts/demo-draft/queue', { cookies: [sessionCookie] }), env);
+      return ((await res.json()) as { order: string[] }).order;
     };
 
-    const before = await read();
+    const before = { myGuy: await myGuy(), queue: await queue() };
     await app(
       request('/api/players/1001/my-guy', { method: 'POST', cookies: [demoCookie, sessionCookie], body: { level: 3 } }),
       env,
     );
     await app(
-      request('/api/players/1001/queue', { method: 'POST', cookies: [demoCookie, sessionCookie], body: { queued: true } }),
+      request('/api/drafts/demo-draft/queue', {
+        method: 'POST',
+        cookies: [demoCookie, sessionCookie],
+        body: { playerId: '1001', queued: true },
+      }),
       env,
     );
-    expect(await read()).toEqual(before);
+    await app(
+      request('/api/drafts/demo-draft/queue/reorder', {
+        method: 'POST',
+        cookies: [demoCookie, sessionCookie],
+        body: { playerId: '1001', toIndex: 0 },
+      }),
+      env,
+    );
+    expect({ myGuy: await myGuy(), queue: await queue() }).toEqual(before);
   });
 
   it('lets go the moment the demo is left, and the same write then succeeds', async () => {

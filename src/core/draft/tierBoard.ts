@@ -17,14 +17,21 @@ import type { TierCliff } from './tiers.ts';
 export interface TierCliffWarning {
   /** Available players left in the active tier. Only ever 1 or 2. */
   remaining: 1 | 2;
-  /** `Tier cliff · last 1` / `Tier cliff · 2 left`. */
+  /** `Tier · last 1` / `Tier · 2 left`. */
   label: string;
-  /** `Cliff · 1` / `Cliff · 2`, for phones too narrow for the sentence. */
+  /** `Tier · 1` / `Tier · 2`, for phones too narrow for the sentence. */
   short: string;
 }
 
 /**
- * `Tier cliff · last 1`, `Tier cliff · 2 left`, or nothing at all.
+ * `Tier · last 1`, `Tier · 2 left`, or nothing at all.
+ *
+ * **The word "cliff" is gone from what the chip prints.** It survives in the
+ * name of this function and in the model underneath, because that is still what
+ * the rule detects — but on the row it was doing the job the count already
+ * does, in a more alarming register. `Tier · 2 left` is the same fact without
+ * the adjective, and the chip is now quiet enough to sit on a row without
+ * shouting over the four numbers beside it.
  *
  * One question, and the wording is the question: **if I want a player from the
  * best tier still available at this position, how many are left before I drop
@@ -67,8 +74,12 @@ export interface TierCliffWarning {
 export function tierCliffWarning(tier: TierCliff): TierCliffWarning | null {
   if (tier.tierIndex !== 0) return null;
   if (!tier.tierEndsAtBoundary) return null;
-  if (tier.tierSize === 1) return { remaining: 1, label: 'Tier cliff · last 1', short: 'Cliff · 1' };
-  if (tier.tierSize === 2) return { remaining: 2, label: 'Tier cliff · 2 left', short: 'Cliff · 2' };
+  /*
+   * The count is read off the tier rather than written into the string, so a
+   * rule that one day warns at three cannot leave a chip claiming two.
+   */
+  if (tier.tierSize === 1) return { remaining: 1, label: 'Tier · last 1', short: 'Tier · 1' };
+  if (tier.tierSize === 2) return { remaining: 2, label: `Tier · ${tier.tierSize} left`, short: 'Tier · 2' };
   return null;
 }
 

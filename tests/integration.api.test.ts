@@ -307,8 +307,8 @@ describe('API with seeded data', () => {
     );
     const first = board.recommendations[0]!.playerId;
     const second = board.recommendations[1]!.playerId;
-    await app(post(`/api/players/${first}/queue`, { queued: true }, cookie), env);
-    await app(post(`/api/players/${second}/queue`, { queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: first, queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: second, queued: true }, cookie), env);
 
     const queued = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),
@@ -332,7 +332,7 @@ describe('API with seeded data', () => {
     );
     const starred = board.recommendations[0]!.playerId;
     const hearted = board.recommendations[1]!.playerId;
-    await app(post(`/api/players/${starred}/queue`, { queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: starred, queued: true }, cookie), env);
     await app(post(`/api/players/${hearted}/my-guy`, { level: 3 }, cookie), env);
 
     const after = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
@@ -353,26 +353,41 @@ describe('API with seeded data', () => {
     const before = await order();
     // Somebody halfway down the board, where a boost would be visible.
     const target = before[5]!.split(':')[0]!;
-    await app(post(`/api/players/${target}/queue`, { queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: target, queued: true }, cookie), env);
     expect(await order()).toEqual(before);
   });
 
-  it('refuses a queue value that is not a boolean, and an unknown player', async () => {
+  it('refuses a queue value that is not a boolean, an unknown player and an unknown draft', async () => {
     const board = await json<{ recommendations: { playerId: string }[] }>(get('/api/drafts/demo-draft/board', cookie));
     const id = board.recommendations[0]!.playerId;
-    expect((await app(post(`/api/players/${id}/queue`, { queued: 'yes' }, cookie), env)).status).toBe(400);
-    expect((await app(post('/api/players/nobody/queue', { queued: true }, cookie), env)).status).toBe(404);
-    expect((await app(post(`/api/players/${id}/queue`, { queued: true }), env)).status).toBe(401);
+    const status = async (path: string, body: unknown, withCookie = true) =>
+      (await app(withCookie ? post(path, body, cookie) : post(path, body), env)).status;
+
+    expect(await status('/api/drafts/demo-draft/queue', { playerId: id, queued: 'yes' })).toBe(400);
+    expect(await status('/api/drafts/demo-draft/queue', { queued: true })).toBe(400);
+    expect(await status('/api/drafts/demo-draft/queue', { playerId: 'nobody', queued: true })).toBe(404);
+    expect(await status('/api/drafts/demo-draft/queue', { playerId: id, queued: true }, false)).toBe(401);
+
+    /*
+     * A draft that does not exist gets nothing, on all three routes.
+     *
+     * This is the invariant the whole repair rests on: there is no way to write
+     * a queue entry that no draft will ever read, so a typo cannot leave an
+     * orphan list in the table.
+     */
+    expect(await status('/api/drafts/not-a-draft/queue', { playerId: id, queued: true })).toBe(404);
+    expect(await status('/api/drafts/not-a-draft/queue/reorder', { playerId: id, toIndex: 0 })).toBe(404);
+    expect((await app(get('/api/drafts/not-a-draft/queue', cookie), env)).status).toBe(404);
   });
 
   it('drops a queued player from the queue once he is taken', async () => {
     const board = await json<{ recommendations: { playerId: string }[] }>(
       get('/api/drafts/demo-draft/board', cookie),
     );
-    await app(post(`/api/players/${board.recommendations[0]!.playerId}/queue`, { queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: board.recommendations[0]!.playerId, queued: true }, cookie), env);
 
     // Marcus Vance is pick 1 in the seed, so he is already off the board.
-    await app(post('/api/players/1001/queue', { queued: true }, cookie), env);
+    await app(post('/api/drafts/demo-draft/queue', { playerId: '1001', queued: true }, cookie), env);
     const queued = await json<{ recommendations: { playerId: string }[] }>(
       get('/api/drafts/demo-draft/board?queued=1', cookie),
     );

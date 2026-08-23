@@ -14,7 +14,7 @@ import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { AdpRepo, UNDERDOG_SOURCE } from '../src/server/repos/adp.ts';
-import { PlayerFlagsRepo } from '../src/server/repos/playerFlags.ts';
+import { DraftQueueRepo } from '../src/server/repos/draftQueue.ts';
 import { PlayerRepo } from '../src/server/repos/players.ts';
 import { DraftBoardService } from '../src/server/services/draftBoard.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
@@ -408,11 +408,20 @@ describe('the queue keeps the order the reader gave it', () => {
   let app: ReturnType<typeof createApp>;
   let cookie: string;
   let ids: string[];
+  /** The draft the demo seed attaches to a league, and the one every route names. */
+  let draft: string;
 
-  /** The draft the demo seed attaches to a league. */
   async function draftId(): Promise<string> {
     return (await new LeagueRepo(db).listLeagues()).find((l) => l.draftId)!.draftId!;
   }
+
+  /** Star or unstar a player in the draft under test. */
+  const star = (playerId: string, queued: boolean) =>
+    app(post(`/api/drafts/${draft}/queue`, { playerId, queued }, cookie), env);
+
+  /** The stored order, read back through the API. */
+  const order = async (): Promise<string[]> =>
+    ((await (await app(get(`/api/drafts/${draft}/queue`, cookie), env)).json()) as { order: string[] }).order;
 
   beforeEach(async () => {
     db = await createTestDb();
@@ -428,38 +437,39 @@ describe('the queue keeps the order the reader gave it', () => {
      * and every ordering assertion is really about a two-item list. Reading the
      * board first means the four ids are four rows the reader could see.
      */
-    const board = await new DraftBoardService(db).build(await draftId(), { limit: 10 });
+    draft = await draftId();
+    const board = await new DraftBoardService(db).build(draft, { limit: 10 });
     ids = board.recommendations.slice(0, 4).map((r) => r.playerId);
     expect(ids).toHaveLength(4);
-    for (const id of ids) await app(post(`/api/players/${id}/queue`, { queued: true }, cookie), env);
+    for (const id of ids) await star(id, true);
   });
 
   it('appends newly queued players in the order they were starred', async () => {
-    const res = await app(get('/api/queue', cookie), env);
-    expect((await res.json() as { order: string[] }).order).toEqual(ids);
+    expect(await order()).toEqual(ids);
   });
 
   it('moves a player and persists it', async () => {
-    const res = await app(post('/api/queue/reorder', { playerId: ids[0], toIndex: 2 }, cookie), env);
+    const res = await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[0], toIndex: 2 }, cookie), env);
     const moved = (await res.json() as { order: string[] }).order;
     expect(moved).toEqual([ids[1], ids[2], ids[0], ids[3]]);
-    // Read back from storage, not from the response.
-    expect(await new PlayerFlagsRepo(db).queueOrder()).toEqual(moved);
+    // Read back from storage, not from the response — and from this draft's row
+    // of it, which is the only place a queue is now stored.
+    expect(await new DraftQueueRepo(db).order(draft)).toEqual(moved);
   });
 
   it('survives a board rebuild', async () => {
-    await app(post('/api/queue/reorder', { playerId: ids[3], toIndex: 0 }, cookie), env);
-    const board = await new DraftBoardService(db).build(await draftId(), { queuedOnly: true, limit: 50 });
+    await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[3], toIndex: 0 }, cookie), env);
+    const board = await new DraftBoardService(db).build(draft, { queuedOnly: true, limit: 50 });
     expect(board.recommendations.map((r) => r.playerId)).toEqual([ids[3], ids[0], ids[1], ids[2]]);
   });
 
   it('changes the order and not one Draft Score', async () => {
-    const id = await draftId();
+    const id = draft;
     const before = await new DraftBoardService(db).build(id, { queuedOnly: true, limit: 50 });
     const scoresBefore = new Map(before.recommendations.map((r) => [r.playerId, r.score]));
     const totalsBefore = new Map(before.recommendations.map((r) => [r.playerId, r.total]));
 
-    await app(post('/api/queue/reorder', { playerId: ids[0], toIndex: 3 }, cookie), env);
+    await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[0], toIndex: 3 }, cookie), env);
 
     const after = await new DraftBoardService(db).build(id, { queuedOnly: true, limit: 50 });
     for (const rec of after.recommendations) {
@@ -472,35 +482,32 @@ describe('the queue keeps the order the reader gave it', () => {
   });
 
   it('drops a removed player without disturbing the rest', async () => {
-    await app(post('/api/queue/reorder', { playerId: ids[3], toIndex: 0 }, cookie), env);
-    await app(post(`/api/players/${ids[1]}/queue`, { queued: false }, cookie), env);
-    const order = (await (await app(get('/api/queue', cookie), env)).json() as { order: string[] }).order;
-    expect(order).toEqual([ids[3], ids[0], ids[2]]);
+    await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[3], toIndex: 0 }, cookie), env);
+    await star(ids[1]!, false);
+    expect(await order()).toEqual([ids[3], ids[0], ids[2]]);
   });
 
   /**
    * Un-starring a player deletes his row, rank and all — the invariant that
-   * "unflagged" has exactly one representation in `player_flags`. So re-starring
+   * "not queued" has exactly one representation in `draft_queue`. So re-starring
    * appends him, exactly as starring him the first time did, rather than
    * restoring a position nobody is flagged at any more.
    */
   it('appends a re-queued player rather than restoring his old place', async () => {
-    await app(post('/api/queue/reorder', { playerId: ids[3], toIndex: 0 }, cookie), env);
-    await app(post(`/api/players/${ids[3]}/queue`, { queued: false }, cookie), env);
-    await app(post(`/api/players/${ids[3]}/queue`, { queued: true }, cookie), env);
-    const order = (await (await app(get('/api/queue', cookie), env)).json() as { order: string[] }).order;
-    expect(order).toEqual([ids[0], ids[1], ids[2], ids[3]]);
+    await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[3], toIndex: 0 }, cookie), env);
+    await star(ids[3]!, false);
+    await star(ids[3]!, true);
+    expect(await order()).toEqual([ids[0], ids[1], ids[2], ids[3]]);
   });
 
   it('is idempotent: starring an already-queued player does not move him', async () => {
-    await app(post('/api/queue/reorder', { playerId: ids[3], toIndex: 0 }, cookie), env);
-    await app(post(`/api/players/${ids[3]}/queue`, { queued: true }, cookie), env);
-    const order = (await (await app(get('/api/queue', cookie), env)).json() as { order: string[] }).order;
-    expect(order[0]).toBe(ids[3]);
+    await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[3], toIndex: 0 }, cookie), env);
+    await star(ids[3]!, true);
+    expect((await order())[0]).toBe(ids[3]);
   });
 
   it('refuses a reorder without a session', async () => {
-    const res = await app(post('/api/queue/reorder', { playerId: ids[0], toIndex: 2 }), env);
+    const res = await app(post(`/api/drafts/${draft}/queue/reorder`, { playerId: ids[0], toIndex: 2 }), env);
     expect(res.status).toBe(401);
   });
 });

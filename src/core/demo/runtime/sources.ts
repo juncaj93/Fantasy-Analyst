@@ -71,6 +71,14 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
         return out;
       },
     },
+    /*
+     * A demo's stars are fixture data and belong to the demo's own draft.
+     *
+     * The draft id is ignored because a scenario has exactly one draft, and it
+     * is a fixture in memory: there is no table here for a live queue to reach
+     * and no route that could write one — Demo Mode refuses every non-GET. The
+     * isolation is structural in both directions.
+     */
     flags: async () => data.flags,
     /*
      * The demo world imports no preseason projection snapshot, so the board it

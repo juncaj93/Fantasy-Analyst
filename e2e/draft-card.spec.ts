@@ -302,23 +302,29 @@ test.describe('the numbers keep the line', () => {
 });
 
 /**
- * It has to be visible on the card it lands on, whichever card that is.
+ * It has to be readable on the card it lands on, whichever card that is — and
+ * quieter than the four numbers beside it.
  *
- * This is the second time this app has painted a status chip in a hue and put
- * it on cards washed in six different hues. The first was `Q`, amber on the
- * amber receiver tint; this was the same mistake, and measurement made it worse
- * than it looked — the pale warning tint sat within 1.1:1 of *every* position
- * card, so only the chip's text was doing any work at all, and on a receiver
- * that went too.
+ * The history is worth keeping, because it is why this reads the way it does.
+ * The chip was once amber on an amber receiver tint and vanished; the fix was a
+ * filled slate slab, measured against the card and required to clear it by a
+ * wide margin. That was the right proxy for a slab and it is the wrong
+ * requirement now: it *mandates* a slab, and the slab was the complaint — the
+ * chip stood 5.5:1 to 7.4:1 off the card, louder than the Score.
  *
- * So the reading taken here is the chip's own surface against the card's, on
- * all six positions the palette paints — including the two a seeded board never
- * shows, forced on by swapping the card's position class. A chip that goes back
- * to being a tint fails this at every position rather than at one, which is the
- * honest shape of the bug.
+ * What made the original bug a bug was that the chip's **letters** disappeared,
+ * not that its surface did. So that is what is measured: the text against the
+ * pill and against the card, on all six positions the palette paints —
+ * including the two a seeded board never shows, forced on by swapping the
+ * card's position class. The surface is then held *below* a ceiling rather than
+ * above a floor, and the border is what keeps the pill a shape.
+ *
+ * A chip that goes back to being a tint with no border fails the edge check at
+ * every position; one that goes back to being a slab fails the quiet check at
+ * every position. Both are the honest shape of their respective bug.
  */
 test.describe('visibility on every card', () => {
-  test('the warning stands off all six position tints, in both themes', async ({ page }) => {
+  test('the warning reads on all six position tints, in both themes, without shouting', async ({ page }) => {
     await openDraft(page);
     await expect(cliffRow(page)).toBeVisible();
 
@@ -366,11 +372,12 @@ test.describe('visibility on every card', () => {
          * never drawn — and those are exactly the ones a bug would hide in.
          */
         const chip = document.createElement('span');
-        chip.className = 'player-row-cliff';
-        chip.textContent = 'Tier cliff · 2 left';
+        chip.className = 'row-pill player-row-cliff';
+        chip.textContent = 'Tier \u00b7 2 left';
         document.body.append(chip);
         const chipStyle = getComputedStyle(chip);
         const background = chipStyle.backgroundColor;
+        const border = chipStyle.borderTopColor;
         const text = chipStyle.color;
         chip.remove();
 
@@ -383,18 +390,28 @@ test.describe('visibility on every card', () => {
           return {
             position,
             chipVsCard: ratio(background, cardBackground),
+            borderVsCard: ratio(border, cardBackground),
             textVsChip: ratio(text, background),
+            textVsCard: ratio(text, cardBackground),
           };
         });
       });
 
       expect(readings).toHaveLength(6);
-      for (const { position, chipVsCard, textVsChip } of readings) {
-        expect(
-          chipVsCard,
-          `the warning is lost on ${position} in ${theme} (${chipVsCard.toFixed(2)}:1)`,
-        ).toBeGreaterThan(4);
-        expect(textVsChip, `the warning cannot be read in ${theme} (${textVsChip.toFixed(2)}:1)`).toBeGreaterThan(4.5);
+      for (const r of readings) {
+        const where = `${r.position} in ${theme}`;
+        // The letters are the carrier, so the letters clear WCAG AA — on the
+        // pill, and on the card underneath it, which the old white-on-slab
+        // lettering never did.
+        expect(r.textVsChip, `the warning cannot be read on its pill in ${where} (${r.textVsChip.toFixed(2)}:1)`)
+          .toBeGreaterThan(4.5);
+        expect(r.textVsCard, `the warning is lost against the card on ${where} (${r.textVsCard.toFixed(2)}:1)`)
+          .toBeGreaterThan(4.5);
+        // Quiet, which is the requirement that replaced "stands well off".
+        expect(r.chipVsCard, `the warning shouts on ${where} (${r.chipVsCard.toFixed(2)}:1)`).toBeLessThan(2);
+        // ...and still a pill rather than floating text.
+        expect(r.borderVsCard, `the warning has no edge on ${where} (${r.borderVsCard.toFixed(2)}:1)`)
+          .toBeGreaterThan(2);
       }
     }
     await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
@@ -403,9 +420,12 @@ test.describe('visibility on every card', () => {
   /**
    * …and it is not painted in anybody's colour.
    *
-   * The position palette is the thing it has to stand off, so it may not be
-   * drawn from it — a chip that happened to match one position's line colour
-   * would be exactly the bug this replaced, arriving from the other direction.
+   * The position palette is the thing it sits on, so it may not be drawn from
+   * it — a chip that happened to match one position's line or tint would be
+   * exactly the bug this replaced, arriving from the other direction. The chip
+   * is neutral now (a count is not a warning), so this checks both the surface
+   * and the hairline: either one landing on a position's own colour would make
+   * the chip read as belonging to that position.
    */
   test('is drawn from outside the position palette', async ({ page }) => {
     await openDraft(page);
@@ -416,9 +436,9 @@ test.describe('visibility on every card', () => {
         root.getPropertyValue(`--pos-${p}-line`).trim(),
         root.getPropertyValue(`--pos-${p}-tint`).trim(),
       ]);
-      return { background: chip.backgroundColor, palette, neutral: root.getPropertyValue('--status-neutral').trim() };
+      return { background: chip.backgroundColor, border: chip.borderTopColor, palette };
     });
-    expect(drawnFrom.neutral, 'the slate token has gone').not.toBe('');
+    expect(drawnFrom.palette.filter((c) => c.startsWith('#')).length, 'the palette tokens have gone').toBeGreaterThan(6);
     // Compared as rendered colours, since the tokens are hex and this is rgb().
     const asRgb = (hex: string) => {
       const n = Number.parseInt(hex.replace('#', '').slice(0, 6), 16);
@@ -427,6 +447,7 @@ test.describe('visibility on every card', () => {
     for (const colour of drawnFrom.palette) {
       if (!colour.startsWith('#')) continue;
       expect(drawnFrom.background, `the warning is painted in a position's own colour`).not.toBe(asRgb(colour));
+      expect(drawnFrom.border, `the warning is outlined in a position's own colour`).not.toBe(asRgb(colour));
     }
   });
 });
@@ -443,14 +464,19 @@ test.describe('what it says', () => {
   test('carries the full sentence whatever it can afford to print', async ({ page }) => {
     await openDraft(page);
     const chip = cliffRow(page).getByTestId('tier-cliff-tag');
-    await expect(chip).toHaveAttribute('aria-label', /^Tier cliff, (last 1|2 left)$/);
+    await expect(chip).toHaveAttribute(
+      'aria-label',
+      /^(The last \w+ in the best group left on the board|Two \w+s left in the best group on the board)$/,
+    );
     await expect(chip).toHaveAttribute('data-remaining', /^[12]$/);
 
     const printed = (await chip.innerText()).trim();
     const remaining = await chip.getAttribute('data-remaining');
-    // Whichever spelling this width gets, the count and the word survive.
-    const full = remaining === '1' ? 'Tier cliff · last 1' : 'Tier cliff · 2 left';
-    expect(printed).toMatch(new RegExp(`^(${full}|Cliff · ${remaining})$`));
+    // Whichever spelling this width gets, the count survives — and "cliff" is
+    // gone from both, because the count was always the message.
+    const full = remaining === '1' ? 'Tier \u00b7 last 1' : 'Tier \u00b7 2 left';
+    expect(printed).toMatch(new RegExp(`^(${full}|Tier \u00b7 ${remaining})$`));
+    expect(printed).not.toMatch(/cliff/i);
   });
 });
 

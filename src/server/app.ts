@@ -13,7 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
 import { nflTeam } from '../core/nfl/teams.ts';
-import { queueSequence, reconcileQueue, reorderQueue } from '../core/draft/queueOrder.ts';
+import { reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
 import { computeNeed } from '../core/draft/need.ts';
@@ -79,6 +79,7 @@ import { validateRawAdp } from '../core/adp/underdog.ts';
 import { EvidenceRepo } from './repos/evidence.ts';
 import { LeagueRepo } from './repos/league.ts';
 import { NewsletterRepo } from './repos/newsletter.ts';
+import { DraftQueueRepo } from './repos/draftQueue.ts';
 import { PlayerFlagsRepo } from './repos/playerFlags.ts';
 import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
@@ -1571,7 +1572,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         movement,
         signal: signals.get(row.player.id) ?? null,
         myGuy: myGuy(flags.get(row.player.id)?.level ?? 0),
-        queued: flags.get(row.player.id)?.queued ?? false,
         ...(availabilityLeagueId
           ? { availability: availability.get(row.player.id) ?? ('available' as const) }
           : {}),
@@ -1601,9 +1601,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       signal,
       evidence: items,
       props: props.get(player.id) ?? [],
-      // The user's own opinion, alongside the ledger and never mixed into it.
+      /*
+       * The user's own opinion, alongside the ledger and never mixed into it.
+       *
+       * No `queued` here. A queue belongs to a draft and this route has none —
+       * a player file is read from the players list, from search and from a
+       * link, none of which is inside a draft. Answering `false` would be a
+       * claim about a draft nobody named; the ★ state is served by
+       * `/api/drafts/:id/queue` and rendered by the board, which knows.
+       */
       myGuy: myGuy(flag.level),
-      queued: flag.queued,
     });
   });
 
@@ -1695,8 +1702,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    *
    * Separate from the evidence ledger by design: this is preference, not news,
    * and the two are weighed separately by the draft engine. It is also separate
-   * from the draft queue, which is a bookmark and moves nothing. Level 0 clears
-   * it.
+   * from the draft queue, which is a bookmark inside one draft and moves
+   * nothing — this is an opinion about a player and outlives every draft he is
+   * in. Level 0 clears it.
    */
   router.post('/api/players/:id/my-guy', async (ctx) => {
     const body = await ctx.json<{ level?: number }>();
@@ -1711,79 +1719,94 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playerId: player.id,
       name: player.fullName,
       myGuy: myGuy(stored.level),
-      queued: stored.queued,
     });
   });
 
+  // ------------------------------------------------------------ draft queue
+  /*
+   * THE QUEUE BELONGS TO A DRAFT, AND THESE ROUTES SAY SO IN THEIR PATHS.
+   *
+   * These used to be `/api/players/:id/queue` and `/api/queue`, with no draft
+   * anywhere in them, because the stored queue had no draft in it either — one
+   * global list keyed by player id, shown by whichever draft happened to be
+   * open. A user queued players in a finished best-ball draft, switched
+   * leagues, and found that shortlist waiting in the new one.
+   *
+   * Putting the draft in the path is the fix at the level the bug was at. There
+   * is now no route, and no repository method, that can read or write a queue
+   * without naming the draft it is for: a caller that does not know which draft
+   * it is in cannot ask. Every one of them 404s on a draft that does not exist,
+   * so a typo cannot open an orphan queue that no board will ever show.
+   *
+   * `draft_queue` rows are keyed on the Sleeper draft id rather than the
+   * league's, because a league keeps its id across seasons and would leak last
+   * August's shortlist into this August's draft.
+   */
+
   /**
-   * Put a player in the draft queue, or take him out.
+   * Put a player in this draft's queue, or take him out.
    *
    * A bookmark, nothing more: it is how the ★ filter finds the player you meant
    * to take, and it deliberately has no effect on the ranking. Rating a player
-   * is what the heart on the players list is for.
+   * is what the heart on the players list is for, and that is a different mark
+   * in a different table that is not scoped to a draft at all.
    */
-  router.post('/api/players/:id/queue', async (ctx) => {
-    const body = await ctx.json<{ queued?: boolean }>();
-    const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
+  router.post('/api/drafts/:id/queue', async (ctx) => {
+    const draft = await new LeagueRepo(ctx.env.db).getDraft(ctx.params['id']!);
+    if (!draft) return errorResponse('draft not found', 404);
+    const body = await ctx.json<{ playerId?: string; queued?: boolean }>();
+    if (!body?.playerId) return errorResponse('playerId required', 400);
+    if (typeof body.queued !== 'boolean') return errorResponse('queued must be true or false', 400);
+    const player = await new PlayerRepo(ctx.env.db).getById(body.playerId);
     if (!player) return errorResponse('player not found', 404);
-    if (typeof body?.queued !== 'boolean') return errorResponse('queued must be true or false', 400);
-    const stored = await new PlayerFlagsRepo(ctx.env.db).setQueued(player.id, body.queued);
-    return jsonResponse({
-      playerId: player.id,
-      name: player.fullName,
-      queued: stored.queued,
-      queueOrder: stored.queueOrder,
-      myGuy: myGuy(stored.level),
-    });
+
+    const queued = await new DraftQueueRepo(ctx.env.db).setQueued(draft.id, player.id, body.queued);
+    return jsonResponse({ draftId: draft.id, playerId: player.id, name: player.fullName, queued });
   });
 
   /**
    * Move a queued player to a new position in the user's own order.
    *
    * The reorder itself is `reorderQueue` in core — pure, tested, and the only
-   * thing that decides what a drag means. This route's whole job is to read the
-   * stored ladder, hand it to that function, and persist the one or two rows it
-   * says moved. It deliberately does not accept a whole ordering from the
-   * client: a client that could post a sequence could post a stale one, and a
-   * queue silently reverting to what it looked like two picks ago is exactly
-   * the corruption this feature must not have.
+   * thing that decides what a drag means. This route's whole job is to read
+   * this draft's stored ladder, hand it to that function, and persist the one
+   * or two rows it says moved. It deliberately does not accept a whole ordering
+   * from the client: a client that could post a sequence could post a stale
+   * one, and a queue silently reverting to what it looked like two picks ago is
+   * exactly the corruption this feature must not have.
+   *
+   * There is no reconciliation step any more, and its absence is the schema
+   * being right rather than a check being dropped. Membership and rank were two
+   * nullable columns that could disagree — a player starred by a path that set
+   * no rank had one and not the other — so the read had to repair them on the
+   * way past. A row in `draft_queue` carries a NOT NULL rank and *is* the
+   * membership, so the disagreement is no longer a state that can exist.
    *
    * The queue is a bookmark. Nothing here touches a Draft Score, and nothing
    * here can: the module it delegates to operates on ids and ranks and has no
    * access to a player's ranking at all.
    */
-  router.post('/api/queue/reorder', async (ctx) => {
+  router.post('/api/drafts/:id/queue/reorder', async (ctx) => {
+    const draft = await new LeagueRepo(ctx.env.db).getDraft(ctx.params['id']!);
+    if (!draft) return errorResponse('draft not found', 404);
     const body = await ctx.json<{ playerId?: string; toIndex?: number }>();
     if (!body?.playerId) return errorResponse('playerId required', 400);
     if (typeof body.toIndex !== 'number' || !Number.isFinite(body.toIndex)) {
       return errorResponse('toIndex must be a number', 400);
     }
 
-    const flags = new PlayerFlagsRepo(ctx.env.db);
-    /*
-     * Reconciled before the move, because the stored ladder and the live queue
-     * drift apart in ordinary use: a player queued from the Players screen on
-     * an older client has no rank, and a player drafted since the last drag
-     * still has one. Reconciling first means the indices the client sent are
-     * indices into the list it was actually looking at.
-     */
-    const queuedNow = [...(await flags.all()).entries()]
-      .filter(([, flag]) => flag.queued)
-      .map(([playerId]) => playerId);
-    const reconciled = reconcileQueue(await flags.queueEntries(), queuedNow);
-    const result = reorderQueue(reconciled, body.playerId, body.toIndex);
-    await flags.setQueueOrder(result.writes);
+    const queue = new DraftQueueRepo(ctx.env.db);
+    const result = reorderQueue(await queue.entries(draft.id), body.playerId, body.toIndex);
+    await queue.setOrder(draft.id, result.writes);
 
     return jsonResponse({ order: result.sequence, compacted: result.compacted });
   });
 
-  /** The queue, in the user's own order. */
-  router.get('/api/queue', async (ctx) => {
-    const flags = new PlayerFlagsRepo(ctx.env.db);
-    const queuedNow = [...(await flags.all()).entries()]
-      .filter(([, flag]) => flag.queued)
-      .map(([playerId]) => playerId);
-    return jsonResponse({ order: queueSequence(reconcileQueue(await flags.queueEntries(), queuedNow)) });
+  /** This draft's queue, in the user's own order. */
+  router.get('/api/drafts/:id/queue', async (ctx) => {
+    const draft = await new LeagueRepo(ctx.env.db).getDraft(ctx.params['id']!);
+    if (!draft) return errorResponse('draft not found', 404);
+    return jsonResponse({ order: await new DraftQueueRepo(ctx.env.db).order(draft.id) });
   });
 
   // -------------------------------------------------------------- newsletter

@@ -83,6 +83,41 @@ export interface DraftComponentWeights {
  * offseason should still be favoured on draft day; recency modifies that
  * judgement rather than replacing it.
  */
+/**
+ * Defences, which this app has no opinion about.
+ *
+ * Every weight but the market's is zero, and that is the whole statement: a
+ * defence is ranked on where the draft market has it and on nothing else. No
+ * news tally, no roster need, no ★, no AVOID, no tier cliff, no scarcity, no
+ * league fit, no season-long betting line, no imported projection.
+ *
+ * Not an oversight and not a shortcut — it is what the app already knew and was
+ * declining to act on. No news rule reads a defence, no published draft order
+ * this app imports ranks one, no Vegas market covers one and no preseason
+ * projection includes one. What was left was news and roster need "alone", said
+ * out loud in a warning above the board, which meant a defence could be floated
+ * up the list by a newsletter sentence about somebody else's team. Zero is a
+ * more honest weight than a small one.
+ *
+ * The board applies this through a separate ranking pass — see
+ * `boardBuilder.ts` — so no non-defence player's score is touched by its
+ * existence.
+ */
+export const DEFENCE_WEIGHTS: DraftComponentWeights = {
+  marketValue: 1,
+  need: 0,
+  scarcity: 0,
+  leagueFit: 0,
+  newsLifetime: 0,
+  news30: 0,
+  news7: 0,
+  survivalUrgency: 0,
+  marketExpectation: 0,
+  myGuy: 0,
+  avoid: 0,
+  tierCliff: 0,
+};
+
 export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   marketValue: 1,
   // Best player available, not best player at a position I am missing.

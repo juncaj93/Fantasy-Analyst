@@ -21,7 +21,7 @@ import { player } from './helpers/players.ts';
 import { PlayerRepo } from '../src/server/repos/players.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { AdpRepo } from '../src/server/repos/adp.ts';
-import { PlayerFlagsRepo } from '../src/server/repos/playerFlags.ts';
+import { DraftQueueRepo } from '../src/server/repos/draftQueue.ts';
 import { importAdpSnapshot } from '../src/core/adp/import.ts';
 import { DraftBoardService, MAX_CANDIDATES } from '../src/server/services/draftBoard.ts';
 import type { Database } from '../src/server/db.ts';
@@ -224,7 +224,7 @@ describe('the draft pool is the whole draft', () => {
     const board = await new DraftBoardService(db).build('deep-draft', { limit: 400 });
     const deep = board.recommendations.find((r) => r.name === deepName)!;
 
-    await new PlayerFlagsRepo(db).setQueued(deep.playerId, true);
+    await new DraftQueueRepo(db).setQueued('deep-draft', deep.playerId, true);
     const queued = await new DraftBoardService(db).build('deep-draft', { limit: 400, queuedOnly: true });
 
     expect(queued.recommendations.map((r) => r.name)).toContain(deepName);

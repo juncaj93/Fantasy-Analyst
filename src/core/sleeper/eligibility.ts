@@ -202,6 +202,64 @@ export function orderPositions(positions: Iterable<string>): string[] {
   return [...known, ...rest];
 }
 
+/**
+ * The positions a chip row draws *after* the FLX chip, in the order it draws
+ * them.
+ *
+ * Deliberately not the whole "not flex-eligible" set — a quarterback chip
+ * belongs where it has always been, at the front. These two are the positions a
+ * reader *browses occasionally* rather than compares: a kicker and a defence
+ * are each one slot filled once, usually against a schedule rather than against
+ * the rest of the pool. Sitting among the positions somebody is actually
+ * choosing between, they were something to read past on the way to FLX rather
+ * than something to reach, and every lineup page in the sport ends with them.
+ *
+ * Kicker before defence, which is the roster's own order.
+ *
+ * **The kicker entry is inert today, and kept anyway.** `NON_PLAYING_SLOTS`
+ * drops a `K` roster slot before it can become a startable position — "the app
+ * has no opinion about them" — so no chip row this app draws can contain one.
+ * It is here so the rule states where a kicker goes rather than leaving the
+ * next person to rediscover it, and so the day kickers are modelled the answer
+ * is already written down.
+ */
+export const TRAILING_FILTER_POSITIONS = ['K', 'DEF'];
+
+/**
+ * The position chips a filter row draws, in the order it draws them.
+ *
+ * `orderPositions` answers "what order are positions read in" and is used for
+ * roster summaries too, where there is no FLX and no chip. This answers the
+ * narrower question a *filter row* asks, which has one more rule in it:
+ *
+ *   `QB → RB → WR → TE → FLX → DEF`
+ *
+ * FLX after its parts, for the reason it has always been last — it is a view
+ * spanning RB, WR and TE, not a fourth position, and a chip that reads like one
+ * sitting among the real ones invites exactly the confusion this filter must
+ * not cause. Then the occasional positions, which is where a chip nobody is
+ * hunting for belongs — see {@link TRAILING_FILTER_POSITIONS}.
+ *
+ * Shared by the draft board, the players list and the compare picker, so the
+ * same chips cannot appear in two different orders on two screens — and by the
+ * draft screen's roster strip, so the strip and the chips beneath it cannot
+ * disagree about where a defence goes. A league that starts no defence — Best
+ * Ball, most of them — is unaffected: the chip is not drawn at all, because a
+ * filter that can only ever return nothing is worse than no filter.
+ *
+ * The `ALL` chip is not here. It is not a position and not every caller draws
+ * one, so the screens prepend their own.
+ */
+export function orderFilterChips(positions: Iterable<string>, offersFlex?: boolean): string[] {
+  const ordered = orderPositions(positions);
+  const leading = ordered.filter((p) => !TRAILING_FILTER_POSITIONS.includes(p));
+  const flex = (offersFlex ?? offersFlexFilter(ordered)) ? [FLX_FILTER] : [];
+  // Read from the constant rather than from `ordered`, so the order *between*
+  // the trailing chips is this rule's and not the reading order's.
+  const trailing = TRAILING_FILTER_POSITIONS.filter((p) => ordered.includes(p));
+  return [...leading, ...flex, ...trailing];
+}
+
 /** Every distinct slot this league starts, with what each accepts. */
 export function slotsOf(shape: RosterShape): { slot: string; accepts: string[] }[] {
   const out: { slot: string; accepts: string[] }[] = [];

@@ -1,22 +1,34 @@
 /**
- * The order the Players list draws its position chips in.
+ * The Players list's own chip row, which is the shared row plus an `ALL`.
  *
- * A presentation decision belonging to one screen, which is why it is here
- * rather than beside `orderPositions` in `core/sleeper/eligibility.ts`. That
- * helper answers "what order are positions read in", and its answer is shared
- * by the draft board, Team and this screen — deliberately, so the same chips
- * cannot appear in two different orders on two screens. What follows is only
- * about which chips this particular row ends with, and a rule about one screen
- * that lived in core is a rule the next screen adopts by accident.
+ * This module used to own the ordering rule as well — the kicker and the
+ * defence following FLX rather than sitting among the positions — on the
+ * argument that it was a presentation decision belonging to one screen, and
+ * that "a rule about one screen that lived in core is a rule the next screen
+ * adopts by accident".
  *
- * Extracted from the component so it can be asserted directly. The demo league
- * has no defence slot, so a browser test cannot exercise the rule this module
- * exists for — the chip it moves would not be drawn at all — and asserting an
- * ordering through a screen that cannot show it is how a rule ends up untested
- * while looking tested.
+ * That argument was right about the danger and wrong about this rule, and the
+ * draft board is what settled it: the same reordering was asked for there, on
+ * the compare picker, and on the roster strip at the top of Draft — which reads
+ * `0/1 QB · … · 0/2 FLX · 0/1 DEF · 0/6 BN` and has to agree with the chips
+ * drawn immediately beneath it. Four places wanting one answer is not one
+ * screen's presentation decision; it is the shared rule the comment beside
+ * `orderPositions` already says must not exist twice. So the rule is
+ * `orderFilterChips` in core now, and this is the Players screen's name for it.
+ *
+ * What stays here is what is genuinely local: the `ALL` chip, which is not a
+ * position, which not every caller draws — the draft board leads with `★` and
+ * `ALL` of its own — and the decision to draw no row at all rather than a lone
+ * `ALL` for a league whose slots say nothing.
+ *
+ * It stays a module rather than folding back into the component for the reason
+ * it was extracted: the demo league starts neither a kicker nor a defence, so a
+ * browser test cannot exercise the rule this exists for — the chips it moves
+ * would not be drawn — and asserting an ordering through a screen that cannot
+ * show it is how a rule ends up untested while looking tested.
  */
 
-import { FLX_FILTER, offersFlexFilter, orderPositions } from '../core/sleeper/eligibility.ts';
+import { TRAILING_FILTER_POSITIONS, orderFilterChips, orderPositions } from '../core/sleeper/eligibility.ts';
 
 /** Everything, the chip the list opens on. */
 export const ALL_FILTER = 'ALL';
@@ -24,16 +36,13 @@ export const ALL_FILTER = 'ALL';
 /**
  * The two chips that follow the flex view, in the order they follow it.
  *
- * Both are positions a reader browses *occasionally* rather than compares: a
- * kicker and a defence are each one slot filled once, usually against a
- * schedule rather than against the rest of the pool. They are the same strings
- * `orderPositions` emits and the same ones the API filters on; this module only
- * decides where they sit in the row.
- *
- * The order between them is the roster's own — kicker, then defence — which is
- * how every lineup page in the sport ends.
+ * Re-exported rather than redeclared: the draft board, the compare picker and
+ * the draft screen's roster strip all read the same constant, and a second copy
+ * of it here is exactly how two rows end up disagreeing about where a defence
+ * goes. See `TRAILING_FILTER_POSITIONS` for why these two and why the kicker
+ * entry is inert today.
  */
-export const TRAILING_FILTERS = ['K', 'DEF'];
+export const TRAILING_FILTERS = TRAILING_FILTER_POSITIONS;
 
 /**
  * `ALL · QB · RB · WR · TE · FLX · K · DEF`, from what the league actually
@@ -43,22 +52,20 @@ export const TRAILING_FILTERS = ['K', 'DEF'];
  * than about what a position is.
  *
  * **The skimmed positions** come first, in the order every fantasy site, draft
- * board and roster page has used for decades — `orderPositions`, shared with
- * the draft board and Team so the same chips cannot appear in two different
- * orders on two screens. These are the chips somebody comparing players moves
- * between, and they keep the front of the row.
+ * board and roster page has used for decades. These are the chips somebody
+ * comparing players moves between, and they keep the front of the row.
  *
  * **FLX** follows them, because it is a view spanning three positions rather
  * than a fourth one, and a chip that reads like a position among the real ones
  * invites exactly the confusion this filter must not cause.
  *
- * **The kicker and the defence** come last, in that order — see
- * {@link TRAILING_FILTERS}. Neither is a player anybody browses a player
- * database for: each is one slot filled once a week, usually against a schedule
- * rather than against the rest of the pool. Sitting among the skimmed positions
- * they were something to move past on the way to FLX rather than something to
- * reach. The end of the row is where a chip nobody is hunting for belongs, and
- * both are still one tap away for the week somebody is.
+ * **The kicker and the defence** come last, in that order. Neither is a player
+ * anybody browses a player database for: each is one slot filled once a week,
+ * usually against a schedule rather than against the rest of the pool. Sitting
+ * among the skimmed positions they were something to move past on the way to
+ * FLX rather than something to reach. The end of the row is where a chip nobody
+ * is hunting for belongs, and both are still one tap away for the week somebody
+ * is.
  *
  * A chip is only offered when the league starts that position. A filter that
  * can only ever return nothing is worse than no filter, which is why a defence
@@ -68,12 +75,5 @@ export const TRAILING_FILTERS = ['K', 'DEF'];
 export function playerFilterChips(startable: Iterable<string>): string[] {
   const positions = orderPositions(startable);
   if (positions.length === 0) return [];
-  return [
-    ALL_FILTER,
-    ...positions.filter((p) => !TRAILING_FILTERS.includes(p)),
-    ...(offersFlexFilter(positions) ? [FLX_FILTER] : []),
-    // Read from the constant rather than from `positions`, so the order between
-    // them is this module's and not the shared helper's.
-    ...TRAILING_FILTERS.filter((p) => positions.includes(p)),
-  ];
+  return [ALL_FILTER, ...orderFilterChips(positions)];
 }

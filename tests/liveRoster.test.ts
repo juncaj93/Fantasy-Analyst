@@ -131,6 +131,60 @@ describe('which starting slots are still open', () => {
  * league's own slots. What to do about it is the ranked list's job.
  */
 describe('roster progress line', () => {
+  /**
+   * The order the strip reads in, which is the chip row's order.
+   *
+   * Sleeper lists a defence among the positions — `QB, RB, RB, WR, WR, TE,
+   * FLEX, K, DEF, BN…` is an ordinary `roster_positions` — so the rows arrived
+   * as `QB · RB · WR · TE · DEF · FLX · BN`, with the defence interrupting the
+   * four positions a drafter is choosing between and the flex that spans three
+   * of them landing after it.
+   */
+  it('puts the flex after its positions, the defence after the flex, and the bench last', () => {
+    const shape = buildRosterShape([
+      'QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'K', 'DEF',
+      'BN', 'BN', 'BN', 'BN', 'BN', 'BN',
+    ]);
+    expect(rosterProgress(shape, {}).map((s) => s.slot)).toEqual([
+      'QB',
+      'RB',
+      'WR',
+      'TE',
+      'FLEX',
+      'DEF',
+      'BN',
+    ]);
+  });
+
+  /**
+   * Ordering only: the same rows, the same counts, the same requirements.
+   *
+   * A sort that quietly dropped or merged a row would satisfy the test above
+   * and be a far worse bug than the order it fixed.
+   */
+  it('reorders the rows and changes not one of them', () => {
+    const shape = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN', 'BN']);
+    const rows = rosterProgress(shape, { QB: 1, RB: 3, WR: 1, DEF: 1 });
+    const byName = new Map(rows.map((r) => [r.slot, r]));
+
+    expect(rows.map((r) => r.slot)).toEqual(['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN']);
+    expect(byName.get('QB')).toMatchObject({ filled: 1, required: 1 });
+    expect(byName.get('RB')).toMatchObject({ filled: 2, required: 2 });
+    expect(byName.get('WR')).toMatchObject({ filled: 1, required: 1 });
+    expect(byName.get('TE')).toMatchObject({ filled: 0, required: 1 });
+    expect(byName.get('FLEX')).toMatchObject({ filled: 1, required: 1 });
+    expect(byName.get('DEF')).toMatchObject({ filled: 1, required: 1 });
+    // Every player is in exactly one count, which the sort must not disturb.
+    const held = rows.reduce((total, row) => total + row.filled, 0);
+    expect(held).toBe(6);
+  });
+
+  /** A slot nobody has heard of keeps its place rather than being sorted away. */
+  it('keeps an unknown starting slot among the starters', () => {
+    const shape = buildRosterShape(['QB', 'LB', 'DEF', 'BN']);
+    expect(rosterProgress(shape, {}).map((s) => s.slot)).toEqual(['QB', 'LB', 'DEF', 'BN']);
+  });
+
   it('reports every starting slot the league has, filled out of required', () => {
     expect(rosterProgress(SHAPE, { QB: 0, RB: 1, WR: 3, TE: 0 })).toEqual([
       { slot: 'QB', filled: 0, required: 1, accepts: ['QB'] },

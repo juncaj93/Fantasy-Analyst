@@ -41,7 +41,7 @@ import {
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchFilterRow, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 /* One shared answer to "which players does this filter mean". */
-import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
+import { FLX_FILTER, orderFilterChips } from '../../core/sleeper/eligibility.ts';
 /* Which rows the typed query leaves on screen. Presentation only — see search.ts. */
 import { rankByQuery } from '../search.ts';
 /*
@@ -502,9 +502,17 @@ export function DraftScreen({
    */
   const setQueued = useCallback(
     async (playerId: string, queued: boolean) => {
+      if (!draftId) return;
       setFlagging(playerId);
       try {
-        await api.post<{ queued: boolean }>(`/api/players/${playerId}/queue`, { queued });
+        /*
+         * The draft is in the path, because the queue is in the draft.
+         *
+         * This used to be `/api/players/:id/queue`, which is the shape of the
+         * bug: a star with no draft on it was stored with no draft on it, and
+         * the next draft you opened showed the last one's shortlist.
+         */
+        await api.post<{ queued: boolean }>(`/api/drafts/${draftId}/queue`, { playerId, queued });
         if (position === QUEUE_FILTER) await load(position);
         else
           setBoard((current) =>
@@ -524,7 +532,7 @@ export function DraftScreen({
         setFlagging(null);
       }
     },
-    [load, position, searching],
+    [draftId, load, position, searching],
   );
 
   /**
@@ -539,9 +547,13 @@ export function DraftScreen({
    */
   const commitQueueOrder = useCallback(
     async (playerId: string, toIndex: number, optimistic: string[]) => {
+      if (!draftId) return;
       setQueueOrder(optimistic);
       try {
-        const res = await api.post<{ order: string[] }>('/api/queue/reorder', { playerId, toIndex });
+        const res = await api.post<{ order: string[] }>(`/api/drafts/${draftId}/queue/reorder`, {
+          playerId,
+          toIndex,
+        });
         setQueueOrder(res.order);
         setError(null);
       } catch (err) {
@@ -549,7 +561,7 @@ export function DraftScreen({
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [],
+    [draftId],
   );
 
   /**
@@ -1044,20 +1056,30 @@ export function DraftScreen({
           value={position}
           onChange={setPosition}
           /*
-            The queue, everybody, the positions the league starts, then FLX.
+            The queue, everybody, then the league's own filter row.
 
-            FLX goes last rather than among the positions, because it is not one:
-            it is a view spanning three of them, and a chip that reads like a
-            position sitting in the middle of the real ones invites exactly the
-            confusion this filter must not cause. At the end it reads as what it
-            is — the combined view, after the parts. It appears only where it can
-            return something; see `offersFlex`, decided from the league's slots.
+            `orderFilterChips` owns the order and is shared with the players list
+            and the compare picker, so the same chips cannot appear in two
+            different orders on two screens: `QB → RB → WR → TE → FLX → DEF`.
+
+            FLX goes after the positions rather than among them, because it is
+            not one: it is a view spanning three of them, and a chip that reads
+            like a position sitting in the middle of the real ones invites
+            exactly the confusion this filter must not cause. At the end of its
+            parts it reads as what it is — the combined view, after them.
+
+            DEF then goes after FLX, at the very end of the row. A defence is the
+            one starting slot that is a team rather than a player, every board a
+            drafter has ever used draws it last, and it was sitting in the middle
+            of the row where a reader scanning for a receiver had to read past
+            it. Both chips appear only where they can return something: FLX from
+            `offersFlex`, DEF from the league's own slots, so Best Ball — which
+            starts no defence — draws neither and is unchanged.
           */
           segments={[
             QUEUE_FILTER,
             ALL_FILTER,
-            ...(board.startablePositions ?? []),
-            ...(board.offersFlex ? [FLX_FILTER] : []),
+            ...orderFilterChips(board.startablePositions ?? [], board.offersFlex === true),
           ].map((p) => ({
             id: p,
             label: p,
@@ -2448,10 +2470,16 @@ function SurvivalMetric({ probability, horizonPick }: { probability: number | nu
 /**
  * One market's consequence, as one column of the compact row.
  *
- * The label, the signed number, and a tone the stylesheet paints — nothing
+ * The label, the signed number, and a band the stylesheet paints — nothing
  * else. `data-tone` is the contract a test reads, deliberately in preference to
  * a colour: what "reach" looks like is the design's business and may change,
  * but that a positive delta *is* a reach is the semantics and may not.
+ *
+ * `data-band` is that design decision, kept apart from the semantics so the two
+ * can move independently. It reads off the printed number — `+10` or lower is
+ * fair, `+11` to `+15` steep, above that costly — because the reader's eye and
+ * the colour should be answering the same question about the same quantity. A
+ * five-pick reach is not a warning, and it used to be painted as one.
  *
  * An unknown market prints the app's own unknown mark rather than a zero. Zero
  * is the claim "he is going at about this market", which is a real reading and
@@ -2488,7 +2516,8 @@ function MarketDeltaMetric({
         <Unknown what={`${source} ADP`} />
       ) : (
         <strong
-          className={`delta delta-${delta.tone}`}
+          className="delta"
+          data-band={delta.band}
           title={note ?? marketDeltaTitle(source, marketAdp, currentPick, delta)}
         >
           {delta.label}
@@ -2501,31 +2530,36 @@ function MarketDeltaMetric({
 function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: boolean }) {
   const warning = enabled ? tierCliffWarning(rec.tierCliff) : null;
   if (warning == null) return null;
+  /*
+   * "The best group on the board" is accurate again.
+   *
+   * It was accurate under the original rule, wrong for one release while the
+   * warning was allowed to mark any small group at a position, and accurate
+   * once more now that it marks only the active tier — the group you are
+   * actually choosing from, which is the only group that can be about to run
+   * out.
+   */
+  const sentence =
+    warning.remaining === 1
+      ? `The last ${rec.position} in the best group left on the board`
+      : `Two ${rec.position}s left in the best group on the board`;
   return (
     <span
-      className="player-row-cliff"
+      className="row-pill player-row-cliff"
       data-testid="tier-cliff-tag"
       data-remaining={warning.remaining}
       /*
-       * The whole sentence, always, for anything that is not counting pixels:
-       * the accessible name does not change with the viewport, so a screen
-       * reader hears the same thing on a 360px phone and on a desktop.
-       */
-      aria-label={warning.label.replace(' · ', ', ')}
-      /*
-       * "The best group on the board" is accurate again.
+       * The whole sentence, always, for anything that is not counting pixels.
        *
-       * It was accurate under the original rule, wrong for one release while
-       * the warning was allowed to mark any small group at a position, and
-       * accurate once more now that it marks only the active tier — the group
-       * you are actually choosing from, which is the only group that can be
-       * about to run out.
+       * The accessible name does not change with the viewport, so a screen
+       * reader hears the same thing on a 360px phone and on a desktop — and it
+       * now hears the sentence rather than the chip's four printed words. That
+       * matters more since the chip stopped printing "cliff": sighted readers
+       * get the count and the tooltip, and this is where a listener gets what
+       * the count is a count *of*.
        */
-      title={
-        warning.remaining === 1
-          ? `The last ${rec.position} in the best group left on the board`
-          : `Two ${rec.position}s left in the best group on the board`
-      }
+      aria-label={sentence}
+      title={sentence}
     >
       {/*
         Two spellings, and the stylesheet picks by width — see `.player-row-cliff`.
@@ -2533,12 +2567,11 @@ function TierCliffChip({ rec, enabled }: { rec: DraftRecommendation; enabled: bo
         The four numbers beside this are not negotiable: a card that drops
         `Next` to make room for a warning about `Next` has its priorities
         backwards. So on the two narrowest phones, where a three-digit ADP and
-        a three-digit Val leave no room for nineteen characters, the warning is
-        what gives. It gives the least it can — the count and the word that
-        makes the colour redundant survive in both.
+        a three-digit Val leave no room for the sentence, the chip is what
+        gives. It gives the least it can — the count survives in both.
 
-        Both spellings are the same length as the ones they replace, so the
-        widths the stylesheet was measured against still hold.
+        Both spellings are shorter than the ones they replace, so the widths the
+        stylesheet was measured against still hold with room to spare.
       */}
       <span className="cliff-full">{warning.label}</span>
       <span className="cliff-tight">{warning.short}</span>
