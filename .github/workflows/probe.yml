@@ -15,6 +15,10 @@ on:
         description: 'Script in scripts/ to run'
         required: true
         default: 'probe-sleeper-graphql.mjs'
+      league_id:
+        description: 'Ask about this league rather than the selected one (optional)'
+        required: false
+        default: ''
 
 jobs:
   probe:
@@ -31,6 +35,10 @@ jobs:
           # Only the odds probe reads this, and it prints whether the key was
           # present rather than the key itself.
           SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+          # Read by the probes that would otherwise ask about whichever league
+          # the deployment happens to have selected. Read-only: it changes which
+          # league is asked about, never which one is selected.
+          LEAGUE_ID: ${{ inputs.league_id }}
         run: |
           set -uo pipefail
           case "$SCRIPT" in
