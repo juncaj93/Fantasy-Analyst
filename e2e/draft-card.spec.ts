@@ -20,6 +20,30 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+/**
+ * A snapshot the demo seed does not carry, injected the way a deployment would.
+ *
+ * The demo world has no StartWho paste in it and inventing one in the seed
+ * would be testing a fixture — the import is proven in the unit and route
+ * suites. What the card's own claims need is the field present, with exactly
+ * the provenance the card must not print: a source, a capture date and a
+ * scoring profile.
+ */
+const PROJECTION = {
+  points: 246.6,
+  label: 'StartWho · Aug 22',
+  scoringLabel: 'Half PPR, 6pt pass TD',
+  capturedAt: '2026-08-22',
+};
+
+async function withProjection(page: Page) {
+  await page.route('**/api/players/*/detail', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, body: JSON.stringify({ ...body, preseasonProjection: PROJECTION }) });
+  });
+}
+
 async function openDraft(page: Page) {
   await page.goto('/');
   await expect(page.getByTestId('board-list')).toBeVisible();
@@ -539,6 +563,17 @@ test.describe('it does not get in the way', () => {
  */
 test.describe('the expanded card is a preview, not an article', () => {
   test('rests at about two rows, on every player the board is drawing', async ({ page }) => {
+    /*
+     * With a market reading on every card, because that is the shape the
+     * ceiling has to hold for.
+     *
+     * It used to be a line of its own under the season — the figure, then the
+     * source, the capture date and the league's scoring profile spelled out
+     * beside it — and it is one metric in the season band now. The band is
+     * where a card most easily buys a row back, so the ceiling is measured with
+     * the reading present rather than on the demo's empty case.
+     */
+    await withProjection(page);
     await openDraft(page);
     const rows = page.getByTestId('recommendation-row');
     const collapsed = (await rows.nth(1).boundingBox())!.height;
@@ -560,6 +595,43 @@ test.describe('the expanded card is a preview, not an article', () => {
       expect(ratio, `${name} expands to ${ratio.toFixed(1)} rows (${Math.round(expanded)}px)`).toBeLessThan(3);
       // …and it did open. A card that renders nothing would pass a ceiling.
       expect(ratio, `${name} did not actually open`).toBeGreaterThan(1.2);
+
+      /*
+       * `Market - 247 Pts · 2025 · 17 GP · WR2 half-PPR` — one band, one line.
+       *
+       * The wording is asserted whole rather than by fragment, because every
+       * one of the rejected spellings would satisfy a looser check: `Preseason
+       * 247 PTS`, `MKT PTS 247`, the figure with `StartWho · Aug 22` after it.
+       * And the band is asserted to be one line high, since the point of
+       * folding the market reading in was that the card stopped spending a row
+       * on it — a band that wraps has given the row straight back.
+       */
+      const band = row.getByTestId('last-season');
+      const seen = await band.evaluate((el) => {
+        const clone = el.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('.sr-only').forEach((node) => node.remove());
+        return {
+          // Joined the way the band reads, so a failure prints the line rather
+          // than one run-on string of every metric in it.
+          text: [...clone.querySelectorAll('.metric')]
+            .map((metric) => (metric.textContent ?? '').replace(/\s+/g, ' ').trim())
+            .join(' · '),
+          lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)),
+        };
+      });
+      expect(seen.text, `${name}'s band does not open with the market reading`).toMatch(/^Market - \d+ Pts(?: ·|$)/);
+      expect(seen.text, `${name} lost his games played`).toMatch(/\d+ GP/);
+      expect(seen.text, `${name} lost his half-PPR finish`).toMatch(/(QB|RB|WR|TE|K|DEF)\d+ half-PPR/);
+      for (const forbidden of ['StartWho', 'Half PPR,', '6pt pass TD', 'Preseason', 'PTS', 'MKT']) {
+        expect(seen.text, `${name}'s card prints "${forbidden}"`).not.toContain(forbidden);
+      }
+      expect(seen.lines, `${name}'s band wrapped to ${seen.lines} lines`).toBe(1);
+
+      // Removed from the card, not from the app: the whole sentence is still
+      // on the metric, in the accessible text and in the title.
+      const provenance = row.getByTestId('preseason-projection');
+      expect(await provenance.getAttribute('title')).toContain('StartWho · Aug 22');
+      expect((await provenance.locator('.sr-only').innerText()).toLowerCase()).toContain('preseason');
 
       await row.locator('.row-button').click();
       await page.waitForTimeout(300);

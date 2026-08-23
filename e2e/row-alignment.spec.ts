@@ -217,25 +217,30 @@ test.describe('the identity cluster', () => {
   });
 
   /**
-   * The tally belongs to the name, and now sits like it.
+   * `Ja'Marr Chase +5` — the tally exactly one space after the name.
    *
-   * The row's own 8px gap is the distance between separate things on the line —
-   * the identity cluster and the name are separate things. The tally and the
-   * status pill are not: they are footnotes on the name, and putting the same
-   * 8px in front of them read as a third column rather than as an annotation.
-   * The field starts 5px after the name now.
+   * One space, measured rather than approximated: the assertion renders a space
+   * in the row's own font and requires the gap to be that width. A pixel
+   * constant would have been the same claim written in a way that stops being
+   * true the moment a font, a size or a width changes, and this file runs at
+   * four widths for that reason.
    *
-   * The measurement that matters more is the second one. Only the gap *in front
-   * of* the field moved; the 4px between the tally and the status pill is
-   * untouched, and a change that tightened both would have made the two marks
-   * one blur. Both are asserted here so a future tweak has to say which it
-   * meant.
+   * **What it is written to catch is drift, and drift is what it found.** The
+   * tally used to sit in a reserved three-character field with its digits
+   * right-aligned inside it, so the box was a fixed distance from the name and
+   * the *ink* was not: `+5` drew about a third of a character further right
+   * than `+11` did, and the board read as though the gap were chosen per
+   * player. The gap is therefore asserted to be the same on every row that
+   * carries a tally — short name and long, two characters and three — as well
+   * as being one space wide. Either assertion alone would pass a board that was
+   * wrong in the other way.
    *
-   * Run at every width the suite runs at, because a flex gap that survives 430
-   * and collapses at 360 is exactly the kind of thing this file exists to
-   * catch.
+   * The measurement that matters nearly as much is the last one. Only the
+   * distance in front of the field changed; the 4px between the tally and the
+   * status pill is untouched, and a change that tightened both would have made
+   * the two marks one blur.
    */
-  test('sits the tally against the name it is about, without crowding the status pill', async ({ page }) => {
+  test('sits the tally exactly one space after the name, without crowding the status pill', async ({ page }) => {
     /*
      * Injected, because the seeded board happens to carry one tally.
      *
@@ -255,33 +260,119 @@ test.describe('the identity cluster', () => {
       await route.fulfill({ response, body: JSON.stringify(body) });
     });
     await openDraft(page);
-    const rows = await page.locator('[data-testid="recommendation-row"]').evaluateAll((nodes) =>
-      nodes.flatMap((row) => {
-        const box = (sel: string) => row.querySelector(sel)?.getBoundingClientRect() ?? null;
-        const name = box('.player-name');
-        const tally = box('[data-testid="compact-tally"]');
-        const tag = box('[data-testid="injury-tag"]');
-        if (!name || !tally) return [];
+    const rows = await page.locator('[data-testid="recommendation-row"]').evaluateAll((nodes) => {
+      /*
+       * Where the tally's ink is, not where its box is.
+       *
+       * A box tells you where a field begins and a reader cannot see a field.
+       * That distinction *is* this bug: the tally used to sit in a reserved
+       * three-character box a fixed distance from the name with its digits
+       * pushed to the far side of it, so every box measurement said the spacing
+       * was constant while `+5` and `+11` visibly started in different places.
+       * A `Range` over the text node returns where the characters actually are,
+       * which is the only measurement that can tell the two arrangements apart.
+       *
+       * The name is measured by its box on purpose, and it is not the same
+       * choice made twice. The name is the one thing on the row that clips, and
+       * a `Range` reports the whole string including the part the ellipsis is
+       * covering — so on a long name it would return an edge outside the row.
+       * Its box is content-sized until it truncates and is the clip edge after
+       * that, which is where the reader sees the name end either way.
+       */
+      const ink = (el: Element | null): DOMRect | null => {
+        if (!el?.firstChild) return null;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getBoundingClientRect();
+      };
+      /*
+       * One space, rendered by the same engine that laid the row out.
+       *
+       * A space is put into the field, measured, and taken out again. The
+       * obvious alternative — `canvas.measureText(' ')` with the field's
+       * computed font — was tried and is subtly the wrong instrument: it is a
+       * text-metrics path rather than the layout path, and in WebKit at 430 it
+       * returned an advance a fraction under the one the row was actually
+       * drawn with, which is enough to land the two on either side of a whole
+       * pixel. A probe laid out in the field itself cannot disagree with the
+       * field for that reason.
+       *
+       * Rendered rather than written down, either way: a pixel constant is the
+       * same claim in a form that stops being true at the next font, size or
+       * width, and this file runs at four widths.
+       */
+      const oneSpaceIn = (field: HTMLElement): number => {
+        const probe = document.createElement('span');
+        probe.style.whiteSpace = 'pre';
+        probe.textContent = ' ';
+        field.appendChild(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width;
+      };
+      return nodes.flatMap((row) => {
+        const el = (sel: string) => row.querySelector(sel) as HTMLElement | null;
+        const name = el('.player-name')?.getBoundingClientRect() ?? null;
+        const tally = ink(el('[data-testid="compact-tally"]'));
+        const tag = el('[data-testid="injury-tag"]')?.getBoundingClientRect() ?? null;
+        const meta = el('.player-row-meta');
+        if (!name || !tally || !meta) return [];
         return [
           {
-            beforeTally: Math.round(tally.left - name.right),
+            name: (el('.player-name') as HTMLElement).innerText,
+            tallyText: (el('[data-testid="compact-tally"]') as HTMLElement).innerText,
+            beforeTally: tally.left - name.right,
+            oneSpace: oneSpaceIn(meta),
             beforePill: tag ? Math.round(tag.left - tally.right) : null,
           },
         ];
-      }),
-    );
+      });
+    });
 
     expect(rows.length, 'no row carried a tally to measure').toBeGreaterThan(3);
     expect(
       rows.some((r) => r.beforePill != null),
       'no row carried a status pill after its tally',
     ).toBe(true);
+    /*
+     * The mix that used to produce three different gaps, proven present rather
+     * than assumed: a two-character tally and a three-character one, and names
+     * either side of the shortest on the board.
+     */
+    expect(
+      new Set(rows.map((r) => r.tallyText.length)).size,
+      'every tally on the board is the same width, so drift could not show',
+    ).toBeGreaterThan(1);
+    expect(
+      new Set(rows.map((r) => r.name.length)).size,
+      'every name on the board is the same length, so drift could not show',
+    ).toBeGreaterThan(1);
+
+    /*
+     * Half a pixel, and the tolerance is doing less work than it looks.
+     *
+     * Sub-pixel layout means two independently laid-out spaces can differ in
+     * the last decimal, and requiring identity would be asserting arithmetic
+     * rather than spacing. What the tolerance cannot let through is any of the
+     * arrangements this is about: no gap at all, the row's own 8px, or the old
+     * reserved field's 11px. The one thing near enough to slip past it — a
+     * hard-coded pixel that happens to sit beside a space at this size — is
+     * caught by the constancy assertion below instead, because it is the tally
+     * *width* that a reserved field varies with and no constant can follow.
+     */
     for (const row of rows) {
-      expect(row.beforeTally, 'the tally drifted away from the name').toBe(5);
+      expect(
+        Math.abs(row.beforeTally - row.oneSpace),
+        `${row.name} ${row.tallyText}: the tally is ${row.beforeTally.toFixed(2)}px after the name, and a space is ${row.oneSpace.toFixed(2)}px`,
+      ).toBeLessThanOrEqual(0.5);
       if (row.beforePill != null) {
         expect(row.beforePill, 'the status pill was crowded by the tally').toBe(4);
       }
     }
+    expect(
+      new Set(rows.map((r) => Math.round(r.beforeTally))).size,
+      `the gap drifted by row: ${rows.map((r) => `${r.name} ${r.tallyText} ${r.beforeTally.toFixed(2)}px`).join(', ')}`,
+    ).toBe(1);
   });
 
   /**

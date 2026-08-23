@@ -242,96 +242,110 @@ function OutlookBody({
 }
 
 /**
- * `16 GP · WR7 half-PPR`.
+ * `Market - 247 Pts · 16 GP · WR7 half-PPR`.
  *
- * Two numbers, one line, and neither is guessed. A player who did not appear
- * last season has no games and no finish, and gets a dash: Sleeper will happily
- * report him as the 1,240th receiver, which looks like a result and is really
- * his place in a directory.
+ * One band rather than two lines. What the market expected of him before the
+ * season and what he actually did in the last one are three short readings, and
+ * three short readings that each took a row of their own were spending two
+ * lines of a card on one line of facts. They wrap together now and the card is
+ * shorter for it.
+ *
+ * The year is the first token of the readings it labels rather than a heading
+ * over them, on every screen that draws this. It used to be a heading on the
+ * wider cards, which cost a row to say one word — and once the market reading
+ * joined the band the heading was also *wrong*: `2025` standing over
+ * `Market - 247 Pts` would file a projection for the season about to be played
+ * under the season already behind it. Inline, the year labels the two readings
+ * that follow it and nothing else.
+ *
+ * Nothing here is guessed. A player who did not appear last season has no games
+ * and no finish, and gets a dash: Sleeper will happily report him as the
+ * 1,240th receiver, which looks like a result and is really his place in a
+ * directory. A player no snapshot named has no market reading at all, and the
+ * band is drawn without one.
  */
 export function LastSeasonLine({
   detail,
   failed,
   position,
-  compact = false,
 }: {
   detail: PlayerDetail | null;
   failed: boolean;
   position: string | null;
-  /**
-   * Put the season on the line instead of above it.
-   *
-   * `2025` as a heading over two numbers costs a whole row of the card to say
-   * one word. On Draft, where the expanded row is budgeted in single lines, the
-   * year is just the first token of the line it labels.
-   */
-  compact?: boolean;
 }) {
   if (failed || !detail) return null;
   const season = detail.lastSeason?.season;
   const games = detail.lastSeason?.gamesPlayed;
   const rank = detail.lastSeason?.positionRank;
-  if (!season) return null;
+  const projection = detail.preseasonProjection ?? null;
+  if (!season && !projection) return null;
   return (
-    <>
-      {compact ? null : <DetailLabel>{season}</DetailLabel>}
-      <div className="season-line" data-testid="last-season">
-        {compact ? <span className="metric season-year">{season}</span> : null}
-        <span className="metric">
-          {games == null ? (
-            <>
-              GP <Unknown what={`${season} games played`} />
-            </>
-          ) : (
-            <>
-              <strong>{games}</strong> GP
-            </>
-          )}
-        </span>
-        <span className="metric" title={detail.lastSeason?.scoring}>
-          {rank == null ? (
-            <>
-              {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
-            </>
-          ) : (
-            <>
-              <strong>{rank}</strong> half-PPR
-            </>
-          )}
-        </span>
-      </div>
-    </>
+    <div className="season-line" data-testid="last-season">
+      <MarketPointsMetric projection={projection} />
+      {!season ? null : (
+        <>
+          <span className="metric season-year">{season}</span>
+          <span className="metric">
+            {games == null ? (
+              <>
+                GP <Unknown what={`${season} games played`} />
+              </>
+            ) : (
+              <>
+                <strong>{games}</strong> GP
+              </>
+            )}
+          </span>
+          <span className="metric" title={detail.lastSeason?.scoring}>
+            {rank == null ? (
+              <>
+                {(position ?? '').toUpperCase() || 'Position'} rank <Unknown what={`${season} half-PPR finish`} />
+              </>
+            ) : (
+              <>
+                <strong>{rank}</strong> half-PPR
+              </>
+            )}
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 
 /**
- * `Preseason PTS 292 · StartWho · Aug 22`.
+ * `Market - 247 Pts` — what a market-derived model expected of his season.
  *
- * Historical, and said so in words rather than left to the reader to infer. The
- * date and the scoring travel with the number for one reason: in week nine a
- * bare `PTS 292` reads as what the market expects of him now, and it is not —
- * it is what a model expected of him in August. The weekly market owns the
- * present tense.
+ * Four words and a number, and every one of the four is doing a job. `Market`
+ * says whose opinion it is; the figure is the opinion; `Pts` says what the
+ * figure counts. What is deliberately *not* printed is the provenance line that
+ * used to follow it — the source, the capture date and the league's scoring
+ * profile, spelled out as `StartWho · Aug 22 · Half PPR, 6pt pass TD`. Four
+ * facts about a pipeline, on a card a reader opened to find out about a player,
+ * costing a row of a card that is budgeted in rows.
+ *
+ * **None of it is lost, and none of it is softened.** The whole sentence is on
+ * the element's title for a pointer, and in the accessible text for a screen
+ * reader, and it still opens with the word *preseason* — because that is the
+ * one thing about this number a reader must not get wrong. In week nine it is
+ * history. A card that let it read as a live weekly line would be the most
+ * expensive kind of wrong: plausible.
  *
  * Absent rather than blank when nothing covers him, so a card costs no height
  * for a player no snapshot named.
  */
-export function PreseasonProjectionLine({
-  detail,
+function MarketPointsMetric({
+  projection,
 }: {
-  detail: { preseasonProjection?: { points: number; label: string; scoringLabel: string } | null } | null;
+  projection: { points: number; label: string; scoringLabel: string } | null;
 }) {
-  const projection = detail?.preseasonProjection;
   if (!projection) return null;
+  const provenance = `Preseason market-derived season projection — captured from ${projection.label}, scored as ${projection.scoringLabel}`;
   return (
-    <div className="season-line" data-testid="preseason-projection">
-      <span className="metric">
-        Preseason <strong>{Math.round(projection.points)}</strong> PTS
-      </span>
-      <span className="metric detail-quiet" title={`Captured from ${projection.label}, scored as ${projection.scoringLabel}`}>
-        {projection.label} · {projection.scoringLabel}
-      </span>
-    </div>
+    <span className="metric" data-testid="preseason-projection" title={provenance}>
+      Market - <strong>{Math.round(projection.points)}</strong> Pts
+      <span className="sr-only"> ({provenance})</span>
+    </span>
   );
 }
 
