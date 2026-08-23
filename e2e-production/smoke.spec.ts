@@ -547,6 +547,82 @@ test.describe('the deployed app', () => {
   });
 
   /**
+   * The two actions on a row, on the deployed site, without touching either.
+   *
+   * A compact row leads somewhere, and two of them also carry a control that
+   * acts on the player without opening him — the star on the board, the heart
+   * on Players. Those were written as a `<button>` nested inside the row's own
+   * `<button>`: invalid, one tab stop where there are two actions, and a target
+   * the size of the glyph. Production is where that was measured, at 28×28, and
+   * production is therefore where the fix is read back.
+   *
+   * Read-only, like everything in this file, and the separation is read from
+   * the structure rather than by pressing anything: a control that is not a
+   * descendant of the way-in button cannot activate it, whatever it does with
+   * its own event. `e2e/row-alignment.spec.ts` presses both and asserts the
+   * outcome, against a dev server it is allowed to write to.
+   */
+  for (const [screen, tab, rowTestId, wayIn, control] of [
+    ['the draft board', 'draft', 'recommendation-row', '.row-button', 'queue-control'],
+    ['Players', 'players', 'player-search-row', '.dense-row-open', 'my-guy-control'],
+  ] as const) {
+    test(`draws a row on ${screen} and its own control as two separate targets`, async ({ page }) => {
+      await page.goto('/');
+      if (tab === 'draft') await requireDraftBoard(page);
+      await open(page, tab);
+      test.skip((await settled(page, rowTestId)) === 0, `no ${screen} on this deployment`);
+
+      const rows = await page.locator(`[data-testid="${rowTestId}"]`).evaluateAll(
+        (all, { way, ctrl }) =>
+          all
+            .filter((r) => {
+              const box = r.getBoundingClientRect();
+              // Clear of the sticky bars, so a hit test answers for the row.
+              return box.top > 120 && box.bottom < window.innerHeight - 120;
+            })
+            .slice(0, 4)
+            .map((r) => {
+              const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement | null;
+              const open = r.querySelector(way) as HTMLElement | null;
+              if (!el || !open) return null;
+              const box = el.getBoundingClientRect();
+              const hits: string[] = [];
+              for (const fx of [0, 0.5, 1]) {
+                for (const fy of [0, 0.5, 1]) {
+                  const x = box.left + Math.min(Math.max(box.width * fx, 1), box.width - 1);
+                  const y = box.top + Math.min(Math.max(box.height * fy, 1), box.height - 1);
+                  const at = document.elementFromPoint(x, y);
+                  hits.push(el === at || el.contains(at) ? 'ok' : 'blocked');
+                }
+              }
+              return {
+                nested: r.querySelector('button button') != null,
+                /* The control is beside the way in, not inside it. */
+                sibling: !open.contains(el),
+                actions: r.querySelectorAll('button').length,
+                target: { width: box.width, height: box.height },
+                hits: hits.join(' '),
+                wayIn: open.getBoundingClientRect().height,
+              };
+            })
+            .filter((r) => r != null),
+        { way: wayIn, ctrl: control },
+      );
+
+      expect(rows.length, `${screen} drew no row clear of the app's own bars`).toBeGreaterThan(0);
+      for (const r of rows) {
+        expect(r.nested, 'a button is nested inside a button').toBe(false);
+        expect(r.sibling, 'the control is still inside the way in').toBe(true);
+        expect(r.actions, `${screen} row offers ${r.actions} buttons rather than two`).toBe(2);
+        expect(r.target.width, `the control is ${r.target.width}px wide`).toBeGreaterThanOrEqual(44);
+        expect(r.target.height, `the control is ${r.target.height}px tall`).toBeGreaterThanOrEqual(44);
+        expect(r.hits, 'something else answers inside the control').toBe('ok ok ok ok ok ok ok ok ok');
+        expect(r.wayIn, 'the way in is no longer a full target').toBeGreaterThanOrEqual(44);
+      }
+    });
+  }
+
+  /**
    * The expanded player, on both screens, in the deployed build.
    *
    * This file's own preamble is the argument for having it here as well as in

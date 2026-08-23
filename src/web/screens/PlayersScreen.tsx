@@ -553,10 +553,11 @@ function PlayerRow({
           one is an opinion and moves the player up your board; the star over
           there is a bookmark and changes nothing.
 
-          It sits inside the row and is its own control, which is why the row is
-          a button beside it rather than a button around it.
+          It sits *beside* the way into the row rather than inside it: two
+          actions, two buttons, two tab stops, and a target the size of a thumb
+          on each. See `CompactPlayerRow`'s `action` and `.row-action`.
         */
-        leading={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
+        action={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
         onOpen={onOpen}
         testId="player-search-row"
         /*

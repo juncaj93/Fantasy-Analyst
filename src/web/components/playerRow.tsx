@@ -42,7 +42,7 @@ export function CompactPlayerRow({
   status,
   tally,
   rank,
-  leading,
+  action,
   trailing,
   trailingBelow,
   metrics,
@@ -61,8 +61,19 @@ export function CompactPlayerRow({
   tally?: number;
   /** The row's place in the list, when the list has an order worth numbering. */
   rank?: ReactNode;
-  /** A control that belongs to the row itself — the heart, a star, a grip. */
-  leading?: ReactNode;
+  /**
+   * The row's own independent control — the heart on Players.
+   *
+   * A *sibling* of the way-in button rather than a child of it, and the
+   * distinction is the whole reason this prop is not simply rendered inline.
+   * Nested, it was a `<button>` inside a `<button>`: invalid, undefined
+   * behaviour between browsers, one tab stop where there are two actions, and a
+   * 28px target where a thumb needs 44. It is drawn over the row from the slot
+   * it always occupied — see `.row-action` — so the line reads exactly as it
+   * did while the two actions are separate to everything that has to tell them
+   * apart.
+   */
+  action?: ReactNode;
   /**
    * The far end of the identity line, and the far end of the numbers under it.
    *
@@ -83,98 +94,142 @@ export function CompactPlayerRow({
   testId: string;
 }) {
   return (
-    <button
-      type="button"
+    /*
+      A container with two buttons in it, and it used to be one button with a
+      button inside it.
+
+      That shape was invalid HTML — a `<button>` may not contain a `<button>` —
+      and what browsers do with the pair is undefined rather than agreed. What
+      it cost in practice was everything the nesting implies: one tab stop where
+      the row offers two actions, a screen reader announcing a control it could
+      not reach separately, and an independent control whose target was whatever
+      the glyph happened to measure, which in production was 28×28.
+
+      The row's identity — the test id, the player, the position accent — stays
+      on the container, because that is the object; the two actions inside it
+      are the two things a reader can do to it.
+    */
+    <div
       className={positionAccentClass(position, 'dense-row')}
       data-testid={testId}
       data-player-id={playerId}
       data-position={(position ?? '').toUpperCase()}
-      /*
-        No `aria-label`, deliberately.
-
-        One was written here — "Marcus Vance — open his page" — and it was an
-        accessibility regression dressed as an improvement: an accessible name
-        on a container replaces everything inside it, so a reader listening
-        rather than looking would have been told the player's name and nothing
-        else, losing the tally, the availability tag, the club, the position and
-        all four numbers that the row exists to show. The row is a button, so
-        the platform already says it can be pressed; what it says when pressed
-        should be what it says.
-      */
-      onClick={onOpen}
     >
-      {/*
-        The locked order, and it is the same on every screen in the app.
+      <button
+        type="button"
+        className="dense-row-open"
+        /*
+          No `aria-label`, deliberately.
 
-        Rank, then **who he is** — the position pill, the club's mark and the
-        name, as one cluster — then whatever qualifies him, and only then the
-        way in.
+          One was written here — "Marcus Vance — open his page" — and it was an
+          accessibility regression dressed as an improvement: an accessible name
+          on a container replaces everything inside it, so a reader listening
+          rather than looking would have been told the player's name and nothing
+          else, losing the tally, the availability tag, the club, the position and
+          all four numbers that the row exists to show. The row is a button, so
+          the platform already says it can be pressed; what it says when pressed
+          should be what it says.
 
-        The club used to sit at the far right, which put the three facts that
-        identify a player at three different places on the row: position on the
-        leading edge, name in the middle, club on the trailing edge beside a
-        control that has nothing to do with him. Everything that says *who* is
-        now on one side in the order a reader asks for it, and the trailing edge
-        is the row's own controls and nothing else. See `PlayerIdentity`.
+          It is truer of this button than it was of the row: the control that
+          used to be nested in here has moved out, so everything left inside is
+          the player and nothing inside it is a second action whose name would
+          be swallowed.
+        */
+        onClick={onOpen}
+      >
+        {/*
+          The locked order, and it is the same on every screen in the app.
 
-        Anything that qualifies the player still sits to the right of his name —
-        his tally, his availability — because those are readings about him
-        rather than parts of his name.
-      */}
-      <span className="dense-row-top">
-        {rank !== undefined ? (
-          <span className="rank" aria-hidden="true">
-            {rank}
+          Rank, then **who he is** — the position pill, the club's mark and the
+          name, as one cluster — then whatever qualifies him, and only then the
+          way in.
+
+          The club used to sit at the far right, which put the three facts that
+          identify a player at three different places on the row: position on the
+          leading edge, name in the middle, club on the trailing edge beside a
+          control that has nothing to do with him. Everything that says *who* is
+          now on one side in the order a reader asks for it, and the trailing edge
+          is the row's own controls and nothing else. See `PlayerIdentity`.
+
+          Anything that qualifies the player still sits to the right of his name —
+          his tally, his availability — because those are readings about him
+          rather than parts of his name.
+        */}
+        <span className="dense-row-top">
+          {rank !== undefined ? (
+            <span className="rank" aria-hidden="true">
+              {rank}
+            </span>
+          ) : null}
+          <PlayerIdentity position={position} {...(team === undefined ? {} : { team })} />
+          <span className="player-name">{name}</span>
+          {/*
+            The tally and the availability tag share one fixed-width field, so
+            the marks after them land on the same edge on every row of every
+            list. See `--row-meta`.
+          */}
+          <span className="player-row-meta">
+            {tally === undefined ? null : <CompactTally net={tally} label="Lifetime research tally" />}
+            <InjuryTag status={status} />
+          </span>
+          {trailing ? <span className="dense-row-aside">{trailing}</span> : null}
+          {/*
+            The control's own slot, and the control itself is not in it.
+
+            The row's first line is as tall as the tallest thing on it and that
+            thing is the control, so lifting the control out without leaving its
+            box behind would cost every row on both screens eight pixels of
+            height — a density change bought by a semantics fix rather than
+            argued for. The box stays, empty and hidden; the control is drawn
+            over it below. See `.row-action-slot`.
+          */}
+          {action ? <span className="row-action-slot" aria-hidden="true" /> : null}
+          <span className="dense-chevron" aria-hidden="true">
+            <ChevronIcon />
+          </span>
+        </span>
+
+        {metrics && metrics.length > 0 ? (
+          /*
+            How many columns there are decides whether they are a grid or a
+            cluster.
+
+            Four equal columns is what makes a list of players scannable: the
+            reader runs an eye down `ADP` and it is in the same place on every
+            row. Two of them under the same rule is not a grid, it is two numbers
+            at opposite ends of the card with a hand's width of nothing between —
+            which is what Trades looked like once its row came down to `30d` and
+            `Life`. Below three they sit together at the leading edge instead.
+          */
+          <span
+            className="dense-row-metrics"
+            data-columns={metrics.length}
+            data-aside={trailingBelow ? 'yes' : 'no'}
+          >
+            {metrics.map((m) => (
+              <span
+                key={m.label}
+                className={m.wide ? 'dense-metric dense-metric-wide' : 'dense-metric'}
+                {...(m.testId ? { 'data-testid': m.testId } : {})}
+              >
+                <span className="dense-metric-label">{m.label}</span>
+                <span className="dense-metric-value">{m.value}</span>
+              </span>
+            ))}
+            {trailingBelow ? <span className="dense-metrics-aside">{trailingBelow}</span> : null}
           </span>
         ) : null}
-        <PlayerIdentity position={position} {...(team === undefined ? {} : { team })} />
-        <span className="player-name">{name}</span>
-        {/*
-          The tally and the availability tag share one fixed-width field, so
-          the marks after them land on the same edge on every row of every
-          list. See `--row-meta`.
-        */}
-        <span className="player-row-meta">
-          {tally === undefined ? null : <CompactTally net={tally} label="Lifetime research tally" />}
-          <InjuryTag status={status} />
-        </span>
-        {trailing ? <span className="dense-row-aside">{trailing}</span> : null}
-        {leading}
-        <span className="dense-chevron" aria-hidden="true">
-          <ChevronIcon />
-        </span>
-      </span>
+      </button>
 
-      {metrics && metrics.length > 0 ? (
-        /*
-          How many columns there are decides whether they are a grid or a
-          cluster.
+      {/*
+        The row's own action, beside the way in rather than inside it.
 
-          Four equal columns is what makes a list of players scannable: the
-          reader runs an eye down `ADP` and it is in the same place on every
-          row. Two of them under the same rule is not a grid, it is two numbers
-          at opposite ends of the card with a hand's width of nothing between —
-          which is what Trades looked like once its row came down to `30d` and
-          `Life`. Below three they sit together at the leading edge instead.
-        */
-        <span
-          className="dense-row-metrics"
-          data-columns={metrics.length}
-          data-aside={trailingBelow ? 'yes' : 'no'}
-        >
-          {metrics.map((m) => (
-            <span
-              key={m.label}
-              className={m.wide ? 'dense-metric dense-metric-wide' : 'dense-metric'}
-              {...(m.testId ? { 'data-testid': m.testId } : {})}
-            >
-              <span className="dense-metric-label">{m.label}</span>
-              <span className="dense-metric-value">{m.value}</span>
-            </span>
-          ))}
-          {trailingBelow ? <span className="dense-metrics-aside">{trailingBelow}</span> : null}
-        </span>
-      ) : null}
-    </button>
+        Last in the DOM and therefore last in the tab order, which is the order
+        it reads in: the row, then the one thing you can do to it without
+        opening it. Where it lands on screen is `.row-action`'s business — over
+        the slot above, in a target the size of a thumb.
+      */}
+      {action ? <span className="row-action">{action}</span> : null}
+    </div>
   );
 }

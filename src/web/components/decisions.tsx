@@ -211,13 +211,24 @@ export function MyGuyControl({
       data-testid="my-guy-control"
       data-level={myGuy.level}
       data-icon="heart"
-      onClick={(event) => {
-        // The row itself is a button that expands; rating must not also open it.
-        event.stopPropagation();
-        onChange(next);
-      }}
+      /*
+        No `stopPropagation` any more, and its absence is the fix rather than an
+        omission.
+
+        This control used to be *inside* the row's button, so a tap on it was
+        also a tap on the row and the only thing standing between rating a
+        player and opening his page was a line of JavaScript. It is a sibling of
+        the row's button now — see `.row-action` — so the two actions are
+        separate to the browser, to the keyboard and to a screen reader, and
+        there is no propagation left to stop.
+      */
+      onClick={() => onChange(next)}
     >
-      {myGuy.level > 0 ? '♥'.repeat(myGuy.level) : '♡'}
+      {/*
+        The mark, in a box of its own, because the button around it is now the
+        44px a thumb needs and the tint belongs to the 28px a reader sees.
+      */}
+      <span className="control-glyph">{myGuy.level > 0 ? '♥'.repeat(myGuy.level) : '♡'}</span>
     </button>
   );
 }
@@ -253,13 +264,10 @@ export function QueueControl({
       title={`${label} — a bookmark; it does not change the ranking`}
       data-testid="queue-control"
       data-queued={queued ? '1' : '0'}
-      onClick={(event) => {
-        // The row itself is a button that expands; queueing must not also open it.
-        event.stopPropagation();
-        onChange(!queued);
-      }}
+      /* A sibling of the row's own button, not a child of it — see `MyGuyControl`. */
+      onClick={() => onChange(!queued)}
     >
-      {queued ? '★' : '☆'}
+      <span className="control-glyph">{queued ? '★' : '☆'}</span>
     </button>
   );
 }
