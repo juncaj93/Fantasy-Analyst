@@ -28,6 +28,7 @@ import { MatchupRepo } from '../repos/matchup.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
+import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import type { Database } from '../db.ts';
 
 /*
@@ -86,6 +87,26 @@ export class MatchupService {
         this.deps.sleeper.getMatchups(league.sleeperLeagueId, week) as Promise<SleeperMatchup[]>,
       nflState: () => new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null),
       startSitInputs: (playerIds) => startSitInputsFor(this.db, playerIds),
+      /*
+       * Read from the database only. The fetch runs on the crons, so a matchup
+       * request — which on a Sunday is one every thirty seconds — never waits on
+       * Sleeper for a number it is allowed to show and not to reason with.
+       *
+       * No `positionOf` here, and that is a decision rather than an omission.
+       * The tight-end-premium case it exists for needs a position per player and
+       * this bag deliberately does not carry the evaluations — so in such a
+       * league `sleeperScoringKey` refuses every unknown position and this path
+       * yields no fallback at all, which is the safe direction. Every other
+       * league is unaffected, because position only matters when there is a
+       * premium.
+       */
+      publishedProjections: (opts) =>
+        new SleeperProjectionService(this.db, this.deps.sleeper).publishedFor({
+          season: opts.season,
+          week: opts.week,
+          playerIds: opts.playerIds,
+          profile: opts.profile,
+        }),
       previousForecast: (opts) => this.previousState(opts.leagueId, opts.season, opts.week, opts.rosterId),
       cached: () => CACHE.get(this.db) ?? null,
       remember: (entry) => CACHE.set(this.db, entry),

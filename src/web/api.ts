@@ -1066,6 +1066,15 @@ export interface StartSitEvaluation {
    * does not send it, and absent means unknown rather than "use the score".
    */
   projection?: number | null;
+  /**
+   * Where {@link projection} came from: this app's betting-market model, or
+   * Rotowire's published weekly figure by way of Sleeper.
+   *
+   * Optional and absent on an older server, which is read as "not stated"
+   * rather than as "ours" — a number whose provenance nobody sent is a number
+   * this app must not claim.
+   */
+  projectionSource?: 'market' | 'sleeper' | null;
   confidence: string;
   confidenceReasons: string[];
   /** `Questionable · hamstring · practised fully`, or null when healthy. */
@@ -1176,6 +1185,15 @@ export interface LineupSlot {
    * back is exactly the bug this field exists to end.
    */
   projection?: number | null;
+  /**
+   * Where {@link projection} came from: this app's betting-market model, or
+   * Rotowire's published weekly figure by way of Sleeper.
+   *
+   * Optional and absent on an older server, which is read as "not stated"
+   * rather than as "ours" — a number whose provenance nobody sent is a number
+   * this app must not claim.
+   */
+  projectionSource?: 'market' | 'sleeper' | null;
   alreadyStarting: boolean;
   locked: boolean;
   /** The two to four things that decided this player. Absent on older servers. */

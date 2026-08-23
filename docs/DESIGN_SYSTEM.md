@@ -87,6 +87,7 @@ is which.
 | `SearchFilterRow` | Search folded into a glyph beside the filters, unfolding into a field that takes the row. Draft uses it; the row is one tap target tall in both states, so opening it moves nothing. Only the control labelled Cancel discards a query. |
 | `Sheet` | A modal sheet: rounded top, grab handle, dimmed backdrop, swipe-to-dismiss, and a Done control because a gesture is never the only way out. |
 | `SkeletonRows` | Loading at the shape of what is coming, so the page does not jump when it lands. |
+| `PlayerIdentity` | Who a player is, on the leading edge of any row: a fixed-width position pill, then the club's mark at the smaller inline size, then his name. `flex: none`, so every name in a list starts on the same x whatever follows it. Draft, Players, Trades, Waivers and Team's lineup and bench all open with it — `e2e/row-alignment.spec.ts` holds all five to it, and to the column being reserved rather than filled with an invented value. |
 | `CompactPlayerRow` | One player as one row, in the columns every list shares: rank, a control of the screen's own, the name, the tally/availability field, the position, a chevron — then up to four labelled numbers and one short line. Players and Trades both draw from it, which is what makes a player read as the same object on both. |
 | `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
 | `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
@@ -99,7 +100,8 @@ is which.
 | `WinBar` | Both percentages printed, and a `role="meter"` between them. The bar is an accelerator and never the carrier of the meaning. |
 | `HeroCarousel` | One live insight at a time: auto-advancing slowly, pausing the instant it is touched, swipeable, and pageable by a button because a gesture is never the only way through. A single insight renders as a card with no pager at all — a carousel with one slide is a control that lies about having more to say. |
 | `SlotRow` | Both sides of one lineup slot on one line, around a fixed-width position pill that never moves between rows. Names truncate rather than wrap; below 400px the numbers and the club marks each give up a point so the names get their letters back. |
-| `BenchSection` | Collapsed on arrival, always. The bench is hindsight, and hindsight belongs behind a tap. |
+| `BenchSection` | Collapsed on arrival, always. The bench is hindsight, and hindsight belongs behind a tap. Its rows are a starter's row exactly — same `PlayerIdentity`, same value field, same widths — so opening the fold adds rows without moving the columns above it. A bench player's pill says what he plays, never `BN`: where he is sitting is what the section heading is for. |
+| Team's trailing value | One number, alone, in a fixed field: the weekly **projection**, in every game state. Team does not read Sleeper's running points at all — live and final scores are the Matchup screen's, from `players_points`. Where no market has priced a player the field holds `—`; it is never a zero, and never the ranking score, which is a different question with a different scale (see `core/startsit/projection.ts`). |
 
 ## The bottom of the screen
 

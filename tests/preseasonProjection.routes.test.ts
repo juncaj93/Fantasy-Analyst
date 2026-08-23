@@ -140,6 +140,50 @@ describe('the preseason projection routes', () => {
     expect(all).toHaveLength(1);
   });
 
+
+  /*
+   * The paste that has no date of its own.
+   *
+   * StartWho prints "Last updated" on the page but does not always put it in
+   * the clipboard, and the first real 149-record paste carried no date at all —
+   * which the parser refuses, because a capture with no date has no identity
+   * and idempotence is built on that identity. The route forwards a fallback
+   * and Setup defaults it to today, so this is the case that would otherwise
+   * have made the whole feature unusable for the exact table it was built for.
+   */
+  it('imports a paste with no date of its own when one is supplied', async () => {
+    const dateless = SAMPLE.split('\n')
+      .filter((line) => !/last updated/i.test(line))
+      .join('\n');
+
+    const refused = await post('/api/preseason-projection/preview', { content: dateless });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(await refused.json())).toMatch(/capture date/i);
+
+    const res = await post('/api/preseason-projection/preview', {
+      content: dateless,
+      capturedAt: '2026-08-23',
+    });
+    expect(res.status).toBe(200);
+    const preview = (await res.json()) as { capturedAt: string; capturedFrom: string; counts: { parsed: number } };
+    expect(preview.capturedAt).toBe('2026-08-23');
+    // And it says the date was assumed rather than read, so nothing pretends.
+    expect(preview.capturedFrom).toBe('declared');
+    // Identity is what was missing, not rows: the table parses either way.
+    expect(preview.counts.parsed).toBeGreaterThan(0);
+  });
+
+  it('prefers the paste\'s own date over the supplied fallback', async () => {
+    // The fallback fills a gap; it never overrules what the source said.
+    const res = await post('/api/preseason-projection/preview', {
+      content: SAMPLE,
+      capturedAt: '2020-01-01',
+    });
+    const preview = (await res.json()) as { capturedAt: string; capturedFrom: string };
+    expect(preview.capturedFrom).toBe('paste');
+    expect(preview.capturedAt).not.toBe('2020-01-01');
+  });
+
   it('refuses an empty paste with something a reader can act on', async () => {
     const res = await post('/api/preseason-projection/preview', { content: '   ' });
     expect(res.status).toBe(400);

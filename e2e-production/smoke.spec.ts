@@ -970,6 +970,49 @@ test.describe('the season features', () => {
       await expect(card).not.toHaveClass(/card-pos/);
       await expect(card).toHaveAttribute('aria-label', /bench/i);
     }
+
+    /*
+     * The lineup and the bench are one list, on real names.
+     *
+     * `e2e/row-alignment.spec.ts` makes this claim against the demo roster,
+     * which is four players with short names and no defence. Production is
+     * where it meets a `DEF`, a hyphenated surname and a full bench — so the
+     * column is measured here too, on whatever this deployment actually has.
+     *
+     * The bench has to be opened first: it is collapsed on arrival and its rows
+     * are not rendered while it is, which is the property that makes the fold
+     * cost the layout nothing.
+     */
+    const toggle = page.getByTestId('bench-toggle');
+    if (await toggle.count()) {
+      await toggle.click();
+      await expect(page.getByTestId('bench-row').first()).toBeVisible();
+    }
+    const columns = await page
+      .locator('[data-testid="starter-row"][data-starter="true"], [data-testid="bench-row"]')
+      .evaluateAll((rows) =>
+        rows.map((row) => {
+          const at = (sel: string, edge: 'left' | 'right') => {
+            const el = row.querySelector(sel);
+            return el ? Math.round(el.getBoundingClientRect()[edge]) : null;
+          };
+          return {
+            pill: at('.pos-pill', 'left'),
+            name: at('.player-name', 'left'),
+            value: at('.proj', 'right'),
+            text: (row.querySelector('.proj')?.textContent ?? '').trim(),
+          };
+        }),
+      );
+    if (columns.length > 1) {
+      for (const key of ['pill', 'name', 'value'] as const) {
+        const edges = columns.map((c) => c[key]);
+        expect(edges.every((e) => e != null), `every row draws its ${key}`).toBe(true);
+        expect(new Set(edges).size, `the ${key} column runs at ${[...new Set(edges)].join(', ')}`).toBe(1);
+      }
+      // A real figure or an honest dash — never a zero nobody computed.
+      for (const c of columns) expect(c.text).toMatch(/^(—|-?\d+\.\d)$/);
+    }
   });
 
   test('the comparison picker opens and reaches beyond the roster', async ({ page }) => {

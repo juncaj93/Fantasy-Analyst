@@ -303,6 +303,20 @@ function PreseasonProjectionPanel({ unlocked, onDone }: { unlocked: boolean; onD
   const [status, setStatus] = useState<ProjectionStatus | null>(null);
   const [open, setOpen] = useState(false);
   const [pasted, setPasted] = useState('');
+  /*
+   * The fallback capture date.
+   *
+   * StartWho prints a "Last updated" line on the page but not always into the
+   * clipboard, and a snapshot with no date has no identity — it is what makes
+   * re-importing a correction replace the old capture instead of stacking
+   * beside it. So the paste's own date wins whenever it carries one, and this
+   * only fills the gap when it does not.
+   *
+   * Defaulted rather than demanded: a projection copied today was captured
+   * today, and making somebody type that is a worse answer than assuming it and
+   * saying so, which the preview does.
+   */
+  const [capturedAt, setCapturedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [preview, setPreview] = useState<ProjectionImportResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -326,6 +340,7 @@ function PreseasonProjectionPanel({ unlocked, onDone }: { unlocked: boolean; onD
     try {
       const result = await api.post<ProjectionImportResult>(`/api/preseason-projection/${what}`, {
         content: pasted,
+        capturedAt,
       });
       if (what === 'preview') {
         setPreview(result);
@@ -450,6 +465,25 @@ function PreseasonProjectionPanel({ unlocked, onDone }: { unlocked: boolean; onD
               }}
               data-testid="projection-paste-input"
             />
+            {/*
+              Only consulted when the paste carries no date of its own, which
+              the preview then says out loud rather than letting an assumed date
+              read as a captured one.
+            */}
+            <label className="faint" style={{ display: 'block', marginTop: 8 }}>
+              Captured
+              <input
+                type="date"
+                value={capturedAt}
+                onChange={(e) => {
+                  setCapturedAt(e.target.value);
+                  setPreview(null);
+                }}
+                style={{ marginLeft: 8 }}
+                data-testid="projection-captured-at"
+              />
+              <div>Used only if the paste carries no date of its own.</div>
+            </label>
             <div className="btn-row" style={{ marginTop: 8 }}>
               <button
                 className="btn btn-sm"

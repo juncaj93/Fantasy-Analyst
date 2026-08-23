@@ -31,6 +31,9 @@ import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
+import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
+import { resolveWeek } from '../core/matchup/build.ts';
+import type { NflState } from '../core/sleeper/phase.ts';
 
 export interface WorkerEnv {
   DB: Database;
@@ -294,10 +297,23 @@ export default {
       } catch (err) {
         console.error('league strategy refresh failed', err);
       }
+
+      await refreshPublishedProjections(env, appEnv);
       return;
     }
 
     await refreshVegas(appEnv);
+    /*
+     * And, on the two weekend ticks, the published fallback beside the market.
+     *
+     * These are the clocks that exist because a weekend is when a weekly number
+     * matters, and the fallback answers the same question the market does when
+     * the market has no answer — so it belongs on the same schedule rather than
+     * on one of its own. Rotowire revises through the week, which is why this
+     * runs on all three clocks (both of these and the nightly one above) and
+     * declines cheaply when what it holds is young; see `MAX_AGE_HOURS`.
+     */
+    await refreshPublishedProjections(env, appEnv);
   },
 
   /**
@@ -414,6 +430,35 @@ export function parseRawEmail(raw: string): {
  * have changed, and saying so in the log. This is the hook the brief asks for,
  * and it is honest about the fact that the read path is already live.
  */
+/**
+ * One week of Rotowire's published projections, for the selected league's season.
+ *
+ * Its own function because three clocks call it, and separately caught for the
+ * reason every optional feed here is: this fills a column that was blank before
+ * it existed, and it must never be the reason an injury check or a market
+ * refresh does not run.
+ *
+ * The week is resolved by the same two functions the Matchup screen and the
+ * lineup route use, so all three ask the feed about the same week. Nothing to
+ * do outside the regular season, which `resolveWeek` reports by handing back
+ * week one for a preseason state — and the service then finds nothing published
+ * and says so, at the cost of one request a day.
+ */
+async function refreshPublishedProjections(env: WorkerEnv, appEnv: AppEnv): Promise<void> {
+  try {
+    const league = await new LeagueRepo(env.DB).getSelectedLeague();
+    if (!league) return;
+    const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+    const report = await new SleeperProjectionService(env.DB, appEnv.sleeper).refresh(league.season, week);
+    if (report.outcome === 'unavailable') {
+      console.log(`published projections ${report.season} week ${report.week}: ${report.detail ?? 'unavailable'}`);
+    }
+  } catch (err) {
+    console.error('published projection refresh failed', err);
+  }
+}
+
 async function recomputeForChangedPlayers(env: WorkerEnv, changedPlayerIds: string[]): Promise<void> {
   if (changedPlayerIds.length === 0) return;
 
