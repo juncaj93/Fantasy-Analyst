@@ -18,15 +18,19 @@
  * widths — see `playwright.config.ts`. Nothing in here is width-specific, which
  * is deliberate: a card that only holds together on a Pro Max is not a card.
  *
- * **The tests are grouped by the card they open, not by the claim they make.**
- * That is a cost decision rather than a stylistic one. Every `page.goto('/')`
- * re-boots the single-page app, and the browser suite runs the whole of `e2e/`
- * inside a twenty-minute step budget that the 430 width was already spending
- * nineteen of; a file of twenty-seven one-assertion tests, each re-booting to
- * check one thing about one card, is most of a minute of that budget spent on
- * navigation. So a test opens a player once and reads everything that is true
- * of *that* player, and the assertion messages carry the claim that a test name
- * would otherwise have carried.
+ * ---------------------------------------------------------------------------
+ * **Six tests, six page loads, and that is a budget rather than a style.**
+ *
+ * `e2e/` runs inside a twenty-minute step ceiling per width, and main already
+ * spends up to eighteen and a half of them; the 430 width has been cancelled
+ * mid-suite twice with nothing failing. Every `page.goto('/')` re-boots the
+ * single-page app, so a file of one-assertion tests is most of a minute of a
+ * budget with none to give. This file therefore opens a card once and reads
+ * everything true of *that* card, and the assertion messages carry the claim
+ * that a test name would otherwise have carried.
+ *
+ * If you add to it, add an assertion to an existing test rather than a test.
+ * ---------------------------------------------------------------------------
  *
  * What it does not touch: which players Players lists and in which order, and
  * which section of Trades a suggestion lands in with what confidence. Both are
@@ -86,14 +90,14 @@ async function pageOverflow(page: Page): Promise<number> {
 }
 
 /**
- * The left edge of everything on the sheet's identity line, in document order.
+ * Position, club, name, status — painted left to right, whatever the markup says.
  *
  * Read as geometry rather than as DOM order on purpose. A card can put the pill
  * first in the markup and float it to the end, and the reader would still be
  * looking at the reversed grammar this file exists to forbid.
  */
-async function identityOrder(page: Page): Promise<{ mark: string; x: number }[]> {
-  return page.locator('.sheet-player-title').evaluate((title) => {
+async function expectRowGrammar(page: Page, expected: string[]): Promise<void> {
+  const marks = await page.locator('.sheet-player-title').evaluate((title) => {
     const pick = (sel: string, mark: string) => {
       const el = title.querySelector(sel) as HTMLElement | null;
       return el ? { mark, x: el.getBoundingClientRect().left } : null;
@@ -105,11 +109,6 @@ async function identityOrder(page: Page): Promise<{ mark: string; x: number }[]>
       pick('[data-testid="injury-tag"]', 'status'),
     ].filter((p): p is { mark: string; x: number } => p != null);
   });
-}
-
-/** Position, club, name, status — painted left to right, whatever the markup says. */
-async function expectRowGrammar(page: Page, expected: string[]): Promise<void> {
-  const marks = await identityOrder(page);
   expect(marks.map((m) => m.mark), 'the expanded card reversed the compact row’s identity order').toEqual(expected);
   for (let i = 1; i < marks.length; i++) {
     expect(marks[i]!.x, `${marks[i]!.mark} is drawn left of ${marks[i - 1]!.mark}`).toBeGreaterThan(marks[i - 1]!.x);
@@ -122,7 +121,16 @@ async function bandLabels(page: Page): Promise<string[]> {
   return labels.map((l) => l.trim().toLowerCase());
 }
 
-/** The blocks that left the card, and the vocabulary that was never football. */
+/**
+ * The blocks that left the card, and the vocabulary that was never football.
+ *
+ * `News by window` repeated the tally windows now in the band; `2025` was a
+ * heading over two numbers now in the band; `Draft market` printed a rank, an
+ * ADP and their difference; `Categories` restated the tally by category. `mag`,
+ * the review status, the rule id and the confidence score are all real and all
+ * about the classifier — they belong under Evidence, which this file opens
+ * separately to check they are still there.
+ */
 async function expectNotAConsole(page: Page): Promise<void> {
   const text = await page.getByTestId('player-page-snapshot').innerText();
   for (const gone of ['News by window', 'Vegas props', 'Categories', 'Draft market']) {
@@ -134,6 +142,23 @@ async function expectNotAConsole(page: Page): Promise<void> {
   expect(text).not.toMatch(/\brule: /);
   expect(text).not.toMatch(/confidence: /);
   await expect(page.getByTestId('player-page-snapshot').getByTestId('player-page-windows')).toHaveCount(0);
+}
+
+/**
+ * Nowhere down the card can it scroll sideways.
+ *
+ * Walked rather than measured once at the top: the band, the trade case, the
+ * outlook and the news each get their own chance to overflow, and only one of
+ * them is on screen when the sheet opens.
+ */
+async function expectNoSidewaysScroll(page: Page, what: string): Promise<void> {
+  const body = page.locator('.sheet-body');
+  const height = await body.evaluate((el) => el.scrollHeight);
+  for (let top = 0; top <= height; top += 240) {
+    await body.evaluate((el, y) => el.scrollTo({ top: y }), top);
+    const overflow = await pageOverflow(page);
+    expect(overflow, `the ${what} card overflows by ${overflow}px at ${top}px down`).toBeLessThanOrEqual(1);
+  }
 }
 
 test.describe('the expanded player, opened from Players', () => {
@@ -161,9 +186,9 @@ test.describe('the expanded player, opened from Players', () => {
      */
     const labels = await bandLabels(page);
     expect(labels.slice(0, 6)).toEqual(['rank', 'adp', '7d', '21d', 'life', 'pts']);
-    expect(labels.slice(6)).toEqual([labels[6]!, labels[7]!]);
     expect(labels[6], 'games played should name its season').toMatch(/^\d{4} gp$/);
     expect(labels[7], 'the finish should name its season').toMatch(/^\d{4} rank$/);
+    expect(labels).toHaveLength(8);
     expect(labels).not.toContain('moved');
 
     // Last season, promoted out of the `2025` block it used to have to itself.
@@ -175,8 +200,8 @@ test.describe('the expanded player, opened from Players', () => {
      *
      * The label is an abbreviation because a metric cell on a 360px phone is an
      * abbreviation or it is nothing. Everything else about the cell exists so
-     * the abbreviation cannot be read as a live number — and in week nine it is
-     * history, where the most expensive kind of wrong is plausible.
+     * the abbreviation cannot be read as a live number — in week nine it is
+     * history, and the most expensive kind of wrong is plausible.
      */
     const pts = page.getByTestId('metric-preseason-pts');
     await expect(pts.locator('.stat-label')).toHaveText('PTS');
@@ -219,7 +244,7 @@ test.describe('the expanded player, opened from Players', () => {
         return { top: Math.round(box.top), left: Math.round(box.left), clipped };
       }),
     );
-    expect(cells.length).toBe(8);
+    expect(cells).toHaveLength(8);
     expect(cells.flatMap((c) => c.clipped), 'these are cut off in the band').toEqual([]);
     for (let i = 1; i < cells.length; i++) {
       const back = cells[i - 1]!;
@@ -227,23 +252,27 @@ test.describe('the expanded player, opened from Players', () => {
       const forwards = here.top > back.top || (here.top === back.top && here.left > back.left);
       expect(forwards, `cell ${i} is painted before the one in front of it`).toBe(true);
     }
-    expect(await pageOverflow(page)).toBeLessThanOrEqual(1);
+
+    await expectNoSidewaysScroll(page, 'players');
   });
 
   /**
    * Honest absence, three ways, on the two players who have it.
    *
-   * Marcus Vance is healthy and no snapshot covers him; Bo Ashworth's season was
-   * looked up and he did not appear in it, and nobody has written about him.
-   * None of that may become a zero, and none of it may become a heading over an
-   * apology.
+   * Marcus Vance is healthy and no snapshot covers him; Bo Ashworth's season
+   * was looked up and he did not appear in it, and nobody has written about
+   * him. None of that may become a zero, and none of it may become a heading
+   * over an apology.
    */
   test('leaves out what it does not know rather than printing a nothing', async ({ page }) => {
     await page.goto('/');
     await openTab(page, 'players');
 
     await openPlayer(page, '1001');
-    await expect(page.getByTestId('metric-preseason-pts'), 'a dash under PTS is a promise the number exists').toHaveCount(0);
+    await expect(
+      page.getByTestId('metric-preseason-pts'),
+      'a dash under PTS is a promise the number exists somewhere',
+    ).toHaveCount(0);
     expect(await bandLabels(page)).not.toContain('pts');
     await expect(page.locator('.sheet-player-title [data-testid="injury-tag"]')).toHaveCount(0);
     await page.keyboard.press('Escape');
@@ -256,35 +285,27 @@ test.describe('the expanded player, opened from Players', () => {
     await expect(page.getByTestId('metric-last-season-gp').locator('.stat-value')).toHaveText('—');
     await expect(page.getByTestId('metric-last-season-rank').locator('.stat-value')).toHaveText('—');
     const snapshot = page.getByTestId('player-page-snapshot');
-    await expect(snapshot.getByTestId('evidence-heading'), 'a heading spent saying no heading was needed').toHaveCount(0);
+    await expect(
+      snapshot.getByTestId('evidence-heading'),
+      'a heading spent saying that a heading was not needed',
+    ).toHaveCount(0);
     await expect(snapshot.getByTestId('evidence-item')).toHaveCount(0);
   });
 
   /**
-   * Nothing ingested at all is a different answer from a season he missed: no
+   * A long name yields before anything to the right of it does — and a
+   * deployment that never ingested last season draws no cells for it.
+   *
+   * Two failures that want the same page load, because both are answered by
+   * rewriting a response before the app boots. The first found a real defect:
+   * `.sheet-title` had `flex: 1` and no `min-width: 0`, so nothing in the chain
+   * below it was allowed to shrink and the status pill went off the sheet.
+   *
+   * "Never ingested" is a different answer from "he missed the season": no
    * cells, rather than two dashes promising numbers that were never stored.
    */
-  test('draws no last-season cells when the statistics were never ingested', async ({ page }) => {
+  test('truncates a long name, and draws no cells for a season nobody stored', async ({ page }) => {
     await patchDetail(page, { lastSeason: null });
-    await page.goto('/');
-    await openTab(page, 'players');
-    await openPlayer(page, '1004');
-    await expect(page.getByTestId('metric-last-season-gp')).toHaveCount(0);
-    await expect(page.getByTestId('metric-last-season-rank')).toHaveCount(0);
-    // …and the band is still a band, with the readings that do exist on it.
-    expect(await bandLabels(page)).toEqual(['rank', 'adp', '7d', '21d', 'life']);
-  });
-
-  /**
-   * A long name yields before anything to the right of it does.
-   *
-   * The failure this guards is the one that only appears with a hyphenated name
-   * and a status: the name pushes the tag off the sheet, or the header grows a
-   * second line and the card loses a row to its own title. It found a real one —
-   * `.sheet-title` had `flex: 1` and no `min-width: 0`, so nothing in the chain
-   * below it was allowed to shrink.
-   */
-  test('truncates a long name rather than pushing the status off the sheet', async ({ page }) => {
     await page.route('**/api/players?*', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -306,18 +327,26 @@ test.describe('the expanded player, opened from Players', () => {
     const shortened = await page.locator('.sheet-player-name').evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(shortened, 'the name was not truncated, so something else must have moved').toBe(true);
     expect(await pageOverflow(page)).toBeLessThanOrEqual(1);
+
+    await expect(page.getByTestId('metric-last-season-gp')).toHaveCount(0);
+    await expect(page.getByTestId('metric-last-season-rank')).toHaveCount(0);
+    // …and the band is still a band, with the readings that do exist on it.
+    expect(await bandLabels(page)).toEqual(['rank', 'adp', '7d', '21d', 'life']);
   });
 
   /**
-   * The news is football, and it is the ledger's own words.
+   * The news is football and it is the ledger's own words — and everything the
+   * card stopped showing is still one tap further in.
    *
-   * A polished card is the easiest place in an app to start inventing a
-   * cleaner-sounding fact than the evidence supports, so the sentence on screen
-   * is read back against what the API actually stores. The source name is
-   * checked the other way: the demo world has one newsletter, and a name
-   * repeated down every line qualifies nothing.
+   * Two halves of one claim, so they share a page load. A polished card is the
+   * easiest place in an app to start inventing a cleaner-sounding fact than the
+   * evidence supports, so the sentence on screen is read back against what the
+   * API actually stores. And the four blocks that left the card would be losses
+   * rather than relocations without the second half: the window breakdown, the
+   * draft market, the categories, the prop table and the whole evidence console
+   * are all still rendered on the player's own page.
    */
-  test('says what happened to him, in words the ledger stores', async ({ page }) => {
+  test('says what happened to him in the ledger’s words, and keeps the rest one tap in', async ({ page }) => {
     await page.goto('/');
     await openTab(page, 'players');
     await openPlayer(page, '1002');
@@ -341,36 +370,25 @@ test.describe('the expanded player, opened from Players', () => {
       .map((s: string) => s.replace(/\s+/g, ' ').trim());
     expect(stored, `"${shown}" is in none of the stored words for this item`).toContain(shown);
 
+    /*
+     * The source is printed when it varies and omitted when it cannot. The demo
+     * world has one newsletter, and a name repeated down every line qualifies
+     * nothing while costing each line the room to say something.
+     */
     const sources: string[] = [
       ...new Set(file.evidence.map((e: { sourceName: string }) => e.sourceName as string)),
     ] as string[];
     const line = await item.innerText();
     if (sources.length === 1) expect(line, 'a source that never varies is a repeated word').not.toContain(sources[0]!);
     else expect(line).toContain(sources[0]!);
-  });
 
-  /**
-   * Nothing was deleted, only moved — the other half of the removals above.
-   *
-   * Without this the four blocks that left the card would be losses rather than
-   * relocations: the four-window breakdown with its item counts, the draft
-   * market with its movement badge, the categories and the prop table are all
-   * still rendered on the player's own page, and so is the whole evidence
-   * console, which is where the app's provenance promise actually lives.
-   */
-  test('keeps every removed block, and the console, on the full profile', async ({ page }) => {
-    await page.goto('/');
-    await openTab(page, 'players');
-    await openPlayer(page, '1002');
     await page.getByTestId('player-full-profile').click();
     await expect(page.getByTestId('player-page')).toBeVisible();
-
     await expect(page.getByTestId('player-page-windows')).toBeVisible();
     const sections = page.getByTestId('player-page-sections');
     await sections.getByRole('button', { name: 'Market' }).click();
     await expect(page.getByText('Draft market')).toBeVisible();
     await expect(page.getByText(/Vegas props/)).toBeVisible();
-
     await sections.getByRole('button', { name: 'Evidence' }).click();
     const ledger = page.getByTestId('player-page-evidence');
     await expect(ledger.getByTestId('evidence-item').first()).toBeVisible();
@@ -386,7 +404,7 @@ test.describe('the same expanded player, opened from Trades', () => {
    * Players adds the two columns it alone knows in front of the shared six;
    * everything after that has to match, or a reader who learned the card on one
    * screen has to learn it again on the other. Both surfaces are opened in one
-   * test because comparing them is the assertion.
+   * test because comparing them *is* the assertion.
    */
   test('reads the same way, in the same order, minus the two Players alone has', async ({ page }) => {
     await patchDetail(page, { preseasonProjection: PROJECTION });
@@ -408,24 +426,31 @@ test.describe('the same expanded player, opened from Trades', () => {
     expect(fromPlayers.slice(2), 'the two surfaces have drifted apart again').toEqual(fromTrades);
 
     await expectNotAConsole(page);
-    // The trade case is Trades' own, and it stays.
+    // The trade case is Trades' own advisory content, and it stays.
     await expect(page.getByTestId('trade-case')).toContainText('Why');
-    expect(await pageOverflow(page)).toBeLessThanOrEqual(1);
+    await expectNoSidewaysScroll(page, 'trades');
   });
 
   /**
-   * The tag appears on Trades, which never had one to pass.
+   * The pill appears on Trades, which never had one to pass — and both lists
+   * are still exactly their API's answer.
    *
    * Players hands over Sleeper's own `status` with the row. A trade suggestion
    * carries a trade-shaped injury category and no designation, so the same
-   * player showed `OUT` on one screen and nothing on the other. The detail
-   * payload both screens already fetch is the fallback.
+   * player showed `OUT` on one screen and nothing on the other; the detail
+   * payload both screens already fetch is the fallback. The designation is
+   * forced onto that response rather than found on the board, because which
+   * players the demo world suggests is the trade engine's business and is
+   * deliberately not this file's to depend on.
    *
-   * The designation is forced onto that response rather than found on the
-   * board: which players the demo world suggests is the trade engine's business
-   * and is deliberately not this file's to depend on.
+   * The ordering assertions ride along on the same page load. Presentation work
+   * is exactly the kind that can quietly re-sort a list — a `map` that became a
+   * `sort`, a memo keyed on the wrong thing — and neither ranking is this
+   * workstream's to touch. For Trades that includes which section a suggestion
+   * landed in, because Trade Target versus Emerging is a classification rather
+   * than an ordering.
    */
-  test('carries the availability pill, and says only what the pill cannot', async ({ page }) => {
+  test('carries the availability pill, over a board still in the API’s own order', async ({ page }) => {
     await patchDetail(page, {
       injury: {
         designation: 'out',
@@ -440,33 +465,7 @@ test.describe('the same expanded player, opened from Trades', () => {
       },
     });
     await page.goto('/');
-    await openTab(page, 'trades');
-    await openFirstTrade(page);
 
-    const tag = page.locator('.sheet-player-title [data-testid="injury-tag"]');
-    await expect(tag).toHaveAttribute('data-status', 'OUT');
-    // The meaning, not just the letters, for anyone listening rather than looking.
-    await expect(tag).toHaveAttribute('aria-label', 'Out');
-    await expectRowGrammar(page, ['position', 'club', 'name', 'status']);
-
-    const injury = page.getByTestId('injury-current');
-    await expect(injury).toContainText('hamstring');
-    await expect(injury, 'the designation is on the card twice').not.toContainText('OUT');
-  });
-});
-
-test.describe('the pass changed no recommendation', () => {
-  /**
-   * Both lists are their API's answer, in their API's order.
-   *
-   * Presentation work is exactly the kind that can quietly re-sort a list — a
-   * `map` that became a `sort`, a memo keyed on the wrong thing — and neither
-   * ranking is this workstream's to touch. For Trades that includes which
-   * section a suggestion landed in, because Trade Target versus Emerging is a
-   * classification rather than an ordering.
-   */
-  test('renders Players and the trade board exactly as their APIs returned them', async ({ page }) => {
-    await page.goto('/');
     await openTab(page, 'players');
     await expect(page.getByTestId('player-search-row').first()).toBeVisible();
     const listed = await page
@@ -476,7 +475,7 @@ test.describe('the pass changed no recommendation', () => {
       const res = await (await fetch('/api/players?q=&limit=100&offset=0')).json();
       return res.players.map((p: { id: string }) => p.id);
     });
-    expect(listed).toEqual(ranked.slice(0, listed.length));
+    expect(listed, 'Players is no longer the order its API returned').toEqual(ranked.slice(0, listed.length));
 
     await openTab(page, 'trades');
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
@@ -495,33 +494,17 @@ test.describe('the pass changed no recommendation', () => {
         players: s.players.map((p) => p.name),
       }));
     });
-    expect(onScreen).toEqual(fromApi);
-  });
+    expect(onScreen, 'a suggestion moved section or place').toEqual(fromApi);
 
-  /**
-   * And neither card can scroll sideways, anywhere down it, at any width.
-   *
-   * Scrolled rather than measured once at the top: the band, the trade case,
-   * the outlook and the news each have their own chance to overflow, and only
-   * one of them is on screen when the sheet opens.
-   */
-  test('never scrolls sideways anywhere down either card', async ({ page }) => {
-    await patchDetail(page, { preseasonProjection: PROJECTION });
-    await page.goto('/');
+    await openFirstTrade(page);
+    const tag = page.locator('.sheet-player-title [data-testid="injury-tag"]');
+    await expect(tag).toHaveAttribute('data-status', 'OUT');
+    // The meaning, not just the letters, for anyone listening rather than looking.
+    await expect(tag).toHaveAttribute('aria-label', 'Out');
+    await expectRowGrammar(page, ['position', 'club', 'name', 'status']);
 
-    for (const surface of ['players', 'trades'] as const) {
-      await openTab(page, surface);
-      if (surface === 'players') await openPlayer(page, '1004');
-      else await openFirstTrade(page);
-
-      const body = page.locator('.sheet-body');
-      const height = await body.evaluate((el) => el.scrollHeight);
-      for (let top = 0; top <= height; top += 240) {
-        await body.evaluate((el, y) => el.scrollTo({ top: y }), top);
-        const overflow = await pageOverflow(page);
-        expect(overflow, `the ${surface} card overflows by ${overflow}px at ${top}px down`).toBeLessThanOrEqual(1);
-      }
-      await page.keyboard.press('Escape');
-    }
+    const injury = page.getByTestId('injury-current');
+    await expect(injury).toContainText('hamstring');
+    await expect(injury, 'the designation is on the card twice').not.toContainText('OUT');
   });
 });
