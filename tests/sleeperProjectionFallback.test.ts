@@ -521,6 +521,19 @@ describe('no recommendation engine can reach the fallback', () => {
       );
     }
 
+    /*
+     * And the Team screen, which is where the two could actually be confused.
+     *
+     * Preseason PTS has a legitimate home on the draft board and in the expanded
+     * player view, both of which label it. What it must never be is the number on
+     * the trailing edge of a Team row — that field is this week's projection, and
+     * a season-long baseline sitting in it would read as a forecast of Sunday.
+     * The row takes its value from `LineupSlot.projection` and the screen knows
+     * no other word for it, which is what this asserts.
+     */
+    const team = readFileSync(path.join(ROOT, 'web', 'screens', 'TeamScreen.tsx'), 'utf8');
+    expect(/preseason/i.test(team), 'the Team screen mentions preseason').toBe(false);
+
     const preseason = sourceFiles(ROOT).filter((file) => /preseason|seasonImport|startWho/i.test(file));
     expect(preseason.length, 'the preseason modules should exist to be checked').toBeGreaterThan(0);
     for (const file of preseason) {
