@@ -135,13 +135,44 @@ describe('which leagues may read a published total', () => {
     expect(sleeperScoringKey(buildScoringProfile({ rec: 2 }, []), 'WR')).toBeNull();
   });
 
-  it('refuses a league that scores the rest of football differently', () => {
+  it('refuses a player whose own stat line is scored differently', () => {
     // Six-point passing touchdowns are worth about two points a game to a
     // quarterback. Quoting a four-point-TD projection to that league is a
     // projection of a different sport, not a projection with a caveat.
     expect(sleeperScoringKey(buildScoringProfile({ rec: 0.5, pass_td: 6 }, []), 'QB')).toBeNull();
     expect(sleeperScoringKey(buildScoringProfile({ rec: 0.5, rec_yd: 0.2 }, []), 'WR')).toBeNull();
+    // Fumbles and rushing reach everybody, quarterbacks included.
     expect(sleeperScoringKey(buildScoringProfile({ rec: 1, fum_lost: -1 }, []), 'RB')).toBeNull();
+    expect(sleeperScoringKey(buildScoringProfile({ rec: 1, fum_lost: -1 }, []), 'QB')).toBeNull();
+    expect(sleeperScoringKey(buildScoringProfile({ rec: 0.5, rush_td: 4 }, []), 'QB')).toBeNull();
+  });
+
+  /**
+   * The live league, which is what taught this rule to be per-position.
+   *
+   * `Sunday Morning Best Ball` scores six-point passing touchdowns and
+   * minus-two interceptions and is otherwise Sleeper's defaults. The first
+   * version of this refused the whole league, so a roster of nine got nine
+   * dashes to avoid one wrong quarterback — while Rotowire's published total was
+   * exactly right for the other eight, whose projected passing line is zero.
+   */
+  it('serves the pass-catchers of a six-point-passing-TD league, and not its quarterback', () => {
+    const live = buildScoringProfile({ rec: 0.5, pass_td: 6, pass_int: -2 }, []);
+    expect(sleeperScoringKey(live, 'QB'), 'a QB is priced on passing').toBeNull();
+    for (const position of ['RB', 'WR', 'TE']) {
+      expect(sleeperScoringKey(live, position), `${position} does not throw`).toBe('pts_half_ppr');
+    }
+    // …and a caller that cannot say who it is asking about still gets nothing.
+    expect(sleeperScoringKey(live, null)).toBeNull();
+  });
+
+  it('checks every setting when the position is unknown or unmodelled', () => {
+    const passingOnly = buildScoringProfile({ rec: 0.5, pass_td: 6 }, []);
+    expect(sleeperScoringKey(passingOnly, null)).toBeNull();
+    expect(sleeperScoringKey(passingOnly, 'K')).toBeNull();
+    expect(sleeperScoringKey(passingOnly, 'DEF')).toBeNull();
+    // The same league is fine for the positions whose stat lines it does not touch.
+    expect(sleeperScoringKey(passingOnly, 'WR')).toBe('pts_half_ppr');
   });
 
   it('refuses tight ends in a premium league, and only tight ends', () => {
@@ -154,7 +185,7 @@ describe('which leagues may read a published total', () => {
     expect(sleeperScoringKey(premium, '')).toBeNull();
   });
 
-  it('is indifferent to position when there is no premium', () => {
+  it('serves every position when the league is Sleeper’s own scoring throughout', () => {
     for (const position of ['QB', 'RB', 'WR', 'TE', null]) {
       expect(sleeperScoringKey(HALF_PPR, position)).toBe('pts_half_ppr');
     }
