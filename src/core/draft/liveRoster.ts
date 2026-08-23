@@ -16,6 +16,7 @@
  */
 
 import { FLEX_ELIGIBILITY, type RosterShape } from '../sleeper/scoring.ts';
+import { POSITION_ORDER, TRAILING_FILTER_POSITIONS } from '../sleeper/eligibility.ts';
 
 export interface LiveRosterPlayer {
   playerId: string;
@@ -199,7 +200,49 @@ export function rosterProgress(shape: RosterShape, counts: Record<string, number
     });
   }
 
-  return rows;
+  return orderProgress(rows);
+}
+
+/**
+ * The order the strip reads in: `QB · RB · WR · TE · FLX · DEF · BN`.
+ *
+ * Sleeper's own `roster_positions` order is what this used to be, and it puts
+ * the defence among the positions — `… TE · DEF · FLX · BN` in most leagues,
+ * because that is the sequence the slots are listed in. Read on a phone that is
+ * wrong twice: the defence interrupts the four positions a drafter is actually
+ * choosing between, and the flex that spans three of them ends up after it.
+ *
+ * So the same rule the filter chips use, and from the same constant — the
+ * positions in reading order, then the flex views over them, then the defence,
+ * then the bench. `TRAILING_FILTER_POSITIONS` is shared with
+ * `orderFilterChips`, so the strip and the chip row under it cannot disagree
+ * about where a defence goes.
+ *
+ * Bench is last on its own terms rather than by that rule: it is not a lineup
+ * slot at all, it is how much room is left, and it is the end of the sentence.
+ *
+ * **Ordering only.** Every row, every count and every requirement is exactly
+ * what the allocation above produced; nothing here adds, drops or recomputes
+ * one. A slot this function has never heard of keeps its place among the
+ * starters rather than being sorted to an end.
+ */
+function orderProgress(rows: SlotProgress[]): SlotProgress[] {
+  const rank = (row: SlotProgress): number => {
+    if (row.bench) return 4;
+    if (TRAILING_FILTER_POSITIONS.includes(row.slot)) return 3;
+    // A flex slot is a view over positions rather than one of them, so it
+    // follows its parts — the same reason `FLX` is last among the chips.
+    if (row.accepts.length > 1) return 2;
+    return POSITION_ORDER.includes(row.slot) ? 0 : 1;
+  };
+  const within = (row: SlotProgress): number => {
+    const at = POSITION_ORDER.indexOf(row.slot);
+    return at === -1 ? POSITION_ORDER.length : at;
+  };
+  return [...rows]
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => rank(a.row) - rank(b.row) || within(a.row) - within(b.row) || a.index - b.index)
+    .map((entry) => entry.row);
 }
 
 export function buildLiveRoster(input: LiveRosterInput): LiveRoster {

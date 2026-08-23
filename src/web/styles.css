@@ -4558,34 +4558,59 @@ table.compact tr:last-child td {
  * has an unusual number of slots, because two lines here is two lines fewer of
  * players. A covered slot goes quiet; the ones still open keep the contrast.
  */
+/*
+ * WHAT IS LEFT TO FILL, ON ONE LINE OF A PHONE.
+ *
+ * `0/1 QB  1/2 RB  3/3 WR  0/1 TE  0/2 FLX  0/1 DEF  0/6 BN` — the league's own
+ * roster settings against the live pick stream, in the order the chips below it
+ * use. Deliberately status only: the ranked list is where "so take a receiver"
+ * belongs.
+ *
+ * It used to scroll sideways, and in a league that starts a defence it had to.
+ * Seven counts at 8px of flex gap *plus* an interpunct with 8px of its own
+ * margin spent about 20px on every join — a hundred and twenty pixels of
+ * separator on a 390px screen — so the bench, which is the count a drafter
+ * checks most in the late rounds, sat off the right-hand edge behind a scroll
+ * nothing announced.
+ *
+ * Three things changed and none of them is the type size:
+ *
+ *  - **the interpunct is gone.** The rhythm of a bold count against a dim label
+ *    already separates one reading from the next, and the character was costing
+ *    more than it was carrying. What is left is one gap, which also means a
+ *    wrapped line cannot begin with a stray `·`;
+ *  - **the gap is six pixels**, measured rather than chosen. Tony's shape —
+ *    seven counts, the widest a real league here has — needs 298px of type; six
+ *    pixels of join puts it on one line at 430, 390 and 375, and four would fit
+ *    360 too but leaves two readings almost touching, which is the legibility
+ *    this was not allowed to spend;
+ *  - **it wraps instead of scrolling.** A configuration that genuinely cannot
+ *    fit — superflex, IDP, a deep bench — takes a second line, which is
+ *    readable and reachable. Nothing on this screen may need a sideways drag to
+ *    be seen, and a strip of counts least of all.
+ *
+ * `column-gap` and `row-gap` are set apart on purpose: the horizontal one is
+ * what had to come down, and the vertical one wants to stay large enough that
+ * two lines read as two lines.
+ */
 .roster-progress {
   display: flex;
-  gap: var(--sp-2);
+  flex-wrap: wrap;
+  column-gap: 6px;
+  row-gap: 2px;
   align-items: center;
-  overflow-x: auto;
-  scrollbar-width: none;
   /* One step, not two: this line and the control row under it were separated
      by a gap large enough to read as a section break between two things that
      are the same thing — what is left to fill, and how to filter for it. */
   padding: 0 var(--sp-1) var(--sp-1);
   font-size: 0.78rem;
   color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.roster-progress::-webkit-scrollbar {
-  display: none;
 }
 
 .roster-progress .slot {
   flex: 0 0 auto;
-  letter-spacing: 0.01em;
-}
-
-.roster-progress .slot + .slot::before {
-  content: '·';
-  color: var(--text-faint);
-  margin-right: var(--sp-2);
+  /* Never between the count and its own label, whatever the line does. */
+  white-space: nowrap;
 }
 
 .roster-progress .slot strong {

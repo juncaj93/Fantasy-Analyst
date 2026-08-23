@@ -271,3 +271,148 @@ test.describe('search and the filters together', () => {
     await page.getByRole('button', { name: 'ALL', exact: true }).click();
   });
 });
+
+/**
+ * WHAT IS LEFT TO FILL, READABLE WITHOUT A SIDEWAYS DRAG.
+ *
+ * The strip used to scroll horizontally, and in a league that starts a defence
+ * it had to: seven counts at eight pixels of gap *plus* an interpunct with
+ * eight of its own spent about twenty pixels on every join, so the bench — the
+ * count a drafter checks most in the late rounds — sat off the right-hand edge
+ * behind a scroll nothing announced.
+ *
+ * Measured here on injected roster shapes rather than on the seeded league,
+ * which starts no defence and would leave the reported case untested. Three
+ * shapes: a small one, the reported one, and a superflex league with a deep
+ * bench that genuinely cannot fit a phone. All of them are derived from what
+ * the board publishes, so nothing here hardcodes anybody's league.
+ */
+const ROSTER_SHAPES = {
+  /** Six slots, no defence: the shape the seeded league has. */
+  small: [
+    { slot: 'QB', filled: 0, required: 1, accepts: ['QB'] },
+    { slot: 'RB', filled: 1, required: 2, accepts: ['RB'] },
+    { slot: 'WR', filled: 0, required: 2, accepts: ['WR'] },
+    { slot: 'TE', filled: 0, required: 1, accepts: ['TE'] },
+    { slot: 'FLEX', filled: 0, required: 1, accepts: ['RB', 'WR', 'TE'] },
+    { slot: 'BN', filled: 0, required: 5, accepts: [], bench: true },
+  ],
+  /** The reported one: seven slots, a defence among them, a six-deep bench. */
+  reported: [
+    { slot: 'QB', filled: 0, required: 1, accepts: ['QB'] },
+    { slot: 'RB', filled: 1, required: 2, accepts: ['RB'] },
+    { slot: 'WR', filled: 3, required: 3, accepts: ['WR'] },
+    { slot: 'TE', filled: 0, required: 1, accepts: ['TE'] },
+    { slot: 'FLEX', filled: 0, required: 2, accepts: ['RB', 'WR', 'TE'] },
+    { slot: 'DEF', filled: 0, required: 1, accepts: ['DEF'] },
+    { slot: 'BN', filled: 0, required: 6, accepts: [], bench: true },
+  ],
+  /** Eight slots, superflex, and two-digit counts on both ends. */
+  large: [
+    { slot: 'QB', filled: 0, required: 1, accepts: ['QB'] },
+    { slot: 'RB', filled: 12, required: 12, accepts: ['RB'] },
+    { slot: 'WR', filled: 3, required: 3, accepts: ['WR'] },
+    { slot: 'TE', filled: 0, required: 1, accepts: ['TE'] },
+    { slot: 'FLEX', filled: 0, required: 2, accepts: ['RB', 'WR', 'TE'] },
+    { slot: 'SUPER_FLEX', filled: 0, required: 1, accepts: ['QB', 'RB', 'WR', 'TE'] },
+    { slot: 'DEF', filled: 0, required: 1, accepts: ['DEF'] },
+    { slot: 'BN', filled: 10, required: 12, accepts: [], bench: true },
+  ],
+} as const;
+
+/** Open Draft with the board's roster strip replaced by one of the shapes above. */
+async function openWithShape(page: Page, shape: keyof typeof ROSTER_SHAPES) {
+  await page.route('**/api/drafts/*/board*', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.rosterProgress = ROSTER_SHAPES[shape];
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await openDraft(page);
+  await expect(page.getByTestId('roster-progress')).toBeVisible();
+}
+
+/** Everything the strip is drawing, and whether any of it is out of reach. */
+async function stripGeometry(page: Page) {
+  return page.evaluate(() => {
+    const strip = document.querySelector('[data-testid="roster-progress"]') as HTMLElement;
+    const slots = [...strip.querySelectorAll('.slot')] as HTMLElement[];
+    const viewport = document.documentElement.clientWidth;
+    return {
+      slots: slots.map((slot) => ({
+        name: slot.getAttribute('data-slot'),
+        text: (slot.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        title: slot.getAttribute('title'),
+        // `+1` for the sub-pixel a fractional layout leaves behind.
+        clipped: slot.scrollWidth > slot.clientWidth + 1,
+        offscreen: slot.getBoundingClientRect().right > viewport + 1,
+        top: Math.round(slot.getBoundingClientRect().top),
+      })),
+      // The strip itself must not be a scroller, whatever it holds.
+      scrolls: strip.scrollWidth > strip.clientWidth + 1,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+}
+
+test.describe('the roster strip', () => {
+  /**
+   * The order, which is the chip row's order and is shared with it.
+   *
+   * Sleeper lists a defence among the positions, so the strip used to read
+   * `… TE · DEF · FLX · BN` — the defence interrupting the four positions a
+   * drafter is choosing between, and the flex that spans three of them landing
+   * after it.
+   */
+  test('reads QB, RB, WR, TE, FLX, DEF, then the bench', async ({ page }) => {
+    await openWithShape(page, 'reported');
+    const { slots } = await stripGeometry(page);
+    expect(slots.map((s) => s.name)).toEqual(['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF', 'BN']);
+    // The labels the reader sees, not the slot names Sleeper uses.
+    expect(slots.map((s) => s.text)).toEqual([
+      '0/1 QB',
+      '1/2 RB',
+      '3/3 WR',
+      '0/1 TE',
+      '0/2 FLX',
+      '0/1 DEF',
+      '0/6 BN',
+    ]);
+  });
+
+  for (const shape of ['small', 'reported', 'large'] as const) {
+    test(`fits a ${shape} roster on the screen, without scrolling or clipping`, async ({ page }) => {
+      await openWithShape(page, shape);
+      const { slots, scrolls, pageOverflow } = await stripGeometry(page);
+
+      expect(slots.length, 'the strip drew nothing').toBeGreaterThan(4);
+      expect(scrolls, 'the strip is a horizontal scroller again').toBe(false);
+      expect(pageOverflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+
+      for (const slot of slots) {
+        expect(slot.clipped, `${slot.name} is clipped`).toBe(false);
+        expect(slot.offscreen, `${slot.name} is off the right-hand edge`).toBe(false);
+        // Counts are never abbreviated: `0/6` is the reading, `0/…` is not.
+        expect(slot.text, `${slot.name} lost its count`).toMatch(/^\d+\/\d+ \S+$/);
+        // ...and the sentence behind the count survives at every width.
+        expect(slot.title, `${slot.name} lost its accessible description`).toBeTruthy();
+      }
+
+      /*
+       * Bench is the count that was off the edge, so it gets its own assertion
+       * rather than being one of the loop's many.
+       */
+      const bench = slots.find((s) => s.name === 'BN')!;
+      expect(bench.offscreen, 'the bench is off the edge again').toBe(false);
+
+      /*
+       * Compact, said as a number so "denser" cannot drift back into an
+       * opinion. Two lines is the ceiling: the reported shape takes one at 430,
+       * 390 and 375 and two at 360, and the superflex league takes two
+       * everywhere — which is the wrap this preferred over a sideways drag.
+       */
+      const lines = new Set(slots.map((s) => s.top)).size;
+      expect(lines, `the strip ran to ${lines} lines`).toBeLessThanOrEqual(2);
+    });
+  }
+});
