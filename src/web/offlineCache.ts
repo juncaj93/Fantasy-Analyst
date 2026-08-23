@@ -27,14 +27,38 @@
  * which chip is selected, what is in the queue — are a different matter and are
  * already local; draft state is read-only, offline as well as online.
  *
- * **Bounded, and disposable.** One entry per draft, capped, and any parse
- * failure throws the entry away rather than propagating. A cache that can break
- * the screen it exists to protect is worse than no cache. Every read is
+ * **Bounded, and disposable.** One entry per draft per world, capped, and any
+ * parse failure throws the entry away rather than propagating. A cache that can
+ * break the screen it exists to protect is worse than no cache. Every read is
  * wrapped: a browser in private mode with `localStorage` throwing on write, a
  * quota that is full, a payload from a previous deploy with a different shape —
  * all of them come back as "no cache", which is the state the app was in before
  * this module existed and is still a working one.
+ *
+ * ## Per world, and why that is not paranoia
+ *
+ * Every demo scenario names its draft `demo-draft-2026`. That is the point of
+ * them — they are the same fixture league at different moments — but it means a
+ * key built from the draft id alone is a key two scenarios share. One scenario
+ * seeds a capture on the way in, another is entered, its board request fails
+ * the way the screen is built to survive, and the first scenario's board is
+ * what the reader is looking at. So the world is part of the key, and a board
+ * captured in one world is unreachable from every other. Live and demo boards
+ * coexist rather than evicting each other, which is also what lets leaving a
+ * demo hand the reader back their own real capture untouched.
+ *
+ * The world is read from the marker by default and can be passed explicitly.
+ * The default is what keeps the Draft screen from having to know that a demo
+ * exists; the explicit form is for the one caller that has to act on a world it
+ * is in the middle of leaving.
+ *
+ * Keys written before this module was world-qualified are not migrated. They
+ * are unreadable rather than misleading — the shape of the key no longer
+ * matches anything asked for — and they are reclaimed by the quota sweep below,
+ * which is the same disposal every other unwanted entry here gets.
  */
+
+import { currentWorld } from './world.ts';
 
 /** Bumped when the cached shape changes. An older entry is dropped, not migrated. */
 const SCHEMA = 3;
@@ -92,6 +116,15 @@ interface Envelope<T> {
   capturedAt: number;
   /** The draft this belongs to. Checked on read; a mismatch is a miss. */
   draftId: string;
+  /**
+   * The world this was captured in. Checked on read; a mismatch is a miss.
+   *
+   * The key already separates the worlds, and this is the same belt-and-braces
+   * the draft id gets one line above: a key can be reached by a key builder
+   * that changed shape between two deploys, and an envelope that says which
+   * world it came from can only ever be read by that world.
+   */
+  world: string;
   value: T;
 }
 
@@ -107,7 +140,14 @@ function storageOf(explicit?: StorageLike | null): StorageLike | null {
   }
 }
 
-const keyFor = (draftId: string) => `${PREFIX}${draftId}`;
+/**
+ * Where one world's board for one draft lives.
+ *
+ * The world sits between the prefix and the draft id so that the prefix still
+ * names everything this module owns — which is what the quota sweep scans for,
+ * and it should reclaim other worlds' boards as readily as other drafts'.
+ */
+const keyFor = (world: string, draftId: string) => `${PREFIX}${world}.${draftId}`;
 
 /**
  * Remember a board, off the path the user is waiting on.
@@ -132,10 +172,21 @@ const keyFor = (draftId: string) => `${PREFIX}${draftId}`;
 export function rememberBoardSoon<T>(
   draftId: string,
   value: T,
-  opts: { storage?: StorageLike | null; defer?: (write: () => void) => void } = {},
+  opts: { storage?: StorageLike | null; defer?: (write: () => void) => void; world?: string } = {},
 ): void {
+  /*
+   * The world is read now, not when the write runs.
+   *
+   * This is the whole reason deferring is safe. The board being handed over was
+   * built by the world in force at this instant, and the write may not happen
+   * for up to two seconds — long enough for the reader to have left a demo. A
+   * write that asked "which world is it?" at the moment it ran would file a
+   * demo board under live, which is precisely the thing this cache must never
+   * do. Capturing it here means the answer travels with the board.
+   */
+  const world = opts.world ?? currentWorld();
   const write = () => {
-    rememberBoard(draftId, value, opts);
+    rememberBoard(draftId, value, { ...opts, world });
   };
   (opts.defer ?? defaultDefer)(write);
 }
@@ -182,14 +233,16 @@ function defaultDefer(write: () => void): void {
 export function rememberBoard<T>(
   draftId: string,
   value: T,
-  opts: { storage?: StorageLike | null; now?: number } = {},
+  opts: { storage?: StorageLike | null; now?: number; world?: string } = {},
 ): boolean {
   const storage = storageOf(opts.storage);
   if (!storage || !draftId) return false;
+  const world = opts.world ?? currentWorld();
   const envelope: Envelope<T> = {
     schema: SCHEMA,
     capturedAt: opts.now ?? Date.now(),
     draftId,
+    world,
     value,
   };
   let text: string;
@@ -200,7 +253,7 @@ export function rememberBoard<T>(
   }
   if (text.length > MAX_ENTRY_CHARS) return false;
   try {
-    storage.setItem(keyFor(draftId), text);
+    storage.setItem(keyFor(world, draftId), text);
     return true;
   } catch {
     /*
@@ -209,9 +262,9 @@ export function rememberBoard<T>(
      * twice would be a loop, and a second failure means the quota is being
      * spent by something that is not ours to reclaim.
      */
-    forgetOtherDrafts(draftId, storage);
+    forgetOtherDrafts(draftId, storage, world);
     try {
-      storage.setItem(keyFor(draftId), text);
+      storage.setItem(keyFor(world, draftId), text);
       return true;
     } catch {
       return false;
@@ -229,14 +282,15 @@ export function rememberBoard<T>(
  */
 export function recallBoard<T>(
   draftId: string,
-  opts: { storage?: StorageLike | null; now?: number; maxAgeMs?: number } = {},
+  opts: { storage?: StorageLike | null; now?: number; maxAgeMs?: number; world?: string } = {},
 ): CachedBoard<T> | null {
   const storage = storageOf(opts.storage);
   if (!storage || !draftId) return null;
+  const world = opts.world ?? currentWorld();
 
   let raw: string | null;
   try {
-    raw = storage.getItem(keyFor(draftId));
+    raw = storage.getItem(keyFor(world, draftId));
   } catch {
     return null;
   }
@@ -246,7 +300,7 @@ export function recallBoard<T>(
   try {
     envelope = JSON.parse(raw) as Envelope<T>;
   } catch {
-    drop(draftId, storage);
+    drop(world, draftId, storage);
     return null;
   }
 
@@ -254,10 +308,11 @@ export function recallBoard<T>(
     !envelope ||
     envelope.schema !== SCHEMA ||
     envelope.draftId !== draftId ||
+    envelope.world !== world ||
     typeof envelope.capturedAt !== 'number' ||
     envelope.value == null
   ) {
-    drop(draftId, storage);
+    drop(world, draftId, storage);
     return null;
   }
 
@@ -271,17 +326,23 @@ export function recallBoard<T>(
    * user their board for no reason.
    */
   if (ageMs > (opts.maxAgeMs ?? MAX_AGE_MS)) {
-    drop(draftId, storage);
+    drop(world, draftId, storage);
     return null;
   }
 
   return { value: envelope.value, capturedAt: envelope.capturedAt, ageMs: Math.max(0, ageMs), stale: true };
 }
 
-/** Forget one draft's board. Used when a fresh one lands, and on a bad parse. */
-export function forgetBoard(draftId: string, storage?: StorageLike | null): void {
+/**
+ * Forget one draft's board. Used when a fresh one lands, and on a bad parse.
+ *
+ * `world` is for the caller that is putting a world down: leaving a demo has to
+ * delete the capture that demo seeded, and by the time the exit runs the marker
+ * may already say live. Everything else omits it and forgets its own world's.
+ */
+export function forgetBoard(draftId: string, storage?: StorageLike | null, world?: string): void {
   const store = storageOf(storage);
-  if (store) drop(draftId, store);
+  if (store) drop(world ?? currentWorld(), draftId, store);
 }
 
 /**
@@ -291,14 +352,15 @@ export function forgetBoard(draftId: string, storage?: StorageLike | null): void
  * leagues drafting on the same night wants both boards, and this is not a
  * cleanup that needs doing on a schedule.
  */
-export function forgetOtherDrafts(keepDraftId: string, storage?: StorageLike | null): number {
+export function forgetOtherDrafts(keepDraftId: string, storage?: StorageLike | null, world?: string): number {
   const store = storageOf(storage);
   if (!store) return 0;
+  const keep = keyFor(world ?? currentWorld(), keepDraftId);
   const doomed: string[] = [];
   try {
     for (let i = 0; i < store.length; i++) {
       const key = store.key(i);
-      if (key && key.startsWith(PREFIX) && key !== keyFor(keepDraftId)) doomed.push(key);
+      if (key && key.startsWith(PREFIX) && key !== keep) doomed.push(key);
     }
   } catch {
     return 0;
@@ -313,9 +375,9 @@ export function forgetOtherDrafts(keepDraftId: string, storage?: StorageLike | n
   return doomed.length;
 }
 
-function drop(draftId: string, storage: StorageLike): void {
+function drop(world: string, draftId: string, storage: StorageLike): void {
   try {
-    storage.removeItem(keyFor(draftId));
+    storage.removeItem(keyFor(world, draftId));
   } catch {
     /* see above */
   }

@@ -3,6 +3,17 @@
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 import { demoSession } from './demo/session.ts';
 import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts';
+/*
+ * Which data source is in force, as part of the identity of a cached response.
+ *
+ * The same league id means two different leagues across two demo scenarios, so
+ * a cache keyed on the path alone would confuse them. It is read from the
+ * marker rather than passed in because no screen should have to know a demo
+ * exists — the same reason the substitution itself lives at this seam — and the
+ * marker is set by `demo/session.ts` in the same breath as the session it
+ * describes, so it cannot disagree with the runtime this file routes to.
+ */
+import { currentWorld } from './world.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -59,18 +70,6 @@ function parseBody(body: BodyInit | null | undefined): unknown {
   } catch {
     return null;
   }
-}
-
-/**
- * Which data source is in force, as a cache key.
- *
- * The same league id means two different leagues across two demo scenarios, so
- * this has to be part of the identity of a cached response. It is read here
- * rather than passed in because no screen should have to know a demo exists —
- * the same reason the substitution itself lives at this seam.
- */
-function currentWorld(): string {
-  return demoSession()?.scenario.id ?? 'live';
 }
 
 export const api = {

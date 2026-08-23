@@ -20,6 +20,16 @@ import {
   type StorageLike,
 } from '../src/web/offlineCache.ts';
 
+/**
+ * Where a live board for draft `D1` actually lives.
+ *
+ * Boards are filed per world as well as per draft, because every demo scenario
+ * names its draft the same thing. `live` is the world these tests run in — they
+ * never enter a demo — and naming the key once here keeps the assertions about
+ * sweeping and about bad payloads pointed at the real slot.
+ */
+const LIVE_KEY = 'fa.draft.board.live.D1';
+
 /** A `localStorage` that can be told to misbehave in each of the ways real ones do. */
 class FakeStorage implements StorageLike {
   private readonly map = new Map<string, string>();
@@ -113,15 +123,18 @@ describe('a board old enough to mislead is not shown at all', () => {
 describe('the cache can never take the screen down with it', () => {
   it('returns nothing rather than throwing on corrupt JSON', () => {
     const storage = new FakeStorage();
-    storage.setItem('fa.draft.board.D1', '{not json');
+    storage.setItem(LIVE_KEY, '{not json');
     expect(recallBoard('D1', { storage })).toBeNull();
     // Swept, so it cannot fail the same way on every subsequent render.
-    expect(storage.getItem('fa.draft.board.D1')).toBeNull();
+    expect(storage.getItem(LIVE_KEY)).toBeNull();
   });
 
   it('rejects an entry written by a previous deploy', () => {
     const storage = new FakeStorage();
-    storage.setItem('fa.draft.board.D1', JSON.stringify({ schema: 1, capturedAt: Date.now(), draftId: 'D1', value: board }));
+    storage.setItem(
+      LIVE_KEY,
+      JSON.stringify({ schema: 1, capturedAt: Date.now(), draftId: 'D1', world: 'live', value: board }),
+    );
     expect(recallBoard('D1', { storage })).toBeNull();
   });
 
@@ -130,8 +143,36 @@ describe('the cache can never take the screen down with it', () => {
     // envelope as well as in the key, and a mismatch is a miss.
     const storage = new FakeStorage();
     storage.setItem(
+      LIVE_KEY,
+      JSON.stringify({ schema: 3, capturedAt: Date.now(), draftId: 'SOMETHING_ELSE', world: 'live', value: board }),
+    );
+    expect(recallBoard('D1', { storage })).toBeNull();
+  });
+
+  it('rejects an entry that names a different world', () => {
+    /*
+     * The same belt and braces, for the fact that actually collides. Every demo
+     * scenario names its draft the same thing, so the world is what separates
+     * one scenario's capture from the next one's — and it is in the envelope as
+     * well as in the key so that a key builder that changes shape between two
+     * deploys cannot hand one world another's board.
+     */
+    const storage = new FakeStorage();
+    storage.setItem(
+      LIVE_KEY,
+      JSON.stringify({ schema: 3, capturedAt: Date.now(), draftId: 'D1', world: 'demo-scenario', value: board }),
+    );
+    expect(recallBoard('D1', { storage })).toBeNull();
+  });
+
+  it('rejects an entry written before boards were kept per world', () => {
+    // A key from a deploy that predates the world in the key. Unreadable rather
+    // than misleading, which is the only property that matters: it is reclaimed
+    // by the quota sweep like anything else here.
+    const storage = new FakeStorage();
+    storage.setItem(
       'fa.draft.board.D1',
-      JSON.stringify({ schema: 3, capturedAt: Date.now(), draftId: 'SOMETHING_ELSE', value: board }),
+      JSON.stringify({ schema: 3, capturedAt: Date.now(), draftId: 'D1', value: board }),
     );
     expect(recallBoard('D1', { storage })).toBeNull();
   });

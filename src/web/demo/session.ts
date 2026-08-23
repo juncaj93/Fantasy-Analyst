@@ -17,8 +17,10 @@
  *
  * The one exception is the offline scenario's cached board, which is written
  * through the production offline cache because the production offline path is
- * the thing being demonstrated. It is keyed by the demo's own draft id, which
- * no real Sleeper draft can collide with, and it is deleted on exit.
+ * the thing being demonstrated. It is keyed by the world as well as by the
+ * demo's own draft id — every scenario names its draft the same thing, so the
+ * world is what keeps one scenario's capture out of the next one's reach — and
+ * it is deleted both on exit and on the way to a different scenario.
  */
 
 import type { DemoScenario } from '../../core/demo/types.ts';
@@ -36,6 +38,7 @@ import type { DemoScenario } from '../../core/demo/types.ts';
 import type { DemoRuntime } from '../../core/demo/runtime/index.ts';
 import { clearScenarioCache } from '../../core/demo/fixtures/index.ts';
 import { forgetBoard, rememberBoard } from '../offlineCache.ts';
+import { LIVE_WORLD, noteWorld } from '../world.ts';
 
 const STORAGE_KEY = 'fa.demo.scenario';
 /**
@@ -59,6 +62,21 @@ const listeners = new Set<() => void>();
 
 export function demoSession(): DemoSession | null {
   return current;
+}
+
+/**
+ * The one place the running scenario changes, so the marker cannot lag it.
+ *
+ * Which world is in force is this module's fact, and two caches key themselves
+ * on it — the session response cache and the offline board. Announcing it from
+ * a listener would be a moment too late: entering a scenario seeds a capture
+ * before it announces, and the seeded board has to land in the world it belongs
+ * to. Setting both together, here, is what makes "the marker is the session" a
+ * property of the code rather than a thing to remember.
+ */
+function setSession(next: DemoSession | null): void {
+  current = next;
+  noteWorld(next?.scenario.id ?? LIVE_WORLD);
 }
 
 export function subscribeToDemo(listener: () => void): () => void {
@@ -148,13 +166,26 @@ export async function enterDemo(scenarioId: string): Promise<DemoSession> {
   const { DemoRuntime } = await import('../../core/demo/runtime/index.ts');
   const runtime = await DemoRuntime.forScenario(scenario);
   const wasActive = current != null;
-  current = { scenario, runtime };
+  const leaving = current;
+  /*
+   * The scenario being left takes its capture with it.
+   *
+   * Every scenario names its draft the same thing, so a capture seeded by one
+   * is at the key the next one would read. Moving between two scenarios does
+   * not pass through `exitDemo`, so without this the offline board is the one
+   * piece of a demo that outlives it — and it would surface in the next
+   * scenario as its own last known board.
+   */
+  if (leaving && leaving.scenario.id !== scenario.id) await forgetOfflineCapture(leaving);
+
+  const session: DemoSession = { scenario, runtime };
+  setSession(session);
   writeStored(scenario.id);
   if (!wasActive) await markServer(true);
 
-  await seedOfflineCapture(runtime);
+  await seedOfflineCapture(scenario.id, runtime);
   announce();
-  return current;
+  return session;
 }
 
 /**
@@ -166,14 +197,30 @@ export async function enterDemo(scenarioId: string): Promise<DemoSession> {
  * So the runtime builds one, it goes through the same `rememberBoard` the live
  * app uses, and the board request then fails exactly as it would in a tunnel.
  */
-async function seedOfflineCapture(runtime: DemoRuntime): Promise<void> {
+async function seedOfflineCapture(world: string, runtime: DemoRuntime): Promise<void> {
   const capture = await runtime.offlineCapture();
   if (!capture) return;
   rememberBoard(capture.draftId, capture.board, {
     // Captured twenty minutes before the scenario's clock, so the screen has an
     // honest age to print rather than "just now".
     now: Date.now() - 20 * 60_000,
+    // Named rather than inferred. The marker already says this scenario, and
+    // saying so anyway means the seed cannot be misfiled by a future reordering
+    // of the lines above it.
+    world,
   });
+}
+
+/**
+ * Undo a scenario's one write to the browser, in the world that made it.
+ *
+ * The world is passed explicitly because both callers are in the middle of
+ * moving off it: one is exiting to live, the other is entering a different
+ * scenario. Asking the marker at this point would name the destination.
+ */
+async function forgetOfflineCapture(session: DemoSession): Promise<void> {
+  const capture = await session.runtime.offlineCapture().catch(() => null);
+  if (capture) forgetBoard(capture.draftId, null, session.scenario.id);
 }
 
 /**
@@ -186,12 +233,11 @@ async function seedOfflineCapture(runtime: DemoRuntime): Promise<void> {
  */
 export async function exitDemo(): Promise<void> {
   const leaving = current;
-  current = null;
+  setSession(null);
   writeStored(null);
   clearScenarioCache();
   if (leaving) {
-    const capture = await leaving.runtime.offlineCapture().catch(() => null);
-    if (capture) forgetBoard(capture.draftId);
+    await forgetOfflineCapture(leaving);
     await markServer(false);
   }
   announce();
