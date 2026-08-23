@@ -433,12 +433,49 @@ export function StatusRow({
   );
 }
 
-/** A headline number with a small label. Large value, quiet label, tabular. */
-export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
+/**
+ * A headline number with a small label. Large value, quiet label, tabular.
+ *
+ * `spoken` is how the cell reads to somebody who is not looking at it, and it
+ * is the reason a label may be as short as `PTS`. A three-letter label is the
+ * right thing on a phone and the wrong thing in an ear: the abbreviation and
+ * the figure are hidden from assistive technology and one sentence naming both
+ * is offered instead, exactly as `TeamLogo` moves `CHI` into an alt text that
+ * says "Chicago Bears". Without it the cell is left to a `title`, which no
+ * screen reader is obliged to announce and no phone can hover over.
+ */
+export function Stat({
+  label,
+  value,
+  hint,
+  note,
+  spoken,
+  testId,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: string;
+  /** A quieter second line under the value — a capture date, a qualifier. */
+  note?: ReactNode;
+  /** The whole cell as one sentence, for anyone not looking at it. */
+  spoken?: string;
+  testId?: string;
+}) {
+  const hidden = spoken ? true : undefined;
   return (
-    <div className="stat" title={hint}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
+    <div className="stat" title={hint} data-testid={testId}>
+      {spoken ? <span className="sr-only">{spoken}</span> : null}
+      <div className="stat-label" aria-hidden={hidden}>
+        {label}
+      </div>
+      <div className="stat-value" aria-hidden={hidden}>
+        {value}
+      </div>
+      {note ? (
+        <div className="stat-note" aria-hidden={hidden}>
+          {note}
+        </div>
+      ) : null}
     </div>
   );
 }

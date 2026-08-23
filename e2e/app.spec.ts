@@ -1673,8 +1673,15 @@ test.describe('player intelligence', () => {
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await expect(page.getByTestId('player-page-sections')).toHaveCount(0);
 
-    await expect(page.getByTestId('player-page-windows')).toContainText('7d');
-    await expect(page.getByTestId('player-page-windows')).toContainText('Lifetime');
+    /*
+     * The windows are in the band at the top now rather than in a grid of
+     * their own halfway down it — see `player-detail.spec.ts`, which owns that
+     * claim. `News by window` printed the same readings a second time under a
+     * heading, which is the duplication the detail pass removed.
+     */
+    await expect(page.getByTestId('player-page-metrics')).toContainText('7d');
+    await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
+    await expect(page.getByTestId('player-page-windows')).toHaveCount(0);
     // The ledger is on the same surface, newest first and counted honestly.
     await expect(page.getByTestId('evidence-heading')).toBeVisible();
     await expect(page.getByTestId('evidence-item').first()).toBeVisible();
@@ -1701,8 +1708,10 @@ test.describe('player intelligence', () => {
     await expect(page_).toBeVisible();
     const sections = page.getByTestId('player-page-sections');
 
-    // What the draft card shows…
-    await expect(page.getByTestId('last-season')).toBeVisible();
+    // What the draft card shows… last season is in the band across the top of
+    // every expanded player now, and the four-window breakdown is what the
+    // pushed page keeps that the sheet does not.
+    await expect(page.getByTestId('metric-last-season-gp')).toBeVisible();
     await expect(page.getByTestId('player-page-windows')).toBeVisible();
 
     await sections.getByRole('button', { name: 'Outlook' }).click();
@@ -1789,10 +1798,22 @@ test.describe('player intelligence', () => {
     await expect(excerpts.filter({ hasText: 'named the starter' })).toHaveCount(1);
   });
 
+  /**
+   * Read under Market, because that is where the prop lines live now.
+   *
+   * They used to be on the expanded card as well, under a `Vegas props`
+   * heading between the injury and the ledger. A cached book line is not an
+   * answer to "who is this player", and what the market expected of him is now
+   * said as `PTS` in the band at the top — preseason, dated, and impossible to
+   * read as a live number. Nothing was deleted: the table is one tap in, and
+   * the honest empty state this defends is still exactly there.
+   */
   test('states plainly when there are no cached props', async ({ page }) => {
     await page.getByLabel('Search players').fill('whitfield');
     await page.locator('[data-testid="player-search-row"][data-player-id="1011"]').click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await page.getByTestId('player-full-profile').click();
+    await page.getByTestId('player-page-sections').getByRole('button', { name: 'Market' }).click();
     await expect(page.getByText(/Prop data unavailable/)).toBeVisible();
   });
 });

@@ -290,8 +290,10 @@ test.describe('the player dossier', () => {
     const sheet = page.getByTestId('player-sheet');
     await expect(sheet).toBeVisible();
     await expect(sheet.locator('.sheet-player-name')).toHaveText(name);
-    // The identity is drawn, not spelled: the position pill and the club's mark.
-    await expect(sheet.locator('.player-page-ident .pos-pill')).toBeVisible();
+    // The identity is drawn, not spelled: the position pill and the club's mark,
+    // and both in front of the name exactly as the row has them. The order
+    // itself is asserted in `player-detail.spec.ts`.
+    await expect(sheet.locator('.sheet-player-title .pos-pill')).toBeVisible();
 
     /*
      * Every section, on one surface, without choosing a tab first.
@@ -304,7 +306,8 @@ test.describe('the player dossier', () => {
     await expect(page.getByTestId('player-page-sections')).toHaveCount(0);
     const snapshot = page.getByTestId('player-page-snapshot');
     await expect(snapshot).toBeVisible();
-    await expect(snapshot.getByTestId('player-page-windows')).toBeVisible();
+    // The windows moved up into the band above the snapshot; the news is here.
+    await expect(page.getByTestId('player-page-metrics')).toContainText('21d');
     await expect(snapshot.getByTestId('evidence-heading')).toBeVisible();
 
     // It dismisses without touching the list, which is still exactly there.
