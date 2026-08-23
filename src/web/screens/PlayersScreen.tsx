@@ -135,9 +135,10 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const segments = useMemo(() => {
     if (!selected) return [];
-    // The order — and why DEF is last rather than between TE and FLX — is
-    // `playerFilterChips`, which is asserted directly because the demo league
-    // has no defence slot for a browser test to find.
+    // The order — and why the kicker and the defence follow FLX rather than
+    // sitting among the positions — is `playerFilterChips`, which is asserted
+    // directly because the demo league starts neither of them for a browser
+    // test to find.
     return playerFilterChips(startablePositions(buildRosterShape(selected.rosterPositions)));
   }, [selected]);
 

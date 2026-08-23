@@ -22,33 +22,43 @@ import { FLX_FILTER, offersFlexFilter, orderPositions } from '../core/sleeper/el
 export const ALL_FILTER = 'ALL';
 
 /**
- * The defence, which goes last.
+ * The two chips that follow the flex view, in the order they follow it.
  *
- * The same string `orderPositions` emits and the same one the API filters on;
- * this module only decides where it sits in the row.
+ * Both are positions a reader browses *occasionally* rather than compares: a
+ * kicker and a defence are each one slot filled once, usually against a
+ * schedule rather than against the rest of the pool. They are the same strings
+ * `orderPositions` emits and the same ones the API filters on; this module only
+ * decides where they sit in the row.
+ *
+ * The order between them is the roster's own — kicker, then defence — which is
+ * how every lineup page in the sport ends.
  */
-export const DEF_FILTER = 'DEF';
+export const TRAILING_FILTERS = ['K', 'DEF'];
 
 /**
- * `ALL · QB · RB · WR · TE · FLX · DEF`, from what the league actually starts.
+ * `ALL · QB · RB · WR · TE · FLX · K · DEF`, from what the league actually
+ * starts.
  *
- * Two chips are moved to the end of the positions, for two different reasons.
+ * The row is in three parts, and the split is about how a reader uses it rather
+ * than about what a position is.
  *
- * **FLX** is a view spanning three positions rather than a fourth one, and a
- * chip that reads like a position among the real ones invites exactly the
- * confusion this filter must not cause.
+ * **The skimmed positions** come first, in the order every fantasy site, draft
+ * board and roster page has used for decades — `orderPositions`, shared with
+ * the draft board and Team so the same chips cannot appear in two different
+ * orders on two screens. These are the chips somebody comparing players moves
+ * between, and they keep the front of the row.
  *
- * **DEF** then follows it. A defence is not a player anybody browses a player
- * database for — it is a streaming decision made once a week against a
- * schedule — and it sat between the tight ends and the flex view, in the middle
- * of the run of chips a reader actually moves between, where it was something
- * to skip past on the way to FLX rather than something to reach. Last is where
- * a chip nobody is looking for belongs, and it is still one tap away for the
- * week somebody is.
+ * **FLX** follows them, because it is a view spanning three positions rather
+ * than a fourth one, and a chip that reads like a position among the real ones
+ * invites exactly the confusion this filter must not cause.
  *
- * `K` is deliberately left among the positions: a kicker is a roster slot a
- * reader browses like any other, so a league with one reads
- * `ALL · QB · RB · WR · TE · K · FLX · DEF`.
+ * **The kicker and the defence** come last, in that order — see
+ * {@link TRAILING_FILTERS}. Neither is a player anybody browses a player
+ * database for: each is one slot filled once a week, usually against a schedule
+ * rather than against the rest of the pool. Sitting among the skimmed positions
+ * they were something to move past on the way to FLX rather than something to
+ * reach. The end of the row is where a chip nobody is hunting for belongs, and
+ * both are still one tap away for the week somebody is.
  *
  * A chip is only offered when the league starts that position. A filter that
  * can only ever return nothing is worse than no filter, which is why a defence
@@ -60,8 +70,10 @@ export function playerFilterChips(startable: Iterable<string>): string[] {
   if (positions.length === 0) return [];
   return [
     ALL_FILTER,
-    ...positions.filter((p) => p !== DEF_FILTER),
+    ...positions.filter((p) => !TRAILING_FILTERS.includes(p)),
     ...(offersFlexFilter(positions) ? [FLX_FILTER] : []),
-    ...(positions.includes(DEF_FILTER) ? [DEF_FILTER] : []),
+    // Read from the constant rather than from `positions`, so the order between
+    // them is this module's and not the shared helper's.
+    ...TRAILING_FILTERS.filter((p) => positions.includes(p)),
   ];
 }

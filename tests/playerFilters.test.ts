@@ -45,21 +45,36 @@ describe('the Players position filters', () => {
   });
 
   /**
-   * A kicker stays among the positions.
+   * The kicker joins it at the end, between the flex view and the defence.
    *
-   * It is a roster slot a reader browses like any other, and the change that
-   * moved the defence was about the defence.
+   * Same argument as the defence and the same place for it: one slot filled
+   * once a week against a schedule rather than against the rest of the pool, so
+   * it belongs where a chip nobody is hunting for belongs. The order between
+   * the two is the roster's own — kicker, then defence.
    */
-  it('leaves a kicker where the shared order puts it', () => {
+  it('puts the kicker after the flex view and before the defence', () => {
     expect(playerFilterChips(['QB', 'RB', 'WR', 'TE', 'K', 'DEF'])).toEqual([
       'ALL',
       'QB',
       'RB',
       'WR',
       'TE',
-      'K',
       'FLX',
+      'K',
       'DEF',
+    ]);
+  });
+
+  /** Each of the two can arrive without the other, and keeps its own place. */
+  it('offers whichever of the kicker and the defence the league starts', () => {
+    expect(playerFilterChips(['QB', 'RB', 'WR', 'TE', 'K'])).toEqual([
+      'ALL',
+      'QB',
+      'RB',
+      'WR',
+      'TE',
+      'FLX',
+      'K',
     ]);
   });
 
