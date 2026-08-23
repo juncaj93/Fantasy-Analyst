@@ -21,7 +21,7 @@ import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { normalizeMode } from '../core/startsit/mode.ts';
-import { weeklyProjection, type ProjectableEvaluation } from '../core/startsit/projection.ts';
+import { weeklyProjection, type ProjectableEvaluation, type ProjectionSource } from '../core/startsit/projection.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { normalizeName } from '../core/identity/normalize.ts';
@@ -105,6 +105,8 @@ import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
 import { startSitInputsFor } from './services/startSitInputs.ts';
 import { MatchupService } from './services/matchupService.ts';
+import { SleeperProjectionService } from './services/sleeperProjectionService.ts';
+import { resolveWeek } from '../core/matchup/build.ts';
 import { MatchupRepo, MIN_CALIBRATION_SAMPLE } from './repos/matchup.ts';
 import { MATCHUP_MODEL_VERSION } from '../core/matchup/types.ts';
 import { UsageService } from './services/usageService.ts';
@@ -580,16 +582,47 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const mode = normalizeMode(ctx.url.searchParams.get('mode'));
 
-    const [inputs, freshness] = await Promise.all([
+    const [inputs, freshness, state] = await Promise.all([
       startSitInputsFor(db, mine.playerIds, { mode }),
       new PropsRepo(db).freshness(),
+      new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
     ]);
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
+
+    /*
+     * Rotowire's published week, for the players this app could not price.
+     *
+     * The week comes through the same two functions the Matchup screen uses, and
+     * that is the point: two screens that disagreed about which week it is would
+     * quote two different published figures for the same player on the same
+     * afternoon. Read from the database only — the fetch runs on the crons, so a
+     * lineup request never waits on Sleeper for a fallback.
+     *
+     * Failure is swallowed to an empty map. This fills a column that was blank
+     * before it existed, and a blank column is a state the screen already knows
+     * how to say out loud; taking the lineup down for it would be absurd.
+     */
+    const positions = new Map(inputs.map((i) => [i.player.id, i.player.position ?? null]));
+    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+    let published: Map<string, number>;
+    try {
+      published = await new SleeperProjectionService(db, ctx.env.sleeper).publishedFor({
+        season: league.season,
+        week,
+        playerIds: mine.playerIds,
+        profile,
+        positionOf: (id) => positions.get(id) ?? null,
+      });
+    } catch {
+      published = new Map();
+    }
+
     const recommendation = recommendLineup(inputs, shape, profile, {
       currentStarterIds: mine.starterIds,
       mode,
+      published,
     });
 
     /*
@@ -615,10 +648,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const withIntelligence = <T extends { playerId: string } & ProjectableEvaluation>(
       evaluations: T[],
-    ): (T & { projection: number | null })[] =>
+    ): (T & { projection: number | null; projectionSource: ProjectionSource | null })[] =>
       evaluations.map((evaluation) => {
         const extra = intelligence.get(evaluation.playerId);
-        return { ...evaluation, ...(extra ?? {}), projection: weeklyProjection(evaluation) };
+        const projected = weeklyProjection(evaluation, published.get(evaluation.playerId) ?? null);
+        return {
+          ...evaluation,
+          ...(extra ?? {}),
+          projection: projected.points,
+          projectionSource: projected.source,
+        };
       });
 
     const unknownPlayers = mine.playerIds.length - inputs.length;
@@ -626,11 +665,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * A column of dashes should say why it is a column of dashes.
      *
      * The projections go blank exactly when no betting market has been read for
-     * anybody — a deployment with no odds provider configured, or a week the
-     * provider has not priced yet. Without a sentence the screen reads as
-     * broken; with one it reads as honest, which is what it is. Said only when
-     * *nothing* is projectable, because a note beside a mostly-full column would
-     * be noise.
+     * anybody *and* nothing has been published for them either — a deployment
+     * with no odds provider configured, or a week neither source has reached.
+     * Without a sentence the screen reads as broken; with one it reads as
+     * honest, which is what it is. Said only when *nothing* is projectable,
+     * because a note beside a mostly-full column would be noise.
      */
     const filledSlots = recommendation.slots.filter((s) => s.playerId);
     const projectable = filledSlots.filter((s) => s.projection != null);
@@ -638,6 +677,20 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (filledSlots.length > 0 && projectable.length === 0) {
       notes.push(
         'No betting market has been read for these players yet, so there is no projection to show — the lineup below is still ranked on everything else that is known.',
+      );
+    }
+    /*
+     * And when the column *is* full of somebody else's numbers, it says whose.
+     *
+     * A screen quoting Rotowire under a heading this app owns is the failure the
+     * whole provenance chain exists to prevent, and the row-level marks are
+     * deliberately subtle. This is the one place the claim is made in a
+     * sentence — said only when a fallback is actually on screen.
+     */
+    const borrowed = filledSlots.filter((s) => s.projectionSource === 'sleeper').length;
+    if (borrowed > 0) {
+      notes.push(
+        `${borrowed} projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.`,
       );
     }
     if (unknownPlayers > 0) {

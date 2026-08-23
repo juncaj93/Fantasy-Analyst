@@ -14,13 +14,20 @@
  * So the app held both answers at once and showed whichever one you navigated
  * to.
  *
- * These tests hold the line in both directions: a projection may not exist
- * without a market underneath it, and where one does exist every surface must
- * quote the same number.
+ * These tests hold the line in both directions: **this app's own** projection
+ * may not exist without a market underneath it, and where one does exist every
+ * surface must quote the same number.
+ *
+ * The rule these tests describe is now `marketProjection`, which is what every
+ * engine reads and what the sentence above has always been about. The published
+ * Rotowire fallback that `weeklyProjection` may reach for on top of it is a
+ * display decision with its own file — `sleeperProjectionFallback.test.ts` —
+ * and it is offered nothing here, so every assertion below is unchanged in
+ * meaning as well as in value.
  */
 
 import { describe, expect, it } from 'vitest';
-import { weeklyProjection } from '../src/core/startsit/projection.ts';
+import { marketProjection, weeklyProjection } from '../src/core/startsit/projection.ts';
 import { activeProjection } from '../src/core/matchup/build.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
@@ -62,7 +69,7 @@ function evaluation(over: Partial<Fixture> = {}): Fixture {
 describe('a projection requires a market', () => {
   it('refuses to project a player nobody has priced', () => {
     // The live shape exactly: every adjustment known, the base missing.
-    expect(weeklyProjection(evaluation())).toBeNull();
+    expect(marketProjection(evaluation())).toBeNull();
   });
 
   it('refuses even when the adjustments sum to something plausible', () => {
@@ -80,7 +87,7 @@ describe('a projection requires a market', () => {
         { key: 'status', value: 0, unknown: false },
       ],
     });
-    expect(weeklyProjection(hurts)).toBeNull();
+    expect(marketProjection(hurts)).toBeNull();
   });
 
   it('never returns a negative projection', () => {
@@ -94,19 +101,19 @@ describe('a projection requires a market', () => {
         { key: 'status', value: -1.5, unknown: false },
       ],
     });
-    expect(weeklyProjection(nabers)).toBeGreaterThanOrEqual(0);
+    expect(marketProjection(nabers)).toBeGreaterThanOrEqual(0);
   });
 
   it('treats an absent expectation exactly like a null one', () => {
     // A caller that does not carry the market cannot have its number blessed as
     // a projection just because it forgot to mention it.
-    expect(weeklyProjection({ score: 4, components: [] })).toBeNull();
+    expect(marketProjection({ score: 4, components: [] })).toBeNull();
   });
 
   it('projects once a market exists, with the availability charge taken back out', () => {
     const priced = evaluation({ score: 12.4, expectation: { points: 13.9, coverage: 1 } });
     // 12.4 minus the -1.5 availability charge.
-    expect(weeklyProjection(priced)).toBeCloseTo(13.9, 5);
+    expect(marketProjection(priced)).toBeCloseTo(13.9, 5);
   });
 
   it('leaves an unknown availability charge alone', () => {
@@ -118,13 +125,27 @@ describe('a projection requires a market', () => {
         { key: 'status', value: -1.5, unknown: true },
       ],
     });
-    expect(weeklyProjection(priced)).toBeCloseTo(12.4, 5);
+    expect(marketProjection(priced)).toBeCloseTo(12.4, 5);
   });
 });
 
 describe('every surface means the same thing by it', () => {
   it('the matchup export is the same function', () => {
-    expect(activeProjection).toBe(weeklyProjection);
+    expect(activeProjection).toBe(marketProjection);
+  });
+
+  /**
+   * …and the hierarchy on top of it is exactly that: on top of it.
+   *
+   * With nothing published, `weeklyProjection` is `marketProjection` wearing a
+   * label. This is the claim that keeps every other test in this file true after
+   * the fallback landed — none of them offers a published figure, so none of
+   * them can have quietly started measuring a different function.
+   */
+  it('offering no published figure leaves the market rule untouched', () => {
+    const priced = evaluation({ score: 12.4, expectation: { points: 13.9, coverage: 1 } });
+    expect(weeklyProjection(priced)).toEqual({ points: marketProjection(priced), source: 'market' });
+    expect(weeklyProjection(evaluation())).toEqual({ points: null, source: null });
   });
 
   it('the weekly card quotes the projection, not the ranking score', () => {
@@ -228,7 +249,7 @@ describe('the lineup carries both numbers, and they are not the same number', ()
     const projectionOf = (playerId: string): number | null => {
       const slot = recommendation.slots.find((s) => s.playerId === playerId);
       if (slot) return slot.projection;
-      return weeklyProjection(recommendation.bench.find((b) => b.playerId === playerId) ?? null);
+      return marketProjection(recommendation.bench.find((b) => b.playerId === playerId) ?? null);
     };
 
     expect(projectionOf('wr1'), 'the priced receiver').not.toBeNull();

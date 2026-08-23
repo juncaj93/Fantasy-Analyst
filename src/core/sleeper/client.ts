@@ -17,6 +17,7 @@ import type {
   SleeperTrendingPlayer,
   SleeperUser,
 } from './types.ts';
+import { sleeperProjectionPath } from './weeklyProjections.ts';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -189,6 +190,47 @@ export class SleeperClient {
         `/stats/nfl/regular/${encodeURIComponent(season)}`,
       )) ?? {}
     );
+  }
+
+  /**
+   * One week of published projections — Rotowire's model, distributed by Sleeper.
+   *
+   * The only endpoint here that does **not** live under `/v1`, so it is built
+   * from the base's origin rather than by appending to it. Passing a full
+   * `baseUrl` in a test still works: the origin is taken from whatever was
+   * configured, so a fixture server is reached the same way the real one is.
+   *
+   * Returned raw. Deciding which rows are worth keeping, and which of the three
+   * published totals a league is entitled to read, belongs to
+   * `core/sleeper/weeklyProjections.ts` — this method only fetches.
+   */
+  async getWeeklyProjections(season: string, week: number): Promise<unknown> {
+    const origin = new URL(this.baseUrl).origin;
+    const url = `${origin}${sleeperProjectionPath(season, week)}`;
+    return this.getAbsolute<unknown>(url);
+  }
+
+  /** `get`, for the one resource that is not under the versioned base. */
+  private async getAbsolute<T>(url: string): Promise<T | null> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      try {
+        const res = await this.fetchImpl(url, { headers: { accept: 'application/json' } });
+        if (res.status === 404) return null;
+        if (res.status >= 500) {
+          lastError = new SleeperError(`Sleeper ${res.status}`, res.status, url);
+          continue;
+        }
+        if (!res.ok) throw new SleeperError(`Sleeper ${res.status}`, res.status, url);
+        const text = await res.text();
+        if (!text || text === 'null') return null;
+        return JSON.parse(text) as T;
+      } catch (err) {
+        lastError = err;
+        if (err instanceof SleeperError && err.status < 500) throw err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new SleeperError('Sleeper request failed', 0, url);
   }
 }
 

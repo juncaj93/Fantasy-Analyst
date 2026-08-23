@@ -79,7 +79,8 @@ test.describe('the recommended lineup, at a glance', () => {
       const own = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
       // Transparent is the group's surface showing through, which is the point.
       expect([surface, 'rgba(0, 0, 0, 0)'], `a starter paints ${own}`).toContain(own);
-      await expect(card.locator('.slot-label')).not.toBeEmpty();
+      // The chip is on the leading edge, and it names what he plays.
+      await expect(card.locator('.player-identity .pos-pill')).toHaveText(position);
     }
 
     await page.getByTestId('bench-toggle').click();
@@ -104,16 +105,43 @@ test.describe('the recommended lineup, at a glance', () => {
     await expect(page.getByTestId('starters-title')).toContainText(/starters/i);
 
     const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
-    // The slot is on the face of the card, and it is not a colour.
-    await expect(starter.locator('.slot-label')).not.toBeEmpty();
+    /*
+     * The slot has left the face of the card except where it says something the
+     * position pill cannot — a back in a FLEX — so the accessible name is now
+     * the one place it is always spoken, and that is what is asserted. What the
+     * face carries instead is the position, checked in the test above.
+     */
     await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
     // The projection is spoken as a projection rather than left as a bare number.
     await expect(starter).toHaveAttribute('aria-label', /projected [\d.]+ points/i);
 
+    /*
+     * …and the rows that have no projection say so, rather than going quiet.
+     *
+     * `—` is legible to somebody looking at the row. To somebody listening to
+     * it, an accessible name that simply omitted the number was a row that
+     * sounded like it had no opinion instead of one that had said it does not
+     * know — and "does not know" is the whole claim this screen makes when no
+     * market has priced a player.
+     */
+    const unpriced = page.locator('[data-testid="starter-row"][data-starter="true"]', {
+      has: page.locator('[data-testid="starter-proj"]', { hasText: '—' }),
+    });
+    expect(await unpriced.count(), 'the demo lineup has an unpriced starter').toBeGreaterThan(0);
+    await expect(unpriced.first()).toHaveAttribute('aria-label', /projection unavailable/i);
+
     await page.getByTestId('bench-toggle').click();
     const bench = page.getByTestId('bench-row').first();
-    await expect(bench.locator('.slot-label')).toContainText('BN');
-    await expect(bench).toHaveAttribute('aria-label', /bench/i);
+    /*
+     * `BN` used to be printed where every other list in the app prints the
+     * position, which told the reader where he is sitting — something the
+     * section heading above already says — in the column that should have been
+     * telling them what he plays. The row now says the position; "bench" is in
+     * the accessible name, where the section heading's job is done properly.
+     */
+    await expect(bench.locator('.pos-pill')).not.toBeEmpty();
+    await expect(bench.locator('.pos-pill')).not.toHaveText('BN');
+    await expect(bench).toHaveAttribute('aria-label', /on your bench/i);
   });
 
   /**
@@ -888,5 +916,116 @@ test.describe('mode and refresh', () => {
       expect(box.y, `${id} must be on the control row`).toBeGreaterThanOrEqual(rowBox.y - 1);
       expect(box.y + box.height, `${id} must not wrap below it`).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
     }
+  });
+});
+
+/**
+ * A number this app did not compute, and how the screen admits it.
+ *
+ * Where no betting market has priced a player, Team shows Rotowire's published
+ * weekly figure by way of Sleeper. That is a product decision with one hard
+ * condition attached: the borrowed number may never be drawn as though it were
+ * this app's own. So the provenance is asserted on all four of the surfaces
+ * that carry it — the mark on the figure, the tooltip, the row's accessible
+ * name, and the sheet the row opens — because a chain that holds in three
+ * places and breaks in the fourth is a chain that misleads exactly the reader
+ * who looked hardest.
+ *
+ * Injected rather than waited for. The demo fixture has markets, which is the
+ * correct fixture for the rest of this file and the wrong one for this: a test
+ * that could only run on a deployment with no odds coverage would be a test
+ * that quietly stops running the day coverage arrives.
+ */
+test.describe('a borrowed projection says whose it is', () => {
+  const BORROWED = 20.9;
+
+  /**
+   * Rewrite the lineup so its first filled slot is quoting a published figure.
+   *
+   * After `inSeason` and fulfilling rather than falling through, for the reason
+   * `row-alignment.spec.ts` sets out at length: Playwright runs the last
+   * matching handler first, so a route installed before that one never runs.
+   */
+  async function withBorrowedProjection(page: Page) {
+    await page.route('**/api/leagues/*/lineup*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const slots = body.slots as Record<string, unknown>[];
+      const target = slots.find((s) => s.playerId);
+      if (target) {
+        target['projection'] = BORROWED;
+        target['projectionSource'] = 'sleeper';
+        for (const group of ['starters', 'bench', 'undecidable']) {
+          body[group] = ((body[group] ?? []) as Record<string, unknown>[]).map((e) =>
+            e['playerId'] === target['playerId']
+              ? { ...e, projection: BORROWED, projectionSource: 'sleeper', expectation: { points: null, coverage: 0 } }
+              : e,
+          );
+        }
+      }
+      body.notes = [
+        ...(body.notes ?? []),
+        "1 projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.",
+      ];
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await withBorrowedProjection(page);
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+  });
+
+  test('marks the figure, and only the borrowed one', async ({ page }) => {
+    const borrowed = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
+    await expect(borrowed).toHaveCount(1);
+    await expect(borrowed).toHaveText(BORROWED.toFixed(1));
+
+    // A dotted rule under the digits, and nothing under anybody else's.
+    const decoration = await borrowed.evaluate((el) => getComputedStyle(el).textDecorationStyle);
+    expect(decoration).toBe('dotted');
+    const ours = page.locator('[data-testid="starter-proj"][data-projection-source="market"]').first();
+    if (await ours.count()) {
+      expect(await ours.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('none');
+    }
+  });
+
+  test('names the source in the tooltip and in the accessible name', async ({ page }) => {
+    const borrowed = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
+    await expect(borrowed).toHaveAttribute('title', /rotowire/i);
+    await expect(borrowed).toHaveAttribute('title', /sleeper/i);
+
+    const row = page.locator('[data-testid="starter-row"]', { has: borrowed });
+    await expect(row).toHaveAttribute('aria-label', /rotowire/i);
+    await expect(row).toHaveAttribute('aria-label', new RegExp(`projected ${BORROWED.toFixed(1)} points`, 'i'));
+  });
+
+  test('says it in a sentence in the sheet the row opens', async ({ page }) => {
+    const borrowed = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
+    await page.locator('[data-testid="starter-row"]', { has: borrowed }).click();
+    await expect(page.getByTestId('weekly-sheet')).toBeVisible();
+    // The same number the row showed, and the claim spelled out beside it.
+    await expect(page.getByTestId('weekly-score')).toContainText(BORROWED.toFixed(1));
+    const provenance = page.getByTestId('weekly-projection-source');
+    await expect(provenance).toBeVisible();
+    await expect(provenance).toContainText(/rotowire/i);
+    await expect(provenance).toContainText(/not used to rank/i);
+  });
+
+  test('and once more, in the notes the lineup carries', async ({ page }) => {
+    /*
+     * The `details` disclosure, which is the surface the product decision names
+     * for provenance: subtle on the row, spelled out where somebody has gone
+     * looking. Asserted rather than skipped when absent — a test that returns
+     * early on a missing element is a test that stops running without saying so.
+     */
+    const details = page.getByTestId('lineup-details');
+    await expect(details).toHaveCount(1);
+    await details.locator('summary').click();
+    await expect(details).toContainText(/rotowire/i);
+    await expect(details).toContainText(/not used to rank/i);
   });
 });

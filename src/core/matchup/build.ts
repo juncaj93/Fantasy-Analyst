@@ -44,11 +44,11 @@
  */
 
 import type { SleeperMatchup, LeagueRecord, RosterRecord } from '../sleeper/types.ts';
-import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY } from '../sleeper/scoring.ts';
+import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY, type ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
-import { weeklyProjection } from '../startsit/projection.ts';
+import { marketProjection } from '../startsit/projection.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
 import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
@@ -106,6 +106,23 @@ export interface MatchupSources {
     week: number;
     rosterId: number;
   }): Promise<PreviousInsightState | null>;
+  /**
+   * Rotowire's published weekly figures, for the cards and for nothing else.
+   *
+   * Optional, and a bag that omits it simply gets no fallback — which is the
+   * right default for every fixture in the test suite, none of which is about
+   * this. What it feeds is `buildWeeklyCard`'s `published`, so the sheet a
+   * Matchup row opens quotes the same number the Team row does. It reaches
+   * **none** of the model: distributions, the projected final, the win
+   * probability and the swap advice all run on `marketProjection`, and this map
+   * is read after all of them.
+   */
+  publishedProjections?(opts: {
+    season: string;
+    week: number;
+    playerIds: string[];
+    profile: ScoringProfile;
+  }): Promise<ReadonlyMap<string, number>>;
   /** The caller's memo of its own last response, for the fingerprint short-circuit. */
   cached(): { fingerprint: string; response: MatchupResponse } | null;
   remember(entry: { fingerprint: string; response: MatchupResponse }): void;
@@ -273,6 +290,30 @@ export async function buildMatchupResponse(
    */
   const cards: Record<string, WeeklyCard> = {};
   const inputById = new Map(inputs.map((input) => [input.player.id, input]));
+
+  /*
+   * The published fallback, fetched after the forecast and used only by cards.
+   *
+   * The order of these two statements is the guarantee: `buildForecast` above
+   * has already run, on `marketProjection` alone, and cannot see anything read
+   * here. Swallowed on failure for the same reason the lineup route swallows it
+   * — this fills a blank, and a blank is a state the screen already says out
+   * loud.
+   */
+  let published: ReadonlyMap<string, number> = new Map();
+  if (sources.publishedProjections) {
+    try {
+      published = await sources.publishedProjections({
+        season: league.season,
+        week,
+        playerIds: players.map((p) => p.playerId),
+        profile,
+      });
+    } catch {
+      published = new Map();
+    }
+  }
+
   for (const player of players) {
     const evaluation = evaluations.get(player.playerId);
     if (!evaluation) continue;
@@ -298,6 +339,7 @@ export async function buildMatchupResponse(
       slot: player.slot ? labelOf(player.slot) : null,
       alreadyStarting: player.starting,
       locked: forecast.slots.some((row) => row.mine?.playerId === player.playerId && row.mine.locked),
+      published: published.get(player.playerId) ?? null,
     });
   }
 
@@ -437,7 +479,17 @@ function toPlayer(
     slot,
     starting,
     side,
-    projection: weeklyProjection(evaluation),
+    /*
+     * The engine's number, and deliberately not the screen's.
+     *
+     * This field is the mean of the distribution the simulator draws from, so it
+     * decides the projected final, the win probability and every swap this
+     * feature recommends. `marketProjection` is therefore the only thing that
+     * may fill it: the published Rotowire fallback is display-only, and a
+     * forecast built on a model this app cannot explain is a forecast it cannot
+     * defend. See `core/startsit/projection.ts`.
+     */
+    projection: marketProjection(evaluation),
     actual: Number.isFinite(actual) ? actual : 0,
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',
@@ -453,8 +505,13 @@ function toPlayer(
  * turned out to need exactly the same rule and was reading the raw start/sit
  * score instead — printing a projection built entirely of adjustments for
  * players nobody had priced. One definition, one number, both screens.
+ *
+ * It now points at `marketProjection` rather than at `weeklyProjection`, and
+ * that is the whole of what changed when the published fallback arrived: this
+ * name has only ever meant "the number the matchup model runs on", and the model
+ * runs on this app's own market-derived figure alone.
  */
-export { weeklyProjection as activeProjection };
+export { marketProjection as activeProjection };
 
 /** `9-5`, when Sleeper's roster settings carry a record. */
 function recordOf(settings: Record<string, unknown> | null | undefined): string | null {
