@@ -1,0 +1,101 @@
+1	
+▸
+Jahmyr Gibbs
+RB1	Detroit Lions	292.0	
+5/5
+2	
+▸
+Bijan Robinson
+RB2	Atlanta Falcons	280.1	
+5/5
+3	
+▸
+Ja'Marr Chase
+WR1	Cincinnati Bengals	247.4	
+3/3
+4	
+▸
+Puka Nacua
+WR2	Los Angeles Rams	234.8	
+3/3
+5	
+▸
+Christian McCaffrey
+RB3	San Francisco 49ers	253.1	
+5/5
+7	
+▸
+Amon-Ra St. Brown
+WR4	Detroit Lions	232.2	
+3/3
+12	
+▸
+Trey McBride
+TE1	Arizona Cardinals	183.7	
+3/3
+14	
+▸
+Josh Allen
+QB1	Buffalo Bills	386.1	
+4/5
+19	
+▸
+A.J. Brown
+WR8	New England Patriots	192.5	
+3/3
+37	
+▸
+Kenneth Walker III
+RB14	Kansas City Chiefs	184.3	
+3/5
+40	
+▸
+Drake Maye
+QB3	New England Patriots	347.5	
+4/5
+46	
+▸
+Kyle Pitts
+TE5	Atlanta Falcons	135.0	
+3/3
+47	
+▸
+Harold Fannin Jr.
+TE6	Cleveland Browns	133.7	
+3/3
+54	
+▸
+Travis Kelce
+TE8	Kansas City Chiefs	127.7	
+3/3
+57	
+▸
+Lamar Jackson
+QB6	Baltimore Ravens	335.0	
+4/5
+76	
+▸
+Alec Pierce
+WR34	Indianapolis Colts	138.0	
+1/3
+99	
+▸
+Chris Godwin Jr.
+WR41	Tampa Bay Buccaneers	122.9	
+2/3
+107	
+▸
+Wan'Dale Robinson
+WR46	Tennessee Titans	120.2	
+1/3
+124	
+▸
+K.C. Concepcion
+WR53	Cleveland Browns	104.6	
+1/3
+146	
+▸
+Jacory Croskey-Merritt
+RB34	Washington Commanders	84.2	
+1/5
+Last updated: Aug 22 at 9:01 AM

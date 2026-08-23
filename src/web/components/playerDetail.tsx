@@ -302,6 +302,37 @@ export function LastSeasonLine({
 }
 
 /**
+ * `Preseason PTS 292 · StartWho · Aug 22`.
+ *
+ * Historical, and said so in words rather than left to the reader to infer. The
+ * date and the scoring travel with the number for one reason: in week nine a
+ * bare `PTS 292` reads as what the market expects of him now, and it is not —
+ * it is what a model expected of him in August. The weekly market owns the
+ * present tense.
+ *
+ * Absent rather than blank when nothing covers him, so a card costs no height
+ * for a player no snapshot named.
+ */
+export function PreseasonProjectionLine({
+  detail,
+}: {
+  detail: { preseasonProjection?: { points: number; label: string; scoringLabel: string } | null } | null;
+}) {
+  const projection = detail?.preseasonProjection;
+  if (!projection) return null;
+  return (
+    <div className="season-line" data-testid="preseason-projection">
+      <span className="metric">
+        Preseason <strong>{Math.round(projection.points)}</strong> PTS
+      </span>
+      <span className="metric detail-quiet" title={`Captured from ${projection.label}, scored as ${projection.scoringLabel}`}>
+        {projection.label} · {projection.scoringLabel}
+      </span>
+    </div>
+  );
+}
+
+/**
  * What he came back from, and what is wrong with him now.
  *
  * Two different facts under two different headings, because a player returning

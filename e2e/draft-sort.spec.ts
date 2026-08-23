@@ -1,5 +1,5 @@
 /**
- * The Score / ADP / DOG control, as a contract.
+ * The Score / ADP / DOG / PTS control, as a contract.
  *
  * Two claims are being defended, and the second is the one that matters.
  *
@@ -43,7 +43,7 @@ async function order(page: Page) {
 }
 
 test.describe('the control', () => {
-  test('offers exactly three modes and defaults to Score', async ({ page }) => {
+  test('offers exactly four modes and defaults to Score', async ({ page }) => {
     await openDraft(page);
     const control = page.getByTestId('draft-sort');
     await expect(control).toBeVisible();
@@ -52,8 +52,14 @@ test.describe('the control', () => {
     await expect(page.getByTestId('sort-score')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('sort-adp')).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByTestId('sort-dog')).toHaveAttribute('aria-checked', 'false');
-    // Three, and no fourth.
-    await expect(control.locator('button')).toHaveCount(3);
+    await expect(page.getByTestId('sort-pts')).toHaveAttribute('aria-checked', 'false');
+    /*
+     * Four, and no fifth. PTS joined DOG and ADP when the preseason projection
+     * import landed; like DOG it is always drawn and says so in its label when
+     * nothing has been imported, rather than appearing and disappearing under
+     * the reader's thumb.
+     */
+    await expect(control.locator('button')).toHaveCount(4);
   });
 
   test('sits beside the board control without adding a row', async ({ page }) => {
@@ -85,6 +91,8 @@ test.describe('the control', () => {
     await openDraft(page);
     await expect(page.getByTestId('sort-adp')).toHaveAttribute('aria-label', /Sleeper ADP/);
     await expect(page.getByTestId('sort-dog')).toHaveAttribute('aria-label', /Underdog/);
+    // And PTS says what it is, which is a projection rather than a betting line.
+    await expect(page.getByTestId('sort-pts')).toHaveAttribute('aria-label', /projection/i);
   });
 });
 

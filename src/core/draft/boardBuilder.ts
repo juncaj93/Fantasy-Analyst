@@ -38,6 +38,7 @@ import type { DraftPickRecord, DraftRecord, LeagueRecord, RosterRecord } from '.
  */
 import { detectBestBall, marketFormatOf } from '../sleeper/bestBall.ts';
 import { blendWeights } from './marketBaseline.ts';
+import { projectionScoringFrom, type ProjectionScoring } from '../startWho/scoring.ts';
 import { dogFreshness, dogIsUsable } from '../adp/underdog.ts';
 import {
   buildPickOwnership,
@@ -84,6 +85,15 @@ export interface DraftBoardSources {
   /** The user's own hearts and stars, for every player who has one. */
   flags(): Promise<Map<string, BoardPlayerFlag>>;
   /** Season-long market lines for the scored pool, from the newest snapshot. */
+  /**
+   * Imported preseason projections for these players, under this league's own
+   * scoring. Empty when no snapshot matches the league's rules — a snapshot
+   * captured under other rules is not a worse answer, it is not an answer.
+   */
+  preseasonPoints(
+    playerIds: string[],
+    scoring: ProjectionScoring,
+  ): Promise<Map<string, number>>;
   seasonMarkets(
     playerIds: string[],
   ): Promise<Map<string, { market: SeasonMarketKey; line: number | null; bookCount?: number }[]>>;
@@ -762,6 +772,15 @@ export async function buildDraftBoard(
   const flags = allFlags;
   const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
   const shape = buildRosterShape(league.rosterPositions);
+  /*
+   * Read for this league's own scoring, which is what makes the number usable
+   * at all: a projection computed under six-point passing touchdowns is fifty
+   * points wrong on every quarterback in a four-point league.
+   */
+  const preseasonPoints = await sources.preseasonPoints(
+    candidateIds,
+    projectionScoringFrom(profile),
+  );
 
   /*
    * `Next`: how likely the room is to leave each of these players alone.
@@ -886,6 +905,7 @@ export async function buildDraftBoard(
       signal: signals.get(player.id) ?? null,
       myGuyLevel: flags.get(player.id)?.level ?? 0,
       seasonMarkets: seasonLines.get(player.id) ?? [],
+      preseasonPoints: preseasonPoints.get(player.id) ?? null,
       nextPickSurvival: survivalFor(nextPick.byPlayer.get(player.id)),
     })),
     {

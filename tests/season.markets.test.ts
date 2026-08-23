@@ -474,8 +474,16 @@ describe('what the market is allowed to do to the board', () => {
     expect(b.total).toBeGreaterThan(a.total);
   });
 
-  it('cannot reorder the board on its own', () => {
-    // A twenty-pick ADP gap against the strongest possible market signal.
+  it('cannot outweigh a materially stronger recommendation', () => {
+    /*
+     * Bounded, which is not the same as inert.
+     *
+     * This component is *meant* to move players the rest of the board rates
+     * alike — that is what a second opinion is for. What it may not do is
+     * overturn a recommendation that is materially stronger on everything else,
+     * and a twenty-pick ADP bargain against the strongest possible market
+     * signal is that case.
+     */
     const ranked = rankAvailablePlayers(
       [
         {

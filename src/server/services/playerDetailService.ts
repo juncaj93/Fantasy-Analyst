@@ -23,6 +23,10 @@ import { summariseOutlook } from '../../core/sleeper/outlookSummary.ts';
 import { majorInjuryHistory } from '../../core/draft/injury.ts';
 import { DESIGNATION_LABEL, injuryLine, provenanceLine } from '../../core/injury/model.ts';
 import { InjuryService } from './injuryService.ts';
+import { LeagueRepo } from '../repos/league.ts';
+import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
+import { buildScoringProfile } from '../../core/sleeper/scoring.ts';
+import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
 import { assessHistory, deriveEpisodes } from '../../core/injury/history.ts';
 import {
@@ -127,8 +131,31 @@ export interface OutlookView {
   fetchedAt: string;
 }
 
+/** What a market-derived model expected of him before the season began. */
+export interface PreseasonProjectionView {
+  points: number;
+  /** `StartWho · Aug 22`. */
+  label: string;
+  /** `Half PPR · 6pt pass TD` — the rules the number was computed under. */
+  scoringLabel: string;
+  capturedAt: string;
+}
+
 export interface PlayerDetailView {
   playerId: string;
+  /**
+   * The preseason market-derived projection, when one covers him.
+   *
+   * Historical context and nothing more. It is shown with its date and the
+   * scoring it was captured under so that after week one it cannot be read as a
+   * current expectation — the weekly market owns that, and this is what
+   * somebody thought in August.
+   *
+   * Null when no snapshot covers him, or when every snapshot was captured under
+   * scoring this league does not use. The card shows nothing rather than a
+   * number that would be wrong for the reader's rules.
+   */
+  preseasonProjection: PreseasonProjectionView | null;
   lastSeason: SeasonStatsView | null;
   outlook: OutlookView | null;
   /**
@@ -268,6 +295,38 @@ export class PlayerDetailService {
    * once, and a failure to reach it is reported rather than thrown: an outlook
    * the network could not deliver must not take the rest of the card with it.
    */
+  /**
+   * The newest preseason projection covering this player, under the league's
+   * own scoring.
+   *
+   * Scoped by scoring profile before anything else, and silent when the league
+   * has none stored: a projection computed under other rules is not a rough
+   * answer for this reader, it is the wrong number with a plausible size.
+   *
+   * Returns null rather than throwing when no league is selected — a player
+   * card is not the place to discover a configuration problem.
+   */
+  private async preseasonProjectionFor(
+    playerId: string,
+    season: string,
+  ): Promise<PreseasonProjectionView | null> {
+    const league = await new LeagueRepo(this.db).getSelectedLeague();
+    if (!league) return null;
+    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
+    const repo = new PreseasonProjectionsRepo(this.db);
+    const snapshot = await repo.latest(season, scoringKey(projectionScoringFrom(profile)));
+    if (!snapshot) return null;
+    const points = await repo.pointsForSnapshot(snapshot.id, [playerId]);
+    const value = points.get(playerId);
+    if (value == null) return null;
+    return {
+      points: value,
+      label: snapshot.label,
+      scoringLabel: snapshot.scoringLabel,
+      capturedAt: snapshot.capturedAt,
+    };
+  }
+
   async forPlayer(playerId: string): Promise<PlayerDetailView> {
     const now = this.now();
     const statsSeason = lastCompletedSeason(now);
@@ -383,6 +442,7 @@ export class PlayerDetailService {
 
     return {
       playerId,
+      preseasonProjection: await this.preseasonProjectionFor(playerId, season).catch(() => null),
       lastSeason,
       outlook,
       outlookNote: note,
