@@ -286,13 +286,30 @@ test.describe('the identity cluster', () => {
         return range.getBoundingClientRect();
       };
       /*
-       * One space, in the font the row is actually drawn in.
+       * One space, rendered by the same engine that laid the row out.
        *
-       * Read off the field, which is where the space is rendered. Asking the
-       * browser what it measures is the only way to assert "one space" without
-       * writing down a number that a font change would quietly falsify.
+       * A space is put into the field, measured, and taken out again. The
+       * obvious alternative — `canvas.measureText(' ')` with the field's
+       * computed font — was tried and is subtly the wrong instrument: it is a
+       * text-metrics path rather than the layout path, and in WebKit at 430 it
+       * returned an advance a fraction under the one the row was actually
+       * drawn with, which is enough to land the two on either side of a whole
+       * pixel. A probe laid out in the field itself cannot disagree with the
+       * field for that reason.
+       *
+       * Rendered rather than written down, either way: a pixel constant is the
+       * same claim in a form that stops being true at the next font, size or
+       * width, and this file runs at four widths.
        */
-      const ctx = document.createElement('canvas').getContext('2d')!;
+      const oneSpaceIn = (field: HTMLElement): number => {
+        const probe = document.createElement('span');
+        probe.style.whiteSpace = 'pre';
+        probe.textContent = ' ';
+        field.appendChild(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width;
+      };
       return nodes.flatMap((row) => {
         const el = (sel: string) => row.querySelector(sel) as HTMLElement | null;
         const name = el('.player-name')?.getBoundingClientRect() ?? null;
@@ -300,14 +317,12 @@ test.describe('the identity cluster', () => {
         const tag = el('[data-testid="injury-tag"]')?.getBoundingClientRect() ?? null;
         const meta = el('.player-row-meta');
         if (!name || !tally || !meta) return [];
-        const font = getComputedStyle(meta);
-        ctx.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
         return [
           {
             name: (el('.player-name') as HTMLElement).innerText,
             tallyText: (el('[data-testid="compact-tally"]') as HTMLElement).innerText,
-            beforeTally: Math.round(tally.left - name.right),
-            oneSpace: Math.round(ctx.measureText(' ').width),
+            beforeTally: tally.left - name.right,
+            oneSpace: oneSpaceIn(meta),
             beforePill: tag ? Math.round(tag.left - tally.right) : null,
           },
         ];
@@ -333,18 +348,30 @@ test.describe('the identity cluster', () => {
       'every name on the board is the same length, so drift could not show',
     ).toBeGreaterThan(1);
 
+    /*
+     * Half a pixel, and the tolerance is doing less work than it looks.
+     *
+     * Sub-pixel layout means two independently laid-out spaces can differ in
+     * the last decimal, and requiring identity would be asserting arithmetic
+     * rather than spacing. What the tolerance cannot let through is any of the
+     * arrangements this is about: no gap at all, the row's own 8px, or the old
+     * reserved field's 11px. The one thing near enough to slip past it — a
+     * hard-coded pixel that happens to sit beside a space at this size — is
+     * caught by the constancy assertion below instead, because it is the tally
+     * *width* that a reserved field varies with and no constant can follow.
+     */
     for (const row of rows) {
       expect(
-        row.beforeTally,
-        `${row.name} ${row.tallyText}: the tally is ${row.beforeTally}px after the name, not one space`,
-      ).toBe(row.oneSpace);
+        Math.abs(row.beforeTally - row.oneSpace),
+        `${row.name} ${row.tallyText}: the tally is ${row.beforeTally.toFixed(2)}px after the name, and a space is ${row.oneSpace.toFixed(2)}px`,
+      ).toBeLessThanOrEqual(0.5);
       if (row.beforePill != null) {
         expect(row.beforePill, 'the status pill was crowded by the tally').toBe(4);
       }
     }
     expect(
-      new Set(rows.map((r) => r.beforeTally)).size,
-      `the gap drifted by row: ${rows.map((r) => `${r.name} ${r.tallyText} ${r.beforeTally}px`).join(', ')}`,
+      new Set(rows.map((r) => Math.round(r.beforeTally))).size,
+      `the gap drifted by row: ${rows.map((r) => `${r.name} ${r.tallyText} ${r.beforeTally.toFixed(2)}px`).join(', ')}`,
     ).toBe(1);
   });
 
