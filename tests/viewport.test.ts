@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { KEYBOARD_OCCLUSION, keyboardIsOpen, occludedHeight } from '../src/web/viewport.ts';
+import { KEYBOARD_OCCLUSION, keyboardInset, keyboardIsOpen, occludedHeight } from '../src/web/viewport.ts';
 
 describe('how much of the page is hidden', () => {
   it('is nothing when the visual viewport fills the layout one', () => {
@@ -63,5 +63,34 @@ describe('is that a keyboard', () => {
   it('is set between the two things it has to tell apart', () => {
     expect(KEYBOARD_OCCLUSION).toBeGreaterThan(100);
     expect(KEYBOARD_OCCLUSION).toBeLessThan(250);
+  });
+});
+
+/**
+ * How far a sheet has to lift to clear the keyboard.
+ *
+ * The same measurement as `occludedHeight`, with the threshold applied — which
+ * is the whole of it: a sheet that shifted by the few tens of pixels Safari's
+ * own chrome moves through would twitch its way down every scroll, and a sheet
+ * that did not shift at all drew its own action button under the keyboard,
+ * visible in a screenshot and unreachable by a thumb.
+ */
+describe('how far a sheet lifts for the keyboard', () => {
+  it('does not move for a browser that reports no viewport at all', () => {
+    expect(keyboardInset(844, null)).toBe(0);
+  });
+
+  it('does not move for browser chrome coming and going', () => {
+    expect(keyboardInset(844, { height: 844 - 60, offsetTop: 0 })).toBe(0);
+    expect(keyboardInset(844, { height: 844 - (KEYBOARD_OCCLUSION - 1), offsetTop: 0 })).toBe(0);
+  });
+
+  it('lifts by exactly what a real keyboard is covering', () => {
+    expect(keyboardInset(844, { height: 844 - 336, offsetTop: 0 })).toBe(336);
+  });
+
+  it('lifts by nothing rather than by something negative', () => {
+    // A visual viewport taller than the layout one is a rounding artefact.
+    expect(keyboardInset(844, { height: 900, offsetTop: 0 })).toBe(0);
   });
 });

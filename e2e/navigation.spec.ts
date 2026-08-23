@@ -199,6 +199,21 @@ test.describe('pushed detail screens', () => {
     await expect(page.getByTestId('players-list')).toBeVisible();
     await expect(page.getByLabel('Search players')).toHaveValue('a');
     await expect(rows, 'the list came back as it was').toHaveCount(narrowed);
+
+    /*
+     * Measured with the sheet out of the way, because Back lands on the sheet.
+     *
+     * Leaving the page returns the reader to the card they opened it from, so
+     * the list is still under a modal surface here — and a modal surface holds
+     * the page still by pinning it, at which point `window.scrollY` reports
+     * zero however far down the list the reader really is. Reading it through
+     * the sheet was measuring the lock rather than the restoration.
+     *
+     * Closing first asks the question the reader would ask: when everything has
+     * gone away, am I where I left off?
+     */
+    await page.getByTestId('sheet-close').click();
+    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     expect(
       Math.abs((await page.evaluate(() => Math.round(window.scrollY))) - offset),
       'Back put the reader back where they were',

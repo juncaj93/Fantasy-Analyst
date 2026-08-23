@@ -32,6 +32,7 @@ import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../componen
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
+import { pageScrollTop } from '../overlay.ts';
 import { unwindOne } from '../tabReset.ts';
 
 /** An unflagged player, so the control renders the same shape either way. */
@@ -389,7 +390,15 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               player={toSummary(open)}
               onClose={() => setOpenId(null)}
               onOpenFull={() => {
-                restoreScroll.current = window.scrollY;
+                /*
+                 * Asked of the overlay rather than of the window, because this
+                 * runs from inside an open sheet and a sheet holds the page
+                 * still by pinning it — at which point the window reports the
+                 * top of the document however far down the list the reader is.
+                 * Recording that would land Back at the top of the list every
+                 * time, which is the one thing this ref exists to prevent.
+                 */
+                restoreScroll.current = pageScrollTop();
                 setFull(true);
               }}
               trailing={

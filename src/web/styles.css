@@ -5667,21 +5667,53 @@ table.compact tr:last-child td {
  * dragged, a dimmed backdrop, and the bottom inset so the last control clears
  * the home indicator.
  */
+/*
+ * Every covering layer sits on one scale.
+ *
+ * `--overlay-lift` is the layer's depth in the overlay stack, in stacking
+ * order, and it is set by `useOverlay` rather than by any stylesheet. Without
+ * it, a sheet opened *from* another layer landed at the same z-index as the
+ * layer it came from and won only by being later in the document — which is
+ * true of a sheet over a sheet and false of a sheet over the draft board, whose
+ * base is higher. The lift is what makes "opened last is on top" a rule instead
+ * of an accident of markup order.
+ */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: calc(40 + var(--overlay-lift, 0));
   background: var(--scrim);
   animation: fade-in var(--dur) var(--ease);
+  /*
+   * The backdrop is part of the modal surface, not a window onto the page.
+   * Without this a drag on it scrolled the list behind — which is the same
+   * complaint as the sheet's own, arriving from the other half of the screen.
+   */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .sheet {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 41;
-  max-height: 88dvh;
+  /*
+   * Above the keyboard rather than under it.
+   *
+   * `--sheet-keyboard` is however much of the layout viewport the software
+   * keyboard is covering, set by the component from `visualViewport` and nought
+   * whenever there is no keyboard — which is every browser in CI, so this
+   * resolves to the plain `bottom: 0` and `88dvh` it has always been. iOS does
+   * not shrink the layout viewport for the keyboard, so a sheet pinned to the
+   * bottom of it is pinned underneath the keyboard: Setup's two paste sheets
+   * drew their own Parse control down there, visible and untappable. The
+   * max-height gives the same room back, so a tall sheet shortens instead of
+   * being pushed off the top of the screen.
+   */
+  bottom: var(--sheet-keyboard, 0px);
+  z-index: calc(41 + var(--overlay-lift, 0));
+  max-height: calc(88dvh - var(--sheet-keyboard, 0px));
+  transition: bottom var(--dur-fast) var(--ease);
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -5692,12 +5724,31 @@ table.compact tr:last-child td {
   /*
    * The sheet's own chrome never scrolls, so the browser is told to keep its
    * hands off every gesture that lands on it. This is the line that makes
-   * swipe-to-dismiss work: with `pan-y` here Safari had already classified the
-   * drag as a scroll before the first `pointermove` arrived, the sheet never
-   * moved, and what the reader saw instead was the page behind rubber-banding.
-   * The same lesson is written on `.drag-handle`, which learned it first.
+   * swipe-to-dismiss work from the grip and the header: with `pan-y` here
+   * Safari had already classified the drag as a scroll before the first
+   * `pointermove` arrived, the sheet never moved, and what the reader saw
+   * instead was the page behind rubber-banding. The same lesson is written on
+   * `.drag-handle`, which learned it first.
+   *
+   * It is inherited by everything in the sheet that does not override it —
+   * `.sheet-body` is the only thing that does, and only while it has somewhere
+   * to scroll to.
    */
   touch-action: none;
+}
+
+/*
+ * The dialog takes focus on arrival and must not be ringed for it.
+ *
+ * `useOverlay` focuses the sheet itself so a screen reader announces the dialog
+ * rather than its first button. That is a programmatic focus and never a
+ * keyboard one, so `:focus-visible` is the right question to ask: controls
+ * inside the sheet keep their ring, and the sheet itself does not draw one
+ * around the whole surface every time it opens.
+ */
+.sheet:focus:not(:focus-visible),
+.dboard-layer:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .sheet-dragging {
@@ -5815,6 +5866,16 @@ table.compact tr:last-child td {
  * entirely, which left the mechanism inert on the browser the original bug came
  * from. Nothing here now depends on a value both engines do not implement.
  *
+ * **And `pan-y` is no longer the end of the conversation.** It used to be, and
+ * that is what made a tall sheet — a player's card, the compare sheet, the
+ * odds — dismissable only from about forty pixels of grip: the body took the
+ * whole gesture and the sheet never saw it. `useSheetDrag` now registers a
+ * non-passive `touchmove` on the sheet, which obliges the browser to ask before
+ * it scrolls, and takes the gesture back only for a downward drag on content
+ * that is already at its top — where this declaration had nothing to offer it
+ * anyway. Scrolling itself is untouched: an upward drag, or any drag on content
+ * that is scrolled, never reaches the hook.
+ *
  * `overscroll-behavior: contain` is the belt to that brace: whatever happens, a
  * scroll that runs out of sheet never becomes a scroll of the page.
  */
@@ -5926,7 +5987,8 @@ table.compact tr:last-child td {
 .dboard-layer {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  /* On the same stack as every other covering layer — see `.sheet-backdrop`. */
+  z-index: calc(60 + var(--overlay-lift, 0));
   display: flex;
   flex-direction: column;
   background: var(--bg);

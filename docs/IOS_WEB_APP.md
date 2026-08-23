@@ -193,7 +193,9 @@ Two properties matter more than the numbers:
 
 - **Scrolling wins.** The layer carries `touch-action: pan-y`, so the browser
   arbitrates: a vertical drag scrolls and cancels the gesture through
-  `pointercancel`. Nothing in this app calls `preventDefault` on a touch region.
+  `pointercancel`. Nothing on the page — this gesture, pull-to-refresh, the
+  queue's reorder — calls `preventDefault` on a touch. The one exception is a
+  modal sheet, and it is described precisely in §10.
 - **Back is navigation, never undo.** The gesture calls the same function the
   Back control calls. It cannot undo a draft selection, a My Guy level, a
   filter or anything else that is stored, and it pushes no history state of its
@@ -203,10 +205,69 @@ There is deliberately **no swipe between the bottom tabs**: they sit above
 horizontal controls (the position filter, the metric rows) and an accidental
 sideways drag would navigate. Tabs are tapped.
 
-Modal sheets support the matching downward swipe-to-dismiss, with the same
-"content scrolls first" rule: a sheet only starts moving once its own content is
-at the top. `e2e/navigation.spec.ts` covers both gestures, in a simulated Home
-Screen launch and in a plain tab.
+## 10. Sheets: dismissal, arbitration and the one `preventDefault`
+
+A modal sheet is pulled down to dismiss. The rules live in `useSheetDrag`
+([`src/web/gestures.ts`](../src/web/gestures.ts)), the thresholds are unit-tested
+in `tests/gestures.test.ts`, and the behaviour is covered by
+`e2e/sheet-interaction.spec.ts`.
+
+| Rule | Value |
+| --- | --- |
+| Before any decision is made | 8px of movement |
+| To count as a dismissal rather than a scroll | downward > horizontal × 1.4 |
+| To complete the dismissal | 28% of the sheet's height, **or** 0.5 px/ms |
+| Speed is measured over | the last 120ms of movement |
+| Otherwise | springs back |
+
+**Where a drag may start.** Anywhere on the sheet, including its content — with
+one condition, which is the rule every native sheet follows: *the content owns
+the gesture until the content is at its top.* A drag that begins on scrolled
+content is a scroll and is never taken. A drag that begins on content already at
+`scrollTop: 0` becomes a dismissal, because scrolling there has nowhere to go.
+
+Three things are refused outright: a drag on anything that scrolls sideways, a
+drag that begins inside a text field — where dragging moves the caret and
+selects, which is what Setup's two paste boxes are for — and a drag that starts
+inside a control carrying `data-no-sheet-drag`, which is how a control the
+primitive cannot guess at claims its own gesture.
+
+**Why this needs a `preventDefault`, and why it is the only one.** A sheet
+taller than the screen declares `touch-action: pan-y` on its body so the browser
+can scroll it. That declaration is a promise, and WebKit collects on it before
+the first `pointermove` arrives: the drag is a scroll, the sheet never moves,
+and the reader is left pulling at something that does nothing. This is what made
+the app's popup cards feel impossible to swipe away — the grip was the only
+place the gesture worked, and a grip is about forty pixels of a phone.
+
+`pan-up` was tried first and is the wrong answer: WebKit does not implement the
+directional values, discards the declaration, and the mechanism is inert on the
+one browser that has the problem. Chromium honours it, so nothing local catches
+that.
+
+So the sheet registers a **non-passive `touchmove`** on itself, which obliges
+the browser to ask before it starts scrolling, and answers *yes, this is mine*
+only when the drag is downward and the scroller under the finger is already at
+its top. Nothing is taken from the reader by that: the browser had nothing to
+offer a downward drag at the top of a scroller. This is the only
+`preventDefault` on a touch anywhere in the app, and its scope is one modal
+surface, one direction and one scroll position.
+
+**What a sheet owes the app while it is up** — the page behind held still, the
+app behind out of the reading order, focus in and focus back, Escape reaching
+the topmost layer only — belongs to `useOverlay`
+([`src/web/overlay.ts`](../src/web/overlay.ts)) and is identical for every
+covering layer, the draft board included. Two points there are iOS-specific:
+
+- The page is held still by **pinning the body** (`position: fixed` at a
+  negative offset), not by `overflow: hidden`, which iOS Safari does not honour.
+  The consequence is that `window.scrollY` reports zero while a layer is open —
+  anything recording "where to come back to" must ask `pageScrollTop()` instead.
+- A sheet **lifts above the software keyboard**. iOS shrinks the visual viewport
+  and not the layout one, so a sheet pinned to the bottom of the layout viewport
+  is pinned underneath the keyboard. `--sheet-keyboard` carries the measured
+  occlusion; it is nought in every browser without a software keyboard, which is
+  every browser in CI.
 
 ## 7. What is deliberately absent
 
