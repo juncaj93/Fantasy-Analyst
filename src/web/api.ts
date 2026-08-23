@@ -1503,3 +1503,76 @@ export interface MatchupResponse {
   cards: Record<string, WeeklyCard>;
   cached: boolean;
 }
+
+/**
+ * One stored preseason projection capture, as Setup lists it.
+ *
+ * `scoringKey` is on the wire because a capture taken under other rules is
+ * kept rather than discarded, and Setup has to be able to say why it is not
+ * being used — an invisible snapshot looks like a bug in the import.
+ */
+export interface ProjectionSnapshotSummary {
+  id: number;
+  season: string;
+  source: string;
+  capturedAt: string;
+  scoringKey: string;
+  scoringLabel: string;
+  importedAt: string;
+  label: string;
+  lastUpdated: string | null;
+  rows: number;
+  players: number;
+  unresolved: number;
+}
+
+/** What Setup shows before anything is pasted: what is loaded, under what rules. */
+export interface ProjectionStatus {
+  season: string;
+  league: { id: string; name: string } | null;
+  /** Null when no league is selected, which is why nothing can be imported. */
+  scoringKey: string | null;
+  scoringLabel: string | null;
+  /** The capture the board is reading — matched to the league's own scoring. */
+  current: ProjectionSnapshotSummary | null;
+  /** Everything else on file for the season, including other scoring profiles. */
+  others: ProjectionSnapshotSummary[];
+}
+
+/**
+ * The answer to both Preview and Apply, which differ only by `committed`.
+ *
+ * Counts are reported whole — parsed, matched, unresolved, rejected — because
+ * the decision a reader makes at the preview is "is this the right table", and
+ * a matched count with no denominator cannot answer that.
+ */
+export interface ProjectionImportResult {
+  committed: boolean;
+  source: string;
+  season: string;
+  capturedAt: string;
+  capturedFrom: 'paste' | 'declared';
+  lastUpdated: string | null;
+  scoringKey: string;
+  scoringLabel: string;
+  label: string;
+  counts: {
+    parsed: number;
+    accepted: number;
+    rejected: number;
+    matched: number;
+    ambiguous: number;
+    unmatched: number;
+  };
+  rejected: { rowNumber: number; reason: string; text: string }[];
+  warnings: string[];
+  needsReview: {
+    name: string;
+    status: 'ambiguous' | 'unmatched';
+    candidates: { playerId: string; name: string; confidence: number }[];
+  }[];
+  replaces: ProjectionSnapshotSummary | null;
+  otherSnapshots: ProjectionSnapshotSummary[];
+  sample: { name: string; position: string | null; team: string | null; points: number }[];
+  reviewsFiled: number;
+}

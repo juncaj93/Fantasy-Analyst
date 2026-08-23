@@ -9,6 +9,8 @@
  * Read-only. Public endpoints only — no passphrase, no writes, nothing stored.
  */
 
+import { isPriced, orderInvariants, scoreInvariants } from './lib/boardInvariants.mjs';
+
 const BASE = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
 
 let failures = 0;
@@ -224,31 +226,27 @@ if (board.json) {
       : `${tagged.length} designated: ${[...new Set(tagged.map((r) => r.status))].join(', ')}`,
   );
   /*
-   * Ranking is ordered by total regardless of who is hurt.
+   * Ranking is ordered by total regardless of who is hurt, and the unpriced
+   * are a tail rather than a scattering.
    *
-   * Checked among the players the market has priced, because the board has one
-   * deliberate exception to "order follows total" and it is not injury: a
-   * player with no published ADP is ranked after every player who has one. The
-   * arithmetic alone gets that backwards -- an unknown market contributes zero
-   * while a genuine reach contributes a negative, so sorting on the total alone
-   * floats anonymous players above ranked ones. The tail is checked separately
-   * below.
+   * The predicates live in `lib/boardInvariants.mjs` so they can be pointed at
+   * a violation in a unit test. They had been asserting `r.adp == null` long
+   * after the board's sort moved to the blended market price, which reported a
+   * player Underdog had priced and Sleeper had not as an unpriced row sitting
+   * illegally at the top of the board. The board was right; the probe was
+   * reading a field the policy had moved off, and nothing caught it because a
+   * probe that only ever sees production only ever sees one board.
    */
-  const priced = recs.filter((r) => r.adp != null);
-  const pricedTotals = priced.map((r) => r.total);
-  check(
-    'the board is still ordered by score, not by health',
-    pricedTotals.every((t, i) => i === 0 || pricedTotals[i - 1] >= t),
-    `${priced.length} priced players in order`,
-  );
-  const firstUnpriced = recs.findIndex((r) => r.adp == null);
-  const lastPriced = recs.map((r) => r.adp == null).lastIndexOf(false);
-  check(
-    'and players it cannot price are ranked after the ones it can',
-    firstUnpriced === -1 || firstUnpriced > lastPriced,
-    firstUnpriced === -1
-      ? 'every player on the board carries an ADP'
-      : `first unpriced at ${firstUnpriced + 1}, last priced at ${lastPriced + 1}, of ${recs.length}`,
+  for (const { label, ok, detail } of orderInvariants(recs)) check(label, ok, detail);
+  /*
+   * And the two questions really are different in production, which is the
+   * fact that made the old check wrong. Not an assertion about how many --
+   * zero is fine -- but it is worth printing, because if this ever reads 0 for
+   * good the distinction above stops earning its keep.
+   */
+  const dogOnly = recs.filter((r) => r.adp == null && isPriced(r));
+  console.log(
+    `      ${dogOnly.length} player(s) priced by a market other than Sleeper — the reason "priced" is the blend`,
   );
 }
 
@@ -261,31 +259,7 @@ if (board.json) {
 // a genuine two-hundred-player spread to check against.
 if (board.json) {
   const recs = board.json.recommendations ?? [];
-  const scores = recs.map((r) => r.score);
-  check(
-    'every player carries a whole-number Score in range',
-    scores.length > 0 && scores.every((s) => Number.isInteger(s) && s >= 0 && s <= 100),
-    `${scores[0]} … ${scores[scores.length - 1]}`,
-  );
-  /*
-   * The Score is a transform of the total, so it must agree with the order the
-   * total produced -- among the players that order actually ranks. The unpriced
-   * tail is placed by policy rather than by arithmetic, so a Score there can
-   * legitimately sit above the priced player in front of it; what must never
-   * happen is the priced part of the board disagreeing with itself.
-   */
-  const pricedScores = recs.filter((r) => r.adp != null).map((r) => r.score);
-  check(
-    'Score never contradicts board order',
-    pricedScores.every((s, i) => i === 0 || pricedScores[i - 1] >= s),
-    `across ${pricedScores.length} priced players`,
-  );
-  const top = scores.slice(0, 20);
-  check(
-    'it separates the players actually being chosen between',
-    top.length > 3 && Math.max(...top) - Math.min(...top) >= 3,
-    `top 20 span ${Math.min(...top)}–${Math.max(...top)}, whole board ${Math.min(...scores)}–${Math.max(...scores)}`,
-  );
+  for (const { label, ok, detail } of scoreInvariants(recs)) check(label, ok, detail);
 
   /*
    * The live component. It is bounded by construction, so what production is
