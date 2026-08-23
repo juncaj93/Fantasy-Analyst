@@ -23,6 +23,14 @@ icon, asset or branding — every glyph in the app is drawn in
 4. **Everything is on the spacing scale.** 2 (hairline), 4, 8, 12, 16, 20, 24.
    A component that wants its own number has stopped being part of a system.
 5. **Touch targets stay at 44px** even when the visible control is smaller.
+   The mark and the target are two boxes, not one — see `.row-action`, which is
+   how a 28px glyph on a compact row carries a 44px target without the row
+   gaining a pixel.
+6. **A control is never nested inside another control.** A row that leads
+   somewhere *and* carries its own action is a container with two sibling
+   buttons in it, never one button wrapping the other: nesting is invalid HTML,
+   it collapses two actions into one tab stop, and it leaves the inner one's
+   target at whatever its glyph happens to measure.
 
 ## Tokens
 
@@ -37,6 +45,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-open` / `--pos-mix-draft` for how much of it a row shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-toolbar: 25` `--radius-pill` `--tap: 44` |
+| Row control | `--row-action: 28` (the mark) against `--tap: 44` (the target), `--row-pad-top: 6`, `--chevron: 14` / `--chevron-nudge: -2` |
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
 | Motion | `--dur-fast: 120ms` `--dur: 220ms` `--dur-slow: 320ms` `--ease` |
 | Elevation | `--shadow-1` `--shadow-2` `--shadow-sheet` `--shadow-toolbar` |
@@ -88,7 +97,8 @@ is which.
 | `Sheet` | A modal sheet: rounded top, grab handle, dimmed backdrop, swipe-to-dismiss, and a Done control because a gesture is never the only way out. |
 | `SkeletonRows` | Loading at the shape of what is coming, so the page does not jump when it lands. |
 | `PlayerIdentity` | Who a player is, on the leading edge of any row: a fixed-width position pill, then the club's mark at the smaller inline size, then his name. `flex: none`, so every name in a list starts on the same x whatever follows it. Draft, Players, Trades, Waivers and Team's lineup and bench all open with it — `e2e/row-alignment.spec.ts` holds all five to it, and to the column being reserved rather than filled with an invented value. |
-| `CompactPlayerRow` | One player as one row, in the columns every list shares: rank, a control of the screen's own, the name, the tally/availability field, the position, a chevron — then up to four labelled numbers and one short line. Players and Trades both draw from it, which is what makes a player read as the same object on both. |
+| `CompactPlayerRow` | One player as one row, in the columns every list shares: rank, a control of the screen's own, the name, the tally/availability field, the position, a chevron — then up to four labelled numbers and one short line. Players and Trades both draw from it, which is what makes a player read as the same object on both. A container, not a button: the way in is a `.dense-row-open` inside it and the screen's own control is its sibling. |
+| `.row-action` / `.row-action-slot` | A row's independent control — the heart on Players, the star on the draft board — hung over the row instead of sitting on it. The line keeps a `.row-action-slot` of exactly the mark's 28px so nothing on it moves; the control is absolutely positioned over that slot at `--tap` square, starting at the row's top edge rather than centred on the mark, so the target never reaches into the row above. Out of flow, so it costs the row no height. |
 | `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
 | `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
@@ -148,6 +158,13 @@ blank strip under the navigation twice:
   collapsed rows rather than as a pixel count. An opened player rests at under
   three rows; everything the card stopped resting on is behind its one control,
   and the second test there proves it is still reachable.
+- `e2e/row-alignment.spec.ts` — the row's columns, and its two actions: that the
+  way in and the row's own control are siblings rather than one nested in the
+  other, that the control is 44×44 and answers at every point inside it, that
+  the mark has not moved off its slot or grown with its target, that neither
+  action does the other's job by pointer or by key, and that the row is the
+  height it was. `e2e-production/smoke.spec.ts` reads the structure and the
+  geometry back off the deployed site, where the 28×28 was measured.
 - `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
   and ceiling, that the position is a pill and neither a rail nor a wash, that no column
   truncates a value, that a trade suggestion is a row rather than a card, and

@@ -1968,7 +1968,8 @@ function RecommendationRow({
             <InjuryTag status={rec.status} />
           </span>
           {/*
-            The star, alone on the trailing edge.
+            The star's slot, alone on the trailing edge — and the star itself is
+            not in it.
 
             It shared that edge with the club's mark, which was two objects
             answering two unrelated questions in one place — *who is this* and
@@ -1977,8 +1978,16 @@ function RecommendationRow({
             row, with the whole trailing column to itself. A bookmark toggle is
             worth finding without looking, and now it is the only thing there
             to find.
+
+            What is left *here* is its box. The star used to be a `<button>`
+            inside this row's `<button>`, which is invalid and cost it its own
+            tab stop and its own target; it is a sibling of the row's button now
+            and is drawn over this slot — see `.row-action`. The box stays
+            because the line is as tall as the tallest thing on it, and that
+            thing is the star: take it away and every card on the board loses
+            eight pixels of height.
           */}
-          <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+          <span className="row-action-slot" aria-hidden="true" />
         </div>
 
         {/*
@@ -2211,6 +2220,19 @@ function RecommendationRow({
           </div>
         ) : null}
       </button>
+
+      {/*
+        The star, beside the way into the card rather than inside it.
+
+        Two actions on one row — open him, remember him — so two buttons, and
+        neither of them nested in the other. Last in the DOM and so last in the
+        tab order, which is the order it reads in; where it lands on screen is
+        `.row-action`'s business, and it lands exactly on the slot reserved for
+        it on the line above.
+      */}
+      <span className="row-action">
+        <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+      </span>
 
       {/*
         The reveal, in place and at a native speed.

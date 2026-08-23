@@ -244,6 +244,39 @@
   --tap: 44px;
 
   /*
+   * A row's own control — the heart on Players, the star on the draft board —
+   * as two numbers rather than one, because they are two different things.
+   *
+   * `--row-action` is the mark: 28px, and it always was. It is a glyph beside a
+   * player's name and growing it would make it compete with the name, which is
+   * the thing the row exists to show.
+   *
+   * `--tap` is the *target*, and in production the two were the same number:
+   * the control measured 28×28, which is a thumb's width short of what a thumb
+   * needs. They are separated now — see `.row-action`, which hangs the target
+   * over the row from the mark's own slot, so the glyph is where it always was,
+   * the row is the height it always was, and the 44 is real.
+   */
+  --row-action: 28px;
+
+  /*
+   * The six pixels above the first line of a row, named because two things
+   * depend on being the same number: the row's own padding, and the offset that
+   * drops a control hanging over the row onto that first line. See `.row-action`.
+   */
+  --row-pad-top: 6px;
+
+  /*
+   * The chevron that says a dense row leads somewhere, and the two pixels it is
+   * tucked in by. Named for the same reason: the control beside it is drawn
+   * from the row's trailing edge inwards, so its offset is this box plus that
+   * nudge, and a chevron that changed size while the number was written out by
+   * hand would move the control off its own slot.
+   */
+  --chevron: 14px;
+  --chevron-nudge: -2px;
+
+  /*
    * The team mark beside a position pill.
    *
    * One token, because the answer is the same on every screen: a club is a
@@ -1584,13 +1617,23 @@ body,
    * a phone and eleven. The tap target is untouched — `min-height` still holds
    * the row at 44px, and the two lines of type inside it are unchanged.
    */
-  padding: 6px var(--sp-2) 6px 10px;
+  padding: var(--row-pad-top) var(--sp-2) 6px 10px;
   margin-bottom: var(--sp-1);
   color: inherit;
   font: inherit;
   cursor: pointer;
   display: block;
   min-height: var(--tap);
+  /*
+   * The containing block for a control that is the row's own rather than the
+   * way in — the draft board's star. Nothing else on the row is positioned, so
+   * this costs the rows that carry no control nothing at all.
+   *
+   * The star sits at the row's own trailing padding, so its slot is `--sp-2`
+   * in; see `.row-action`, which grows the target out from there.
+   */
+  position: relative;
+  --row-action-inset: var(--sp-2);
   box-shadow: var(--shadow-1);
   transition:
     background-color var(--dur-fast) ease,
@@ -2579,14 +2622,6 @@ body,
 }
 
 /*
- * One player, two lines, the full tap target.
- *
- * `min-height` holds the 44px a thumb needs while the padding stays at six
- * points: a row that is exactly as tall as its contents on a phone with large
- * type is still a row a thumb can hit, and a row with a single line of content
- * does not collapse below what can be tapped.
- */
-/*
  * The dense list row: no rail, no wash, the position in the pill.
  *
  * It carried a three-pixel bar of the position's hue down its leading edge.
@@ -2598,9 +2633,49 @@ body,
  *
  * The hue token stays on the element (`positionAccentClass`) because the pill
  * inside it reads from it. What went is the paint.
+ *
+ * **It is a container rather than a button, and that is the newer half of this
+ * rule.** It used to be one `<button>` around everything, with the heart nested
+ * inside it — which is invalid: a button may not contain a button, and what a
+ * browser does with the pair is undefined rather than agreed. The row's two
+ * actions are siblings now, which is what makes each of them reachable,
+ * nameable and activatable on its own. See `CompactPlayerRow` and `.row-action`.
+ *
+ * `--row-gap` moves up here from `.dense-row-top`, where it was declared, and
+ * is inherited back down to it unchanged. The line still reads it for its own
+ * `gap`; what needed it up here is `--row-action-inset` below, which measures
+ * the control's slot in from the trailing edge and has to be told the same gap
+ * the line uses.
  */
 .dense-row {
   position: relative;
+  /*
+   * How far the control's own 28px slot sits in from the row's trailing edge:
+   * the row's padding, the chevron's box, the gap in front of it, and the two
+   * pixels the chevron is tucked in by. Written from the tokens the line itself
+   * uses rather than as the 26 they currently add up to, so a chevron that
+   * changes size takes the control with it.
+   */
+  --row-action-inset: calc(var(--sp-2) + var(--chevron) + var(--row-gap) + var(--chevron-nudge));
+  --row-gap: 6px;
+  scroll-margin-top: 72px;
+  scroll-margin-bottom: var(--content-inset);
+}
+
+/*
+ * The way in: one player, two lines, the full tap target.
+ *
+ * Everything the row draws is inside this button — the rank, the identity, the
+ * name, the numbers under it and the chevron — so a reader listening rather
+ * than looking hears the row rather than a label somebody wrote for it, and a
+ * thumb has the full row minus the control's corner to land on.
+ *
+ * `min-height` holds the 44px a thumb needs while the padding stays at six
+ * points: a row that is exactly as tall as its contents on a phone with large
+ * type is still a row a thumb can hit, and a row with a single line of content
+ * does not collapse below what can be tapped.
+ */
+.dense-row-open {
   display: block;
   width: 100%;
   text-align: left;
@@ -2610,10 +2685,8 @@ body,
   font: inherit;
   cursor: pointer;
   min-height: var(--tap);
-  padding: 6px var(--sp-2) 7px var(--sp-2);
+  padding: var(--row-pad-top) var(--sp-2) 7px var(--sp-2);
   transition: background-color var(--dur-fast) ease;
-  scroll-margin-top: 72px;
-  scroll-margin-bottom: var(--content-inset);
 }
 
 /*
@@ -2629,7 +2702,7 @@ body,
   border-top: 1px solid var(--separator-soft);
 }
 
-.dense-row:active {
+.dense-row-open:active {
   background: var(--pressed);
 }
 
@@ -2651,9 +2724,10 @@ body,
    * of a gap here is a fixed-width field, so nothing else changes size.
    *
    * Named for the same reason `.player-row-top`'s is — the rank cancels its own
-   * share of it. See `.rank:has(+ .player-identity)`.
+   * share of it. See `.rank:has(+ .player-identity)`. Declared on `.dense-row`
+   * and inherited to here, because the control that hangs over the row is
+   * positioned from the same number.
    */
-  --row-gap: 6px;
   gap: var(--row-gap);
 }
 
@@ -2777,7 +2851,7 @@ body,
   flex: none;
   /* Tucked against the position it follows: it belongs to the row, not to a
      column of its own, and the name is what the space is worth more to. */
-  margin-left: -2px;
+  margin-left: var(--chevron-nudge);
   display: inline-flex;
   align-items: center;
   color: var(--text-faint);
@@ -2785,8 +2859,8 @@ body,
 }
 
 .dense-chevron svg {
-  width: 14px;
-  height: 14px;
+  width: var(--chevron);
+  height: var(--chevron);
 }
 
 /*
@@ -4500,50 +4574,164 @@ table.compact tr:last-child td {
 }
 
 /*
- * The My Guy control.
+ * The My Guy control, and the draft board's star.
  *
  * A glyph, not a box: a bordered square read as a button competing with the
- * player's name. The tap target is unchanged — 28px inside a 44px row — and the
- * selected state is carried by the filled glyph and the accent colour rather
- * than by an outline.
+ * player's name. The selected state is carried by the filled glyph and the
+ * accent colour rather than by an outline.
+ *
+ * **The button and the mark are two boxes now, and that is the whole of this
+ * change.** They used to be one, which meant the thing a thumb had to hit was
+ * the size of the thing an eye had to read — 28×28, measured in production,
+ * against the 44 a thumb needs. The mark keeps the 28 (`.control-glyph`); the
+ * button is free to be larger, and on a row it is exactly `--tap` in both
+ * directions without the row growing or the glyph moving. See `.row-action`.
+ *
+ * Off a row — the heart in a player sheet's header — the button is still the
+ * mark's own size, because nothing there is asking it to be otherwise and
+ * widening it would take the space from the name beside it.
  */
 .star-btn,
 .heart-btn {
   flex: 0 0 auto;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 3px;
-  font-size: 0.95rem;
-  line-height: 1;
-  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--row-action);
+  min-height: var(--row-action);
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+
+/* The mark itself: the box the reader sees, and the only one that is painted. */
+.control-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--row-action);
+  min-height: var(--row-action);
+  padding: 0 3px;
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: var(--radius-pill);
   transition:
-    color var(--dur-fast) ease,
     transform var(--dur-fast) var(--ease),
     background-color var(--dur-fast) ease;
 }
 
-.star-btn:active,
-.heart-btn:active {
+.star-btn:active .control-glyph,
+.heart-btn:active .control-glyph {
   transform: scale(0.85);
 }
 
 .star-btn-on {
   color: var(--accent-text);
+}
+
+.star-btn-on .control-glyph {
   background: var(--accent-tint);
 }
 
 .heart-btn-on {
   color: var(--neg);
+}
+
+.heart-btn-on .control-glyph {
   background: var(--neg-tint);
 }
 
 .heart-btn:disabled,
 .star-btn:disabled {
   opacity: 0.5;
+}
+
+/*
+ * The focus ring stays on the mark, not on the target.
+ *
+ * The button is `--tap` square now and the shared rule would draw the ring
+ * around all of it — a 44px box around a 28px glyph, overlapping the chevron
+ * beside it, on a row whose whole design is that it is compact. The target is
+ * for a thumb and does not need to be seen; the ring is for an eye and belongs
+ * where the eye already is. Nothing is lost: the same ring, the same tokens,
+ * the same pill it drew before the target existed.
+ */
+.star-btn:focus-visible,
+.heart-btn:focus-visible {
+  box-shadow: none;
+}
+
+.star-btn:focus-visible .control-glyph,
+.heart-btn:focus-visible .control-glyph {
+  box-shadow: var(--focus-ring);
+}
+
+/*
+ * A row's own control, over the row rather than on it.
+ *
+ * This is what makes the two actions on a player row siblings without the row
+ * being redrawn. The control is lifted out of the way-in button — where it was
+ * nested, which is invalid — and hung over the row from the same slot it always
+ * occupied, while the line underneath keeps a `.row-action-slot` of exactly the
+ * mark's size so nothing on it moved by a pixel.
+ *
+ * The target is `--tap` square and it grows *from the mark's own slot*, half of
+ * it either side, so the glyph lands where it always landed: `right` is the
+ * slot's inset less the half that hangs past it, and the mark inside is pushed
+ * back out to the slot's own trailing edge by the same half.
+ *
+ * The mark is trailing-aligned rather than centred inside the target, and that
+ * is not a detail. The row's slack sits in front of this cluster — see
+ * `.player-row-meta`'s `margin-right: auto` — so the mark has always been
+ * anchored on its right edge and grown leftwards into the name: `♥♥♥` is three
+ * points wider than `♡` and those three points come off the name, with the gap
+ * to the chevron unchanged. Centred in the target it would have grown in both
+ * directions instead, and closed half of that gap.
+ *
+ * Vertically it starts at the row's top edge rather than centring on the glyph,
+ * which is deliberate — a 44px box centred on a mark that sits 6px down would
+ * reach two pixels into the row above, and a control that can be hit from the
+ * row above it is worse than a small one. `--row-pad-top` on the button inside
+ * puts the glyph back on the row's first line.
+ *
+ * `z-index` because the target overlaps the way-in button by design: in its own
+ * 44px corner the row's control wins, everywhere else the row opens.
+ */
+.row-action {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: calc(var(--row-action-inset) - (var(--tap) - var(--row-action)) / 2);
+  width: var(--tap);
+  height: var(--tap);
+  display: flex;
+}
+
+.row-action > button {
+  width: 100%;
+  height: 100%;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-top: var(--row-pad-top);
+  padding-right: calc((var(--tap) - var(--row-action)) / 2);
+}
+
+/*
+ * The space the control would have taken if it were still on the line.
+ *
+ * Empty and hidden, and it is not decoration: the row's first line is the
+ * height of the tallest thing on it, and that thing was the control. Take the
+ * control out without leaving its box behind and every row on both screens
+ * loses eight pixels of height — which is a density change nobody asked for,
+ * and would have been bought by a semantics fix rather than argued for.
+ */
+.row-action-slot {
+  flex: none;
+  width: var(--row-action);
+  height: var(--row-action);
 }
 
 /* =========================================================== draft screen */

@@ -977,3 +977,488 @@ test.describe('the AVOID tag', () => {
     expect(recommendations.every((r) => typeof r.avoid?.active === 'boolean')).toBe(true);
   });
 });
+
+/**
+ * A row has two actions on it, and until this they were one button inside
+ * another.
+ *
+ * Every compact row in the app leads somewhere — tap it and the player opens —
+ * and two of them also carry a control that acts on the player without opening
+ * him: the heart on Players, the star on the draft board. Those were written as
+ * a `<button>` nested inside the row's own `<button>`, which is invalid HTML
+ * and undefined behaviour rather than agreed behaviour, and the whole of what
+ * kept the two apart was a `stopPropagation` in the inner one's handler.
+ *
+ * What it cost was measurable and was measured in production: the independent
+ * control's target was the glyph, 28×28, against the 44 a thumb needs. It also
+ * cost the row a tab stop — one focusable object where there are two actions —
+ * and cost a screen reader the ability to say which of them it was on.
+ *
+ * The two are siblings now: a container, the way in, and the row's own control
+ * drawn over the slot the glyph already occupied. These assertions are the ones
+ * that would fail if any part of that were undone — the nesting, the target,
+ * the separation of the two actions, or the geometry the arrangement was
+ * required not to disturb. Every one of them runs at 430, 390, 375 and 360,
+ * because this file's projects are those four widths.
+ */
+test.describe('a row and its own control', () => {
+  /** Everything a browser, a keyboard or a screen reader treats as an action. */
+  const INTERACTIVE =
+    'button, a[href], input, select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="switch"], [tabindex]';
+
+  async function openPlayers(page: Page) {
+    await page.goto('/');
+    await page.getByTestId('tab-players').click();
+    await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
+  }
+
+  /**
+   * The two rows that carry an independent control, and what each of them calls
+   * its parts.
+   *
+   * Trades, Waivers and Team draw the same primitives and carry no control at
+   * all, so they have nothing to nest and are covered by the identity and
+   * column assertions above. If one of them ever grows a control, it grows it
+   * through `CompactPlayerRow`'s `action` — which is the arrangement asserted
+   * here.
+   */
+  const ROWS = [
+    {
+      screen: 'the draft board',
+      open: openDraft,
+      row: 'recommendation-row',
+      wayIn: '.row-button',
+      control: 'queue-control',
+      /** What "the row opened" looks like on this screen. */
+      opened: (page: Page) => page.getByTestId('player-detail'),
+      /** The attribute the control's own state is published on. */
+      state: 'data-queued',
+      /* The board's card opens in place, so the way in is also the way out. */
+      close: (page: Page) => page.locator('[data-testid="recommendation-row"] .row-button').first().click(),
+    },
+    {
+      screen: 'Players',
+      open: openPlayers,
+      row: 'player-search-row',
+      wayIn: '.dense-row-open',
+      control: 'my-guy-control',
+      opened: (page: Page) => page.getByTestId('player-sheet'),
+      state: 'data-level',
+      /* Players opens a sheet, which dismisses the way every sheet does. */
+      close: (page: Page) => page.keyboard.press('Escape'),
+    },
+  ] as const;
+
+  /**
+   * A row far enough down the list to be nothing but itself.
+   *
+   * The first row on a screen sits under a sticky bar on some of these widths,
+   * and a hit test against a point covered by the bar would report the bar —
+   * which is a true answer to the wrong question. This picks the first row
+   * whose top edge is clear of the chrome, so every point sampled inside it
+   * belongs to the row.
+   */
+  async function clearRow(page: Page, testId: string): Promise<number> {
+    const index = await page.locator(`[data-testid="${testId}"]`).evaluateAll((rows) =>
+      rows.findIndex((r) => {
+        const box = r.getBoundingClientRect();
+        return box.top > 120 && box.bottom < window.innerHeight - 120;
+      }),
+    );
+    expect(index, `no ${testId} was clear of the app's own bars`).toBeGreaterThanOrEqual(0);
+    return index;
+  }
+
+  for (const { screen, open, row, wayIn, control, opened, state, close } of ROWS) {
+    test(`draws the way in and the control as two buttons on ${screen}`, async ({ page }) => {
+      await open(page);
+      const rows = await page.locator(`[data-testid="${row}"]`).evaluateAll(
+        (all, { sel, way, ctrl }) =>
+          all.slice(0, 8).map((r) => ({
+            /* The defect itself: a button inside a button. */
+            nested: r.querySelector('button button') != null,
+            /* And the general form of it, whatever tag or role it is written in. */
+            insideTheWayIn: [...(r.querySelector(way)?.querySelectorAll(sel) ?? [])].map(
+              (el) => el.tagName + (el.getAttribute('role') ? `[role=${el.getAttribute('role')}]` : ''),
+            ),
+            actions: [...r.querySelectorAll(sel)].map((el) => el.getAttribute('data-testid') ?? el.className),
+            controlIsChildOfRow: r.querySelector(`[data-testid="${ctrl}"]`)?.closest(way) == null,
+          })),
+        { sel: INTERACTIVE, way: wayIn, ctrl: control },
+      );
+
+      expect(rows.length, `${screen} should be drawing rows`).toBeGreaterThan(4);
+      for (const r of rows) {
+        expect(r.nested, 'a button is nested inside a button').toBe(false);
+        expect(
+          r.insideTheWayIn,
+          `the way in contains ${r.insideTheWayIn.join(', ')}, which are actions of their own`,
+        ).toEqual([]);
+        /*
+         * Exactly two, and no more: the row opens, and the control acts. A third
+         * would mean something had been added to the row without being thought
+         * about as a tab stop.
+         */
+        expect(r.actions, `${screen} row offers ${r.actions.join(', ')}`).toHaveLength(2);
+        expect(r.controlIsChildOfRow, 'the control is still inside the way in').toBe(true);
+      }
+    });
+
+    /**
+     * Forty-four in both directions, and it is the *control* that is that big
+     * rather than a box drawn near it.
+     *
+     * A bounding box alone would pass for a target covered by something else, so
+     * every point sampled inside it is hit-tested as well: what a finger landing
+     * there would actually reach has to be the control itself.
+     */
+    test(`gives the control a thumb's worth of target on ${screen}`, async ({ page }) => {
+      await open(page);
+      const i = await clearRow(page, row);
+      const measured = await page.locator(`[data-testid="${row}"]`).nth(i).evaluate(
+        (r, ctrl) => {
+          const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement;
+          const box = el.getBoundingClientRect();
+          const rowBox = r.getBoundingClientRect();
+          const glyph = el.querySelector('.control-glyph')!.getBoundingClientRect();
+          const slot = r.querySelector('.row-action-slot')!.getBoundingClientRect();
+          const hits: string[] = [];
+          for (const fx of [0, 0.5, 1]) {
+            for (const fy of [0, 0.5, 1]) {
+              const x = box.left + Math.min(Math.max(box.width * fx, 1), box.width - 1);
+              const y = box.top + Math.min(Math.max(box.height * fy, 1), box.height - 1);
+              const at = document.elementFromPoint(x, y);
+              hits.push(at === el || el.contains(at) ? 'ok' : `${(at as HTMLElement)?.className ?? at?.nodeName}`);
+            }
+          }
+          return {
+            width: box.width,
+            height: box.height,
+            hits,
+            /* The mark itself, which is not allowed to have grown with the target. */
+            glyph: { width: glyph.width, height: glyph.height },
+            /*
+             * …and is still exactly where the line reserved room for it.
+             *
+             * The trailing edge rather than the leading one, because that is
+             * the edge the mark is anchored on: the row's slack sits in front
+             * of this cluster, so `♥♥♥` grows leftwards out of its slot and has
+             * always done. Measuring the left edge would be measuring how many
+             * hearts the first row happens to be showing.
+             */
+            offSlot: { x: Math.abs(glyph.right - slot.right), y: Math.abs(glyph.top - slot.top) },
+            /* The target has to live inside its own row, top and bottom. */
+            aboveRow: rowBox.top - box.top,
+            belowRow: box.bottom - rowBox.bottom,
+          };
+        },
+        control,
+      );
+
+      expect(measured.width, `the control is ${measured.width}px wide`).toBeGreaterThanOrEqual(44);
+      expect(measured.height, `the control is ${measured.height}px tall`).toBeGreaterThanOrEqual(44);
+      expect(measured.hits.join(' '), 'something else answers inside the control').toBe('ok '.repeat(9).trim());
+
+      /*
+       * The compact look, which is the other half of the brief. The glyph is
+       * the row's own 28px mark and it has not moved off the slot the line
+       * reserves for it — so the target grew and the row did not.
+       */
+      /*
+       * A mark is one or two characters wide plus its padding; the ceiling is
+       * generous enough for the three-heart case and nowhere near the target.
+       */
+      expect(measured.glyph.width, 'the mark grew with its target').toBeLessThanOrEqual(34);
+      expect(measured.glyph.height, 'the mark grew with its target').toBeLessThanOrEqual(29);
+      expect(measured.offSlot.x, 'the mark has drifted off its reserved slot').toBeLessThanOrEqual(0.5);
+      expect(measured.offSlot.y, 'the mark has drifted off its reserved slot').toBeLessThanOrEqual(0.5);
+
+      /*
+       * A 44px target centred on a mark that sits six pixels down the row would
+       * reach into the row above it, and a control that can be hit from the
+       * neighbouring row is worse than a small one.
+       */
+      expect(measured.aboveRow, 'the target reaches into the row above').toBeLessThanOrEqual(0.5);
+      expect(measured.belowRow, 'the target reaches into the row below').toBeLessThanOrEqual(0.5);
+    });
+
+    /** And the way in keeps the rest of the row, which is most of it. */
+    test(`leaves the way in comfortably tappable on ${screen}`, async ({ page }) => {
+      await open(page);
+      const i = await clearRow(page, row);
+      const measured = await page.locator(`[data-testid="${row}"]`).nth(i).evaluate((r, way) => {
+        const el = r.querySelector(way) as HTMLElement;
+        const box = el.getBoundingClientRect();
+        const hits: string[] = [];
+        for (const fx of [0.05, 0.35, 0.6]) {
+          const x = box.left + box.width * fx;
+          const y = box.top + box.height / 2;
+          const at = document.elementFromPoint(x, y);
+          hits.push(at === el || el.contains(at) ? 'ok' : `${(at as HTMLElement)?.className ?? at?.nodeName}`);
+        }
+        return { width: box.width, height: box.height, row: r.getBoundingClientRect().width, hits };
+      }, wayIn);
+
+      expect(measured.height, `the way in is ${measured.height}px tall`).toBeGreaterThanOrEqual(44);
+      // The control's corner is all it gives up.
+      expect(measured.width).toBeGreaterThanOrEqual(measured.row - 44);
+      expect(measured.hits.join(' '), 'something else answers over the row').toBe('ok ok ok');
+    });
+
+    /**
+     * The separation itself, and it is asserted in both directions because it
+     * used to hold in only one: the nested control stopped the event, so the
+     * control did not open the row — but the row and the control were one
+     * object to the keyboard, which is the half nothing was checking.
+     */
+    test(`keeps the control and the way in apart on ${screen}`, async ({ page }) => {
+      await open(page);
+      const i = await clearRow(page, row);
+      const line = page.locator(`[data-testid="${row}"]`).nth(i);
+      const button = line.getByTestId(control);
+      const before = await button.getAttribute(state);
+
+      // Acting on the control acts on the control, and does not open the row.
+      await button.click();
+      await expect(button).not.toHaveAttribute(state, before!);
+      await expect(opened(page), 'the control opened the row as well').toHaveCount(0);
+
+      // Opening the row opens the row, and does not act on the control.
+      const afterTap = await button.getAttribute(state);
+      await line.locator(wayIn).click();
+      await expect(opened(page)).toBeVisible();
+      await expect(button, 'opening the row moved the control').toHaveAttribute(state, afterTap!);
+
+      // Put the screen, and the shared dev server, back as they were found.
+      await close(page);
+      await expect(opened(page)).toHaveCount(0);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if ((await button.getAttribute(state)) === before) break;
+        await button.click();
+        await page.waitForTimeout(150);
+      }
+      await expect(button).toHaveAttribute(state, before!);
+    });
+
+    /**
+     * …and the same separation from a keyboard, which is the half the old shape
+     * could not have.
+     *
+     * One `<button>` inside another is one tab stop and one activation: Space on
+     * the row was Space on whichever of the two the browser had decided the
+     * focus belonged to. Two siblings are two stops, in the order they read in,
+     * and each says what it is.
+     */
+    test(`reaches both from the keyboard on ${screen}`, async ({ page }) => {
+      await open(page);
+      const i = await clearRow(page, row);
+      const line = page.locator(`[data-testid="${row}"]`).nth(i);
+      const button = line.getByTestId(control);
+      const before = await button.getAttribute(state);
+
+      /*
+       * Focus the way in, then Tab: the next stop has to be this row's own
+       * control rather than the next row. Driven by the real key rather than by
+       * `.focus()`, because tab order is the claim.
+       */
+      await line.locator(wayIn).focus();
+      await page.keyboard.press('Tab');
+      await expect(button, 'Tab skipped past the row into the next one').toBeFocused();
+
+      // Space activates the control, and only the control.
+      await page.keyboard.press(' ');
+      await expect(button).not.toHaveAttribute(state, before!);
+      await expect(opened(page), 'a keypress on the control opened the row').toHaveCount(0);
+      const afterKey = await button.getAttribute(state);
+
+      // Enter on the way in opens the row, and only the row.
+      await line.locator(wayIn).focus();
+      await page.keyboard.press('Enter');
+      await expect(opened(page)).toBeVisible();
+      await expect(button, 'opening the row from the keyboard moved the control').toHaveAttribute(state, afterKey!);
+
+      await close(page);
+      await expect(opened(page)).toHaveCount(0);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if ((await button.getAttribute(state)) === before) break;
+        await button.click();
+        await page.waitForTimeout(150);
+      }
+      await expect(button).toHaveAttribute(state, before!);
+    });
+
+    /**
+     * What each of the two says it is.
+     *
+     * The control has always carried its own name; what it did not have was
+     * anywhere to say it from, being inside something else. The way in
+     * deliberately has no `aria-label` — see `CompactPlayerRow` — so its name is
+     * its contents, and the player's name has to be in there.
+     */
+    test(`names both actions on ${screen}`, async ({ page }) => {
+      await open(page);
+      const i = await clearRow(page, row);
+      const named = await page.locator(`[data-testid="${row}"]`).nth(i).evaluate(
+        (r, { way, ctrl }) => {
+          const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement;
+          const open = r.querySelector(way) as HTMLElement;
+          return {
+            control: el.getAttribute('aria-label') ?? '',
+            controlPressed: el.getAttribute('aria-pressed'),
+            wayInLabel: open.getAttribute('aria-label'),
+            wayInText: (open.innerText ?? '').replace(/\s+/g, ' ').trim(),
+            player: (r.querySelector('.player-name') as HTMLElement).innerText.trim(),
+            /* The control's own mark must not be read as part of the row. */
+            markInsideWayIn: open.innerText.includes('♥') || open.innerText.includes('★'),
+          };
+        },
+        { way: wayIn, ctrl: control },
+      );
+
+      expect(named.control.length, 'the control has no name of its own').toBeGreaterThan(8);
+      expect(named.wayInLabel, 'the way in has taken a label, which replaces the row it reads').toBeNull();
+      expect(named.wayInText, 'the way in no longer says who the player is').toContain(named.player);
+      expect(named.markInsideWayIn, 'the control is being read as part of the row').toBe(false);
+    });
+
+    /**
+     * And the list is in the order it was in.
+     *
+     * Nothing here touches ranking, and the only way a DOM change could have is
+     * by reordering what it draws — so the order on screen is compared with the
+     * order the screen was given, rather than with a list written down here.
+     */
+    test(`draws ${screen} in the order it was given`, async ({ page }) => {
+      await open(page);
+      const onScreen = await page
+        .locator(`[data-testid="${row}"]`)
+        .evaluateAll((all) => all.map((r) => r.getAttribute('data-player-id')));
+      expect(onScreen.length).toBeGreaterThan(4);
+      expect(new Set(onScreen).size, 'a player is drawn twice').toBe(onScreen.length);
+
+      const ordered = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-player-id]')]
+          .filter((el) => el.matches('[data-testid="recommendation-row"], [data-testid="player-search-row"]'))
+          .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+          .map((el) => el.getAttribute('data-player-id')),
+      );
+      // Document order and painted order are the same list: no row is drawn out
+      // of its place, which is the one way a container change could reorder one.
+      expect(ordered).toEqual(onScreen);
+    });
+  }
+
+  /**
+   * The rows are the height they were, top and bottom, and the target costs
+   * them nothing.
+   *
+   * Two ways this change could have moved a row, and both are checked because
+   * they fail in opposite directions. Take the control out of the line without
+   * leaving its box behind and every row on both screens loses eight pixels —
+   * the control was the tallest thing on the first line. Leave the 44px target
+   * *in* the line instead of over it and every row gains sixteen. So: the first
+   * line is still exactly the control's own 28, and the target is out of flow,
+   * which is the whole of why the sixteen it gained cost the row nothing.
+   *
+   * Row heights themselves are content, not layout — a draft card with a market
+   * line is taller than one without — so they are not pinned to a number here.
+   * `density.spec.ts` holds Players to its own ceiling, and the floor every row
+   * has to clear is the tap target.
+   */
+  for (const [screen, rowTestId, line, wayIn, open] of [
+    ['the draft board', 'recommendation-row', '.player-row-top', '.row-button', openDraft],
+    [
+      'Players',
+      'player-search-row',
+      '.dense-row-top',
+      '.dense-row-open',
+      async (page: Page) => {
+        await page.goto('/');
+        await page.getByTestId('tab-players').click();
+        await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
+      },
+    ],
+  ] as const) {
+    test(`leaves ${screen} at the height it was`, async ({ page }) => {
+      await open(page);
+      const rows = await page.locator(`[data-testid="${rowTestId}"]`).evaluateAll(
+        (all, { lineSel, waySel }) =>
+          all.slice(0, 10).map((r) => {
+            const target = r.querySelector('.row-action')!;
+            return {
+              row: r.getBoundingClientRect().height,
+              line: Math.round(r.querySelector(lineSel)!.getBoundingClientRect().height),
+              /* The way in is what the row is made of; the target is over it. */
+              wayIn: Math.round(r.querySelector(waySel)!.getBoundingClientRect().height),
+              flow: getComputedStyle(target).position,
+              targetHeight: Math.round(target.getBoundingClientRect().height),
+              slot: Math.round(r.querySelector('.row-action-slot')!.getBoundingClientRect().height),
+            };
+          }),
+        { lineSel: line, waySel: wayIn },
+      );
+      expect(rows.length, `${screen} should be drawing rows`).toBeGreaterThan(4);
+      for (const r of rows) {
+        expect(r.line, `${screen} lost the height its control was setting`).toBe(28);
+        expect(r.slot, 'the slot the control used to fill has changed size').toBe(28);
+        expect(
+          r.flow,
+          `the target is ${r.flow}, so its ${r.targetHeight}px is being paid for out of the row's height`,
+        ).toBe('absolute');
+        expect(r.wayIn, 'the way in no longer fills the row').toBeGreaterThanOrEqual(44);
+        expect(r.row, `a row is only ${r.row}px tall`).toBeGreaterThanOrEqual(44);
+      }
+    });
+  }
+
+  /**
+   * The worst row the data can produce, with the target on it.
+   *
+   * `keeps a status tag off the star…` above proves the availability tag stays
+   * off the star's *glyph* when the name is long and the tally wide. The target
+   * is four times the area of the glyph, so it is the thing that can now reach
+   * back over the row — and the answer has to be that the name truncates and
+   * the row still does not scroll sideways, exactly as before.
+   */
+  test('holds the target and the columns when the name is long and the tally wide', async ({ page }) => {
+    const LONG = 'Bartholomew Vandersteen-Whitfield Jr.';
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recommendations = (body.recommendations as Record<string, unknown>[]).map((rec, i) =>
+        i < 4 ? { ...rec, name: LONG, status: 'Out', position: 'DEF', newsLifetimeNet: -12 } : rec,
+      );
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+    await openDraft(page);
+
+    const worst = await page.locator('[data-testid="recommendation-row"]').evaluateAll((rows) =>
+      rows.slice(1, 4).map((r) => {
+        const star = r.querySelector('[data-testid="queue-control"]')!.getBoundingClientRect();
+        const name = r.querySelector('.player-name')!;
+        const tag = r.querySelector('[data-testid="injury-tag"]')?.getBoundingClientRect() ?? null;
+        return {
+          target: { w: star.width, h: star.height },
+          /* The tag may reach the target's edge; it may not reach the mark. */
+          tagOverMark: tag
+            ? Math.round(tag.right - r.querySelector('.control-glyph')!.getBoundingClientRect().left)
+            : null,
+          nameTruncates: name.scrollWidth > name.clientWidth + 1,
+          nameWidth: Math.round(name.getBoundingClientRect().width),
+        };
+      }),
+    );
+
+    expect(worst).toHaveLength(3);
+    for (const r of worst) {
+      expect(r.target.w, 'the target shrank on a crowded row').toBeGreaterThanOrEqual(44);
+      expect(r.target.h, 'the target shrank on a crowded row').toBeGreaterThanOrEqual(44);
+      expect(r.tagOverMark, `the tag reaches ${r.tagOverMark}px past the star`).toBeLessThanOrEqual(0);
+      expect(r.nameTruncates, 'the name should be the thing that truncates').toBe(true);
+      expect(r.nameWidth, 'and it is still a name afterwards').toBeGreaterThan(60);
+    }
+
+    const width = page.viewportSize()!.width;
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+});
