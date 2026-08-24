@@ -462,6 +462,35 @@ for (const regime of REGIMES) {
 }
 line();
 
+line('A sample of rows in the shape section 21 asks for');
+line('-'.repeat(78));
+line('  Twelve real player-weeks, in the coverage regime that leaves the most for');
+line('  the model to do. Every column the handoff lists is here except the current');
+line('  market projection, which no historical props snapshot can supply.');
+line();
+{
+  const sample = rows
+    .filter((r) => r.perRegime.no_receptions.points != null)
+    .filter((_, i) => i % Math.max(1, Math.floor(rows.length / 12)) === 0)
+    .slice(0, 12);
+  for (const r of sample) {
+    const p = r.perRegime.no_receptions;
+    line(
+      `  wk${String(r.week).padStart(2)}  ${r.position.padEnd(3)} ${r.gsisId}  ` +
+        `v2 ${fixed(p.points).padStart(6)}  rotowire ${fixed(r.rotowire).padStart(6)}  ` +
+        `actual ${fixed(r.actual).padStart(6)}  diff ${fixed(p.points - (r.rotowire ?? 0)).padStart(6)}`,
+    );
+    line(
+      `        floor ${fixed(p.interval?.floor).padStart(5)}  ceiling ${fixed(p.interval?.ceiling).padStart(6)}  ` +
+        `confidence ${p.confidence.level.padEnd(6)} coverage ${(p.anchor.marketCoverage * 100).toFixed(0)}%  ` +
+        `usage ${String(p.provenance.usageWeeks.length).padStart(2)} games  ` +
+        `filled ${p.anchor.filledMarkets.join('+') || 'none'}  basis ${p.basis}`,
+    );
+    for (const reason of p.reasons.slice(0, 2)) line(`        · ${reason}`);
+    line();
+  }
+}
+
 line('The ten largest disagreements with Rotowire, usage model alone');
 line('-'.repeat(78));
 {
