@@ -141,3 +141,47 @@ export function buildPickOwnership(input: OwnershipInput): PickOwnership {
     hasTrades: tradedOwner.size > 0,
   };
 }
+
+/**
+ * The picks that actually stand between the clock and the user's next selection.
+ *
+ * Ownership decides, not the snake, and the user's own picks are dropped — the
+ * one being made now, and any owned inside the interval. Your own selection is
+ * not competition for you.
+ *
+ * Exported because two callers need the same answer and must not derive it
+ * twice: the simulator walks these picks, and `managerPrior.ts` decides whose
+ * history is allowed to matter from the slots that own them. A second
+ * implementation that drifted by one pick would let a manager with no
+ * intervening selection influence a number he cannot affect.
+ */
+export function interveningPicks(
+  ownership: PickOwnership,
+  currentPick: number,
+  targetPick: number,
+  mySlot: number | null,
+): number[] {
+  const out: number[] = [];
+  for (let pickNo = currentPick; pickNo < targetPick; pickNo++) {
+    const owner = ownership.ownerAt(pickNo);
+    if (owner != null && owner === mySlot) continue;
+    out.push(pickNo);
+  }
+  return out;
+}
+
+/** The distinct slots owning those picks, ascending. */
+export function slotsAheadOf(
+  ownership: PickOwnership,
+  currentPick: number,
+  targetPick: number,
+  mySlot: number | null,
+): number[] {
+  return [
+    ...new Set(
+      interveningPicks(ownership, currentPick, targetPick, mySlot)
+        .map((p) => ownership.ownerAt(p))
+        .filter((s): s is number => s != null),
+    ),
+  ].sort((a, b) => a - b);
+}
