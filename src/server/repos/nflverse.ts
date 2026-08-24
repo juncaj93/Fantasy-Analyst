@@ -75,6 +75,49 @@ const IDENTITY_COLUMNS = 13;
 const SNAP_COLUMNS = 14;
 const DEPTH_COLUMNS = 13;
 
+/**
+ * Statements sent to D1 in one round trip.
+ *
+ * The reason this exists rather than a loop of awaits: a roster ingest writes
+ * 915 rows, and at 90 bound parameters per statement and 13 columns per row
+ * that is six rows a statement and **153 statements**. Awaited one at a time
+ * inside a cron, that is 153 round trips of network latency for a job that has
+ * no reason to take more than a handful — and the failure mode is a timeout on
+ * a slow morning rather than an error anybody can read.
+ *
+ * `batch` runs its statements in a transaction on D1 and `NodeSqliteDatabase`
+ * mirrors that, so the failure semantics are the same either way: a half-written
+ * crosswalk is not a state either can produce.
+ */
+const STATEMENTS_PER_BATCH = 40;
+
+/**
+ * Insert many rows as multi-row `VALUES` statements, batched.
+ *
+ * Shared by all three stores because they differ only in their column list and
+ * their conflict clause, and three copies of this arithmetic is three places for
+ * the parameter cap to be got wrong by one.
+ */
+async function insertRows<T>(
+  db: Database,
+  rows: T[],
+  columns: number,
+  sql: (values: string) => string,
+  bind: (row: T) => (string | number | null)[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const perStatement = Math.max(1, Math.floor(MAX_BOUND_PARAMS / columns));
+  const statements = chunk(rows, perStatement).map((batch) => {
+    const values = batch.map(() => `(${new Array(columns).fill('?').join(', ')})`).join(', ');
+    const binds: (string | number | null)[] = [];
+    for (const row of batch) binds.push(...bind(row));
+    return db.prepare(sql(values)).bind(...binds);
+  });
+  for (const group of chunk(statements, STATEMENTS_PER_BATCH)) {
+    await db.batch(group);
+  }
+}
+
 // ------------------------------------------------------------- identity ---
 
 export class IdentityCrosswalkRepo {
@@ -89,49 +132,43 @@ export class IdentityCrosswalkRepo {
    * tuple does not stop being true.
    */
   async save(links: (IdentityLink & { fullName?: string | null; status?: string | null })[], fetchedAt: string): Promise<void> {
-    const perStatement = Math.floor(MAX_BOUND_PARAMS / IDENTITY_COLUMNS);
-    for (const batch of chunk(links, perStatement)) {
-      const values = batch.map(() => `(${new Array(IDENTITY_COLUMNS).fill('?').join(', ')})`).join(', ');
-      const binds: (string | number | null)[] = [];
-      for (const link of batch) {
-        binds.push(
-          link.gsisId,
-          link.season,
-          link.sleeperId,
-          link.pfrId,
-          link.espnId,
-          link.yahooId,
-          link.team,
-          link.position,
-          link.fullName ?? null,
-          link.status ?? null,
-          link.source,
-          link.asOf,
-          fetchedAt,
-        );
-      }
-      await this.db
-        .prepare(
-          `INSERT INTO nflverse_identity
-             (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, team, position,
-              full_name, status, source, as_of, fetched_at)
-           VALUES ${values}
-           ON CONFLICT(gsis_id, season) DO UPDATE SET
-             sleeper_id = excluded.sleeper_id,
-             pfr_id = excluded.pfr_id,
-             espn_id = excluded.espn_id,
-             yahoo_id = excluded.yahoo_id,
-             team = excluded.team,
-             position = excluded.position,
-             full_name = excluded.full_name,
-             status = excluded.status,
-             source = excluded.source,
-             as_of = excluded.as_of,
-             fetched_at = excluded.fetched_at`,
-        )
-        .bind(...binds)
-        .run();
-    }
+    await insertRows(
+      this.db,
+      links,
+      IDENTITY_COLUMNS,
+      (values) =>
+        `INSERT INTO nflverse_identity
+           (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, team, position,
+            full_name, status, source, as_of, fetched_at)
+         VALUES ${values}
+         ON CONFLICT(gsis_id, season) DO UPDATE SET
+           sleeper_id = excluded.sleeper_id,
+           pfr_id = excluded.pfr_id,
+           espn_id = excluded.espn_id,
+           yahoo_id = excluded.yahoo_id,
+           team = excluded.team,
+           position = excluded.position,
+           full_name = excluded.full_name,
+           status = excluded.status,
+           source = excluded.source,
+           as_of = excluded.as_of,
+           fetched_at = excluded.fetched_at`,
+      (link) => [
+        link.gsisId,
+        link.season,
+        link.sleeperId,
+        link.pfrId,
+        link.espnId,
+        link.yahooId,
+        link.team,
+        link.position,
+        link.fullName ?? null,
+        link.status ?? null,
+        link.source,
+        link.asOf,
+        fetchedAt,
+      ],
+    );
   }
 
   /** The whole crosswalk for a season. It is ~900 rows; the resolver wants all of it. */
@@ -187,50 +224,44 @@ export class SnapCountRepo {
   constructor(private readonly db: Database) {}
 
   async saveWeeks(rows: StoredSnapWeek[]): Promise<void> {
-    const perStatement = Math.floor(MAX_BOUND_PARAMS / SNAP_COLUMNS);
-    for (const batch of chunk(rows, perStatement)) {
-      const values = batch.map(() => `(${new Array(SNAP_COLUMNS).fill('?').join(', ')})`).join(', ');
-      const binds: (string | number | null)[] = [];
-      for (const row of batch) {
-        binds.push(
-          row.playerId,
-          row.season,
-          row.week,
-          row.gameType,
-          row.team,
-          row.opponent,
-          row.position,
-          row.offenseSnaps,
-          row.offenseShare,
-          row.pfrId,
-          row.gsisId,
-          row.source,
-          row.publishedAt,
-          row.fetchedAt,
-        );
-      }
-      await this.db
-        .prepare(
-          `INSERT INTO player_snap_weeks
-             (player_id, season, week, game_type, team, opponent, position,
-              offense_snaps, offense_share, pfr_id, gsis_id, source, published_at, fetched_at)
-           VALUES ${values}
-           ON CONFLICT(player_id, season, week) DO UPDATE SET
-             game_type = excluded.game_type,
-             team = excluded.team,
-             opponent = excluded.opponent,
-             position = excluded.position,
-             offense_snaps = excluded.offense_snaps,
-             offense_share = excluded.offense_share,
-             pfr_id = excluded.pfr_id,
-             gsis_id = excluded.gsis_id,
-             source = excluded.source,
-             published_at = excluded.published_at,
-             fetched_at = excluded.fetched_at`,
-        )
-        .bind(...binds)
-        .run();
-    }
+    await insertRows(
+      this.db,
+      rows,
+      SNAP_COLUMNS,
+      (values) =>
+        `INSERT INTO player_snap_weeks
+           (player_id, season, week, game_type, team, opponent, position,
+            offense_snaps, offense_share, pfr_id, gsis_id, source, published_at, fetched_at)
+         VALUES ${values}
+         ON CONFLICT(player_id, season, week) DO UPDATE SET
+           game_type = excluded.game_type,
+           team = excluded.team,
+           opponent = excluded.opponent,
+           position = excluded.position,
+           offense_snaps = excluded.offense_snaps,
+           offense_share = excluded.offense_share,
+           pfr_id = excluded.pfr_id,
+           gsis_id = excluded.gsis_id,
+           source = excluded.source,
+           published_at = excluded.published_at,
+           fetched_at = excluded.fetched_at`,
+      (row) => [
+        row.playerId,
+        row.season,
+        row.week,
+        row.gameType,
+        row.team,
+        row.opponent,
+        row.position,
+        row.offenseSnaps,
+        row.offenseShare,
+        row.pfrId,
+        row.gsisId,
+        row.source,
+        row.publishedAt,
+        row.fetchedAt,
+      ],
+    );
   }
 
   /** Regular-season snap weeks for a set of players, oldest first. */
@@ -281,46 +312,40 @@ export class DepthChartRepo {
   constructor(private readonly db: Database) {}
 
   async saveSnapshot(rows: StoredDepthEntry[]): Promise<void> {
-    const perStatement = Math.floor(MAX_BOUND_PARAMS / DEPTH_COLUMNS);
-    for (const batch of chunk(rows, perStatement)) {
-      const values = batch.map(() => `(${new Array(DEPTH_COLUMNS).fill('?').join(', ')})`).join(', ');
-      const binds: (string | number | null)[] = [];
-      for (const row of batch) {
-        binds.push(
-          row.season,
-          row.capturedAt,
-          row.gsisId,
-          row.team,
-          row.playerName,
-          row.position,
-          row.posGroup,
-          row.posSlot,
-          row.posRank,
-          row.starterSlots,
-          row.schemaVersion,
-          row.source,
-          row.fetchedAt,
-        );
-      }
-      await this.db
-        .prepare(
-          `INSERT INTO depth_chart_entries
-             (season, captured_at, gsis_id, team, player_name, position, pos_group,
-              pos_slot, pos_rank, starter_slots, schema_version, source, fetched_at)
-           VALUES ${values}
-           ON CONFLICT(season, captured_at, gsis_id) DO UPDATE SET
-             team = excluded.team,
-             player_name = excluded.player_name,
-             position = excluded.position,
-             pos_group = excluded.pos_group,
-             pos_slot = excluded.pos_slot,
-             pos_rank = excluded.pos_rank,
-             starter_slots = excluded.starter_slots,
-             schema_version = excluded.schema_version`,
-        )
-        .bind(...binds)
-        .run();
-    }
+    await insertRows(
+      this.db,
+      rows,
+      DEPTH_COLUMNS,
+      (values) =>
+        `INSERT INTO depth_chart_entries
+           (season, captured_at, gsis_id, team, player_name, position, pos_group,
+            pos_slot, pos_rank, starter_slots, schema_version, source, fetched_at)
+         VALUES ${values}
+         ON CONFLICT(season, captured_at, gsis_id) DO UPDATE SET
+           team = excluded.team,
+           player_name = excluded.player_name,
+           position = excluded.position,
+           pos_group = excluded.pos_group,
+           pos_slot = excluded.pos_slot,
+           pos_rank = excluded.pos_rank,
+           starter_slots = excluded.starter_slots,
+           schema_version = excluded.schema_version`,
+      (row) => [
+        row.season,
+        row.capturedAt,
+        row.gsisId,
+        row.team,
+        row.playerName,
+        row.position,
+        row.posGroup,
+        row.posSlot,
+        row.posRank,
+        row.starterSlots,
+        row.schemaVersion,
+        row.source,
+        row.fetchedAt,
+      ],
+    );
   }
 
   /** The capture times held for a season, newest first. */
