@@ -63,3 +63,45 @@ export function signalWithNet(net: number, items = 3): PlayerSignal {
   s.last30 = { ...s.raw };
   return s;
 }
+
+/**
+ * A defence, which is a game line rather than a set of props.
+ *
+ * The counterpart to {@link candidate}, and deliberately a different shape:
+ * there is no such thing as a receiving line for Seattle, so a fixture that
+ * built one would be testing the defence model against inputs it never sees.
+ * What a defence has is a total and a spread, and the spread is written from
+ * **this defence's own team's** point of view — negative when favoured, the
+ * convention `GameContext` states and `startSitInputs.ts` resolves against the
+ * stored `spreadTeam`.
+ *
+ * Passing `game: null` is the missing-market case, which is a behaviour and not
+ * an error: no line, no anchor, no number.
+ */
+export function defence(
+  id: string,
+  name: string,
+  game: { spread: number; total: number; opponent?: string } | null,
+  extra: {
+    status?: string | null;
+    team?: string;
+    kickoff?: string | null;
+    now?: string | Date;
+    lineAsOf?: string | null;
+    opponentQuarterback?: { starterOut: boolean; observedAt: string | null } | null;
+  } = {},
+): StartSitInput {
+  return {
+    player: player({ id, fullName: name, position: 'DEF', team: extra.team ?? 'SEA' }),
+    props: [],
+    signal: null,
+    injuryStatus: extra.status ?? null,
+    propsStale: false,
+    game: game == null ? null : { spread: game.spread, total: game.total, opponent: game.opponent ?? null },
+    ...(game?.opponent === undefined ? {} : { opponent: game.opponent }),
+    ...(extra.kickoff === undefined ? {} : { kickoff: extra.kickoff }),
+    ...(extra.now === undefined ? {} : { now: extra.now }),
+    ...(extra.lineAsOf === undefined ? {} : { lineAsOf: extra.lineAsOf }),
+    ...(extra.opponentQuarterback === undefined ? {} : { opponentQuarterback: extra.opponentQuarterback }),
+  };
+}

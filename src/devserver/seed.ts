@@ -26,6 +26,7 @@ import { buildSeasonStatLines } from '../core/sleeper/seasonStats.ts';
 import { lastCompletedSeason, outlookSeason } from '../server/services/playerDetailService.ts';
 import { injurySeason } from '../server/services/injuryService.ts';
 import { InjuryRepo, InjurySourceRepo } from '../server/repos/injury.ts';
+import { VegasEventsRepo } from '../server/repos/vegasEvents.ts';
 
 /** Synthetic players — real-looking names, entirely local. */
 export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
@@ -64,6 +65,42 @@ export const DEMO_PLAYERS: Record<string, SleeperPlayer> = {
   '1017': { player_id: '1017', search_rank: 17, first_name: 'Miles', last_name: 'Barrowman', full_name: 'Miles Barrowman', team: 'CLE', position: 'TE', active: true, injury_status: null },
   '1018': { player_id: '1018', search_rank: 18, first_name: 'Teo', last_name: 'Ferreira', full_name: 'Teo Ferreira', team: 'HOU', position: 'TE', active: true, injury_status: null },
   '1019': { player_id: '1019', search_rank: 19, first_name: 'Grant', last_name: 'Aldous', full_name: 'Grant Aldous', team: 'WAS', position: 'TE', active: true, injury_status: null },
+  /*
+   * Three defences, so the demo deployment has a `DEF` slot it can actually
+   * fill.
+   *
+   * Until the DST lane a defence was unscorable everywhere in this app, so the
+   * seed had no reason to carry one and the league it seeds had no `DEF` slot
+   * to put one in. The two facts propped each other up: no fixture could reach
+   * the defence paths, so no test could show they were broken, so nothing
+   * forced a fixture. Defences are scorable now, and the seed is where a
+   * browser test meets one.
+   *
+   * `1030` sits on the reader's own roster and its game is priced, which is the
+   * whole of the phantom-DEF defect in one row — a rostered, scorable defence
+   * in a league that starts one. `1031` is on the wire for a waiver scan and a
+   * draft board to find, and is the other side of `1030`'s game: the road
+   * underdog, so the two draw as a good spot and a bad one out of a single
+   * line. `1032` is on the wire too and its game is *not* priced, because
+   * "nobody has quoted this game, so there is no number" is a state the screen
+   * has to draw and a demo where every defence has a line would never reach it.
+   *
+   * A defence's Sleeper row carries the club as the name, no first/last split
+   * and no injury status, which is exactly what the dictionary transform sees
+   * in production.
+   *
+   * All three play for clubs **no demo skill player belongs to**, and that is
+   * load-bearing rather than tidy. A defence needs a game line to be projected
+   * at all, so seeding one means seeding a game — and a game line is also a
+   * game-script component for every skill player on either side of it. Putting
+   * the defences on Jacksonville, Baltimore and Tennessee means the one game
+   * seeded below reaches exactly the rows it is for, and not one receiver's
+   * score moves. A fixture addition that silently reprices half the demo board
+   * is how an unrelated assertion starts failing three commits later.
+   */
+  '1030': { player_id: '1030', search_rank: 210, first_name: 'Jacksonville', last_name: '', full_name: 'Jacksonville', team: 'JAX', position: 'DEF', active: true, injury_status: null },
+  '1031': { player_id: '1031', search_rank: 219, first_name: 'Baltimore', last_name: '', full_name: 'Baltimore', team: 'BAL', position: 'DEF', active: true, injury_status: null },
+  '1032': { player_id: '1032', search_rank: 238, first_name: 'Tennessee', last_name: '', full_name: 'Tennessee', team: 'TEN', position: 'DEF', active: true, injury_status: null },
   /*
    * The players neither market has priced — and the one who should not be here.
    *
@@ -253,8 +290,50 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     name: 'Demo Dynasty',
     season: '2026',
     totalRosters: 12,
-    scoringSettings: { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rush_td: 6, rec_td: 6 },
-    rosterPositions: ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'BN', 'BN'],
+    /*
+     * A defence table, written the way a Sleeper league publishes one.
+     *
+     * Including the bands this league scores nothing for. That is how the
+     * settings blob actually arrives — a league states its whole table,
+     * switched-off categories included — and it is the case `buildDstScoring`
+     * has to read correctly: `pts_allow_21_27: 0` is the league saying it pays
+     * nothing for that band, which is a rule, and is not the same as a band it
+     * never mentioned.
+     */
+    scoringSettings: {
+      rec: 0.5,
+      pass_td: 4,
+      rush_yd: 0.1,
+      rec_yd: 0.1,
+      pass_yd: 0.04,
+      rush_td: 6,
+      rec_td: 6,
+      sack: 1,
+      int: 2,
+      fum_rec: 2,
+      ff: 1,
+      def_td: 6,
+      def_st_td: 6,
+      safe: 2,
+      blk_kick: 2,
+      pts_allow_0: 10,
+      pts_allow_1_6: 7,
+      pts_allow_7_13: 4,
+      pts_allow_14_20: 1,
+      pts_allow_21_27: 0,
+      pts_allow_28_34: -1,
+      pts_allow_35p: -4,
+    },
+    /*
+     * One `DEF` slot, taken out of the bench rather than added to the lineup.
+     *
+     * Twelve roster spots either way, so nothing that counts a roster changes;
+     * what changes is that one of them is a starting slot the app now has an
+     * opinion about. Adding a thirteenth would have quietly widened every
+     * roster in the demo, which is the kind of fixture change that turns an
+     * unrelated failing assertion into an afternoon.
+     */
+    rosterPositions: ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN'],
     /*
      * A FAAB league, because that is what the strategy layer has to be
      * exercised against. The demo represents a fully connected deployment, and
@@ -273,8 +352,8 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       rosterId: 1,
       ownerId: 'demo-user',
       ownerName: 'You',
-      playerIds: ['1001', '1004', '1009', '1011'],
-      starterIds: ['1001', '1004'],
+      playerIds: ['1001', '1004', '1009', '1011', '1030'],
+      starterIds: ['1001', '1004', '1030'],
       reserveIds: [],
       isMine: true,
       settings: { waiver_budget_used: 35 },
@@ -378,6 +457,40 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       propCount += consensus.length;
     }
   }
+
+  /*
+   * One game line, for the two defences that have one.
+   *
+   * A defence's entire projection is the opponent's implied team total, so a
+   * seeded defence with no game is a seeded defence with no number — which is a
+   * real state and is what `1032` is for, but cannot be the only one on offer.
+   * This is the row `buildStartSitContext` reads: the same table, the same
+   * columns and the same `spread_team` identity the paid provider writes, so
+   * the demo exercises the production resolution rather than a shortcut past it.
+   *
+   * The spread is stored **against the team it belongs to** rather than against
+   * a column position, which is the one thing about this table that must not be
+   * inferred: `home_team` here means "a team we know is in this game", so a
+   * spread read as the home side's would be backwards for half a real slate.
+   * Jacksonville favoured by 7.5 in a 42.5-point game implies 17.5 against
+   * them and 25 against Baltimore — a good start and a bad one out of one row,
+   * which is what makes the two defences worth drawing side by side.
+   *
+   * Neither club has a demo skill player, so this adds a game-script component
+   * to precisely nobody's score but the defences'.
+   */
+  await new VegasEventsRepo(db).upsertMany([
+    {
+      eventId: 'demo-game-def',
+      provider: provider.name,
+      kickoff: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+      homeTeam: 'JAX',
+      awayTeam: 'BAL',
+      total: 42.5,
+      spread: -7.5,
+      spreadTeam: 'JAX',
+    },
+  ]);
 
   // --- season-long markets, through the same path the real provider uses ---
   // The draft reads these; seeding them means the demo exercises the whole

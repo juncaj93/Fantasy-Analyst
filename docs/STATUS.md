@@ -1637,8 +1637,116 @@ still carries the swings, the mode and the freshness. Opening a player from the
 best-move sheet swaps rather than stacks, so there is one focus trap, one
 Escape and one downward swipe on screen at any time.
 
+## DST safety and scoring foundation
+
+**A defence is now a player this app has an opinion about, and the first lane
+that made one scorable had to close every door that opened.**
+
+**League-specific DST scoring, or a refusal.** `core/sleeper/dstScoring.ts`
+reads what *this* league pays a defence for, out of the `scoring_settings_json`
+Sleeper already persists: sacks, interceptions, fumble recoveries and forced
+fumbles, defensive and special-teams touchdowns, safeties, blocked kicks,
+two-point returns, and the points-allowed and yards-allowed band tables with
+Sleeper's own bounds. There is no standard table to fall back on — two leagues
+identical everywhere else can disagree about a shutout by ten points — so a
+league that publishes a defence-affecting setting the module does not model is
+refused outright rather than scored on the categories it recognised. IDP
+settings are not a refusal: they score a linebacker, not the unit. The result
+rides on `ScoringProfile.dst`, so every engine reads one answer.
+
+**One anchor, and it is the opponent's implied team total.**
+`core/startsit/dstProjection.ts` prices a defence on `total/2 + spread/2` —
+the spread read from the defence's own team, negative when favoured, the same
+convention `gameScript.ts` states — mapped through the league's own bands by a
+monotone, saturating, deterministic curve. Realistic output: about 9.7 points
+for a 13.5-point favourite against a weak offence, about 4.1 for a 13.5-point
+underdog in a shootout.
+
+Everything else is a bounded residual or an explanation, under one rule: **if
+the market could already know it, the anchor already contains it.** The total is
+in the anchor, so it is not a second input; defensive-unit quality is *why* the
+anchor is low, so it is not an independent component; pace and line quality are
+the same. What is allowed on top is a ±0.8 game-script residual for the *shape*
+of a game rather than its size, a ±1.0 quarterback adjustment that is **zero
+unless the news post-dates the line**, and a ±0.3 home-field nudge. Sacks and
+takeaways are in the number — a league paying 2 a sack must project higher than
+one paying nothing — but on league-wide baselines identical for every defence,
+so they set the scale and can never reorder it.
+
+**Unknown stays unknown.** No total, no spread, no projection. Not a league
+average, not a replacement defence, not zero — the rule `projection.ts` was
+written for, on the position most likely to break it, because with the anchor
+gone the remaining components sum to a small number that sorts above nothing and
+reads as a judgement.
+
+**The Team phantom-DEF defect, fixed through the normal path.** `evaluatePlayer`
+branches to a defence model on its first line; a rostered, scorable DST now
+holds its slot like anybody else, and `no scorable player available for: DEF`
+is gone. The second half of that defect was never reported: the current-lineup
+total is shown only when every current starter can be scored, so an unscorable
+defence blanked the comparison the whole screen is built on. The skill-position
+path is byte-identical — asserted as a whole-object comparison, not promised.
+
+**The Smart Trades invariant is now a rule rather than an accident.** A DST was
+excluded from trades only because it was unscorable, and `tradeableFrom` drops
+anything the engine could not score. Making one scorable removed the accident,
+so two independent gates replace it: `needFor` returns a permanently `adequate`
+need for DEF, taking it out of `hasNeed`, the need multiplier, `spareness`,
+bench depth and every `fills_hole` rationale in one move; and `tradeableFrom`
+excludes it explicitly, depending on it being a defence rather than on it being
+unpriced. Tested against a genuinely scorable DST in the league shape where the
+invariant is actually at risk. See `docs/SMART_TRADES.md`.
+
+**Draft says nothing rather than something it will not act on.** The board has
+ranked defences on ADP alone since `DEFENCE_WEIGHTS`; the alerts above it had
+not caught up, so `Still need a starting DEF` sat in warn-red over a ranking
+that explicitly refused to act on the same fact. Both that and the lopsided
+`DEF depth is becoming more important` line are suppressed in one-defence
+leagues. `Starting lineup is covered` is *not* fired in their place — it is a
+claim about every slot, and a false reassurance is worse than the pressure being
+removed. A league starting two or more defences keeps every warning: that is an
+objective property of `RosterShape`, not a league-name exception.
+
+**Streaming did not ship by accident.** A scorable defence makes the waiver scan
+offer a better one over a rostered one most weeks, because the gap across a
+slate clears the upgrade bar comfortably. Filling an *empty* DEF slot is kept —
+it is the ordinary answer to an ordinary hole — and the weekly swap is switched
+off deliberately in `waivers.ts`, because transaction cost, how long an add
+survives and what it does to a playoff plan are the questions the next lane
+exists to answer. `assessStreaming` remains written and unwired.
+
+**The schedule foundation.** `nfl_schedule` (migration 0032) stores the nflverse
+fixture list as two rows per game, one per team, upserted idempotently on
+`(season, week, team)` so a truncated read leaves every row it did not mention
+alone — a hole is indistinguishable from a bye to everything downstream. Byes
+are derived rather than stored. `roof` is carried because it is a forecast;
+`temp` and `wind` are deliberately not, because they are post-game observations
+and reading one as a forecast would give this app a weather model that is
+perfectly accurate about the past. **No new cron trigger**: it rides the
+existing `0 9 * * *` tick in a try/catch of its own, behind a conditional GET
+that answers 304 on nearly every morning of the season. Nothing on a
+recommendation read path reads it in this lane — asserted, not promised.
+
+**Free tier.** No new cron, no new provider, no read-path fetch, no paid source
+and no user-facing backfill. The one new cost is one Vegas team-fetch per
+rostered defence on the *refresh* path, which is unavoidable: a defence's whole
+projection is the game's total and spread, and those arrive in the same answer
+as the props. The Demo Mode bundle budget was raised 108KB → 115KB in this
+commit with the reason attached, because the two new modules add ~2.2KB to a
+chunk that had 0.4KB of headroom left.
+
 ## Recommended next work
 
+0. **DST streaming and playoff planning.** The sequential next lane, and the
+   foundation it needs is now in place: defences are scorable, the Smart Trades
+   invariant is a rule, and the fixture list is stored. What it has to decide is
+   the product this lane deliberately withheld — the weekly `Stream X over Y`
+   row, the Waivers DEF behaviour, transaction-cost awareness, multi-week holds
+   and the playoff stash. Two concrete starting points: `assessStreaming` is
+   written and unwired, and `waivers.ts` has one guard to remove (with a model
+   behind it, not without one). It will also want the schedule on a read path
+   for the first time, which is the only part of §12 this lane left untested in
+   anger.
 0. **Watch one real waiver run.** The FAAB layer is built and tested against
    constructed transactions; what a preseason league cannot show is what
    Sleeper's `transactions/{week}` actually returns for a live waiver run —

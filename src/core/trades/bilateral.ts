@@ -45,7 +45,7 @@
  */
 
 import { MANAGER_FIT_CAP, managerFitFor, type ManagerFit, type ManagerFitInput } from './managerFit.ts';
-import type { RosterDelta, RosterView } from './rosterUtility.ts';
+import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
 
 // ------------------------------------------------------------- the bounds --
 
@@ -582,7 +582,24 @@ export function generateCandidates(args: {
  * pruning rule.
  */
 function tradeableFrom(view: RosterView): string[] {
-  return view.playerIds.filter((id) => !view.unscored.has(id) && view.valueOf.has(id)).sort();
+  return view.playerIds
+    .filter((id) => !view.unscored.has(id) && view.valueOf.has(id))
+    /*
+     * And never a defence, whatever the engine now thinks one is worth.
+     *
+     * The second of the two gates described in `rosterUtility.ts`, and the one
+     * that has to be explicit rather than inherited. Until this lane a DST was
+     * excluded here for free, because it was unscorable and the line above
+     * drops anything the engine could not score — an accident, not a rule. Now
+     * that a DST has a real number, that filter passes it, and without this it
+     * would be ranked, packaged and offered like a wide receiver.
+     *
+     * Written as its own step so a future change to how defences are scored
+     * cannot quietly re-open the door: this does not depend on a defence being
+     * unpriced, thin, cheap or unwanted. It depends on it being a defence.
+     */
+    .filter((id) => !tradeExcluded(view.positionOf.get(id)))
+    .sort();
 }
 
 /**

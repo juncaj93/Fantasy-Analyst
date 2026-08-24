@@ -36,6 +36,17 @@ export const MEANINGFUL_UPGRADE_GAIN = 2.5;
 /** Free agents scored per slot before the list is cut. Keeps Team fast. */
 export const DEFAULT_ALTERNATIVES = 3;
 
+/**
+ * A slot only a defence can fill.
+ *
+ * Read rather than assumed from the slot's name, because what a slot accepts is
+ * a property of the league: a hypothetical flex that took a defence alongside a
+ * receiver would not be a defence slot, and this must not treat it as one.
+ */
+function isDefenceOnlySlot(slot: { accepts: string[] }): boolean {
+  return slot.accepts.length > 0 && slot.accepts.every((p) => p === 'DEF');
+}
+
 export interface WaiverCandidate {
   playerId: string;
   name: string;
@@ -158,6 +169,30 @@ export function recommendWaiverUpgrades(opts: {
     if (slot.locked) continue;
     const current = slot.playerId ? (rosterEvaluations.get(slot.playerId) ?? null) : null;
     const need: 'unfilled' | 'upgrade' = slot.playerId == null ? 'unfilled' : 'upgrade';
+
+    /*
+     * A defence may fill an empty slot. It may not yet replace a rostered one.
+     *
+     * The distinction is the whole of it, and it is a scope line rather than a
+     * modelling one. Filling an empty DEF slot is the ordinary answer to an
+     * ordinary hole — a reader who owns no defence in a league that starts one
+     * should be told, in the same words a reader missing a tight end is told.
+     *
+     * Swapping one rostered defence for a better one *every week* is a
+     * different product, and it has a name: streaming. It arrives free the
+     * moment defences become scorable, because the gap between the best and
+     * worst defence on a slate is comfortably over the upgrade bar — so a
+     * reader would be told to drop and add a defence most weeks, on a card with
+     * no sense of how many transactions that costs, whether the add survives to
+     * next week, or what it does to a playoff plan. Those are exactly the
+     * questions the streaming lane exists to answer, and `assessStreaming`
+     * already exists and is deliberately not wired in.
+     *
+     * So the emergent version is switched off here, on purpose, and turning it
+     * on is a deliberate act in the lane that models it rather than a side
+     * effect of this one.
+     */
+    if (need === 'upgrade' && isDefenceOnlySlot(slot)) continue;
     const currentScore = current?.score ?? null;
 
     /*

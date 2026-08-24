@@ -38,6 +38,7 @@ import { classifyRole, UNCLASSIFIED, type RoleProfile } from './roleProfile.ts';
 import { assessTdDependency, NO_TD_DATA, type TdDependencyAssessment } from './tdDependency.ts';
 import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
 import { assessWeather, type GameWeather, type WeatherAssessment } from './weather.ts';
+import { projectDst, type DstProjection } from './dstProjection.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -78,6 +79,25 @@ export interface StartSitInput {
   usageWeeks?: UsageWeek[];
   /** The spread and total for his game, when the market has priced it. */
   game?: GameContext | null;
+  /**
+   * When the game line in {@link game} was published.
+   *
+   * Read by the defence model and nobody else, for one comparison: whether a
+   * piece of news is newer than the market that would already have priced it.
+   * Absent means the comparison cannot be made, which is treated as "the market
+   * has seen it" — the conservative branch, because the alternative is counting
+   * one injury twice. See `dstProjection.ts`.
+   */
+  lineAsOf?: string | null;
+  /**
+   * A quarterback change on the offence a defence is facing.
+   *
+   * Only meaningful for a defence, and deliberately not derived from the
+   * opponent's roster here: whether a starter is out is an availability
+   * question the injury layer owns, and this is the shape it would be handed
+   * over in. Absent — the state through this lane — is no adjustment.
+   */
+  opponentQuarterback?: { starterOut: boolean; observedAt: string | null } | null;
   /** The forecast for his game, when one is available. */
   weather?: GameWeather | null;
   /** Opponent tendencies by role, built once for the whole board. */
@@ -158,6 +178,14 @@ export interface StartSitEvaluation {
   drivers: string[];
   /** Where the evidence points different ways, said rather than averaged. */
   conflicts: string[];
+  /**
+   * The defence model's working, on a defence and only on a defence.
+   *
+   * Absent for everybody else rather than null-filled, because a receiver has
+   * no opponent-implied-total anchor and a field that existed on his row would
+   * invite a reader — or a screen — to look for one. See `dstProjection.ts`.
+   */
+  dst?: DstProjection;
 }
 
 export interface StartSitComparison {
@@ -198,7 +226,33 @@ export const NEWS_POINTS_PER_UNIT = 0.35;
 export const NEWS_RECENT_CAP = 2.1;
 export const NEWS_RAW_CAP = 1.2;
 
+/**
+ * The position a team defence occupies, as Sleeper names it.
+ *
+ * One spelling, in the layer that decides what a position means, so a `'DEF'`
+ * typed into a filter somewhere cannot drift from a `'DST'` typed into another.
+ */
+export const DEFENCE_POSITION = 'DEF';
+
 export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): StartSitEvaluation {
+  /*
+   * A defence is scored by a different model, and the branch is the first line
+   * for a reason.
+   *
+   * Everything below this point reads a market that does not exist for a
+   * defence — no book publishes a receiving line for Seattle — and then reads
+   * usage, role, touchdown dependency, weather sensitivity and an opponent
+   * tendency index, none of which have a meaning for a unit rather than a
+   * person. Running them anyway is what produced the state this lane was opened
+   * to fix: an expectation of null, a score of null, and a DEF slot the lineup
+   * could never fill.
+   *
+   * Branching here rather than threading defence cases through twenty
+   * components keeps the skill-position path *byte-identical* to what it was —
+   * the defence work cannot regress a receiver, because it is not on his path.
+   */
+  if (input.player.position === DEFENCE_POSITION) return evaluateDefence(input, profile);
+
   const expectation = buildExpectation(input.player.position, input.props, profile);
   const mode = input.mode ?? 'balanced';
   const components: StartSitComponent[] = [];
@@ -506,6 +560,169 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     availability: availabilityView,
     drivers,
     conflicts,
+  };
+}
+
+/**
+ * Evaluate a team defence, on the model built for one.
+ *
+ * The shape of the answer is deliberately the same `StartSitEvaluation` every
+ * other position produces, because the lineup optimiser, the trade engine and
+ * the Team screen all read that shape and none of them should need to know a
+ * defence is different. What is different is where the number comes from, and
+ * that is `dstProjection.ts`.
+ *
+ * Three of this app's components apply to a defence and the rest do not:
+ *
+ *   - **the anchor**, which arrives as the `vegas` component so that
+ *     `marketProjection()` — the one function allowed to publish a number under
+ *     the word "projected" — finds it exactly where it finds everybody else's,
+ *     and refuses a defence with no market for exactly the same reason;
+ *   - **availability**, because a defence has a Sleeper status like anybody
+ *     else and a unit on a bye is not startable;
+ *   - **uncertainty**, so a defence whose league scoring is thin loses a tie to
+ *     one whose is not, the same way a thinly-covered receiver does.
+ *
+ * Everything else is left at its `NO_*` constant rather than computed and
+ * discarded. Usage, role trend, touchdown dependency, explosiveness and the
+ * opponent-by-role matchup are statements about a person's job in an offence.
+ * Weather is not modelled in this lane at all — see the brief's §14. And
+ * **game script is deliberately absent**: the whole spread lives inside the
+ * opponent's implied total already, and the one residual a defence is allowed
+ * for it is applied inside the projection under its own cap.
+ */
+function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSitEvaluation {
+  const mode = input.mode ?? 'balanced';
+  const components: StartSitComponent[] = [];
+  const confidenceReasons: string[] = [];
+
+  const dst = projectDst({
+    game: input.game ?? null,
+    scoring: profile.dst,
+    opponentQuarterback: input.opponentQuarterback ?? null,
+    lineAsOf: input.lineAsOf ?? null,
+  });
+
+  /*
+   * The projection, carried in the shape a market expectation travels in.
+   *
+   * `contributions` stays empty — a `MarketContribution` names one of the
+   * player prop markets and a defence has none of them — and the defence's own
+   * breakdown travels on `dst` where it is typed for what it actually is. What
+   * this object exists for is `points`: it is the field `marketProjection()`
+   * checks before it will publish anything, so a defence with no game line is
+   * refused a projection by the same line of code that refuses a receiver.
+   */
+  const expectation: VegasExpectation = {
+    points: dst.points,
+    contributions: [],
+    missingMarkets: [],
+    coverage: dst.points == null ? 0 : 1,
+    minBookCount: null,
+    notes: dst.reasons,
+  };
+
+  const push = (component: Omit<StartSitComponent, 'baseValue' | 'modeWeight' | 'value'> & { value: number }) => {
+    const weight = component.unknown ? 1 : modeWeightFor(component.key, mode, component.value);
+    components.push({
+      ...component,
+      baseValue: round2(component.value),
+      modeWeight: weight,
+      value: round2(component.value * weight),
+    });
+  };
+
+  push({
+    key: 'vegas',
+    label: 'Defence market expectation',
+    display: dst.points == null ? 'unavailable' : `${dst.points.toFixed(1)} pts`,
+    value: dst.points ?? 0,
+    unknown: dst.points == null,
+  });
+
+  const injury = resolveInjuryState(input);
+  const availability = availabilityPenalty(injury);
+  const availabilityView = availabilityConfidence(injury);
+  push({
+    key: 'status',
+    label: 'Availability',
+    display: availability.display,
+    value: availability.points,
+    unknown: injury.designation === 'unknown',
+  });
+
+  /*
+   * Uncertainty, on the two things that can actually be thin about a defence.
+   *
+   * A league that scores no points-allowed table gives the market nothing to
+   * separate its defences with, and a stale line is a stale anchor. Neither is
+   * a reason to refuse a number — they are reasons to lose a tie, which is what
+   * this component is for everywhere else too.
+   */
+  let uncertainty = 0;
+  if (dst.points != null) {
+    if (dst.confidence === 'low') uncertainty -= 1;
+    else if (dst.confidence === 'medium') uncertainty -= 0.5;
+    if (input.propsStale) {
+      uncertainty -= 0.75;
+      confidenceReasons.push('the game line behind this defence is stale');
+    }
+  }
+  push({
+    key: 'uncertainty',
+    label: 'Uncertainty penalty',
+    display: uncertainty === 0 ? 'none' : `${uncertainty.toFixed(2)} pts`,
+    value: round2(uncertainty),
+    unknown: false,
+  });
+
+  confidenceReasons.push(...dst.reasons);
+
+  /*
+   * No anchor, no score. Not a floor, not the sum of the adjustments.
+   *
+   * This is the same rule the header of `projection.ts` was written for, and a
+   * defence is the position most likely to break it: with the market gone the
+   * only components left are an availability charge and an uncertainty penalty,
+   * whose sum is a small negative number that would rank a defence nobody has
+   * priced *below* one projected two points, as though that were a judgement.
+   * Null is the honest answer and every caller already handles it — an
+   * unscorable player is listed as undecidable rather than benched.
+   */
+  const score = dst.points == null ? null : round2(components.filter((c) => !c.unknown).reduce((a, c) => a + c.value, 0));
+
+  const confidence: 'high' | 'medium' | 'low' = dst.points == null ? 'low' : dst.confidence;
+
+  return {
+    playerId: input.player.id,
+    name: input.player.fullName,
+    position: input.player.position,
+    team: input.player.team,
+    expectation,
+    components,
+    score,
+    confidence,
+    confidenceReasons,
+    statusFlag: availability === AVAILABLE ? null : availability.display,
+    injury,
+    ruledOut: availability.gate,
+    lock: lockState(input.kickoff, input.now ?? new Date()),
+    opponent: input.opponent ?? null,
+    movement: compareMarkets([], []),
+    role: assessRole([]),
+    mode,
+    usage: NO_USAGE,
+    roleProfile: UNCLASSIFIED,
+    tdDependency: NO_TD_DATA,
+    // Absent on purpose: the spread is inside the anchor, and the only part of
+    // it a defence may be paid for again is capped inside the projection.
+    gameScript: NO_GAME_SCRIPT,
+    weather: assessWeather(input.player.position, UNCLASSIFIED.bucket, null),
+    matchup: NO_MATCHUP,
+    availability: availabilityView,
+    drivers: dst.driver ? [dst.driver] : [],
+    conflicts: [],
+    dst,
   };
 }
 
