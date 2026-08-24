@@ -242,7 +242,6 @@ export default {
         console.error('usage refresh failed', err);
       }
 
-
       /*
        * The season-long market lines the draft board prices players against.
        *
