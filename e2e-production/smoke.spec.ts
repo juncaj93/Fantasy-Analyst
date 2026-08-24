@@ -2054,3 +2054,74 @@ test.describe('the decision intelligence', () => {
     expect(allCertain, 'every deep player reads as a certainty, which is the calibration bug').toBe(false);
   });
 });
+
+/**
+ * The deployed API answers in JSON, including when it is refusing.
+ *
+ * The defect this guards was reproduced on a physical iPhone as `JSON Parse
+ * error: Unrecognized token '<'` — the client had been handed a page where a
+ * payload should have been and parsed it. The client boundary
+ * (`src/web/apiResponse.ts`) is what stops that reaching a reader, and it has to
+ * exist because the layers above the Worker are not ours to fix.
+ *
+ * But one source of markup *was* ours, and only a deployed site can prove it is
+ * closed: an exception escaping the Worker is answered by Cloudflare with its
+ * own HTML error page, on a path under `/api/`. The check that matters is not
+ * "does the API work" — the rest of this suite covers that — but "does an
+ * `/api/` path *ever* answer in anything other than JSON", which is why the
+ * assertions below deliberately ask for answers the app would rather not have:
+ * a route that does not exist, and a write from a stranger.
+ *
+ * Every request here is safe. Two are GETs, and the third is the refusal this
+ * suite already exercises above.
+ */
+test.describe('the API boundary', () => {
+  const isJson = (contentType: string | null) => /^application\/json/.test(contentType ?? '');
+
+  test('answers every /api/ path in JSON, including the refusals', async ({ request }) => {
+    const cases = [
+      { what: 'health', res: await request.get('/api/health', { failOnStatusCode: false }) },
+      { what: 'overview', res: await request.get('/api/overview', { failOnStatusCode: false }) },
+      // A path no route matches. The single-page-application fallback would
+      // answer this one with index.html if `run_worker_first` ever stopped
+      // covering /api/*, which is exactly the 200-and-a-page case.
+      { what: 'unknown route', res: await request.get('/api/no-such-route', { failOnStatusCode: false }) },
+      // A write with no session: refused, and the refusal is JSON too.
+      { what: 'unauthorized write', res: await request.post('/api/sleeper/sync-players', { failOnStatusCode: false }) },
+    ];
+
+    for (const { what, res } of cases) {
+      const contentType = res.headers()['content-type'] ?? null;
+      const body = await res.text();
+      console.log(`api boundary — ${what}: ${res.status()} ${contentType}`);
+
+      expect(isJson(contentType), `${what} answered ${res.status()} as ${contentType}`).toBe(true);
+      expect(body.trimStart().startsWith('<'), `${what} answered with markup`).toBe(false);
+      // It says JSON; it has to be JSON.
+      expect(() => JSON.parse(body) as unknown, `${what} did not parse`).not.toThrow();
+    }
+
+    // And the ones that are refusals are refusals, not pages pretending.
+    expect(cases[2]!.res.status()).toBe(404);
+    expect([401, 503]).toContain(cases[3]!.res.status());
+  });
+
+  test('never shows a reader a parser error on a first, cold load', async ({ page }) => {
+    /*
+     * A fresh context against the deployed site: the first load is the one the
+     * original symptom was reported for, because it is the one that can meet a
+     * cold Worker. Nothing is injected here — this is the real site answering.
+     */
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(String(err)));
+
+    await page.goto('/');
+    await expect(page.getByTestId('tab-setup')).toBeVisible();
+
+    const text = await page.locator('body').innerText();
+    for (const forbidden of ['Unrecognized token', 'Unexpected token', 'is not valid JSON', 'DOCTYPE']) {
+      expect(text, `"${forbidden}" reached the rendered UI`).not.toContain(forbidden);
+    }
+    expect(pageErrors.join('\n')).not.toMatch(/Unrecognized token|Unexpected token|not valid JSON/);
+  });
+});
