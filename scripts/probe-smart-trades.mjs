@@ -146,11 +146,30 @@ async function main() {
   line('request latency', `${latency}ms`);
   line('added Sleeper requests', sleeperBefore == null || sleeperAfter == null ? '(unknown)' : sleeperAfter - sleeperBefore);
 
+  console.log('\n--- league trade capability ---');
+  line('can this league trade', b.capability?.tradeable === false ? `no — ${b.capability.basis}` : 'yes');
+  if (b.capability?.reason) line('reason', b.capability.reason);
+
   console.log('\n--- manager history available ---');
-  line('trade profiles stored', unknown(b.history?.profiles));
-  line('seasons fully read', (b.history?.seasonsComplete ?? []).join(', ') || '(none)');
-  line('history complete', String(b.history?.complete));
-  line("league's own trade rate", unknown(b.history?.leagueRate));
+  /*
+   * Whether the ledger was read at all, before anything read out of it.
+   *
+   * This line exists because its absence produced a false report: the board
+   * used to return a hardcoded `profiles: 0` from five paths that exit before
+   * opening the ledger, and this probe printed it for a production league
+   * holding eight profiles. An unmeasured value printed as a measurement is the
+   * one thing this probe must never do, so the flag is printed first and the
+   * counts are suppressed when it is false.
+   */
+  if (b.history?.measured === false) {
+    line('ledger read', 'no — nothing below was measured');
+  } else {
+    line('ledger read', 'yes');
+    line('trade profiles stored', unknown(b.history?.profiles));
+    line('seasons fully read', (b.history?.seasonsComplete ?? []).join(', ') || '(none)');
+    line('history complete', String(b.history?.complete));
+    line("league's own trade rate", unknown(b.history?.leagueRate));
+  }
 
   console.log('\n--- the offers ---');
   if ((b.offers ?? []).length === 0) {

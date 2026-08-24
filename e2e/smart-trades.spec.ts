@@ -85,7 +85,8 @@ const BOARD = {
     surfaced: 3,
     bounds: { targetsPerPartner: 6, givePerPartner: 6, scoredPerPartner: 12, offersPerPartner: 2, offersTotal: 5, maxPackageSize: 2 },
   },
-  history: { profiles: 2, seasonsComplete: ['2024', '2025'], complete: true, leagueRate: 1.2 },
+  capability: { tradeable: true, basis: null, reason: null },
+  history: { measured: true, profiles: 2, seasonsComplete: ['2024', '2025'], complete: true, leagueRate: 1.2 },
   notes: [],
   warnings: [],
 };
@@ -356,6 +357,39 @@ test.describe('when there is nothing to propose', () => {
     await expect(page.getByTestId('smart-trades-empty')).toBeVisible();
     // The discovery board is untouched by the bilateral half finding nothing.
     await expect(page.getByTestId('trades-nav')).toBeVisible();
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('names the format, not the draft, in a league that cannot trade', async ({ page }) => {
+    /*
+     * A best-ball league has full rosters and no trading. The reader must be
+     * told the permanent reason — telling them their draft has not happened
+     * would send them back for a feature the format will never have.
+     */
+    await openTrades(page, {
+      ...BOARD,
+      found: false,
+      offers: [],
+      capability: {
+        tradeable: false,
+        basis: 'best_ball',
+        reason: 'This is a best-ball league — there are no lineup decisions and no trading, so there is nothing to offer.',
+      },
+      notes: ['This is a best-ball league — there are no lineup decisions and no trading, so there is nothing to offer.'],
+    });
+
+    /*
+     * The screen's contract here is that it prints the *board's* sentence
+     * rather than composing one of its own — so the check is that the format
+     * reason arrives and the draft reason does not. Which fact produced it is
+     * asserted where the fact lives, on `capability.basis` in
+     * `tests/trades.lifecycle.test.ts`; this is the reader's half.
+     */
+    const row = page.getByTestId('smart-trades-empty');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText(/best-ball/i);
+    await expect(row).not.toContainText(/draft/i);
+    await expect(page.getByTestId('smart-trades')).toHaveCount(0);
     expect(await horizontalOverflow(page)).toBe(0);
   });
 

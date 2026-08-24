@@ -34,6 +34,7 @@ import {
   buildTradeTendencies,
   type ManagerTradeTendencies,
 } from '../src/core/managers/tradeTendencies.ts';
+import { TRADEABLE, tradeCapabilityOf } from '../src/core/trades/capability.ts';
 import type { LedgerTransaction } from '../src/core/managers/ledger.ts';
 
 /** One completed trade in the ledger, between two named managers. */
@@ -343,5 +344,42 @@ describe('the league baseline the shrinkage leans on', () => {
     expect(baseline.trades).toBe(2);
     expect(baseline.traders).toBe(3);
     expect(baseline.tradesPerManagerSeason).toBeGreaterThan(0);
+  });
+});
+
+describe('league trade capability', () => {
+  it('blocks a league Sleeper states is best ball', () => {
+    const cap = tradeCapabilityOf({ leagueSettings: { best_ball: 1 } });
+    expect(cap.tradeable).toBe(false);
+    expect(cap.basis).toBe('best_ball');
+    expect(cap.reason).toMatch(/best-ball/i);
+  });
+
+  it('reads the flag off league metadata too, and as a string', () => {
+    expect(tradeCapabilityOf({ leagueMetadata: { best_ball: '1' } }).tradeable).toBe(false);
+  });
+
+  it('blocks a league whose commissioner switched trading off', () => {
+    const cap = tradeCapabilityOf({ leagueSettings: { disable_trades: 1 } });
+    expect(cap.tradeable).toBe(false);
+    expect(cap.basis).toBe('trades_disabled');
+  });
+
+  it('permits an ordinary league, and one Sleeper says nothing about', () => {
+    expect(tradeCapabilityOf({ leagueSettings: { playoff_week_start: 15 } })).toEqual(TRADEABLE);
+    expect(tradeCapabilityOf({})).toEqual(TRADEABLE);
+    expect(tradeCapabilityOf({ leagueSettings: null })).toEqual(TRADEABLE);
+  });
+
+  it('does not turn a missing flag into a disabled feature', () => {
+    /*
+     * `detectBestBall` answers `bestBall: false, confident: false` for a league
+     * Sleeper has not described, which is "not stated" rather than "not best
+     * ball". Treating that as a block would silence the feature for the
+     * overwhelmingly common league, which carries no flag and does trade.
+     */
+    expect(tradeCapabilityOf({ leagueSettings: { best_ball: 'maybe' } }).tradeable).toBe(true);
+    expect(tradeCapabilityOf({ leagueSettings: { disable_trades: 0 } }).tradeable).toBe(true);
+    expect(tradeCapabilityOf({ leagueSettings: { disable_trades: 'nope' } }).tradeable).toBe(true);
   });
 });

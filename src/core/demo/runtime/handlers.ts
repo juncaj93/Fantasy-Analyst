@@ -47,6 +47,7 @@ import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
 import { TRADE_BOUNDS, findBilateralTrades } from '../../trades/bilateral.ts';
+import { tradeCapabilityOf } from '../../trades/capability.ts';
 import { buildRosterViews } from '../../trades/rosterUtility.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../../sleeper/eligibility.ts';
 import {
@@ -387,15 +388,26 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
 function smartTrades(data: ScenarioData, limit: number) {
   const { profile, shape, mine } = leagueContext(data);
   const league = { id: data.league.id, name: data.league.name };
+  const capability = tradeCapabilityOf({ leagueSettings: data.league.leagueSettings });
   const emptyBoard = (notes: string[]) => ({
     league,
     found: false,
     offers: [],
     search: { partners: 0, generated: 0, scored: 0, viable: 0, surfaced: 0, bounds: TRADE_BOUNDS },
-    history: { profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    capability,
+    // A fixture league has no ingested ledger, and saying so is the point.
+    history: { measured: true, profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
     notes,
     warnings: [],
   });
+
+  /*
+   * The same format gate the deployed service applies, on the same reader.
+   *
+   * A best-ball scenario must behave in Demo Mode exactly as it would in the
+   * app — otherwise the demo is the one place the rule does not hold.
+   */
+  if (!capability.tradeable) return emptyBoard([capability.reason!]);
 
   if (!mine || mine.playerIds.length === 0) {
     return emptyBoard(['Your team was not found in this league.']);
@@ -449,7 +461,8 @@ function smartTrades(data: ScenarioData, limit: number) {
       surfaced: report.offers.length,
       bounds: TRADE_BOUNDS,
     },
-    history: { profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    capability,
+    history: { measured: true, profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
     notes: [...report.notes, ...data.notes],
     warnings: [],
   };
