@@ -363,6 +363,32 @@ describe('the history block tells the truth about itself', () => {
     expect(board.history.measured).toBe(true);
   });
 
+  it('says why the history is missing when the ledger cannot be read at all', async () => {
+    /*
+     * A real read failure, not a mocked one: the profiles table is dropped, so
+     * `history()` throws exactly as it would against a half-migrated database.
+     *
+     * Two things must survive that. The board still answers — a degraded
+     * history has never been allowed to fail the feature — and it says *why*,
+     * which is the half that was missing: every early exit used to return
+     * `warnings: []` and discard the explanation, so a pre-draft league with an
+     * unreadable ledger reported no history and no reason for it. Losing the
+     * explanation for a degraded answer is the same defect as inventing a
+     * number for one.
+     */
+    const sleeper = scriptedSleeper({ drafted: false });
+    await new SleeperSyncService(db, sleeper.client).syncLeague(LEAGUE);
+    await new LeagueRepo(db).selectLeague(LEAGUE);
+    await db.exec('DROP TABLE manager_intel_profiles');
+
+    const board = await new SmartTradeService(db).build();
+
+    expect(board.offers).toEqual([]);
+    expect(board.warnings.join(' ')).toMatch(/manager history could not be read/i);
+    // And the counts are not passed off as a measurement of nothing.
+    expect(board.history.profiles).toBe(0);
+  });
+
   it('reports it as read for a best-ball league too', async () => {
     const sleeper = scriptedSleeper({ drafted: true, bestBall: true });
     await new SleeperSyncService(db, sleeper.client).syncLeague(LEAGUE);

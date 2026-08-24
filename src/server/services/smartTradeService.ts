@@ -140,7 +140,10 @@ export class SmartTradeService {
        * absent rather than zero. Every exit below has a league and therefore
        * reads the ledger before answering.
        */
-      return empty(null, ['No league is selected, so there is nobody to trade with.'], { capability: TRADEABLE });
+      return empty(null, ['No league is selected, so there is nobody to trade with.'], {
+        capability: TRADEABLE,
+        warnings,
+      });
     }
 
     const named = { id: league.id, name: league.name };
@@ -161,8 +164,8 @@ export class SmartTradeService {
     });
 
     /*
-     * Can this league trade at all? Asked first, because the answer is free and
-     * because it is permanent.
+     * Can this league trade at all? The first thing *decided*, though the
+     * ledger read above happens first so that this exit can report it.
      *
      * A best-ball league has full rosters and no trading. Without this it would
      * fall through to the roster checks below, find populated squads, and start
@@ -173,7 +176,7 @@ export class SmartTradeService {
      */
     const capability = tradeCapabilityOf({ leagueSettings: league.leagueSettings });
     if (!capability.tradeable) {
-      return empty(named, [capability.reason!], { capability, history });
+      return empty(named, [capability.reason!], { capability, history, warnings });
     }
 
     const rosters = await this.leagues.listRosters(league.id);
@@ -182,7 +185,7 @@ export class SmartTradeService {
       return empty(
         named,
         ['Your own roster is not identified in this league, so there is nobody to trade on behalf of.'],
-        { capability, history },
+        { capability, history, warnings },
       );
     }
 
@@ -204,7 +207,7 @@ export class SmartTradeService {
             ? 'No rosters have been drafted in this league yet — trade ideas appear once the draft is done.'
             : 'No other roster in this league has any players yet.',
         ],
-        { capability, history },
+        { capability, history, warnings },
       );
     }
 
@@ -230,6 +233,7 @@ export class SmartTradeService {
       return empty(named, ['No player data is available for these rosters yet, so no trade can be priced.'], {
         capability,
         history,
+        warnings,
       });
     }
     const pool = new Map(inputs.map((i) => [i.player.id, i]));
@@ -242,7 +246,7 @@ export class SmartTradeService {
     });
 
     const me = views.get(String(mine.rosterId));
-    if (!me) return empty(named, ['Your roster could not be evaluated.'], { capability, history });
+    if (!me) return empty(named, ['Your roster could not be evaluated.'], { capability, history, warnings });
 
     const partners: { view: RosterView; partner: TradePartnerView; fit: Omit<ManagerFitInput, 'offer'> }[] = [];
     for (const roster of others) {
@@ -431,7 +435,7 @@ const NO_HISTORY: HistoryContext = {
 function empty(
   league: { id: string; name: string } | null,
   notes: string[],
-  context: { capability: TradeCapability; history?: HistoryContext },
+  context: { capability: TradeCapability; history?: HistoryContext; warnings?: string[] },
 ): SmartTradeBoard & { rejections: BilateralReport['rejections'] } {
   const history = context.history;
   return {
@@ -449,6 +453,15 @@ function empty(
       leagueRate: history?.leagueRate ?? null,
     },
     notes,
-    warnings: [],
+    /*
+     * Carried, not discarded.
+     *
+     * This was `[]`, which quietly threw away anything collected before an
+     * early exit — a failed ledger read on a pre-draft league reported neither
+     * the history nor the reason it was missing. Losing the explanation for a
+     * degraded answer is the same defect as inventing a number for one, and it
+     * was sitting three lines under the fix for it.
+     */
+    warnings: context.warnings ?? [],
   };
 }
