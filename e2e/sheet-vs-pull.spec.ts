@@ -368,8 +368,25 @@ test.describe('and gives it straight back', () => {
     }).toBeGreaterThan(0);
   });
 
+  /**
+   * Team's own gesture, on the screen as the demo league actually stands.
+   *
+   * Deliberately without `inSeason`, which every other Team test here needs and
+   * this one does not: the pull surface wraps the whole screen in either
+   * standing, and what is being proved is that the gesture still reaches the
+   * server, not what the roster says.
+   *
+   * It is also the only test in this file that fires a real refresh on Team,
+   * and `inSeason` cannot survive one. Refreshing re-requests the roster, which
+   * re-enters that helper's route handler, and the racing response is disposed
+   * under it — `apiResponse.json: Response has been disposed`, which fails the
+   * test from inside the interceptor and says nothing about the gesture. Not
+   * asking for the interception is better than making the gesture tolerate it.
+   */
   test('Team still pulls to refresh when no sheet is open', async ({ page }) => {
-    await openTeam(page);
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('team-pull')).toBeVisible();
     const requests = watchRequests(page, '/api/startsit/refresh');
     await watchPulls(page);
     await pullScreen(page, 'team-pull');
