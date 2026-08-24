@@ -58,10 +58,20 @@ describe('a weekly refresh', () => {
     const report = await new VegasRefreshService(db, provider).refresh();
 
     expect(provider.teamCalls).toHaveLength(1);
-    // The demo roster is four players; whatever teams they are on, the request
-    // is made per team and never for the league.
-    expect(provider.teamCalls[0]!.length).toBeLessThanOrEqual(4);
-    expect(report.spent).toBeLessThanOrEqual(4);
+    /*
+     * The demo roster is five: four skill players and the defence the league
+     * starts. Whatever teams they are on, the ask is made **per team and never
+     * for the league**, which is the invariant this test is really about — the
+     * bound tracks the fixture's roster and the shape of the request does not.
+     *
+     * The defence costs one team fetch like anybody else, and it has to: a
+     * defence's whole projection is the game's total and spread, and those
+     * arrive in the same answer as the props. That is a cost on the refresh
+     * path, which is metered and scheduled — not on a recommendation read,
+     * which still buys nothing at all.
+     */
+    expect(provider.teamCalls[0]!.length).toBeLessThanOrEqual(5);
+    expect(report.spent).toBeLessThanOrEqual(5);
     expect(report.errors).toEqual([]);
   });
 

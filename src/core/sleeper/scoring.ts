@@ -5,6 +5,8 @@
  * league's rules is hardcoded in the recommendation engines.
  */
 
+import { buildDstScoring, type DstScoring } from './dstScoring.ts';
+
 export interface ScoringProfile {
   /** Points per reception (Sleeper key `rec`). */
   ppr: number;
@@ -24,6 +26,16 @@ export interface ScoringProfile {
   tePremium: boolean;
   /** Label such as "Full PPR", "Half PPR", "Standard". */
   label: string;
+  /**
+   * What this league pays a defence for, or a refusal to guess.
+   *
+   * Carried on the profile rather than built at each call site because every
+   * engine already receives a profile, and a defence scored one way by the
+   * lineup screen and another by the trade engine is the same class of bug as
+   * a player who is Questionable on one screen and healthy on the next. See
+   * `dstScoring.ts` for why this cannot fall back to a standard table.
+   */
+  dst: DstScoring;
 }
 
 export interface RosterShape {
@@ -128,6 +140,7 @@ export function buildScoringProfile(scoringSettings: Record<string, number>, ros
     superflex,
     tePremium: teBonus > 0,
     label: pprLabel(ppr),
+    dst: buildDstScoring(scoringSettings),
   };
 }
 

@@ -141,6 +141,47 @@ and one RB/WR/TE flex needs a roster able to start two-and-a-bit backs *and*
 three-and-a-bit receivers, because the flex has to come from somewhere and which
 position fills it is decided weekly.
 
+### Defences are excluded, and it is a rule rather than an accident
+
+> **A DST is never a Smart Trades target or trade asset, and an unfilled DEF
+> slot is never a roster need for trade purposes.**
+
+Nobody trades for a defence. A DST is a two-dollar waiver claim in every league
+that starts one, it is streamed weekly by anybody paying attention, and an offer
+built around one wastes the reader's attention at best.
+
+This app has never surfaced such an offer — but until the DST lane that was an
+**accident**. `tradeableFrom` drops any player the engine could not score,
+defences were unscorable everywhere, and so a defence was excluded for a reason
+that had nothing to do with defences. Making a DST scorable removed the
+accident, so the rule it was standing in for is now written down and enforced.
+
+**Two independent gates**, because one of them silently regressing is how this
+would fail:
+
+1. `rosterUtility.ts` — `needFor` returns a permanently **`adequate`** need for
+   an excluded position, whatever the roster holds. That single answer takes DEF
+   out of `hasNeed()`, out of the need multiplier in `upgradeOver`, out of
+   `spareness`, and out of every `fills_hole` and `surplus_for_need` rationale.
+   The entry is *present and flat* rather than missing, because six call sites
+   read `needs.get(position)` and each has its own default for an absent one.
+   `adequate` rather than `surplus` for the same reason: `surplus` is an
+   argument *for* moving somebody, and the invariant is that a trade has no
+   opinion here at all. A spare defence is also not counted as bench depth, so
+   `depthChange` cannot move on one.
+2. `bilateral.ts` — `tradeableFrom` filters excluded positions explicitly. It
+   does not depend on a defence being unpriced, thin, cheap or unwanted. It
+   depends on it being a defence.
+
+`tests/trades.dst.test.ts` asserts all of it against a **genuinely scorable**
+defence — a real game line, a real league defence table, a non-null score — in
+the league shape where the invariant is actually at risk: no defence on the
+user's roster, a good one on the partner's, and everything else adequate on
+both. A test built on an unscorable DST would pass against no exclusion at all.
+It also asserts the other half: every non-DEF position's need is byte-identical
+to the same league with the defences removed, so the exclusion cannot distort
+what it is not about.
+
 ---
 
 ## Candidate generation, and the bounds

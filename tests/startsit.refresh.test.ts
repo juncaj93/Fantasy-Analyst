@@ -13,6 +13,7 @@ import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { StartSitRefreshService, DEDUPE_SECONDS } from '../src/server/services/startSitRefresh.ts';
 import { VegasUsageRepo } from '../src/server/repos/vegasUsage.ts';
+import { PropsRepo } from '../src/server/repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../src/server/repos/settings.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { createTestDb } from './helpers/db.ts';
@@ -34,7 +35,16 @@ class CountingProvider extends MockVegasProvider {
   }
 }
 
-/** A provider that refuses everything, for the partial-failure tests. */
+/**
+ * A provider that is actually dead, on every method that reaches the network.
+ *
+ * `getPropsForTeams` alone is not enough and used to look like enough only
+ * because the seeded demo had no stored events: with nothing in `vegas_events`,
+ * schedule discovery was the only path and breaking it broke everything. The
+ * seed now carries a game line for the defence it rosters, so the planner has a
+ * known event to go straight to — and a provider that answers *that* is not a
+ * dead source, it is a degraded one, which is a different test.
+ */
 class BrokenProvider extends MockVegasProvider {
   constructor() {
     super(MOCK_GAMES);
@@ -45,6 +55,10 @@ class BrokenProvider extends MockVegasProvider {
   }
 
   override async getPropsForTeams(): Promise<never> {
+    throw new Error('provider is on fire');
+  }
+
+  override async getPlayerProps(): Promise<never> {
     throw new Error('provider is on fire');
   }
 }
@@ -115,12 +129,24 @@ describe('the Start/Sit refresh', () => {
   });
 
   it('leaves the stored lines exactly where they were when the provider fails', async () => {
+    const linesBefore = await new PropsRepo(db).freshness();
     const before = await new VegasUsageRepo(db).view();
     await new StartSitRefreshService(db, { vegas: new BrokenProvider() }).refresh();
     const after = await new VegasUsageRepo(db).view();
-    // Nothing was bought, so the ledger did not move by more than the failed
-    // attempt the budget layer records for itself.
-    expect(after.used - before.used).toBeLessThanOrEqual(1);
+    const linesAfter = await new PropsRepo(db).freshness();
+
+    /*
+     * The claim is that nothing was *bought*, and it is asserted on the lines
+     * rather than only on the ledger — the ledger is the weaker half.
+     *
+     * The budget layer charges itself for an attempt whether or not it comes
+     * back with anything, so the count moves by one per path the planner tried.
+     * There are two now that the seed stores an event: schedule discovery, and
+     * the known event the planner can go straight to. Both failed, nothing was
+     * stored, and the lines on screen are the ones that were there before.
+     */
+    expect(linesAfter?.fetchedAt).toBe(linesBefore?.fetchedAt);
+    expect(after.used - before.used).toBeLessThanOrEqual(2);
   });
 
   it('reports a budget refusal as blocked rather than as an update', async () => {

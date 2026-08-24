@@ -248,9 +248,19 @@ describe('API with seeded data', () => {
 
   it('offers filters only for positions the league actually starts', async () => {
     const board = await json<{ startablePositions: string[] }>(get('/api/drafts/demo-draft/board', cookie));
-    // The demo league starts QB/RB/RB/WR/WR/TE/FLEX — no defence, no kicker.
-    expect(board.startablePositions).toEqual(['QB', 'RB', 'WR', 'TE']);
-    expect(board.startablePositions).not.toContain('DEF');
+    /*
+     * The demo league starts QB/RB/RB/WR/WR/TE/FLEX/DEF. The defence is there
+     * because the DST lane needed a fixture that could actually reach the
+     * defence paths, and it belongs on this list for the reason the list
+     * exists: "which positions matter" is a property of the league, and a
+     * league that starts a defence should be offered defences.
+     *
+     * The kicker is the assertion that has always been doing the work here. It
+     * is never on this list however a league is shaped, because the app has no
+     * opinion about kickers and a slot it could never fill is a warning it
+     * could never clear — see `NON_PLAYING_SLOTS`.
+     */
+    expect(board.startablePositions).toEqual(['QB', 'RB', 'WR', 'TE', 'DEF']);
     expect(board.startablePositions).not.toContain('K');
   });
 
@@ -426,7 +436,8 @@ describe('API with seeded data', () => {
       get('/api/leagues/demo-league/roster', cookie),
     );
     expect(body.found).toBe(true);
-    expect(body.starters).toHaveLength(2);
+    // Two skill starters and the defence, which the seeded league starts.
+    expect(body.starters).toHaveLength(3);
     expect(body.bench.length).toBeGreaterThan(0);
   });
 

@@ -98,17 +98,40 @@ test.describe('the club mark on a player row', () => {
    * the same claim is the same claim with the sides swapped: the mark ends
    * before the name begins, and the name still gets enough of the row to be a
    * name. Neither number was relaxed on the way.
+   *
+   * ## Why "enough of the row" is two clauses rather than one
+   *
+   * `.player-name` is `flex: 0 1 auto`, so its box is the *text's own width*
+   * until the row runs out of space and it starts to shrink. A bare
+   * `width > 60` therefore conflates two very different rows: one whose name
+   * has been crushed by everything to its left, and one whose name is simply
+   * short. The first is the defect; the second is a fact about the name.
+   *
+   * The board now carries defences, whose names are single words — `Baltimore`
+   * renders 59.77px in WebKit at *every* width from 360 to 430, which is the
+   * proof it is not being squeezed by anything: a crushed name would measure
+   * differently on a wider screen.
+   *
+   * So the floor still applies, and a name below it has to earn its place by
+   * being **complete**. A crushed long name fails both clauses — it is under 60
+   * *and* ellipsised — which is exactly the row this test was written to catch.
    */
   test('never lets a mark push the player name off the row', async ({ page }) => {
     await openDraft(page);
 
     for (const row of await page.getByTestId('recommendation-row').all()) {
-      const name = await row.locator('.player-name').boundingBox();
+      const label = row.locator('.player-name');
+      const name = await label.boundingBox();
       const mark = await row.getByTestId('team-logo').boundingBox();
       if (!name || !mark) continue;
       // The mark ends before the name starts.
       expect(mark.x + mark.width).toBeLessThanOrEqual(name.x + 1);
-      expect(name.width).toBeGreaterThan(60);
+
+      if (name.width <= 60) {
+        const text = (await label.textContent())?.trim();
+        const truncated = await label.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+        expect(truncated, `"${text}" is under 60px because it was cut off, not because it is short`).toBe(false);
+      }
     }
   });
 

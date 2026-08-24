@@ -25,6 +25,8 @@ import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
 import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 import { InjuryService, previousSeason } from '../server/services/injuryService.ts';
+import { ScheduleService } from '../server/services/scheduleService.ts';
+import { usageSeason } from '../server/services/usageService.ts';
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
@@ -296,6 +298,35 @@ export default {
         if (result.error) console.error('season market refresh failed', result.error);
       } catch (err) {
         console.error('season market refresh failed', err);
+      }
+
+      /*
+       * The fixture list, on the clock it costs nothing to be on.
+       *
+       * A conditional GET against a file published in May and revised only when
+       * the league flexes a Sunday-night game, so the answer is 304 on nearly
+       * every tick of the season and the bytes are zero. **No cron trigger of
+       * its own**: the account has five, this needs none of them, and one
+       * conditional request is not worth a schedule entry.
+       *
+       * Nothing on a recommendation read path reads what it stores. The DST
+       * model is anchored on the Vegas line for the week in play, which is the
+       * right source for a game that has been priced; this is the source for
+       * the two questions no book answers in October — which week is a bye, and
+       * who a defence plays in December. Having it land a lane early is what
+       * lets the streaming and playoff work be about the model rather than
+       * about ingest.
+       *
+       * Separately caught, and last of the file feeds, for the ordinary reason:
+       * a planning input that fails to refresh costs a screen nobody is looking
+       * at today, and it must never take down a feed a lineup depends on. A
+       * failure leaves the stored schedule exactly where it is.
+       */
+      try {
+        const schedule = await new ScheduleService(env.DB).refresh(usageSeason());
+        if (schedule.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
+      } catch (err) {
+        console.error('schedule refresh failed', err);
       }
 
       /*

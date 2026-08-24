@@ -67,7 +67,9 @@ test.describe('the recommended lineup, at a glance', () => {
    */
   test('leaves every row on the group surface, and puts the position in the chip', async ({ page }) => {
     const filled = page.locator('[data-testid="starter-row"][data-starter="true"]');
-    expect(await filled.count(), 'the demo roster fills three slots').toBe(3);
+    // Four of the eight slots: the demo roster is deliberately partial, and the
+    // defence it now rosters fills one of them.
+    expect(await filled.count(), 'the demo roster fills four slots').toBe(4);
 
     const surface = await page.getByTestId('starters-group').evaluate((el) => getComputedStyle(el).backgroundColor);
     for (const card of await filled.all()) {
@@ -155,7 +157,9 @@ test.describe('the recommended lineup, at a glance', () => {
     const slots = await page.getByTestId('starter-row').evaluateAll((rows) =>
       rows.map((r) => r.getAttribute('data-slot')),
     );
-    expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX']);
+    // The league's own order, defence included: dedicated slots first in the
+    // order Sleeper lists them, then the flex.
+    expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'DEF', 'FLEX']);
   });
 
   /**
@@ -220,7 +224,7 @@ test.describe('a weekly command centre, on one screen', () => {
     const viewport = page.viewportSize()!.height;
     const rows = page.getByTestId('starter-row');
     const count = await rows.count();
-    expect(count, 'the demo league starts seven slots').toBe(7);
+    expect(count, 'the demo league starts eight slots').toBe(8);
 
     // Measured from the page, so the toolbar's own reservation is included.
     const bottom = await rows.last().evaluate((el) => el.getBoundingClientRect().bottom);

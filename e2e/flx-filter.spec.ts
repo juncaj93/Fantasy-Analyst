@@ -45,20 +45,24 @@ test.describe('the draft board', () => {
    * reads like a position sitting between the real ones invites exactly the
    * confusion this filter must not cause.
    *
-   * The seeded league starts no defence — the Best Ball shape, and the common
-   * one here — so FLX is also the last chip in this row. That the row is
-   * unchanged for such a league is half of what the reordering promised; the
-   * league that *does* start a defence is covered where a defence league can be
-   * built, in `tests/positions.test.ts` and `tests/flx.test.ts`.
+   * The seeded league now starts a defence, so this row also carries the case
+   * that used to have no browser coverage at all: **DEF comes after FLX**, at
+   * the end. Both halves of the ordering claim are asserted at the unit level
+   * in `tests/positions.test.ts` — the defence league and the best-ball one —
+   * and what this adds is that a real browser draws them in that order rather
+   * than in whatever order the chips happen to be emitted.
    */
-  test('offers FLX after the positions, and draws no defence chip in a league with no defence', async ({ page }) => {
+  test('offers FLX after the positions, and DEF after FLX', async ({ page }) => {
     const chips = await page.getByTestId('flx-filter').textContent();
     expect(chips).toContain('FLX');
     const labels = await page
       .locator('.filter-row .chip')
       .evaluateAll((els) => els.map((e) => e.textContent?.trim() ?? ''));
-    expect(labels).toEqual(['★', 'ALL', 'QB', 'RB', 'WR', 'TE', 'FLX']);
-    expect(labels).not.toContain('DEF');
+    expect(labels).toEqual(['★', 'ALL', 'QB', 'RB', 'WR', 'TE', 'FLX', 'DEF']);
+    // The point of the ordering: FLX is not among the positions, and the
+    // defence is not between them.
+    expect(labels.indexOf('FLX')).toBeGreaterThan(labels.indexOf('TE'));
+    expect(labels.indexOf('DEF')).toBeGreaterThan(labels.indexOf('FLX'));
   });
 
   test('leaves exactly RB, WR and TE on the board', async ({ page }) => {

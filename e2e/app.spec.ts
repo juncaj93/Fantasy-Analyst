@@ -1514,8 +1514,10 @@ test.describe('team, ADP import and start/sit', () => {
     // `team-draft-mode.spec.ts` which asserts its absence during a draft.
     await openTeamInSeason(page);
     await expect(page.getByTestId('starters-title')).toBeVisible();
-    // Seven slots: QB, RB, RB, WR, WR, TE, FLEX — the league's own shape.
-    expect(await page.getByTestId('starter-row').count()).toBe(7);
+    // Eight slots: QB, RB, RB, WR, WR, TE, FLEX, DEF — the league's own shape.
+    // The defence joined it when defences became scorable; a league that starts
+    // one and cannot draw a row for it was the defect that lane fixed.
+    expect(await page.getByTestId('starter-row').count()).toBe(8);
 
     // The bench is behind its own chevron now, so that the starters fit on one
     // phone screen. It still says how many are back there before it is opened,

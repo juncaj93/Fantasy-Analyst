@@ -38,6 +38,7 @@ import {
 import type { UsageWeek } from '../src/core/usage/role.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
 import type { ScoringProfile } from '../src/core/sleeper/scoring.ts';
+import { buildDstScoring } from '../src/core/sleeper/dstScoring.ts';
 import type { DepthRole } from '../src/core/nflverse/depthChart.ts';
 
 const PROFILE: ScoringProfile = {
@@ -54,6 +55,10 @@ const PROFILE: ScoringProfile = {
   superflex: false,
   tePremium: false,
   label: 'Full PPR',
+  // This fixture's league publishes no defence settings, which reads as a
+  // league that does not score defences — the right answer for a profile that
+  // exists to test skill-position projection.
+  dst: buildDstScoring({}),
 };
 
 function prop(market: PlayerProp['market'], line: number | null, impliedProbability: number | null = null): PlayerProp {

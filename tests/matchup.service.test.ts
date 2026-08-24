@@ -105,7 +105,7 @@ describe('GET /api/leagues/:id/matchup', () => {
     expect(body.found).toBe(true);
     expect(body.week).toBe(1);
     expect(body.season).toBe('2026');
-    expect(body.forecast.slots).toHaveLength(7);
+    expect(body.forecast.slots).toHaveLength(8);
     expect(body.forecast.slots.map((s: { slot: string }) => s.slot)).toEqual([
       'QB',
       'RB',
@@ -114,6 +114,7 @@ describe('GET /api/leagues/:id/matchup', () => {
       'WR',
       'TE',
       'FLEX',
+      'DEF',
     ]);
     expect(body.forecast.slots[0].mine.playerId).toBe('1003');
     expect(body.forecast.slots[0].theirs.playerId).toBe('1010');

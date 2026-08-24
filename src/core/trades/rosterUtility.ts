@@ -50,6 +50,40 @@ import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 export const FLEX_SLOT_SHARE = 0.5;
 
 /**
+ * Positions a trade may never be about.
+ *
+ * **A DST is never a Smart Trades target or trade asset, and an unfilled DEF
+ * slot is never a roster need for trade purposes.** That is a product
+ * invariant, not a modelling opinion, and it is stated here because this module
+ * is where "what does this roster need" is decided.
+ *
+ * Nobody trades for a defence. A DST is a two-dollar waiver claim in every
+ * league that starts one, it is streamed weekly by anybody paying attention,
+ * and the market for one is a market of nothing — so an offer built around one
+ * is an offer that wastes the reader's attention at best and gets them laughed
+ * at in a league chat at worst. The app has never surfaced one, but until now
+ * that was an *accident*: defences were unscorable, so the engine skipped them
+ * the same way it skips a player with no data. This lane makes defences
+ * scorable, which removes the accident — so the rule it was standing in for has
+ * to be written down and enforced, or the first scorable DST would have walked
+ * straight into a trade package.
+ *
+ * Enforced at both levels the brief asks for. Here, an excluded position can
+ * never read as a hole, a weakness or a surplus, which takes it out of
+ * `hasNeed()`, out of the need multiplier in `upgradeOver`, out of `spareness`
+ * and out of every `fills_hole` and `surplus_for_need` rationale in one move.
+ * In `bilateral.ts`, `tradeableFrom` refuses to put one in a package at all.
+ * Two independent gates, because one of them silently regressing is exactly how
+ * this failed the first time.
+ */
+export const TRADE_EXCLUDED_POSITIONS: ReadonlySet<string> = new Set(['DEF']);
+
+/** Whether a trade is allowed to have an opinion about this position at all. */
+export function tradeExcluded(position: string | null | undefined): boolean {
+  return TRADE_EXCLUDED_POSITIONS.has(String(position ?? '').toUpperCase());
+}
+
+/**
  * A score at or below which a player is not depth.
  *
  * Zero rather than a threshold: the start/sit engine already floors an
@@ -279,6 +313,16 @@ function buildView(args: {
       if (value == null || value <= STARTABLE_FLOOR) continue;
       const position = positionOf.get(id) ?? evaluations.get(id)?.position;
       if (!position) continue;
+      /*
+       * A second defence is not depth.
+       *
+       * `depthChange` is a headline number on an offer card — "costs you one
+       * startable bench player" — and counting a spare DST in it would let a
+       * package look like it thins a roster, or shores one up, on the strength
+       * of a unit nobody would trade for. The same exclusion, one layer down
+       * from the needs.
+       */
+      if (tradeExcluded(position)) continue;
       depth.set(position, (depth.get(position) ?? 0) + 1);
     }
     const entry = {
@@ -369,6 +413,39 @@ export function needFor(args: {
   benchmark: readonly number[];
 }): PositionNeed {
   const values = [...args.values];
+
+  /*
+   * An excluded position is permanently adequate, whatever the roster holds.
+   *
+   * Not "excluded from the map" — present, and flat. A missing entry would make
+   * every `needs.get(position)` in `bilateral.ts` fall through to its own
+   * default, and there are six of them, each with its own idea of what an
+   * absent need means. One neutral answer is a guarantee; six defaults are six
+   * chances to get it wrong.
+   *
+   * Adequate rather than surplus for the same reason: `surplus` is a *reason to
+   * trade someone away*, and it would put a spare defence into the
+   * `surplus_for_need` rationale and the "you can afford to move DEF depth"
+   * sentence. The invariant is that a trade has no opinion here at all, and
+   * `adequate` is the level that says nothing.
+   *
+   * `values` and `benchmark` are still reported honestly — a reader inspecting
+   * the model should see what the roster actually holds — because they are
+   * descriptions, and only `level`, `shortfall` and `surplus` are arguments.
+   */
+  if (tradeExcluded(args.position)) {
+    return {
+      position: args.position,
+      slots: args.slots,
+      startable: values.filter((v) => v > STARTABLE_FLOOR).length,
+      values,
+      benchmark: [...args.benchmark],
+      shortfall: 0,
+      surplus: 0,
+      level: 'adequate',
+    };
+  }
+
   /*
    * Two different readings of the same slot count, and they must not be one.
    *

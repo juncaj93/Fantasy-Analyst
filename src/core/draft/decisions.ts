@@ -294,8 +294,10 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
   const alerts: RosterAlert[] = [];
   const roundsLeft = Math.max(0, input.totalRounds - input.round + 1);
 
-  const unfilled = Object.values(input.needs)
-    .filter((n) => n.startersUnfilled > 0)
+  const quiet = quietPositions(input.shape);
+  const allUnfilled = Object.values(input.needs).filter((n) => n.startersUnfilled > 0);
+  const unfilled = allUnfilled
+    .filter((n) => !quiet.has(n.position))
     .sort((a, b) => b.startersUnfilled - a.startersUnfilled || a.position.localeCompare(b.position));
 
   const severityFor = (): AlertSeverity =>
@@ -317,7 +319,7 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
         detail: `Round ${input.round} — take the best players available; there is time to fill ${unfilled.map((n) => n.position).join(', ')}.`,
         positions: unfilled.map((n) => n.position),
       },
-      ...lopsidedAlerts(input),
+      ...lopsidedAlerts(input, quiet),
     ];
   }
 
@@ -340,7 +342,16 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
     });
   }
 
-  if (unfilled.length === 0) {
+  /*
+   * "Covered" is a claim about every slot, so it waits for every slot.
+   *
+   * `unfilled` has had the quiet positions taken out of it, and saying the
+   * lineup is covered off that list would be telling a reader with an empty DEF
+   * slot that every dedicated starting slot has somebody in it. That sentence
+   * is false, and a false reassurance is worse than the pressure this whole
+   * section exists to remove — so the quiet positions buy silence, not a claim.
+   */
+  if (allUnfilled.length === 0) {
     alerts.push({
       key: 'starters:covered',
       severity: 'info',
@@ -350,9 +361,38 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
     });
   }
 
-  alerts.push(...lopsidedAlerts(input));
+  alerts.push(...lopsidedAlerts(input, quiet));
 
   return alerts;
+}
+
+/**
+ * Positions the draft has decided not to argue about.
+ *
+ * A defence, and in the ordinary league only a defence. The reasoning is
+ * already settled and is written down in `draft/engine.ts` beside
+ * `DEFENCE_WEIGHTS`: no news rule reads a defence, no published draft order
+ * this app imports ranks one, no Vegas market covers one and no preseason
+ * projection includes one. The board therefore ranks them on ADP alone and
+ * appends them after the field.
+ *
+ * These alerts were the last place that decision had not reached. The board
+ * would decline to move a defence up on roster need and then, above it, print
+ * "Still need a starting DEF" in the same red the reader learned to trust for a
+ * missing running back — pressure the ranking underneath it explicitly refuses
+ * to act on. A screen that argues with itself is worse than either half.
+ *
+ * **The exception is objective and is not a league-name special case.** A
+ * league starting two or more defences has made one a real roster requirement:
+ * you cannot field a lineup without them, they will not both be there in the
+ * last round, and a reader in that league is owed the same warning as anybody
+ * else. So the quiet applies to the shape this app has an opinion about — one
+ * defence, drafted last, forgotten — and to nothing else.
+ */
+export function quietPositions(shape: RosterShape): Set<string> {
+  const quiet = new Set<string>();
+  if ((shape.starters['DEF'] ?? 0) === 1) quiet.add('DEF');
+  return quiet;
 }
 
 /**
@@ -363,10 +403,22 @@ export function rosterAlerts(input: RosterAlertInput): RosterAlert[] {
  * comparison is on the surplus over each position's own requirement, which is
  * the only version of "too many" that means anything across league shapes.
  */
-function lopsidedAlerts(input: RosterAlertInput): RosterAlert[] {
+function lopsidedAlerts(input: RosterAlertInput, quiet: ReadonlySet<string>): RosterAlert[] {
   const { startersUrgentFromRound, lopsidedGap } = DECISION_THRESHOLDS.rosterAlerts;
   const alerts: RosterAlert[] = [];
-  const startable = Object.keys(input.shape.starters).filter((p) => (input.shape.starters[p] ?? 0) > 0);
+  /*
+   * A quiet position cannot be the thing that is "becoming more important".
+   *
+   * This alert names `least` and argues for it, and an empty defence slot is
+   * the reliable minimum for eleven rounds of any draft — so left in, it would
+   * reintroduce the exact sentence the section above removes, in different
+   * words and with a depth argument behind it. Excluded from the candidates
+   * rather than filtered from the output, so the alert that does fire names the
+   * genuinely thinnest position a reader can act on.
+   */
+  const startable = Object.keys(input.shape.starters).filter(
+    (p) => (input.shape.starters[p] ?? 0) > 0 && !quiet.has(p),
+  );
   const surpluses = startable
     .map((position) => ({
       position,
