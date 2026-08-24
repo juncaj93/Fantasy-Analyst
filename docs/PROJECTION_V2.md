@@ -429,3 +429,58 @@ where a runner with a network path to the deployment lives:
 4. **Red-zone usage**, if a path to it inside the CPU budget is ever found.
 5. **The fresh-information path has never fired against a real market
    timestamp.** It is unit-tested in both directions and has no field evidence.
+
+### Rollout blockers found in the post-deploy freshness audit
+
+Both were found by auditing the deployed article rather than the design, and
+both are about *automatic* behaviour rather than about a number being wrong.
+Every source has an automatic refresh path — see §13 — so neither is a
+manual-only feed; they are gaps in what that automatic path recovers from and
+in what it tells the model.
+
+6. **Snap counts have no gap recovery. Blocker.** `refreshSnapCounts` reads only
+   the *latest* week in the published file. `UsageService` has
+   `catchUpOneWeek` and `missingWeekBefore` for exactly this problem and
+   `NflverseService` has neither, so a week that passes while the app is down
+   is never ingested: if the deployment is unavailable on the morning week 5
+   settles and returns after week 6 publishes, week 5's snaps are missing
+   permanently. That is a hole in the series `uncertainty.snap_share_stability`
+   is computed over, and a stability figure with a silent hole in it is worse
+   than no figure — it reads as a settled role.
+
+   Roster and depth charts are immune and for different reasons: the roster is
+   a whole-file snapshot that any later successful ingest fully repairs, and
+   the depth chart is deliberately newest-capture-only. This is snap counts
+   alone.
+
+7. **nflverse source age does not reach confidence or uncertainty. Blocker.**
+   `stale` in `core/projection/v2.ts` is set by one condition: the market
+   snapshot being older than `MARKET_STALE_HOURS`. So the `uncertainty.
+   freshness` width factor and the 0–15 freshness band in `confidenceFor` are
+   driven by the *market* clock alone. A depth chart or identity crosswalk six
+   weeks stale currently scores identically to one refreshed this morning.
+   nflverse inputs reach confidence only as *absence*, through `missingInputs`
+   at −5 each, and never as *age*.
+
+   §11 of the handoff asks that stale data reduce confidence rather than
+   silently look current, and for the nflverse half of the inputs that is not
+   yet true. The plumbing is most of the way there — `depthChartAsOf` is
+   already carried in `ProjectionProvenance` and the health endpoint reports
+   every feed's real timestamps — but nothing reads them into the arithmetic.
+   One detail to fix alongside it: `usageAsOf` is populated with the season
+   string rather than an ingest timestamp, so it is not an age even where a
+   reader might take it for one.
+
+### Non-blocking
+
+8. **The side-by-side reports inputs it never looked for.** In preseason, with
+   an empty roster, `/api/diagnostics/projection-v2` prints `crosswalk false ·
+   snaps false · depth captures 0` beside a health block correctly reporting
+   915 crosswalk rows and one depth capture. The empty-roster early return in
+   `ProjectionV2Service.sideBySide` hardcodes those defaults instead of
+   reporting what it never went and looked up, so the payload contradicts
+   itself on its face.
+
+   Cosmetic, diagnostics-only, consumed by nothing, and the truthful figures
+   are two lines above it. Low-priority cleanup, explicitly **not** a rollout
+   blocker.
