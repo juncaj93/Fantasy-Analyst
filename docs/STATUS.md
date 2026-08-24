@@ -1549,7 +1549,7 @@ below the floor twice as often as above the ceiling — the signature of a wrong
 shape rather than a wrong parameter. A lognormal cannot reach zero and a fantasy
 week can: 10.5% of receiver weeks scored under 15% of their projection. The
 distribution is a mixture now — a bust branch at approximately zero, and a
-lognormal for the rest — and it holds 76% with the bottom tail landing at 9.4%
+lognormal for the rest — and it holds 76% with the bottom tail landing at 8.8%
 against a nominal 10%. The consequence is stated rather than tuned away: **a
 receiver's honest tenth percentile is zero**, because one receiver week in ten
 is zero.

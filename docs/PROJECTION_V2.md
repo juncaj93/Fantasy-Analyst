@@ -306,18 +306,19 @@ cannot open in this backtest — the structural claim is proven separately by
 
 | Confidence | n | below floor | inside | above ceiling | scaled error |
 |---|---|---|---|---|---|
-| high | 3,486 | 9.4% | 76.1% | 14.5% | 0.68 |
-| medium | 452 | 2.4% | 73.0% | 24.6% | 0.94 |
+| high | 3,859 | 8.8% | 75.8% | 15.4% | 0.70 |
+| medium | 79 | 1.3% | 65.8% | 32.9% | 1.57 |
 
 Nominal is 10 / 80 / 10. `scaled error` is `|v2 − actual| ÷ projection`: raw MAE
 is scale-dependent, and a high-confidence player is usually a high-volume one, so
 comparing raw MAE across tiers compares workloads rather than models.
 
-**Confidence correlates with scaled error in both regimes** — 0.68 against 0.94
+**Confidence correlates with scaled error in both regimes** — 0.70 against 1.57
 with full coverage, 0.69 against 0.85 with none.
 
-By position, full coverage: QB 14.7 / 76.1 / 9.3, RB 15.9 / 69.5 / 14.7,
-WR 0.1 / 85.9 / 14.1, TE 13.3 / 63.5 / 23.1.
+By position, full coverage: QB 14.9 / 75.8 / 9.3, RB 16.0 / 69.3 / 14.7,
+WR 0.1 / 85.8 / 14.1, TE 13.3 / 63.5 / 23.1. The upper tail is where the
+residual sits, and tight end is where it is worst — see §8.
 
 ### Largest disagreements
 

@@ -406,6 +406,26 @@ describe('stale inputs lower confidence rather than looking current', () => {
     expect(stale.points).toBe(fresh.points);
   });
 
+  it('does not charge a thin sample twice, once as itself and once as staleness', () => {
+    /*
+     * `stale` feeds `uncertainty.freshness` and a confidence deduction, and it
+     * used to be set from "any warning at all". A short usage window already has
+     * `uncertainty.sample_size` and its own confidence band; letting it also
+     * register as stale widened and downgraded the same fact twice. Age is the
+     * only thing that is staleness — a short sample is not old data.
+     */
+    const short = steadyWeeks().slice(0, 3);
+    const thin = project({ features: buildFeatures('WR', short, { snaps: snaps(0.8), team: 'ARI' }) });
+    expect(thin.provenance.warnings.some((w) => /only 3 games/.test(w))).toBe(true);
+    expect(thin.uncertainty.factors.some((f) => f.key === 'uncertainty.freshness')).toBe(false);
+    expect(thin.uncertainty.factors.some((f) => f.key === 'uncertainty.sample_size')).toBe(true);
+  });
+
+  it('does charge an old market snapshot as staleness, because it is', () => {
+    const stale = project({ marketAsOf: '2026-08-01T12:00:00Z' });
+    expect(stale.uncertainty.factors.some((f) => f.key === 'uncertainty.freshness')).toBe(true);
+  });
+
   it('carries the provenance a reader needs to check any of this', () => {
     const projection = project({ depthChartAsOf: '2026-09-07T07:00:00Z', usageAsOf: '2026' });
     expect(projection.provenance.marketAsOf).toBe('2026-09-06T12:00:00Z');

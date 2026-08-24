@@ -171,9 +171,25 @@ export function projectV2(input: ProjectionV2Input): ProjectionV2 {
   const marketAgeHours =
     input.marketAsOf != null ? hoursBetween(input.marketAsOf, now) : null;
 
+  /*
+   * Two lists, and running them together was a real double count.
+   *
+   * `warnings` is everything a reader should be told. `stale` is the narrower
+   * question the uncertainty and confidence models are asked: *is an input older
+   * than it should be*. An earlier version set `stale` from `warnings.length >
+   * 0`, which meant a thin usage sample widened the distribution twice — once
+   * through `uncertainty.sample_size`, which exists for exactly that, and again
+   * through `uncertainty.freshness`, which does not. Missing coverage was
+   * counted twice the same way.
+   *
+   * Age is the only thing that belongs in `stale`. A short sample is not old
+   * data and an unpriced component is not old data.
+   */
   const warnings: string[] = [];
+  let stale = false;
   if (marketAgeHours != null && marketAgeHours > MARKET_STALE_HOURS) {
     warnings.push(`the market lines are ${Math.round(marketAgeHours / 24)} days old`);
+    stale = true;
   }
   if (input.expectation && (input.expectation.minBookCount ?? 0) === 1) {
     warnings.push('the thinnest market used came from a single book');
@@ -186,7 +202,6 @@ export function projectV2(input: ProjectionV2Input): ProjectionV2 {
       `no market and no usable usage for ${anchor.unfilledMarkets.join(', ')}, which are absent from the estimate rather than zero`,
     );
   }
-  const stale = warnings.length > 0;
 
   const uncertainty = uncertaintyFor({
     position,
