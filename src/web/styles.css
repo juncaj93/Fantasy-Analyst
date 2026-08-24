@@ -54,31 +54,16 @@
   --toolbar-border: rgb(17 24 39 / 8%);
 
   /*
-   * The selected destination's bloom, as material rather than as a control.
+   * There is no token here for the selected destination's surface, and that is
+   * the design rather than an omission.
    *
-   * A whole gradient rather than a colour and an alpha, because the two themes
-   * do not want the same *shape* of falloff and a single number cannot say so —
-   * see the Dark block for what changes and why. The stops run to an explicit
-   * `0%` of the same colour rather than to `transparent`, which is the keyword
-   * that interpolates through transparent black and puts a grey haze around a
-   * blue bloom on the engines that do not premultiply.
-   *
-   * The outermost stop lands at the ellipse's own radius, and the ellipse is
-   * exactly half the layer's box — so the bloom reaches nothing at every edge
-   * of its box, and its box is the capsule's inner boundary. There is no
-   * perimeter to see because there is no ink at the perimeter.
-   *
-   * Light: cool, restrained, and a long way below the accent's own strength.
-   * At the accent's full saturation the destination reads as a blue sticker
-   * pressed onto the bar rather than as the bar itself lifting.
+   * A radial lift painted behind the selected destination shipped and was
+   * rejected on hardware: the toolbar is the one control on screen the whole
+   * time, and a diffuse wash inside a capsule that is already a material makes
+   * it read fuzzy beside an app that is otherwise crisp. The capsule is the
+   * material. The selected destination is the accent colour, the heavier glyph
+   * and the heavier word — foreground, no second surface.
    */
-  --toolbar-bloom: radial-gradient(
-    50% 50% at 50% 50%,
-    rgb(42 95 216 / 16%) 0%,
-    rgb(42 95 216 / 12%) 34%,
-    rgb(42 95 216 / 5%) 66%,
-    rgb(42 95 216 / 0%) 100%
-  );
 
   /* -- lines ------------------------------------------------------------- */
   /*
@@ -589,29 +574,6 @@
     --toolbar-surface: #1e242deb;
     --toolbar-border: rgb(255 255 255 / 9%);
 
-    /*
-     * Dark's bloom is a different colour and a different falloff, and both
-     * differences are the point — reusing Light's with another alpha is what
-     * makes a dark bar look like a lit one.
-     *
-     * The colour is a slate-blue well below the accent's luminance rather than
-     * `--accent` itself: on a #1e242d pill the accent at any readable strength
-     * is a glow, and a glow behind an already-accented label is how a selected
-     * destination ends up harder to read than an unselected one. This is a lift
-     * in the material, not a light source behind it.
-     *
-     * The falloff is shorter — full strength held to a third of the way out and
-     * then dropped — because a dark surface shows a wide, even wash as a smudge
-     * with no centre, and the centre is what says *which* destination.
-     */
-    --toolbar-bloom: radial-gradient(
-      50% 50% at 50% 50%,
-      rgb(129 160 208 / 20%) 0%,
-      rgb(129 160 208 / 15%) 32%,
-      rgb(122 150 194 / 6%) 64%,
-      rgb(122 150 194 / 0%) 100%
-    );
-
     --separator: #262e39;
     --separator-soft: #1e252e;
     --border: var(--separator);
@@ -694,13 +656,6 @@
   /* Same values as the media query above, for an explicit Dark choice. */
   --toolbar-surface: #1e242deb;
   --toolbar-border: rgb(255 255 255 / 9%);
-  --toolbar-bloom: radial-gradient(
-    50% 50% at 50% 50%,
-    rgb(129 160 208 / 20%) 0%,
-    rgb(129 160 208 / 15%) 32%,
-    rgb(122 150 194 / 6%) 64%,
-    rgb(122 150 194 / 0%) 100%
-  );
 
   --separator: #262e39;
   --separator-soft: #1e252e;
@@ -1042,20 +997,20 @@ body,
   border: 1px solid var(--toolbar-border);
   box-shadow: var(--shadow-toolbar);
   /*
-   * The capsule is what bounds the selected destination's bloom.
+   * The capsule does not clip, and nothing in it asks to be clipped.
    *
-   * The bloom is painted by the active destination and is deliberately wider
-   * than it — see `[aria-current]::before` below — so at either end of the bar
-   * it reaches the pill's own edge. Clipping here rather than shaping the bloom
-   * per position means the first and last destinations get the same drawing as
-   * the five in the middle and the capsule decides what survives, which is the
-   * difference between a bloom that belongs to the material and one that is
-   * being fitted around it.
-   *
-   * This clips descendants only. The pill's own shadow and border are drawn
-   * from its box and are untouched — the elevation is where it was.
+   * `overflow: hidden` was here for exactly one reason — to bound the selected
+   * destination's bloom at the pill's edge — and the bloom is gone. What is
+   * left inside the bar needs no clipping and one thing actively wants none:
+   * the destinations' focus ring is drawn *outside* their box, and a clip does
+   * not know a decoration from a focus ring. Nothing else here depends on it.
+   * `backdrop-filter` and the border both round to `--radius-toolbar` on their
+   * own; the destinations sit inside the pill's padding with a radius of their
+   * own, so a pressed wash cannot reach a corner; the badge and the lock are
+   * inside their destination's box; and the bar is sized by its contents, so
+   * there is never more in it than fits — seven targets at their 44px floor
+   * plus the pill's padding is 314px inside the 336px a 360px phone leaves.
    */
-  overflow: hidden;
   /*
    * Out of the way while the keyboard is up.
    *
@@ -1125,7 +1080,21 @@ body,
 
 /*
  * The selected destination: its own colour, a heavier glyph, a heavier word,
- * and the material behind it lifted.
+ * and nothing behind it.
+ *
+ * The bar carried a diffuse lift in its own surface here, and hardware threw it
+ * out. Everything the argument for it got right is still true — a filled pill
+ * is a button inside a button, an underline is a hard edge in a soft capsule —
+ * but so is the thing it got wrong: the capsule is *already* a material, and a
+ * second atmospheric treatment inside it reads as fuzz rather than as
+ * hierarchy, on the one control that is on screen the whole time. On a phone,
+ * beside an app that is otherwise crisp and dense, a glass capsule containing a
+ * glowing button is what it looked like.
+ *
+ * So the fact is carried in the foreground, where a native bottom bar carries
+ * it: the accent colour, the glyph drawn with a heavier hand — see the
+ * `stroke-width` below — and the word set heavier. Three cues, none of them
+ * colour alone, plus `aria-current` for anything that can see none of them.
  *
  * Everything here is a repaint of a fixed box. Nothing changes a width, nothing
  * changes a height, nothing moves — every destination either side of the one
@@ -1138,6 +1107,11 @@ body,
  * the narrowest destination the bar ever draws. `toolbar.spec.ts` holds that at
  * all four widths and at both destination counts, because it is the one thing
  * in this rule that a longer label could quietly break.
+ *
+ * 680 rather than 600 is asked of the platform font and iOS renders the
+ * difference. Some rasterisers snap the two to the same face, which is a fact
+ * about the screenshot and not about the phone — the target is hardware, and
+ * this is not made heavier to satisfy a Linux capture.
  */
 .tabbar button[aria-current='page'] {
   color: var(--accent-text);
@@ -1145,83 +1119,31 @@ body,
 }
 
 /*
- * The bloom: the material noticing, rather than a second control appearing.
+ * The dash under the selected destination is gone, and so is the wash behind
+ * it.
  *
- * This is the selected state the bar had been missing. What was here before was
- * a colour and a stroke weight, which is a lot to ask of a 10px word and a 22px
- * mark at the bottom of a phone — and the two obvious ways to add to it are
- * both worse. A filled pill behind the destination puts a button inside a
- * button, and a bar whose selected item is a smaller version of itself reads as
- * a webpage's tab strip; an underline is a hard edge in a soft capsule and the
- * bar has already had one of those removed.
- *
- * A diffuse lift in the toolbar's own surface is neither. There is no perimeter
- * to find, so there is no second object; it is local to one destination, so it
- * still says which; and because it is painted *by* the destination it is always
- * exactly where the destination is, with no measurement, no indicator element
- * and nothing to keep in step.
- *
- * The geometry, which is the whole of it:
- *
- *   `inset: calc(-1 * var(--toolbar-pad))` — the layer is the destination's
- *   column extended to the pill's inner edge on all four sides. Wider than the
- *   target, as a lift in a material has to be, and never wider than the bar.
- *
- *   `50% 50%` radii on the gradient — the ellipse's edge is the layer's edge,
- *   so the ink is already nothing by the time it arrives there and the corners
- *   were never painted at all. Combined with the capsule's `overflow`, nothing
- *   of this reaches outside the pill at any position in the bar.
- *
- *   `z-index: -1` — behind the glyph and the word, and behind the button's own
- *   `:active` wash, so a press still registers on the destination you are
- *   already on. An absolutely-positioned pseudo-element would otherwise paint
- *   over the content it is meant to sit under.
- *
- *   `pointer-events: none` and no accessible presence: it is a decoration, the
- *   sentence is carried by `aria-current`, and the colour, the stroke and the
- *   label weight all say it again for anyone who cannot see a 16% wash.
- *
- * No transition, deliberately. Selection arrives with the screen it belongs to,
- * and a bloom that fades in behind a screen that is already there is an effect
- * about itself.
- */
-.tabbar button[aria-current='page']::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: calc(-1 * var(--toolbar-pad));
-  pointer-events: none;
-  background: var(--toolbar-bloom);
-}
-
-/*
- * The dash under the selected destination is gone.
- *
- * It was a third cue for one fact. The destination is already its own colour
- * and already drawn with a heavier stroke — see the `stroke-width` below — and
- * `aria-current` carries it for anything listening, so nothing here depended on
- * the mark and nothing depends on colour alone without it. What it did add was
- * a hard two-pixel edge inside a soft capsule, on the one control that is on
- * screen the entire time.
+ * Both were a further cue for one fact, and the destination is already its own
+ * colour and already drawn with a heavier stroke — see the `stroke-width`
+ * below — with `aria-current` carrying it for anything listening. Neither
+ * removal leaves the selection resting on colour alone. What they cost was a
+ * hard two-pixel edge and a soft blue cloud, inside a capsule that wanted
+ * neither.
  */
 
 /*
- * The focus ring, drawn inside the destination rather than around it.
+ * The focus ring is the shared one, drawn outside the destination.
  *
- * The capsule clips its descendants so the bloom cannot escape it, and a clip
- * does not know a decoration from a focus ring: outside the button the ring is
- * nipped at the two end destinations, where the pill's own curve runs closest
- * to the target, and at the narrow seven-destination width there is only the
- * pill's 3px of padding for a 3px ring to live in. Inset, the same ring — same
- * colour, same weight, same token — lands entirely on material that is on
- * screen, at every width and in every position in the bar.
+ * It was moved inside for the bloom: the capsule had to clip its descendants to
+ * bound the wash, and a clip does not know a decoration from a focus ring — at
+ * the two ends of the bar, and at the narrow seven-destination width where the
+ * pill has 3px of padding for a 3px ring, an outset ring came back nipped. That
+ * was a consequence of the bloom rather than a decision about focus, the clip
+ * is gone with it, and so the toolbar goes back to the ring every other control
+ * in the app draws: `:focus-visible` on the shared rule, outset, same token.
  *
- * The shared rule it overrides also sets a `border-radius`, which the toolbar's
- * own is already more specific than; only the shadow needs saying again.
+ * Nothing is said here, deliberately. A rule that restated the shared one would
+ * be a second place for the ring to drift from.
  */
-.tabbar button:focus-visible {
-  box-shadow: inset var(--focus-ring);
-}
 
 .tabbar button:active {
   background: var(--pressed);

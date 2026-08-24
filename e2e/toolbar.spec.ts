@@ -218,70 +218,121 @@ test.describe('the active destination', () => {
 });
 
 /**
- * The selected destination, and the material behind it.
+ * The selected destination, which is foreground and nothing else.
  *
- * A colour and a heavier stroke is a lot to ask of a 10px word and a 22px mark
- * at the bottom of a phone, so the bar now lifts its own surface behind the
- * destination that is showing. The two obvious alternatives are both a second
- * object — a filled pill is a button inside a button, an underline is a hard
- * edge inside a soft capsule — and what is asserted here is that this is
- * neither: it belongs to exactly one destination, it is drawn behind
- * everything, it takes no taps, it says nothing to a screen reader, it ends
- * where the pill does, and it costs the bar not one pixel of layout.
+ * The bar shipped a diffuse lift in its own surface behind the destination that
+ * was showing, and a physical-iPhone review threw it out: the capsule is
+ * already a material, and a second atmospheric treatment inside it reads as
+ * fuzz beside an app that is otherwise crisp. What replaced it is what a native
+ * bottom bar does — the accent colour, a heavier glyph, a heavier word — and
+ * what is asserted here is that it really is only that: nothing is painted
+ * behind any destination, the three cues all land on the one `aria-current`
+ * names, they are readable in both themes, they cost the bar no layout, and the
+ * focus ring the clip used to nip is back outside the destination and visible.
  */
-test.describe('the selected destination’s bloom', () => {
-  /** The lift's own layer, as the browser resolved it. */
-  async function bloom(page: Page) {
+test.describe('the selected destination', () => {
+  /**
+   * Everything each destination paints, and the capsule's clipping, as the
+   * browser resolved it.
+   *
+   * Both pseudo-elements as well as the button's own box, because "no surface
+   * behind the selection" is a claim about anything that could draw one, and a
+   * reintroduced wash is as likely to arrive on `::after` as on `::before`.
+   */
+  async function paint(page: Page) {
+    await page.locator('.tabbar').waitFor({ state: 'attached' });
     return page.evaluate(() => {
-      const bar = document.querySelector('.tabbar')!;
-      const layers = [...bar.querySelectorAll('button')].map((b) => {
-        const layer = getComputedStyle(b, '::before');
-        return {
-          id: (b as HTMLElement).dataset.testid,
-          current: b.getAttribute('aria-current'),
-          painted: layer.backgroundImage !== 'none' && layer.content !== 'none',
-          taps: layer.pointerEvents,
-          depth: layer.zIndex,
-          inset: [layer.top, layer.right, layer.bottom, layer.left].map((v) => Number.parseFloat(v)),
-        };
+      const surface = (s: CSSStyleDeclaration) => ({
+        colour: s.backgroundColor,
+        image: s.backgroundImage,
+        shadow: s.boxShadow,
+        content: s.content,
       });
+      const bar = document.querySelector('.tabbar')!;
       return {
         clip: getComputedStyle(bar).overflow,
-        pad: Number.parseFloat(getComputedStyle(bar).paddingLeft),
-        layers,
+        tabs: [...bar.querySelectorAll('button')].map((b) => ({
+          id: (b as HTMLElement).dataset.testid,
+          current: b.getAttribute('aria-current') === 'page',
+          own: surface(getComputedStyle(b)),
+          before: surface(getComputedStyle(b, '::before')),
+          after: surface(getComputedStyle(b, '::after')),
+        })),
       };
     });
   }
 
-  test('is behind the destination that is showing, and behind no other', async ({ page }) => {
+  /** Nothing at all, on any of the three layers a destination could draw on. */
+  function drawsNothing(tab: Awaited<ReturnType<typeof paint>>['tabs'][number]) {
+    const blank = (s: { colour: string; image: string; shadow: string; content: string }) =>
+      s.image === 'none' &&
+      s.shadow === 'none' &&
+      /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(s.colour);
+    return (
+      blank(tab.own) &&
+      (tab.before.content === 'none' || blank(tab.before)) &&
+      (tab.after.content === 'none' || blank(tab.after))
+    );
+  }
+
+  /**
+   * No pill, no tray, no bloom — on the selected destination or on any other.
+   *
+   * This is the whole of the correction, stated as the thing that would undo
+   * it. The selection is carried in front of the material, so the material
+   * behind every destination is the capsule's and only the capsule's, and the
+   * one that is showing paints no more of its own than the five that are not.
+   */
+  test('paints no surface of its own, and neither does any other', async ({ page }) => {
     await page.goto('/');
     for (const tab of DESTINATIONS) {
       await open(page, tab);
-      const { layers } = await bloom(page);
-      const lit = layers.filter((l) => l.painted);
-      expect(lit.map((l) => l.id), `${tab}: exactly one destination may be lifted`).toEqual([`tab-${tab}`]);
-      expect(lit[0]!.current, 'the lift and `aria-current` are the same fact').toBe('page');
+      const { tabs } = await paint(page);
+      expect(tabs.filter((t) => t.current).map((t) => t.id), `${tab}: exactly one destination is current`).toEqual([
+        `tab-${tab}`,
+      ]);
+      for (const t of tabs) {
+        expect(drawsNothing(t), `${tab}: ${t.id} draws a surface of its own — ${JSON.stringify(t)}`).toBe(true);
+      }
     }
   });
 
   /**
-   * It is decoration, and the sentence is carried elsewhere.
+   * The selection is a repaint, and the selected destination is the same object
+   * as an unselected one.
    *
-   * Three separate claims, because a selected state that is only a wash is a
-   * selected state that does not exist for a reader who cannot see it: the
-   * layer takes no taps and is behind the glyph, `aria-current` says which
-   * destination is showing, and the accessible name is the word and nothing
-   * more — no "selected", no stray text from a pseudo-element.
+   * Compared rather than asserted against a value: whatever the bar decides its
+   * resting material is, the destination that is showing has to have exactly
+   * the same one. A pill, a tray, a tint or a wash reintroduced for the
+   * selected state alone fails here without this test having to know what shape
+   * it arrived in.
    */
-  test('takes no taps, sits behind the glyph, and adds no words', async ({ page }) => {
+  test('has the same material as the destinations either side of it', async ({ page }) => {
     await page.goto('/');
     await open(page, 'players');
-    const { layers } = await bloom(page);
-    const lit = layers.find((l) => l.painted)!;
-    expect(lit.taps, 'the lift is not a target').toBe('none');
-    expect(Number.parseInt(lit.depth, 10), 'the lift is behind the glyph and the word').toBeLessThan(0);
+    const { tabs } = await paint(page);
+    const lit = tabs.find((t) => t.current)!;
+    for (const resting of tabs.filter((t) => !t.current)) {
+      expect(
+        { own: lit.own, before: lit.before, after: lit.after },
+        `the selected destination is a different surface from ${resting.id}`,
+      ).toEqual({ own: resting.own, before: resting.before, after: resting.after });
+    }
+  });
 
-    // The tap still lands on the destination, not on the decoration over it.
+  /**
+   * The tap lands on the destination, and the accessible name is the word.
+   *
+   * Both survive from the bloom's own contract and are worth keeping without
+   * it: the selected state must not put anything between a thumb and the
+   * button, and it must not put a stray word — "selected", a pseudo-element's
+   * `content` — into the accessible name. `aria-current` is what carries the
+   * sentence, which matters more now that there is one visual cue fewer.
+   */
+  test('takes the tap itself, and adds no words', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+
     const hit = await page.evaluate(() => {
       const box = document.querySelector('[data-testid="tab-players"]')!.getBoundingClientRect();
       const el = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
@@ -289,87 +340,86 @@ test.describe('the selected destination’s bloom', () => {
     });
     expect(hit).toBe('tab-players');
     await expect(page.getByTestId('tab-players')).toHaveAccessibleName('Players');
+    await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
   });
 
   /**
-   * The capsule is what the lift ends at.
+   * Readable in both themes, and free.
    *
-   * The layer is deliberately wider than the destination it belongs to — a lift
-   * in a material has no perimeter, and a layer the size of the target would
-   * have one — so at either end of the bar it reaches the pill's own edge. Two
-   * things keep that from becoming a bloom hanging off the side of a rounded
-   * capsule: the pill clips its descendants, and the layer is never asked to go
-   * further than the pill's own padding in the first place.
-   */
-  test('reaches the pill’s inner edge and stops there', async ({ page }) => {
-    await page.goto('/');
-    await open(page, 'draft');
-    const { clip, pad, layers } = await bloom(page);
-    expect(clip, 'the capsule clips what is drawn inside it').toBe('hidden');
-
-    const lit = layers.find((l) => l.painted)!;
-    for (const side of lit.inset) {
-      expect(side, 'the lift stops at the pill’s own padding, on every side').toBe(-pad);
-    }
-
-    // …and that really is inside the bar, measured rather than assumed.
-    const contained = await page.evaluate(() => {
-      const bar = document.querySelector('.tabbar')!;
-      const box = bar.getBoundingClientRect();
-      const border = Number.parseFloat(getComputedStyle(bar).borderLeftWidth);
-      const pad = Number.parseFloat(getComputedStyle(bar).paddingLeft);
-      const tab = bar.querySelector('button[aria-current="page"]')!.getBoundingClientRect();
-      return {
-        overshootLeft: +(box.left + border - (tab.left - pad)).toFixed(2),
-        overshootRight: +(tab.right + pad - (box.right - border)).toFixed(2),
-        overshootTop: +(box.top + border - (tab.top - pad)).toFixed(2),
-      };
-    });
-    expect(contained.overshootLeft).toBeLessThanOrEqual(0.5);
-    expect(contained.overshootRight).toBeLessThanOrEqual(0.5);
-    expect(contained.overshootTop).toBeLessThanOrEqual(0.5);
-  });
-
-  /**
-   * Visible, in both themes, and free.
+   * With the wash gone the whole of the selected state is foreground, so what
+   * has to hold is that the foreground is legible: the selected word is a
+   * different colour from the resting one, and both are readable against the
+   * material they sit on. A number rather than an eye, because "clearly
+   * accented" and "washed-out grey" are a tuning pass apart in Light and
+   * "readable accent" and "neon" are a tuning pass apart in Dark.
    *
-   * "Subtle" and "invisible" are one tuning pass apart, and a wash that reads on
-   * a laptop can vanish on a phone — so rather than asserting a colour, this
-   * turns the lift off and asks the browser whether the bar it drew was a
-   * different bar. Light and Dark are checked separately because they are
-   * tuned separately: the same alpha that is restrained on a near-white pill is
-   * nothing at all on a near-black one.
+   * The contrast is computed against the capsule composited over the page, and
+   * the two themes are checked separately because they are tuned separately.
    *
-   * The same two captures answer the other half of it. The bar's box is
-   * measured with the lift on and off, and it is the same box — the layer is
-   * out of flow and behind everything, so it can no more move a destination
-   * than the shadow under the pill can.
+   * The same visit answers the other half of it: the bar's box is measured with
+   * the selection on this destination and on its neighbour, and it is the same
+   * box — a repaint can no more move a destination than the shadow under the
+   * pill can.
    */
   for (const theme of ['light', 'dark'] as const) {
-    test(`is visible in ${theme} and costs the bar no layout`, async ({ page }) => {
+    test(`is legible in ${theme}, and costs the bar no layout`, async ({ page }) => {
       await page.goto('/');
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
       await open(page, 'team');
       await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
 
-      const shot = async () => {
-        const box = (await page.locator('.tabbar').boundingBox())!;
-        return {
-          box: { w: Math.round(box.width), h: Math.round(box.height), x: Math.round(box.x), y: Math.round(box.y) },
-          png: await page.screenshot({
-            clip: { x: box.x, y: box.y, width: box.width, height: box.height },
-          }),
-        };
-      };
+      const read = () =>
+        page.evaluate(() => {
+          /** sRGB relative luminance, per WCAG. */
+          const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+          const lum = ([r, g, b]: number[]) => {
+            const lin = [r!, g!, b!].map((v) => {
+              const s = v / 255;
+              return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
+          };
+          /** `over` seen through `c`'s own alpha. */
+          const flatten = (c: string, over: number[]) => {
+            const [r, g, b, a = 1] = parse(c);
+            return [r!, g!, b!].map((v, i) => v * a! + over[i]! * (1 - a!));
+          };
+          const bar = document.querySelector('.tabbar')!;
+          // The page is opaque, so the capsule's own alpha is the only one that
+          // has to be resolved to know what the label is actually sitting on.
+          const beneath = flatten(getComputedStyle(document.body).backgroundColor, [255, 255, 255]);
+          const material = flatten(getComputedStyle(bar).backgroundColor, beneath);
+          const contrast = (ink: string) => {
+            const a = lum(flatten(ink, material));
+            const b = lum(material);
+            return +(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2));
+          };
+          const box = bar.getBoundingClientRect();
+          return {
+            box: [box.width, box.height, box.x, box.y].map(Math.round),
+            tabs: [...bar.querySelectorAll('button')].map((b) => ({
+              id: (b as HTMLElement).dataset.testid,
+              current: b.getAttribute('aria-current') === 'page',
+              colour: getComputedStyle(b).color,
+              contrast: contrast(getComputedStyle(b).color),
+            })),
+          };
+        });
 
-      const lifted = await shot();
-      // The one property under test, removed and nothing else touched.
-      await page.addStyleTag({ content: `.tabbar button[aria-current='page']::before { background: none }` });
-      await page.waitForTimeout(150);
-      const flat = await shot();
+      const shown = await read();
+      const lit = shown.tabs.find((t) => t.current)!;
+      const resting = shown.tabs.find((t) => !t.current)!;
 
-      expect(lifted.png.equals(flat.png), `the ${theme} bloom draws nothing`).toBe(false);
-      expect(flat.box, 'the lift moved the bar').toEqual(lifted.box);
+      expect(lit.colour, `${theme}: the selected destination is the same colour as the rest`).not.toBe(resting.colour);
+      expect(lit.contrast, `${theme}: the selected word reads at ${lit.contrast}:1 on the bar`).toBeGreaterThanOrEqual(
+        4.5,
+      );
+      expect(resting.contrast, `${theme}: an unselected word reads at ${resting.contrast}:1`).toBeGreaterThanOrEqual(3);
+
+      // …and moving the selection along the bar moved nothing.
+      await open(page, 'players');
+      await expect(page.getByTestId('tab-players')).toHaveAttribute('aria-current', 'page');
+      expect((await read()).box, `${theme}: the selection moved the bar`).toEqual(shown.box);
       await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
     });
   }
@@ -419,35 +469,67 @@ test.describe('the selected destination’s bloom', () => {
   });
 
   /**
-   * Focus is still visible, and it is inside the capsule.
+   * Focus is visible, and it is the ring every other control draws.
    *
-   * The pill clips its descendants so the bloom cannot escape it, and a clip
-   * does not know a decoration from a focus ring — outside the destination the
-   * ring would be nipped at the two ends of the bar, and at the narrow
-   * seven-destination width there is only 3px of pill for a 3px ring to live
-   * in. So the ring is drawn inside the destination instead: same token, same
-   * weight, same colour, and on screen at every width.
+   * It was briefly drawn *inside* the destination, and only because the capsule
+   * had to clip its descendants to bound the bloom — a clip does not know a
+   * decoration from a focus ring, and outside the button an outset ring came
+   * back nipped at the two ends of the bar. The bloom and the clip are both
+   * gone, so this asserts the ring is back where the shared rule puts it and
+   * that nothing is clipping it.
+   *
+   * Checked at the first and last destination, which are the two the capsule's
+   * own curve runs closest to and the two that failed under the clip. The
+   * capture is deliberately wider than the button: an outset ring is drawn
+   * entirely outside the element's box, so a screenshot of the element alone
+   * would show nothing either way.
    */
-  test('keeps a visible focus ring inside the clipped capsule', async ({ page }) => {
+  test('draws the shared focus ring outside the destination, unclipped at either end', async ({ page }) => {
     await page.goto('/');
     await page.locator('.tabbar').waitFor({ state: 'attached' });
-    const first = page.getByTestId(`tab-${DESTINATIONS[0]}`);
-    const before = await first.screenshot();
-    /*
-     * `:focus-visible` is about how focus arrived, not that it did — a button
-     * focused after a tap does not draw a ring, and should not. One keystroke
-     * makes the keyboard the way the reader is working; the destination is then
-     * focused directly rather than tabbed to, because how many stops there are
-     * between the top of the page and the bar is a fact about the screen that
-     * happens to be showing.
-     */
-    await page.keyboard.press('Tab');
-    await first.evaluate((b: HTMLElement) => b.focus());
-    expect(await first.evaluate((b) => b.matches(':focus-visible')), 'the ring never came up').toBe(true);
-    const ring = await first.evaluate((b) => getComputedStyle(b).boxShadow);
-    expect(ring, 'focus is not suppressed').not.toBe('none');
-    expect(ring, 'the ring is drawn inside, where the capsule cannot clip it').toContain('inset');
-    expect((await first.screenshot()).equals(before), 'focus draws nothing').toBe(false);
+
+    expect(
+      (await paint(page)).clip,
+      'the capsule clips its descendants again, which is what nips the ring',
+    ).toBe('visible');
+
+    const ends = [DESTINATIONS[0]!, DESTINATIONS[DESTINATIONS.length - 1]!];
+    for (const tab of ends) {
+      const button = page.getByTestId(`tab-${tab}`);
+      /** The button and the band around it the ring is drawn into. */
+      const around = async () => {
+        const box = (await button.boundingBox())!;
+        const pad = 8;
+        return page.screenshot({
+          clip: {
+            x: Math.max(0, box.x - pad),
+            y: Math.max(0, box.y - pad),
+            width: box.width + 2 * pad,
+            height: box.height + 2 * pad,
+          },
+        });
+      };
+
+      const before = await around();
+      /*
+       * `:focus-visible` is about how focus arrived, not that it did — a button
+       * focused after a tap does not draw a ring, and should not. One keystroke
+       * makes the keyboard the way the reader is working; the destination is
+       * then focused directly rather than tabbed to, because how many stops
+       * there are between the top of the page and the bar is a fact about the
+       * screen that happens to be showing.
+       */
+      await page.keyboard.press('Tab');
+      await button.evaluate((b: HTMLElement) => b.focus());
+      expect(await button.evaluate((b) => b.matches(':focus-visible')), `${tab}: the ring never came up`).toBe(true);
+
+      const ring = await button.evaluate((b) => getComputedStyle(b).boxShadow);
+      expect(ring, `${tab}: focus is not suppressed`).not.toBe('none');
+      expect(ring, `${tab}: the ring is drawn outside the destination, as everywhere else`).not.toContain('inset');
+      expect((await around()).equals(before), `${tab}: focus draws nothing outside the destination`).toBe(false);
+
+      await button.evaluate((b: HTMLElement) => b.blur());
+    }
   });
 });
 
