@@ -20,18 +20,31 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, type TradeBoard, type TradeSuggestion } from '../api.ts';
+import { api, type SmartTradeBoard, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
+import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
 import { unwindOne } from '../tabReset.ts';
 
 export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   const [board, setBoard] = useState<TradeBoard | null>(null);
+  /**
+   * The bilateral offers, which arrive on their own request.
+   *
+   * Separate from `board` deliberately. The discovery board is a read of the
+   * evidence ledger and answers in milliseconds; this prices two rosters
+   * through the lineup optimiser per candidate, and tying the two together
+   * would make the fast half wait for the slow one on every visit. Null while
+   * it is in flight and null for ever if it fails — see `load`.
+   */
+  const [smart, setSmart] = useState<SmartTradeBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  /** Which bilateral offer's detail sheet is open, if any. */
+  const [openOffer, setOpenOffer] = useState<string | null>(null);
   /** Whether a skim has turned into a study — see `PlayerSheet`. */
   const [full, setFull] = useState(false);
 
@@ -47,16 +60,33 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
     unwindOne([
       { when: full, undo: () => setFull(false) },
       { when: openId != null, undo: () => setOpenId(null) },
+      { when: openOffer != null, undo: () => setOpenOffer(null) },
     ]);
   }, [resetNonce]);
 
   const load = useCallback(async () => {
+    /*
+     * Two requests, and only one of them may fail loudly.
+     *
+     * The board is the screen; if it cannot be read there is nothing to draw
+     * and the error belongs in front of the reader. The bilateral offers are an
+     * enhancement over the top of it — §18's "behavioural intelligence is an
+     * enhancement, not a dependency", extended to the whole feature — so a
+     * failure there leaves the screen exactly as it was before this existed
+     * rather than replacing it with a message about trades that did not load.
+     */
+    const offers = api
+      .get<SmartTradeBoard>('/api/trades/smart', { onFresh: setSmart })
+      .then(setSmart)
+      .catch(() => setSmart(null));
+
     try {
       setBoard(await api.get<TradeBoard>('/api/trades', { onFresh: setBoard }));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+    await offers;
   }, []);
 
   useEffect(() => {
@@ -74,6 +104,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   }
 
   const open = openId == null ? null : (board.sections.flatMap((s) => s.players).find((p) => p.playerId === openId) ?? null);
+  const offer = openOffer == null ? null : (smart?.offers.find((o) => o.id === openOffer) ?? null);
 
   /*
    * The same player page every other screen opens, with the trade case at the
@@ -153,6 +184,49 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         </StatusRow>
       ))}
 
+      {/*
+        The bilateral ideas, above the discovery board.
+
+        Above rather than below because they answer a further question: the
+        board says whose news is moving, and these say what to actually offer
+        whom. A reader who opens Trades wanting to *do* something finds the
+        do-something list first, and the board is still one thumb-flick down.
+
+        Absent entirely until the request lands, and absent for ever if it
+        fails or finds nothing worth proposing. Nothing on this screen depends
+        on it.
+      */}
+      {smart && smart.offers.length > 0 ? (
+        <div data-testid="smart-trades">
+          <div className="section-title section-title-row">
+            <span>Trade ideas</span>
+            <span className="section-title-meta">
+              <span className="section-count">{smart.offers.length}</span>
+            </span>
+          </div>
+          <div className="smart-trade-group" role="list" aria-label="Trade ideas">
+            {smart.offers.map((o) => (
+              <div role="listitem" key={o.id}>
+                <SmartTradeRow offer={o} onOpen={() => setOpenOffer(o.id)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/*
+        And when there is genuinely nothing to propose, one line saying so.
+
+        §18: say so, and do not manufacture filler. Only printed when the search
+        actually ran and came back empty — a request still in flight, or one
+        that failed, says nothing rather than claiming an empty league.
+      */}
+      {smart && smart.offers.length === 0 && smart.notes.length > 0 ? (
+        <StatusRow tone="info" data-testid="smart-trades-empty">
+          {smart.notes[0]}
+        </StatusRow>
+      ) : null}
+
       {board.sections.length === 0 ? (
         <Empty>
           Nothing to suggest yet. Trade ideas come from newsletter evidence moving in the last 30 days — once a few
@@ -208,6 +282,17 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         screen. The full page is still there for a reader who wants the whole
         ledger, one step further in.
       */}
+      {/*
+        The bilateral detail, in the same sheet grammar as the player card.
+
+        Only one of the two sheets can be open at a time by construction: a tap
+        on a trade idea sets `openOffer` and a tap on a board row sets `openId`,
+        and each renders only when its own state is set. Two overlays at once
+        would be two competing drag targets, which is exactly the arbitration
+        this screen must not regress.
+      */}
+      {offer ? <SmartTradeSheet offer={offer} onClose={() => setOpenOffer(null)} /> : null}
+
       {open && !full ? (
         <PlayerSheet
           player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}

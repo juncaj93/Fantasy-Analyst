@@ -91,6 +91,7 @@ import { InjuryService } from './services/injuryService.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
+import { SmartTradeService } from './services/smartTradeService.ts';
 import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService, seasonFor } from './services/seasonMarketService.ts';
 import { PreseasonProjectionService } from './services/preseasonProjectionService.ts';
@@ -2233,6 +2234,40 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/trades', async (ctx) => {
     const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 60) || 60, 200);
     return jsonResponse(await new TradeService(ctx.env.db).build({ limit }));
+  });
+
+  /**
+   * Smart Bilateral Trades: the few offers worth actually sending.
+   *
+   * A separate request from the board above, and deliberately so. That one is
+   * discovery — whose news is moving — and answers for sixty players at once.
+   * This one prices both rosters through the lineup optimiser and only makes
+   * sense for a handful of ideas, so a reader who never looks at it never pays
+   * for it and the board keeps the latency it had.
+   *
+   * **Zero Sleeper requests.** Every input is a stored row: the rosters, the
+   * player pool, and the trade tendencies the history subsystem's cron derived.
+   * `SmartTradeService` does not import a Sleeper client, which is what makes
+   * that a property rather than a promise.
+   */
+  router.get('/api/trades/smart', async (ctx) => {
+    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 5) || 5, 20);
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    return jsonResponse(
+      await new SmartTradeService(ctx.env.db).build({ limit, ...(leagueId ? { leagueId } : {}) }),
+    );
+  });
+
+  /**
+   * The same run, with every rejected candidate and the reason it died.
+   *
+   * For the read-only probe of §23 and for a person asking "why is that not on
+   * the list". Read-only and mutation-free like the board itself — it is the
+   * identical assembly, viewed with the rejections kept rather than dropped.
+   */
+  router.get('/api/diagnostics/smart-trades', async (ctx) => {
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    return jsonResponse(await new SmartTradeService(ctx.env.db).explain(leagueId ? { leagueId } : {}));
   });
 
   /**

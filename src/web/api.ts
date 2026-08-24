@@ -1508,6 +1508,51 @@ export interface TradeBoard {
 }
 
 /**
+ * `GET /api/trades/smart` — Smart Bilateral Trades.
+ *
+ * The offer shapes are imported from core rather than restated here. They are
+ * computed by a pure module both sides of the wire already compile, and a
+ * second hand-written copy of a nine-field evaluation is a copy that drifts the
+ * first time a field is added — the same rule the matchup forecast follows two
+ * blocks below.
+ */
+export type {
+  Fairness,
+  FairnessBand,
+  OfferEvaluation,
+  OfferPlayer,
+  RosterRationale,
+  SideOutcome,
+} from '../core/trades/bilateral.ts';
+export type { ActivityClass, ManagerFit } from '../core/trades/managerFit.ts';
+
+import type { OfferEvaluation } from '../core/trades/bilateral.ts';
+
+export interface SmartTradeBoard {
+  league: { id: string; name: string } | null;
+  /** True when at least one offer cleared every gate. */
+  found: boolean;
+  offers: OfferEvaluation[];
+  /** What the search did. Developer-facing; no screen reads it. */
+  search: {
+    partners: number;
+    generated: number;
+    scored: number;
+    viable: number;
+    surfaced: number;
+    bounds: Record<string, number>;
+  };
+  history: {
+    profiles: number;
+    seasonsComplete: string[];
+    complete: boolean;
+    leagueRate: number | null;
+  };
+  notes: string[];
+  warnings: string[];
+}
+
+/**
  * `GET /api/leagues/:id/matchup` — this week's head-to-head.
  *
  * The forecast's own shapes are imported from core rather than restated here.
