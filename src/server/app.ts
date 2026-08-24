@@ -53,7 +53,9 @@ import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
 import { evaluateBench } from '../core/roster/bench.ts';
 import { buildLadder } from '../core/trades/ladder.ts';
 import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
-import { LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
+import { DEFAULT_FINAL_WEEK, LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
+import { ManagerIntelService } from './services/managerIntelService.ts';
+import { ManagerLedgerRepo } from './repos/managerLedger.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -135,6 +137,20 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // (and one test) rather than leaking across everything in the process.
   const loginLimiter = new RateLimiter(8, 5 * 60_000);
   const refreshLimiter = new RateLimiter(4, 15 * 60_000);
+  /*
+   * The manager backfill gets its own, looser allowance.
+   *
+   * Four in fifteen minutes was the right number for a refresh that walked the
+   * previous-league chain and cost dozens of requests. That refresh is gone: a
+   * batch is now capped at twenty-four subrequests and checkpointed, so calling
+   * it repeatedly is the *supported* way to fill a new league's ledger in
+   * minutes rather than days — and the thing the free plan actually bounds is
+   * requests per invocation, which no number here can change.
+   *
+   * Twelve, so a resync can run a handful of batches in a row and still leave
+   * the endpoint bounded against a loop that has gone wrong.
+   */
+  const backfillLimiter = new RateLimiter(12, 15 * 60_000);
 
   /**
    * Reads are public; writes need an unlocked session.
@@ -894,6 +910,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
        * read, so the names and the price cannot be looking at different weeks.
        */
       observations: strategy?.bidHistory.observations ?? [],
+      /*
+       * And what the ledger knows about the people who need him.
+       *
+       * A read of two tables, never a fetch: the manager-history backfill fills
+       * them on the daily clock, and a waiver board that triggered ingestion
+       * would turn a page load into a walk of the previous-league chain. Absent
+       * for a league nobody has backfilled yet, which the pressure column reads
+       * as "not known" and never as "quiet".
+       */
+      history: await new ManagerIntelService(db)
+        .waiverHistory({
+          leagueId: league.id,
+          rosters,
+          week: nflState?.week ?? 1,
+          finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
+        })
+        .catch(() => undefined),
     });
 
     const budgets = strategy
@@ -905,7 +938,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: freshness,
       ...advice,
-      upgrades: withCompetition(upgradesWithValue, intel.competition, intel.bidders),
+      upgrades: withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure),
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
@@ -951,24 +984,80 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   /**
-   * Rebuild the manager profiles from league history.
+   * Advance the manager-history backfill by one bounded batch, then rebuild.
    *
-   * Separate from the refresh above and deliberately so: it walks the
-   * previous-league chain and costs dozens of requests to produce a handful of
-   * sentences that change perhaps once a season. Nothing calls it on a page
-   * load.
+   * This used to walk the previous-league chain in full on every call — about
+   * sixty-six Sleeper requests, against a free-plan ceiling of fifty, so it
+   * failed. It now does at most twenty-four, checkpoints what it reached, and
+   * leaves the rest for the daily clock: an established league fills over a few
+   * days rather than in one invocation that cannot finish.
+   *
+   * Calling it repeatedly is the supported way to hurry a backfill along, and
+   * each call is bounded the same way. Once history is stored it makes almost
+   * no requests at all and simply re-derives.
    */
   router.post('/api/leagues/:id/managers/refresh', async (ctx) => {
-    const limit = refreshLimiter.check('managers');
+    const limit = backfillLimiter.check('managers');
     if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
 
-    const league = await new LeagueRepo(ctx.env.db).getLeague(ctx.params['id']!);
+    const db = ctx.env.db;
+    const league = await new LeagueRepo(db).getLeague(ctx.params['id']!);
     if (!league) return errorResponse('league not found', 404);
-    const result = await new LeagueStrategyService(ctx.env.db, { sleeper: ctx.env.sleeper }).refreshProfiles({
+
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const result = await new ManagerIntelService(db, { sleeper: ctx.env.sleeper }).advance({
       leagueId: league.id,
       sleeperLeagueId: league.sleeperLeagueId,
+      season: league.season,
+      week: state?.week ?? 1,
     });
-    return jsonResponse(result);
+
+    /*
+     * The keys the resync workflow already prints, kept meaning what they
+     * meant, plus what a partial backfill needs to be legible: how much is
+     * left, whether the budget or the work ended the batch, and what it cost.
+     */
+    return jsonResponse({
+      seasons: result.seasons,
+      picks: result.derived?.picks ?? 0,
+      trades: result.derived?.trades ?? 0,
+      transactions: result.derived?.transactions ?? 0,
+      rosters: result.derived?.rosters ?? 0,
+      tendencies: result.derived?.draftProfiles ?? 0,
+      tradeProfiles: result.derived?.tradeProfiles ?? 0,
+      transactionProfiles: result.derived?.transactionProfiles ?? 0,
+      backfill: {
+        requestsUsed: result.requestsUsed,
+        requestBudget: result.requestBudget,
+        budgetBound: result.budgetBound,
+        unitsCompleted: result.completed.length,
+        outstanding: result.outstanding,
+        complete: result.complete,
+        steps: result.completed.map((c) => `${c.kind} ${c.detail}`),
+      },
+      errors: result.errors,
+    });
+  });
+
+  /**
+   * What the manager-history subsystem knows, and what it is still missing.
+   *
+   * Developer-facing and read-only. It exists because a backfill that quietly
+   * stopped and a league with genuinely no history produce identical empty
+   * profiles, and only this can tell them apart.
+   */
+  router.get('/api/diagnostics/manager-intelligence', async (ctx) => {
+    const db = ctx.env.db;
+    const league = await new LeagueRepo(db).getSelectedLeague();
+    if (!league) return jsonResponse({ league: null, reason: 'no league is selected' });
+
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const coverage = await new ManagerIntelService(db).coverage({
+      leagueId: league.id,
+      season: league.season,
+      week: state?.week ?? 1,
+    });
+    return jsonResponse({ league: { id: league.id, name: league.name, season: league.season }, ...coverage });
   });
 
   /** What has been learned about the people in this league. Read-only. */
@@ -978,20 +1067,39 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const league = await leagueRepo.getLeague(ctx.params['id']!);
     if (!league) return errorResponse('league not found', 404);
 
-    const [rosters, profiles] = await Promise.all([
-      leagueRepo.listRosters(league.id),
+    const rosters = await leagueRepo.listRosters(league.id);
+    const intel = new ManagerIntelService(db);
+    /*
+     * Two families of profile, filed two ways, and both are wanted here.
+     *
+     * `profiles` are the roster-keyed caches the screens read. `tendencies` and
+     * `history` come from the ledger and are keyed by Sleeper user id, which is
+     * the identity that survives a season boundary — so they are looked up
+     * *from* the current roster table rather than the other way round, and a
+     * seat that changed hands finds its new occupant's history or none at all.
+     */
+    const [profiles, tendencies, history, baseline] = await Promise.all([
       new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id),
+      intel.tradePartners({ leagueId: league.id, rosters }),
+      intel.waiverHistory({ leagueId: league.id, rosters, week: 1, finalWeek: readFinalWeek(league.leagueSettings) }),
+      new ManagerLedgerRepo(db).baseline<unknown>(league.id, 'transaction'),
     ]);
 
     return jsonResponse({
       league: { id: league.id, name: league.name },
       room: profiles.room,
+      /** What the room does, so a manager's numbers can be read against it. */
+      baseline: baseline?.value ?? null,
       managers: rosters.map((roster) => ({
         rosterId: roster.rosterId,
         ownerName: roster.ownerName,
         isMine: roster.isMine,
         trade: profiles.trade.get(roster.rosterId) ?? null,
         draft: profiles.draft.get(roster.rosterId) ?? null,
+        /** Trade behaviour from the ledger. Null until the backfill reaches it. */
+        tradeTendencies: (roster.ownerId ? tendencies.get(roster.ownerId) : null) ?? null,
+        /** Waiver behaviour from the ledger, on the same terms. */
+        transactions: history?.profiles.get(roster.rosterId) ?? null,
       })),
     });
   });

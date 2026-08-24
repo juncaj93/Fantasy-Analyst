@@ -31,6 +31,7 @@ import { NflverseService } from '../server/services/nflverseService.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
+import { ManagerIntelService } from '../server/services/managerIntelService.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
 import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
 import { MatchupService } from '../server/services/matchupService.ts';
@@ -123,9 +124,12 @@ export default {
    *                       one injury check, per-game usage (weekly stats
    *                       settle when a game ends, so a daily check learns
    *                       everything 288 of them would), the season-long
-   *                       market lines the draft board prices against, and the
+   *                       market lines the draft board prices against, the
    *                       matchup calibration ledger — the forecast written
-   *                       down and finished weeks closed out
+   *                       down and finished weeks closed out — and one bounded
+   *                       batch of manager history, which is why a league's
+   *                       four seasons of drafts and transactions arrive over
+   *                       a few days instead of failing in one invocation
    *
    * The calibration ledger is on a clock at all because of the final audit's
    * F-01: it used to be written from inside `GET /api/leagues/:id/matchup`, so
@@ -295,40 +299,73 @@ export default {
       }
 
       /*
-       * The league-strategy inputs, on the same daily clock.
+       * The trending capture, which nothing else can reconstruct.
        *
-       * Two feeds with one thing in common: neither can be reconstructed after
-       * the fact. Sleeper's transaction endpoint has no all-weeks form, so a
-       * week nobody read while it was current is read later or not at all; and
-       * the trending list is a rolling window Sleeper keeps no history of, so
-       * `add rate accelerated 6x` exists only for somebody who wrote yesterday's
-       * list down. A daily capture is what makes a day-over-day comparison
-       * possible at all.
+       * Sleeper's trending list is a rolling twenty-four-hour window it keeps no
+       * history of, so `add rate accelerated 6x` exists only for somebody who
+       * wrote yesterday's list down. A daily capture is what makes a
+       * day-over-day comparison possible at all — and it is once a day rather
+       * than on the five-minute tick because the window itself is a day, so 288
+       * captures would measure the same window 288 times.
        *
-       * Once a day rather than on the five-minute tick, and for the same reason
-       * usage is: a finished week's transactions never change, and Sleeper's own
-       * trending window is twenty-four hours, so 288 captures a day would
-       * measure the same window 288 times.
+       * This block used to sync the current league's transactions too. It no
+       * longer does, and that is a removal rather than a loss: the
+       * manager-intelligence batch below reads exactly the same weeks from the
+       * same repository, prioritises the live season ahead of every other, and
+       * knows which weeks are settled. Running both meant paying twice for the
+       * one week that is still in play.
        *
-       * Only the selected league, because that is the only one anything reads,
-       * and separately caught — this is the layer above lineups, and it must
-       * never take a lineup feed down.
+       * Separately caught — this is the layer above lineups, and it must never
+       * take a lineup feed down.
        */
       try {
-        const strategy = new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper });
-        await strategy.captureTrending();
+        await new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper }).captureTrending();
+      } catch (err) {
+        console.error('trending capture failed', err);
+      }
+
+      /*
+       * One bounded batch of manager history, on the same daily clock.
+       *
+       * The subsystem this feeds is the reason the batch exists. Sleeper keeps
+       * a league's drafts and transactions for every season it has ever played,
+       * and reading them is how `Next%` learns that the man three seats over
+       * takes his quarterback in round fourteen — but reading them all at once
+       * cost about sixty-six subrequests against a free-plan ceiling of fifty,
+       * and it failed in production for exactly that reason.
+       *
+       * So it is a batch. At most twenty-four requests, checkpointed at every
+       * unit, resumed here tomorrow. An established league fills its ledger
+       * over a few days and then costs two requests a day for ever — the live
+       * draft's index and the week still in play — because a finished draft and
+       * a finished week can never change and are never re-read.
+       *
+       * **Last of the Sleeper work on this tick, and deliberately.** Everything
+       * above it feeds a surface somebody is looking at today: the player
+       * dictionary, the injury report, the market lines, the current week's
+       * transactions. This feeds a signal measured in seasons, and a signal
+       * measured in seasons can wait a day. Its budget is spent after theirs,
+       * so a batch can never crowd out a lineup feed.
+       *
+       * Separately caught, like every other feed here: a history that fails to
+       * advance costs a small `Next%` adjustment and nothing else.
+       */
+      try {
         const selected = await new LeagueRepo(env.DB).getSelectedLeague();
         if (selected) {
           const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
-          await strategy.syncTransactions({
+          const report = await new ManagerIntelService(env.DB, { sleeper: appEnv.sleeper }).advance({
             leagueId: selected.id,
             sleeperLeagueId: selected.sleeperLeagueId,
             season: selected.season,
             week: state?.week ?? 1,
           });
+          if (report.errors.length > 0) {
+            console.error('manager intelligence batch had failures', report.errors);
+          }
         }
       } catch (err) {
-        console.error('league strategy refresh failed', err);
+        console.error('manager intelligence batch failed', err);
       }
 
       await refreshMatchupCalibration(env, appEnv);

@@ -202,6 +202,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
 | [docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](docs/PLAYER_AND_LINEUP_INTELLIGENCE.md) | expected points, injury beneficiaries, contingency lineups, self-grading |
 | [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | waiver competition, bilateral trade fit, planning, the decision feed |
+| [docs/MANAGER_INTELLIGENCE.md](docs/MANAGER_INTELLIGENCE.md) | the free, resumable history ledger, and the three bounded things it may change |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |

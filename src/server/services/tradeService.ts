@@ -7,6 +7,8 @@
  */
 
 import { groupByVerdict, rankTrades, type Ownership, type TradeSuggestion } from '../../core/trades/engine.ts';
+import { partnerContext, type TradePartnerContext } from '../../core/managers/tradeTendencies.ts';
+import { ManagerIntelService } from './managerIntelService.ts';
 import type { Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { LeagueRepo } from '../repos/league.ts';
@@ -133,10 +135,27 @@ export class TradeService {
       for (const playerId of roster.playerIds) ownerByPlayer.set(playerId, roster.ownerName);
     }
 
+    /*
+     * And what the league's own trade history says about talking to him.
+     *
+     * Four things and no more — a plausibility label, the shape his deals
+     * usually take, one sentence built from counts, and a tiebreak weight
+     * bounded to ±5%. There is deliberately no acceptance probability:
+     * Sleeper publishes completed trades and not declined offers, so the
+     * denominator of that fraction does not exist. See
+     * `core/managers/tradeTendencies.ts`.
+     *
+     * A read of one table, and empty for a league nobody has backfilled — in
+     * which case every suggestion keeps exactly the bilateral reasoning it had
+     * before this existed.
+     */
+    const partners = await this.partnerContexts(league.id, rosters);
+
     const withProvenance = ranked.map((suggestion) => ({
       ...suggestion,
       draft: provenance.get(suggestion.playerId) ?? null,
       owner: ownerByPlayer.get(suggestion.playerId) ?? null,
+      partner: suggestion.ownership === 'other' ? (partners.get(suggestion.playerId) ?? null) : null,
     }));
 
     return {
@@ -146,6 +165,54 @@ export class TradeService {
       considered: candidates.length,
       warnings,
     };
+  }
+
+  /**
+   * The trade-behaviour context for each player somebody else holds.
+   *
+   * Keyed by player id rather than by manager, because that is what a row on
+   * this board is: the question being asked is "what would talking to whoever
+   * holds *him* look like", and the position wanted is his own — which is the
+   * only position-shaped claim the history can honestly answer, since "has been
+   * selling running backs" matters when you want his running back and not
+   * otherwise.
+   */
+  private async partnerContexts(
+    leagueId: string,
+    rosters: readonly { rosterId: number; ownerId: string | null; ownerName: string | null; isMine: boolean; playerIds: string[] }[],
+  ): Promise<Map<string, TradePartnerContext>> {
+    const out = new Map<string, TradePartnerContext>();
+    const tendencies = await new ManagerIntelService(this.db)
+      .tradePartners({ leagueId, rosters })
+      .catch(() => new Map());
+    if (tendencies.size === 0) return out;
+
+    const me = rosters.find((r) => r.isMine)?.ownerId ?? null;
+    const positions = new Map((await this.players.listAll()).map((p) => [p.id, p.position]));
+    /*
+     * Seasons observed, so "has never traded" can be told from "has not been
+     * measured". A manager with no deals in four seasons is a rare trader; one
+     * with no deals in his first is simply unknown, and the two must not print
+     * the same label.
+     */
+    const seasonsByUser = new Map([...tendencies].map(([userId, t]) => [userId, t.seasons.length]));
+
+    for (const roster of rosters) {
+      if (roster.isMine || !roster.ownerId) continue;
+      const tendency = tendencies.get(roster.ownerId) ?? null;
+      for (const playerId of roster.playerIds) {
+        out.set(
+          playerId,
+          partnerContext({
+            tendencies: tendency,
+            askingUserId: me,
+            wantPosition: positions.get(playerId) ?? null,
+            seasonsObserved: seasonsByUser.get(roster.ownerId) ?? 0,
+          }),
+        );
+      }
+    }
+    return out;
   }
 
   /**

@@ -37,6 +37,16 @@ export class TransactionRepo {
     week: number;
     transactions: SleeperTransaction[];
     settled: boolean;
+    /**
+     * The Sleeper league this week was actually read from.
+     *
+     * Optional, and absent means "the current season's league" — which is what
+     * every row written before the history backfill existed means. Present, it
+     * is what tells a 2024 row from a 2026 one: `leagueId` is this app's own id
+     * for the league *now*, and history is fetched from a different Sleeper id
+     * every season.
+     */
+    sleeperLeagueId?: string | null;
   }): Promise<number> {
     const fetchedAt = nowIso();
 
@@ -47,8 +57,8 @@ export class TransactionRepo {
             `INSERT INTO league_transactions (
                league_id, transaction_id, season, week, txn_type, status, created_at_ms,
                waiver_bid, faab_traded, draft_picks_moved, roster_ids_json, adds_json,
-               drops_json, creator, payload_json, fetched_at
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               drops_json, creator, payload_json, fetched_at, sleeper_league_id
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(league_id, transaction_id) DO UPDATE SET
                status = excluded.status,
                waiver_bid = excluded.waiver_bid,
@@ -57,7 +67,8 @@ export class TransactionRepo {
                adds_json = excluded.adds_json,
                drops_json = excluded.drops_json,
                payload_json = excluded.payload_json,
-               fetched_at = excluded.fetched_at`,
+               fetched_at = excluded.fetched_at,
+               sleeper_league_id = COALESCE(excluded.sleeper_league_id, league_transactions.sleeper_league_id)`,
           )
           .bind(
             opts.leagueId,
@@ -80,6 +91,7 @@ export class TransactionRepo {
             txn.creator ?? null,
             toJson(txn),
             fetchedAt,
+            opts.sleeperLeagueId ?? null,
           ),
       );
       if (statements.length > 0) await this.db.batch(statements);
@@ -87,15 +99,24 @@ export class TransactionRepo {
 
     await this.db
       .prepare(
-        `INSERT INTO league_transaction_weeks (league_id, season, week, fetched_at, transactions_seen, settled)
-         VALUES (?,?,?,?,?,?)
+        `INSERT INTO league_transaction_weeks (league_id, season, week, fetched_at, transactions_seen, settled, sleeper_league_id)
+         VALUES (?,?,?,?,?,?,?)
          ON CONFLICT(league_id, season, week) DO UPDATE SET
            fetched_at = excluded.fetched_at,
            transactions_seen = excluded.transactions_seen,
            -- Settled is a one-way door: a week that is over does not reopen.
-           settled = MAX(league_transaction_weeks.settled, excluded.settled)`,
+           settled = MAX(league_transaction_weeks.settled, excluded.settled),
+           sleeper_league_id = COALESCE(excluded.sleeper_league_id, league_transaction_weeks.sleeper_league_id)`,
       )
-      .bind(opts.leagueId, opts.season, opts.week, fetchedAt, opts.transactions.length, opts.settled ? 1 : 0)
+      .bind(
+        opts.leagueId,
+        opts.season,
+        opts.week,
+        fetchedAt,
+        opts.transactions.length,
+        opts.settled ? 1 : 0,
+        opts.sleeperLeagueId ?? null,
+      )
       .run();
 
     return opts.transactions.length;
@@ -120,20 +141,58 @@ export class TransactionRepo {
     return rows.results.map((r) => parseJson<SleeperTransaction>(r.payload_json, {} as SleeperTransaction));
   }
 
+  /**
+   * Every stored transaction with the season it belongs to, oldest first.
+   *
+   * The read the manager-history derivations make. `list` returns payloads
+   * alone, which is enough for a single-season question and not enough for a
+   * multi-season one: a transaction's roster ids can only be resolved to people
+   * through the roster map of *its own* season, so a caller that has lost track
+   * of which season a row came from cannot attribute it to anybody.
+   */
+  async listBySeason(leagueId: string): Promise<{ season: string; transaction: SleeperTransaction }[]> {
+    const rows = await this.db
+      .prepare(
+        'SELECT season, payload_json FROM league_transactions WHERE league_id = ? ORDER BY season ASC, week ASC',
+      )
+      .bind(leagueId)
+      .all<{ season: string; payload_json: string }>();
+    return rows.results.map((r) => ({
+      season: String(r.season),
+      transaction: parseJson<SleeperTransaction>(r.payload_json, {} as SleeperTransaction),
+    }));
+  }
+
+  /**
+   * How many transactions are stored, without loading any of them.
+   *
+   * A count for a diagnostics line. Reading every payload to call `.length` on
+   * the array was several megabytes of JSON parsed to produce one integer.
+   */
+  async countStored(leagueId: string): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT COUNT(*) AS n FROM league_transactions WHERE league_id = ?')
+      .bind(leagueId)
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  /** Which weeks have been read, in every season. For coverage reporting. */
+  async allWeeksRead(leagueId: string): Promise<StoredTransactionWeek[]> {
+    const rows = await this.db
+      .prepare('SELECT * FROM league_transaction_weeks WHERE league_id = ? ORDER BY season ASC, week ASC')
+      .bind(leagueId)
+      .all<Record<string, unknown>>();
+    return rows.results.map(toWeek);
+  }
+
   /** Which weeks have been read, so a caller knows what its sample covers. */
   async weeksRead(leagueId: string, season: string): Promise<StoredTransactionWeek[]> {
     const rows = await this.db
       .prepare('SELECT * FROM league_transaction_weeks WHERE league_id = ? AND season = ? ORDER BY week ASC')
       .bind(leagueId, season)
       .all<Record<string, unknown>>();
-    return rows.results.map((r) => ({
-      leagueId: String(r['league_id']),
-      season: String(r['season']),
-      week: Number(r['week']),
-      fetchedAt: String(r['fetched_at']),
-      transactionsSeen: Number(r['transactions_seen'] ?? 0),
-      settled: Number(r['settled'] ?? 0) === 1,
-    }));
+    return rows.results.map(toWeek);
   }
 
   /**
@@ -163,4 +222,16 @@ export class TransactionRepo {
     wanted.reverse();
     return opts.maxWeeks != null ? wanted.slice(0, opts.maxWeeks) : wanted;
   }
+}
+
+/** One `league_transaction_weeks` row, read the same way everywhere. */
+function toWeek(r: Record<string, unknown>): StoredTransactionWeek {
+  return {
+    leagueId: String(r['league_id']),
+    season: String(r['season']),
+    week: Number(r['week']),
+    fetchedAt: String(r['fetched_at']),
+    transactionsSeen: Number(r['transactions_seen'] ?? 0),
+    settled: Number(r['settled'] ?? 0) === 1,
+  };
 }

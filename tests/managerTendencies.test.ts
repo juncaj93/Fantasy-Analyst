@@ -21,7 +21,9 @@
  * improve.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   MANAGER_HISTORY_CEILING,
@@ -52,6 +54,15 @@ import {
   neutralUniverse,
 } from './helpers/nextpick.ts';
 import type { PositionCounts } from '../src/core/draft/nextpick/demand.ts';
+
+/** Every `.ts` file under a directory, recursively. */
+function walk(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return walk(path);
+    return entry.name.endsWith('.ts') ? [path] : [];
+  });
+}
 
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN']);
 const POSITIONS = positionsInPlay(SHAPE);
@@ -332,13 +343,29 @@ describe('historical reach-vs-ADP integrity (§4)', () => {
      * arriving here with a price can only have come from a real contemporaneous
      * snapshot — and there is no code path that fills one in from the current
      * market.
+     *
+     * Asserted across the whole tree rather than against one file, because the
+     * ingestion has already moved once: it lived in `leagueStrategyService.ts`
+     * until the manager-history ledger took it over, and a guard pinned to a
+     * path silently stops guarding when its subject moves. What must hold is
+     * that *nowhere* fills a historical price in from `search_rank`, and that
+     * the place building historical picks writes an explicit null.
      */
-    const source = readFileSync(
-      new URL('../src/server/services/leagueStrategyService.ts', import.meta.url),
+    const roots = ['../src/core', '../src/server'];
+    const offenders: string[] = [];
+    for (const root of roots) {
+      for (const file of walk(fileURLToPath(new URL(root, import.meta.url)))) {
+        const source = readFileSync(file, 'utf8');
+        if (/marketRank\s*:\s*[^,\n]*search_rank/.test(source)) offenders.push(file);
+      }
+    }
+    expect(offenders).toEqual([]);
+
+    const ingestion = readFileSync(
+      new URL('../src/server/services/managerIntelService.ts', import.meta.url),
       'utf8',
     );
-    expect(source).not.toMatch(/marketRank:\s*numberOrNull\(meta\['search_rank'\]\)/);
-    expect(source).toMatch(/marketRank:\s*null/);
+    expect(ingestion).toMatch(/marketRank:\s*null/);
   });
 });
 
