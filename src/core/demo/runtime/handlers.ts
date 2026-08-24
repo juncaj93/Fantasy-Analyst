@@ -46,6 +46,8 @@ import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
+import { TRADE_BOUNDS, findBilateralTrades } from '../../trades/bilateral.ts';
+import { buildRosterViews } from '../../trades/rosterUtility.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../../sleeper/eligibility.ts';
 import {
   buildRosterShape,
@@ -202,6 +204,7 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
 
   // -------------------------------------------------------------- decisions
   if (path === '/api/trades') return ok(trades(data, Number(params.get('limit') ?? 60) || 60));
+  if (path === '/api/trades/smart') return ok(smartTrades(data, Number(params.get('limit') ?? 5) || 5));
   if (path === '/api/startsit/compare') return compare(data, request.body);
 
   return fail(`Demo Mode has no fixture for ${path}`, 404);
@@ -364,6 +367,91 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
     bench: withIntelligence(recommendation.bench),
     undecidable: withIntelligence(recommendation.undecidable),
     notes: [...recommendation.notes, ...data.notes],
+  };
+}
+
+/**
+ * Smart Bilateral Trades, run through the real engine on fixture rosters.
+ *
+ * Not a canned payload. The scenario's own rosters go through the same
+ * `buildRosterViews` and `findBilateralTrades` the deployed service uses, so a
+ * demo shows what the app would actually say about these teams — and a change
+ * that breaks the engine breaks the demo, which is the point of building it this
+ * way rather than storing an answer.
+ *
+ * Manager history is deliberately absent. A fixture league has no ingested
+ * ledger, so every partner reads as `unknown` and contributes exactly zero —
+ * which is also the correct demonstration of §18's last empty state: the
+ * bilateral reasoning stands on its own.
+ */
+function smartTrades(data: ScenarioData, limit: number) {
+  const { profile, shape, mine } = leagueContext(data);
+  const league = { id: data.league.id, name: data.league.name };
+  const emptyBoard = (notes: string[]) => ({
+    league,
+    found: false,
+    offers: [],
+    search: { partners: 0, generated: 0, scored: 0, viable: 0, surfaced: 0, bounds: TRADE_BOUNDS },
+    history: { profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    notes,
+    warnings: [],
+  });
+
+  if (!mine || mine.playerIds.length === 0) {
+    return emptyBoard(['Your team was not found in this league.']);
+  }
+  const others = data.rosters.filter((r) => !r.isMine && r.playerIds.length > 0);
+  if (others.length === 0) return emptyBoard(['No other roster in this league has any players.']);
+
+  const everyId = [...new Set(data.rosters.flatMap((r) => r.playerIds))];
+  const pool = new Map(startSitInputsFrom(data, everyId).map((i) => [i.player.id, i]));
+  const views = buildRosterViews({
+    rosters: data.rosters.map((r) => ({ key: String(r.rosterId), playerIds: r.playerIds })),
+    pool,
+    shape,
+    profile,
+  });
+
+  const me = views.get(String(mine.rosterId));
+  if (!me) return emptyBoard(['Your roster could not be evaluated.']);
+
+  const report = findBilateralTrades({
+    me,
+    partners: others.flatMap((roster) => {
+      const view = views.get(String(roster.rosterId));
+      return view
+        ? [
+            {
+              view,
+              partner: {
+                key: String(roster.rosterId),
+                rosterId: roster.rosterId,
+                displayName: roster.ownerName ?? `Roster ${roster.rosterId}`,
+                userId: roster.ownerId,
+              },
+              fit: { tendencies: null, seasonsObserved: 0, historyComplete: false },
+            },
+          ]
+        : [];
+    }),
+    bounds: { offersTotal: Math.max(1, Math.min(limit, 20)) },
+  });
+
+  return {
+    league,
+    found: report.offers.length > 0,
+    offers: report.offers,
+    search: {
+      partners: report.partners,
+      generated: report.generated,
+      scored: report.scored,
+      viable: report.viable,
+      surfaced: report.offers.length,
+      bounds: TRADE_BOUNDS,
+    },
+    history: { profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    notes: [...report.notes, ...data.notes],
+    warnings: [],
   };
 }
 

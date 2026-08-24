@@ -170,6 +170,16 @@ would have produced a row whose two halves disagreed about the same player.
 
 ## Trade fits — `core/league/tradeFit.ts`
 
+> **There are now two answers to "what should I offer whom", and they are not the
+> same thing.** This one serves `/api/leagues/:id/trade-fit` and values a player
+> by multiplying his score by a need factor. The one the Trades screen shows is
+> **Smart Bilateral Trades** (`core/trades/bilateral.ts`), which values a package
+> by running the lineup optimiser over both rosters and subtracting, keeps
+> objective value and manager behaviour as separate outputs rather than folding
+> behaviour into a plausibility score, and is bounded and explained per offer.
+> See [`SMART_TRADES.md`](SMART_TRADES.md). This section describes the older
+> endpoint, which is unchanged and still reachable.
+
 `core/trades/ladder.ts` prices a negotiation once a deal exists — opening offer,
 fair band, walk-away. Nothing chose the deal. This does: it enumerates
 one-for-one and two-for-one deals against every partner and scores three things

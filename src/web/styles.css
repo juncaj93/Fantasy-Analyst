@@ -8039,3 +8039,150 @@ div.matchup-result {
   font-size: 0.92em;
   line-height: 1.35;
 }
+
+/*
+  Smart Bilateral Trades.
+
+  Three lines and a tap target, sitting above the discovery board on Trades.
+  The whole design constraint is that five of these have to fit on a 360-point
+  phone next to a board that was already full — so nothing here has a card, a
+  border of its own, or a second copy of a fact the line above already carried.
+
+  It is a `<button>` rather than a row with a handler because the entire object
+  is one target: there is no secondary action inside it, which is what lets the
+  whole surface be tappable without nesting controls.
+*/
+.smart-trade {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-2) var(--sp-3);
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  min-height: var(--tap);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.smart-trade:active {
+  background: var(--pressed);
+}
+
+/*
+  Give → Get, on one line that wraps rather than scrolls.
+
+  `minmax(0, 1fr)` on the sides is what actually enforces this: without it a
+  long name sets the column's minimum to its own intrinsic width and the row
+  pushes the page sideways, which is the one thing §22's UI list forbids
+  outright. The names wrap inside their half instead.
+*/
+.smart-trade-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-weight: 600;
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+}
+
+.smart-trade-side {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+  `Give` and `Get`, small and above the names.
+
+  Uppercase micro-labels rather than a sentence, because the two halves are
+  otherwise indistinguishable at a glance and an arrow alone does not say which
+  direction is which for a reader coming to the screen cold.
+*/
+.smart-trade-label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.smart-trade-arrow {
+  color: var(--text-faint);
+  font-size: 0.9rem;
+  align-self: center;
+}
+
+.smart-trade-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-top: 3px;
+  font-size: 0.8rem;
+}
+
+.smart-trade-gain {
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.smart-trade-partner {
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-trade-why {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  line-height: 1.35;
+}
+
+.smart-trade-why > span:first-child {
+  min-width: 0;
+}
+
+/*
+  The manager cue.
+
+  Deliberately the quietest thing on the row and deliberately often absent —
+  behaviour is subordinate to the roster case above it, and a cue that appeared
+  on every idea would be read as part of the recommendation rather than as a
+  qualifier on it. `effectively_inactive` is the one value that gets a warmer
+  colour, because it is the one that changes what a reader does next.
+*/
+.smart-trade-cue {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.smart-trade-cue[data-activity='effectively_inactive'],
+.smart-trade-cue[data-activity='low_activity'] {
+  background: var(--status-neutral);
+  color: var(--on-status-neutral);
+}
+
+.smart-trade-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}

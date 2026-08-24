@@ -19,6 +19,10 @@ on:
         description: 'Ask about this league rather than the selected one (optional)'
         required: false
         default: ''
+      rejections:
+        description: 'Also print why candidates were rejected, where a probe supports it'
+        required: false
+        default: ''
 
 jobs:
   probe:
@@ -39,6 +43,11 @@ jobs:
           # the deployment happens to have selected. Read-only: it changes which
           # league is asked about, never which one is selected.
           LEAGUE_ID: ${{ inputs.league_id }}
+          # Read by probes with a verbose mode. A probe's switches have to be
+          # reachable from here or the one place it is meant to run is the one
+          # place it cannot be driven: this workflow invokes `node
+          # scripts/<name>.mjs` with no arguments.
+          REJECTIONS: ${{ inputs.rejections }}
         run: |
           set -uo pipefail
           case "$SCRIPT" in

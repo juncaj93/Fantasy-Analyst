@@ -240,6 +240,18 @@ small to do it.
 `rare_trader` and `thin_history` are different claims: no trades in four seasons
 is a finding, no trades in a first season is not.
 
+**Smart Bilateral Trades reads the same profiles through a second, richer
+reading** — `core/trades/managerFit.ts` — which adds the five-way activity
+classification §10 of its brief requires, shrinkage toward the league's own rate,
+and a contribution capped at **±0.08**. It is a *consumer* of these tendencies,
+not a second derivation: nothing there fetches, and nothing there can change what
+`buildTradeTendencies` computed. See [`SMART_TRADES.md`](SMART_TRADES.md).
+
+The distinction that reading turns on is one no single table answers — *has this
+manager been measured?* — and it is resolved by crossing the ledger's roster
+identities against its transaction checkpoints. A season counts as observed only
+when its walk is checkpointed complete, which never happens for a live season.
+
 ### Transaction → competition, cost context, urgency
 
 `core/waivers/managerPressure.ts`. `MAX_MANAGER_COST_EFFECT = 0.25`,
@@ -287,10 +299,43 @@ Missing or partial history is an ordinary state, not an error.
 | surface | with no history |
 | --- | --- |
 | Draft | baseline `Next%`, exactly as before this existed |
-| Trades | bilateral fit alone, no plausibility line |
+| Trades | bilateral fit alone; every partner reads `unknown` and contributes zero |
 | Waivers | existing competition and cost logic, pressure reads `unknown` |
 
 Unknown is allowed. Nothing here may fail a decision.
+
+---
+
+## The Waivers lane, which is not built
+
+Preserved here because it is the third contract off this ledger and because the
+principle it turns on is the same one that took two attempts to get right in
+Trades. **Do not implement it from this section** — it is a roadmap, not a spec.
+
+Future Waivers intelligence must treat **non-action as informative**. Some
+managers make zero waiver moves; some are extremely frugal with FAAB; some
+participate only occasionally; some are effectively inactive. Those are different
+facts about different people, and a model that reads them all as "no data"
+throws away the most useful thing the ledger holds about a quiet league.
+
+It should distinguish:
+
+- aggressive managers;
+- selective managers who spend heavily when interested;
+- active but frugal managers;
+- passive managers;
+- effectively inactive managers;
+- unknown / insufficient history.
+
+From participation propensity, positional interest, FAAB aggressiveness, roster
+need, recency and **observed abstention**, it should estimate real competition,
+claim and bid likelihood, expected clearing price, a recommended bid range,
+urgency, and whether the user can safely wait.
+
+**Unknown must never equal inactive.** The mechanism that makes that true in
+Trades — crossing roster identities against completed transaction checkpoints, so
+"we have not looked" is representable separately from "we looked and there was
+nothing" — is available to Waivers unchanged, and is the part worth reusing.
 
 ---
 
