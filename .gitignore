@@ -16,3 +16,7 @@ coverage/
 
 # Local scratch: measurement and screenshot helpers, never part of the app.
 *.local.mjs
+
+# Downloaded season files for scripts/projection-v2-backtest.mjs. Public data,
+# 100MiB of it, and re-downloadable — never committed.
+.backtest-cache/

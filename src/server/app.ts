@@ -111,6 +111,9 @@ import { resolveWeek } from '../core/matchup/build.ts';
 import { MatchupRepo, MIN_CALIBRATION_SAMPLE } from './repos/matchup.ts';
 import { MATCHUP_MODEL_VERSION } from '../core/matchup/types.ts';
 import { UsageService } from './services/usageService.ts';
+import { NflverseService } from './services/nflverseService.ts';
+import { ProjectionV2Service } from './services/projectionV2Service.ts';
+import { classificationsByClass } from '../core/projection/classification.ts';
 import { PlayerDetailService } from './services/playerDetailService.ts';
 
 export interface AppEnv extends AuthEnv {
@@ -308,6 +311,49 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * run and can be run from a phone on a free tier at any time of year.
    */
   router.get('/api/diagnostics/rollover', async (ctx) => jsonResponse(await buildRolloverReport(ctx.env.db)));
+
+  /**
+   * Projection v2, beside what this app shows today. Phase 1, and nothing else.
+   *
+   * The evaluation gate the handoff calls for in section 21: for every player on
+   * the connected team, the current market projection, the Rotowire fallback,
+   * Projection v2, the difference, the floor and ceiling, the confidence, what
+   * the market covered, how much usage is behind it and the reasons.
+   *
+   * **Nothing consumes this.** It is a report, not a source. `Team`, `Matchup`,
+   * `Draft`, `Trades` and `Players` do not import `core/projection` at all and a
+   * test asserts that, so this route can be read, deleted or ignored without any
+   * recommendation in the app changing by a point. That is the phase boundary,
+   * and it stays until the evaluation has been reviewed and a rollout is
+   * explicitly approved.
+   *
+   * A GET, like every other diagnostic here: it reads and computes and writes
+   * nothing at all.
+   */
+  router.get('/api/diagnostics/projection-v2', async (ctx) => {
+    const leagues = new LeagueRepo(ctx.env.db);
+    const requested = ctx.url.searchParams.get('league');
+    const league = requested ? await leagues.getLeague(requested) : await leagues.getSelectedLeague();
+    if (!league) return errorResponse('no league selected', 404);
+    const weekParam = Number(ctx.url.searchParams.get('week'));
+    const state = await new SettingsRepo(ctx.env.db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const week = Number.isFinite(weekParam) && weekParam > 0 ? weekParam : (state?.week ?? null);
+    const report = await new ProjectionV2Service(ctx.env.db).sideBySide({ leagueId: league.id, week });
+    return jsonResponse({
+      league: { id: league.id, name: league.name },
+      authoritative: false,
+      note:
+        'Projection v2 is computed side-by-side for evaluation only. No recommendation, ranking or ' +
+        'simulation in this app reads it.',
+      classification: classificationsByClass(),
+      ...report,
+    });
+  });
+
+  /** What the three nflverse feeds have, and how fresh it is. Read-only. */
+  router.get('/api/diagnostics/nflverse', async (ctx) =>
+    jsonResponse(await new NflverseService(ctx.env.db).health()),
+  );
 
   router.get('/api/setup/newsletter', async (ctx) => {
     const status = await setupService(ctx).newsletterStatus();
@@ -1680,6 +1726,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    */
   router.post('/api/usage/refresh', async (ctx) =>
     jsonResponse(await new UsageService(ctx.env.db).refresh()),
+  );
+
+  /**
+   * The three nflverse feeds Projection v2 added, on demand.
+   *
+   * The daily 09:00 cron is the real schedule. This is for the person who wants
+   * the crosswalk populated now rather than tomorrow -- and for the first run
+   * after a deploy, when the tables are empty and every projection is
+   * market-only for want of a roster file.
+   *
+   * Returns one run per feed rather than an ok. `not_published` is a fact about
+   * the calendar -- `snap_counts_2026.csv` is a 404 until the season starts --
+   * and must not read as a failure.
+   *
+   * A change, so it needs the passphrase.
+   */
+  router.post('/api/nflverse/refresh', async (ctx) =>
+    jsonResponse({ runs: await new NflverseService(ctx.env.db).refreshAll() }),
   );
 
   router.get('/api/players/:id/detail', async (ctx) => {

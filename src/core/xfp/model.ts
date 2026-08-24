@@ -391,7 +391,7 @@ function driverFor(
  * the assessment records as `depthMeasured: false` rather than passing off an
  * assumption as a measurement.
  */
-function depthAdjustedRates(
+export function depthAdjustedRates(
   position: string,
   targets: number,
   airYards: number | null,

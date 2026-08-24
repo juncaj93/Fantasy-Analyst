@@ -584,6 +584,20 @@ describe('no recommendation engine can reach the fallback', () => {
         'server/services/sleeperProjectionService.ts',
         'server/services/matchupService.ts',
         'server/services/startSitRefresh.ts',
+        /*
+         * The Projection v2 side-by-side, and it is sanctioned for exactly the
+         * reason this list exists.
+         *
+         * The rule being guarded is that Rotowire's number never enters a
+         * recommendation. This service enters nothing: it is the phase-1
+         * evaluation report, it reads the published figure to print it in a
+         * comparison column beside this app's own projection and Projection v2,
+         * and its output is returned to a diagnostics route rather than stored
+         * or consumed. `tests/projectionV2.boundary.test.ts` asserts separately
+         * that no recommendation engine imports anything it produces, which is
+         * the other half of the same promise.
+         */
+        'server/services/projectionV2Service.ts',
         'server/app.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
