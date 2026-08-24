@@ -1571,9 +1571,10 @@ Every one of the ten largest disagreements in the no-market regime is a backup
 quarterback pressed into a start. The usage model correctly has nothing to go on
 and correctly marks all ten low confidence.
 
-Checks at this milestone: typecheck, the whole unit suite (3,738 tests, 82 of
-them new), the browser suite at 430, 390, 375 and 360, the build, the page-weight
-budget — unchanged, because the web bundle imports none of this — and
+Checks at this milestone: typecheck, the whole unit suite (3,706 passing and one
+skipped, 93 of them new), the browser suite at 430, 390, 375 and 360, the build,
+the page-weight budget — unchanged, because the web bundle imports none of this —
+and
 `scripts/probe-usage-parse.mjs` against the real 19,422-line published file,
 which reports **zero mismatches across 252,486 fields** and is the proof that
 moving the CSV extractor into `core/source/csv.ts` changed no behaviour. The only
