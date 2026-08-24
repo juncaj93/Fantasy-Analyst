@@ -406,6 +406,201 @@ Nothing in this path ranks, scores or decides anything, and every step degrades
 to the team abbreviation: an unknown code, a free agent, a missing file and a
 failed request all end at the same `CHI`-style fallback the rows printed before.
 
+**Player portraits are the opposite decision, on purpose.** They are hot-linked
+from Sleeper's CDN rather than bundled, and the section below sets out why the
+four reasons above do not carry across to them — chiefly that a club mark is
+information the row needs and a portrait is not. The two are meant to be read
+together, so neither reads as an accident.
+
+## Player portraits
+
+The one place in this app that hot-links a third party's images, and the section
+above is the argument it has to answer: club marks are **bundled**, deliberately,
+for four reasons that all still hold. Portraits are the opposite decision on
+purpose, and the difference between the two cases is what justifies it.
+
+`src/core/players/headshot.ts` answers "does this player have a face, and what is
+its URL" and nothing else. Screens reach it through the `PlayerFace` primitive in
+`src/web/components/common.tsx`, exactly as they reach `nflTeamLogoUrl` through
+`TeamLogo` — no component builds the string itself.
+
+### The URL is a convention, not a contract
+
+    https://sleepercdn.com/content/nfl/players/{player_id}.jpg
+
+Sleeper's player dictionary carries **no image field**. The path is the one
+Sleeper's own clients use, and it was established here empirically rather than
+from documentation. A local probe of 91 players measured:
+
+| | |
+|---|---|
+| resolved | 80 of 91 (88%) |
+| distinct portraits | 78 (86%) |
+| stars / starters / backups / rookies / kickers / PUP-NFI | 100% distinct within each group |
+| redirects | none |
+| format | JPEG, dominant size 350×254 |
+| median weight | ~30 kB full, ~23 kB thumb variant |
+| cache policy | `public, max-age=2678400` (31 days), Cloudflare `HIT` |
+
+Nothing published promises any of that keeps working. That is why the helper
+returns `string | null`, why the component treats a failed load as an ordinary
+outcome rather than an error, and why no screen's content depends on one
+arriving.
+
+The thumb variant is **not** used. It saves roughly 7 kB on an asset the browser
+caches for a month, on one image per opened card, in exchange for a second path
+that can rot independently of the first. The canonical path is simpler and the
+saving is not real at this volume.
+
+### Why hot-linking is right here and wrong for club marks
+
+The four reasons the marks are bundled were: the PWA keeps working offline, there
+is no third-party runtime dependency, coverage is a fact a test can check against
+the filesystem, and the marks can be seen in local visual QA. Every one of them
+is about something the app **needs**. A portrait is not needed — it is identity
+polish, and the fallback below makes its absence a non-event — so each reason
+weighs differently:
+
+* **offline** — a missing portrait offline is initials, which is the same thing a
+  missing portrait online is. A missing club mark was a missing club.
+* **third-party dependency** — real, and contained: it degrades to initials
+  rather than to a broken screen, and it cannot take a request path with it
+  because there is no request path (below).
+* **coverage as a fact** — there is no filesystem to check. 88% was measured
+  once and is not asserted anywhere, because it is Sleeper's number to change.
+* **local visual QA** — genuinely lost, and paid for. See the note on the stand-in
+  image in `e2e/player-face.spec.ts`.
+
+Against that, hot-linking buys one thing bundling cannot: **the player lifecycle
+is free**. A rookie with no portrait today gets initials; the day Sleeper adds
+one, the same URL starts resolving and he has a face, with no sync job, no
+re-vendoring, no image administration and no deploy. A vendored set of ~2,000
+active players would need a pipeline, a refresh policy and an annual rookie pass —
+and would be stale between them. There is no annual workflow here at all: the
+existing Sleeper player sync supplies the ids, and a club change does not touch
+image identity because the id is the identity.
+
+If the convention becomes unreliable, two exits are open and neither is urgent:
+fall back permanently (delete one component; every surface already renders
+correctly without it), or vendor active-player assets the way the marks are
+vendored, at which point only `playerHeadshotUrl` changes.
+
+### The runtime-cost invariant
+
+The expected path is:
+
+    browser → sleepercdn.com
+
+and never:
+
+    browser → Junculator Worker → Sleeper
+
+No API route, no Worker `fetch` that touches the host, no D1/KV/R2 dependency,
+and no change to the number of requests this app's own API serves when a reader
+looks at a player. The incremental Cloudflare cost of the feature is therefore
+effectively **zero** — a direct image load is not a Worker subrequest. This is
+asserted rather than asserted-in-prose: `tests/playerHeadshotSurfaces.test.ts`
+fails if any server or Worker module names the host, if the router grows a
+headshot route, if a migration stores an image, or if a storage binding appears.
+
+### Failure is the normal case, not the exception
+
+Twelve percent of probed players had no portrait, so this path runs constantly:
+
+* a 403, a 404, a network error and an offline first paint all end at
+  deterministic initials from the display name;
+* in the **same box** — same square, same circle, same ground — so nothing on the
+  page moves and a screen of mixed coverage keeps one column;
+* no retry, no toast, no banner, no error copy, no repeated logging, and no
+  broken-image chrome: the `<img>` is unmounted the instant it errors;
+* the failure is remembered **per URL**, at module scope, so one player's missing
+  portrait cannot blank out the next player drawn into the same reused component
+  instance, and a portrait already known to be missing is not re-requested when
+  the reader reopens that player.
+
+The fallback is initials and never a silhouette — a generic head is a picture of
+someone who is not this player — and never the club's mark, which is already on
+the line beside it.
+
+### Where portraits are drawn, and where they are not
+
+**Drawn:** the expanded player sheet only, at 64px, loaded eagerly, because that
+is the one surface where a reader has already committed to a single player.
+
+**Not drawn**, by decision rather than by omission: Matchup, Draft, Waivers, the
+Players index, and the compact Smart Trades rows. The read-only discovery
+quantified the worst of these — on Matchup at 390px the name column falls from
+about 85px to about 60px — and a shortened name is information lost in exchange
+for decoration. `tests/playerHeadshotSurfaces.test.ts` names these files and
+fails if one grows a face; `e2e/player-face.spec.ts` checks the running app never
+requests a portrait from a list.
+
+**Deferred:** the Team screen. The discovery expected a 28px face to fit inside
+the 44px row, and the row height does hold — but a measured prototype at all four
+widths introduced name truncation at 390 (`Cal Whitfield`, 28px short, from
+none), 375 (3px → 43px) and 360 (18px → 58px), and left the identity column of a
+populated slot indented 32px from the empty slots above it. Two of the gate's
+conditions therefore fail. Team keeps its bundled club mark and no portrait.
+
+### The sheet header, and what the portrait changed about it
+
+A 64px portrait makes the sheet's header 64px tall whatever else is on it. On the
+single identity line the header used to have — pill, club, name, status — that
+was expensive rather than free: the line carried about twenty pixels of slack and
+the face wanted sixty-eight, so at 360px it truncated nineteen of twenty-two
+seeded names, `Julian Reyes` down to `Julian…`, where none truncated before. No
+size was free; even a 40px face cost ten names.
+
+The height the portrait already costs is now spent instead of wasted. The name
+takes a line of its own beside the face and the marks that qualify him — pill,
+club, status — take the line under it. That is the arrangement `PlayerPage`
+already uses for the same player in a navigation bar (`.nav-title` over
+`.nav-subtitle`), so the two surfaces where a player is a *heading* read the same
+way. Every **list** is untouched: pill → club → name still reads across one line
+on Draft, Players, Trades and Waivers, which is the situation that rule was
+written for — making forty names start on one column. A header has one name in
+it. At 430, 390, 375 and 360, no name truncates.
+
+### Security and privacy
+
+There is no CSP in this repository, and this feature does not add one — a
+security layer is not something to introduce as a side effect of an image. If one
+is added later, `https://sleepercdn.com` needs to be in `img-src` and nothing
+else.
+
+Nothing but a numeric Sleeper player id ever reaches the URL: no user, league,
+auth or session value, no query string, no fragment. And there is no fuzzy
+matching and no name-derived path, because a portrait keyed on a name draws the
+wrong person the first time two players share one, and a confident wrong face is
+worse than no face.
+
+**A defence is excluded twice, on purpose.** Live Sleeper keys team defences by
+the club abbreviation — `CHI` is a real `player_id` — so the numeric rule alone
+already covers production data. That is the incidental version of the rule and
+it is not enough: this repository's own demo seed keys its three defences
+numerically (`1030` is Jacksonville), so the id shape is a convention of the
+*source* rather than a fact about defences. `playerHeadshotUrl` therefore takes
+the position too, and refuses `DEF` whatever the id looks like. A rule that
+holds only because one provider happens to format its keys a certain way is a
+rule waiting to be broken by a fixture — and that fixture is already in the
+tree. Both shapes are exercised in `e2e/player-face.spec.ts`.
+
+### Performance
+
+The perf budgets govern JS, CSS and HTML — this repository's own bytes — and
+deliberately do not grow a media-budget system for one image. What holds instead:
+
+* text and data render independently of image completion; nothing awaits a
+  portrait;
+* the box is fixed by `--face` and by the `width`/`height` attributes, so CLS
+  from a portrait is structurally zero;
+* no prefetch of the roster or the player pool, no background batch loading, no
+  service worker;
+* dense lists stay image-free (above), so nothing eager-loads across a large
+  result set — `tests/playerHeadshotSurfaces.test.ts` asserts the sheet is the
+  only eager loader;
+* repeat visits are the browser's HTTP cache, at Sleeper's 31-day `max-age`.
+
 ## Season as data
 
 Nothing hardcodes a year, and nothing derives one from the calendar if it can

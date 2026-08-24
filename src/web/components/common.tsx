@@ -17,6 +17,8 @@ import { injuryStatusTag } from '../../core/draft/injury.ts';
 /* The 32 clubs and their marks. Presentation metadata; never a ranking input. */
 import { nflTeam, nflTeamLogoUrl } from '../../core/nfl/teams.ts';
 import { normalizeTeam } from '../../core/identity/normalize.ts';
+/* Where a player's portrait lives, and when there is not one. Never a ranking input. */
+import { playerHeadshotUrl, playerInitials } from '../../core/players/headshot.ts';
 
 /**
  * An inline disclosure that opens in place.
@@ -198,6 +200,152 @@ export function TeamLogo({ team }: { team: string | null | undefined }) {
   return (
     <span className="team-code" data-testid="team-code">
       {code || 'FA'}
+    </span>
+  );
+}
+
+/**
+ * Portraits this session asked for and got nothing back from.
+ *
+ * Module-level rather than per-instance, and keyed by URL rather than held as a
+ * boolean, which are two separate decisions doing two separate jobs.
+ *
+ * **Keyed by URL** for the reason {@link TeamLogo} keeps its own failure that
+ * way: React reuses component instances as lists re-sort and sheets reopen on a
+ * different player, and a bare boolean would let one missing portrait blank out
+ * whoever landed in that slot next. A new player's URL has never failed, so it
+ * gets its own attempt.
+ *
+ * **Module-level** because a rookie without a portrait is not a one-off: the
+ * reader opens him, gets initials, closes the sheet and opens him again, and a
+ * per-instance memory would send a fresh request every time for an image that
+ * is not going to exist this week. Remembering it for the session is what makes
+ * "one network attempt per URL" true rather than "one per mount".
+ *
+ * It only ever grows by one entry per genuinely missing player, and it holds
+ * nothing but a URL that was already public.
+ */
+const missingPortraits = new Set<string>();
+
+/**
+ * A player's face, at a fixed size, or his initials in exactly the same box.
+ *
+ * The whole of this component's job is to be **optional**. A portrait is
+ * identity polish — it helps a reader recognise who they are looking at half a
+ * beat sooner — and it is never information. Nothing on any screen depends on
+ * one arriving, every failure path ends at the same two letters, and the app is
+ * fully usable with every image on it missing. That is not a graceful-degradation
+ * story bolted on afterwards; it is why the feature was allowed at all, because
+ * the URL these come from is an undocumented convention rather than a published
+ * API (see `core/players/headshot.ts`).
+ *
+ * Four rules hold it to costing nothing:
+ *
+ *  1. **the box exists before the image does.** `--face` sizes it and the
+ *     `width`/`height` attributes state the same number, so the slot is
+ *     reserved in the first frame — before the stylesheet applies, before the
+ *     network answers, and permanently if it never does. A portrait that
+ *     arrives late moves nothing on the page and a portrait that never arrives
+ *     leaves no gap.
+ *  2. **failure is an ordinary outcome.** A 403, a 404, a blocked request and
+ *     an offline first paint all end at the initials. No retry, no toast, no
+ *     console noise, and no broken-image glyph — the `<img>` is unmounted the
+ *     moment it errors rather than left on screen showing the browser's own
+ *     chrome.
+ *  3. **it asks once.** See {@link missingPortraits}.
+ *  4. **it says nothing out loud.** The face is `alt=""` because every surface
+ *     that draws one already prints the player's name inches away, and a
+ *     screen reader announcing "Marcus Vance" twice is worse than one that
+ *     never mentions the picture. The fallback is hidden for the same reason:
+ *     `MV` read aloud beside the name it abbreviates is noise.
+ *
+ * The fallback is deterministic initials on the app's own sunken surface —
+ * never a silhouette, which is a picture of a person who is not this person,
+ * and never the club's mark, which is already on the line beside it and would
+ * be the row saying the same thing twice.
+ */
+export function PlayerFace({
+  playerId,
+  name,
+  position,
+  size,
+  loading = 'lazy',
+  testId = 'player-face',
+}: {
+  playerId: string | null | undefined;
+  /** Only ever read for the initials; the box is never named out loud. */
+  name: string;
+  /**
+   * Passed straight to the URL helper, which uses it to hold a defence out.
+   *
+   * Optional because a caller may not have one, and worth giving when it does:
+   * live Sleeper keys defences by club abbreviation and this app's own demo
+   * seed keys them numerically, so the id shape alone is not a reliable test.
+   */
+  position?: string | null;
+  /** The square, in pixels. One number: a face is never a rectangle here. */
+  size: number;
+  /**
+   * `eager` where the face is the thing the reader just asked for — a sheet
+   * they opened — and `lazy` in a list, where most of the rows are below the
+   * fold and the browser should decide.
+   */
+  loading?: 'eager' | 'lazy';
+  testId?: string;
+}) {
+  const src = playerHeadshotUrl(playerId, position);
+  /*
+   * A render-triggering copy of the module-level memory above.
+   *
+   * The `Set` is what remembers; this is what re-renders. Seeded from the set
+   * on mount so a reopened sheet draws initials in its first frame rather than
+   * flashing an empty box while a request it already knows the answer to fails
+   * again.
+   */
+  const [failed, setFailed] = useState<string | null>(() =>
+    src && missingPortraits.has(src) ? src : null,
+  );
+
+  const box = {
+    ['--face' as string]: `${size}px`,
+  };
+
+  if (src && failed !== src && !missingPortraits.has(src)) {
+    return (
+      <img
+        className="player-face"
+        data-testid={testId}
+        data-player-id={playerId ?? ''}
+        style={box}
+        src={src}
+        /*
+          Empty on purpose, and it is the accessible answer rather than a
+          shortcut past one. See rule 4 above.
+        */
+        alt=""
+        width={size}
+        height={size}
+        loading={loading}
+        decoding="async"
+        onError={() => {
+          missingPortraits.add(src);
+          setFailed(src);
+        }}
+      />
+    );
+  }
+
+  const initials = playerInitials(name);
+  return (
+    <span
+      className="player-face player-face-fallback"
+      data-testid={testId}
+      data-fallback="yes"
+      data-player-id={playerId ?? ''}
+      style={box}
+      aria-hidden="true"
+    >
+      {initials}
     </span>
   );
 }

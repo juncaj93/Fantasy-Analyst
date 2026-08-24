@@ -90,28 +90,76 @@ async function pageOverflow(page: Page): Promise<number> {
 }
 
 /**
- * Position, club, name, status — painted left to right, whatever the markup says.
+ * The face, then the name, then what qualifies him under it — read as geometry.
  *
- * Read as geometry rather than as DOM order on purpose. A card can put the pill
- * first in the markup and float it to the end, and the reader would still be
- * looking at the reversed grammar this file exists to forbid.
+ * This asserted one line for as long as the header was one line: position,
+ * club, name, status, painted left to right whatever the markup said. It is
+ * now two lines beside a 64px portrait, and the reason is measured rather than
+ * aesthetic — a face on the single line truncated nineteen of twenty-two seed
+ * names at 360px, `Julian Reyes` down to `Julian…`. See the note in
+ * `PlayerSheet`.
+ *
+ * What is being defended did not change, so this still reads paint order
+ * rather than DOM order — a card can put the pill first in the markup and
+ * float it anywhere:
+ *
+ *  1. **the portrait leads the whole block.** Everything that says *who* is on
+ *     the leading side, and a face is the most immediate `who` there is.
+ *  2. **the name is the heading**, on its own line above the marks, which is
+ *     what makes it the largest thing in the header rather than one of four
+ *     things sharing a line with it.
+ *  3. **the marks under it keep the row's order** — pill, club, status — so a
+ *     reader who has just been scanning a list is not asked to re-learn the
+ *     sequence at the moment they commit to one player.
+ *
+ * The one-line rule this replaced still holds everywhere it was written for:
+ * `e2e/row-alignment.spec.ts` holds Draft, Players, Trades and Waivers to
+ * pill → club → name across a single line, which is what makes forty names
+ * start on one column. A header has one name in it.
  */
 async function expectRowGrammar(page: Page, expected: string[]): Promise<void> {
   const marks = await page.locator('.sheet-player-title').evaluate((title) => {
     const pick = (sel: string, mark: string) => {
       const el = title.querySelector(sel) as HTMLElement | null;
-      return el ? { mark, x: el.getBoundingClientRect().left } : null;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { mark, x: r.left, top: r.top, bottom: r.bottom };
     };
-    return [
-      pick('.pos-pill', 'position'),
-      pick('.team-logo, .team-code', 'club'),
-      pick('.sheet-player-name', 'name'),
-      pick('[data-testid="injury-tag"]', 'status'),
-    ].filter((p): p is { mark: string; x: number } => p != null);
+    return {
+      face: pick('[data-testid="sheet-player-face"]', 'face'),
+      name: pick('.sheet-player-name', 'name'),
+      quals: [
+        pick('.pos-pill', 'position'),
+        pick('.team-logo, .team-code', 'club'),
+        pick('[data-testid="injury-tag"]', 'status'),
+      ].filter((p): p is { mark: string; x: number; top: number; bottom: number } => p != null),
+    };
   });
-  expect(marks.map((m) => m.mark), 'the expanded card reversed the compact row’s identity order').toEqual(expected);
-  for (let i = 1; i < marks.length; i++) {
-    expect(marks[i]!.x, `${marks[i]!.mark} is drawn left of ${marks[i - 1]!.mark}`).toBeGreaterThan(marks[i - 1]!.x);
+
+  expect(marks.face, 'the expanded card is not drawing a portrait at all').not.toBeNull();
+  expect(marks.name, 'the expanded card is not drawing a name').not.toBeNull();
+
+  // 1. The portrait leads everything.
+  expect(marks.face!.x, 'the portrait is not the leading mark in the header').toBeLessThan(marks.name!.x);
+  for (const q of marks.quals) {
+    expect(marks.face!.x, `${q.mark} is drawn left of the portrait`).toBeLessThan(q.x);
+  }
+
+  // 2. The name is a line above the marks that qualify it, not beside them.
+  for (const q of marks.quals) {
+    expect(q.top, `${q.mark} is back on the name's own line`).toBeGreaterThanOrEqual(marks.name!.bottom - 1);
+  }
+
+  // 3. And those marks keep the row's order, left to right, on their own line.
+  const qualOrder = expected.filter((m) => m !== 'name');
+  expect(
+    marks.quals.map((m) => m.mark),
+    'the expanded card reordered the marks that qualify the name',
+  ).toEqual(qualOrder);
+  for (let i = 1; i < marks.quals.length; i++) {
+    expect(marks.quals[i]!.x, `${marks.quals[i]!.mark} is drawn left of ${marks.quals[i - 1]!.mark}`).toBeGreaterThan(
+      marks.quals[i - 1]!.x,
+    );
   }
 }
 
@@ -208,7 +256,7 @@ test.describe('the expanded player, opened from Players', () => {
    * designation, a partial season with a finish, and a published outlook — and
    * the projection is routed in, so this is the card with every cell present.
    */
-  test('reads position, club, name, status — then eight readings in one order', async ({ page }) => {
+  test('reads face, name, then position, club, status — then eight readings in one order', async ({ page }) => {
     await patchDetail(page, { preseasonProjection: PROJECTION });
     await page.goto('/');
     await openTab(page, 'players');
@@ -362,7 +410,18 @@ test.describe('the expanded player, opened from Players', () => {
     const tag = (await page.locator('.sheet-player-title [data-testid="injury-tag"]').boundingBox())!;
 
     expect(tag.x + tag.width, 'the status pill is clipped by the sheet').toBeLessThanOrEqual(sheet.x + sheet.width + 1);
-    expect(title.height, `the header wrapped to ${title.height}px`).toBeLessThanOrEqual(40);
+    /*
+      The header is as tall as the portrait and never taller.
+
+      This read `<= 40` while the header was one line of type. It is two lines
+      beside a 64px face now, and the number moved with the layout rather than
+      the guard: what is being caught is a header that *grows with the name* —
+      a name that wraps to three lines, or a qualifier line that pushes onto a
+      second one — and the face fixes the height at 64 unless something does
+      exactly that. A name this long must still shorten rather than reflow, and
+      the assertion under this one is what says so.
+    */
+    expect(title.height, `the header grew to ${title.height}px`).toBeLessThanOrEqual(64.5);
     const shortened = await page.locator('.sheet-player-name').evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(shortened, 'the name was not truncated, so something else must have moved').toBe(true);
     expect(await pageOverflow(page)).toBeLessThanOrEqual(1);
