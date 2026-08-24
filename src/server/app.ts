@@ -55,6 +55,7 @@ import { buildLadder } from '../core/trades/ladder.ts';
 import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
 import { DEFAULT_FINAL_WEEK, LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
 import { ManagerIntelService } from './services/managerIntelService.ts';
+import { ManagerLedgerRepo } from './repos/managerLedger.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
@@ -1066,20 +1067,39 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const league = await leagueRepo.getLeague(ctx.params['id']!);
     if (!league) return errorResponse('league not found', 404);
 
-    const [rosters, profiles] = await Promise.all([
-      leagueRepo.listRosters(league.id),
+    const rosters = await leagueRepo.listRosters(league.id);
+    const intel = new ManagerIntelService(db);
+    /*
+     * Two families of profile, filed two ways, and both are wanted here.
+     *
+     * `profiles` are the roster-keyed caches the screens read. `tendencies` and
+     * `history` come from the ledger and are keyed by Sleeper user id, which is
+     * the identity that survives a season boundary — so they are looked up
+     * *from* the current roster table rather than the other way round, and a
+     * seat that changed hands finds its new occupant's history or none at all.
+     */
+    const [profiles, tendencies, history, baseline] = await Promise.all([
       new LeagueStrategyService(db, { sleeper: ctx.env.sleeper }).managerProfiles(league.id),
+      intel.tradePartners({ leagueId: league.id, rosters }),
+      intel.waiverHistory({ leagueId: league.id, rosters, week: 1, finalWeek: readFinalWeek(league.leagueSettings) }),
+      new ManagerLedgerRepo(db).baseline<unknown>(league.id, 'transaction'),
     ]);
 
     return jsonResponse({
       league: { id: league.id, name: league.name },
       room: profiles.room,
+      /** What the room does, so a manager's numbers can be read against it. */
+      baseline: baseline?.value ?? null,
       managers: rosters.map((roster) => ({
         rosterId: roster.rosterId,
         ownerName: roster.ownerName,
         isMine: roster.isMine,
         trade: profiles.trade.get(roster.rosterId) ?? null,
         draft: profiles.draft.get(roster.rosterId) ?? null,
+        /** Trade behaviour from the ledger. Null until the backfill reaches it. */
+        tradeTendencies: (roster.ownerId ? tendencies.get(roster.ownerId) : null) ?? null,
+        /** Waiver behaviour from the ledger, on the same terms. */
+        transactions: history?.profiles.get(roster.rosterId) ?? null,
       })),
     });
   });

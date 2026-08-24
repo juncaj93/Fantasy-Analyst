@@ -495,6 +495,14 @@ describe('the routes report the backfill honestly', () => {
     // seat does not.
     expect(veteran.draft.sample).toBeGreaterThan(0);
     expect(newcomer.draft.sample).toBe(0);
+
+    // And the ledger-keyed profiles are exposed beside them, so a probe can
+    // report sample size per manager across all three domains.
+    expect(body).toHaveProperty('baseline');
+    for (const manager of body.managers) {
+      expect(manager).toHaveProperty('tradeTendencies');
+      expect(manager).toHaveProperty('transactions');
+    }
   });
 });
 

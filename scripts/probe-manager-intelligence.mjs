@@ -152,11 +152,28 @@ async function main() {
    */
   const managers = await get(`/api/leagues/${leagueId}/managers`);
   if (managers.status === 200) {
-    console.log('\n--- sample size by manager (draft history) ---');
+    console.log('\n--- sample size by manager ---');
     for (const m of managers.body.managers ?? []) {
-      const sample = m.draft?.sample ?? 0;
+      const picks = m.draft?.sample ?? 0;
+      const trades = m.tradeTendencies?.sample ?? 0;
+      const txns = m.transactions?.sample ?? 0;
+      const bids = m.transactions?.bidSample ?? 0;
       const seasons = (m.draft?.profile?.seasons ?? []).join('/') || '-';
-      line(m.ownerName ?? `Roster ${m.rosterId}`, `${sample} pick(s), seasons ${seasons}`);
+      line(
+        m.ownerName ?? `Roster ${m.rosterId}`,
+        `${picks} pick(s) · ${trades} trade(s) · ${txns} transaction(s) · ${bids} bid(s) · seasons ${seasons}`,
+      );
+    }
+    const room = managers.body.baseline;
+    if (room) {
+      console.log('\n--- league baseline ---');
+      line('claims per manager per week', room.claimsPerWeek);
+      line('adds per manager per week', room.addsPerWeek);
+      line('churn per manager per week', room.churnPerWeek);
+      line('uses FAAB', room.usesFaab ? 'yes' : 'no');
+      line('median winning bid, share of budget', unknown(room.medianBidShare));
+      line('winning bids behind that', room.bidSample);
+      line('position share of adds', (room.positionShare ?? []).map((p) => `${p.position} ${p.share}`).join(', ') || '(none)');
     }
   }
 
