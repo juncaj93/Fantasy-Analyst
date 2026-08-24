@@ -31,7 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { pageScrollTop } from './overlay.ts';
+import { pageScrollTop, useAppIsCovered } from './overlay.ts';
 import { isStandalone, watchStandalone } from './standalone.ts';
 
 /* ------------------------------------------------------------- thresholds */
@@ -959,6 +959,35 @@ export interface PullToRefresh {
 export const NO_PULL_ATTRIBUTE = 'data-no-pull';
 
 /**
+ * Whether a pointer landing on the pull surface may begin a pull.
+ *
+ * The five refusals below are the whole of the gesture's arbitration, and they
+ * are here — pure, and away from the pointer bookkeeping — because arbitration
+ * is the part that is worth stating once and testing exhaustively. Every one of
+ * them was a defect before it was a rule.
+ */
+export function pullBegins({
+  enabled,
+  covered,
+  refreshing,
+  atTop,
+  claimed,
+}: {
+  /** What the screen itself says — see rule 2's second half. */
+  enabled: boolean;
+  /** Whether a layer is over the app — rule 6. */
+  covered: boolean;
+  /** Whether a refresh is already running — rule 3. */
+  refreshing: boolean;
+  /** Whether the surface under the gesture is at its top — rule 1. */
+  atTop: boolean;
+  /** Whether the pointer went down inside a control that owns its drag — rule 2. */
+  claimed: boolean;
+}): boolean {
+  return enabled && !covered && !refreshing && atTop && !claimed;
+}
+
+/**
  * Pull down from the top of a screen to reload it.
  *
  * The one gesture an iPhone user tries without being told, and the reason both
@@ -1001,6 +1030,28 @@ export const NO_PULL_ATTRIBUTE = 'data-no-pull';
  *  5. **Nothing calls `preventDefault`.** `overscroll-behavior` in the
  *     stylesheet is what stops the browser bouncing the whole document under
  *     the gesture; the arbitration stays the browser's.
+ *
+ *  6. **A covered page does not own the gesture at all.** The screen behind an
+ *     open sheet is pinned, `inert`, and not the thing the reader is touching;
+ *     a downward drag while a layer is up belongs to that layer, and dismissing
+ *     a sheet must never also reload what is behind it.
+ *
+ *     This is not merely tidy. React portals move a layer's *elements* to the
+ *     end of the document and leave its *events* propagating up the component
+ *     tree, and every screen with this gesture renders its sheets inside the
+ *     wrapper the gesture is attached to — so a finger on an open sheet was
+ *     arriving here as if it had landed on the list behind it. On a real iPhone
+ *     that read as a sheet which would not be swiped away: the reader pulled,
+ *     and the page underneath tried to refresh instead. Players was the only
+ *     screen where it worked, and only because Players has no pull-to-refresh
+ *     for the sheet's events to reach.
+ *
+ *     `scrollTop` below was the first attempt at this and is not enough on its
+ *     own: it reports where the reader was pinned, which is zero — the top —
+ *     whenever the sheet was opened without scrolling first. The signal has to
+ *     be the layer's own, so it comes from `useOverlay`, which is what being a
+ *     layer means. Nothing screen-specific is involved and nothing has to
+ *     remember to opt in.
  */
 export function usePullToRefresh({
   onRefresh,
@@ -1013,8 +1064,13 @@ export function usePullToRefresh({
    * How far the surface under this gesture is scrolled. Injected for tests.
    *
    * Defaults to the overlay's reading rather than the window's, which are the
-   * same number except while a layer has the page pinned — and a screen under
-   * an open sheet must not decide it is "at the top" and arm a refresh.
+   * same number except while a layer has the page pinned — where the window
+   * reports zero however far down the reader actually is.
+   *
+   * This was once also the guard against arming a refresh under an open sheet,
+   * and it was the wrong instrument for it: a sheet opened from the top of a
+   * list pins the page at zero, so the reading is "at the top" and honestly so.
+   * Rule 6 is that guard now; this is back to answering only what it is asked.
    */
   scrollTop?: () => number;
 }): PullToRefresh {
@@ -1022,22 +1078,35 @@ export function usePullToRefresh({
   const running = useRef(false);
   const [distance, setDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  /*
+   * Rule 6, read in the render the handlers are made in.
+   *
+   * Not a prop, deliberately. Every screen with this gesture would have had to
+   * pass the same thing, every screen that opens a sheet would have had to know
+   * it had one open, and the one screen that forgot would have the defect back.
+   * The layer already announces itself; the page just has to listen.
+   */
+  const covered = useAppIsCovered();
+  /** What the gesture is actually allowed to do, from both halves of that. */
+  const live = enabled && !covered;
 
   /*
-   * A gesture in flight when the screen takes the gesture back.
+   * A gesture in flight when the gesture is taken back.
    *
-   * Rule 2's second half. Dropping the drag alone would leave the surface held
-   * open at whatever it had reached, so the distance goes with it — the list
-   * springs back to where it belongs and the row being carried is the only
-   * thing moving. A refresh already *running* is left alone: it has been
-   * requested and cancelling a request nobody asked to cancel is worse than
+   * Rule 2's second half, and rule 6's: a sheet can open under a finger that is
+   * already pulling — a row tapped at the top of a list is exactly that — and
+   * the pull must not carry on behind it. Dropping the drag alone would leave
+   * the surface held open at whatever it had reached, so the distance goes with
+   * it: the list springs back to where it belongs and the layer is the only
+   * thing moving. A refresh already *running* is left alone — it has been
+   * requested, and cancelling a request nobody asked to cancel is worse than
    * letting it finish.
    */
   useEffect(() => {
-    if (enabled) return;
+    if (live) return;
     drag.current = null;
     setDistance((current) => (current === 0 ? current : 0));
-  }, [enabled]);
+  }, [live]);
 
   const run = useCallback(() => {
     // The guard is the ref, not `refreshing`: two pulls inside one render would
@@ -1058,9 +1127,7 @@ export function usePullToRefresh({
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
-      if (!enabled || running.current) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if (scrollTop() > 0) return;
       /*
        * A control that has claimed this drag keeps it. Asked of the *target*
        * rather than of the surface, because the surface is the whole screen and
@@ -1068,16 +1135,25 @@ export function usePullToRefresh({
        * the only record of where the finger actually landed is `e.target`.
        */
       const target = e.target;
-      if (target instanceof Element && target.closest(`[${NO_PULL_ATTRIBUTE}]`)) return;
+      const claimed = target instanceof Element && target.closest(`[${NO_PULL_ATTRIBUTE}]`) !== null;
+      if (!pullBegins({ enabled, covered, refreshing: running.current, atTop: scrollTop() <= 0, claimed })) return;
       drag.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, engaged: false };
     },
-    [enabled, scrollTop],
+    [enabled, covered, scrollTop],
   );
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
       const state = drag.current;
       if (!state || state.pointerId !== e.pointerId) return;
+      // Rule 6 again, because a layer can open between two moves and the effect
+      // above lands a render later — by which time this has already stretched
+      // the page under the sheet by a frame's worth of finger.
+      if (covered) {
+        drag.current = null;
+        setDistance(0);
+        return;
+      }
       const dx = e.clientX - state.startX;
       const dy = e.clientY - state.startY;
 
@@ -1102,14 +1178,17 @@ export function usePullToRefresh({
 
       setDistance(pullDistance(dy));
     },
-    [scrollTop],
+    [covered, scrollTop],
   );
 
   const finish = useCallback(
     (e: ReactPointerEvent, cancelled: boolean) => {
       const state = drag.current;
       drag.current = null;
-      if (!state || state.pointerId !== e.pointerId || !state.engaged) {
+      // And rule 6 a third time, at the last place it could still fire one: a
+      // layer that opened after the finger did leaves a pull engaged, and
+      // letting go of it would reload the page under the sheet.
+      if (covered || !state || state.pointerId !== e.pointerId || !state.engaged) {
         setDistance(0);
         return;
       }
@@ -1124,7 +1203,7 @@ export function usePullToRefresh({
       }
       setDistance(0);
     },
-    [run],
+    [covered, run],
   );
 
   return {

@@ -10,14 +10,18 @@
  *  - the sheet claimed `aria-modal` and then let Tab walk straight out of it
  *    into a list the reader could not see.
  *
- * The counting and the wrap-around are the parts that are easy to get wrong and
- * impossible to see in a screenshot, so they are pure and they are tested here.
- * The rest of `useOverlay` — pinning the body, `inert`, focus restoration — is
- * DOM behaviour and belongs to the browser suite.
+ *  - and the page behind an open sheet had no way to know it was covered, so
+ *    the screen's own pull-to-refresh kept competing for the reader's dismissal
+ *    gesture — see `usePullToRefresh`, rule 6.
+ *
+ * The counting, the wrap-around and the modal-open signal are the parts that are
+ * easy to get wrong and impossible to see in a screenshot, so they are pure and
+ * they are tested here. The rest of `useOverlay` — pinning the body, `inert`,
+ * focus restoration — is DOM behaviour and belongs to the browser suite.
  */
 
-import { describe, expect, it } from 'vitest';
-import { counted, nextFocusIndex } from '../src/web/overlay.ts';
+import { afterEach, describe, expect, it } from 'vitest';
+import { appIsCovered, claimCovered, counted, nextFocusIndex, watchCovered } from '../src/web/overlay.ts';
 
 describe('a claim held by however many layers want it', () => {
   /** A claim that records what happened to it, in order. */
@@ -107,5 +111,92 @@ describe('where Tab goes inside a dialog', () => {
     // place, and that place is where focus already is.
     expect(nextFocusIndex(1, 0, false)).toBe(0);
     expect(nextFocusIndex(1, 0, true)).toBe(0);
+  });
+});
+
+describe('the signal that says the app is covered', () => {
+  /* Module state is shared across this file, so every test leaves it empty. */
+  const held: Array<() => void> = [];
+  const open = () => {
+    const release = claimCovered();
+    held.push(release);
+    return release;
+  };
+  afterEach(() => {
+    while (held.length > 0) held.pop()!();
+  });
+
+  it('is quiet until something covers the app', () => {
+    expect(appIsCovered()).toBe(false);
+  });
+
+  it('is raised by a layer and lowered when it goes', () => {
+    const sheet = open();
+    expect(appIsCovered()).toBe(true);
+    sheet();
+    expect(appIsCovered()).toBe(false);
+  });
+
+  it('stays raised while a second layer is still up', () => {
+    // The odds sheet opens a player's card; the draft board can have a sheet
+    // over it. Closing the inner one does not uncover the page.
+    const board = open();
+    const sheet = open();
+    sheet();
+    expect(appIsCovered(), 'the page was uncovered with a layer still on it').toBe(true);
+    board();
+    expect(appIsCovered()).toBe(false);
+  });
+
+  it('does not care what order the layers are given up in', () => {
+    const board = open();
+    const sheet = open();
+    board();
+    expect(appIsCovered()).toBe(true);
+    sheet();
+    expect(appIsCovered()).toBe(false);
+  });
+
+  it('cannot be left stuck on by a cleanup that runs twice', () => {
+    // StrictMode invokes a cleanup twice, and a pull-to-refresh that never came
+    // back would be a worse defect than the one this signal exists to fix.
+    const first = open();
+    const second = open();
+    first();
+    first();
+    expect(appIsCovered()).toBe(true);
+    second();
+    expect(appIsCovered()).toBe(false);
+  });
+
+  it('tells its watchers when the answer changes, and only then', () => {
+    let told = 0;
+    const stop = watchCovered(() => {
+      told += 1;
+    });
+    const board = open();
+    expect(told).toBe(1);
+    const sheet = open();
+    expect(told, 'a second layer changed nothing for the page underneath').toBe(1);
+    sheet();
+    expect(told).toBe(1);
+    board();
+    expect(told).toBe(2);
+    stop();
+    open()();
+    expect(told, 'a watcher that had stopped was still being told').toBe(2);
+  });
+
+  it('survives a watcher that stops listening as it is told', () => {
+    // Which is what a component unmounting in response to this does.
+    const seen: string[] = [];
+    const stop = watchCovered(() => {
+      seen.push('first');
+      stop();
+    });
+    const alsoStop = watchCovered(() => seen.push('second'));
+    open()();
+    alsoStop();
+    expect(seen).toContain('second');
   });
 });

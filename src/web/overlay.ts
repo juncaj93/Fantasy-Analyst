@@ -30,7 +30,7 @@
  * something is covering the app, and what that obliges the app to do.
  */
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 
 /* --------------------------------------------------------- the scroll lock */
 
@@ -175,6 +175,82 @@ export const hideBackground = counted(() => {
   };
 });
 
+/* --------------------------------------------------- the modal-open signal */
+
+/**
+ * Whether anything is currently covering the app.
+ *
+ * The third thing a layer owes the page, and the one that was missing: the page
+ * has to be able to *find out*. Holding it still and taking it out of the
+ * reading order are both done to the document, where anything can see them; the
+ * fact of being covered was known only to the layer, so a gesture attached to
+ * the screen behind had no way to stand down.
+ *
+ * That is not a hypothetical. React's portals move a layer's *elements* to the
+ * end of the document but leave its *events* propagating up the component tree
+ * — so a sheet rendered inside a screen's pull-to-refresh wrapper delivers
+ * every pointer it receives to that wrapper, however far apart the two are in
+ * the DOM. The screen behind an open sheet was being handed the reader's
+ * dismissal gesture and starting a refresh with it. See `usePullToRefresh`,
+ * rule 6, which is the one consumer of this today.
+ *
+ * A boolean rather than a count, because "is the app covered" is the only
+ * question anyone has: a second layer over the first changes nothing for the
+ * page underneath, which was already covered.
+ */
+let covered = false;
+
+/** Everyone who has asked to be told when that changes. */
+const watchers = new Set<() => void>();
+
+function announce(): void {
+  // A copy, because a watcher that unsubscribes as it runs — which is what a
+  // component unmounting in response to this does — must not shorten the set
+  // being walked.
+  for (const watcher of [...watchers]) watcher();
+}
+
+/**
+ * Counted, and separately from the other two claims, for the same reason they
+ * are counted separately from each other: layers nest, and the app is covered
+ * until the *last* one goes.
+ */
+export const claimCovered = counted(() => {
+  covered = true;
+  announce();
+  return () => {
+    covered = false;
+    announce();
+  };
+});
+
+/** Whether a layer is up, asked once, without subscribing. */
+export function appIsCovered(): boolean {
+  return covered;
+}
+
+/** Be told when that changes; the returned function stops the telling. */
+export function watchCovered(onChange: () => void): () => void {
+  watchers.add(onChange);
+  return () => {
+    watchers.delete(onChange);
+  };
+}
+
+/**
+ * Whether a layer is up, as something a component re-renders on.
+ *
+ * `useSyncExternalStore` rather than an effect and a piece of state, because
+ * the answer has to be right in the *render* that a gesture handler is created
+ * in. An effect lands a render later, and a render later is after the finger
+ * has already gone down.
+ *
+ * Nothing is ever covered on a server, where there is no document to cover.
+ */
+export function useAppIsCovered(): boolean {
+  return useSyncExternalStore(watchCovered, appIsCovered, () => false);
+}
+
 /* -------------------------------------------------------------- the stack */
 
 /** The layers currently up, oldest first. Identity only — no contents. */
@@ -299,6 +375,15 @@ export function useOverlay({ container, onDismiss }: OverlayOptions): Overlay {
 
     const unlock = lockPageScroll();
     const reveal = hideBackground();
+    /*
+     * And the page is told, so that what is attached to it can stand down.
+     *
+     * Claimed here rather than by each layer, because "the app is covered" is
+     * true of every layer by definition — this hook is what being a layer
+     * means — and a signal a layer could forget to raise is a signal the page
+     * cannot trust.
+     */
+    const uncover = claimCovered();
 
     /*
      * Focus enters the layer itself, not its first control.
@@ -345,6 +430,7 @@ export function useOverlay({ container, onDismiss }: OverlayOptions): Overlay {
       if (at >= 0) stack.splice(at, 1);
       // Order matters: the page has to be reachable again before focus is
       // handed back to something on it.
+      uncover();
       reveal();
       unlock();
       if (invoker && invoker.isConnected) invoker.focus({ preventScroll: true });

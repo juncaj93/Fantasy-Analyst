@@ -15,8 +15,10 @@
  *    cannot reload the page by accident;
  *  - the state the indicator paints is a function of the distance and nothing
  *    else;
- *  - and it engages only on a deliberately vertical gesture, which is the rule
- *    that keeps it out of the way of every other drag on a phone.
+ *  - it engages only on a deliberately vertical gesture, which is the rule
+ *    that keeps it out of the way of every other drag on a phone;
+ *  - and it does not take the gesture at all while a layer is over the app,
+ *    which is the rule that lets a sheet be swiped away on a real iPhone.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -27,6 +29,7 @@ import {
   PULL_RESISTANCE,
   PULL_TRIGGER,
   engageDecision,
+  pullBegins,
   pullDecision,
   pullDistance,
   pullReleases,
@@ -197,5 +200,67 @@ describe('what the indicator is saying', () => {
     expect(pullState(0, true)).toBe('refreshing');
     expect(pullState(PULL_TRIGGER, true)).toBe('refreshing');
     expect(pullState(PULL_LIMIT, true)).toBe('refreshing');
+  });
+});
+
+describe('whether a pointer landing on the surface may begin a pull', () => {
+  /** Everything permitting, which each case below then spoils in one way. */
+  const permitted = { enabled: true, covered: false, refreshing: false, atTop: true, claimed: false };
+
+  it('begins when nothing is in the way', () => {
+    expect(pullBegins(permitted)).toBe(true);
+  });
+
+  it('does not begin below the top of the page', () => {
+    expect(pullBegins({ ...permitted, atTop: false })).toBe(false);
+  });
+
+  it('does not begin inside a control that owns its own drag', () => {
+    // The queue's grip: the row is being carried, and letting go of it must not
+    // also reload the board out from under the reorder.
+    expect(pullBegins({ ...permitted, claimed: true })).toBe(false);
+  });
+
+  it('does not begin while a refresh is already running', () => {
+    expect(pullBegins({ ...permitted, refreshing: true })).toBe(false);
+  });
+
+  it('does not begin on a screen that has taken the gesture back', () => {
+    expect(pullBegins({ ...permitted, enabled: false })).toBe(false);
+  });
+
+  /**
+   * The physical-iPhone defect, stated as a rule.
+   *
+   * A sheet is portalled to the end of the document, but React delivers its
+   * events up the *component* tree — and every screen with this gesture renders
+   * its sheets inside the wrapper the gesture is attached to. So a finger
+   * pulling a sheet down arrived here as if it had landed on the list behind
+   * it, and the page tried to refresh instead of the sheet dismissing. On
+   * Trades and on Team the sheet simply would not be swiped away.
+   */
+  it('does not begin at all while a layer is over the app', () => {
+    expect(pullBegins({ ...permitted, covered: true })).toBe(false);
+  });
+
+  it('is refused by a covering layer whatever else is true', () => {
+    // The point of putting this in the same rule as the other four rather than
+    // beside them: there is no combination that talks its way past it.
+    for (const enabled of [true, false]) {
+      for (const refreshing of [true, false]) {
+        for (const atTop of [true, false]) {
+          for (const claimed of [true, false]) {
+            expect(pullBegins({ enabled, covered: true, refreshing, atTop, claimed })).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it('gives the gesture back the moment the layer goes', () => {
+    // The other half of the same rule, and the one a stuck-disabled surface
+    // would fail: closing a sheet has to leave the screen pullable again.
+    expect(pullBegins({ ...permitted, covered: true })).toBe(false);
+    expect(pullBegins({ ...permitted, covered: false })).toBe(true);
   });
 });
