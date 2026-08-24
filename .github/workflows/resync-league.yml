@@ -142,6 +142,20 @@ jobs:
           code=$(curl -s -o /tmp/managers.json -w '%{http_code}' \
             -X POST "$URL/api/leagues/$LEAGUE/managers/refresh" -b /tmp/c.txt)
 
+          # Whatever happened, say what the app said about it.
+          #
+          # Every answer that leaves the router is JSON, and a 500 carries the
+          # exception's own message in `error` — so the cause is already in
+          # hand and the only way to lose it is not to look. A step that failed
+          # loudly without naming the failure would be doing the exact thing it
+          # exists to prevent, one level up.
+          detail=$(node -e "
+            try {
+              const r = JSON.parse(require('fs').readFileSync('/tmp/managers.json','utf8'));
+              process.stdout.write(r && r.error ? String(r.error) : '');
+            } catch { process.stdout.write(''); }
+          ")
+
           # A cooldown is the endpoint saying this was already done recently,
           # which is a successful outcome for a workflow whose job is to make
           # sure it has been done at all.
@@ -153,7 +167,10 @@ jobs:
           # Anything else that is not a 200 is loud. The entire reason this step
           # exists is that a signal which quietly fails to be built looks exactly
           # like a signal that has nothing to say.
-          [ "$code" = "200" ] || { echo "::error::managers/refresh answered $code"; exit 1; }
+          if [ "$code" != "200" ]; then
+            echo "::error::managers/refresh answered $code${detail:+ — $detail}"
+            exit 1
+          fi
 
           node -e "
             const r = JSON.parse(require('fs').readFileSync('/tmp/managers.json','utf8'));
