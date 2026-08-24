@@ -1493,6 +1493,97 @@ each rejected spelling, and require the band to be one line high. The Players
 `ALL · QB · RB · WR · TE · FLX · DEF` order was verified and left alone; no
 ranking, formula, ordering or data semantics were touched.
 
+## Milestone — Projection v2, evaluated and consumed by nothing (done)
+
+The nflverse investigation left a data contract and no code. This is phase 1 of
+it: three more free sources ingested, a deterministic usage/role feature layer,
+a market-anchored projection with an uncertainty model, and a side-by-side
+evaluation against what the app shows today. **No recommendation reads any of
+it**, and that is asserted against the dependency graph rather than promised —
+`tests/projectionV2.boundary.test.ts` walks every module under `core/startsit`,
+`core/matchup`, `core/draft`, `core/trades`, `core/players` and five more
+transitively and requires that none of them can reach `core/projection` or
+`core/nflverse`. There is no flag to flip.
+
+**The roster file turned out to be the keystone, and it is not football.** It
+publishes `gsis_id`, `sleeper_id` and `pfr_id` on one row, which does two things.
+It fills in the GSIS ids Sleeper leaves blank for 16.5% of skill-position
+players — rookies especially, which is exactly the population whose role is
+changing. And its `pfr_id` retires an objection this codebase wrote down and
+meant: `core/usage/nflverse.ts` rejected the PFR snap counts because
+`pfr_player_id` was "an id space this app has never seen", and a second fuzzy
+matcher for a second id space is what every brief here has ruled out. That was
+right and it is now spent. Measured over the full 2025 season the join resolves
+**6,955 of 6,981** regular-season skill-position snap rows — 99.6% — on two
+identifier hops and no name. Offensive snap share is the best role signal in the
+free data and it is reachable now.
+
+**The depth chart is a 44MiB file read 768KiB at a time.** It is written
+newest-first, one capture is about 310KiB, and the release asset answers an
+explicit `bytes=0-N` range with 206 while still answering `If-None-Match` with
+304 — so the ordinary tick costs a round trip and no bytes. A prefix read cannot
+tell a complete capture from a truncated one by looking at the rows, and a
+truncated one reads as a club having released everybody the read did not reach,
+so the parser calls a capture complete only once it has seen the *next, older*
+one begin, and refuses outright if a newer timestamp ever appears below an older
+one. The pre-2025 schema means something different by "rank" and is versioned
+rather than papered over.
+
+**The projection is arithmetic, not discipline.** `market components + estimates
+for components no market priced + a capped adjustment for information newer than
+the market snapshot`, and there is no fourth term. Every feature declares
+A/B/C/D in a registry the engine actually calls before touching a mean, so a
+feature cannot reach the mean by being wired in and forgotten. Most of them are
+B: knowing a receiver's role is stable does not say the market is wrong about
+him, it says its number has less to go wrong with it. A depth-chart move on its
+own moves the mean by zero — clubs publish two-deeps to satisfy a league
+requirement, and Arizona's live chart has a rookie ahead of James Conner — so it
+needs a second source that measures behaviour and a timestamp after the market's,
+and it is still capped at 1.5 points or a tenth of the anchor.
+
+**The backtest found the uncertainty model twice wrong, which is what a backtest
+is for.** Borrowing the matchup simulation's volatility table gave a nominal
+10–90 interval that held **43%** of the time over 3,938 player-weeks of 2025.
+Widening it to the measured spread got to 69% and stopped, with outcomes falling
+below the floor twice as often as above the ceiling — the signature of a wrong
+shape rather than a wrong parameter. A lognormal cannot reach zero and a fantasy
+week can: 10.5% of receiver weeks scored under 15% of their projection. The
+distribution is a mixture now — a bust branch at approximately zero, and a
+lognormal for the rest — and it holds 76% with the bottom tail landing at 9.4%
+against a nominal 10%. The consequence is stated rather than tuned away: **a
+receiver's honest tenth percentile is zero**, because one receiver week in ten
+is zero.
+
+A grid search wanted twice the measured spread for backs, receivers and tight
+ends, pressed against the top of the search range. That was not adopted — it
+would have been absorbing a thin lognormal tail and somebody else's positional
+bias into a width. The residual is reported instead: the interval runs tight in
+the upper tail, most visibly at tight end.
+
+**What could not be measured, said plainly.** This app has no betting-market
+history, so market-anchor error is unanswerable and no number claiming to be it
+appears anywhere. The backtest uses Rotowire's published weekly numbers — real,
+independent, and published per component — both as the fallback baseline and as
+a labelled *proxy* anchor. Whether betting markets are sharper than Rotowire is
+the question the whole design rests on and the one this cannot answer.
+
+Every one of the ten largest disagreements in the no-market regime is a backup
+quarterback pressed into a start. The usage model correctly has nothing to go on
+and correctly marks all ten low confidence.
+
+Checks at this milestone: typecheck, the whole unit suite (3,738 tests, 82 of
+them new), the browser suite at 430, 390, 375 and 360, the build, the page-weight
+budget — unchanged, because the web bundle imports none of this — and
+`scripts/probe-usage-parse.mjs` against the real 19,422-line published file,
+which reports **zero mismatches across 252,486 fields** and is the proof that
+moving the CSV extractor into `core/source/csv.ts` changed no behaviour. The only
+other edit to a live-engine file is one keyword: `depthAdjustedRates` is exported
+so the gap fill uses this app's published rates rather than a second copy of
+them.
+
+**Recommendation: keep it side-by-side.** See
+[docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) §14 for the five open items.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against

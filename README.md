@@ -206,6 +206,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
+| [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) | the market-anchored usage model, evaluated side by side and consumed by nothing |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
 
 ## Tests

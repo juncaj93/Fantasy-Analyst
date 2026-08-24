@@ -234,7 +234,7 @@ export function projectV2(input: ProjectionV2Input): ProjectionV2 {
     modelDerived: anchor.basis === 'model',
     anchor,
     freshInformation: fresh,
-    interval: intervalFor(points, uncertainty.cv),
+    interval: intervalFor(points, uncertainty.cv, uncertainty.bustRate),
     uncertainty,
     confidence,
     provenance,
@@ -299,6 +299,12 @@ function explain(
     out.push(
       `${widest.multiplier > 1 ? 'Widened' : 'Narrowed'} because ${widest.reason} ` +
         `(spread ${uncertainty.cv} against ${uncertainty.baseCv} for the position).`,
+    );
+  }
+  if (uncertainty.bustReasons.length > 0) {
+    out.push(
+      `A ${Math.round(uncertainty.bustRate * 100)}% chance the week is a bust, above the ordinary rate for the ` +
+        `position because ${uncertainty.bustReasons[0]}.`,
     );
   }
   out.push(`Confidence ${confidence.level}: ${confidence.reasons[0] ?? 'no coverage detail recorded'}.`);

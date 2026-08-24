@@ -24,13 +24,21 @@
  *
  * ## The shape, and why it is the app's existing one
  *
- * A lognormal parameterised by a coefficient of variation, from
- * `core/matchup/distribution.ts`. Reused rather than re-chosen for a specific
- * reason: §24 anticipates the Matchup simulation eventually consuming Projection
- * v2's distribution, and a v2 that produced a differently-shaped object would
- * make that integration a rewrite instead of a wire-up. `POSITION_VOLATILITY`
- * is already this app's tested view of how wide a position's week is; what this
- * module adds is the *data-dependent* part the simulation has never had.
+ * A lognormal parameterised by a coefficient of variation — the same *shape* as
+ * `core/matchup/distribution.ts`, and deliberately not the same *numbers*.
+ *
+ * The shape is shared for a specific reason: §24 anticipates the Matchup
+ * simulation eventually consuming Projection v2's distribution, and a v2 that
+ * produced a differently-shaped object would make that integration a rewrite
+ * instead of a wire-up. So `lognormalParameters` and `probit` are imported from
+ * there rather than reimplemented.
+ *
+ * The widths are **not** shared, and that was a finding rather than a decision:
+ * borrowing the simulation's `POSITION_VOLATILITY` produced a nominal 10–90
+ * interval that held 43% of the time across a real season. See
+ * {@link PROJECTION_VOLATILITY} for the measurement and for why the two
+ * questions genuinely have different answers. Nothing here changes that table,
+ * because Matchup reads it and phase 1 changes no live behaviour.
  *
  * Fantasy scoring is right-skewed — a receiver's downside is bounded at zero and
  * his upside is a 60-yard catch — so a lognormal's median sits below its mean by
@@ -46,14 +54,147 @@
  * inherited from the CV rather than bolted on afterwards.
  */
 
-import { POSITION_VOLATILITY, DEFAULT_VOLATILITY, lognormalParameters, probit } from '../matchup/distribution.ts';
+import { POSITION_VOLATILITY, lognormalParameters, probit } from '../matchup/distribution.ts';
 import { mayMoveUncertainty } from './classification.ts';
 import { THIN_SAMPLE_GAMES, type UsageFeatures } from './features.ts';
 import type { AnchorBasis } from './anchor.ts';
 import type { RoleChangeEvidence } from './roleEvidence.ts';
 
-/** Bounds on the fitted coefficient of variation. */
-export const CV_BOUNDS = { min: 0.18, max: 1.25 } as const;
+/**
+ * How wide a week is **in which he was involved at all**, by position.
+ *
+ * The conditioning in that sentence is the whole design, and it is there because
+ * the first two attempts at this were wrong in a way only a backtest could show.
+ *
+ * **Attempt one** borrowed `POSITION_VOLATILITY` from
+ * `core/matchup/distribution.ts`. A nominal 10–90 interval built from it
+ * contained the outcome **43%** of the time across 3,938 player-weeks of 2025.
+ * That table is not wrong; it answers a different question. It describes what is
+ * *left* of a game already under way — truth banked, minutes elapsed,
+ * correlations applied — and this describes a whole week from Tuesday, which is
+ * a strictly larger unknown.
+ *
+ * **Attempt two** widened it to the empirical spread of `actual / projected`
+ * (QB 0.43, RB 0.78, WR 0.85, TE 0.83). Coverage rose to 69% and stopped, and
+ * the residual was not noise: outcomes fell *below* the floor twice as often as
+ * above the ceiling — 23.8% under for receivers against 12.7% over. Widening
+ * further did not fix it, which is the signature of a wrong shape rather than a
+ * wrong parameter.
+ *
+ * **What was actually wrong.** A lognormal cannot reach zero and a fantasy week
+ * can. Measured on 2025, among players projected three points or more, the share
+ * of weeks scoring under 15% of the projection was:
+ *
+ *     QB 0.9%    RB 7.8%    WR 10.5%    TE 7.8%
+ *
+ * He was inactive by kickoff, or left in the first quarter, or was simply never
+ * thrown to. No continuous unimodal shape puts a tenth of its mass on top of
+ * zero, so the distribution is a **mixture**: a bust branch at approximately
+ * zero with probability {@link BUST_RATE}, and a lognormal for the rest. Once
+ * they are separated, the lognormal has a job it can do, and the conditional
+ * spread it needs is much closer to the original guess:
+ *
+ *     QB 0.42    RB 0.70    WR 0.75    TE 0.74
+ *
+ * The table below is those figures divided by the mean widening factor the
+ * B-class modifiers actually apply — measured at 0.87 to 0.90 across the same
+ * population — so that a *typical* player comes out at the measured dispersion
+ * rather than 13% below it. Calibrating the base and then letting a skewed set
+ * of multipliers pull every projection under it is how an uncertainty model ends
+ * up narrower than the thing it was fitted to.
+ *
+ * ## What is still wrong, said rather than tuned away
+ *
+ * These values are **not** the ones that produce a perfect 10/80/10. A grid
+ * search over the same season wanted a base coefficient of variation of about
+ * **1.55** for backs, receivers and tight ends — roughly twice the measured
+ * dispersion, and pressed against the top of the search range, which is the
+ * signature of a fit absorbing something that is not width.
+ *
+ * Two things it would have been absorbing. A lognormal has thinner tails than
+ * real fantasy scoring even after the bust branch is removed: the 40-yard
+ * touchdown is more common than the shape allows. And the anchor itself is
+ * biased for some positions — conditional on not busting, tight ends outscored
+ * their projection by 13% on average — and widening a distribution to cover
+ * somebody else's bias is not calibration, it is hiding a bias inside a spread.
+ *
+ * So the measured numbers are what is here, and the residual is reported instead
+ * of fitted: the interval runs a little tight in the upper tail, most visibly at
+ * tight end. That is a real limitation, it is in `docs/PROJECTION_V2.md`, and it
+ * is one of the reasons the recommendation at the end of phase 1 is to keep
+ * this side-by-side rather than to ship it.
+ *
+ * **The consequence, stated rather than tuned away: a receiver's honest tenth
+ * percentile is zero.** More than one receiver week in ten is a bust, so the
+ * bottom decile of his distribution *is* the bust branch. A floor that looked
+ * more comfortable would be a floor that was wrong one week in nine.
+ *
+ * Fitted on 2025 alone, which is the season nflverse has published in full. §22
+ * says not to overfit to one and the risk is named in `docs/PROJECTION_V2.md`;
+ * `scripts/projection-v2-backtest.mjs` is the harness that produced every
+ * number above and re-runs against any season.
+ */
+export const PROJECTION_VOLATILITY: Record<string, number> = {
+  QB: 0.48,
+  RB: 0.77,
+  WR: 0.85,
+  TE: 0.85,
+};
+
+/**
+ * Anything the table does not carry. At the wide end of what is in it, because a
+ * position this app has never modelled is not a narrow one.
+ */
+export const DEFAULT_PROJECTION_VOLATILITY = 0.8;
+
+/**
+ * How often a week is a bust — under 15% of what he was projected for.
+ *
+ * Measured on 2025 over players projected three points or more. A quarterback
+ * who starts almost always throws; a receiver can be shut out by one cornerback
+ * and a game script, and one in ten is.
+ *
+ * This is a fact about the position, not about the player, and the player-level
+ * adjustments to it are in {@link uncertaintyFor} — availability that is not
+ * settled, a role that has not settled, a sample too thin to have shown a bust
+ * yet.
+ */
+export const BUST_RATE: Record<string, number> = {
+  QB: 0.02,
+  RB: 0.08,
+  WR: 0.11,
+  TE: 0.08,
+};
+
+export const DEFAULT_BUST_RATE = 0.1;
+
+/**
+ * The most of a distribution that may sit on the bust branch.
+ *
+ * A third. Past that the mixture stops describing a footballer and starts
+ * describing a coin, and the honest output for a player that uncertain is a
+ * lower confidence rather than a more elaborate distribution.
+ */
+export const MAX_BUST_RATE = 0.35;
+
+/**
+ * Bounds on the fitted coefficient of variation.
+ *
+ * The ceiling sits well above the widest base times its widening factors, so the
+ * clamp cannot quietly cancel every B-class signal for receivers — an
+ * uncertainty model that cannot express uncertainty is the failure worth
+ * guarding against here.
+ */
+export const CV_BOUNDS = { min: 0.25, max: 1.8 } as const;
+
+/**
+ * The simulation's table, imported only so a test can compare against it.
+ *
+ * Exported so `tests/projectionV2.model.test.ts` can assert these two are
+ * different values — which is what stops a later tidy-up "deduplicating" them
+ * and silently rewriting the Matchup screen's win probabilities.
+ */
+export const SIMULATION_VOLATILITY = POSITION_VOLATILITY;
 
 /** Where the floor and the ceiling are taken. */
 export const QUANTILES = { floor: 0.1, median: 0.5, ceiling: 0.9 } as const;
@@ -77,11 +218,24 @@ export interface WidthFactor {
 }
 
 export interface UncertaintyModel {
-  /** The fitted coefficient of variation, after every factor and the clamp. */
+  /**
+   * The fitted coefficient of variation of the **live branch** — the week in
+   * which he was involved. Not the spread of the whole distribution, which also
+   * contains the bust branch.
+   */
   cv: number;
   /** The position's base, before anything data-dependent. */
   baseCv: number;
+  /**
+   * Probability the week is a bust: approximately zero points.
+   *
+   * A separate branch rather than a thin left tail, because a lognormal cannot
+   * reach zero and a tenth of receiver weeks are zero. See {@link BUST_RATE}.
+   */
+  bustRate: number;
   factors: WidthFactor[];
+  /** Reasons the bust branch is heavier than the position's own base rate. */
+  bustReasons: string[];
   /** True when the clamp bound the result rather than the factors. */
   clamped: boolean;
 }
@@ -121,7 +275,7 @@ export interface UncertaintyInput {
  * same way a mean contribution from a feature not classified A or C is.
  */
 export function uncertaintyFor(input: UncertaintyInput): UncertaintyModel {
-  const baseCv = POSITION_VOLATILITY[input.position.toUpperCase()] ?? DEFAULT_VOLATILITY;
+  const baseCv = PROJECTION_VOLATILITY[input.position.toUpperCase()] ?? DEFAULT_PROJECTION_VOLATILITY;
   const factors: WidthFactor[] = [];
 
   const add = (key: string, multiplier: number, reason: string): void => {
@@ -228,7 +382,51 @@ export function uncertaintyFor(input: UncertaintyInput): UncertaintyModel {
 
   const raw = factors.reduce((cv, f) => cv * f.multiplier, baseCv);
   const cv = Math.min(CV_BOUNDS.max, Math.max(CV_BOUNDS.min, raw));
-  return { cv: round3(cv), baseCv, factors, clamped: Math.abs(cv - raw) > 1e-9 };
+
+  /*
+   * The bust branch, adjusted for the player rather than only the position.
+   *
+   * Additive rather than multiplicative, and deliberately: these are answers to
+   * "how much more often than a typical player at his position does this one
+   * disappear", and a multiplier on a 2% quarterback base would say almost
+   * nothing while the same multiplier on an 11% receiver said a great deal.
+   */
+  const baseBust = BUST_RATE[input.position.toUpperCase()] ?? DEFAULT_BUST_RATE;
+  const bustReasons: string[] = [];
+  let bust = baseBust;
+  if (input.availabilityUncertain) {
+    bust += 0.08;
+    bustReasons.push('his availability for this week is not settled');
+  }
+  if (games === 0) {
+    bust += 0.06;
+    bustReasons.push('no stored usage, so nothing has shown whether he disappears');
+  } else if (games < THIN_SAMPLE_GAMES) {
+    bust += 0.03;
+    bustReasons.push(`only ${games} game${games === 1 ? '' : 's'} of usage`);
+  }
+  const shares = [input.features?.snapShareStability, input.features?.targetShareStability];
+  if (shares.some((sd) => sd != null && sd >= STABILITY_BANDS.volatile)) {
+    bust += 0.04;
+    bustReasons.push('his share of the work has swung game to game');
+  }
+  if (input.basis === 'model') {
+    bust += 0.03;
+    bustReasons.push('no market priced him, so nothing outside his own history says he plays');
+  }
+  if (input.outsideFieldedSpots) {
+    bust += 0.03;
+    bustReasons.push('the depth chart lists him outside the spots his club fields');
+  }
+
+  return {
+    cv: round3(cv),
+    baseCv,
+    bustRate: round3(Math.min(MAX_BUST_RATE, bust)),
+    factors,
+    bustReasons,
+    clamped: Math.abs(cv - raw) > 1e-9,
+  };
 }
 
 function addStability(
@@ -266,20 +464,47 @@ export interface ProjectionInterval {
 }
 
 /**
- * Floor, median and ceiling as exact lognormal quantiles of the fitted
- * distribution.
+ * Floor, median and ceiling as exact quantiles of the fitted mixture.
  *
- * The mean is the projection and the distribution is fitted to it, so the
- * median comes out below it — which is correct for a right-skewed week and is
- * the reason both are reported. A caller printing the median under the word
- * "projected" would be printing a different number from the one every other
- * surface uses, so the projection travels beside these rather than being
- * replaced by them.
+ * The distribution is `bustRate` of mass at approximately zero and the rest a
+ * lognormal, and the two are combined so that **the mixture's mean is exactly
+ * the projection it was built from**. That identity is why the live branch is
+ * fitted to `mean / (1 - bustRate)` rather than to `mean`: a bust branch that
+ * contributed nothing to the mean while taking a tenth of the probability would
+ * quietly make every distribution's expectation lower than the number printed
+ * beside it, and §24 anticipates a simulation eventually summing these.
+ *
+ * Treating the bust branch as exactly zero is not an approximation for
+ * convenience — it was checked. On 2025 the mean of `actual / projected` among
+ * bust weeks was **0.02**.
+ *
+ * A quantile that falls inside the bust branch is zero, and that is the whole
+ * point of the mixture: with an 11% bust rate, a receiver's tenth percentile
+ * *is* zero, and reporting anything else would be reporting a floor he falls
+ * below one week in nine.
+ *
+ * §16: quantiles, not an arbitrary ±X. Computed exactly through the existing
+ * `probit` rather than sampled, so they are stable between renders.
  */
-export function intervalFor(mean: number | null, cv: number): ProjectionInterval | null {
+export function intervalFor(
+  mean: number | null,
+  cv: number,
+  bustRate = 0,
+): ProjectionInterval | null {
   if (mean == null || !Number.isFinite(mean) || mean <= 0) return null;
-  const { mu, sigma } = lognormalParameters(mean, cv);
-  const at = (p: number): number => round2(Math.exp(mu + sigma * probit(p)));
+  const q = Math.min(MAX_BUST_RATE, Math.max(0, bustRate));
+  const live = mean / (1 - q);
+  const { mu, sigma } = lognormalParameters(live, cv);
+
+  /*
+   * Rescale each quantile out of the mixture and into the live branch. `p <= q`
+   * means the quantile sits in the bust branch, which is zero.
+   */
+  const at = (p: number): number => {
+    if (p <= q) return 0;
+    const conditional = (p - q) / (1 - q);
+    return round2(Math.exp(mu + sigma * probit(conditional)));
+  };
   return { floor: at(QUANTILES.floor), median: at(QUANTILES.median), ceiling: at(QUANTILES.ceiling) };
 }
 
