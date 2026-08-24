@@ -327,7 +327,40 @@ after 0, 3 and 0 in his prior appearances. The usage model correctly has almost
 nothing to go on and correctly marks all ten `low` confidence. This is the
 honest limit of a usage model without a market, not a defect in it.
 
-## 11. Failure behaviour
+## 11. Live readback
+
+`scripts/probe-nflverse-live.mjs` runs all three ingests against the real
+endpoints into a throwaway in-memory database. Run on 2026-08-24 for season
+2026:
+
+| feed | outcome | returned | written | note |
+|---|---|---|---|---|
+| `nflverse_roster` | ok | 2,930 | 915 | 764 carried a Sleeper id, 151 did not |
+| `nflverse_depth` | ok | 3,282 | 919 | complete capture, `2026-08-23T07:28:22Z` |
+| `nflverse_snaps` | not_published | 0 | 0 | the season has not started |
+
+What crossed the wire:
+
+```
+roster_2026.csv          200                        905KiB   390ms
+depth_charts_2026.csv    206  bytes=0-786431        768KiB   235ms
+snap_counts_2026.csv     404                          0KiB   117ms
+roster_2026.csv          304       if-none-match      0KiB    90ms
+depth_charts_2026.csv    304  ...  if-none-match      0KiB   104ms
+snap_counts_2026.csv     404                          0KiB    48ms
+```
+
+**The second pass downloaded zero bytes**, including the ranged request — the
+asset honours `If-None-Match` sent together with a `Range` header, which is the
+property the whole depth-chart design rests on and which had until now only been
+measured by hand rather than through the shipping code path.
+
+Arizona's stored chart reads the way the design notes claim: Jeremiyah Love
+listed RB1, James Conner RB3. One depth-chart entry printed as a bare
+`00-0040526` because he is on the chart and not on the roster file — unresolved,
+explicitly, which is the correct answer rather than a name match.
+
+## 12. Failure behaviour
 
 Every nflverse input is optional. With the crosswalk, the snaps and the depth
 charts all absent — the true state of the world in August, when
@@ -336,7 +369,7 @@ expectation, with the confidence lowered and the reason recorded. **Market-only
 is a valid answer, not a degraded one.** With no market and no usage it returns
 `null`, never zero.
 
-## 12. Storage and cadence
+## 13. Storage and cadence
 
 Migration `0030`. Three tables plus the source-health trio the injury and usage
 pipelines already have the shape of.
@@ -353,7 +386,7 @@ the crosswalk it writes. Shared daily write ceiling of 6,000 rows, its own
 budget table so neither this nor the usage pipeline can spend the other's
 allowance.
 
-## 13. Diagnostics
+## 14. Diagnostics
 
 - `GET /api/diagnostics/projection-v2` — the side-by-side report. Public read,
   writes nothing, and says `authoritative: false` in its own payload.
@@ -361,7 +394,7 @@ allowance.
 - `POST /api/nflverse/refresh` — on-demand ingest. A write, so it needs the
   passphrase.
 
-## 14. Open items before any rollout
+## 15. Open items before any rollout
 
 1. **One real season with the props feed enabled.** Whether betting markets are
    sharper than Rotowire is the question this backtest structurally cannot

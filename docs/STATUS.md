@@ -1582,7 +1582,7 @@ so the gap fill uses this app's published rates rather than a second copy of
 them.
 
 **Recommendation: keep it side-by-side.** See
-[docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) §14 for the five open items.
+[docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) §15 for the five open items.
 
 ## Recommended next work
 
