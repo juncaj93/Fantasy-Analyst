@@ -159,7 +159,9 @@ test.describe('the real matchup', () => {
    */
   test('draws one compact row per lineup slot, both sides on one line', async ({ page }) => {
     const rows = page.getByTestId('matchup-row');
-    await expect(rows).toHaveCount(7);
+    // Eight, since the seeded league started a defence: QB, RB, RB, WR, WR, TE,
+    // FLEX, DEF. Both sides still draw on one line, which is the claim here.
+    await expect(rows).toHaveCount(8);
     await expect(page.getByTestId('slot-pill').first()).toHaveText('QB');
 
     for (const row of await rows.all()) {

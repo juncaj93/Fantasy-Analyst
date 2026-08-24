@@ -874,10 +874,19 @@ test.describe('Team starters and bench share one geometry', () => {
     const rows = await columns(page);
     expect(rows.length).toBeGreaterThan(3);
     expect(rows.every((r) => r.who.startsWith('Bartholomew')), 'the stress fixture is what is on screen').toBe(true);
+    /*
+     * At least one DEF pill, which is the widest code the column has to hold.
+     *
+     * The stress route above still injects one rather than relying on the
+     * fixture, so this case survives a fixture change — and the seeded league
+     * now rosters a real defence as well, so there can legitimately be two. The
+     * claim was never "exactly one"; it is that the widest pill is on screen
+     * while the columns are measured.
+     */
     expect(
       await page.locator(`${FILLED} .pos-pill`).filter({ hasText: 'DEF' }).count(),
-      'and one of them is a DEF',
-    ).toBe(1);
+      'a DEF pill is on screen, so the widest code is what the columns are held against',
+    ).toBeGreaterThanOrEqual(1);
     expect(rows.some((r) => r.text === '—'), 'the unpriced starter reads as a dash').toBe(true);
 
     for (const key of ['pill', 'name', 'value'] as const) {
