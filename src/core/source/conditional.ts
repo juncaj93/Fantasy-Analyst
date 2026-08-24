@@ -74,6 +74,27 @@ export async function conditionalGet(
     accept?: string;
     /** Names the file in a note, e.g. "2026 injury reports". */
     describe?: string;
+    /**
+     * Ask for only the first N bytes, as `Range: bytes=0-(N-1)`.
+     *
+     * For the one source that is too large to download whole. The depth-chart
+     * file is 44MiB and is written newest-first, so the current chart is its
+     * first ~310KiB; see `core/nflverse/depthChart.ts`. Measured against the
+     * live asset, all three properties this needs hold: an explicit `bytes=0-N`
+     * range is answered `206` with a `Content-Range`, the `ETag` is byte-for-
+     * byte the same one a `HEAD` returns, and `If-None-Match` sent *with* the
+     * range still answers `304`. So a ranged check is as cheap as any other on
+     * the ordinary tick and costs a fraction of a file on the tick that isn't.
+     *
+     * Suffix ranges (`bytes=-N`) are not usable — the asset answers them `501
+     * Unsupported client range` — which is why nothing here asks for the end of
+     * a file and why the newest-first ordering is what makes this work at all.
+     *
+     * A partial body is returned as `ok` like any other. It is the *parser's*
+     * job to decide whether what arrived is a complete unit of meaning, because
+     * only the parser knows what one is.
+     */
+    rangeBytes?: number;
   } = {},
 ): Promise<ConditionalResponse> {
   const doFetch = opts.fetch ?? ((target, init) => fetch(target, init));
@@ -81,6 +102,9 @@ export async function conditionalGet(
   const what = opts.describe ?? url;
 
   const headers: Record<string, string> = { accept: opts.accept ?? 'text/csv' };
+  if (opts.rangeBytes != null && opts.rangeBytes > 0) {
+    headers['range'] = `bytes=0-${Math.floor(opts.rangeBytes) - 1}`;
+  }
   /*
    * Only one conditional header, and ETag wins where both exist.
    *

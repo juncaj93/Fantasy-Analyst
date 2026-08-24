@@ -86,6 +86,7 @@
  */
 
 import { parseCsv } from '../adp/import.ts';
+import { extractFields } from '../source/csv.ts';
 import {
   conditionalGet,
   type ConditionalResponse,
@@ -201,82 +202,15 @@ export interface ParsedUsage {
 }
 
 /**
- * Read the requested column values out of one line, quote-aware, in one pass.
+ * Reading named columns out of a very large published CSV, quote-aware.
  *
- * ## The bug this signature exists to prevent
- *
- * The single pass can only move forwards, so it must be given its column
- * indices in ascending order. The prototype was handed `[0, 2, 3, 7, 10, 45,
- * 32, 44]` — the natural order of the fields as a human lists them — matched up
- * to 45, and could then never match 32 or 44 again. `carries` and `receptions`
- * came back as empty strings with no error at all: a usage series that is
- * quietly always zero.
- *
- * So the sort happens **here**, and the results are mapped back into the
- * caller's order. A caller cannot reintroduce the bug by listing its columns in
- * a readable order, which is the only way it was ever going to come back.
+ * Lives in `core/source/csv.ts` now. It was written and measured here, against
+ * this file, and moved when the roster, depth-chart and snap-count parsers
+ * arrived and would otherwise have been three more copies of it. Re-exported so
+ * this module's callers and tests still import it from where it was born, and
+ * so the tuning notes above still describe code somebody can find.
  */
-export function extractFields(line: string, indices: readonly number[]): string[] {
-  /*
-   * A column the header does not have is asked for as -1, and is dropped here
-   * rather than searched for.
-   *
-   * It cannot simply be sorted with the rest: -1 sorts first, never matches a
-   * field index, and — because the scan only moves forwards — the cursor would
-   * wait for it forever and return an empty string for *every* column. One
-   * absent column would silently empty the whole row, which is precisely the
-   * class of failure the sort above exists to prevent.
-   */
-  const order = indices
-    .map((column, position) => ({ column, position }))
-    .filter((entry) => entry.column >= 0)
-    .sort((a, b) => a.column - b.column);
-  const out: string[] = new Array(indices.length).fill('');
-
-  let want = 0;
-  let field = 0;
-  let start = 0;
-  let quoted = false;
-  const end = line.length;
-
-  for (let i = 0; i <= end && want < order.length; i++) {
-    // Past the last character, the end of the line terminates the final field.
-    const ch = i === end ? ',' : line[i]!;
-    if (quoted) {
-      // A doubled quote inside a quoted field closes and reopens, which lands
-      // in the same state — correct for finding delimiters, and the escape is
-      // undone in `unquote` where the value is actually built.
-      if (ch === '"') quoted = false;
-      continue;
-    }
-    if (ch === '"') {
-      quoted = true;
-      continue;
-    }
-    if (ch !== ',') continue;
-
-    // `while` rather than `if`: a caller may ask for the same column twice.
-    while (want < order.length && order[want]!.column === field) {
-      out[order[want]!.position] = unquote(line.slice(start, i));
-      want++;
-    }
-    field++;
-    start = i + 1;
-  }
-
-  return out;
-}
-
-/** A field may or may not be quoted, so strip only what is actually there. */
-function unquote(raw: string): string {
-  // CRLF would leave a stray carriage return on the last field. This file ships
-  // LF today; costing one character test to survive the day it does not.
-  const value = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replace(/""/g, '"');
-  }
-  return value;
-}
+export { extractFields } from '../source/csv.ts';
 
 /**
  * Parse one week of usage out of the published season file.

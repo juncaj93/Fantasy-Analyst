@@ -27,6 +27,7 @@ import { PlayerDetailService } from '../server/services/playerDetailService.ts';
 import { InjuryService, previousSeason } from '../server/services/injuryService.ts';
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { UsageService } from '../server/services/usageService.ts';
+import { NflverseService } from '../server/services/nflverseService.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
@@ -239,6 +240,32 @@ export default {
         if (run.rowsWritten === 0) await usage.catchUpOneWeek();
       } catch (err) {
         console.error('usage refresh failed', err);
+      }
+
+      /*
+       * The three nflverse feeds Projection v2 reads, on the same daily clock
+       * and deliberately after the usage refresh.
+       *
+       * Order matters twice over. After the player dictionary, like everything
+       * else here, because snap rows are matched against the players this app
+       * knows. And after the usage refresh because both write to the same day's
+       * budget and usage is the feed a live screen already depends on — if a
+       * ceiling is going to bind, it must bind on the evaluation rather than on
+       * the role trend a Team card is showing.
+       *
+       * Costs three conditional GETs on an ordinary day, two of which 304. The
+       * depth chart is a ranged read of the first 768KiB of a 44MiB file rather
+       * than the file; see `core/nflverse/depthChart.ts`.
+       *
+       * Separately caught, and this one matters more than most: **nothing on a
+       * live screen reads what this writes.** Projection v2 is side-by-side
+       * only, so a total failure of all three feeds costs an evaluation report
+       * and no recommendation anywhere in the app.
+       */
+      try {
+        await new NflverseService(env.DB).refreshAll();
+      } catch (err) {
+        console.error('nflverse refresh failed', err);
       }
 
       /*
