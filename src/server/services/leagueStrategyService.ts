@@ -18,15 +18,10 @@
  */
 
 import { SleeperClient } from '../../core/sleeper/client.ts';
-import type { SleeperTransaction } from '../../core/sleeper/types.ts';
 import { buildBudgetState, type LeagueBudgetState } from '../../core/faab/budget.ts';
 import { collectBids, losingBidNote, summarisePrices, type BidHistory, type PriceSummary } from '../../core/faab/bids.ts';
 import { toSnapshot, velocity, trendingHeadline, type TrendingVelocity } from '../../core/market/trending.ts';
-import { buildTradeProfile, collectTrades, type TradeEvent } from '../../core/managers/tradeProfile.ts';
-import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../core/managers/draftProfile.ts';
-import { neutralTendencies, readManagerTendencies } from '../../core/managers/managerTendencies.ts';
 import { LeagueRepo } from '../repos/league.ts';
-import { PlayerRepo } from '../repos/players.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import { TrendingRepo } from '../repos/trending.ts';
 import { ManagerProfileRepo } from '../repos/managerProfiles.ts';
@@ -42,15 +37,16 @@ import type { Database } from '../db.ts';
  */
 export const MAX_WEEKS_PER_REFRESH = 4;
 
-/**
- * How far back the previous-league chain is followed.
- *
- * Three seasons is enough for a manager profile to mean something and short
- * enough that the person described is still recognisably the same manager. It
- * also bounds the request count: each season is one league lookup plus one
- * transaction fetch per week that had any.
+/*
+ * Manager history used to live here, in a `refreshProfiles` that walked the
+ * previous-league chain on every call. It is gone, and its absence is the
+ * point: the walk cost about sixty-six Sleeper requests against a free-plan
+ * ceiling of fifty, and it re-read three seasons of immutable history every
+ * time. `services/managerIntelService.ts` owns that work now — checkpointed,
+ * bounded to twenty-four requests a batch, and derived from stored rows rather
+ * than re-fetched. This file keeps what it was always good at: budget truth,
+ * bid prices and market attention for the season being played.
  */
-export const MAX_HISTORY_SEASONS = 3;
 
 /** The last week of the fantasy regular season, when the league does not say. */
 export const DEFAULT_FINAL_WEEK = 14;
@@ -77,7 +73,7 @@ export class LeagueStrategyService {
   private readonly leagues: LeagueRepo;
 
   constructor(
-    private readonly db: Database,
+    db: Database,
     private readonly deps: { sleeper?: SleeperClient } = {},
   ) {
     this.transactions = new TransactionRepo(db);
@@ -214,202 +210,6 @@ export class LeagueStrategyService {
     return v ? trendingHeadline(v, opts) : null;
   }
 
-  /**
-   * Rebuild every manager profile for a league from its history.
-   *
-   * Walks the previous-league chain, which is the only way Sleeper exposes
-   * earlier seasons. Each season contributes its trades and its completed
-   * draft; both are bounded by `MAX_HISTORY_SEASONS` and by the transaction cap
-   * per season, so a league with ten years of history costs the same as one
-   * with three.
-   */
-  async refreshProfiles(opts: {
-    leagueId: string;
-    sleeperLeagueId: string;
-    maxSeasons?: number;
-  }): Promise<{ seasons: string[]; trades: number; picks: number; rosters: number; tendencies: number }> {
-    const maxSeasons = opts.maxSeasons ?? MAX_HISTORY_SEASONS;
-    /*
-     * The whole dictionary, once. A trade profile has to look up the position
-     * of every player who has ever changed hands in this league across three
-     * seasons — hundreds of ids that no longer appear on any current roster —
-     * and one full read beats hundreds of `IN (?, ?)` batches.
-     */
-    const players = new Map((await new PlayerRepo(this.db).listAll()).map((p) => [p.id, p.position]));
-    const positionOf = (id: string) => players.get(id) ?? null;
-
-    const seasons: string[] = [];
-    const trades: TradeEvent[] = [];
-    const picks: HistoricalPick[] = [];
-
-    let sleeperLeagueId: string | null = opts.sleeperLeagueId;
-    for (let i = 0; i < maxSeasons && sleeperLeagueId; i++) {
-      const league = await this.sleeper.getLeague(sleeperLeagueId);
-      if (!league) break;
-      seasons.push(league.season);
-
-      /*
-       * Owner id to roster id, for that season's rosters specifically.
-       *
-       * Sleeper records a trade's creator as a *user* id, and a roster id is
-       * only meaningful within one league. Rebuilding the map per season is
-       * what keeps a manager who changed roster slots between seasons from
-       * having his old trades attributed to whoever holds that slot now.
-       */
-      const leagueRosters = await this.sleeper.getRosters(sleeperLeagueId);
-      const rosterByUser = new Map<string, number>();
-      for (const roster of leagueRosters) {
-        if (roster.owner_id) rosterByUser.set(roster.owner_id, roster.roster_id);
-      }
-
-      /*
-       * Trades cluster in the middle of a season and are rare at either end,
-       * but there is no endpoint that says which weeks had any — so every week
-       * of a *finished* season is read once and never again. The current season
-       * is handled by `syncTransactions`, which knows about settled weeks.
-       */
-      const seasonTransactions: SleeperTransaction[] = [];
-      for (let week = 1; week <= 18; week++) {
-        const rows = await this.sleeper.getTransactions(sleeperLeagueId, week);
-        if (rows.length > 0) seasonTransactions.push(...rows);
-      }
-      trades.push(...collectTrades(seasonTransactions, league.season, rosterByUser));
-
-      /*
-       * That season's roster id back to the user who held it, so a pick with no
-       * `picked_by` can still be identified. The direction matters: this is
-       * rebuilt per season precisely because a roster id means nothing across
-       * one — see the identity note below.
-       */
-      const userByRoster = new Map<number, string>();
-      for (const roster of leagueRosters) {
-        if (roster.owner_id) userByRoster.set(roster.roster_id, roster.owner_id);
-      }
-
-      for (const draft of await this.sleeper.getLeagueDrafts(sleeperLeagueId)) {
-        /*
-         * A draft that never finished describes nobody's habits.
-         *
-         * Sleeper reports `pre_draft` for a scheduled draft and `in_progress`
-         * for one under way; both carry picks arrays that are empty or partial,
-         * and a partial draft is worse than no draft here — it is every
-         * manager's *first* few picks with none of the rest, which reads as a
-         * whole room that only ever drafts running backs.
-         */
-        if (draft.status !== 'complete') continue;
-        const draftPicks = await this.sleeper.getDraftPicks(draft.draft_id);
-        for (const pick of draftPicks) {
-          const meta = pick.metadata ?? {};
-          const rosterId = typeof pick.roster_id === 'number' ? pick.roster_id : Number(pick.roster_id) || null;
-          picks.push({
-            season: league.season,
-            draftId: draft.draft_id,
-            pickNo: pick.pick_no,
-            round: pick.round,
-            /*
-             * Identity is the user, and only the user.
-             *
-             * `picked_by` is present on every historical pick this was verified
-             * against (320 of them, two completed drafts). `roster_id` is the
-             * fallback *within this season only*, resolved through that
-             * season's own roster table — never carried across one. Roster ids
-             * are reused between seasons: in this league roster 4 belonged to
-             * three different people in three years, so keying history on it
-             * would build a confident profile for a manager out of two
-             * strangers' picks.
-             */
-            userId: pick.picked_by ?? (rosterId != null ? (userByRoster.get(rosterId) ?? null) : null),
-            rosterId,
-            position: typeof meta['position'] === 'string' ? meta['position'] : (pick.player_id ? positionOf(pick.player_id) : null),
-            /*
-             * No historical market price exists, so none is invented.
-             *
-             * `GET /draft/<id>/picks` returns a player snapshot and no price of
-             * any kind — no ADP, no rank, no `search_rank`; confirmed against
-             * both completed drafts by `scripts/probe-sleeper-draft-history.mjs`.
-             * This previously read `meta['search_rank']`, which is absent and so
-             * always produced null in practice, but the line invited the one
-             * substitution that must never be made: today's ranking is not what
-             * the market thought in 2024, and measuring a two-year-old pick
-             * against it would report two seasons of player movement as a
-             * manager's habit. `reachAvailability` says `no-historical-market`
-             * and the reach metric stays unavailable until a contemporaneous
-             * snapshot exists to measure against.
-             */
-            marketRank: null,
-            yearsExp: numberOrNull(meta['years_exp']),
-          });
-        }
-      }
-
-      sleeperLeagueId = league.previous_league_id ?? null;
-    }
-
-    const latestSeason = seasons[0] ?? String(new Date().getUTCFullYear());
-    const rosters = await this.leagues.listRosters(opts.leagueId);
-
-    /*
-     * Tendencies are read once, over every manager at once.
-     *
-     * Per-manager rather than per-roster because the room baseline each manager
-     * is measured against has to be the same one for all of them — computing it
-     * inside a per-roster loop would measure each manager against a room that
-     * included himself to a different degree.
-     */
-    const tendencies = readManagerTendencies({
-      picks,
-      positions: [...new Set(picks.map((p) => p.position).filter((p): p is string => !!p))].sort(),
-      latestSeason,
-      displayNames: new Map(rosters.map((r) => [r.ownerId ?? '', r.ownerName])),
-    });
-
-    for (const roster of rosters) {
-      /*
-       * A roster with no matched owner, or an owner with no history, is stored
-       * as explicitly neutral rather than left absent — so "we looked and there
-       * is nothing" and "we never looked" stay distinguishable at read time.
-       */
-      await this.profiles.saveTendencies(
-        opts.leagueId,
-        roster.rosterId,
-        (roster.ownerId ? tendencies.get(roster.ownerId) : undefined) ??
-          neutralTendencies(roster.ownerId ?? '', roster.ownerName),
-      );
-      await this.profiles.saveTradeProfile(
-        opts.leagueId,
-        buildTradeProfile({
-          rosterId: roster.rosterId,
-          ownerName: roster.ownerName,
-          trades,
-          positionOf,
-          latestSeason,
-        }),
-      );
-      await this.profiles.saveDraftProfile(
-        opts.leagueId,
-        buildManagerDraftProfile({
-          rosterId: roster.rosterId,
-          // The current league's owner, matched against `picked_by` in every
-          // prior season. A roster whose owner is unknown gets no history
-          // rather than the history of whoever last held the slot.
-          userId: roster.ownerId,
-          ownerName: roster.ownerName,
-          picks,
-        }),
-      );
-    }
-    await this.profiles.saveRoomProfile(opts.leagueId, buildRoomProfile(picks));
-
-    return {
-      seasons,
-      trades: trades.length,
-      picks: picks.length,
-      rosters: rosters.length,
-      /** Managers with enough history for the Next% adjustment to read. */
-      tendencies: [...tendencies.values()].filter((t) => t.usable).length,
-    };
-  }
-
   async managerProfiles(leagueId: string) {
     const [trade, draft, room] = await Promise.all([
       this.profiles.tradeProfiles(leagueId),
@@ -434,9 +234,4 @@ export function readFinalWeek(settings: Record<string, unknown> | null | undefin
   const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
   if (Number.isFinite(value) && value > 1 && value <= 19) return Math.round(value) - 1;
   return DEFAULT_FINAL_WEEK;
-}
-
-function numberOrNull(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(n) ? n : null;
 }

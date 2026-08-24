@@ -26,7 +26,14 @@ import {
 } from '../league/competition.ts';
 import type { LeagueBudgetState, RosterBudget } from '../faab/budget.ts';
 import type { BidObservation, PriceSummary } from '../faab/bids.ts';
-import { namedBidders, type BidderIntel } from '../league/bidders.ts';
+import { namedBidders, type BidderIntel, type BidderTendency } from '../league/bidders.ts';
+import {
+  NEUTRAL_PRESSURE,
+  bidderTendencyFrom,
+  waiverManagerPressure,
+  type WaiverManagerPressure,
+} from './managerPressure.ts';
+import type { LeagueTransactionBaseline, ManagerTransactionProfile } from '../managers/transactionProfile.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { WaiverAdvice } from '../startsit/waivers.ts';
@@ -59,9 +66,44 @@ export function waiverLeagueIntel(opts: {
    * simply withheld, which is the same degradation as a league with no history.
    */
   observations?: BidObservation[];
-}): { competition: Map<string, CompetitionAssessment>; bidders: Map<string, BidderIntel> } {
+  /**
+   * What the manager-history ledger knows about each rival, by roster id.
+   *
+   * Optional in every sense: absent, the competition count and the named
+   * bidders are exactly what they were before this existed, and the pressure
+   * column reports "not known". Present, it adds the one thing rosters and
+   * wallets cannot show — whether the people with a hole at this position are
+   * the sort who actually claim, and what they usually pay.
+   *
+   * Keyed by *current* roster id, resolved by the caller from Sleeper user id
+   * against the current roster table. That direction matters: a profile keyed
+   * the other way would follow a roster slot to its next occupant.
+   */
+  history?: {
+    profiles: ReadonlyMap<number, ManagerTransactionProfile>;
+    baseline: LeagueTransactionBaseline | null;
+    week: number;
+    finalWeek: number;
+  };
+}): {
+  competition: Map<string, CompetitionAssessment>;
+  bidders: Map<string, BidderIntel>;
+  pressure: Map<string, WaiverManagerPressure>;
+} {
   const competition = new Map<string, CompetitionAssessment>();
   const bidders = new Map<string, BidderIntel>();
+  const pressure = new Map<string, WaiverManagerPressure>();
+
+  /*
+   * The ledger's spending reading, translated once for the whole board rather
+   * than per candidate. Same managers, same numbers, whatever position is being
+   * priced — so computing it inside the loop would be the same arithmetic
+   * repeated forty times.
+   */
+  const tendencies = new Map<number, BidderTendency>();
+  for (const [rosterId, profile] of opts.history?.profiles ?? []) {
+    tendencies.set(rosterId, bidderTendencyFrom(rosterId, profile));
+  }
 
   const teams = opts.rosters.map((r) => ({
     rosterId: r.rosterId,
@@ -134,13 +176,37 @@ export function waiverLeagueIntel(opts: {
             prices: opts.prices,
             rule: opts.budgets?.rule ?? { total: null, usesFaab: bidding, provenance: 'not read' },
             position: candidate.position,
+            tendencies,
           }),
         );
       }
+
+      /*
+       * And what the years say about the people who need him.
+       *
+       * Built from the same `assessed` the label was built from, so the count
+       * of rivals in the pressure reading can never disagree with the count on
+       * the pill beside it. Neutral without a backfilled history, which is the
+       * correct answer for a first-season league and for one mid-backfill.
+       */
+      pressure.set(
+        candidate.playerId,
+        opts.history
+          ? waiverManagerPressure({
+              competition: assessed,
+              profilesByRoster: opts.history.profiles,
+              baseline: opts.history.baseline,
+              prices: opts.prices,
+              position: candidate.position,
+              week: opts.history.week,
+              finalWeek: opts.history.finalWeek,
+            })
+          : NEUTRAL_PRESSURE,
+      );
     }
   }
 
-  return { competition, bidders };
+  return { competition, bidders, pressure };
 }
 
 /**
@@ -155,12 +221,14 @@ export function withCompetition<T extends { candidates: { playerId: string }[] }
   upgrades: T[],
   competition: Map<string, CompetitionAssessment>,
   bidders?: Map<string, BidderIntel>,
+  pressure?: Map<string, WaiverManagerPressure>,
 ): T[] {
   return upgrades.map((upgrade) => ({
     ...upgrade,
     candidates: upgrade.candidates.map((candidate) => {
       const assessed = competition.get(candidate.playerId);
       const named = bidders?.get(candidate.playerId) ?? null;
+      const history = pressure?.get(candidate.playerId) ?? null;
       return {
         ...candidate,
         competition: assessed
@@ -180,6 +248,27 @@ export function withCompetition<T extends { candidates: { playerId: string }[] }
         /** The expanded view. Null when the evidence does not support naming anybody. */
         bidders: named?.namesShown ? named.named : null,
         biddersWithheld: named && !named.namesShown ? named.notes : null,
+        /**
+         * What the rivals' own history says, as its own field.
+         *
+         * Deliberately beside the price rather than inside it. `competition`
+         * and the bid recommendation are answers about this player and this
+         * roster; this is an answer about the people in the room, it can
+         * honestly differ from them, and folding it in would let a busy league
+         * quietly inflate every number this app suggests. Null when no history
+         * has been backfilled, which reads as "not known" and never as "quiet".
+         */
+        managerPressure:
+          history && history.contested !== 'unknown'
+            ? {
+                level: history.contested,
+                label: history.label,
+                detail: history.detail,
+                costContext: history.costContext,
+                confidence: history.confidence,
+                rivalsWithHistory: history.rivalsWithHistory,
+              }
+            : null,
       };
     }),
   }));

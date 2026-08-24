@@ -133,8 +133,24 @@ export interface ManagerTransactionProfile {
   /** Share of his transactions in each window. Empty when timestamps are absent. */
   timing: { window: TransactionWindow; share: number }[];
 
-  /** In [0,1]. How much of this profile is his own rather than the room's. */
+  /**
+   * In [0,1]. How much of the *rate* readings are his own rather than the room's.
+   *
+   * Driven by active weeks, because that is a rate's denominator: a manager
+   * observed across fourteen weeks has a well-measured claims-per-week whether
+   * the answer is four or zero.
+   */
   confidence: number;
+  /**
+   * The same thing for the *spending* readings, and a separate number on purpose.
+   *
+   * Its denominator is bids, not weeks, and the two come apart constantly — a
+   * manager can be observed for a whole season and place two claims. Weighting
+   * `spendRelative` by {@link ManagerTransactionProfile.confidence} would give
+   * his two bids the same say as another manager's forty, which is exactly the
+   * mistake the shrinkage exists to prevent.
+   */
+  spendConfidence: number;
   /** Developer-facing sentences. Never user copy. */
   notes: string[];
 }
@@ -282,6 +298,7 @@ export function neutralTransactionProfile(
     byPosition: [],
     timing: [],
     confidence: 0,
+    spendConfidence: 0,
     notes: ['no transaction history on record'],
   };
 }
@@ -458,6 +475,7 @@ function profileFor(args: {
     byPosition,
     timing,
     confidence,
+    spendConfidence: round3(bidWeight),
     notes: notesFor({ sample, activeWeeks, usable, activityRelative, spendRelative, bigBidRate, byPosition }),
   };
 }

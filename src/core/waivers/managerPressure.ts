@@ -41,6 +41,7 @@
  */
 
 import type { CompetitionAssessment } from '../league/competition.ts';
+import { MIN_BIDS_FOR_TENDENCY, type BidderTendency } from '../league/bidders.ts';
 import type { PriceSummary } from '../faab/bids.ts';
 import type {
   LeagueTransactionBaseline,
@@ -210,7 +211,15 @@ export function waiverManagerPressure(input: WaiverPressureInput): WaiverManager
   for (const { profile } of rivals) {
     const relative = profile.spendRelative;
     if (relative == null) continue;
-    const weight = Math.max(0.1, profile.confidence);
+    /*
+     * Weighted by his *bid* sample, not by his weeks.
+     *
+     * The two come apart constantly — a manager can be watched all season and
+     * place two claims — and this is a spending reading, so bids are its
+     * denominator. Weighting by the rate confidence gave two bids the same say
+     * as forty, which is the shrinkage undone at the last step.
+     */
+    const weight = Math.max(0.1, profile.spendConfidence);
     weighted += relative * weight;
     weightSum += weight;
   }
@@ -310,6 +319,39 @@ export function waiverManagerPressure(input: WaiverPressureInput): WaiverManager
     }),
     notes,
   };
+}
+
+/**
+ * The ledger's spending reading, in the shape `core/league/bidders.ts` speaks.
+ *
+ * A translation and not a second model: both are "his median bid as a share of
+ * the budget, divided by the room's, bounded". The difference is the sample —
+ * this one spans every backfilled season and is keyed by Sleeper user id, where
+ * the in-module version can only see the bids it was handed. A manager with
+ * three claims this season and thirty across four years is the case that makes
+ * the difference, and he is the common case.
+ *
+ * Falls back to an unconfident tendency — `relative` null — whenever the bid
+ * sample is thin, which `bidders.ts` already handles by widening the league's
+ * range rather than shifting it.
+ */
+export function bidderTendencyFrom(rosterId: number, profile: ManagerTransactionProfile): BidderTendency {
+  const confident = profile.usable && profile.bidSample >= MIN_BIDS_FOR_TENDENCY && profile.spendRelative != null;
+  return {
+    rosterId,
+    sample: profile.bidSample,
+    medianShare: confident ? profile.medianBidShare : null,
+    relative: confident ? profile.spendRelative : null,
+    confident,
+    note: confident ? spendNote(profile) : profile.bidSample > 0 ? `${profile.bidSample} bids on record` : null,
+  };
+}
+
+function spendNote(profile: ManagerTransactionProfile): string {
+  const relative = profile.spendRelative ?? 1;
+  if (relative >= 1.2) return 'bids above the room';
+  if (relative <= 0.85) return 'bids below the room';
+  return 'bids around the room';
 }
 
 function contestLevel(counts: {

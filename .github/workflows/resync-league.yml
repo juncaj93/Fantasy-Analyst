@@ -18,14 +18,17 @@ name: Re-read the selected league from Sleeper
 # today.
 #
 # One of them is not a call the app makes, and it is here deliberately.
-# `/api/leagues/:id/managers/refresh` walks the previous-league chain to rebuild
-# what is known about the people in the league, and it is too expensive to put on
-# a page load — dozens of Sleeper requests to produce a handful of facts that
-# change about once a season. So nothing called it at all, which meant the
-# historical-manager signal in `Next%` could sit switched off indefinitely
-# without anything looking wrong. An intentional resync is exactly the right
-# moment to pay that cost: somebody has already decided the app should catch up
-# with Sleeper, and this is part of catching up.
+# `/api/leagues/:id/managers/refresh` advances the manager-history backfill by
+# one bounded batch — at most twenty-four Sleeper requests, checkpointed, with
+# the rest left for the daily cron. It used to walk the whole previous-league
+# chain in one go, which cost about sixty-six requests against a free-plan
+# ceiling of fifty and therefore failed.
+#
+# The daily cron advances the same backfill on its own, so this is no longer the
+# only thing that keeps the signal alive. It is here because an intentional
+# resync is the right moment to hurry it along: somebody has already decided the
+# app should catch up with Sleeper, and a few batches in a row fill a new
+# league's ledger in minutes rather than days.
 #
 # It prints what the roster looked like before and after, which is the only
 # reason to run it rather than simply waiting.
@@ -130,12 +133,12 @@ jobs:
             for (const s of r.sources ?? []) console.log('   ', s.source + ':', s.outcome, '—', s.detail);
           "
 
-      - name: Rebuild what is known about the managers, from the league's own history
+      - name: Advance what is known about the managers, from the league's own history
         env:
           LEAGUE: ${{ steps.ids.outputs.league }}
         run: |
           set -uo pipefail
-          echo "=== POST /api/leagues/\$LEAGUE/managers/refresh — the previous-league chain ==="
+          echo "=== POST /api/leagues/\$LEAGUE/managers/refresh — one bounded backfill batch ==="
 
           # The session cookie from the step above: files under /tmp outlive a
           # step, the same way `before.json` reaches the comparison at the end.
@@ -175,15 +178,38 @@ jobs:
           node -e "
             const r = JSON.parse(require('fs').readFileSync('/tmp/managers.json','utf8'));
             if (r.error) { console.log('::error::' + r.error); process.exit(1); }
-            console.log('  seasons walked:', (r.seasons||[]).join(' <- ') || '(none)');
-            console.log('  historical picks:', r.picks, '| trades:', r.trades, '| rosters filed against:', r.rosters);
-            console.log('  managers with usable draft history:', r.tendencies);
-            if (!r.picks) {
+            const b = r.backfill || {};
+            console.log('  seasons discovered:', (r.seasons||[]).join(' <- ') || '(none)');
+            console.log('  this batch:', b.unitsCompleted, 'unit(s) for', b.requestsUsed, 'of', b.requestBudget, 'requests');
+            for (const step of (b.steps||[]).slice(0, 12)) console.log('   ', step);
+            console.log('  ledger: picks', r.picks, '| transactions', r.transactions, '| trades', r.trades);
+            console.log('  profiles: draft', r.tendencies, '| trade', r.tradeProfiles, '| transaction', r.transactionProfiles);
+            console.log('  outstanding units:', b.outstanding, '| history complete:', b.complete);
+            for (const e of (r.errors||[])) console.log('::warning::backfill unit failed — ' + e);
+            if (b.outstanding > 0) {
+              console.log('  history is still filling; run this again or wait for the daily cron to advance it');
+            }
+            if (!r.picks && b.complete) {
               console.log('::warning::no completed historical draft was found, so Next% will read no manager history — correct for a league in its first season, and worth a look otherwise');
-            } else if (!r.tendencies) {
+            } else if (r.picks && !r.tendencies) {
               console.log('::warning::history was found but no manager cleared the sample minimum, so Next% will read none of it');
             }
           "
+
+          # A backfill is meant to take several batches, so one call is not
+          # expected to finish it. Run a few more while the session is still
+          # unlocked -- each is bounded the same way, and a new league's whole
+          # ledger lands in a couple of minutes instead of a couple of days.
+          for i in 1 2 3 4 5; do
+            sleep 2
+            curl -s -o /tmp/managers.json -w '' -X POST "$URL/api/leagues/$LEAGUE/managers/refresh" -b /tmp/c.txt || true
+            node -e "
+              let r; try { r = JSON.parse(require('fs').readFileSync('/tmp/managers.json','utf8')); } catch { process.exit(0); }
+              if (r.error) { console.log('  batch refused:', r.error); process.exit(0); }
+              const b = r.backfill || {};
+              console.log('  +batch:', b.unitsCompleted, 'unit(s),', b.requestsUsed, 'request(s), outstanding', b.outstanding);
+            " || true
+          done
 
       - name: What the Team screen says now
         run: |

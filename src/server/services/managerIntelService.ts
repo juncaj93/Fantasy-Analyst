@@ -53,6 +53,7 @@ import {
   buildLeagueTransactionBaseline,
   buildTransactionProfiles,
   TRANSACTION_PROFILE_VERSION,
+  type LeagueTransactionBaseline,
   type ManagerTransactionProfile,
 } from '../../core/managers/transactionProfile.ts';
 import {
@@ -875,6 +876,70 @@ export class ManagerIntelService {
     }
 
     await this.profiles.saveRoomProfile(args.leagueId, buildRoomProfile(args.historical));
+  }
+
+  /**
+   * What the waiver board needs from the ledger, resolved to current rosters.
+   *
+   * A read of two tables and nothing else. The mapping direction is the point:
+   * profiles are stored against a Sleeper user id, and they are looked up
+   * *from* the current roster table — so a roster slot that changed hands finds
+   * its new occupant's profile or none at all, and never the previous
+   * occupant's.
+   *
+   * Returns undefined when nothing has been derived yet, which the waiver
+   * intel reads as "no history" rather than as an error. That is the correct
+   * state for a league in its first season and for one whose backfill is still
+   * running.
+   */
+  async waiverHistory(opts: {
+    leagueId: string;
+    rosters: readonly { rosterId: number; ownerId: string | null }[];
+    week: number;
+    finalWeek: number;
+  }): Promise<
+    | {
+        profiles: Map<number, ManagerTransactionProfile>;
+        baseline: LeagueTransactionBaseline | null;
+        week: number;
+        finalWeek: number;
+      }
+    | undefined
+  > {
+    const stored = await this.ledger.profiles<ManagerTransactionProfile>(opts.leagueId, 'transaction');
+    if (stored.size === 0) return undefined;
+
+    const profiles = new Map<number, ManagerTransactionProfile>();
+    for (const roster of opts.rosters) {
+      if (!roster.ownerId) continue;
+      const entry = stored.get(roster.ownerId);
+      if (entry) profiles.set(roster.rosterId, entry.profile);
+    }
+    if (profiles.size === 0) return undefined;
+
+    const baseline = await this.ledger.baseline<LeagueTransactionBaseline>(opts.leagueId, 'transaction');
+    return { profiles, baseline: baseline?.value ?? null, week: opts.week, finalWeek: opts.finalWeek };
+  }
+
+  /**
+   * Trade-partner context for the managers who hold the players on a board.
+   *
+   * The Smart Trades half of the same read, and bounded the same way: what
+   * comes back is a label, a shape, a sentence and a tiebreak weight — never a
+   * probability, and never anything that could rescue a poor bilateral fit. See
+   * `core/managers/tradeTendencies.ts` for why that list is exhaustive.
+   */
+  async tradePartners(opts: {
+    leagueId: string;
+    rosters: readonly { rosterId: number; ownerId: string | null }[];
+  }): Promise<Map<string, ManagerTradeTendencies>> {
+    const stored = await this.ledger.profiles<ManagerTradeTendencies>(opts.leagueId, 'trade');
+    const out = new Map<string, ManagerTradeTendencies>();
+    for (const roster of opts.rosters) {
+      const entry = roster.ownerId ? stored.get(roster.ownerId) : undefined;
+      if (entry && roster.ownerId) out.set(roster.ownerId, entry.profile);
+    }
+    return out;
   }
 
   // ----------------------------------------------------------- diagnostics --

@@ -125,6 +125,22 @@ export interface BidderIntelInput {
   prices: PriceSummary | null;
   rule: LeagueBudgetRule;
   position: string;
+  /**
+   * Pre-computed tendencies from the manager-history ledger, by roster id.
+   *
+   * Optional, and strictly better evidence when present: {@link tendencyFor}
+   * can only see the bids the caller handed it, which in practice is the
+   * current season's stored weeks — three or four claims for a typical manager,
+   * which is exactly the sample that is too small to say anything. The ledger's
+   * version of the same reading spans every season that has been backfilled and
+   * is keyed by Sleeper user id, so it survives a manager changing roster slots.
+   *
+   * It is the same *quantity* either way — a median bid as a share of budget,
+   * bounded to ±{@link MAX_TENDENCY_EFFECT} of the room — so nothing downstream
+   * changes shape, and the double-counting rule in this file's header holds
+   * unaltered: a tendency still multiplies only its own manager's estimate.
+   */
+  tendencies?: ReadonlyMap<number, BidderTendency>;
 }
 
 /**
@@ -212,7 +228,17 @@ export function namedBidders(input: BidderIntelInput): BidderIntel {
   const named = input.competition.bidders
     .map((bidder) => toNamed(bidder, {
       need: needByRoster.get(bidder.rosterId) ?? null,
-      tendency: tendencyFor(bidder.rosterId, input.observations, budgetTotal, leagueMedianShare),
+      /*
+       * The ledger's reading when there is one, this season's otherwise.
+       *
+       * Not a blend. Two estimates of the same thing averaged together is a
+       * third number that neither sample supports, and the ledger's already
+       * *contains* this season — the current week's transactions are written to
+       * the same store the backfill fills.
+       */
+      tendency:
+        input.tendencies?.get(bidder.rosterId) ??
+        tendencyFor(bidder.rosterId, input.observations, budgetTotal, leagueMedianShare),
       prices: input.prices,
       budgetTotal,
       bidding,
