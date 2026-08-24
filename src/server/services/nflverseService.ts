@@ -17,7 +17,7 @@
  * `pfr_player_id → gsis_id` is a roster lookup — and because a roster refreshed
  * after the snaps would leave a week of snaps unmatched for a day.
  *
- * **The depth chart is read by range.** The file is 44MiB and is written
+ * **The depth chart is read by range.** The file is 42MiB and is written
  * newest-first, so the current chart is its first few hundred kilobytes. See
  * `core/nflverse/depthChart.ts` for the measurements and for the completeness
  * guard that stops a truncated read being stored as a chart with players

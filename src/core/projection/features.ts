@@ -20,10 +20,10 @@
  *
  * The fifth — **scoring opportunity**: red-zone and goal-line targets and
  * carries — is **not built, and cannot be on this data path**. Those splits
- * exist only in nflfastR play-by-play, whose 2025 season file is **98MiB**
+ * exist only in nflfastR play-by-play, whose 2025 season file is **93MiB**
  * (measured, `Content-Length: 97,951,481`). A Workers invocation gets 10ms of
  * CPU; the 8.3MiB weekly-stats file costs 4ms to read one week out of, and the
- * play-by-play file is twelve times that before a single play is parsed. There
+ * play-by-play file is eleven times that before a single play is parsed. There
  * is no ranged read that helps, because red-zone usage is a season-long
  * aggregate rather than a block at one end of the file. `core/xfp/model.ts`
  * already states this limitation in the app's own voice — "no red-zone or

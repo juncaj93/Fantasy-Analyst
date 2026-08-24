@@ -30,10 +30,10 @@ confidence, in the reasons — and none of them is in the mean.
 | Source | Status | What it gives | Cost per check |
 |---|---|---|---|
 | Weekly player stats | already live (unchanged) | targets, carries, receptions, target share, air-yard share, yards, TDs | conditional GET, one week parsed |
-| **Seasonal rosters** | **new** | `gsis_id` ↔ `sleeper_id` ↔ `pfr_id` ↔ `espn_id` | conditional GET, 926KiB |
-| **Timestamped depth charts** | **new** | `pos_grp` / `pos_slot` / `pos_rank`, captured to the second | ranged GET of the first 768KiB of a 44MiB file |
-| **PFR snap counts** | **new** | offensive snaps and snap share per player-game | conditional GET, 2.4MiB |
-| nflfastR play-by-play | **not implemented** | red-zone and goal-line usage, QB scramble split | 98MiB — see §7 |
+| **Seasonal rosters** | **new** | `gsis_id` ↔ `sleeper_id` ↔ `pfr_id` ↔ `espn_id` | conditional GET, 905KiB |
+| **Timestamped depth charts** | **new** | `pos_grp` / `pos_slot` / `pos_rank`, captured to the second | ranged GET of the first 768KiB of a 42MiB file |
+| **PFR snap counts** | **new** | offensive snaps and snap share per player-game | conditional GET, 2.3MiB |
+| nflfastR play-by-play | **not implemented** | red-zone and goal-line usage, QB scramble split | 93MiB — see §7 |
 | ffverse crosswalk | not needed separately | the roster file *is* the deterministic crosswalk | — |
 | nflverse current injuries | deliberately excluded | — | the existing injury pipeline is unchanged |
 | NGS, participation/routes, FTN, PFR advanced | out of scope for v1 | — | — |
@@ -57,13 +57,13 @@ things that had been open:
 
 ### Depth charts are read by range
 
-The 2026 file is 44MiB, which no Workers invocation can download. It is written
+The 2026 file is 42MiB, which no Workers invocation can download. It is written
 **newest-first** (verified by probing the head, the midpoint and the 90% mark of
-the live file) and one capture is ~3,300 rows and ~310KiB. The release asset
+the live file) and one capture is ~3,300 rows and ~303KiB. The release asset
 answers an explicit `bytes=0-N` range with `206`, returns byte-for-byte the same
 `ETag` a `HEAD` does, and still answers `304` when `If-None-Match` is sent *with*
 the range. So the ordinary tick costs a round trip and no bytes, and the tick
-that isn't costs 768KiB instead of 44MiB.
+that isn't costs 768KiB instead of 42MiB.
 
 Suffix ranges (`bytes=-N`) are answered `501 Unsupported client range`, which is
 why nothing asks for the end of a file and why the newest-first ordering is what
@@ -184,7 +184,7 @@ him no longer being active on the roster.
 ## 7. What is not built, and why
 
 **Red-zone and goal-line usage.** Those splits exist only in nflfastR
-play-by-play, whose 2025 season file is **98MiB** (`Content-Length:
+play-by-play, whose 2025 season file is **93MiB** (`Content-Length:
 97,951,481`). A Workers invocation gets 10ms of CPU; the 8.3MiB weekly-stats
 file costs 4ms to read one week out of. No ranged read helps, because red-zone
 usage is a season-long aggregate rather than a block at one end of the file.

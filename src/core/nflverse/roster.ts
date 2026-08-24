@@ -6,7 +6,7 @@
  *
  * A public GitHub release asset like the injury report and the weekly stats: no
  * key, no account, no quota. Measured against the live 2026 file on 2026-08-23 —
- * 926KiB, 2,929 data rows, 36 columns, 915 of them at the four positions this
+ * 905KiB, 2,929 data rows, 36 columns, 915 of them at the four positions this
  * app carries.
  *
  * ## Why this file first, ahead of anything it can say about football
@@ -26,7 +26,8 @@
  *     matcher for a second id space is what every brief here has ruled out.
  *     That objection was correct and it is now spent — this file maps
  *     `pfr_id → gsis_id` deterministically for 2,196 players, which joins
- *     **99.7%** of the 2025 season's 7,318 skill-position snap rows. Offensive
+ *     **99.7%** of the 2025 season's 7,318 snap rows at the carried positions
+ *     (QB, RB, WR, TE and the fullbacks that sit with them), all game types. Offensive
  *     snap share is the best single role signal in the free data, and it is
  *     reachable now without one fuzzy match.
  *

@@ -34,11 +34,11 @@
  *
  * ## Why it is read from the front of the file
  *
- * The live 2026 file is **44MiB** and the 2025 one is 53MiB, which no Workers
+ * The live 2026 file is **42MiB** and the 2025 one is 50MiB, which no Workers
  * invocation can download, let alone parse. It is written **newest first** —
  * strictly descending by `dt`, verified by probing the head, the midpoint and
  * the 90% mark of the live file — and one capture is about 3,300 rows and
- * 310KiB. So the newest chart is the first 310KiB of a 44MiB file, and a ranged
+ * 303KiB. So the newest chart is the first 303KiB of a 42MiB file, and a ranged
  * `GET` for the first few hundred kilobytes is the whole ingest.
  *
  * The release asset answers explicit `bytes=0-N` ranges with `206 Partial
@@ -65,7 +65,7 @@ export function depthChartUrl(season: string): string {
 /**
  * How many bytes of the file to ask for.
  *
- * One live capture measured 310KiB across 3,281 rows. 768KiB is a little over
+ * One live capture measured 303KiB across 3,281 rows. 768KiB is a little over
  * two of them, which is what {@link parseDepthChart} needs to *prove* the first
  * one is complete — it must see the second block start — with room for a club
  * expanding its chart. Larger costs bandwidth on every check for no more
@@ -178,18 +178,22 @@ function parseTimestamped(
   let rowsRead = 0;
   const entries: DepthEntry[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
+  /*
+   * The final line of a ranged read is very likely cut mid-field, so it is
+   * never parsed. A half-written `pos_rank` would read as a plausible number
+   * and put somebody at the wrong depth.
+   *
+   * Dropping it unconditionally costs nothing, and the reason is worth stating:
+   * a snapshot is only *usable* once the loop below has seen the next, older
+   * timestamp begin, which means the newest block ended strictly before the end
+   * of the read. So a discarded last line can never have belonged to the block
+   * that gets returned.
+   */
+  const lastLine = lines.length - 1;
+
+  for (let i = 1; i < lastLine; i++) {
     const line = lines[i]!;
     if (line.length === 0) continue;
-    /*
-     * The last line of a ranged read is very likely cut mid-field. It is
-     * dropped rather than parsed: a half-written `pos_rank` would parse to a
-     * plausible number and put somebody at the wrong depth.
-     */
-    if (i === lines.length - 1 && !line.endsWith('\r') && lines.length > 2) {
-      const stamp = text(extractFields(line, [dtColumn])[0]);
-      if (stamp == null || stamp !== capturedAt) break;
-    }
     rowsRead++;
 
     const stamp = text(extractFields(line, [dtColumn])[0]);

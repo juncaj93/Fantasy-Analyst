@@ -78,8 +78,8 @@ export async function conditionalGet(
      * Ask for only the first N bytes, as `Range: bytes=0-(N-1)`.
      *
      * For the one source that is too large to download whole. The depth-chart
-     * file is 44MiB and is written newest-first, so the current chart is its
-     * first ~310KiB; see `core/nflverse/depthChart.ts`. Measured against the
+     * file is 42MiB and is written newest-first, so the current chart is its
+     * first ~303KiB; see `core/nflverse/depthChart.ts`. Measured against the
      * live asset, all three properties this needs hold: an explicit `bytes=0-N`
      * range is answered `206` with a `Content-Range`, the `ETag` is byte-for-
      * byte the same one a `HEAD` returns, and `If-None-Match` sent *with* the

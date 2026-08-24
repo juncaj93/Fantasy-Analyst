@@ -17,8 +17,9 @@
  * publishes `pfr_id` and `gsis_id` on the same row, so the join is
  * `pfr_player_id → gsis_id → canonical player`: two identifier hops and no
  * name anywhere. Measured against the full 2025 season — 7,318 snap rows at the
- * four positions this app carries — the roster crosswalk resolves **7,293 of
- * them, 99.7%**, with seven players unmatched in total. That is better than the
+ * carried positions, all game types — the roster crosswalk resolves **7,293 of
+ * them, 99.7%**, with seven players unmatched in total; over the regular season
+ * alone it is 6,955 of 6,981, 99.6%. That is better than the
  * injury feed's 98.9% on a path with no fuzzy step in it at all.
  *
  * ## Why the signal is worth the join
@@ -37,7 +38,7 @@
  *
  * ## Cost
  *
- * 2.4MiB, 26,612 rows for a full 2025 season, ordered **oldest first** — weeks
+ * 2.3MiB, 26,612 rows for a full 2025 season, ordered **oldest first** — weeks
  * verified monotonically non-decreasing across every row — so the newest week is
  * at the end and is found by walking backwards, exactly as the weekly-stats
  * parser does. A regular-season week is about 1,410 rows of which 363 are at a
@@ -119,9 +120,9 @@ const EMPTY: ParsedSnaps = { rows: [], season: '', latestWeek: 0, week: 0, rowsI
  * By default the latest week in the file, found by walking backwards from the
  * end. Passing `week` asks for an older one, which is what a backfill or a
  * backtest needs; that path walks the file once rather than binary-searching,
- * because this file is a twentieth the size of the weekly-stats one and the
+ * because this file is under a third the size of the weekly-stats one and the
  * seek machinery there exists to dodge a 25ms scan that simply does not arise
- * at 2.4MiB.
+ * at 2.3MiB.
  */
 export function parseSnapCounts(
   text_: string,
@@ -191,13 +192,14 @@ export function parseSnapCounts(
     for (let i = last; i >= 1; i--) if (!scan(i)) break;
     rows.reverse();
   } else {
-    let seen = false;
+    /*
+     * Forwards until the block ends. `scan` returns false only for a row of a
+     * different week, so the walk stops at the first of those *after* it has
+     * seen at least one row of the week it wants — the block is contiguous, and
+     * stopping before entering it would return nothing.
+     */
     for (let i = 1; i <= last; i++) {
-      const before = rowsInWeek;
-      const inBlock = scan(i);
-      if (inBlock && rowsInWeek > before) seen = true;
-      // The block is contiguous, so the first row after it ends the walk.
-      else if (seen && !inBlock) break;
+      if (!scan(i) && rowsInWeek > 0) break;
     }
   }
 

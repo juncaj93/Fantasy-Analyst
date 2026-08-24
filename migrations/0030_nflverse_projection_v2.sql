@@ -108,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_player_snap_weeks_season_week
 -- ---------------------------------------------------------- depth charts ---
 -- The current chart and the one before it. Two, and no more.
 --
--- The published file is 44MiB and holds every daily capture of a whole season --
+-- The published file is 42MiB and holds every daily capture of a whole season --
 -- 554,216 rows for 2025. Storing that would be the giant warehouse the handoff
 -- rules out in section 12, and it would buy nothing: change detection compares
 -- now against the last capture, and a chart from October is not evidence about

@@ -254,7 +254,7 @@ export default {
        * the role trend a Team card is showing.
        *
        * Costs three conditional GETs on an ordinary day, two of which 304. The
-       * depth chart is a ranged read of the first 768KiB of a 44MiB file rather
+       * depth chart is a ranged read of the first 768KiB of a 42MiB file rather
        * than the file; see `core/nflverse/depthChart.ts`.
        *
        * Separately caught, and this one matters more than most: **nothing on a
