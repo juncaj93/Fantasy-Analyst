@@ -196,6 +196,44 @@ describe('ingesting the three feeds', () => {
     expect(stored.get('sleeper-2')![0]!.pfrId).toBe('BridBa00');
   });
 
+  it('will not write a snap row for a player the dictionary has never heard of', async () => {
+    /*
+     * nflverse carries plenty of players Sleeper's dictionary does not —
+     * practice-squad bodies, players who retired before this app existed. The
+     * crosswalk gives every one of them a `sleeper_id`, and trusting that
+     * without a lookup would store usage against an id no `players` row has:
+     * unreadable forever, counted as written, and invisible in `unmatched`. A
+     * pipeline that reports success for rows nobody can read is precisely what
+     * the match counts exist to catch.
+     */
+    const db = await createTestDb();
+    // Only the first player is in the dictionary. The second is in the roster
+    // file and the snap file and nowhere else.
+    await new PlayerRepo(db).upsertMany([
+      player({
+        id: 'sleeper-1',
+        fullName: 'Direct Receiver',
+        position: 'WR',
+        team: 'ARI',
+        externalIds: { gsis: '00-0000001' },
+      }),
+    ]);
+    const service = new NflverseService(db, {
+      fetch: fakeFetch({ 'roster_': ROSTER, snap_counts_: SNAPS }),
+      log: () => {},
+    });
+    await service.refreshRoster(SEASON);
+    const run = await service.refreshSnapCounts(SEASON);
+
+    expect(run.outcome).toBe('ok');
+    expect(run.rowsWritten).toBe(1);
+    // The bridged player and the wholly unknown one, both counted rather than
+    // written.
+    expect(run.unmatched).toBe(2);
+    const stored = await new SnapCountRepo(db).weeksFor(['sleeper-1', 'sleeper-2'], SEASON);
+    expect(stored.has('sleeper-2')).toBe(false);
+  });
+
   it('cannot join the snaps at all without the roster first', async () => {
     const db = await createTestDb();
     await seedPlayers(db);

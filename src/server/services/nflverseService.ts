@@ -291,9 +291,23 @@ export class NflverseService {
        * the crosswalk's own `sleeper_id` is this app's `players.id`, so a player
        * the indexed lookup above could not find is still reachable. This is the
        * ~16% the bridge exists for.
+       *
+       * **Verified, not assumed.** nflverse carries plenty of players Sleeper's
+       * dictionary does not — practice-squad bodies, players who retired before
+       * this app existed — and writing snap rows against an id no `players` row
+       * has would put usage in the store for a player nothing can ever read,
+       * count him in `rowsWritten`, and hide him from `unmatched`. A pipeline
+       * that reports success for rows nobody can read is exactly the failure the
+       * match counts exist to catch, so the ids are looked up before they are
+       * trusted.
        */
+      const bridgeCandidates = crosswalk
+        .filter((link) => link.sleeperId && !playerByGsis.has(link.gsisId))
+        .map((link) => link.sleeperId!);
+      const known = await this.players.listByIds(bridgeCandidates).catch(() => new Map());
       for (const link of crosswalk) {
-        if (link.sleeperId && !playerByGsis.has(link.gsisId)) playerByGsis.set(link.gsisId, link.sleeperId);
+        if (!link.sleeperId || playerByGsis.has(link.gsisId)) continue;
+        if (known.has(link.sleeperId)) playerByGsis.set(link.gsisId, link.sleeperId);
       }
 
       const rows: StoredSnapWeek[] = [];
