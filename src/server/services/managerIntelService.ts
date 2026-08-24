@@ -157,8 +157,19 @@ export interface ManagerIntelCoverage {
     derivedAt: string | null;
     version: number | null;
   }[];
-  /** Units still to fetch, and whether anything is left at all. */
+  /** Units still to fetch. */
   outstandingUnits: number;
+  /**
+   * True once a batch has run at all.
+   *
+   * The distinction {@link ManagerIntelCoverage.complete} needs to be
+   * trustworthy. A league nobody has ever backfilled has no seasons, so nothing
+   * is outstanding, so "no work left" is literally true and completely
+   * misleading — it is the exact shape of the silent staleness this report
+   * exists to prevent. `complete` therefore requires this as well.
+   */
+  started: boolean;
+  /** True when the ledger holds everything Sleeper can give for this league. */
   complete: boolean;
   /** The batch budget in force, so a reader can see the ceiling is respected. */
   requestBudget: number;
@@ -1031,7 +1042,8 @@ export class ManagerIntelService {
       })),
       profiles,
       outstandingUnits: outstanding.length,
-      complete: outstanding.length === 0,
+      started: links.length > 0,
+      complete: links.length > 0 && outstanding.length === 0,
       requestBudget: MAX_SLEEPER_SUBREQUESTS_PER_BATCH,
     };
   }

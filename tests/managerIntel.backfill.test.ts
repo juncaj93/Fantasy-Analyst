@@ -25,6 +25,9 @@ import { TransactionRepo } from '../src/server/repos/transactions.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { PlayerRepo } from '../src/server/repos/players.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
+import { createApp, type AppEnv } from '../src/server/app.ts';
+import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
+import { SETTING_KEYS, SettingsRepo } from '../src/server/repos/settings.ts';
 import { createTestDb } from './helpers/db.ts';
 
 /**
@@ -407,5 +410,86 @@ describe('derivation needs no Sleeper at all', () => {
     expect(first.picks).toBe(24);
     // Deterministic: the same ledger produces the same profile, every time.
     expect(second).toEqual(first);
+  });
+});
+
+describe('the routes report the backfill honestly', () => {
+  let db: NodeSqliteDatabase;
+  let env: AppEnv;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedLeague(db);
+    await new LeagueRepo(db).selectLeague('tony');
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, {
+      season: '2026',
+      seasonType: 'regular',
+      week: 5,
+      leg: 5,
+      fetchedAt: new Date().toISOString(),
+    });
+    env = {
+      db,
+      sleeper: stubSleeper().client,
+      vegas: new MockVegasProvider([]),
+      disableAuth: true,
+    };
+    app = createApp();
+  });
+
+  it('says how much of the budget a batch spent and how much work is left', async () => {
+    const res = await app(new Request('https://app.test/api/leagues/tony/managers/refresh', { method: 'POST' }), env);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.backfill.requestBudget).toBe(MAX_SLEEPER_SUBREQUESTS_PER_BATCH);
+    expect(body.backfill.requestsUsed).toBeLessThanOrEqual(MAX_SLEEPER_SUBREQUESTS_PER_BATCH);
+    expect(body.backfill.unitsCompleted).toBeGreaterThan(0);
+    expect(body.seasons).toContain('2026');
+    expect(body.errors).toEqual([]);
+  });
+
+  it('tells a backfill that has not finished from a league with no history', async () => {
+    const before = await (
+      await app(new Request('https://app.test/api/diagnostics/manager-intelligence'), env)
+    ).json();
+    /*
+     * Nothing ingested yet. `complete` must be false here, and the reason it
+     * needs asserting is that "no work outstanding" is *literally true* for a
+     * league with no seasons discovered — which is the exact shape of the
+     * silent staleness this endpoint exists to catch.
+     */
+    expect(before.started).toBe(false);
+    expect(before.complete).toBe(false);
+    expect(before.profiles.every((p: { count: number }) => p.count === 0)).toBe(true);
+
+    for (let i = 0; i < 8; i++) {
+      await app(new Request('https://app.test/api/leagues/tony/managers/refresh', { method: 'POST' }), env);
+    }
+
+    const after = await (
+      await app(new Request('https://app.test/api/diagnostics/manager-intelligence'), env)
+    ).json();
+    expect(after.seasonsDiscovered.sort()).toEqual(['2024', '2025', '2026']);
+    expect(after.drafts.picksStored).toBe(24);
+    expect(after.transactions.weeksSettled).toBeGreaterThan(0);
+    expect(after.profiles.find((p: { kind: string }) => p.kind === 'draft').count).toBeGreaterThan(0);
+    expect(after.checkpoints.length).toBeGreaterThan(0);
+    expect(after.started).toBe(true);
+  });
+
+  it('serves the managers screen from the rebuilt profiles', async () => {
+    for (let i = 0; i < 8; i++) {
+      await app(new Request('https://app.test/api/leagues/tony/managers/refresh', { method: 'POST' }), env);
+    }
+    const body = await (await app(new Request('https://app.test/api/leagues/tony/managers'), env)).json();
+
+    const veteran = body.managers.find((m: { ownerName: string }) => m.ownerName === 'Veteran');
+    const newcomer = body.managers.find((m: { ownerName: string }) => m.ownerName === 'Newcomer');
+    // The manager who actually drafted has a sample; the one who inherited his
+    // seat does not.
+    expect(veteran.draft.sample).toBeGreaterThan(0);
+    expect(newcomer.draft.sample).toBe(0);
   });
 });

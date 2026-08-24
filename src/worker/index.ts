@@ -299,40 +299,29 @@ export default {
       }
 
       /*
-       * The league-strategy inputs, on the same daily clock.
+       * The trending capture, which nothing else can reconstruct.
        *
-       * Two feeds with one thing in common: neither can be reconstructed after
-       * the fact. Sleeper's transaction endpoint has no all-weeks form, so a
-       * week nobody read while it was current is read later or not at all; and
-       * the trending list is a rolling window Sleeper keeps no history of, so
-       * `add rate accelerated 6x` exists only for somebody who wrote yesterday's
-       * list down. A daily capture is what makes a day-over-day comparison
-       * possible at all.
+       * Sleeper's trending list is a rolling twenty-four-hour window it keeps no
+       * history of, so `add rate accelerated 6x` exists only for somebody who
+       * wrote yesterday's list down. A daily capture is what makes a
+       * day-over-day comparison possible at all — and it is once a day rather
+       * than on the five-minute tick because the window itself is a day, so 288
+       * captures would measure the same window 288 times.
        *
-       * Once a day rather than on the five-minute tick, and for the same reason
-       * usage is: a finished week's transactions never change, and Sleeper's own
-       * trending window is twenty-four hours, so 288 captures a day would
-       * measure the same window 288 times.
+       * This block used to sync the current league's transactions too. It no
+       * longer does, and that is a removal rather than a loss: the
+       * manager-intelligence batch below reads exactly the same weeks from the
+       * same repository, prioritises the live season ahead of every other, and
+       * knows which weeks are settled. Running both meant paying twice for the
+       * one week that is still in play.
        *
-       * Only the selected league, because that is the only one anything reads,
-       * and separately caught — this is the layer above lineups, and it must
-       * never take a lineup feed down.
+       * Separately caught — this is the layer above lineups, and it must never
+       * take a lineup feed down.
        */
       try {
-        const strategy = new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper });
-        await strategy.captureTrending();
-        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
-        if (selected) {
-          const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
-          await strategy.syncTransactions({
-            leagueId: selected.id,
-            sleeperLeagueId: selected.sleeperLeagueId,
-            season: selected.season,
-            week: state?.week ?? 1,
-          });
-        }
+        await new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper }).captureTrending();
       } catch (err) {
-        console.error('league strategy refresh failed', err);
+        console.error('trending capture failed', err);
       }
 
       /*
