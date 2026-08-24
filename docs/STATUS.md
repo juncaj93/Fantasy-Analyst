@@ -1585,6 +1585,58 @@ them.
 **Recommendation: keep it side-by-side.** See
 [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) §15 for the five open items.
 
+## Milestone — the Matchup answer, above the fold (done)
+
+The screen already knew whether there was a lineup change worth making. It kept
+the answer two taps down, inside the sheet behind the win probability, under a
+heading called `Lineup impact` — so a reader who did not tap the odds never
+learned that a starting slot was being spent on somebody who was not playing.
+This promotes `forecast.decision.best` to a compact grouped row between the
+scoreboard and the starters, and nothing else came up with it.
+
+**No second optimiser, and it is asserted rather than promised.** The engine's
+answer arrives already chosen, already ranked by win-probability gain, already
+filtered for legality and already above the two-point materiality threshold. The
+web layer reads four fields and lays them out;
+`tests/matchup.bestMove.test.ts` walks the source and requires that neither
+Matchup file imports a *value* from `core/matchup`, that `assessLineupDecision`
+has exactly one caller in the whole repository, and that the threshold is still
+0.02 — which is the number a screen like this puts the most pressure on, because
+an empty slot above the lineup looks like a bug.
+
+**Four states, and the two that both mean "no move" are told apart.** A move
+worth making is a control; nothing worth changing is a footnote on the
+`Starters` heading that costs the page no height; no forecast at all says so in
+different words, because "your lineup is fine" and "we cannot tell you" are
+different answers and both leave `decision.best` null; a finished afternoon says
+nothing whatever, since the card above has already stopped forecasting. The copy
+is deliberately `No lineup change recommended` rather than `Optimal lineup`: the
+engine suppresses sub-threshold improvements, so the restrained sentence stays
+true when the reason there is nothing to offer is that it is too late.
+
+**The poll now watches the recommendation as well as the score.** A swap expires
+at a kickoff, which is precisely when nothing is live yet and the old condition
+— poll only while `phase === 'live'` — was false. A reader holding the screen
+open at 12:55 would have been looking at `Start J. Doe over A. Smith` at 1:05.
+The condition turns itself off: `decision.best` exists only while both players
+it names are unstarted, so the first read after either kickoff removes the move
+*and* the reason to keep polling. One timer and one visibility listener, exactly
+as before, and the forecast's fingerprint covers every game's clock so a poll
+that finds nothing changed recomputes nothing.
+
+**A negative points delta renders with its minus sign.** The swap that gives up
+projected points and still wins more afternoons is the answer a median cannot
+reach and the reason this engine simulates at all; a row that quietly dropped
+the sign would be the one recommendation in the app a reader is right not to
+trust. `gain` is printed nowhere — `44% → 48%` already contains it.
+
+**The explanation is its own sheet.** A reader who taps a win probability is
+asking what is behind a number; a reader who taps `Best move` has been told what
+to do and is asking whether to believe it. `Behind the odds` is unchanged and
+still carries the swings, the mode and the freshness. Opening a player from the
+best-move sheet swaps rather than stacks, so there is one focus trap, one
+Escape and one downward swipe on screen at any time.
+
 ## Recommended next work
 
 0. **Watch one real waiver run.** The FAAB layer is built and tested against

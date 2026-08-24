@@ -7202,6 +7202,201 @@ div.matchup-result {
  */
 
 
+/* ------------------------------------------------------------- best move */
+/*
+ * The one lineup change worth making, between the score and the lineup.
+ *
+ * Deliberately the *same* material as the starter rows below it rather than a
+ * louder one. Three surfaces stack here — the scoreboard, this, the lineup —
+ * and the temptation with a recommendation is to give it a tint, a rail or a
+ * shadow so it cannot be missed. It does not need one: it is the only control
+ * on the page with a chevron, it carries a label nothing else carries, and it
+ * sits in the one position a reader looks at first. A card shouting at the top
+ * of a screen whose whole job is fitting a starting lineup onto a phone is the
+ * hero panel this screen has already been compacted out of once.
+ *
+ * Three lines and about seventy pixels, which is the grouped-row class the
+ * rest of the app uses — not a card class. `--tap` is the floor and the
+ * content is what actually sets the height.
+ */
+.matchup-best-move {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matchup-best-move:active {
+  background: var(--pressed);
+}
+
+.matchup-best-move-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.matchup-best-move-label {
+  font-size: 0.68rem;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+}
+
+/*
+ * The swap, with the slot pushed to the far end of the same line.
+ *
+ * `margin-left: auto` on the slot rather than `justify-content: space-between`
+ * on the row, because the names have to be allowed to run out of room before
+ * the slot does: the slot is three or four characters and it is fixed, and a
+ * layout that shared the shortfall between them would truncate `FLEX` to
+ * `FL…` on the width where it matters most.
+ */
+.matchup-best-move-swap {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.matchup-best-move-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.matchup-best-move-name {
+  white-space: nowrap;
+}
+
+.matchup-best-move-name > .matchup-status {
+  margin-left: 3px;
+}
+
+.matchup-best-move-slot {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+.matchup-best-move-metrics {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * No move, said on the heading of the thing it is about.
+ *
+ * A sentence hung on the `Starters` label rather than a second card, which is
+ * the difference the state deserves: something to act on earns a control, and
+ * the absence of one earns a footnote that costs the page no height at all.
+ * Lighter than the heading it shares a line with, so the eye still reads
+ * `Starters` first.
+ */
+/*
+ * The heading never pays for the note beside it.
+ *
+ * Both are flex items and a deficit is shared out by base width, so a narrow
+ * enough phone would have taken a letter or two off `Starters` as well as off
+ * the sentence — clipping the word that says what the list is in order to fit
+ * a footnote about it. The sentence is the only thing here allowed to shorten.
+ */
+.matchup-starters-label {
+  flex: 0 0 auto;
+}
+
+.matchup-best-move-note {
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------- best-move sheet */
+.matchup-best-move-lead {
+  font-size: 0.95rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  margin: 0 2px 2px;
+}
+
+/* The two men the swap names, as the way through to their evidence. */
+.matchup-best-move-player {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--separator-soft);
+  font: inherit;
+  font-size: 0.84rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matchup-best-move-player:active {
+  background: var(--pressed);
+}
+
+.matchup-best-move-player-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One of the moves that did not win, in the order the engine ranked it. */
+.matchup-best-move-other {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--separator-soft);
+  font-size: 0.84rem;
+}
+
+.matchup-best-move-other-swap {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchup-best-move-other-odds {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
 /* ---------------------------------------------------------- starter rows */
 .matchup-rows {
   background: var(--surface);
@@ -7505,6 +7700,20 @@ div.matchup-result {
 
   .matchup-name {
     font-size: 0.78rem;
+  }
+
+  /*
+   * The swap gives up the same point of type the lineup rows do, and for the
+   * same reason: at 360px `Start M. Barrowman over C. Ledoux` is what pays for
+   * the slot and the chevron, and a name a reader has to decode is worse than
+   * a name set a point smaller.
+   */
+  .matchup-best-move-names {
+    font-size: 0.82rem;
+  }
+
+  .matchup-best-move {
+    padding-inline: var(--sp-2);
   }
 
   .matchup-actual {

@@ -31,7 +31,7 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
+import type { HeroInsight, LineupImpact, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
 import { TeamLogo } from './common.tsx';
 import { ChevronIcon } from './icons.tsx';
 
@@ -286,6 +286,244 @@ function WinBar({
         </div>
       )}
     </>
+  );
+}
+
+/* -------------------------------------------------------------- best move */
+
+/*
+ * The one lineup change worth making, or the quiet fact that there is none.
+ *
+ * The Matchup screen is asked one question before any other — *is there a
+ * lineup change I should make right now?* — and until this existed the answer
+ * was two taps away, inside the sheet behind the win probability, under a
+ * heading called `Lineup impact`. A reader who did not tap the odds never
+ * learned that a starting slot was being spent on somebody who was not playing.
+ *
+ * So the answer comes up to the surface, directly under the score and directly
+ * above the lineup it is about. What did **not** come up with it is the rest of
+ * that sheet: the swings, the mode, the freshness, the other options. The
+ * product rule this is built to is `answer first, explanation one tap away,
+ * evidence one tap after that`, and a second card full of numbers above the
+ * starters would be the opposite of it.
+ *
+ * **Nothing here decides anything.** `decision.best` arrives already chosen,
+ * already ranked by win-probability gain, already filtered for legality and
+ * already above the materiality threshold — see `core/matchup/decision.ts`,
+ * which is the only place any of those rules exist. This file reads four fields
+ * and lays them out.
+ */
+
+/** What the slot above the starters is currently saying. */
+export type BestMoveState =
+  | { kind: 'move'; move: LineupImpact }
+  /** A forecast exists and offers nothing worth interrupting somebody for. */
+  | { kind: 'none' }
+  /** No forecast, so no comparison — which is not the same as no move. */
+  | { kind: 'unavailable' }
+  /** Nothing left to decide, and nothing worth saying about it. */
+  | { kind: 'silent' };
+
+/**
+ * Which of the four states this forecast is in.
+ *
+ * One function rather than a condition in each of the two components below,
+ * because the invariant that matters is that **exactly one of them draws**: a
+ * screen that showed a recommendation and a line saying there was none would be
+ * contradicting itself in twenty pixels.
+ *
+ * The `final` case is silence rather than restraint. `No lineup change
+ * recommended` is true of a finished afternoon and it is also pointless — the
+ * card above has already stopped forecasting and turned into a result, and a
+ * screen in recap mode has no business carrying advice about a lineup nobody
+ * can change. Everywhere else the note stays, including once the last kickoff
+ * has passed: `No lineup change recommended` is deliberately not `Optimal
+ * lineup`, so it remains honest when the reason there is nothing to offer is
+ * that it is too late rather than that the lineup is already right.
+ */
+export function bestMoveState(forecast: MatchupForecast): BestMoveState {
+  if (forecast.degraded) return { kind: 'unavailable' };
+  if (forecast.decision.best) return { kind: 'move', move: forecast.decision.best };
+  if (forecast.phase === 'final') return { kind: 'silent' };
+  return { kind: 'none' };
+}
+
+/**
+ * The recommendation, as one control.
+ *
+ * One button and one tab stop, at the grouped-list size the rest of the app
+ * uses — not a card. §6 of the design system forbids a control inside a
+ * control, and this row has exactly one thing to do, so the whole row is it:
+ * the label, the swap, the numbers and the chevron are all inside the same
+ * target, and there is nothing on it that could be tapped by mistake.
+ *
+ * Three lines, in the order somebody reads them: what this is, what to do, and
+ * what it is worth. The third line is the one that has to be honest about the
+ * sign — a swap that gives up projected points to win more often is the
+ * interesting case rather than an edge case, and printing `+` on it would be a
+ * lie the reader catches the first time they check.
+ */
+export function BestMoveRow({
+  move,
+  players,
+  onOpen,
+}: {
+  move: LineupImpact;
+  /** Everybody on screen, so the swap can carry the same status marks the rows do. */
+  players: Map<string, MatchupPlayerView>;
+  onOpen: () => void;
+}) {
+  const incoming = players.get(move.inPlayerId) ?? null;
+  const outgoing = players.get(move.outPlayerId) ?? null;
+  const inName = incoming?.name ?? move.inName;
+  const outName = outgoing?.name ?? move.outName;
+
+  return (
+    <button
+      type="button"
+      className="matchup-best-move"
+      data-testid="matchup-best-move"
+      data-state="move"
+      onClick={onOpen}
+      aria-label={bestMoveLabel(move, incoming, outgoing)}
+    >
+      <span className="matchup-best-move-body">
+        <span className="matchup-best-move-label">Best move</span>
+        <span className="matchup-best-move-swap">
+          <span className="matchup-best-move-names">
+            Start <StatusName name={inName} flag={incoming?.statusFlag ?? null} /> over{' '}
+            <StatusName name={outName} flag={outgoing?.statusFlag ?? null} />
+          </span>
+          <span className="matchup-best-move-slot" data-testid="best-move-slot">
+            {move.slot}
+          </span>
+        </span>
+        <span className="matchup-best-move-metrics" data-testid="best-move-metrics">
+          {pointsDeltaText(move.pointsDelta)} · {winShift(move)}
+        </span>
+      </span>
+      <span className="dense-chevron" aria-hidden="true">
+        <ChevronIcon />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * There is nothing to do, said as quietly as it can be said.
+ *
+ * A sentence on the section heading rather than a card of its own, which is the
+ * whole difference between the two states: something to act on earns a control,
+ * and the absence of one earns a footnote. It costs the screen no height at
+ * all, which on the one page whose purpose is fitting a starting lineup onto a
+ * phone is not a small thing.
+ */
+export function BestMoveNote({ state }: { state: BestMoveState }) {
+  if (state.kind === 'move' || state.kind === 'silent') return null;
+  return (
+    <span
+      className="matchup-best-move-note"
+      data-testid="matchup-best-move"
+      data-state={state.kind}
+    >
+      {state.kind === 'unavailable' ? 'No lineup recommendation without a forecast' : 'No lineup change recommended'}
+    </span>
+  );
+}
+
+/** A name, with the status mark the lineup rows already give him. */
+function StatusName({ name, flag }: { name: string; flag: string | null }) {
+  return (
+    <span className="matchup-best-move-name">
+      {name}
+      {flag ? (
+        /*
+         * Hidden from assistive technology on purpose, and not dropped from it:
+         * the row's own accessible name spells `Q` out as `questionable` in the
+         * sentence it belongs to. A one-letter mark read out mid-sentence is
+         * the thing the expansion exists to avoid.
+         */
+        <span
+          className={`matchup-status matchup-status-${flag.toLowerCase()}`}
+          data-testid="best-move-status"
+          title={STATUS_WORD[flag] ?? flag}
+          aria-hidden="true"
+        >
+          {flag}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The projection given up or gained, with its true sign.
+ *
+ * Rounded to a tenth and then checked against a tenth, so a delta of four
+ * hundredths reads as no change rather than as `+0.0` — a signed zero is fake
+ * precision wearing a plus sign.
+ *
+ * A negative number here is not an error and must never be hidden: the swap
+ * that gives up projected points and wins the afternoon more often is the case
+ * this whole engine exists to find, and a row that quietly dropped the minus
+ * would be the one recommendation in the app a reader is right not to trust.
+ */
+export function signedPoints(pointsDelta: number): string {
+  const shown = Math.round(pointsDelta * 10) / 10;
+  if (shown === 0) return 'no change';
+  return `${shown > 0 ? '+' : ''}${shown.toFixed(1)}`;
+}
+
+/** The same number where nothing else says what it counts. */
+export function pointsDeltaText(pointsDelta: number): string {
+  const shown = signedPoints(pointsDelta);
+  return shown === 'no change' ? 'no change in projected pts' : `${shown} projected pts`;
+}
+
+/** `44% → 48%`, and never the difference between them as well. */
+export function winShift(move: LineupImpact): string {
+  return `${Math.round(move.winNow * 100)}% → ${Math.round(move.winAfter * 100)}%`;
+}
+
+/**
+ * The whole recommendation in one sentence, for anything reading it aloud.
+ *
+ * Everything the eye takes from three lines and a chevron: who is coming in,
+ * whether his availability is a question, who is going out, which slot, what it
+ * costs or gains, what it moves the odds to, and that there is more behind it.
+ * Q, D and OUT are expanded here — the visual mark stays a letter, because on
+ * the lineup rows it already is one.
+ */
+function bestMoveLabel(
+  move: LineupImpact,
+  incoming: MatchupPlayerView | null,
+  outgoing: MatchupPlayerView | null,
+): string {
+  /*
+   * The full name, not the abbreviated one the row prints.
+   *
+   * `C. Olave` is a rendering decision made for a 42px column, and reading it
+   * aloud produces "cee dot olave". The status is set off by commas on both
+   * sides so the sentence still parses when it is there — "start Chris Olave,
+   * questionable, over Adam Smith" — and closes up when it is not.
+   */
+  const withStatus = (fallback: string, player: MatchupPlayerView | null) => {
+    const name = player?.fullName ?? fallback;
+    const flag = player?.statusFlag;
+    return flag ? `${name}, ${STATUS_WORD[flag] ?? flag},` : name;
+  };
+  const shown = Math.round(move.pointsDelta * 10) / 10;
+  const points =
+    shown === 0
+      ? 'No change in projected points'
+      : shown > 0
+        ? `${shown.toFixed(1)} more projected points`
+        : `${Math.abs(shown).toFixed(1)} fewer projected points`;
+
+  return (
+    `Best move: start ${withStatus(move.inName, incoming)} over ${withStatus(move.outName, outgoing)}` +
+    ` in the ${move.slot} slot. ${points}. Win probability ${Math.round(move.winNow * 100)}%` +
+    ` to ${Math.round(move.winAfter * 100)}%. Show why.`
   );
 }
 

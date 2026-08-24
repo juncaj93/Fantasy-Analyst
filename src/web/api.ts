@@ -1574,6 +1574,15 @@ export type {
 } from '../core/matchup/model.ts';
 export type { HeroInsight, MatchupPhase } from '../core/matchup/insights.ts';
 export type { PlayerLeverage } from '../core/matchup/needs.ts';
+/*
+ * The lineup decision, for the same reason as everything above it.
+ *
+ * `decision` has always been on the wire inside the forecast; what is new is
+ * that a component now draws one of these on its own, and a component that
+ * draws one needs to be able to name its type without reaching past this
+ * module into core.
+ */
+export type { LineupDecision, LineupImpact } from '../core/matchup/decision.ts';
 
 import type { MatchupForecast } from '../core/matchup/model.ts';
 import type { WeeklyCard } from '../core/startsit/weekCard.ts';
