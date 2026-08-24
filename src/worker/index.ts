@@ -242,31 +242,6 @@ export default {
         console.error('usage refresh failed', err);
       }
 
-      /*
-       * The three nflverse feeds Projection v2 reads, on the same daily clock
-       * and deliberately after the usage refresh.
-       *
-       * Order matters twice over. After the player dictionary, like everything
-       * else here, because snap rows are matched against the players this app
-       * knows. And after the usage refresh because both write to the same day's
-       * budget and usage is the feed a live screen already depends on — if a
-       * ceiling is going to bind, it must bind on the evaluation rather than on
-       * the role trend a Team card is showing.
-       *
-       * Costs three conditional GETs on an ordinary day, two of which 304. The
-       * depth chart is a ranged read of the first 768KiB of a 42MiB file rather
-       * than the file; see `core/nflverse/depthChart.ts`.
-       *
-       * Separately caught, and this one matters more than most: **nothing on a
-       * live screen reads what this writes.** Projection v2 is side-by-side
-       * only, so a total failure of all three feeds costs an evaluation report
-       * and no recommendation anywhere in the app.
-       */
-      try {
-        await new NflverseService(env.DB).refreshAll();
-      } catch (err) {
-        console.error('nflverse refresh failed', err);
-      }
 
       /*
        * The season-long market lines the draft board prices players against.
@@ -335,6 +310,40 @@ export default {
 
       await refreshMatchupCalibration(env, appEnv);
       await refreshPublishedProjections(env, appEnv);
+
+      /*
+       * The three nflverse feeds Projection v2 reads — **last on this tick, and
+       * that position is the point.**
+       *
+       * Everything above it feeds a live surface: the player dictionary, last
+       * season's statistics, the injury report, per-game usage, the season-long
+       * market lines the draft board prices against, the matchup calibration
+       * ledger, and the published weekly fallback. Nothing below it does,
+       * because there is nothing below it.
+       *
+       * It was written directly after the usage refresh, which read well and was
+       * wrong. A slow or hanging fetch there delays the season markets and the
+       * calibration ledger, and an invocation killed part-way through never
+       * reaches them at all — so a feed no recommendation reads could cost two
+       * that several do. Phase 1 promises Projection v2 is inert to live
+       * decisions; a queue position is part of keeping that promise, not just a
+       * dependency graph.
+       *
+       * Costs three conditional GETs on an ordinary day, two of which answer
+       * 304 with no body. The depth chart is a ranged read of the first 768KiB
+       * of a 42MiB file rather than the file; see `core/nflverse/depthChart.ts`.
+       *
+       * After the player dictionary, like everything else here, because snap
+       * rows are matched against the players this app knows. Separately caught,
+       * and this one matters least of any catch in this function: a total
+       * failure of all three feeds costs an evaluation report and no
+       * recommendation anywhere in the app.
+       */
+      try {
+        await new NflverseService(env.DB).refreshAll();
+      } catch (err) {
+        console.error('nflverse refresh failed', err);
+      }
       return;
     }
 

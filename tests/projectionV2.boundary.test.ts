@@ -180,6 +180,38 @@ describe('no live surface can render a Projection v2 number', () => {
     expect(app).not.toMatch(/router\.post\('\/api\/diagnostics\/projection-v2'/);
   });
 
+  it('the nflverse refresh is the last thing the daily tick does', () => {
+    /*
+     * A queue position is part of the phase-1 promise, not just the dependency
+     * graph. Everything above it on the daily tick feeds a live surface — the
+     * player dictionary, the injury report, per-game usage, the season-long
+     * market lines the draft board prices against, the matchup calibration
+     * ledger, the published weekly fallback. A slow or hanging fetch placed
+     * before those delays them, and an invocation killed part-way through never
+     * reaches them at all, so a feed no recommendation reads could cost two
+     * that several do.
+     *
+     * It was written directly after the usage refresh, which read well and was
+     * wrong. This is what stops it drifting back.
+     */
+    const worker = readFileSync(path.join(ROOT, 'worker', 'index.ts'), 'utf8');
+    const nflverse = worker.indexOf('new NflverseService(env.DB).refreshAll()');
+    expect(nflverse, 'the daily tick should refresh the nflverse feeds').toBeGreaterThan(-1);
+
+    for (const live of [
+      'syncPlayers()',
+      'refreshSeasonStats()',
+      'new InjuryService(env.DB).refresh()',
+      'new SeasonMarketService(env.DB, appEnv.vegas).refresh()',
+      'refreshMatchupCalibration(env, appEnv)',
+      'refreshPublishedProjections(env, appEnv)',
+    ]) {
+      const at = worker.indexOf(live);
+      expect(at, `${live} should be on the daily tick`).toBeGreaterThan(-1);
+      expect(at, `${live} must run before the nflverse refresh`).toBeLessThan(nflverse);
+    }
+  });
+
   it('the side-by-side service writes nothing', () => {
     /*
      * §21 asks for a report and this checks it stays one. No INSERT, no UPDATE,

@@ -381,11 +381,20 @@ pipelines already have the shape of.
   holds 554,216 rows for 2025; change detection compares now against last, and a
   chart from October is not evidence about this week.
 
-Cadence: all three on the existing daily 09:00 UTC cron, after the player
-dictionary and after the usage refresh, roster first because the snap join reads
-the crosswalk it writes. Shared daily write ceiling of 6,000 rows, its own
-budget table so neither this nor the usage pipeline can spend the other's
-allowance.
+Cadence: all three on the existing daily 09:00 UTC cron, roster first because
+the snap join reads the crosswalk it writes. Shared daily write ceiling of 6,000
+rows, its own budget table so neither this nor the usage pipeline can spend the
+other's allowance.
+
+**It runs last on that tick, and the position is part of the promise.**
+Everything above it feeds a live surface: the player dictionary, last season's
+statistics, the injury report, per-game usage, the season-long market lines the
+draft board prices against, the matchup calibration ledger, the published weekly
+fallback. A slow or hanging fetch placed before those delays them, and an
+invocation killed part-way through never reaches them at all — so a feed no
+recommendation reads could cost two that several do. Being inert to live
+decisions is a scheduling property as well as a dependency-graph one, and
+`tests/projectionV2.boundary.test.ts` pins the order.
 
 ## 14. Diagnostics
 
