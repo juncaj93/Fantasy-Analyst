@@ -141,6 +141,38 @@ export function providerTeamId(team: string | null | undefined): string | null {
   return PROVIDER_TEAM_IDS[raw.toUpperCase()] ?? null;
 }
 
+/** The inverse map, built once from the outbound one so the two cannot drift. */
+const APP_TEAM_IDS: Record<string, string> = Object.fromEntries(
+  Object.entries(PROVIDER_TEAM_IDS).map(([app, provider]) => [provider, app]),
+);
+
+/**
+ * **The app's** id for a team, from whichever vocabulary the provider used.
+ *
+ * The counterpart to {@link providerTeamId}, and the one that was missing. This
+ * module's contract — stated at the top of `vegas/types.ts` — is that an adapter
+ * translates its vendor's vocabulary into the app's on the way out, and every
+ * field honoured that except `GameLines.spreadTeam`, which left here as
+ * `KANSAS_CITY_CHIEFS_NFL` and was stored beside team columns holding `KC`.
+ *
+ * The consequence was silent and total: `buildStartSitContext` resolves a
+ * spread's sign by checking the handicap's team against the game's two sides
+ * and **drops a spread whose team it cannot place** — which is the correct
+ * refusal, because a game-script model fed a handicap with the wrong sign is
+ * worse than one fed nothing. With the two vocabularies never matching, that
+ * refusal fired on every spread the app had ever stored.
+ *
+ * Symmetrical with its inverse: an id already in the app's vocabulary comes
+ * back untouched, so this is safe to apply to anything, and a code it cannot
+ * place returns null rather than a guess.
+ */
+export function appTeamId(team: string | null | undefined): string | null {
+  const raw = (team ?? '').trim().toUpperCase();
+  if (!raw) return null;
+  if (!raw.endsWith('_NFL')) return PROVIDER_TEAM_IDS[raw] ? raw : (APP_TEAM_IDS[raw] ?? null);
+  return APP_TEAM_IDS[raw] ?? null;
+}
+
 /**
  * Their season-long `statID` -> our season market key.
  *
@@ -603,7 +635,16 @@ function toGameLines(event: SgoEvent): GameLines {
   // number is read. No team, no spread.
   const teamFor = (entity: string): string | null => {
     const side = event.teams?.[entity];
-    const id = side?.teamID ?? side?.names?.short ?? null;
+    /*
+     * Translated on the way out, which is this module's whole job.
+     *
+     * `teamID` is `KANSAS_CITY_CHIEFS_NFL` and every reader of this field holds
+     * Sleeper's `KC`. Leaving it untranslated does not fail loudly — it makes
+     * `buildStartSitContext` unable to place the handicap's team, so it drops
+     * the spread exactly as it is designed to when the sign cannot be trusted.
+     * See `tests/vegas.spreadVocabulary.test.ts`.
+     */
+    const id = appTeamId(side?.teamID ?? side?.names?.short ?? null);
     return id ? id.toUpperCase() : null;
   };
 

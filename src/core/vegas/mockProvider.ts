@@ -19,6 +19,7 @@ import type {
   VegasProvider,
 } from './types.ts';
 import { MARKET_KEYS, SEASON_MARKET_KEYS } from './types.ts';
+import { appTeamId } from './sportsGameOddsProvider.ts';
 
 export interface MockRoster {
   eventId: string;
@@ -181,7 +182,17 @@ export class MockVegasProvider implements VegasProvider {
         ? {
             total: roundToHalf(45 + jitter(`${eventId}|total`, 6)),
             spread: roundToHalf(jitter(`${eventId}|spread`, 7)),
-            spreadTeam: game.homeTeam,
+            /*
+             * The team in the app's own vocabulary, like the real adapter.
+             *
+             * A `MockRoster` may name its sides however a fixture finds
+             * readable, and this field is not a label — it is the identity
+             * `buildStartSitContext` matches the game's sides against to decide
+             * which way the handicap points. A full club name here reads
+             * downstream as a spread whose team cannot be placed, and is
+             * dropped.
+             */
+            spreadTeam: appTeamId(game.homeTeam) ?? game.homeTeam.toUpperCase(),
           }
         : { total: null, spread: null, spreadTeam: null },
       raw: { mock: true, eventId, playerCount: game?.players.length ?? 0 },
