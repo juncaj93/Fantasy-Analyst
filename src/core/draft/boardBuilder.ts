@@ -30,6 +30,7 @@ import { injuryStatusTag } from './injury.ts';
 import { injuryLine, type InjuryState } from '../injury/model.ts';
 import { tierContextLine } from './tierContext.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../sleeper/transform.ts';
+import type { ManagerTendencies } from '../managers/managerTendencies.ts';
 import type { DraftPickRecord, DraftRecord, LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 /*
  * The two market-facing decisions this board makes, both read from data rather
@@ -43,6 +44,10 @@ import { dogFreshness, dogIsUsable } from '../adp/underdog.ts';
 import {
   buildPickOwnership,
   estimateNextPickAvailability,
+  MANAGER_HISTORY_CEILING,
+  positionsInPlay,
+  readManagerPrior,
+  slotsAheadOf,
   type NextPickAvailability,
   type SimCandidate,
   type TradedPick,
@@ -114,6 +119,15 @@ export interface DraftBoardSources {
    * from here.
    */
   marketSnapshot(): Promise<{ provider: string; season: string; fetchedAt: string } | null>;
+  /**
+   * Historical draft tendencies for this league's managers, by current roster id.
+   *
+   * Optional: a source that does not supply it produces exactly the board that
+   * existed before manager history did. Empty is the honest answer for a
+   * league in its first season, one whose history has not been synced, or one
+   * whose managers are all new. See `core/managers/managerTendencies.ts`.
+   */
+  managerTendencies?(leagueId: string): Promise<Map<number, ManagerTendencies>>;
   /** Unresolved newsletter names, for the draft-day readiness warning. */
   repairStatus(): Promise<BoardRepairStatus>;
   /** Normalized availability for the ranked page. May reject; the caller catches. */
@@ -236,6 +250,16 @@ export type BoardRecommendation = DraftRecommendation & {
   nextPick: {
     probability: number | null;
     marketBaseline: number | null;
+    /**
+     * The same probability with historical manager behaviour removed.
+     *
+     * Null wherever no history applied, which is every league that has not
+     * synced one. Where it is present it is also the number the *ranking* used:
+     * `Score` is deliberately computed without this signal. See `survivalFor`.
+     */
+    historyBaseline: number | null;
+    /** The bounded adjustment history contributed, in probability units. */
+    historyAdjustment: number | null;
     drivers: string[];
     confidence: 'high' | 'medium' | 'low';
     degraded: string[];
@@ -417,6 +441,35 @@ export interface DraftBoardState {
     roomNotes: string[];
     /** NFL teams this room is configured to take early. Usually empty. */
     localTeams: string[];
+    /**
+     * What previous seasons said about the managers picking before you.
+     *
+     * Null in a league with no history, no matched identity or no returning
+     * manager with enough of a sample. `entries` carries the sample behind each
+     * multiplier and the positions whose history was overruled by what the
+     * manager already holds today, so the adjustment can be audited against the
+     * pick stream rather than believed.
+     */
+    managerHistory: {
+      managersWithHistory: number;
+      /** Slots picking ahead whose manager had no usable history. Neutral. */
+      unknownSlots: number[];
+      entries: {
+        slot: number;
+        displayName: string | null;
+        draftsObserved: number;
+        picksObserved: number;
+        multipliers: Record<string, number>;
+        suppressed: string[];
+      }[];
+      notes: string[];
+      /** Largest bounded movement on this board, in percentage points. */
+      largestMovePoints: number;
+      /** Players whose raw movement had to be clamped. Zero is healthy. */
+      ceilingHits: number;
+      /** The hard ceiling in force, in percentage points. */
+      ceilingPoints: number;
+    } | null;
     /**
      * What the local-team prior applied, and what it was measured from.
      *
@@ -768,6 +821,14 @@ export async function buildDraftBoard(
   // did that is not reaching the board. Say so here rather than only in Setup,
   // because this is the screen they are looking at when it matters.
   const repair = await sources.repairStatus();
+  /*
+   * Historical tendencies, if this deployment has any.
+   *
+   * A source that does not implement it, a league in its first season, and a
+   * sync that has not run yet all arrive here as an empty map, and an empty map
+   * produces the board exactly as it was before this feature existed.
+   */
+  const managerTendencies = (await sources.managerTendencies?.(league.id)) ?? new Map<number, ManagerTendencies>();
   if (repair.summary.names > 0 && Math.abs(repair.summary.net) >= 2) {
     warnings.push(
       `${repair.summary.headline} — fix it under Help my scores in Setup; the board is usable meanwhile`,
@@ -875,7 +936,60 @@ export async function buildDraftBoard(
   }
 
   const tierMaps = buildTierMaps(simCandidates, currentPick, horizon?.pickNo ?? null);
+
+  /*
+   * What the managers between you and your next pick have drafted before.
+   *
+   * Assembled here rather than inside the model because it needs two things the
+   * model does not have: which Sleeper user holds each seat in *this* draft, and
+   * the profiles keyed by that user. The chain is slot → roster → owner, and it
+   * is followed in that order every time — a roster id is a seat, and seats
+   * change hands between seasons.
+   *
+   * `slotsAheadOf` is the same function the simulator uses to decide whose picks
+   * it walks, so "only managers picking before you" holds by construction: a
+   * manager with no intervening selection is never in this list to begin with.
+   */
+  const ownerBySlot = new Map<number, string | null>();
+  for (let slot = 1; slot <= teams; slot++) {
+    const rosterId = draft.slotToRosterId?.[String(slot)] ?? null;
+    const roster = rosterId == null ? null : rosters.find((r) => r.rosterId === rosterId);
+    ownerBySlot.set(slot, roster?.ownerId ?? null);
+  }
+  const tendenciesByUser = new Map<string, ManagerTendencies>();
+  for (const [rosterId, tendencies] of managerTendencies) {
+    const roster = rosters.find((r) => r.rosterId === rosterId);
+    /*
+     * Filed by roster, read by user — and only when the two still agree.
+     *
+     * A profile stored before the roster changed hands carries the *previous*
+     * owner's user id, so matching it against the current owner is what stops a
+     * new manager inheriting it between a sync and a re-sync.
+     */
+    if (roster?.ownerId && tendencies.userId === roster.ownerId) {
+      tendenciesByUser.set(roster.ownerId, tendencies);
+    }
+  }
+  const managerPrior =
+    mySlot == null || horizon == null || tendenciesByUser.size === 0
+      ? undefined
+      : readManagerPrior({
+          tendencies: tendenciesByUser,
+          userBySlot: ownerBySlot,
+          slotsAhead: slotsAheadOf(ownership, currentPick, horizon.pickNo, mySlot),
+          rosters: rostersBySlot,
+          shape,
+          positions: positionsInPlay(shape),
+          displayNames: new Map(
+            [...ownerBySlot.entries()].map(([slot, userId]) => [
+              slot,
+              rosters.find((r) => r.ownerId === userId)?.ownerName ?? null,
+            ]),
+          ),
+        });
+
   const nextPick = estimateNextPickAvailability({
+    managerPrior,
     draftId,
     currentPick,
     targetPick: horizon?.pickNo ?? null,
@@ -1062,14 +1176,37 @@ export async function buildDraftBoard(
    */
   const orderedRanked = queuedOnly ? applyQueueOrder(ranked, allFlags) : ranked;
 
-  const recommendations = orderedRanked.map((rec) => ({
-    ...rec,
-    queued: allFlags.get(rec.playerId)?.queued === true,
-    status: designationOf(byId.get(rec.playerId)?.status ?? null),
-    tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
-    injuryLine: injuryLineFor(injuries.get(rec.playerId)),
-    nextPick: nextPickDetail(nextPick.byPlayer.get(rec.playerId)),
-  }));
+  const recommendations = orderedRanked.map((rec) => {
+    const availability = nextPick.byPlayer.get(rec.playerId);
+    return {
+      ...rec,
+      /*
+       * The card's number, substituted after the ranking is finished.
+       *
+       * The engine was given `historyBaseline` — the simulation without
+       * historical manager behaviour — because whatever it receives reaches
+       * `Score` through two channels: the `survivalUrgency` component, and the
+       * separation and cost-of-waiting pass that reads `survivalProbability`
+       * off the finished recommendation. Both are ranking machinery, and the
+       * brief puts manager history out of bounds for both.
+       *
+       * The reader, though, should see the model's best estimate of whether the
+       * player survives, which is the adjusted one. So it is put back here,
+       * once the ordering and every component are already fixed. Nothing
+       * downstream of this line scores anything — `applyBoardComponents` has
+       * long since run inside the engine.
+       *
+       * Where no history applied, `historyBaseline` is absent and this is the
+       * same number the engine already had.
+       */
+      survivalProbability: availability?.probability ?? rec.survivalProbability,
+      queued: allFlags.get(rec.playerId)?.queued === true,
+      status: designationOf(byId.get(rec.playerId)?.status ?? null),
+      tierContext: tierContextLine(rec.position, rec.tierCliff, demand.get(rec.position) ?? null),
+      injuryLine: injuryLineFor(injuries.get(rec.playerId)),
+      nextPick: nextPickDetail(availability),
+    };
+  });
 
   return {
     draftId,
@@ -1189,6 +1326,25 @@ export async function buildDraftBoard(
        * on screen — `Next` is one percentage on a card and has to stay one.
        */
       localTeams: league.localTeams ?? [],
+      managerHistory:
+        nextPick.managerPrior && nextPick.managerPrior.entries.length > 0
+          ? {
+              managersWithHistory: nextPick.managerPrior.entries.length,
+              unknownSlots: nextPick.managerPrior.unknownSlots,
+              entries: nextPick.managerPrior.entries.map((e) => ({
+                slot: e.slot,
+                displayName: e.displayName,
+                draftsObserved: e.draftsObserved,
+                picksObserved: e.picksObserved,
+                multipliers: Object.fromEntries(e.multipliers),
+                suppressed: e.suppressed,
+              })),
+              notes: nextPick.managerPrior.notes,
+              largestMovePoints: nextPick.historyLargestMovePoints,
+              ceilingHits: nextPick.historyCeilingHits,
+              ceilingPoints: MANAGER_HISTORY_CEILING * 100,
+            }
+          : null,
       teamPrior: nextPick.teamPrior
         ? {
             basis: nextPick.teamPrior.basis,
@@ -1481,7 +1637,31 @@ function survivalFor(availability: NextPickAvailability | undefined):
   if (!availability) return undefined;
   if (availability.probability == null && availability.drivers.length === 0) return undefined;
   return {
-    probability: availability.probability,
+    /*
+     * The ranking reads the number *without* historical manager behaviour.
+     *
+     * This is the one place the two versions of `Next%` are told apart, and the
+     * reason they exist. Survival is not merely displayed — it is a scored
+     * component, `survivalUrgency`, at 0.22 of the composite: a player likelier
+     * to be taken is more urgent, which is right, and which means anything that
+     * moves survival moves `Score`.
+     *
+     * For the room's own behaviour in this draft, that is the mechanism working:
+     * a run at the position is public, everyone can see it, and a player caught
+     * in one really is more urgent. Historical manager tendency is different in
+     * kind. It is the weakest evidence the model carries — two drafts, shrunk
+     * hard, about people rather than about football — and the brief draws the
+     * line there explicitly: it may change the estimate of whether somebody
+     * takes him, and it may not change how good he is or where he ranks.
+     *
+     * So the composite is fed `historyBaseline`, the counterfactual the paired
+     * run computed, and the card is shown `probability`, which carries the
+     * adjustment. `Score`, `Val`, the tier ladders and the ordering are then
+     * identical whether or not a league has ever synced its history —
+     * `nextpick.managerHistory.board.test.ts` asserts exactly that, field by
+     * field, over the whole board.
+     */
+    probability: availability.historyBaseline ?? availability.probability,
     note: availability.drivers.slice(1).join(' · '),
   };
 }
@@ -1492,6 +1672,10 @@ function nextPickDetail(availability: NextPickAvailability | undefined): BoardRe
   return {
     probability: availability.probability,
     marketBaseline: availability.marketBaseline,
+    // Present only where history actually applied, so the card and the probe can
+    // show what it did without having to run the model a second time.
+    historyBaseline: availability.historyBaseline ?? null,
+    historyAdjustment: availability.historyAdjustment ?? null,
     drivers: availability.drivers,
     confidence: availability.confidence,
     degraded: availability.degraded,

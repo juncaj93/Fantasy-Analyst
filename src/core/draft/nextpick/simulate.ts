@@ -69,8 +69,13 @@ import {
 } from './demand.ts';
 import { NEUTRAL_ROOM, type RoomBehaviour } from './room.ts';
 import { teamMultiplier, type TeamPriorResult } from './teamPrior.ts';
+import { managerMultiplier, NEUTRAL_MANAGER_PRIOR, type ManagerPriorResult } from './managerPrior.ts';
 import { hashString, mulberry32, sampleIndex } from './rng.ts';
-import type { PickOwnership } from './ownership.ts';
+import {
+  interveningPicks as interveningPicksOf,
+  slotsAheadOf,
+  type PickOwnership,
+} from './ownership.ts';
 import type { RosterShape } from '../../sleeper/scoring.ts';
 
 export const SIMULATION = {
@@ -212,6 +217,15 @@ export interface SimulationInput {
    * rather than quality.
    */
   teamPrior?: TeamPriorResult;
+  /**
+   * What the managers picking ahead have historically drafted.
+   *
+   * Optional, and absent means every manager is read from this draft alone —
+   * which is what every board did before this existed and what every board
+   * still does in a league with no previous season, no matched identity or too
+   * little history. See `managerPrior.ts`.
+   */
+  managerPrior?: ManagerPriorResult;
   /** Tier ladders per position, from the existing tier engine. Optional. */
   tiers?: Map<string, PositionTierMap>;
   simulations?: number;
@@ -250,6 +264,11 @@ export interface SimulationResult {
    */
   teamPrior: TeamPriorResult | null;
   /**
+   * The historical-manager appetite that was applied, so the effect can be
+   * inspected rather than inferred. Null where no manager ahead has a history.
+   */
+  managerPrior: ManagerPriorResult | null;
+  /**
    * How much of the model actually ran.
    *
    * Decided here rather than inferred downstream from the wording of the
@@ -278,6 +297,7 @@ function emptyResult(input: SimulationInput, degraded: string[]): SimulationResu
     needAhead: new Map(),
     room: input.room ?? NEUTRAL_ROOM,
     teamPrior: input.teamPrior ?? null,
+    managerPrior: input.managerPrior ?? null,
     confidence: 'low',
     marketOnly: false,
     degraded,
@@ -308,18 +328,11 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
    * next pick influence the path" is true by construction rather than by
    * remembering to check.
    */
-  const interveningPicks: number[] = [];
-  for (let pickNo = input.currentPick; pickNo < input.targetPick; pickNo++) {
-    const owner = input.ownership.ownerAt(pickNo);
-    if (owner != null && owner === input.mySlot) continue;
-    interveningPicks.push(pickNo);
-  }
+  const interveningPicks = interveningPicksOf(input.ownership, input.currentPick, input.targetPick, input.mySlot);
 
   const candidates = input.candidates;
   const count = candidates.length;
-  const slotsAhead = [
-    ...new Set(interveningPicks.map((p) => input.ownership.ownerAt(p)).filter((s): s is number => s != null)),
-  ].sort((a, b) => a - b);
+  const slotsAhead = slotsAheadOf(input.ownership, input.currentPick, input.targetPick, input.mySlot);
 
   const needAhead = countNeedAhead(slotsAhead, input, positions);
 
@@ -346,6 +359,7 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
       needAhead,
       room,
       teamPrior: input.teamPrior ?? null,
+      managerPrior: input.managerPrior ?? null,
       confidence: 'high',
       marketOnly: false,
       degraded,
@@ -555,13 +569,27 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
    * small table rather than three map lookups per position per pick.
    */
   const slotIndex = new Map(slotsAhead.map((slot, i) => [slot, i]));
+  const history = input.managerPrior ?? NEUTRAL_MANAGER_PRIOR;
   const roomMult = new Float64Array(Math.max(1, slotsAhead.length) * positionCount);
   slotsAhead.forEach((slot, si) => {
     const lean = managerLean.get(slot);
     for (let pi = 0; pi < positionCount; pi++) {
       const position = activePositions[pi]!;
+      /*
+       * Four factors, and the order of the last two is not an accident.
+       *
+       * `lean` is what this manager has done in the last hour; `managerMultiplier`
+       * is what he did in previous seasons. Both are his, both are bounded, and
+       * they multiply rather than replace each other — a manager who took two
+       * receivers today *and* takes receivers early every year is a receiver
+       * risk twice over, which is the shape reality has. Neither can overturn
+       * the room, and the room cannot overturn the market.
+       */
       roomMult[si * positionCount + pi] =
-        (room.runs.get(position) ?? 1) * (room.bias.get(position) ?? 1) * (lean?.get(position) ?? 1);
+        (room.runs.get(position) ?? 1) *
+        (room.bias.get(position) ?? 1) *
+        (lean?.get(position) ?? 1) *
+        managerMultiplier(history, slot, position);
     }
   });
   /** For a pick with no published owner: the room, without a personal lean. */
@@ -772,6 +800,7 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
     needAhead,
     room,
     teamPrior: input.teamPrior ?? null,
+    managerPrior: input.managerPrior ?? null,
     /*
      * Trust is about what the model could see, not about what it said.
      *
@@ -828,6 +857,7 @@ function marketOnly(
     needAhead,
     room,
     teamPrior: input.teamPrior ?? null,
+    managerPrior: input.managerPrior ?? null,
     confidence: 'low',
     marketOnly: true,
     degraded,
