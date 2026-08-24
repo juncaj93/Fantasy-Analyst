@@ -436,6 +436,64 @@ describe('waiver pressure is bounded, and cannot touch player value', () => {
     expect(waiverManagerPressure({ ...args, week: 11 }).fundedLateRivals).toBe(2);
   });
 
+  it('reads a high-churn room as slightly less urgent, not as less contested', () => {
+    /*
+     * The subtle one from the brief: a room that churns its bench constantly
+     * makes a speculative add likely to come back around, so there is less need
+     * to reach for him. It must not make the claim look *cheaper* or the room
+     * look *quieter* — those are different claims with different evidence.
+     */
+    const base = {
+      competition: competitionWith([2, 3]),
+      baseline: BASELINE,
+      prices: PRICES,
+      position: 'RB',
+      week: 5,
+      finalWeek: 14,
+    };
+    const steady = new Map([
+      [2, profileFor({ churnPerWeek: BASELINE.churnPerWeek, spendRelative: 1.2, spendConfidence: 1 })],
+      [3, profileFor({ churnPerWeek: BASELINE.churnPerWeek, spendRelative: 1.2, spendConfidence: 1 })],
+    ]);
+    const churny = new Map([
+      [2, profileFor({ churnPerWeek: BASELINE.churnPerWeek * 3, spendRelative: 1.2, spendConfidence: 1 })],
+      [3, profileFor({ churnPerWeek: BASELINE.churnPerWeek * 3, spendRelative: 1.2, spendConfidence: 1 })],
+    ]);
+
+    const a = waiverManagerPressure({ ...base, profilesByRoster: steady });
+    const b = waiverManagerPressure({ ...base, profilesByRoster: churny });
+
+    expect(b.urgencyDelta).toBeLessThan(a.urgencyDelta);
+    // The cost and the contest reading are untouched by churn.
+    expect(b.costFactor).toBe(a.costFactor);
+    expect(b.contested).toBe(a.contested);
+  });
+
+  it('stays quiet on partial history, and speaks once the sample arrives', () => {
+    const base = {
+      competition: competitionWith([2, 3, 4]),
+      baseline: BASELINE,
+      prices: PRICES,
+      position: 'RB',
+      week: 5,
+      finalWeek: 14,
+    };
+    // Mid-backfill: two of three rivals are still unusable.
+    const partial = new Map([
+      [2, profileFor({ usable: false })],
+      [3, profileFor({ usable: false })],
+      [4, profileFor({ spendRelative: 1.3, spendConfidence: 0.9 })],
+    ]);
+    expect(waiverManagerPressure({ ...base, profilesByRoster: partial }).contested).toBe('unknown');
+
+    const filled = new Map([
+      [2, profileFor({ spendRelative: 1.3, spendConfidence: 0.9 })],
+      [3, profileFor({ spendRelative: 1.3, spendConfidence: 0.9 })],
+      [4, profileFor({ spendRelative: 1.3, spendConfidence: 0.9 })],
+    ]);
+    expect(waiverManagerPressure({ ...base, profilesByRoster: filled }).contested).not.toBe('unknown');
+  });
+
   it('is neutral rather than absent when nothing is known', () => {
     expect(NEUTRAL_PRESSURE.costFactor).toBe(1);
     expect(NEUTRAL_PRESSURE.urgencyDelta).toBe(0);
