@@ -89,6 +89,25 @@ function expectNothingPulled(seen: { states: string[]; maxShift: number }, reque
 }
 
 /**
+ * The mirror of it: the surface took this gesture and followed the finger.
+ *
+ * Deliberately *not* asserted as `armed`, which is what this first checked and
+ * what WebKit then failed on. `armed` is the state between passing the trigger
+ * and letting go, and it need never be painted at all: releasing sets the
+ * distance and starts the refresh in one batch, so the surface can go from
+ * `pulling` straight to `refreshing` between two frames. A sampler cannot
+ * depend on catching it, and a test that does is asserting the frame rate.
+ *
+ * What is stable is that the surface left `idle` and actually moved. Whether
+ * the refresh then *fired* is a question for the network, and every caller
+ * asks it that way.
+ */
+function expectPulled(seen: { states: string[]; maxShift: number }): void {
+  expect(seen.states.filter((s) => s !== 'idle'), 'the surface never took the gesture').not.toEqual([]);
+  expect(seen.maxShift, 'the surface never followed the finger').toBeGreaterThan(0);
+}
+
+/**
  * Drag, in steps, the way a thumb does.
  *
  * The same shape `sheet-interaction.spec.ts` uses, for the same reason: a
@@ -102,6 +121,22 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
     await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
   }
   await page.mouse.up();
+}
+
+/**
+ * Pull a screen down from the one place the gesture is allowed to begin.
+ *
+ * The `scrollTo` is not decoration and is the same line `team-startsit.spec`
+ * opens its own pull helper with. These are long screens, and a pull that
+ * starts below the top is a scroll by rule 1 — so a test that pulled without
+ * first putting the page back at its top fails whenever anything has moved it,
+ * and fails intermittently, which is worse than failing.
+ */
+async function pullScreen(page: Page, testId: string): Promise<void> {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = (await page.getByTestId(testId).boundingBox())!;
+  const x = box.x + box.width / 2;
+  await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
 }
 
 /** Where a drag on a sheet's *content* — not its grip, not its header — starts. */
@@ -282,14 +317,12 @@ test.describe('and gives it straight back', () => {
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
 
-    const box = (await page.getByTestId('trades-pull').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
+    await pullScreen(page, 'trades-pull');
 
-    const seen = await pullsSeen(page);
-    expect(seen.states, 'the pull never armed on a screen with nothing over it').toContain('armed');
-    expect(seen.maxShift, 'the surface never followed the finger').toBeGreaterThan(0);
-    await expect.poll(async () => requests.length).toBeGreaterThan(0);
+    expectPulled(await pullsSeen(page));
+    await expect.poll(async () => requests.length, {
+      message: 'the pull never reached the server on a screen with nothing over it',
+    }).toBeGreaterThan(0);
   });
 
   test('and pulls again the moment the sheet is dismissed by gesture', async ({ page }) => {
@@ -303,13 +336,12 @@ test.describe('and gives it straight back', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const box = (await page.getByTestId('trades-pull').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
+    await pullScreen(page, 'trades-pull');
 
-    const seen = await pullsSeen(page);
-    expect(seen.states, 'the gesture never came back after a sheet was swiped away').toContain('armed');
-    await expect.poll(async () => requests.length).toBeGreaterThan(0);
+    expectPulled(await pullsSeen(page));
+    await expect.poll(async () => requests.length, {
+      message: 'the gesture never came back after a sheet was swiped away',
+    }).toBeGreaterThan(0);
   });
 
   /**
@@ -328,24 +360,26 @@ test.describe('and gives it straight back', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const box = (await page.getByTestId('trades-pull').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
+    await pullScreen(page, 'trades-pull');
 
-    const seen = await pullsSeen(page);
-    expect(seen.states, 'closing a sheet with Done left the screen unpullable').toContain('armed');
-    await expect.poll(async () => requests.length).toBeGreaterThan(0);
+    expectPulled(await pullsSeen(page));
+    await expect.poll(async () => requests.length, {
+      message: 'closing a sheet with Done left the screen unpullable',
+    }).toBeGreaterThan(0);
   });
 
   test('Team still pulls to refresh when no sheet is open', async ({ page }) => {
     await openTeam(page);
+    const requests = watchRequests(page, '/api/startsit/refresh');
     await watchPulls(page);
-    const box = (await page.getByTestId('team-pull').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
-    const seen = await pullsSeen(page);
-    expect(seen.states).toContain('armed');
-    expect(seen.maxShift).toBeGreaterThan(0);
+    await pullScreen(page, 'team-pull');
+
+    expectPulled(await pullsSeen(page));
+    // Team's refresh is a POST, which is why the sheet tests above watch it to
+    // prove it did *not* happen. Here it is the proof that it did.
+    await expect.poll(async () => requests.length, {
+      message: 'the pull never reached the server on Team',
+    }).toBeGreaterThan(0);
   });
 });
 
