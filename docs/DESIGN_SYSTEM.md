@@ -37,7 +37,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Group | Tokens |
 | --- | --- |
 | Surfaces | `--bg` `--surface` `--surface-raised` `--surface-sunken` `--surface-inset` |
-| Material | `--nav-surface` `--toolbar-surface` `--toolbar-border` `--blur` `--scrim` |
+| Material | `--nav-surface` `--toolbar-surface` `--toolbar-border` `--toolbar-bloom` `--blur` `--scrim` |
 | Lines | `--separator` `--separator-soft` `--border-strong` |
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
@@ -136,6 +136,18 @@ blank strip under the navigation twice:
   destination below 400px. The floor is 44px and it is hard — a destination
   narrower than a fingertip is not a destination, and `toolbar.spec.ts` asserts
   it at every width.
+- **The selected destination is a lift in the material, not a control inside
+  one.** `--toolbar-bloom` is a whole radial gradient rather than a colour and
+  an alpha, because Light and Dark want different falloffs as well as different
+  strengths, and it is painted by the active destination's own `::before` — so
+  it is always exactly where the destination is, with nothing to measure and
+  nothing to keep in step. It reaches the pill's padding on every side and the
+  capsule clips its descendants, so it ends where the bar does. No pill, no
+  tray, no underline: a filled shape behind one destination is a button inside a
+  button, and a hard edge is the thing the dash under the selection was removed
+  for. The fact is carried four times over — the lift, the accent colour, a
+  heavier glyph stroke, a heavier label — and by `aria-current` for anything
+  that cannot see any of them.
 - **It holds no state.** The current destination is passed in from the app, so
   the highlight and the screen can never disagree — including on a nested screen
   or a destination the app chose on its own.
@@ -147,7 +159,11 @@ blank strip under the navigation twice:
 
 - `e2e/toolbar.spec.ts` — the floating toolbar: destinations, route-derived
   active state, shape, targets, label wrapping, content clearance, keyboard,
-  modal layering, reduced motion.
+  modal layering, reduced motion — and the selected state, which is the part
+  with the most ways to go wrong quietly: that the lift belongs to exactly one
+  destination, takes no taps, adds no words, ends at the pill's inner edge,
+  draws something in *both* themes, moves nothing, and leaves the selected label
+  room inside its own column at the heavier weight.
 - `e2e/draft-controls.spec.ts` — the folded search beside the position filters:
   collapsed shape, control-row height, expansion, query semantics, and that the
   filters are untouched by any of it.

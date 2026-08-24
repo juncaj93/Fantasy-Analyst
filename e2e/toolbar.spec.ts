@@ -217,6 +217,240 @@ test.describe('the active destination', () => {
   });
 });
 
+/**
+ * The selected destination, and the material behind it.
+ *
+ * A colour and a heavier stroke is a lot to ask of a 10px word and a 22px mark
+ * at the bottom of a phone, so the bar now lifts its own surface behind the
+ * destination that is showing. The two obvious alternatives are both a second
+ * object — a filled pill is a button inside a button, an underline is a hard
+ * edge inside a soft capsule — and what is asserted here is that this is
+ * neither: it belongs to exactly one destination, it is drawn behind
+ * everything, it takes no taps, it says nothing to a screen reader, it ends
+ * where the pill does, and it costs the bar not one pixel of layout.
+ */
+test.describe('the selected destination’s bloom', () => {
+  /** The lift's own layer, as the browser resolved it. */
+  async function bloom(page: Page) {
+    return page.evaluate(() => {
+      const bar = document.querySelector('.tabbar')!;
+      const layers = [...bar.querySelectorAll('button')].map((b) => {
+        const layer = getComputedStyle(b, '::before');
+        return {
+          id: (b as HTMLElement).dataset.testid,
+          current: b.getAttribute('aria-current'),
+          painted: layer.backgroundImage !== 'none' && layer.content !== 'none',
+          taps: layer.pointerEvents,
+          depth: layer.zIndex,
+          inset: [layer.top, layer.right, layer.bottom, layer.left].map((v) => Number.parseFloat(v)),
+        };
+      });
+      return {
+        clip: getComputedStyle(bar).overflow,
+        pad: Number.parseFloat(getComputedStyle(bar).paddingLeft),
+        layers,
+      };
+    });
+  }
+
+  test('is behind the destination that is showing, and behind no other', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      const { layers } = await bloom(page);
+      const lit = layers.filter((l) => l.painted);
+      expect(lit.map((l) => l.id), `${tab}: exactly one destination may be lifted`).toEqual([`tab-${tab}`]);
+      expect(lit[0]!.current, 'the lift and `aria-current` are the same fact').toBe('page');
+    }
+  });
+
+  /**
+   * It is decoration, and the sentence is carried elsewhere.
+   *
+   * Three separate claims, because a selected state that is only a wash is a
+   * selected state that does not exist for a reader who cannot see it: the
+   * layer takes no taps and is behind the glyph, `aria-current` says which
+   * destination is showing, and the accessible name is the word and nothing
+   * more — no "selected", no stray text from a pseudo-element.
+   */
+  test('takes no taps, sits behind the glyph, and adds no words', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'players');
+    const { layers } = await bloom(page);
+    const lit = layers.find((l) => l.painted)!;
+    expect(lit.taps, 'the lift is not a target').toBe('none');
+    expect(Number.parseInt(lit.depth, 10), 'the lift is behind the glyph and the word').toBeLessThan(0);
+
+    // The tap still lands on the destination, not on the decoration over it.
+    const hit = await page.evaluate(() => {
+      const box = document.querySelector('[data-testid="tab-players"]')!.getBoundingClientRect();
+      const el = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return el?.closest('button')?.getAttribute('data-testid');
+    });
+    expect(hit).toBe('tab-players');
+    await expect(page.getByTestId('tab-players')).toHaveAccessibleName('Players');
+  });
+
+  /**
+   * The capsule is what the lift ends at.
+   *
+   * The layer is deliberately wider than the destination it belongs to — a lift
+   * in a material has no perimeter, and a layer the size of the target would
+   * have one — so at either end of the bar it reaches the pill's own edge. Two
+   * things keep that from becoming a bloom hanging off the side of a rounded
+   * capsule: the pill clips its descendants, and the layer is never asked to go
+   * further than the pill's own padding in the first place.
+   */
+  test('reaches the pill’s inner edge and stops there', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'draft');
+    const { clip, pad, layers } = await bloom(page);
+    expect(clip, 'the capsule clips what is drawn inside it').toBe('hidden');
+
+    const lit = layers.find((l) => l.painted)!;
+    for (const side of lit.inset) {
+      expect(side, 'the lift stops at the pill’s own padding, on every side').toBe(-pad);
+    }
+
+    // …and that really is inside the bar, measured rather than assumed.
+    const contained = await page.evaluate(() => {
+      const bar = document.querySelector('.tabbar')!;
+      const box = bar.getBoundingClientRect();
+      const border = Number.parseFloat(getComputedStyle(bar).borderLeftWidth);
+      const pad = Number.parseFloat(getComputedStyle(bar).paddingLeft);
+      const tab = bar.querySelector('button[aria-current="page"]')!.getBoundingClientRect();
+      return {
+        overshootLeft: +(box.left + border - (tab.left - pad)).toFixed(2),
+        overshootRight: +(tab.right + pad - (box.right - border)).toFixed(2),
+        overshootTop: +(box.top + border - (tab.top - pad)).toFixed(2),
+      };
+    });
+    expect(contained.overshootLeft).toBeLessThanOrEqual(0.5);
+    expect(contained.overshootRight).toBeLessThanOrEqual(0.5);
+    expect(contained.overshootTop).toBeLessThanOrEqual(0.5);
+  });
+
+  /**
+   * Visible, in both themes, and free.
+   *
+   * "Subtle" and "invisible" are one tuning pass apart, and a wash that reads on
+   * a laptop can vanish on a phone — so rather than asserting a colour, this
+   * turns the lift off and asks the browser whether the bar it drew was a
+   * different bar. Light and Dark are checked separately because they are
+   * tuned separately: the same alpha that is restrained on a near-white pill is
+   * nothing at all on a near-black one.
+   *
+   * The same two captures answer the other half of it. The bar's box is
+   * measured with the lift on and off, and it is the same box — the layer is
+   * out of flow and behind everything, so it can no more move a destination
+   * than the shadow under the pill can.
+   */
+  for (const theme of ['light', 'dark'] as const) {
+    test(`is visible in ${theme} and costs the bar no layout`, async ({ page }) => {
+      await page.goto('/');
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+      await open(page, 'team');
+      await expect(page.getByTestId('tab-team')).toHaveAttribute('aria-current', 'page');
+
+      const shot = async () => {
+        const box = (await page.locator('.tabbar').boundingBox())!;
+        return {
+          box: { w: Math.round(box.width), h: Math.round(box.height), x: Math.round(box.x), y: Math.round(box.y) },
+          png: await page.screenshot({
+            clip: { x: box.x, y: box.y, width: box.width, height: box.height },
+          }),
+        };
+      };
+
+      const lifted = await shot();
+      // The one property under test, removed and nothing else touched.
+      await page.addStyleTag({ content: `.tabbar button[aria-current='page']::before { background: none }` });
+      await page.waitForTimeout(150);
+      const flat = await shot();
+
+      expect(lifted.png.equals(flat.png), `the ${theme} bloom draws nothing`).toBe(false);
+      expect(flat.box, 'the lift moved the bar').toEqual(lifted.box);
+      await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+    });
+  }
+
+  /**
+   * The selected word is heavier, and it still fits.
+   *
+   * The label is asked for at 680 rather than 600 when its destination is the
+   * one showing, so the selection is carried by weight as well as by colour.
+   * That is the one thing in the selected state that a longer word could
+   * quietly break: the destination is a fixed `--tab-w` and the label does not
+   * wrap, so a word that outgrows its column does not reflow the bar — it runs
+   * under the destination beside it, which no layout assertion would catch.
+   *
+   * Measured at whatever width the project is running, which is the point of
+   * running the suite at four of them, and with every destination taking its
+   * turn at being the selected one.
+   */
+  test('draws the selected label heavier without outgrowing its destination', async ({ page }) => {
+    await page.goto('/');
+    for (const tab of DESTINATIONS) {
+      await open(page, tab);
+      const row = await page.evaluate(() =>
+        [...document.querySelectorAll('.tabbar button')].map((b) => {
+          const label = [...b.childNodes].find((n) => n.nodeType === Node.TEXT_NODE)!;
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          return {
+            id: (b as HTMLElement).dataset.testid,
+            current: b.getAttribute('aria-current') === 'page',
+            weight: Number.parseInt(getComputedStyle(b).fontWeight, 10),
+            stroke: Number.parseFloat(getComputedStyle(b.querySelector('svg')!).strokeWidth),
+            colour: getComputedStyle(b).color,
+            slack: +(b.getBoundingClientRect().width - range.getBoundingClientRect().width).toFixed(2),
+          };
+        }),
+      );
+      const lit = row.find((r) => r.current)!;
+      const resting = row.find((r) => !r.current)!;
+      expect(lit.weight, `${tab}: the selected word is no heavier than the rest`).toBeGreaterThan(resting.weight);
+      expect(lit.stroke, `${tab}: the selected glyph is no heavier than the rest`).toBeGreaterThan(resting.stroke);
+      expect(lit.colour, `${tab}: the selected destination is the same colour as the rest`).not.toBe(resting.colour);
+      for (const r of row) {
+        expect(r.slack, `${r.id} has ${r.slack}px of room for its label`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  /**
+   * Focus is still visible, and it is inside the capsule.
+   *
+   * The pill clips its descendants so the bloom cannot escape it, and a clip
+   * does not know a decoration from a focus ring — outside the destination the
+   * ring would be nipped at the two ends of the bar, and at the narrow
+   * seven-destination width there is only 3px of pill for a 3px ring to live
+   * in. So the ring is drawn inside the destination instead: same token, same
+   * weight, same colour, and on screen at every width.
+   */
+  test('keeps a visible focus ring inside the clipped capsule', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('.tabbar').waitFor({ state: 'attached' });
+    const first = page.getByTestId(`tab-${DESTINATIONS[0]}`);
+    const before = await first.screenshot();
+    /*
+     * `:focus-visible` is about how focus arrived, not that it did — a button
+     * focused after a tap does not draw a ring, and should not. One keystroke
+     * makes the keyboard the way the reader is working; the destination is then
+     * focused directly rather than tabbed to, because how many stops there are
+     * between the top of the page and the bar is a fact about the screen that
+     * happens to be showing.
+     */
+    await page.keyboard.press('Tab');
+    await first.evaluate((b: HTMLElement) => b.focus());
+    expect(await first.evaluate((b) => b.matches(':focus-visible')), 'the ring never came up').toBe(true);
+    const ring = await first.evaluate((b) => getComputedStyle(b).boxShadow);
+    expect(ring, 'focus is not suppressed').not.toBe('none');
+    expect(ring, 'the ring is drawn inside, where the capsule cannot clip it').toContain('inset');
+    expect((await first.screenshot()).equals(before), 'focus draws nothing').toBe(false);
+  });
+});
+
 test.describe('shape and reach', () => {
   test('is a compact floating pill, not a full-width band', async ({ page }) => {
     await page.goto('/');
@@ -735,65 +969,114 @@ test.describe('Matchup, once the draft is finished', () => {
   });
 
   /**
-   * The `VS` stays inside its ring, at both weights.
+   * The glyph is a drawing, not a word in a ring.
    *
-   * Matchup is the one glyph in the bar drawn as a mark *inside* another mark,
-   * and selecting a tab redraws all of them at `stroke-width: 2.15`. That is
-   * where this can fail without anybody editing the icon: the ring thickens
-   * inwards and the letters thicken outwards in the same moment, so a pair with
-   * comfortable air at rest can close the gap on both sides the instant the tab
-   * is tapped, and the `VS` becomes a blot in a circle.
+   * Matchup used to be `VS` inside a circle, and it was the only mark in the
+   * bar that was either of those things: the other seven are open outlines, and
+   * a coin with a wordmark stamped on it reads as a badge dropped into the row.
+   * It is now two brackets facing each other across a centre line.
    *
-   * Read off the rendered boxes rather than off the path data, because what
-   * matters is where the ink lands after the group's scale, the viewBox and the
-   * bar's 22px have all been applied — none of which the numbers in the file
-   * mention. Asserted at whatever width the project is running.
+   * What is asserted is what would bring the coin back — text of any kind, a
+   * closed ring, a fill — plus the name, because a glyph swap is exactly the
+   * change that quietly takes an accessible name with it.
    */
-  test('draws the VS clear of its ring whether the tab is selected or not', async ({ page }) => {
+  test('carries no letters and no ring, and is still called Matchup', async ({ page }) => {
     await postDraft(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
 
-    const clearance = async () =>
-      page.getByTestId('tab-matchup').evaluate((tab) => {
-        const svg = tab.querySelector('svg')!;
-        const ring = svg.querySelector('circle')!;
-        const letters = svg.querySelector('g')!;
-        const box = ring.getBoundingClientRect();
-        const geometry = letters.getBoundingClientRect();
+    const glyph = await page.getByTestId('tab-matchup').evaluate((tab) => {
+      const svg = tab.querySelector('svg')!;
+      const marks = [...svg.querySelectorAll('*')];
+      return {
+        tags: marks.map((m) => m.tagName.toLowerCase()),
+        text: (svg.textContent ?? '').trim(),
+        fills: marks.map((m) => getComputedStyle(m).fill),
+        caps: marks.map((m) => getComputedStyle(m).strokeLinecap),
+        joins: marks.map((m) => getComputedStyle(m).strokeLinejoin),
+        hidden: tab.querySelector('.tab-glyph')!.getAttribute('aria-hidden'),
+      };
+    });
+    expect(glyph.tags, 'the Matchup glyph is three open strokes').toEqual(['path', 'path', 'path']);
+    expect(glyph.text, 'no wordmark survives in the glyph').toBe('');
+    for (const fill of glyph.fills) expect(fill, 'the family is drawn, never filled').toBe('none');
+    for (const cap of glyph.caps) expect(cap).toBe('round');
+    for (const join of glyph.joins) expect(join).toBe('round');
+    expect(glyph.hidden, 'the glyph is decoration; the word beside it is the name').toBe('true');
 
-        /*
-         * Both rects are the *geometry*, without the stroke — so the ink is
-         * half a stroke either side of each of them, and the letters carry a
-         * different half from the ring: they are inside a scaled group, and a
-         * scale divides the stroke along with everything else. Read both
-         * scales off the rendered matrices rather than the file, so the check
-         * measures what the browser drew and not what the source intended.
-         */
-        const declared = Number.parseFloat(getComputedStyle(svg).strokeWidth);
-        const ringStroke = declared * svg.getScreenCTM()!.a;
-        const letterStroke = declared * letters.getScreenCTM()!.a;
+    // …and no `VS` anywhere in the bar, glyph or otherwise.
+    const bar = await page.locator('.tabbar').innerText();
+    expect(bar).not.toContain('VS');
+    await expect(page.getByTestId('tab-matchup')).toHaveAccessibleName(/Matchup/);
+  });
 
-        const inner = box.width / 2 - ringStroke / 2;
-        const cx = box.x + box.width / 2;
-        const cy = box.y + box.height / 2;
-        const reach = Math.hypot(
-          Math.max(Math.abs(geometry.x - cx), Math.abs(geometry.right - cx)) + letterStroke / 2,
-          Math.max(Math.abs(geometry.y - cy), Math.abs(geometry.bottom - cy)) + letterStroke / 2,
-        );
-        return { stroke: +ringStroke.toFixed(2), gap: +(inner - reach).toFixed(2) };
+  /**
+   * It belongs beside its neighbours, at both weights.
+   *
+   * The failure this catches is a glyph that is correct in a design file and
+   * wrong in the row: a mark that is visibly smaller than the ones either side
+   * of it looks like a mistake, and one that is visibly larger looks like an
+   * advertisement. So the footprint is measured against the family rather than
+   * against a number — the rendered ink of Matchup, against the rendered ink of
+   * Team and Waivers, at whatever width the project is running.
+   *
+   * Both weights, because selecting a tab redraws every glyph in the bar at
+   * `stroke-width: 2.15`, and the heavier drawing is the one that can close a
+   * gap the resting one had. Here that gap is the air either side of the centre
+   * line, which is what stops three vertical strokes reading as one blot.
+   */
+  test('sits in the family’s box, and keeps its centre clear when selected', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    /** The glyph's ink: its geometry, grown by half a stroke on every side. */
+    const ink = (tab: string) =>
+      page.getByTestId(`tab-${tab}`).evaluate((el) => {
+        const svg = el.querySelector('svg')!;
+        const stroke = Number.parseFloat(getComputedStyle(svg).strokeWidth) * svg.getScreenCTM()!.a;
+        const box = svg.getBBox();
+        const scale = svg.getScreenCTM()!.a;
+        return { width: box.width * scale + stroke, height: box.height * scale + stroke, stroke };
+      });
+
+    const rest = await ink('matchup');
+    const team = await ink('team');
+    const waivers = await ink('waivers');
+    const family = [team, waivers];
+    const widest = Math.max(...family.map((f) => f.width));
+    const tallest = Math.max(...family.map((f) => f.height));
+    expect(rest.width, `Matchup is ${rest.width.toFixed(1)}px wide against a family of ${widest.toFixed(1)}`).
+      toBeLessThanOrEqual(widest + 0.5);
+    expect(rest.width).toBeGreaterThan(widest * 0.8);
+    expect(rest.height, 'Matchup is taller than anything beside it').toBeLessThanOrEqual(tallest + 0.5);
+
+    /*
+     * The air around the centre line, read off the rendered boxes rather than
+     * the path data: what matters is where the ink lands after the viewBox and
+     * the bar's 22px have been applied, and neither is mentioned in the file.
+     */
+    const clearance = () =>
+      page.getByTestId('tab-matchup').evaluate((el) => {
+        const svg = el.querySelector('svg')!;
+        const [left, right, divider] = [...svg.querySelectorAll('path')];
+        const stroke = Number.parseFloat(getComputedStyle(svg).strokeWidth) * svg.getScreenCTM()!.a;
+        const gap = (a: Element, b: Element) =>
+          +(b.getBoundingClientRect().left - a.getBoundingClientRect().right - stroke).toFixed(2);
+        return { stroke: +stroke.toFixed(2), before: gap(left!, divider!), after: gap(divider!, right!) };
       });
 
     const resting = await clearance();
-    expect(resting.gap, `the resting VS clears its ring by ${resting.gap}px`).toBeGreaterThan(0.4);
+    expect(resting.before, `the divider is ${resting.before}px clear of the left bracket`).toBeGreaterThan(0.5);
+    expect(resting.after, `the divider is ${resting.after}px clear of the right bracket`).toBeGreaterThan(0.5);
 
     await page.getByTestId('tab-matchup').click();
     await expect(page.getByTestId('tab-matchup')).toHaveAttribute('aria-current', 'page');
     const selected = await clearance();
-
     // The selected glyph really is the heavier one — otherwise the check above
     // would be passing twice on the same drawing.
     expect(selected.stroke, 'selecting a tab draws it heavier').toBeGreaterThan(resting.stroke);
-    expect(selected.gap, `the selected VS clears its ring by ${selected.gap}px`).toBeGreaterThan(0.2);
+    expect(selected.before, `the selected divider clears the left bracket by ${selected.before}px`).toBeGreaterThan(0.3);
+    expect(selected.after, `the selected divider clears the right bracket by ${selected.after}px`).toBeGreaterThan(0.3);
   });
 });
