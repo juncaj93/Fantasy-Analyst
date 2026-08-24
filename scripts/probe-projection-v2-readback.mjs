@@ -231,6 +231,43 @@ if (!league) {
   }
   line();
 
+  // ---- Draft: the surface that actually produces decisions in preseason ----
+  /*
+   * The lineup and the matchup are the app's headline outputs in season and
+   * are close to empty out of it — no roster assigned, no fixture published.
+   * The Draft Room is where a preseason deployment does real work, so it is
+   * the surface a preseason read-back has to fingerprint or it is comparing
+   * two blanks and calling them equal.
+   *
+   * `DRAFT_ID` is exported by `.github/workflows/probe.yml`, which reads it
+   * from the live app rather than hardcoding one.
+   */
+  const draftId = process.env.DRAFT_ID || league.draftId || null;
+  if (!draftId) {
+    line('  draft         no draft id available, so the draft board was not fingerprinted');
+  } else {
+    const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=40`);
+    line(`  GET /api/drafts/:id/board              ${board.status}  ${board.bytes}B  ${board.ms}ms`);
+    if (board.status === 200 && board.body) {
+      const b = board.body;
+      line(`    status ${b.status}   round ${b.round}   pick ${b.currentPick}   picksMade ${b.picksMade}   mySlot ${b.mySlot ?? '—'}`);
+      line(`    adp snapshot  ${b.adpSnapshot ? `${b.adpSnapshot.label} captured ${b.adpSnapshot.capturedAt}, ${b.adpSnapshot.matched} matched` : 'none'}`);
+      const ph = b.poolHealth ?? {};
+      line(`    pool  eligible ${ph.activeEligible ?? '—'} · scored ${ph.scored ?? '—'} · returned ${ph.returned ?? '—'} · withAdp ${ph.withAdp ?? '—'}`);
+      const recs = b.recommendations ?? [];
+      line(`    recommendations: ${recs.length}`);
+      line('    #   player                        pos  team   score     adp');
+      recs.slice(0, 15).forEach((r, i) => {
+        line(
+          `    ${String(i + 1).padStart(2)}  ${String(r.name ?? r.playerId).padEnd(28)}  ${String(r.position ?? '—').padEnd(3)}  ` +
+            `${String(r.team ?? '—').padEnd(4)}  ${fixed(r.score).padStart(7)}  ${fixed(r.adp, 1).padStart(6)}`,
+        );
+      });
+      line(`    warnings: ${(b.warnings ?? []).join(' | ') || 'none'}`);
+    }
+  }
+  line();
+
   // ---- The rankings, as orderings ----
   for (const [label, path, pick] of [
     ['waivers', `/api/leagues/${league.id}/waivers`, (b) => b?.candidates ?? b?.waivers ?? b?.rows ?? []],
@@ -254,7 +291,10 @@ line('input freshness, so a moved number can be attributed');
 rule();
 for (const [label, path, pick] of [
   ['vegas', '/api/vegas/status', (b) => `${b?.provider ?? '—'} · fetched ${b?.fetchedAt ?? b?.freshness?.fetchedAt ?? '—'} · events ${b?.events ?? '—'}`],
-  ['setup', '/api/setup/status', (b) => `season ${b?.season ?? '—'} · week ${b?.week ?? b?.nflState?.week ?? '—'}`],
+  ['setup', '/api/setup/status', (b) =>
+    `season ${b?.league?.season ?? b?.season ?? '—'}` +
+    ` · week ${b?.nflState?.week ?? b?.state?.week ?? b?.week ?? '—'}` +
+    ` · draft ${b?.league?.draftId ?? '—'}`],
   ['rollover', '/api/diagnostics/rollover', (b) => `ready ${b?.ready ?? '—'}`],
 ]) {
   const res = await get(path);
