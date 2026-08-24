@@ -52,6 +52,23 @@ export class SleeperClient {
     this.retries = opts.retries ?? 2;
   }
 
+  /**
+   * The same client, with its transport wrapped.
+   *
+   * The one supported way to observe or gate this client's traffic. It exists
+   * for the request budget (`core/sleeper/budget.ts`), which has to count what
+   * actually goes out rather than what was asked for — a call retried twice is
+   * three subrequests against Cloudflare's free-plan ceiling, and a counter
+   * that sits above `get` would report one.
+   *
+   * Returns a new client rather than mutating this one, so a caller holding the
+   * shared unmetered client keeps it. `wrap` receives the transport in force
+   * here, which means wrappers compose.
+   */
+  withFetch(wrap: (inner: FetchLike) => FetchLike): SleeperClient {
+    return new SleeperClient({ fetch: wrap(this.fetchImpl), baseUrl: this.baseUrl, retries: this.retries });
+  }
+
   private async get<T>(path: string): Promise<T | null> {
     const url = `${this.baseUrl}${path}`;
     let lastError: unknown;
