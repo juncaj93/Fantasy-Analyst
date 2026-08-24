@@ -1,6 +1,16 @@
 /** Typed API client. All calls are same-origin and credentialed. */
 
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
+/*
+ * The rule about what a response has to be before it is parsed.
+ *
+ * It lives next door rather than here because it is the one part of this file
+ * that is about the wire rather than about this app's endpoints, and because it
+ * is the part that has to be provable on its own — see tests/api.errors.test.ts
+ * for the answers it is written against, all of which arrived on a real phone
+ * in one form or another.
+ */
+import { ApiError, networkFailure, readJson } from './apiResponse.ts';
 import { demoSession } from './demo/session.ts';
 import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts';
 /*
@@ -15,15 +25,13 @@ import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts'
  */
 import { currentWorld } from './world.ts';
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+/*
+ * Re-exported so that `import { ApiError } from './api.ts'` keeps meaning what
+ * it has always meant. The class itself moved to `apiResponse.ts` when it grew
+ * the fields that say *what kind* of failure it is.
+ */
+export { ApiError } from './apiResponse.ts';
+export type { ApiFailure, FailureKind, ResponseKind } from './apiResponse.ts';
 
 /**
  * The one seam Demo Mode substitutes at.
@@ -39,28 +47,40 @@ export class ApiError extends Error {
  * that never came through here at all.
  */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = init.method ?? 'GET';
   const session = demoSession();
   if (session) {
-    const res = await session.runtime.request(init.method ?? 'GET', path, parseBody(init.body));
+    const res = await session.runtime.request(method, path, parseBody(init.body));
     if (res.status >= 400) {
       const message = (res.body as { error?: string } | null)?.error ?? `request failed (${res.status})`;
-      throw new ApiError(message, res.status);
+      /*
+       * The demo runtime answers in objects, not in responses, so there is no
+       * body to misread and nothing here can be handed markup. It is still
+       * given the same shape of error as the network path — a refusal from a
+       * rehearsal has to look to a screen exactly like a refusal from the
+       * server, or the rehearsal is not rehearsing the thing.
+       */
+      throw new ApiError(message, res.status, { method, endpoint: path, kind: 'json' });
     }
     return res.body as T;
   }
 
-  const res = await fetch(path, {
-    credentials: 'same-origin',
-    headers: init.body ? { 'content-type': 'application/json' } : undefined,
-    ...init,
-  });
-  const text = await res.text();
-  const body = text ? (JSON.parse(text) as unknown) : null;
-  if (!res.ok) {
-    const message = (body as { error?: string } | null)?.error ?? `request failed (${res.status})`;
-    throw new ApiError(message, res.status);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: 'same-origin',
+      headers: init.body ? { 'content-type': 'application/json' } : undefined,
+      ...init,
+    });
+  } catch (cause) {
+    /*
+     * Nothing arrived. Normalised here so that "the request failed" is one kind
+     * of thing to a caller whether the failure was a dropped connection or a
+     * page where a payload should have been.
+     */
+    throw networkFailure(method, path, cause);
   }
-  return body as T;
+  return readJson<T>(res, method, path);
 }
 
 function parseBody(body: BodyInit | null | undefined): unknown {

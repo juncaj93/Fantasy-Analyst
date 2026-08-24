@@ -81,7 +81,31 @@ export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
-      return app(request, toAppEnv(env));
+      /*
+       * The last thing standing between an `/api/` request and a page.
+       *
+       * Anything that escapes a Worker's `fetch` is answered by Cloudflare
+       * with an HTML error page — `Error 1101`, `text/html`, status 500 — and
+       * a client that asked this path for JSON is then holding markup. That is
+       * the shape of the defect this guard closes, and it is worth having even
+       * though the router below now catches its own handlers and middleware:
+       * this catches what the router cannot, which is anything thrown while
+       * building the environment, resolving a binding, or inside the router
+       * itself.
+       *
+       * The message is the error's own, because every caller of this API is
+       * this app and there is nothing here a stranger could not already get by
+       * reading the source. What is *not* included is anything from `env`.
+       */
+      try {
+        return await app(request, toAppEnv(env));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
     }
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('static assets are not configured', { status: 404 });
