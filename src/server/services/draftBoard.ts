@@ -15,6 +15,8 @@
 import { buildDraftBoard, type DraftBoardSources } from '../../core/draft/boardBuilder.ts';
 import { InjuryService } from './injuryService.ts';
 import { RepairService } from './repairService.ts';
+import { ManagerProfileRepo } from '../repos/managerProfiles.ts';
+import type { ManagerTendencies } from '../../core/managers/managerTendencies.ts';
 import { seasonFor } from './seasonMarketService.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
@@ -107,6 +109,21 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
       return snapshot
         ? { provider: snapshot.provider, season: snapshot.season, fetchedAt: snapshot.fetchedAt }
         : null;
+    },
+    /*
+     * Historical tendencies, straight from the profile cache.
+     *
+     * A read, never a sync: the previous-league chain costs several seasons of
+     * Sleeper requests and is refreshed on its own weekly cadence by
+     * `LeagueStrategyService`. A board that triggered that work would turn a
+     * three-second draft poll into a multi-second one. Nothing cached yet means
+     * an empty map, which the board reads as "no history" and not as an error.
+     */
+    managerTendencies: async (leagueId) => {
+      const cached = await new ManagerProfileRepo(db).tendencyProfiles(leagueId);
+      const out = new Map<number, ManagerTendencies>();
+      for (const [rosterId, entry] of cached) out.set(rosterId, entry.profile);
+      return out;
     },
     repairStatus: () => new RepairService(db).status(),
     injuryStates: (list) => new InjuryService(db).statesFor(list),

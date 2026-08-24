@@ -263,6 +263,15 @@ export interface AvailablePlayerInput {
    * `note` carries the drivers behind the number, and is appended to the
    * component's own sentence rather than replacing it.
    */
+  /**
+   * The simulated survival number, for the two components that read one.
+   *
+   * This is a *ranking* input and nothing else. Whatever is handed in reaches
+   * `Score` twice — once through the `survivalUrgency` component and once
+   * through the separation and cost-of-waiting pass over the composite — so a
+   * caller with a display-only adjustment must not put it here. See
+   * `boardBuilder.survivalFor`, which is the one caller that has such a thing.
+   */
   nextPickSurvival?: { probability: number | null; note: string };
 }
 

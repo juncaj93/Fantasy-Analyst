@@ -30,12 +30,37 @@ export interface HistoricalPick {
   draftId: string;
   pickNo: number;
   round: number;
+  /**
+   * The Sleeper user id that made the pick — `picked_by` on the raw pick.
+   *
+   * The only identity that survives a season boundary, and the one every
+   * cross-season read must key on. See `rosterId` for why.
+   */
+  userId: string | null;
+  /**
+   * That season's roster id. A label, **never an identity.**
+   *
+   * Roster ids are reused. In the league this was built against, roster 4 was
+   * Anthonyberardo in 2024, Tupaz11 in 2025 and a manager who had never drafted
+   * here at all in 2026 — so grouping history by roster id would have given a
+   * newcomer a confident profile built from two strangers. Kept because it is
+   * how a profile is filed against the *current* league table, and for nothing
+   * else.
+   */
   rosterId: number | null;
   position: string | null;
   /**
-   * The player's market rank at the time, when it is known. Absent for old
-   * drafts, and absent is a limit rather than a zero — a reach cannot be
-   * measured without a market to reach past.
+   * The player's market rank at the time, when it is known.
+   *
+   * Null in practice for every Sleeper draft: `GET /draft/<id>/picks` returns a
+   * player snapshot (name, team, position, years_exp, injury status) and **no
+   * price of any kind** — no ADP, no rank, no `search_rank`. Verified against
+   * 320 real historical picks by `scripts/probe-sleeper-draft-history.mjs`.
+   *
+   * Absent is a limit rather than a zero, and specifically it must not be
+   * filled in from *today's* market: a 2024 pick measured against a 2026 ADP
+   * would report two years of player movement as a manager's habit. Anything
+   * that reads this must treat null as "unavailable" and say so.
    */
   marketRank?: number | null;
   /** Years of NFL experience at draft time; 0 is a rookie. */
@@ -68,6 +93,17 @@ export interface DraftProfile {
    * Null when no draft in the sample carried market ranks.
    */
   reachTendency: number | null;
+  /**
+   * Why `reachTendency` is null, when it is.
+   *
+   * Stated rather than left to inference, because "null" and "no market to
+   * measure against" look the same from the outside and only one of them is a
+   * standing property of the data source. Sleeper publishes no price with a
+   * historical pick, so `no-historical-market` is the answer for every league
+   * whose history comes from Sleeper alone — and a reader that sees it must not
+   * go looking for a substitute in today's ADP.
+   */
+  reachAvailability: 'measured' | 'no-historical-market' | 'insufficient-sample';
   /** Rookies as a share of picks in the first five rounds. Null when unknown. */
   rookieRate: number | null;
   /** Positive means RB-leaning, negative WR-leaning, in the first five rounds. */
@@ -103,6 +139,7 @@ export function buildRoomProfile(picks: HistoricalPick[], opts: { minSample?: nu
     confident,
     timing: confident ? ['QB', 'TE'].map((pos) => roomTiming(picks, pos)) : [],
     reachTendency: confident ? reachTendency(picks) : null,
+    reachAvailability: reachAvailability(picks, confident),
     rookieRate: confident ? rookieRate(picks) : null,
     rbWrBias: confident ? rbWrBias(picks) : null,
     runFollowing: confident ? runFollowing(picks) : null,
@@ -114,15 +151,27 @@ export function buildRoomProfile(picks: HistoricalPick[], opts: { minSample?: nu
   return profile;
 }
 
-/** One manager's own habits, measured against the room he sits in. */
+/**
+ * One manager's own habits, measured against the room he sits in.
+ *
+ * `userId` is what selects his picks; `rosterId` only says which row of the
+ * current league table the answer is filed under. Passing a roster id and no
+ * user id used to be the same thing and is not: see `HistoricalPick.rosterId`
+ * for the league where that produced a thirty-two-pick profile for a manager
+ * who had never drafted. Without a user id nothing is selected, because the
+ * honest answer for an unidentifiable manager is "no history", not "somebody
+ * else's".
+ */
 export function buildManagerDraftProfile(opts: {
   rosterId: number;
+  /** Sleeper user id. Absent means this manager cannot be matched to history. */
+  userId?: string | null;
   ownerName?: string | null;
   picks: HistoricalPick[];
   minPicks?: number;
 }): DraftProfile {
   const minPicks = opts.minPicks ?? MIN_MANAGER_PICKS;
-  const mine = opts.picks.filter((p) => p.rosterId === opts.rosterId);
+  const mine = opts.userId ? opts.picks.filter((p) => p.userId === opts.userId) : [];
   const drafts = new Set(mine.map((p) => p.draftId));
   const seasons = [...new Set(mine.map((p) => p.season))].sort();
   const confident = mine.length >= minPicks;
@@ -153,6 +202,7 @@ export function buildManagerDraftProfile(opts: {
         })
       : [],
     reachTendency: confident ? reachTendency(mine) : null,
+    reachAvailability: reachAvailability(mine, confident),
     rookieRate: confident ? rookieRate(mine) : null,
     rbWrBias: confident ? rbWrBias(mine) : null,
     /*
@@ -204,6 +254,25 @@ function reachTendency(picks: HistoricalPick[]): number | null {
     .filter((p) => p.marketRank != null && Number.isFinite(p.marketRank))
     .map((p) => (p.marketRank as number) - p.pickNo);
   return deltas.length >= 10 ? median(deltas) : null;
+}
+
+/**
+ * Why a reach number is or is not on offer.
+ *
+ * Separated from `reachTendency` so that "we did not measure this" and "we
+ * cannot measure this" stop being the same null. The distinction is the whole
+ * of the integrity rule: an insufficient sample may become sufficient next
+ * season, whereas a source that publishes no contemporaneous price will never
+ * start having published one, and no amount of current ADP fixes it.
+ */
+function reachAvailability(
+  picks: HistoricalPick[],
+  confident: boolean,
+): DraftProfile['reachAvailability'] {
+  const priced = picks.filter((p) => p.marketRank != null && Number.isFinite(p.marketRank));
+  if (priced.length === 0) return 'no-historical-market';
+  if (!confident || priced.length < 10) return 'insufficient-sample';
+  return 'measured';
 }
 
 function rookieRate(picks: HistoricalPick[]): number | null {
