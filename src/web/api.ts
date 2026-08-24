@@ -1525,8 +1525,10 @@ export type {
   SideOutcome,
 } from '../core/trades/bilateral.ts';
 export type { ActivityClass, ManagerFit } from '../core/trades/managerFit.ts';
+export type { TradeCapability } from '../core/trades/capability.ts';
 
 import type { OfferEvaluation } from '../core/trades/bilateral.ts';
+import type { TradeCapability } from '../core/trades/capability.ts';
 
 export interface SmartTradeBoard {
   league: { id: string; name: string } | null;
@@ -1542,7 +1544,11 @@ export interface SmartTradeBoard {
     surfaced: number;
     bounds: Record<string, number>;
   };
+  /** Whether this league can trade at all. Best ball and disable_trades block. */
+  capability: TradeCapability;
   history: {
+    /** False only when no league was resolved — the counts mean nothing then. */
+    measured: boolean;
     profiles: number;
     seasonsComplete: string[];
     complete: boolean;

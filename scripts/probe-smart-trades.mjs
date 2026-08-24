@@ -146,11 +146,30 @@ async function main() {
   line('request latency', `${latency}ms`);
   line('added Sleeper requests', sleeperBefore == null || sleeperAfter == null ? '(unknown)' : sleeperAfter - sleeperBefore);
 
+  console.log('\n--- league trade capability ---');
+  line('can this league trade', b.capability?.tradeable === false ? `no — ${b.capability.basis}` : 'yes');
+  if (b.capability?.reason) line('reason', b.capability.reason);
+
   console.log('\n--- manager history available ---');
-  line('trade profiles stored', unknown(b.history?.profiles));
-  line('seasons fully read', (b.history?.seasonsComplete ?? []).join(', ') || '(none)');
-  line('history complete', String(b.history?.complete));
-  line("league's own trade rate", unknown(b.history?.leagueRate));
+  /*
+   * Whether the ledger was read at all, before anything read out of it.
+   *
+   * This line exists because its absence produced a false report: the board
+   * used to return a hardcoded `profiles: 0` from five paths that exit before
+   * opening the ledger, and this probe printed it for a production league
+   * holding eight profiles. An unmeasured value printed as a measurement is the
+   * one thing this probe must never do, so the flag is printed first and the
+   * counts are suppressed when it is false.
+   */
+  if (b.history?.measured === false) {
+    line('ledger read', 'no — nothing below was measured');
+  } else {
+    line('ledger read', 'yes');
+    line('trade profiles stored', unknown(b.history?.profiles));
+    line('seasons fully read', (b.history?.seasonsComplete ?? []).join(', ') || '(none)');
+    line('history complete', String(b.history?.complete));
+    line("league's own trade rate", unknown(b.history?.leagueRate));
+  }
 
   console.log('\n--- the offers ---');
   if ((b.offers ?? []).length === 0) {
@@ -189,6 +208,22 @@ async function main() {
     line('without manager fit', effect.withoutFit.join(' > '));
   }
 
+  /*
+   * Every league this deployment knows, and whether Smart Trades will speak for
+   * it.
+   *
+   * Here because a format gate is only worth having if somebody checks it
+   * against a real league of that format, and finding one meant knowing an id
+   * nobody has to hand. The sweep answers "which of my leagues can trade" from
+   * the deployment's own list, which is the question the gate exists to answer.
+   *
+   * Bounded and read-only. A league that cannot trade exits at the gate before
+   * any roster is priced, and a pre-draft one exits at the roster check, so the
+   * only league this does real work for is one that is drafted and tradeable —
+   * which is the one worth measuring.
+   */
+  await sweepLeagues();
+
   console.log('\n--- sanity review (§24) ---');
   const findings = reviewFindings(b);
   if (findings.length === 0) {
@@ -217,6 +252,42 @@ async function main() {
 
   console.log('');
   process.exit(findings.length === 0 ? 0 : 1);
+}
+
+/** How many leagues the sweep will price before it stops and says so. */
+const SWEEP_LIMIT = 8;
+
+async function sweepLeagues() {
+  console.log('\n--- every league, and whether it can trade ---');
+  const list = await get('/api/leagues');
+  const leagues = list.body?.leagues ?? [];
+  if (list.status !== 200 || leagues.length === 0) {
+    console.log(`  could not list leagues (HTTP ${list.status})`);
+    return;
+  }
+
+  for (const league of leagues.slice(0, SWEEP_LIMIT)) {
+    const board = await get(`/api/trades/smart?leagueId=${encodeURIComponent(league.id)}`);
+    if (board.status !== 200) {
+      line(league.name, `HTTP ${board.status}`);
+      continue;
+    }
+    const b = board.body;
+    const verdict = b.capability?.tradeable === false
+      ? `no — ${b.capability.basis}`
+      : `yes · ${b.search?.surfaced ?? 0} offer(s)`;
+    line(league.name, verdict);
+    /*
+     * The note, for a league with nothing to show. It is the whole point of the
+     * gate that these read differently: a format reason is permanent and a
+     * pre-draft one is not.
+     */
+    if ((b.offers ?? []).length === 0 && b.notes?.[0]) console.log(`      ${b.notes[0]}`);
+  }
+
+  if (leagues.length > SWEEP_LIMIT) {
+    console.log(`  ${leagues.length - SWEEP_LIMIT} further league(s) not priced (sweep is capped at ${SWEEP_LIMIT})`);
+  }
 }
 
 /** Every Sleeper request this deployment has recorded, across all checkpoints. */

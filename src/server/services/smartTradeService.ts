@@ -36,6 +36,7 @@ import {
   type TradePartnerView,
 } from '../../core/trades/bilateral.ts';
 import type { ManagerFitInput } from '../../core/trades/managerFit.ts';
+import { TRADEABLE, tradeCapabilityOf, type TradeCapability } from '../../core/trades/capability.ts';
 import type { ManagerTradeTendencies, LeagueTradeBaseline } from '../../core/managers/tradeTendencies.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
 import { LeagueRepo } from '../repos/league.ts';
@@ -56,8 +57,26 @@ export interface SmartTradeBoard {
     surfaced: number;
     bounds: TradeBounds;
   };
+  /** Whether this league can trade at all, and why not when it cannot. */
+  capability: TradeCapability;
   /** How much manager history was available, and how complete it is. */
   history: {
+    /**
+     * Whether the ledger was actually read.
+     *
+     * The field that stops this block lying. Every count below is meaningless
+     * when this is false, and it is false in exactly one case: no league was
+     * resolved, so there was nothing to read history *for*. Anything else has
+     * looked, and `profiles: 0` then means the league genuinely has none.
+     *
+     * This exists because it was once absent and the block was wrong. Five
+     * early-exit paths returned a hardcoded `profiles: 0` before the ledger was
+     * opened, and the production probe duly reported "trade profiles stored: 0"
+     * for a league holding eight of them — an unmeasured value printed as a
+     * measurement, which is the exact failure this whole feature is built to
+     * avoid, committed by its own diagnostics.
+     */
+    measured: boolean;
     /** Managers in this league with a stored trade profile. */
     profiles: number;
     /** Seasons whose transaction history is finished. */
@@ -114,20 +133,82 @@ export class SmartTradeService {
       : await this.leagues.getSelectedLeague();
 
     if (!league) {
-      return empty(null, ['No league is selected, so there is nobody to trade with.']);
+      /*
+       * The one genuinely unmeasured case, and the only one that may say so.
+       *
+       * With no league there is nothing to read history *for*, so the counts are
+       * absent rather than zero. Every exit below has a league and therefore
+       * reads the ledger before answering.
+       */
+      return empty(null, ['No league is selected, so there is nobody to trade with.'], {
+        capability: TRADEABLE,
+        warnings,
+      });
+    }
+
+    const named = { id: league.id, name: league.name };
+
+    /*
+     * What the ledger actually holds, read once, before any exit that could
+     * report on it.
+     *
+     * Deliberately ahead of the roster checks even though a pre-draft league
+     * will not use the profiles: the board's history block is a *diagnostic*,
+     * and a diagnostic that is only populated on the happy path is one that
+     * says nothing in exactly the situations somebody is investigating. Four
+     * indexed reads.
+     */
+    const history = await this.history(league.id).catch((err) => {
+      warnings.push(`manager history could not be read: ${String(err)}`);
+      return NO_HISTORY;
+    });
+
+    /*
+     * Can this league trade at all? The first thing *decided*, though the
+     * ledger read above happens first so that this exit can report it.
+     *
+     * A best-ball league has full rosters and no trading. Without this it would
+     * fall through to the roster checks below, find populated squads, and start
+     * pricing offers nobody in that format can send — or, before its draft,
+     * report "no other roster has any players", which is a reason that stops
+     * being true on a date and would tell a reader to come back for a feature
+     * their league will never have.
+     */
+    const capability = tradeCapabilityOf({ leagueSettings: league.leagueSettings });
+    if (!capability.tradeable) {
+      return empty(named, [capability.reason!], { capability, history, warnings });
     }
 
     const rosters = await this.leagues.listRosters(league.id);
     const mine = rosters.find((r) => r.isMine) ?? null;
     if (!mine) {
-      return empty({ id: league.id, name: league.name }, [
-        'Your own roster is not identified in this league, so there is nobody to trade on behalf of.',
-      ]);
+      return empty(
+        named,
+        ['Your own roster is not identified in this league, so there is nobody to trade on behalf of.'],
+        { capability, history, warnings },
+      );
     }
 
+    /*
+     * Pre-draft, stated as the temporary thing it is.
+     *
+     * Sleeper reports empty squads until a draft ends and becomes authoritative
+     * the moment it does, so this is the ordinary state of a league in August
+     * and it resolves itself: `SleeperSyncService.adoptCompletedDraftRosters`
+     * re-reads the rosters as soon as a draft is seen complete, and the next
+     * read of this endpoint finds them. Nothing here has to be switched on.
+     */
     const others = rosters.filter((r) => !r.isMine && r.playerIds.length > 0);
     if (others.length === 0) {
-      return empty({ id: league.id, name: league.name }, ['No other roster in this league has any players.']);
+      return empty(
+        named,
+        [
+          mine.playerIds.length === 0
+            ? 'No rosters have been drafted in this league yet — trade ideas appear once the draft is done.'
+            : 'No other roster in this league has any players yet.',
+        ],
+        { capability, history, warnings },
+      );
     }
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
@@ -149,9 +230,11 @@ export class SmartTradeService {
       return [];
     });
     if (inputs.length === 0) {
-      return empty({ id: league.id, name: league.name }, [
-        'No player data is available for these rosters yet, so no trade can be priced.',
-      ]);
+      return empty(named, ['No player data is available for these rosters yet, so no trade can be priced.'], {
+        capability,
+        history,
+        warnings,
+      });
     }
     const pool = new Map(inputs.map((i) => [i.player.id, i]));
 
@@ -163,12 +246,7 @@ export class SmartTradeService {
     });
 
     const me = views.get(String(mine.rosterId));
-    if (!me) return empty({ id: league.id, name: league.name }, ['Your roster could not be evaluated.']);
-
-    const history = await this.history(league.id).catch((err) => {
-      warnings.push(`manager history could not be read: ${String(err)}`);
-      return NO_HISTORY;
-    });
+    if (!me) return empty(named, ['Your roster could not be evaluated.'], { capability, history, warnings });
 
     const partners: { view: RosterView; partner: TradePartnerView; fit: Omit<ManagerFitInput, 'offer'> }[] = [];
     for (const roster of others) {
@@ -229,7 +307,9 @@ export class SmartTradeService {
         surfaced: report.offers.length,
         bounds: TRADE_BOUNDS,
       },
+      capability,
       history: {
+        measured: true,
         profiles: history.profiles,
         seasonsComplete: history.seasonsComplete,
         complete: history.complete,
@@ -343,19 +423,45 @@ const NO_HISTORY: HistoryContext = {
   leagueRate: null,
 };
 
-/** A board that says why there is nothing on it. Never an error. */
+/**
+ * A board that says why there is nothing on it. Never an error.
+ *
+ * `found` is what it always was. What changed is that the history block is now
+ * *passed in* rather than invented: a caller that has read the ledger reports
+ * what it found, and only the one caller that could not — no league resolved —
+ * leaves `measured: false`. The counts are zeroed there for shape, and
+ * `measured` is the field that says not to read them.
+ */
 function empty(
   league: { id: string; name: string } | null,
   notes: string[],
+  context: { capability: TradeCapability; history?: HistoryContext; warnings?: string[] },
 ): SmartTradeBoard & { rejections: BilateralReport['rejections'] } {
+  const history = context.history;
   return {
     rejections: [],
     league,
     found: false,
     offers: [],
     search: { partners: 0, generated: 0, scored: 0, viable: 0, surfaced: 0, bounds: TRADE_BOUNDS },
-    history: { profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    capability: context.capability,
+    history: {
+      measured: history != null,
+      profiles: history?.profiles ?? 0,
+      seasonsComplete: history?.seasonsComplete ?? [],
+      complete: history?.complete ?? false,
+      leagueRate: history?.leagueRate ?? null,
+    },
     notes,
-    warnings: [],
+    /*
+     * Carried, not discarded.
+     *
+     * This was `[]`, which quietly threw away anything collected before an
+     * early exit — a failed ledger read on a pre-draft league reported neither
+     * the history nor the reason it was missing. Losing the explanation for a
+     * degraded answer is the same defect as inventing a number for one, and it
+     * was sitting three lines under the fix for it.
+     */
+    warnings: context.warnings ?? [],
   };
 }

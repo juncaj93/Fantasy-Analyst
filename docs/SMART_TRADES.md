@@ -332,10 +332,74 @@ identical requests produce an identical board.
 
 ---
 
+## Activation: nothing switches this on
+
+There is no Smart Trades activation step, and that is a design decision rather
+than an omission. Two mechanisms that already existed compose into it:
+
+1. **`SleeperSyncService.adoptCompletedDraftRosters`** re-reads a league's
+   rosters the moment a draft is seen complete. It is written as a *state check*
+   — "is the draft complete and does no roster hold a player?" — rather than as
+   an edge, so a Sleeper outage during the one poll that saw the transition does
+   not strand the app: the next sync re-offers the repair.
+2. **`SmartTradeService` reads `listRosters` on every request.** It holds no
+   cache and has no enabled flag.
+
+So the sequence is:
+
+| when | what happens | who triggers it |
+| --- | --- | --- |
+| pre-draft | Sleeper reports empty squads; the board says so, naming the draft | — |
+| last pick lands | the Draft screen's poll sees `complete`, adoption re-syncs the league, `replaceRosters` writes the real squads | the draft poll |
+| next Trades read | populated rosters → offers | the reader opening Trades |
+| a trade or waiver later | `syncLeague` replaces the rows wholesale | league select / Team refresh |
+
+`replaceRosters` is a delete-and-insert, so **every** roster change — draft,
+trade, waiver, add/drop — arrives the same way. There is nothing incremental to
+keep in step and nothing to invalidate.
+
+**No new cron, no polling loop, and no read-path fetch.** Adding a sync to the
+Trades read would have been the obvious way to guarantee freshness and would
+have cost the zero-Sleeper-request property; the sync lifecycle already owns
+that job.
+
+`tests/trades.lifecycle.test.ts` drives this end to end through the sync paths
+alone — a league is synced, a draft is polled, the draft finishes, a roster
+changes — and **no Smart Trades method is called except a read of the board**.
+
+---
+
+## Formats that cannot trade
+
+Asked before anything else, because the answer is free and permanent.
+`core/trades/capability.ts`:
+
+| basis | source | effect |
+| --- | --- | --- |
+| `best_ball` | `detectBestBall` on Sleeper's own settings | hard stop |
+| `trades_disabled` | `settings.disable_trades` | hard stop |
+
+Best ball is the stronger case: there is no weekly lineup decision at all, so
+the marginal-utility model has nothing to measure — "does this player enter your
+lineup" has no answer in a format with no lineup.
+
+The distinction this exists to preserve is *why* a screen is empty. "Your draft
+has not happened yet" resolves itself on a date; "this format has no trading"
+never does, and reporting the first when the second is true tells somebody to
+come back for a feature their league will never have.
+
+**An unstated flag is not a block.** `detectBestBall` answers `confident: false`
+for a league Sleeper has described neither way, and that falls through to
+tradeable — the overwhelmingly common league carries no flag and does trade.
+
+---
+
 ## Degradation
 
 | state | behaviour |
 | --- | --- |
+| pre-draft, rosters empty | says so, naming the draft; resolves itself when the draft completes |
+| best ball / trades disabled | says so, naming the format; permanent |
 | no history derived at all | every partner `unknown`, contribution 0, offers ranked on roster fit alone |
 | profile exists, seasons unsettled | confidence halved, `uncertain`, "history is still being read" |
 | manager not in the ledger | `unknown` — never inactive |
@@ -407,6 +471,15 @@ has seen fail is a gate nobody knows the shape of.
 - **Automated WebKit does not prove real-finger gesture arbitration**, per the
   standing note in `sheet-vs-pull.spec.ts`. The sheet added here is checked the
   same way and inherits the same caveat.
+- **The trade deadline is not read.** A league past its deadline can still be
+  offered trades. `settings.trade_deadline` is a week number and the check needs
+  a clock `tradeCapabilityOf` deliberately does not take; it belongs with the
+  capability gate when it is added.
+- **Activation depends on some sync running.** A reader who opens Trades as
+  their very first action after a draft, having opened nothing else, sees the
+  pre-draft state until any sync runs. The draft poll normally beats them to it;
+  the alternative was a fetch on the read path, which costs the zero-request
+  property.
 
 ---
 
