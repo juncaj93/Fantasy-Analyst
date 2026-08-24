@@ -27,7 +27,30 @@
 import { MANAGER_FIT_CAP, orderingEffect, reviewFindings } from './lib/smartTradeReview.mjs';
 
 const URL_BASE = (process.env.URL ?? 'https://fantasy-analyst.juncaj93.workers.dev').replace(/\/$/, '');
-const SHOW_REJECTIONS = process.argv.includes('--rejections');
+
+/*
+ * Both switches are readable from the environment as well as from argv.
+ *
+ * Not a convenience. The repository's own authenticated probe runner
+ * (`.github/workflows/probe.yml`) is the supported way to reach production —
+ * §31 says to use it rather than route around a proxy that blocks the host —
+ * and it invokes `node scripts/<name>.mjs` with **no arguments**, passing its
+ * inputs as environment variables. A probe whose only switch is a flag is a
+ * probe that cannot be driven from the one place it is meant to run.
+ */
+const SHOW_REJECTIONS = process.argv.includes('--rejections') || truthy(process.env.REJECTIONS);
+
+/** Ask about a specific league rather than whichever one is selected. */
+const LEAGUE_ID = (process.env.LEAGUE_ID ?? '').trim();
+
+function truthy(value) {
+  return value != null && value !== '' && value !== '0' && value.toLowerCase?.() !== 'false';
+}
+
+/** `?leagueId=…` when one was named, and nothing when it was not. */
+function scoped(path) {
+  return LEAGUE_ID ? `${path}${path.includes('?') ? '&' : '?'}leagueId=${encodeURIComponent(LEAGUE_ID)}` : path;
+}
 
 async function get(path) {
   let res;
@@ -81,6 +104,7 @@ async function main() {
     process.exit(0);
   }
   line('league', `${setup.body.league.name} (${setup.body.league.id})`);
+  if (LEAGUE_ID) line('asked about', LEAGUE_ID);
 
   /*
    * The Sleeper request counter, read either side of a Trades page load.
@@ -88,12 +112,17 @@ async function main() {
    * `coverage` publishes `requestsUsed` per checkpoint, which is the only
    * running total this app keeps. If a Trades request were to walk Sleeper, the
    * sum would move.
+   *
+   * It is a whole-deployment total, so a cron batch landing between the two
+   * reads would show up here as a non-zero difference that Smart Trades did not
+   * cause. That is the honest failure direction — it can produce a false alarm
+   * and never a false all-clear — and the way to settle one is to read it twice.
    */
   const before = await get('/api/diagnostics/manager-intelligence');
   const sleeperBefore = sumRequests(before.body);
 
   const started = Date.now();
-  const board = await get('/api/trades/smart');
+  const board = await get(scoped('/api/trades/smart'));
   const latency = Date.now() - started;
 
   if (board.unreachable || board.status !== 200) {
@@ -170,7 +199,7 @@ async function main() {
   for (const finding of findings) console.log(`  ! ${finding}`);
 
   if (SHOW_REJECTIONS) {
-    const detail = await get('/api/diagnostics/smart-trades');
+    const detail = await get(scoped('/api/diagnostics/smart-trades'));
     console.log('\n--- why candidates died ---');
     if (detail.status !== 200) {
       console.log(`  diagnostics answered ${detail.status}: ${unknown(detail.body?.error)}`);
