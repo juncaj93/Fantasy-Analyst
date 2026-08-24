@@ -190,10 +190,45 @@ test.describe('the trade ideas', () => {
   test('shows one row per idea, above the board', async ({ page }) => {
     await expect(page.getByTestId('smart-trade-row')).toHaveCount(3);
 
-    // Above the discovery board it complements, not buried under it.
+    /*
+     * The watchlist survives, and it survives *underneath*.
+     *
+     * Asserted rather than checked conditionally, which is what this was and
+     * which was worth nothing: a board that had vanished entirely would have
+     * produced no `trade-row` to compare against and the test would have passed
+     * on the strength of the thing it was meant to catch. The ideas are new
+     * context above an existing screen, not a replacement for it.
+     */
+    const boardRows = page.getByTestId('trade-row');
+    await expect(boardRows.first()).toBeVisible();
+    expect(await boardRows.count()).toBeGreaterThan(0);
+
     const idea = (await page.getByTestId('smart-trade-row').first().boundingBox())!;
-    const firstBoardRow = await page.getByTestId('trade-row').first().boundingBox();
-    if (firstBoardRow) expect(idea.y).toBeLessThan(firstBoardRow.y);
+    const firstBoardRow = (await boardRows.first().boundingBox())!;
+    expect(idea.y).toBeLessThan(firstBoardRow.y);
+  });
+
+  test('leaves the watchlist rows exactly as it found them', async ({ page }) => {
+    /*
+     * The brief's standing constraint, checked as an outcome: nothing about
+     * which players the discovery board shows, in which section, in which order
+     * may change because bilateral offers now sit above it.
+     *
+     * Read twice — once with the offers present, once with the endpoint refused
+     * — and compared. The board is a separate request that this feature does not
+     * touch, and this is what says so.
+     */
+    const withOffers = await page.getByTestId('trade-row').allInnerTexts();
+
+    await page.route('**/api/trades/smart*', (route) => route.fulfill({ status: 500, body: 'off' }));
+    await page.goto('/');
+    await page.getByTestId('tab-trades').click();
+    await expect(page.getByTestId('trades-nav')).toBeVisible();
+    await expect(page.getByTestId('smart-trades')).toHaveCount(0);
+
+    const withoutOffers = await page.getByTestId('trade-row').allInnerTexts();
+    expect(withoutOffers).toEqual(withOffers);
+    expect(withoutOffers.length).toBeGreaterThan(0);
   });
 
   test('never scrolls sideways, however long the names are', async ({ page }) => {

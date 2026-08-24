@@ -253,34 +253,42 @@ describe('roster logic the offers must be able to name', () => {
     expect(rationales).toContain('surplus_for_need');
   });
 
-  it('offers a consolidation only to a roster deep enough to afford it', () => {
-    /*
-     * Two startable receivers for one better running back. It is a real idea for
-     * a roster with bench cover and a bad one for a roster without, and the
-     * rationale exists only in the first case.
-     */
-    const fixture = leagueOf({
-      '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 3], ['wr1', 'WR', 15], ['wr2', 'WR', 14], ['wr3', 'WR', 13], ['wr4', 'WR', 12], ['wr5', 'WR', 12], ['te1', 'TE', 9]],
-      '2': [['qb2', 'QB', 17], ['rb3', 'RB', 18], ['rb4', 'RB', 14], ['rb5', 'RB', 13], ['rb6', 'RB', 12], ['wr6', 'WR', 4], ['wr7', 'WR', 3], ['te2', 'TE', 9]],
+  /**
+   * Deep at receiver, one elite back on the other roster.
+   *
+   * The one shape that reliably produces a real 2-for-1: two of my startable
+   * receivers for their monster. Both tests below need such an offer to *exist*
+   * before they can say anything about it — an earlier pair of them filtered for
+   * one, found none, and asserted nothing at all while passing.
+   */
+  function consolidationLeague() {
+    return leagueOf({
+      '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 3], ['wr1', 'WR', 16], ['wr2', 'WR', 14], ['wr3', 'WR', 13], ['wr4', 'WR', 13], ['wr5', 'WR', 12], ['te1', 'TE', 9]],
+      '2': [['qb2', 'QB', 17], ['rb3', 'RB', 26], ['rb4', 'RB', 14], ['rb5', 'RB', 13], ['wr6', 'WR', 4], ['wr7', 'WR', 3], ['te2', 'TE', 9]],
     });
+  }
 
-    const report = run(fixture, '1', ['2']);
-    const packages = report.offers.filter((o) => o.give.length === 2);
-    for (const offer of packages) {
-      // A 2-for-1 that reaches a screen has to say what it does for them.
-      expect(offer.counterparty.rationales.length).toBeGreaterThan(0);
-    }
+  it('turns two of my receivers into their one back, and names it from both chairs', () => {
+    /*
+     * The same package is a consolidation from my side and depth-spreading from
+     * theirs, and it must be described from the chair it is being described to.
+     */
+    const report = run(consolidationLeague(), '1', ['2']);
+    const twoForOne = report.offers.find((o) => o.give.length === 2 && o.get.length === 1);
+
+    expect(twoForOne).toBeDefined();
+    expect(twoForOne!.counterparty.rationales).toContain('spreads_depth');
+    expect(twoForOne!.reasons.join(' ')).toMatch(/two starters/i);
   });
 
   it('charges a caveat when a deal costs the user startable depth', () => {
-    const fixture = leagueOf({
-      '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 3], ['wr1', 'WR', 15], ['wr2', 'WR', 14], ['wr3', 'WR', 13], ['wr4', 'WR', 13], ['te1', 'TE', 9]],
-      '2': [['qb2', 'QB', 17], ['rb3', 'RB', 18], ['rb4', 'RB', 14], ['rb5', 'RB', 13], ['wr6', 'WR', 4], ['te2', 'TE', 9]],
-    });
-
-    const report = run(fixture, '1', ['2']);
+    const report = run(consolidationLeague(), '1', ['2']);
     const costly = report.offers.find((o) => o.user.depthChange < 0);
-    if (costly) expect(costly.caveats.join(' ')).toMatch(/bench player/i);
+
+    // Asserted, not filtered for: a board with no costly offer would otherwise
+    // have made this test pass by having nothing to check.
+    expect(costly).toBeDefined();
+    expect(costly!.caveats.join(' ')).toMatch(/bench player/i);
   });
 });
 
