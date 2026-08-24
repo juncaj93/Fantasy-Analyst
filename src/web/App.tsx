@@ -110,6 +110,13 @@ export function App() {
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   /*
+   * Whether a retry of the app's own first read is in the air.
+   *
+   * Only so the control cannot be tapped four times while the first tap is
+   * still travelling; the honest state is still the banner above it.
+   */
+  const [retrying, setRetrying] = useState(false);
+  /*
    * Which world the app is looking at: `'live'`, or a demo scenario's id.
    *
    * Read here rather than inside each screen, because no screen should have to
@@ -239,7 +246,36 @@ export function App() {
         is the point: no screen knows a demo exists.
       */}
       <main className="app-main" key={world}>
-        {error ? <Notice tone="error">{error}</Notice> : null}
+        {/*
+          The app's own first read failed, and it is the one read no screen can
+          repair for itself.
+
+          Every screen owns a pull-to-refresh that re-reads what that screen is
+          showing, but the overview and the league list are read here, once, on
+          mount — so before this control existed a cold Worker on the first
+          load left a banner that nothing could clear short of closing the app.
+          That is the exact case this whole change is about: the failure is
+          transient by nature and the recovery has to be reachable.
+        */}
+        {error ? (
+          <Notice tone="error" data-testid="app-error">
+            <div>{error}</div>
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                data-testid="app-error-retry"
+                disabled={retrying}
+                onClick={() => {
+                  setRetrying(true);
+                  void Promise.all([refresh(), checkLock()]).finally(() => setRetrying(false));
+                }}
+              >
+                {retrying ? 'Trying…' : 'Try again'}
+              </button>
+            </div>
+          </Notice>
+        ) : null}
         {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
         <InstallPrompt />
         {tab === 'draft' ? <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} /> : null}

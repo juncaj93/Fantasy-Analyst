@@ -73,12 +73,26 @@ export class Router<Env> {
         },
       };
 
-      for (const mw of this.middlewares) {
-        const early = await mw(ctx);
-        if (early) return early;
-      }
-
+      /*
+       * Middleware inside the guard, not beside it.
+       *
+       * It used to run before the `try`, which meant an exception from a
+       * middleware — `verifySession` is `crypto.subtle` work and can throw —
+       * left this router entirely, left the Worker, and was answered by
+       * Cloudflare's own error page: `text/html`, status 500, on a path under
+       * `/api/`. A client that asked for JSON got markup, which is the failure
+       * this whole change exists to remove, arriving from the one source this
+       * repository owns.
+       *
+       * The rule the API keeps, stated in one place: **every answer to an
+       * `/api/` request that leaves this router is JSON**, including the ones
+       * nobody meant to send.
+       */
       try {
+        for (const mw of this.middlewares) {
+          const early = await mw(ctx);
+          if (early) return early;
+        }
         return await route.handler(ctx);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
