@@ -37,7 +37,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Group | Tokens |
 | --- | --- |
 | Surfaces | `--bg` `--surface` `--surface-raised` `--surface-sunken` `--surface-inset` |
-| Material | `--nav-surface` `--toolbar-surface` `--toolbar-border` `--toolbar-bloom` `--blur` `--scrim` |
+| Material | `--nav-surface` `--toolbar-surface` `--toolbar-border` `--blur` `--scrim` |
 | Lines | `--separator` `--separator-soft` `--border-strong` |
 | Text | `--text` `--text-dim` `--text-faint` |
 | Semantic | `--accent` `--pos` `--neg` `--warn` and their `-tint` pairs |
@@ -136,18 +136,22 @@ blank strip under the navigation twice:
   destination below 400px. The floor is 44px and it is hard — a destination
   narrower than a fingertip is not a destination, and `toolbar.spec.ts` asserts
   it at every width.
-- **The selected destination is a lift in the material, not a control inside
-  one.** `--toolbar-bloom` is a whole radial gradient rather than a colour and
-  an alpha, because Light and Dark want different falloffs as well as different
-  strengths, and it is painted by the active destination's own `::before` — so
-  it is always exactly where the destination is, with nothing to measure and
-  nothing to keep in step. It reaches the pill's padding on every side and the
-  capsule clips its descendants, so it ends where the bar does. No pill, no
-  tray, no underline: a filled shape behind one destination is a button inside a
-  button, and a hard edge is the thing the dash under the selection was removed
-  for. The fact is carried four times over — the lift, the accent colour, a
-  heavier glyph stroke, a heavier label — and by `aria-current` for anything
-  that cannot see any of them.
+- **The selected destination is foreground only.** The accent colour, the glyph
+  at a heavier `stroke-width`, and the label at 680 rather than 600 — and
+  `aria-current` for anything that can see none of them. Nothing is painted
+  behind it: no pill, no tray, no underline, no dot, no wash. A filled shape
+  behind one destination is a button inside a button, a hard edge is the thing
+  the dash under the selection was removed for, and a diffuse lift in the bar's
+  own surface — which shipped, and which a physical-iPhone review rejected — is
+  a second material inside a capsule that is already one. The capsule provides
+  the surface; the destination provides the emphasis. Because none of the three
+  cues changes a box, the bar does not move when the selection does.
+- **The destinations' focus ring is the shared outset one.** It was briefly
+  inset, because bounding the lift meant the capsule had to clip its
+  descendants and a clip does not know a decoration from a focus ring. Both the
+  lift and the clip are gone, so the bar draws the same `--focus-ring` every
+  other control does, outside the destination's box, unclipped at either end of
+  the pill and at the narrow seven-destination width.
 - **It holds no state.** The current destination is passed in from the app, so
   the highlight and the screen can never disagree — including on a nested screen
   or a destination the app chose on its own.
@@ -160,10 +164,12 @@ blank strip under the navigation twice:
 - `e2e/toolbar.spec.ts` — the floating toolbar: destinations, route-derived
   active state, shape, targets, label wrapping, content clearance, keyboard,
   modal layering, reduced motion — and the selected state, which is the part
-  with the most ways to go wrong quietly: that the lift belongs to exactly one
-  destination, takes no taps, adds no words, ends at the pill's inner edge,
-  draws something in *both* themes, moves nothing, and leaves the selected label
-  room inside its own column at the heavier weight.
+  with the most ways to go wrong quietly: that nothing is painted behind any
+  destination, that the accent, the stroke and the weight all land on exactly
+  the destination `aria-current` names, in *both* themes, that the selection
+  moves nothing, that the selected label still has room inside its own column at
+  the heavier weight, and that the focus ring is visible and unclipped at the
+  ends of the bar.
 - `e2e/draft-controls.spec.ts` — the folded search beside the position filters:
   collapsed shape, control-row height, expansion, query semantics, and that the
   filters are untouched by any of it.
