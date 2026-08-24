@@ -129,6 +129,88 @@ receivers. Adherence narrows the distribution for a room tracking ADP tightly
 and widens it for one full of reaches. In the first two rounds all four are
 exactly 1: there is nothing to read yet.
 
+### What the managers have done in previous seasons
+
+The four reads above are all about *this* draft. A league with returning managers
+knows something slower and more specific: the man three seats over has taken his
+quarterback in round fourteen two years running, and the one beside him has never
+let a tight end past round three.
+
+Sleeper publishes the previous-season chain, so this is measurable rather than
+assumed. `core/managers/managerTendencies.ts` reads it;
+`core/draft/nextpick/managerPrior.ts` turns it into a fifth factor on the same
+per-slot, per-position demand table, and nothing else consumes it.
+
+| Property | Value |
+| --- | --- |
+| Identity | Sleeper `picked_by` user id — **never** roster id |
+| Per-manager cap | ×0.87–1.15 |
+| Minimum | 12 picks, 1 completed draft |
+| Shrinkage | `n / (n + 1.5 + spread/3)` — sample size *and* self-disagreement |
+| Recency | ×0.85 per season of age, floored at 0.6 |
+| Suppression | Scaled by how much of the starting requirement he still has open |
+| **Hard ceiling** | **±5 percentage points on `Next%`, all managers combined** |
+
+**Identity is a user, never a roster.** Roster ids are reused between seasons. In
+the league this was built against, roster 4 was three different people in three
+years, the last of them a manager who had never drafted here at all — so keying
+history by roster id would hand a newcomer a confident thirty-two-pick profile
+assembled from two strangers.
+
+**Two things shrink an observation, not one.** A manager whose first quarterback
+went in rounds 4 and 4 has said something; one whose went in rounds 7 and 16 has
+a mean of 11.5 and has said nothing, and the mean is the more dangerous of the
+two because it looks like an answer. Both have n = 2, so sample size alone cannot
+separate them and the spread has to.
+
+**Today outranks history.** A manager who has taken quarterbacks early for years
+and already holds two this afternoon is not a quarterback risk this afternoon.
+Every tendency is scaled by how much of the relevant starting requirement is
+still open, read from the live pick stream, and goes to nothing when it is met.
+
+**The ceiling is enforced on the output, not the multiplier.** When a historical
+prior is in play the board is simulated **twice** — once with it, once without —
+and the difference is clamped. The two runs share a state key and therefore a
+seed, so they draw the same random numbers in the same order and the difference
+between them is the effect of the history alone, carrying none of the ±0.7-point
+sampling noise two independent runs would. This is why the history fingerprint is
+deliberately kept out of `draftStateKey` and put in `nextPickCacheKey` instead:
+history must not be able to change the dice. The second run is not performed at
+all in a league with no history, so the common case costs exactly what it did
+before.
+
+Bounding the multiplier instead would have left the movement in `Next%` unbounded
+and dependent on how many picks were in the way — the brief asks for a ceiling in
+*percentage points*, which is a statement about the output.
+
+**Measured, not assumed.** Against the real league this was built for — three
+seasons in the chain, two completed drafts, eleven returning managers with usable
+profiles, nine of them holding two drafts each — the largest movement on a full
+board was **0.3 percentage points**, and no player was clamped. The 5-point
+ceiling is a guard rail well above observed behaviour rather than a cap that
+shapes it; `historyCeilingHits` in the board diagnostics counts the exceptions, so
+a ceiling that quietly becomes the mechanism is visible. If the effect is ever
+judged too quiet, `MANAGER_PRIOR.gain` is the single lever — but the brief is
+explicit that this should nudge and not dominate, and 0.3 points is the honest
+output of evidence this thin.
+
+**Reach versus ADP is unavailable, permanently.** Sleeper returns a player
+snapshot with a historical pick and no price of any kind — no ADP, no rank, no
+`search_rank`; verified against 320 real picks by
+`scripts/probe-sleeper-draft-history.mjs`. Measuring a 2024 pick against today's
+market would report two years of player movement as a manager's habit, so
+`reachAvailability` reports `no-historical-market` and no substitute is used.
+
+**It does not touch `Score`.** Survival reaches the composite through two
+channels — the `survivalUrgency` component and the separation / cost-of-waiting
+pass over the finished composite — and the ranking engine is handed the
+history-free number for both. The adjusted number is put back onto the
+recommendation afterwards, once the ordering and every component are fixed, so
+the card shows the model's best estimate while `Score`, `Val`, `ADP`, `DOG`,
+`PTS` and the board order are byte-identical whether or not a league has ever
+synced its history. `tests/nextpick.managerHistory.board.test.ts` asserts that
+field by field over a whole board.
+
 ## What is deliberately excluded
 
 | Input | Why not |
@@ -137,6 +219,7 @@ exactly 1: there is nothing to read yet.
 | **Newsletter tally** | This app's private evidence. The room has not read it. |
 | **Vegas / season markets** | Excellent at "is he good", unevidenced at "will somebody else draft him". Pinned as no effect. |
 | **Score** | `Next` feeds `Score`; if `Score` fed back it would be circular. |
+| **Historical manager tendency, for ranking** | It informs the estimate on the card and is kept out of the composite entirely — see above. The weakest evidence the model carries should not reorder a board. |
 
 Public injury designations are the one judgement call the room can also see, and
 are already carried in the candidate pool.
@@ -207,12 +290,20 @@ DRAFT_ID=1234 TOP=20 node scripts/probe-next-pick-survival.mjs
 npx vitest run tests/nextpick.model.test.ts      # market, demand, room, ownership
 npx vitest run tests/nextpick.simulate.test.ts   # directional invariants, cost
 npx vitest run tests/nextpick.board.test.ts      # which pick, and what it may see
+npx vitest run tests/managerTendencies.test.ts   # history, shrinkage, the ceiling
+npx vitest run tests/nextpick.managerHistory.board.test.ts   # Score left alone
+
+# the historical chain and what Sleeper actually publishes with a pick
+node scripts/probe-sleeper-draft-history.mjs <league_id> [username]
+# real profiles, and what they do to a real board
+node --experimental-strip-types scripts/probe-manager-history-next.ts <league_id>
 ```
 
 ## Calibration assumptions
 
 Every constant that is not read from the league or the market is an assumption,
-collected in `DEMAND`, `ROOM` and `SIMULATION` and bounded. No public dataset
+collected in `DEMAND`, `ROOM`, `SIMULATION`, `TENDENCY` and `MANAGER_PRIOR` and
+bounded. No public dataset
 this project can use says how much likelier a manager is to take a tight end when
 his tight-end slot is empty, so the values are the smallest that reproduce
 behaviour a drafter would recognise, and the tests pin the *direction* rather

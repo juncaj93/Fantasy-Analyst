@@ -11,6 +11,12 @@
 import { nowIso, parseJson, toJson, type Database } from '../db.ts';
 import type { ManagerTradeProfile } from '../../core/managers/tradeProfile.ts';
 import type { DraftProfile } from '../../core/managers/draftProfile.ts';
+import {
+  fromStoredTendencies,
+  toStoredTendencies,
+  type ManagerTendencies,
+  type StoredManagerTendencies,
+} from '../../core/managers/managerTendencies.ts';
 
 /**
  * How long a profile stands before it is recomputed.
@@ -52,10 +58,38 @@ export class ManagerProfileRepo {
     });
   }
 
+  /**
+   * A manager's historical draft tendencies, filed against his current roster row.
+   *
+   * A third `kind` in the table that already holds the other two, rather than a
+   * table of its own: it is the same fact about the same manager on the same
+   * cadence, and it needs no column this one does not have. The Sleeper user id
+   * travels *inside* the profile, so a row whose roster changed hands between
+   * syncs is detectable rather than silently inherited by the new occupant.
+   */
+  async saveTendencies(leagueId: string, rosterId: number, tendencies: ManagerTendencies): Promise<void> {
+    await this.save(leagueId, rosterId, 'tendency', {
+      ownerName: tendencies.displayName,
+      sample: tendencies.picksObserved,
+      confident: tendencies.usable,
+      seasons: tendencies.seasons,
+      profile: toStoredTendencies(tendencies),
+    });
+  }
+
+  async tendencyProfiles(leagueId: string, now = new Date()): Promise<Map<number, CachedProfile<ManagerTendencies>>> {
+    const rows = await this.load<StoredManagerTendencies>(leagueId, 'tendency', now);
+    const out = new Map<number, CachedProfile<ManagerTendencies>>();
+    for (const [rosterId, cached] of rows) {
+      out.set(rosterId, { ...cached, profile: fromStoredTendencies(cached.profile) });
+    }
+    return out;
+  }
+
   private async save(
     leagueId: string,
     rosterId: number,
-    kind: 'trade' | 'draft',
+    kind: 'trade' | 'draft' | 'tendency',
     data: { ownerName: string | null; sample: number; confident: boolean; seasons: string[]; profile: unknown },
   ): Promise<void> {
     await this.db

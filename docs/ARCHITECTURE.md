@@ -254,6 +254,70 @@ the refresh layer duplicates none of them. Repeated failures keep the last good
 board and show one compact `Draft sync delayed · retrying` line rather than an
 error page. `window.__draftRefresh()` reports the loop's state on the device.
 
+## The fetch boundary
+
+`fetch` resolves for every answer that arrived, including the ones that are not
+this app's. The client used to read each body and call `JSON.parse` on it before
+looking at the status or the content-type, so a page where a payload should have
+been reached the user as the parser's own complaint — on JavaScriptCore, which is
+every iPhone, `JSON Parse error: Unrecognized token '<'`. Every screen renders
+`err.message` verbatim, so that sentence was the whole of what a person saw, and
+because the parser quotes what it failed on it was also a small leak of the page.
+
+There are at least three ways to be handed markup on an `/api/` path with nothing
+in this repository being wrong at the time: the Worker throws or exhausts CPU and
+Cloudflare answers with its own `Error 1101` page; an edge or proxy layer answers
+with a 502/503/504 interstitial while the origin is cold or mid-deploy; or the
+static-asset router answers before the Worker and the single-page-application
+fallback returns `index.html` — **status 200**, `text/html`, and the API never
+ran. `run_worker_first = ["/api/*"]` in `wrangler.toml` is the line that prevents
+the third, and therefore the line whose absence causes it.
+
+`src/web/apiResponse.ts` is the contract, and it is one rule: **the status and
+the content-type are read before the body is parsed, and a body that is not JSON
+is never handed to the parser.** What comes back instead is an `ApiError`
+carrying the method, the endpoint, the status, what kind of answer arrived
+(`json` / `html` / `text` / `empty`), which family of failure it is (`auth` /
+`client` / `server` / `protocol` / `network`), whether asking again could
+plausibly help, Cloudflare's ray id, and a bounded, tag-stripped prefix of the
+body for diagnosis.
+
+`protocol` is worth naming separately: the request completed, the status may even
+be 200, and the thing that answered was not the API — a 500 means this app's code
+failed, a protocol failure means this app's code never ran.
+
+Three properties the contract is careful about:
+
+- **Auth stays auth.** A 401 that arrives as a sign-in page is still a 401, is
+  classified from the status rather than from the body, and is never retryable.
+  Softening one into "try again" turns a locked session into a spinner that can
+  never resolve. A JSON refusal keeps the server's own words, because the server
+  writes better copy about its own refusals than anything general could.
+- **Nothing is swallowed.** Every failure leaves as a rejection.
+  `retryable` is a fact offered to whoever owns the retry policy — the draft
+  refresh controller's backoff, or the reader's pull-to-refresh — not a retry
+  performed at the seam. Nothing returns `null` on failure: a resolved `null`
+  would be stored by the session cache as though the server had said so, which is
+  how a transient edge page becomes a screen that is confidently empty.
+- **The body never reaches the glass.** The message is the sentence a person
+  reads and nothing else — four of them, chosen by what happened and by whether
+  the request was a read or a write. The prefix travels beside the message, in a
+  field screens do not render.
+
+The API side keeps the matching half: **every answer to an `/api/` request is
+JSON, including the ones nobody meant to send.** The router runs its middleware
+inside the same guard as its handlers (an exception from `verifySession` used to
+escape the Worker and be answered by Cloudflare in HTML), and `worker/index.ts`
+wraps the whole `/api/` dispatch for anything thrown before the router exists.
+Client hardening is still required regardless, because the layers above the
+Worker are not ours.
+
+Guarded by `tests/api.errors.test.ts` (the response matrix),
+`tests/api.jsonContract.test.ts` (the server's half) and
+`e2e/api-error-resilience.spec.ts`, which injects production-shaped HTML answers
+at the route and asserts that no parser wording, no markup and no fragment of a
+body ever reaches the rendered UI.
+
 ## Same-session response cache
 
 Tabs are mounted as `{tab === 'draft' ? <DraftScreen/> : null}`, so leaving one

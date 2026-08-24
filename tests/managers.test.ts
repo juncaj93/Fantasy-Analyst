@@ -131,10 +131,15 @@ describe('historical trade economics (§10)', () => {
 });
 
 function picks(over: Partial<HistoricalPick> & { draftId: string; pickNo: number }): HistoricalPick {
+  const rosterId = ((over.pickNo - 1) % 12) + 1;
   return {
     season: '2025',
     round: Math.ceil(over.pickNo / 12),
-    rosterId: ((over.pickNo - 1) % 12) + 1,
+    // Identity is the user; the roster id is the seat he happened to sit in.
+    // They agree in this fixture, which is what makes the pair that disagree
+    // (`reuses a roster id`, below) worth writing down separately.
+    userId: `u${rosterId}`,
+    rosterId,
     position: 'WR',
     ...over,
   };
@@ -187,12 +192,12 @@ describe('historical draft tendencies (§11)', () => {
   });
 
   it('does not pretend one manager’s picks are a sequence', () => {
-    const profile = buildManagerDraftProfile({ rosterId: 1, picks: twoDrafts() });
+    const profile = buildManagerDraftProfile({ rosterId: 1, userId: 'u1', picks: twoDrafts() });
     expect(profile.runFollowing).toBeNull();
   });
 
   it('needs enough picks before describing a manager', () => {
-    const thin = buildManagerDraftProfile({ rosterId: 1, picks: twoDrafts().slice(0, 12) });
+    const thin = buildManagerDraftProfile({ rosterId: 1, userId: 'u1', picks: twoDrafts().slice(0, 12) });
     expect(thin.confident).toBe(false);
     expect(thin.notes.join(' ')).toContain('not enough to describe a tendency');
   });

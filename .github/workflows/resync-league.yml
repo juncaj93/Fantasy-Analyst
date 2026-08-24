@@ -9,13 +9,23 @@ name: Re-read the selected league from Sleeper
 # deploy that changed how the app syncs, and recovering after an outage that
 # lasted through a lifecycle change.
 #
-# **It calls the same endpoints the app itself calls**, in the same order, with
-# no privileged access of any kind: `/api/drafts/:id/sync` is exactly what the
-# Draft screen posts when it mounts, and `/api/leagues/:id/sync` and
-# `/api/startsit/refresh` are the two calls a pull down on Team makes. Nothing
-# here touches the database directly, names a league, or writes a roster — the
-# ids come from the app's own status, so this is as true of whichever league is
-# selected next season as it is today.
+# **It calls the app's own endpoints**, in the same order, with no privileged
+# access of any kind: `/api/drafts/:id/sync` is exactly what the Draft screen
+# posts when it mounts, and `/api/leagues/:id/sync` and `/api/startsit/refresh`
+# are the two calls a pull down on Team makes. Nothing here touches the database
+# directly, names a league, or writes a roster — the ids come from the app's own
+# status, so this is as true of whichever league is selected next season as it is
+# today.
+#
+# One of them is not a call the app makes, and it is here deliberately.
+# `/api/leagues/:id/managers/refresh` walks the previous-league chain to rebuild
+# what is known about the people in the league, and it is too expensive to put on
+# a page load — dozens of Sleeper requests to produce a handful of facts that
+# change about once a season. So nothing called it at all, which meant the
+# historical-manager signal in `Next%` could sit switched off indefinitely
+# without anything looking wrong. An intentional resync is exactly the right
+# moment to pay that cost: somebody has already decided the app should catch up
+# with Sleeper, and this is part of catching up.
 #
 # It prints what the roster looked like before and after, which is the only
 # reason to run it rather than simply waiting.
@@ -118,6 +128,44 @@ jobs:
             if (r.error) { console.log('  refused:', r.error); process.exit(0); }
             console.log('  ' + (r.headline ?? '(no headline)'));
             for (const s of r.sources ?? []) console.log('   ', s.source + ':', s.outcome, '—', s.detail);
+          "
+
+      - name: Rebuild what is known about the managers, from the league's own history
+        env:
+          LEAGUE: ${{ steps.ids.outputs.league }}
+        run: |
+          set -uo pipefail
+          echo "=== POST /api/leagues/\$LEAGUE/managers/refresh — the previous-league chain ==="
+
+          # The session cookie from the step above: files under /tmp outlive a
+          # step, the same way `before.json` reaches the comparison at the end.
+          code=$(curl -s -o /tmp/managers.json -w '%{http_code}' \
+            -X POST "$URL/api/leagues/$LEAGUE/managers/refresh" -b /tmp/c.txt)
+
+          # A cooldown is the endpoint saying this was already done recently,
+          # which is a successful outcome for a workflow whose job is to make
+          # sure it has been done at all.
+          if [ "$code" = "429" ]; then
+            echo "  on cooldown — the profiles were rebuilt recently, so there is nothing to do"
+            exit 0
+          fi
+
+          # Anything else that is not a 200 is loud. The entire reason this step
+          # exists is that a signal which quietly fails to be built looks exactly
+          # like a signal that has nothing to say.
+          [ "$code" = "200" ] || { echo "::error::managers/refresh answered $code"; exit 1; }
+
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/managers.json','utf8'));
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+            console.log('  seasons walked:', (r.seasons||[]).join(' <- ') || '(none)');
+            console.log('  historical picks:', r.picks, '| trades:', r.trades, '| rosters filed against:', r.rosters);
+            console.log('  managers with usable draft history:', r.tendencies);
+            if (!r.picks) {
+              console.log('::warning::no completed historical draft was found, so Next% will read no manager history — correct for a league in its first season, and worth a look otherwise');
+            } else if (!r.tendencies) {
+              console.log('::warning::history was found but no manager cleared the sample minimum, so Next% will read none of it');
+            }
           "
 
       - name: What the Team screen says now
