@@ -210,7 +210,7 @@ sideways drag would navigate. Tabs are tapped.
 A modal sheet is pulled down to dismiss. The rules live in `useSheetDrag`
 ([`src/web/gestures.ts`](../src/web/gestures.ts)), the thresholds are unit-tested
 in `tests/gestures.test.ts`, and the behaviour is covered by
-`e2e/sheet-interaction.spec.ts`.
+`e2e/sheet-interaction.spec.ts` and `e2e/sheet-vs-pull.spec.ts`.
 
 | Rule | Value |
 | --- | --- |
@@ -269,6 +269,27 @@ covering layer, the draft board included. Two points there are iOS-specific:
   occlusion; it is nought in every browser without a software keyboard, which is
   every browser in CI.
 
+**And the page is told it is covered.** `useOverlay` raises a counted signal —
+`appIsCovered()` / `useAppIsCovered()` — for as long as any layer is up, and
+`usePullToRefresh` refuses the gesture outright while it is raised (rule 6).
+
+This is the fix for a defect that only showed on a physical iPhone: on Trades
+and on Team, a sheet could not be swiped away, and the page underneath behaved
+as though pull-to-refresh were trying to win. It was. React's portals move a
+layer's *elements* to the end of the document but leave its *events* propagating
+up the component tree, and every screen with pull-to-refresh renders its sheets
+inside the wrapper that gesture is attached to — so a finger on an open sheet
+arrived at `usePullToRefresh` as if it had landed on the list behind it, and the
+pull surface captured the pointer out from under the dismissal. Players looked
+correct only because Players has no pull-to-refresh for a sheet's events to
+reach.
+
+The arbitration is therefore at the ownership boundary rather than on the two
+screens that showed it: a layer announces itself by *being* a layer, and nothing
+screen-specific has to opt in. `pageScrollTop()` was the earlier attempt and
+cannot do this job — a sheet opened from the top of a list pins the page at
+zero, which is honestly "at the top".
+
 ## 7. What is deliberately absent
 
 - **No service worker.** Standalone display does not need one, and an offline
@@ -286,6 +307,7 @@ covering layer, the draft board included. Two points there are iOS-specific:
 | A grey bar under the nav **in a Safari tab** | Expected. It is Safari's. See §1. |
 | A grey bar under the nav **in standalone mode** | A real bug if it is taller than the gap the toolbar floats by. Open Setup → Install on iPhone → Layout diagnostics and read "Below the toolbar" — it says which it is. |
 | Light-mode flash when launching | The manifest's `background_color` is the dark page colour; a light-theme user sees one dark frame. The alternative is a white flash into a dark app, which is worse. |
+| A sheet will not swipe away, and the page behind it moves instead | Pull-to-refresh is taking the gesture. The overlay's covered signal is not reaching `usePullToRefresh` — see §10, rule 6. |
 
 `node scripts/probe-pwa.mjs <url>` checks every install prerequisite against a
 running deployment — page metadata, manifest, content types, icon sizes,

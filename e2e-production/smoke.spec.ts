@@ -769,6 +769,82 @@ test.describe('the deployed app', () => {
     await card();
   });
 
+  /**
+   * Swiping the card away, on the deployed build, without the board reloading.
+   *
+   * A physical-iPhone defect this file is well placed to catch, because it was
+   * invisible everywhere else: on Trades and on Team, a player's card would not
+   * be swiped away, and the page underneath behaved as though pull-to-refresh
+   * were trying to win. It was — React's portals leave a layer's events
+   * propagating up the component tree, and every screen with that gesture
+   * renders its sheets inside the wrapper it is attached to, so the finger
+   * dismissing the card arrived at the list behind it and the pull surface
+   * captured the pointer out from under the dismissal.
+   *
+   * The arbitration lives on the overlay boundary — see `usePullToRefresh`,
+   * rule 6 — so what is read back here is that the deployed bundle carries it:
+   * the card goes, and nothing behind it armed, moved or fetched.
+   *
+   * Read-only in the strict sense this file means. Trades reloads with a GET
+   * the site already answers to anyone, and the assertion is that even that
+   * does not happen. Team is the other screen the defect was reported on and
+   * is deliberately not exercised: its refresh is a POST, and a smoke suite
+   * that provoked one to prove a gesture would be writing to production.
+   */
+  test('a card swiped away on Trades takes the board with it, not the network', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'trades');
+    test.skip((await settled(page, 'trade-row')) === 0, 'no trade board on this deployment');
+
+    await page.getByTestId('trade-row').first().click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
+
+    const reloads: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/trades')) reloads.push(r.url());
+    });
+    /* Sampled every frame: a pull that loses is still a pull that started. */
+    await page.evaluate(() => {
+      const store = { states: [] as string[], maxShift: 0, running: true };
+      (window as unknown as { __pulls: typeof store }).__pulls = store;
+      const tick = () => {
+        if (!store.running) return;
+        for (const surface of document.querySelectorAll<HTMLElement>('.pull-surface')) {
+          const state = surface.dataset['pullState'];
+          if (state && !store.states.includes(state)) store.states.push(state);
+          const content = surface.querySelector<HTMLElement>('.pull-content');
+          const transform = content ? getComputedStyle(content).transform : 'none';
+          if (transform !== 'none') {
+            const shift = new DOMMatrixReadOnly(transform).m42;
+            if (shift > store.maxShift) store.maxShift = shift;
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    const body = (await page.locator('[data-testid="player-sheet"] .sheet-body').boundingBox())!;
+    const x = body.x + body.width / 2;
+    const y = body.y + 24;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 14; i++) await page.mouse.move(x, y + (420 * i) / 14);
+    await page.mouse.up();
+
+    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
+    const seen = await page.evaluate(() => {
+      const store = (window as unknown as { __pulls: { states: string[]; maxShift: number; running: boolean } })
+        .__pulls;
+      store.running = false;
+      return { states: store.states, maxShift: store.maxShift };
+    });
+    expect(seen.states.filter((v) => v !== 'idle'), 'a pull surface armed under an open card').toEqual([]);
+    expect(seen.maxShift, 'the board was stretched by the dismissal').toBe(0);
+    expect(reloads, 'the board reloaded itself as the card was swiped away').toEqual([]);
+  });
+
   test('Setup reads as a settings screen, and every area opens and comes back', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
