@@ -163,6 +163,20 @@ export class TransactionRepo {
     }));
   }
 
+  /**
+   * How many transactions are stored, without loading any of them.
+   *
+   * A count for a diagnostics line. Reading every payload to call `.length` on
+   * the array was several megabytes of JSON parsed to produce one integer.
+   */
+  async countStored(leagueId: string): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT COUNT(*) AS n FROM league_transactions WHERE league_id = ?')
+      .bind(leagueId)
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
   /** Which weeks have been read, in every season. For coverage reporting. */
   async allWeeksRead(leagueId: string): Promise<StoredTransactionWeek[]> {
     const rows = await this.db

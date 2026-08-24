@@ -36,8 +36,17 @@
  * rather than half-done.
  */
 
-/** The two datasets the ledger fills, and the two checkpoint families. */
-export type DatasetName = 'drafts' | 'transactions';
+/**
+ * The datasets the ledger fills, and the checkpoint families that track them.
+ *
+ * `identity` earns a checkpoint of its own even though it writes no ledger
+ * rows, because "we asked and the answer was nothing" and "we never asked" are
+ * different states and only one of them should be retried. A season whose
+ * rosters come back empty — Sleeper does return that — would otherwise be
+ * re-requested every single day for ever, since the test for "identity known"
+ * would be a row count that never leaves zero.
+ */
+export type DatasetName = 'drafts' | 'transactions' | 'identity';
 
 /**
  * How deep the previous-league chain is followed before the walk gives up.

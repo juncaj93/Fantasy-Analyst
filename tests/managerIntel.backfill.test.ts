@@ -94,6 +94,8 @@ interface StubOptions {
   failures?: Map<string, number>;
   /** Transactions to serve, by `<leagueId>:<week>`. */
   transactions?: Record<string, unknown[]>;
+  /** Answer every roster read with an empty list, as Sleeper sometimes does. */
+  emptyRosters?: boolean;
 }
 
 function stubSleeper(opts: StubOptions = {}) {
@@ -118,7 +120,9 @@ function stubSleeper(opts: StubOptions = {}) {
         return new Response(JSON.stringify(found ?? null), { status: found ? 200 : 404 });
       }
       const rosters = /\/league\/([^/]+)\/rosters$/.exec(url);
-      if (rosters) return new Response(JSON.stringify(ROSTERS[rosters[1]!] ?? []), { status: 200 });
+      if (rosters) {
+        return new Response(JSON.stringify(opts.emptyRosters ? [] : (ROSTERS[rosters[1]!] ?? [])), { status: 200 });
+      }
 
       const drafts = /\/league\/([^/]+)\/drafts$/.exec(url);
       if (drafts) return new Response(JSON.stringify(DRAFTS[drafts[1]!] ?? []), { status: 200 });
@@ -491,5 +495,62 @@ describe('the routes report the backfill honestly', () => {
     // seat does not.
     expect(veteran.draft.sample).toBeGreaterThan(0);
     expect(newcomer.draft.sample).toBe(0);
+  });
+});
+
+describe('a season that answers with nothing is asked once', () => {
+  let db: NodeSqliteDatabase;
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedLeague(db);
+  });
+
+  it('does not re-request rosters for ever when Sleeper returns an empty list', async () => {
+    /*
+     * The failure this guards against is quiet and permanent: if "identity is
+     * known" is a row count, a league whose rosters come back empty never leaves
+     * zero, so the unit is planned again on every batch — one wasted request a
+     * day, for ever, with nothing to show for it. The checkpoint is what records
+     * that the question was asked and answered.
+     */
+    const { client, calls } = stubSleeper({ emptyRosters: true });
+    const service = new ManagerIntelService(db, { sleeper: client });
+
+    await service.advance(RUN);
+    const first = calls.filter((u) => u.endsWith('/rosters')).length;
+    expect(first).toBeGreaterThan(0);
+
+    calls.length = 0;
+    await service.advance(RUN);
+    await service.advance(RUN);
+    // Asked once per season, not once per batch.
+    expect(calls.filter((u) => u.endsWith('/rosters'))).toEqual([]);
+
+    const checkpoints = await new ManagerLedgerRepo(db).checkpoints('tony');
+    expect(checkpoints.filter((c) => c.dataset === 'identity').length).toBeGreaterThan(0);
+    expect(checkpoints.find((c) => c.dataset === 'identity')?.completed).toBe(true);
+  });
+
+  it('re-reads a live season’s roster map after a week, and never a finished one', async () => {
+    const { client } = stubSleeper();
+    const service = new ManagerIntelService(db, { sleeper: client });
+    for (let i = 0; i < 12; i++) {
+      const report = await service.advance(RUN);
+      if (report.complete) break;
+    }
+
+    // Age every identity checkpoint by a fortnight.
+    const old = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    await db
+      .prepare('UPDATE manager_history_checkpoints SET last_success_at = ? WHERE dataset = ?')
+      .bind(old, 'identity')
+      .run();
+
+    const { client: second, calls } = stubSleeper();
+    await new ManagerIntelService(db, { sleeper: second }).advance(RUN);
+
+    const reread = calls.filter((u) => u.endsWith('/rosters'));
+    // The live season is re-read; the two finished ones are settled for ever.
+    expect(reread).toEqual(['https://api.sleeper.app/v1/league/L2026/rosters']);
   });
 });

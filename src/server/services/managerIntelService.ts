@@ -36,6 +36,7 @@ import {
   planBackfill,
   enumerateWork,
   type BackfillState,
+  type DatasetName,
   type SeasonState,
   type WorkUnit,
 } from '../../core/managers/backfillPlan.ts';
@@ -270,7 +271,7 @@ export class ManagerIntelService {
           await this.ledger
             .recordFailure({
               leagueId: opts.leagueId,
-              dataset: unit.kind === 'transactions' ? 'transactions' : 'drafts',
+              dataset: datasetOf(unit),
               sleeperLeagueId: unit.sleeperLeagueId,
               season: unit.season ?? opts.season,
               error: String(err),
@@ -330,16 +331,16 @@ export class ManagerIntelService {
     leagueId: string;
     season: string;
     week: number;
+    now?: Date;
   }): Promise<BackfillState> {
-    const [links, drafts, checkpoints, identities, weeks] = await Promise.all([
+    const now = opts.now ?? new Date();
+    const [links, drafts, checkpoints, weeks] = await Promise.all([
       this.ledger.seasonLinks(opts.leagueId),
       this.ledger.drafts(opts.leagueId),
       this.ledger.checkpoints(opts.leagueId),
-      this.ledger.rosterIdentities(opts.leagueId),
       this.transactions.allWeeksRead(opts.leagueId),
     ]);
 
-    const identifiedLeagues = new Set(identities.map((i) => i.sleeperLeagueId));
     const checkpointOf = (dataset: string, sleeperLeagueId: string) =>
       checkpoints.find((c) => c.dataset === dataset && c.sleeperLeagueId === sleeperLeagueId) ?? null;
 
@@ -364,7 +365,7 @@ export class ManagerIntelService {
         status: link.status,
         previousLeagueId: link.previousLeagueId,
         resolved: link.resolved,
-        identityKnown: identifiedLeagues.has(link.sleeperLeagueId),
+        identityKnown: identityIsCurrent(checkpointOf('identity', link.sleeperLeagueId), finished, now),
         drafts: {
           indexFresh: pendingDraftIds.length > 0,
           pendingDraftIds,
@@ -463,6 +464,26 @@ export class ManagerIntelService {
       rosters,
     });
     await this.ledger.saveRosterIdentities(ctx.leagueId, identities);
+
+    /*
+     * Checkpointed even when the answer was nothing.
+     *
+     * Sleeper does return an empty roster list for a league it no longer serves
+     * properly, and without this the season would be asked again every day for
+     * ever — "identity known" would be a row count that never leaves zero.
+     * `last_success_at` is what a live season's weekly re-read is measured
+     * from; see `identityIsCurrent`.
+     */
+    await this.ledger.recordSuccess({
+      leagueId: ctx.leagueId,
+      dataset: 'identity',
+      sleeperLeagueId: unit.sleeperLeagueId,
+      season: unit.season,
+      cursor: identities.length,
+      completed: true,
+      requestsUsed: 1,
+    });
+
     const named = identities.filter((i) => i.userId).length;
     return `${unit.season}: ${named}/${identities.length} rosters mapped to a Sleeper user`;
   }
@@ -1027,7 +1048,7 @@ export class ManagerIntelService {
         weeksRead: weeks.length,
         weeksSettled: weeks.filter((w) => w.settled).length,
         weeksMissing,
-        stored: (await this.transactions.listBySeason(opts.leagueId)).length,
+        stored: await this.transactions.countStored(opts.leagueId),
       },
       checkpoints: checkpoints.map((c) => ({
         dataset: c.dataset,
@@ -1048,9 +1069,23 @@ export class ManagerIntelService {
     };
   }
 
-  /** Player id to position, once per call rather than per lookup. */
+  /**
+   * Player id to position, read once per service instance.
+   *
+   * `listAll` is the whole dictionary plus its aliases — several thousand rows —
+   * and a batch wants it twice: once to give a historical pick its position, and
+   * again when the derivation resolves every player who has ever changed hands.
+   * They are the same answer, so it is read once and held. Not cached beyond the
+   * instance, because a service is constructed per request and per cron tick and
+   * a longer-lived cache would be a stale dictionary nobody could see.
+   */
+  private positions: Map<string, string | null> | null = null;
+
   private async positionIndex(): Promise<Map<string, string | null>> {
-    return new Map((await this.players.listAll()).map((p) => [p.id, p.position]));
+    if (!this.positions) {
+      this.positions = new Map((await this.players.listAll()).map((p) => [p.id, p.position]));
+    }
+    return this.positions;
   }
 }
 
@@ -1132,6 +1167,48 @@ export function ledgerTradeEvents(
 export function isFinishedSeason(season: string, currentSeason: string, status: string | null): boolean {
   if (season && currentSeason && season < currentSeason) return true;
   return status === 'complete';
+}
+
+/**
+ * How long a live season's roster map stands before it is read again.
+ *
+ * A finished season's is permanent — nobody changes hands in 2024 any more. A
+ * live one can: a manager leaves, a co-owner takes over, a commissioner
+ * reassigns an abandoned team, and every transaction after that point would be
+ * attributed to the person who left. Weekly is far more often than that happens
+ * and costs one request a week per live league.
+ */
+const IDENTITY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a season's roster map can be trusted without asking again.
+ *
+ * A finished season is settled for ever. A live one is trusted for a week; an
+ * unread one is never trusted, which is what puts it on the plan.
+ */
+export function identityIsCurrent(
+  checkpoint: { completed: boolean; lastSuccessAt: string | null } | null,
+  seasonFinished: boolean,
+  now: Date,
+): boolean {
+  if (!checkpoint?.completed) return false;
+  if (seasonFinished) return true;
+  const readAt = checkpoint.lastSuccessAt ? Date.parse(checkpoint.lastSuccessAt) : NaN;
+  return Number.isFinite(readAt) && now.getTime() - readAt < IDENTITY_TTL_MS;
+}
+
+/**
+ * Which checkpoint family a unit's failure belongs against.
+ *
+ * `discover` files under `drafts` deliberately: it has no dataset of its own,
+ * and drafts is the family whose progress a stalled chain walk actually blocks
+ * — so a reader chasing "why is 2023 empty" finds the error on the row they are
+ * already looking at.
+ */
+function datasetOf(unit: WorkUnit): DatasetName {
+  if (unit.kind === 'transactions') return 'transactions';
+  if (unit.kind === 'identity') return 'identity';
+  return 'drafts';
 }
 
 /** A unit's identity within one batch. Two plans naming the same work agree. */
