@@ -395,6 +395,19 @@ allowance.
 - `POST /api/nflverse/refresh` — on-demand ingest. A write, so it needs the
   passphrase.
 
+Two read-only probes, both runnable from `.github/workflows/probe.yml`, which is
+where a runner with a network path to the deployment lives:
+
+- `scripts/probe-nflverse-live.mjs` — runs all three ingests against the real
+  files into a throwaway in-memory database and counts what crossed the wire.
+- `scripts/probe-projection-v2-readback.mjs` — the production read-back. Prints
+  the ingest health *and* a fingerprint of every live decision surface, so a
+  run before a deploy and a run after it answer whether anything a user would
+  act on changed. Deliberately prints components rather than a digest: the
+  response legitimately carries timestamps and live scores that differ between
+  any two calls, so a whole-body hash would differ every time and prove nothing,
+  and a real difference has to be readable rather than merely alarmed about.
+
 ## 15. Open items before any rollout
 
 1. **One real season with the props feed enabled.** Whether betting markets are
