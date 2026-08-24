@@ -25,21 +25,41 @@ const ADVANCE = advanceArg ? Number(advanceArg.split('=')[1] ?? 1) || 1 : 0;
 let cookie = '';
 
 async function get(path) {
-  const res = await fetch(`${URL_BASE}${path}`, { headers: cookie ? { cookie } : {} });
+  let res;
+  try {
+    res = await fetch(`${URL_BASE}${path}`, { headers: cookie ? { cookie } : {} });
+  } catch (err) {
+    /*
+     * Unreachable is not an answer, and must never be printed as one.
+     *
+     * This probe exists to tell "the backfill has nothing" from "the backfill
+     * has stopped", so a transport failure it reported as an empty result would
+     * be the exact confusion it was written to prevent — and it was: run from
+     * behind a proxy that denied the host, the first version said "no league is
+     * selected on this deployment", which is a confident claim about a
+     * deployment it never reached.
+     */
+    return { status: 0, unreachable: true, body: { error: String(err?.cause?.message ?? err?.message ?? err) } };
+  }
   const text = await res.text();
   try {
-    return { status: res.status, body: JSON.parse(text) };
+    return { status: res.status, unreachable: false, body: JSON.parse(text) };
   } catch {
-    return { status: res.status, body: { error: text.slice(0, 200) } };
+    return { status: res.status, unreachable: false, body: { error: text.slice(0, 200) } };
   }
 }
 
 async function post(path, body) {
-  const res = await fetch(`${URL_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(`${URL_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    return { status: 0, unreachable: true, body: { error: String(err?.cause?.message ?? err?.message ?? err) } };
+  }
   const setCookie = res.headers.get('set-cookie');
   if (setCookie) cookie = setCookie.split(';')[0];
   const text = await res.text();
@@ -62,8 +82,17 @@ async function main() {
   console.log(`\n=== manager intelligence @ ${URL_BASE} ===\n`);
 
   const status = await get('/api/setup/status');
-  if (status.status !== 200 || !status.body?.league?.id) {
-    console.log('  no league is selected on this deployment; nothing to report');
+  if (status.unreachable) {
+    console.log(`  the deployment could not be reached: ${status.body.error}`);
+    console.log('  nothing below is known — this is a transport failure, not a report');
+    process.exit(1);
+  }
+  if (status.status !== 200) {
+    console.log(`  /api/setup/status answered ${status.status}: ${unknown(status.body.error)}`);
+    process.exit(1);
+  }
+  if (!status.body?.league?.id) {
+    console.log('  the deployment answered, and no league is selected on it; nothing to report');
     process.exit(0);
   }
   const leagueId = status.body.league.id;
@@ -81,6 +110,10 @@ async function main() {
         let maxRequests = 0;
         for (let i = 1; i <= ADVANCE; i++) {
           const run = await post(`/api/leagues/${leagueId}/managers/refresh`);
+          if (run.unreachable) {
+            console.log(`  batch ${i}: unreachable — ${run.body.error}`);
+            break;
+          }
           if (run.status === 429) {
             console.log(`  batch ${i}: on cooldown — ${run.body.error}`);
             break;
@@ -104,8 +137,9 @@ async function main() {
   }
 
   const diag = await get('/api/diagnostics/manager-intelligence');
-  if (diag.status !== 200) {
-    console.log(`\n  diagnostics answered ${diag.status}: ${unknown(diag.body.error)}\n`);
+  if (diag.unreachable || diag.status !== 200) {
+    const why = diag.unreachable ? 'unreachable' : `answered ${diag.status}`;
+    console.log(`\n  diagnostics ${why}: ${unknown(diag.body.error)}\n`);
     process.exit(1);
   }
   const d = diag.body;
@@ -113,7 +147,12 @@ async function main() {
   console.log('\n--- coverage ---');
   line('seasons discovered', (d.seasonsDiscovered ?? []).join(', ') || '(none)');
   line('seasons complete', (d.seasonsComplete ?? []).join(', ') || '(none)');
-  line('chain link still unresolved', unknown(d.chainUnresolved) || '(chain fully walked)');
+  /*
+   * Null here is a finding, not a missing value: it means the previous-league
+   * walk reached the league's first season and there is nothing left to
+   * discover. `unknown()` would print "(unknown)", which reads as the opposite.
+   */
+  line('chain link still unresolved', d.chainUnresolved ?? '(none — chain fully walked)');
   line('completed drafts ingested', `${d.drafts?.complete ?? 0} of ${d.drafts?.total ?? 0}`);
   line('historical picks stored', d.drafts?.picksStored ?? 0);
   line('transaction weeks read', d.transactions?.weeksRead ?? 0);
