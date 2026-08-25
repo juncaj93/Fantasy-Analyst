@@ -129,15 +129,19 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           ) : null}
 
           {/*
-            The defence, above the board rather than inside it.
+            The defence, when it has no row of its own to be said in.
 
             A `wait` or a `hold` names nobody, so it cannot be a row — and it is
             still the answer to "which defence should I add", which is the
-            question this page exists for. It sits above the list because it is
-            about a slot rather than about a player, and it draws nothing at all
-            in a league that does not start a defence.
+            question this page exists for. When the planner *has* named
+            somebody, the row below carries the same words and this line would
+            be the same recommendation twice.
+
+            Read from the whole board rather than from `rows`, which the
+            position chips have already narrowed: filtering to QB must not make
+            a defence line appear.
           */}
-          <DstLine plan={board?.dst ?? null} />
+          {board?.rows.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
 
           {rows.length === 0 ? (
             /*
@@ -146,7 +150,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               `Add PIT` over `Nothing available beats what you already have` is
               two claims about the same wire.
             */
-            board?.dst?.surface && filter === ALL_FILTER ? null : (
+            board?.dst?.surface && filter === ALL_FILTER && !board.rows.some((row) => row.dst != null) ? null : (
               <Empty>
                 {filter === ALL_FILTER
                   ? (board?.headline ?? 'Nothing available beats what you already have.')

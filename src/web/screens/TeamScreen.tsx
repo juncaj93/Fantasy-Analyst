@@ -1042,7 +1042,18 @@ function WaiverSection({
   faab: FaabAdvice | null;
   onOpen: (row: WaiverBoardRow) => void;
 }) {
-  if (board.rows.length === 0) {
+  /*
+   * The defence is not one of these rows on this screen.
+   *
+   * It has its own line immediately above — `DstLine` — and a teaser that
+   * repeated it would put the same recommendation on the same screen twice, in
+   * two different shapes, one of them ranked by a gain that was measured
+   * against a different bar. The Waivers board draws it as a row, because that
+   * is the page where "which defence should I add" is a list question.
+   */
+  const rows = board.rows.filter((row) => row.dst == null);
+
+  if (rows.length === 0) {
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
@@ -1057,7 +1068,7 @@ function WaiverSection({
       <div className="section-title" data-testid="waiver-title">
         Waiver upgrades
       </div>
-      {board.rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
+      {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
       {/*

@@ -1,12 +1,17 @@
 /**
  * The defence, on a phone.
  *
- * One row on Waivers, one row on Team, the same words on both, and everything
- * behind it one tap away. What is being defended here is the restraint: this
- * lane models six weeks of schedule, a bench spot's opportunity cost and a
- * playoff carry, and the reader is shown one line. A second line, a wrapped
- * headline or a card that pushed the lineup down the page would all be the
- * modelling leaking onto the screen.
+ * One line on Team, one row on the Waivers board, and never both for the same
+ * recommendation. What is being defended here is the restraint: this lane
+ * models six weeks of schedule, a bench spot's opportunity cost and a playoff
+ * carry, and the reader is shown one line. A second line, a wrapped headline or
+ * a card that pushed the lineup down the page would all be the modelling
+ * leaking onto the screen.
+ *
+ * The division is deliberate. Team draws the *slot decision*, because that is
+ * what a roster screen is about. Waivers draws the *player*, because "which
+ * defence should I add" is a list question there — so the line appears on that
+ * page only in the states that name nobody: `wait`, `hold`, `unknown`.
  *
  * The plan is injected rather than seeded, the way `inSeason` injects a settled
  * roster. The demo deployment's league is permanently mid-draft, and pre-draft
@@ -78,11 +83,18 @@ async function openWaivers(page: Page) {
   await expect(page.getByTestId('waivers-nav')).toBeVisible();
 }
 
-test.describe('the defence line', () => {
+test.describe('the defence line on Team', () => {
+  async function openTeam(page: Page) {
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+  }
+
   test('says the answer, and only the answer', async ({ page }) => {
     await inSeason(page);
+    await settledRoster(page);
     await withPlan(page, plan());
-    await openWaivers(page);
+    await openTeam(page);
 
     const line = page.getByTestId('dst-line');
     await expect(line).toBeVisible();
@@ -93,6 +105,7 @@ test.describe('the defence line', () => {
 
   test('stays on one line and inside the viewport at this width', async ({ page }, testInfo) => {
     await inSeason(page);
+    await settledRoster(page);
     await withPlan(
       page,
       plan({
@@ -100,7 +113,7 @@ test.describe('the defence line', () => {
         headline: 'Stream Pittsburgh this week · stash Denver for Weeks 15–17',
       }),
     );
-    await openWaivers(page);
+    await openTeam(page);
 
     const line = page.getByTestId('dst-line');
     await expect(line).toBeVisible();
@@ -123,8 +136,9 @@ test.describe('the defence line', () => {
 
   test('opens why on a tap, and the evidence one tap deeper', async ({ page }) => {
     await inSeason(page);
+    await settledRoster(page);
     await withPlan(page, plan());
-    await openWaivers(page);
+    await openTeam(page);
 
     await page.getByTestId('dst-line').click();
     await expect(page.getByTestId('dst-detail-body')).toBeVisible();
@@ -137,39 +151,92 @@ test.describe('the defence line', () => {
     await expect(page.getByTestId('dst-evidence')).toContainText('Opponent implied total');
   });
 
-  test('draws the same answer on Team as on Waivers', async ({ page }) => {
+  test('is not repeated inside the waiver teaser under it', async ({ page }) => {
     await inSeason(page);
     await settledRoster(page);
     await withPlan(page, plan());
+    await openTeam(page);
 
-    await page.goto('/');
-    await page.getByTestId('tab-team').click();
-    await expect(page.getByTestId('starters-title')).toBeVisible();
-    await expect(page.getByTestId('dst-headline')).toHaveText('Stream NYJ over BUF · +4.2');
-
-    await page.getByTestId('tab-waivers').click();
-    await expect(page.getByTestId('waivers-nav')).toBeVisible();
-    await expect(page.getByTestId('dst-headline')).toHaveText('Stream NYJ over BUF · +4.2');
+    /*
+     * The same recommendation twice on one screen — once as the line, once as a
+     * ranked row measured against a different bar — is the duplicate state this
+     * lane is required not to produce.
+     */
+    await expect(page.getByTestId('dst-line')).toBeVisible();
+    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
   });
 
   test('draws nothing at all when the planner has nothing to say', async ({ page }) => {
     await inSeason(page);
+    await settledRoster(page);
     await withPlan(page, plan({ surface: false, decision: 'hold', headline: '' }));
-    await openWaivers(page);
+    await openTeam(page);
 
     await expect(page.getByTestId('dst-line')).toHaveCount(0);
+  });
+});
+
+test.describe('the defence on the Waivers board', () => {
+  test('appears as a row, with the club rather than a headshot', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(page, plan());
+    await openWaivers(page);
+
+    const row = page.locator('[data-testid="waiver-row"][data-position="DEF"]');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('New York Jets');
+    await expect(row.getByTestId('waiver-strength')).toHaveText('Stream');
+    /*
+     * The identity cluster draws the club — a mark, or its letters when the
+     * mark cannot be loaded. What matters is that the row identifies a *team*:
+     * there is no field on a waiver row a player headshot could come from, and
+     * a defence identified by nothing would draw the position pill alone.
+     */
+    await expect(row.locator('[data-testid="team-logo"][data-team="NYJ"], [data-testid="team-code"]')).toHaveCount(1);
+  });
+
+  test('is filterable, like every other position on the board', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(page, plan());
+    await openWaivers(page);
+
+    await page.getByTestId('waiver-filter-def').click();
+    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="waiver-row"]:not([data-position="DEF"])')).toHaveCount(0);
+  });
+
+  test('is said once — the row, or the line, never both', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(page, plan());
+    await openWaivers(page);
+
+    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toBeVisible();
+    await expect(page.getByTestId('dst-line')).toHaveCount(0);
+  });
+
+  test('falls back to the line for a state that names nobody', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(
+      page,
+      plan({ decision: 'hold', headline: 'Hold BUF — next 3 favourable', target: null, gain: 0.7 }),
+    );
+    await openWaivers(page);
+
+    await expect(page.getByTestId('dst-headline')).toHaveText('Hold BUF — next 3 favourable');
+    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
   });
 
   test('is silent on the deployment’s own data, which has not drafted', async ({ page }) => {
     /*
      * No interception. The demo league's draft is live, and a manager mid-draft
      * has no weekly acquisition pressure — so the correct number of defence
-     * rows on this page is zero, and it is asserted against the real endpoint
-     * rather than against a fixture.
+     * surfaces on this page is zero, and it is asserted against the real
+     * endpoint rather than against a fixture.
      */
     await inSeason(page);
     await openWaivers(page);
 
     await expect(page.getByTestId('dst-line')).toHaveCount(0);
+    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
   });
 });
