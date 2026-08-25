@@ -2008,6 +2008,82 @@ are still unreferenced, so those four removals stand. `common.tsx` was
 deliberately left alone in this pass because the headshot lane owned it — it
 edited that file, so the restraint was load-bearing rather than theoretical.
 
+## Milestone — the waiver plan, wired (done)
+
+The claim planner shipped in #179 as core intelligence with nothing calling it,
+which was the right way to build it and a strange thing to leave: the app knew
+who to add, what to bid, who to drop and in what order to enter the claims, and
+the Waivers screen still answered only the first half. This wires it, and the
+whole of the wiring is `core/waivers/claimPlan.ts` — two functions, one call
+from `app.ts` and one from the demo runtime.
+
+**The gather computes nothing.** `planWaiversFor` takes the objects the waivers
+handler is already holding when it is about to reply — the roster inputs it just
+scored, the bounded wire it just scanned, the advice it is about to send, the
+bids `core/faab` just priced, the IR slots and the wallet — and calls
+`planWaiverClaims` once. No provider is touched, no player rescored, no price
+recomputed. It rebuilds the board with `buildWaiverBoard`, the same pure function
+the screen calls, so the targets the planner ranks are in the order the reader is
+looking at; a second ordering would have been a second opinion about who is worth
+chasing, arrived at with strictly less information. `PlannerBid` is a structural
+subset of the priced bid, so the seam passes a reference and "the displayed bid
+is the recommended bid" is a fact about the types rather than a thing to keep
+true by hand.
+
+**The wording is the integration's, and it is written once.** The planner emits
+`WaiverReasonCode` values and no prose, deliberately, because a plan is read
+three ways and prose written there would be prose written for whichever of the
+three was imagined first. `describeWaiverPlan` is the only place in the app that
+turns a code into a sentence. It runs on the server, beside the arithmetic that
+justifies it, which is why the browser paid ~0.7 kB for a feature whose model is
+nine files — and the same reason the DST planner writes its own headline.
+
+**The card is an ordered list and nothing on it is a button.** A plan naming one
+target twice and one drop twice is exactly right and looks exactly like a
+mistake, so `Only if 1 loses` is on the card and not behind **See Why** — a
+reader who cannot see it deletes one of the two lines, and which one they delete
+decides whether they land the player. The numbering is the instruction, so it is
+a real `<ol>` marker rather than a printed digit; the first attempt gave the
+`li` a `display: flex` and silently deleted every number on the card, which a
+screenshot caught and no assertion would have. One `See why`, at 44px, and no
+control anywhere on the screen that could transact.
+
+**An empty plan surfaces only when it says something the board does not.** A
+quiet week is already `Nothing available beats what you already have` four
+pixels below; `No safe drop for this upgrade` is a different fact — a roster
+that needs a trade rather than a better target — and earns its line. A roster
+the engine cannot score keeps its adds and its bids and says the cut is the
+reader's, and never leaves a blank where a name should be, because a blank reads
+as *no cut needed*.
+
+**Two boundaries were held rather than blurred.** The defence is excluded inside
+`planWaiverClaims`, so the generic plan can never contradict the DST planner on
+the same screen — and because the model reports a rostered defence as
+`core_value`, the sheet recovers the position from the drop ranking and says *a
+defence, which belongs to the defence plan* rather than filing it under "worth
+too much to cut". And the add-specific cut is drawn on a player's own detail
+sheet rather than on the compact row, because a row four lines under the plan
+card would be repeating it; it reaches the targets the plan had no room for,
+which is what makes it worth a line at all. The plan and the sheet are
+reconciled inside the seam — they rank on different things underneath and would
+otherwise legitimately name two different cuts for one add.
+
+**Demo Mode calls the same function and pays for it.** The demo waivers handler
+adds the one line `app.ts` adds, on the scenario's own clock, so a scenario and a
+real league cannot draw two different shapes of the same screen. That pulls the
+whole planner into the demo chunk for ~9 kB and the budget was raised from 115 kB
+to 124 kB in the same commit with the reason recorded — a Demo Mode whose Waivers
+screen is missing its headline card is a worse demo than an ideal one is a better
+bundle, and reimplementing the plan for the demo would be exactly the second
+model this repository refuses to keep honest. The fixtures themselves are
+untouched; staging a realistic A → C, B → C, B → D scenario belongs to the Demo
+refresh.
+
+Thirty-eight unit and integration tests over the seam and the endpoint, and
+twenty-one browser tests over the card, the sheet, the honest endings, a
+forty-five-character name, a four-figure bid and a one-dollar one, at all four
+widths.
+
 ## Recommended next work
 
 0. **Watch the defence planner through one real week.** DST is complete enough

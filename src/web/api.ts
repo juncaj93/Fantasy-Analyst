@@ -2,6 +2,7 @@
 
 import type { DstPlan } from '../core/dst/planner.ts';
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
+import type { WaiverClaimPlan } from '../core/waivers/claimPlan.ts';
 /*
  * The rule about what a response has to be before it is parsed.
  *
@@ -1343,6 +1344,16 @@ export interface WaiverAdvice {
    * to disagree.
    */
   dst?: DstPlan | null;
+  /**
+   * The claims to enter, in the order to enter them.
+   *
+   * Computed by the server rather than by the screen, on the same principle as
+   * the defence plan above: the wording is written once, next to the arithmetic
+   * that justifies it, and both screens that read this response are drawing the
+   * same sentences. Absent on a deployment whose planner could not run, which
+   * the screen reads as "no plan" and never as "no move".
+   */
+  claimPlan?: WaiverClaimPlan | null;
 }
 
 /** A roster's budget position, in dollars and as a share of the league. */

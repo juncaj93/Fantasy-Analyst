@@ -1,8 +1,9 @@
 # The waiver claim planner
 
-> **Status: core intelligence, built and tested, deliberately unwired.**
-> Nothing in the app calls it. The integration is a separate, small lane — see
-> [Integration contract](#integration-contract).
+> **Status: built, tested and wired.** The Waivers screen opens on the plan.
+> The seam is `core/waivers/claimPlan.ts` — two functions, one call from the
+> endpoint — and it is described in [Integration contract](#integration-contract)
+> and [What the reader sees](#what-the-reader-sees).
 
 The question this answers, in one sentence:
 
@@ -294,10 +295,60 @@ What comes back:
 are a closed list in `types.ts`; adding one is a deliberate act, which is the
 point.
 
-Nothing here transacts. There is no write path in the folder, and the future UI
-still tells the user what to type into Sleeper by hand — which is why the
-ordering matters, since entering the same claims in a different order produces a
-different result.
+Nothing here transacts. There is no write path in the folder, and the UI tells
+the user what to type into Sleeper by hand — which is why the ordering matters,
+since entering the same claims in a different order produces a different result.
+
+---
+
+## What the reader sees
+
+The seam is `core/waivers/claimPlan.ts` and it is two functions.
+`planWaiversFor` gathers — it rebuilds the board with the same pure function the
+screen uses, so the targets the planner ranks are in the order the reader is
+looking at, and hands the priced bids through as references rather than copies.
+`describeWaiverPlan` turns the reason codes into sentences. Both are called
+together by `buildWaiverClaimPlan`, which is the one line `app.ts` and the demo
+runtime each add.
+
+The Waivers screen opens on the result:
+
+```
+Your waiver plan
+1. Add Breakout Back · $24 · Drop Depth Back
+2. Add Emerging Receiver · $14 · Drop Depth Back   Only if 1 loses
+3. Add Emerging Receiver · $14 · Drop Roster Filler  Only if 2 does not land him
+4. Add Streaming Tight End · $4 · Drop Backup Tight End
+Enter them in this order — Sleeper runs claims top to bottom …
+                                                              [ See why ]
+```
+
+Three decisions in that card are worth stating, because each is the answer to a
+way the feature could have gone wrong.
+
+**The qualifier is on the card, not behind `See Why`.** A plan naming one target
+twice and one drop twice is exactly right and looks exactly like a mistake, and a
+reader who cannot see why will delete one of the two lines — which decides
+whether they land the player.
+
+**It is an ordered list, and nothing on it is a button.** The numbering is the
+instruction, so it is a real `<ol>` marker rather than a printed digit. The only
+control is one `See why`, because this card is a list of transactions and there
+is no control on it that performs one.
+
+**An empty plan surfaces only when it says something the board does not.** A
+quiet week is already `Nothing available beats what you already have` on the
+board underneath; `No safe drop for this upgrade` is a different fact and earns
+its line.
+
+`See Why` is one sheet with no tabs in it: per claim, why him, why that cut, what
+the roster gains, what the lineup gains, the pricing pass's own headline, who
+else wants him, and how the claim stands to the ones above it — then the
+branches, the substitute and complement readings, who the plan refuses to cut,
+and what the wallet allowed. A player's own detail sheet carries one extra line,
+`If you claim him → Drop X`, which reaches the targets the plan had no room for.
+
+Nothing says `optimal`, and no branch carries a percentage.
 
 ---
 
@@ -313,6 +364,14 @@ different result.
 | `outcomes.ts` | the branch enumeration |
 | `index.ts` | `planWaiverClaims`, and the contract above |
 
+And one file outside the folder:
+
+| file | what it owns |
+| --- | --- |
+| `core/waivers/claimPlan.ts` | the gather, and every string a reader sees |
+
 Tests are `tests/waiverPlanner.*.test.ts` — 60 across drop cost, pairs,
 contingencies, multiple targets, FAAB, bounds, unknowns and one worked week
-pinned end to end.
+pinned end to end — plus `tests/waiverClaimPlan.test.ts` and
+`tests/waiverClaimPlan.api.test.ts` for the seam, and `e2e/waiver-plan.spec.ts`
+for the card, the sheet and the four phone widths.

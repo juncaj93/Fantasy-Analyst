@@ -1476,6 +1476,87 @@ test.describe('the season features', () => {
       }
     }
   });
+
+  /**
+   * The claim plan, live: the instructions this app hands somebody to type into
+   * Sleeper by hand.
+   *
+   * Two things are checked against whatever real roster and real wire the
+   * deployment is serving, because both are the kind of mistake that costs all
+   * the trust the rest of the plan earned. A claim that names a cut the reader
+   * does not own is one; a plan that reaches a reader still carrying the
+   * planner's machine vocabulary is the other.
+   *
+   * The screen half is separate and guarded, because the seasonal slot means
+   * Waivers is not a destination in preseason. The API half is true either way.
+   */
+  test('the waiver plan cuts only your own players, and says so in English', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+
+    const data = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const [waivers, roster] = await Promise.all([
+        (await fetch(`/api/leagues/${id}/waivers`)).json(),
+        (await fetch(`/api/leagues/${id}/roster`)).json(),
+      ]);
+      return { waivers, roster } as {
+        waivers: {
+          found: boolean;
+          claimPlan: {
+            claims: { rank: number; addName: string; addPosition: string; dropPlayerId: string | null; bid: number | null }[];
+          } | null;
+        };
+        roster: { starters: { playerId: string }[]; bench: { playerId: string }[] };
+      };
+    });
+    test.skip(!data?.waivers?.found, 'no roster on this deployment');
+    test.skip(!data!.waivers.claimPlan, 'this deployment produced no plan');
+
+    const plan = data!.waivers.claimPlan!;
+    const mine = new Set([
+      ...data!.roster.starters.map((p) => p.playerId),
+      ...data!.roster.bench.map((p) => p.playerId),
+    ]);
+
+    for (const [index, claim] of plan.claims.entries()) {
+      expect(claim.rank, 'the ranks are the order to enter the claims in').toBe(index + 1);
+      if (claim.dropPlayerId == null) continue;
+      expect(mine.has(claim.dropPlayerId), 'the plan named a cut this roster does not hold').toBe(true);
+    }
+
+    /*
+     * The defence is the DST planner's, on a live deployment as much as on a
+     * fixture. Two surfaces recommending different things about one DEF slot is
+     * the failure the boundary inside `planWaiverClaims` exists to prevent.
+     */
+    for (const claim of plan.claims) {
+      expect(claim.addPosition, 'the generic plan claimed a defence').not.toBe('DEF');
+    }
+
+    const text = JSON.stringify(plan);
+    for (const code of ['add_enters_lineup', 'protected_in_lineup', 'drop_covered_by_add', 'net_gain_below_bar']) {
+      expect(text, `the reason code "${code}" reached a reader`).not.toContain(code);
+    }
+    expect(text.toLowerCase(), 'nothing this app produces is optimal').not.toContain('optimal');
+
+    /* And on screen: one See Why, and no control that could transact. */
+    const tabs = await expectedTabs(page);
+    test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
+    await open(page, 'waivers');
+    const card = page.getByTestId('waiver-plan');
+    if ((await card.count()) === 0) return;
+
+    await expect(card.getByRole('button')).toHaveCount(1);
+    const label = (await card.getByRole('button').innerText()).toLowerCase();
+    for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
+      expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
+        new RegExp(`\\b${forbidden}\\b`),
+      );
+    }
+  });
 });
 
 /**

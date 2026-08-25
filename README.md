@@ -93,9 +93,29 @@ compact row per slot, both sides on one line; the bench is collapsed until you
 ask for it. Nothing here sets a lineup — it says what a change would be worth in
 win probability, and the change is made in Sleeper.
 
-**Waivers** — in season, where Draft used to be: who is available, how strongly
-he is recommended, which slot he fits and what he is worth this week. Expected
-cost, likely competition and multi-week value are shown as unknown until the
+**Waivers** — in season, where Draft used to be. It opens on the plan:
+
+```
+Your waiver plan
+1. Add Breakout Back · $24 · Drop Depth Back
+2. Add Emerging Receiver · $14 · Drop Depth Back    Only if 1 loses
+3. Add Emerging Receiver · $14 · Drop Roster Filler
+```
+
+One player claimed twice, one cut spent twice, and it is not a mistake. Sleeper
+runs claims in the order they were entered and a claim whose drop is already
+gone does not run, so if claim 1 lands, claim 2 cannot execute and the receiver
+is only pursued through claim 3 at the cost of a second cut. Working that out is
+the app's job, not yours; the qualifier on the repeated line is what says so. One
+**See why** opens the argument — why him, why that cut, what the roster gains,
+what the pricing pass said, who else wants him, and what changes if an earlier
+claim lands. Nothing says *optimal*, and no branch carries a percentage, because
+this app has an observed distribution of what past bids cost and no model of
+whether one wins. See [docs/WAIVER_CLAIM_PLANNER.md](docs/WAIVER_CLAIM_PLANNER.md).
+
+Below the plan is the board it argues from: who is available, how strongly he is
+recommended, which slot he fits and what he is worth this week. Expected cost,
+likely competition and multi-week value are shown as unknown until the
 league-intelligence pass provides them, because a bid we invented would be worse
 than an empty field. It never makes a transaction.
 
@@ -202,6 +222,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |
 | [docs/PLAYER_AND_LINEUP_INTELLIGENCE.md](docs/PLAYER_AND_LINEUP_INTELLIGENCE.md) | expected points, injury beneficiaries, contingency lineups, self-grading |
 | [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md) | waiver competition, bilateral trade fit, planning, the decision feed |
+| [docs/WAIVER_CLAIM_PLANNER.md](docs/WAIVER_CLAIM_PLANNER.md) | add-specific drop cost, the contingency claim structure, and what the reader sees |
 | [docs/MANAGER_INTELLIGENCE.md](docs/MANAGER_INTELLIGENCE.md) | the free, resumable history ledger, and the three bounded things it may change |
 | [docs/SMART_TRADES.md](docs/SMART_TRADES.md) | bilateral trade offers: roster need, counterparty defensibility, capped manager fit |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
