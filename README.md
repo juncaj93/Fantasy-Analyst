@@ -242,6 +242,21 @@ npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
 ```
 
+CI runs each of those four widths across three runners rather than one, so a
+red tick names the width *and* the third of the suite it came from — `webkit-
+iphone-430 (2/3)`. To reproduce exactly what one of those runners did, pass the
+same shard through:
+
+```bash
+npx playwright test --project=webkit-iphone-430 --shard=2/3
+```
+
+(`npm run e2e` names all four widths itself, so reproducing one runner means
+naming the one project rather than adding a flag to the script.)
+
+The split is Playwright's own and is by whole spec file, so a new spec file
+needs nothing added anywhere. See `.github/workflows/ci.yml` for why three.
+
 The original build brief is preserved verbatim in [docs/brief/](docs/brief/),
 alongside the later ones — the Matchup brief this feature was built to is
 [09_MATCHUP.md](docs/brief/09_MATCHUP.md), and the section numbers the matchup

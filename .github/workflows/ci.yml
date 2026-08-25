@@ -13,6 +13,11 @@ name: CI
 # So: `main` is verified on every push, and everything else is verified on its
 # pull request. Nothing loses coverage — a branch is gated before it can merge,
 # and main is gated after — and the apt load halves.
+#
+# This matters more since the widths were sharded three ways: the browser job is
+# twelve runners now rather than four, so a duplicated workflow would ask for
+# twenty-four at once. None of them touch apt any more — see the container image
+# on the `e2e` job — but twelve is a number worth only asking for once.
 on:
   push:
     branches: [main]
@@ -50,7 +55,14 @@ jobs:
         run: npx wrangler deploy --dry-run --outdir=.wrangler/dry-run
 
   e2e:
-    name: iPhone WebKit smoke tests
+    # Width and shard, both in the name, because that is what a red tick has to
+    # answer first: *which* phone, and *which third of the suite*. GitHub would
+    # otherwise label these `e2e (webkit-iphone-430, 1)`, which needs the matrix
+    # definition open beside it to read.
+    #
+    # The denominator appears twice — here and in `--shard=` below — and the two
+    # have to move together with the `shard:` list. Three literals, one number.
+    name: ${{ matrix.project }} (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
 
     # The browser and its system libraries arrive with the image, rather than
@@ -84,51 +96,30 @@ jobs:
     # A hung browser is a real failure mode, and without this it is invisible:
     # the job sits at "in progress" for six hours and nobody learns anything.
     #
-    # One viewport per runner, rather than all of them in sequence. The widths
-    # are completely independent -- they share no state, no server and no order
-    # -- so running them one after another only ever bought a longer wall clock,
-    # and the suite eventually grew past this timeout and started being
-    # cancelled part of the way through with nothing failing.
+    # This is a *job* ceiling, so it pays for setup as well as tests and on its
+    # own cannot say which of the two overran. Each step that can block carries
+    # its own budget below for exactly that reason, and this number's only job
+    # is to stay comfortably larger than their sum, so that an overrun is named
+    # by the step that caused it. A job ceiling that becomes the binding
+    # constraint reports "something took too long", which is the one thing it
+    # exists not to say.
     #
-    # Raised from 20 to 35 when that happened a second time, and the arithmetic
-    # is why rather than the symptom. This is a *job* timeout, so it pays for
-    # `npm ci` and `playwright install --with-deps webkit` before a single test
-    # runs -- about six minutes of it. The suite itself is now around fourteen
-    # minutes per width on a good runner, and a shared runner can be half again
-    # as slow. Twenty left roughly fourteen minutes for a twenty-minute job, so
-    # the fast widths finished and the slow ones were cut two thirds through:
-    # the number had quietly gone back to policing how big the suite is.
+    # The arithmetic: ten for the browser check, eighteen for the tests, and
+    # container start, checkout and `npm ci` either side — 27s, 3s, 2s and 5s on
+    # the last run of `main`, so call it a minute. Twenty-nine, and thirty-two
+    # leaves the steps binding rather than this.
     #
-    # Thirty-five restored what it is for. A browser that is genuinely stuck
-    # still fails here inside the hour instead of sitting until GitHub's own
-    # six-hour ceiling; a suite that merely grew does not. That paragraph ended
-    # by saying that if this ever needed raising again, the browser download was
-    # the cheapest thing on the list to stop paying for. It was not the download
-    # in the end — it was apt, and the container above stops paying for both.
-    #
-    # Back to thirty-five, and it is a real ceiling again rather than a number
-    # inflated to cover a queue: ten for the browser check, twenty for the
-    # tests, and setup either side. Setup is now a checkout and an `npm ci`,
-    # because everything else arrives with the image.
-    #
-    # Each step that can block still carries its own budget, so a failure names
-    # which part overran instead of leaving this one to say only "something".
-    #
-    # Forty, tracking the test step's move from twenty-five to thirty below. It
-    # moves for one reason only: to stay *larger* than the sum of the steps it
-    # contains, so that an overrun is still named by the step that caused it. A
-    # job ceiling that becomes the binding constraint reports "something took too
-    # long", which is the one thing this number exists not to say.
-    timeout-minutes: 40
+    # It went 20 → 35 → 40 across three raises, each covering a suite that had
+    # outgrown the previous number rather than a browser that was stuck. Down,
+    # now, for the first time: the number below is what actually changed and
+    # this one only follows it.
+    timeout-minutes: 32
 
-    # The job number above pays for setup as well as tests, so on its own it
-    # still cannot say *which* of the two overran — and that distinction is the
-    # whole point of having it. The test step therefore carries its own budget
-    # below: twenty minutes of actual testing is a stuck browser, whatever apt
-    # did beforehand.
     strategy:
       # Every width reports for itself: a failure at 360 is usually a layout
-      # fact about 360, and cancelling the other two would hide whether it is.
+      # fact about 360, and cancelling the others would hide whether it is. The
+      # same goes for a shard — one third failing is a fact about those specs,
+      # and the other two thirds still have to say whether they agree.
       fail-fast: false
       matrix:
         # 430 is the Pro Max class, and it is here for the opposite reason to
@@ -136,6 +127,8 @@ jobs:
         # catches anything only ever tuned for a narrow screen — a control row
         # that stretches, a fixed field that stops looking fixed.
         project: [webkit-iphone-430, webkit-iphone-390, webkit-iphone-375, webkit-small-360]
+        # Each width across three runners instead of one. See the test step.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -166,72 +159,64 @@ jobs:
           fi
           npx playwright install webkit
 
-      # This is the one that can hang. Twenty-five minutes of *testing* is a
-      # stuck browser however long the setup took beforehand.
+      # A third of the suite, at one width. This is the one step that can hang,
+      # and eighteen minutes of *testing* is a stuck browser however long the
+      # setup took beforehand.
       #
-      # Twenty until the suite outgrew it, and this is a capacity correction
-      # rather than a number inflated to cover a queue — the distinction the
-      # job timeout above spends three paragraphs on, and it is worth making
-      # again because the evidence here is unusually clean.
+      # Sharding, rather than a fourth raise of the ceiling. The ceiling went
+      # 20 → 25 → 30 across three commits, each raise honest about what it was
+      # — a suite that had legitimately grown, not a browser that was stuck —
+      # and each one leaving the number measuring the suite's size instead of
+      # the failure it was written to catch. `docs/STATUS.md` had this recorded
+      # as blocking rather than recommended. Here is the measurement it was
+      # blocking on, from `main` at a5448ef — four widths, one commit, the whole
+      # suite on one runner each:
       #
-      # What was measured, twice, on two different commits: `webkit-iphone-430`
-      # was killed mid-run with **no test having failed** — once at test 527 of
-      # 547, once at 514 of 554 — while the other three widths finished the
-      # whole suite green. The last run's passing widths came in at roughly
-      # 18m30s to 19m of testing, so three of four were already inside ninety
-      # seconds of the ceiling and the fourth simply landed on a slower runner.
-      # On main the night before, 390 finished in 19m02s: fifty-eight seconds
-      # of headroom on a suite that has grown by two features since.
+      #     360   19m24s   green
+      #     375   23m12s   green
+      #     390   23m36s   green
+      #     430   25m03s   green, with 4m57s of a thirty-minute budget left
       #
-      # So the ceiling had stopped measuring what it was written to measure. A
-      # browser that is genuinely stuck still fails here well inside the hour;
-      # what it had started catching instead was a suite that legitimately
-      # takes longer than it used to, on a runner that happened to be slow —
-      # and the signal for that is indistinguishable from a real hang, which is
-      # exactly what makes it expensive.
+      # Every width was green and nothing was flaky. That is the point: at 430
+      # the suite was inside five minutes of a ceiling it had already pushed up
+      # three times, and the next feature to add a spec file would have spent
+      # that too. The number was going to keep meaning "the suite grew".
       #
-      # Twenty-five, and the job ceiling above stays at thirty-five: setup is a
-      # checkout and an `npm ci`, the browser arrives with the image, so 25 + ~2
-      # still leaves the job's own limit doing its job. Nothing else moved — no
-      # assertion loosened, no test skipped, no retry added.
+      # `--shard=n/3` is Playwright's own split, so nothing here enumerates
+      # which specs go where and a new spec file is picked up by whichever shard
+      # the split puts it in. With `fullyParallel: false` the unit of splitting
+      # is a whole file, so no file is ever cut in half and every spec still
+      # runs in its own file's order, beside the same neighbours, against a
+      # server seeded exactly as before — three servers now instead of one, each
+      # a fresh `FA_SEED=1` boot, which is if anything stricter isolation than
+      # the single shared server the suite used to share across a whole width.
       #
-      # This buys time; it does not buy capacity. Sharding each width across two
-      # runners is the answer that scales, and it is in `docs/STATUS.md` under
-      # recommended next work rather than here, because it is a workflow project
-      # and not a line in a file.
+      # Three, not two, and not four. Playwright balances shards by test count,
+      # so the interesting question is what that does to *time*; measured
+      # against the real per-file durations of a full local run, the slowest
+      # shard carries 54% of the suite at two shards, 42% at three and 35% at
+      # four. Two leaves the slowest width near fourteen minutes, which is not
+      # far enough from the ceiling to stop this conversation happening again;
+      # four buys three more minutes for a third again as many runners and a
+      # worse spread. Three puts the slowest shard of the slowest width at
+      # roughly eleven minutes.
       #
-      # Twenty-five to thirty, and this is the third time. The measurement, from
-      # the waiver-plan run on #181 — four widths, one commit, one afternoon:
-      #
-      #     375   ~17m50s   green
-      #     360   ~21m27s   green
-      #     390   ~22m15s   green
-      #     430    25m00s   cut at test 649 of ~660, no test having failed
-      #
-      # 430 is reliably the slowest width — the widest viewport lays out the most
-      # — and it went over by something under half a minute. What matters more is
-      # 390 at 22m15s: two of four widths were inside three minutes of the
-      # ceiling on the same run, so this is the suite's size and not one unlucky
-      # runner. The distinction the paragraphs above spend so long on is the one
-      # that decides it, and the evidence points the same way it did at twenty.
-      #
-      # Thirty, and the job ceiling moves with it so it keeps doing its own job
-      # rather than becoming the binding constraint.
-      #
-      # Being honest about what this is: raising a ceiling for the third time is
-      # the behaviour this file warns about two comments up, and the only reason
-      # it is defensible here is that nothing was skipped, loosened or retried to
-      # get green. Sharding has stopped being an optimisation and started being
-      # the fix — see `docs/STATUS.md`, where it is now recorded as blocking the
-      # next feature rather than merely recommended.
-      - run: npx playwright test --project=${{ matrix.project }}
-        timeout-minutes: 30
+      # So eighteen: about 1.6× the expected worst shard, which is the variance
+      # a shared runner has actually shown, and it is a ceiling that means
+      # "stuck" again rather than "big". The suite can roughly half again in
+      # size before this needs looking at, and when it does the answer is a
+      # fourth shard — a one-character change to the three literals above and
+      # below — rather than a fourth raise.
+      - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
+        timeout-minutes: 18
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          # Artifact names have to be unique across a matrix, or the shards
-          # race to write one and all but the first fail on upload.
-          name: playwright-report-${{ matrix.project }}
+          # Artifact names have to be unique across a matrix, or the jobs race
+          # to write one and all but the first fail on upload. The engine is in
+          # the project name, so this reads browser, width and shard — which is
+          # what you need to know before opening a trace.
+          name: playwright-report-${{ matrix.project }}-shard-${{ matrix.shard }}-of-3
           path: |
             playwright-report/
             test-results/
