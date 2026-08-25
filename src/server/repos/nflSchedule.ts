@@ -113,6 +113,67 @@ export class NflScheduleRepo {
     return (result.results ?? []).map(toRow);
   }
 
+  /**
+   * A handful of teams across a handful of weeks — the planner's read.
+   *
+   * One query rather than one per team, and bounded on both axes, because this
+   * is the first thing in the app to read the fixture list on a *request* path
+   * rather than on the cron. A defence planner asks about at most the rostered
+   * defences plus the bounded free-agent pool, over the next few weeks plus the
+   * league's own playoff weeks: a few hundred rows at the very worst and about
+   * a hundred in practice. `season(...)` would have fetched five hundred and
+   * forty-four to answer the same question.
+   */
+  async forTeams(
+    season: string,
+    teams: readonly string[],
+    range: { from: number; to: number },
+  ): Promise<ScheduleTeamWeek[]> {
+    const wanted = [...new Set(teams.map((t) => t.toUpperCase()))].filter((t) => t.length > 0);
+    if (wanted.length === 0 || range.to < range.from) return [];
+
+    const rows: ScheduleTeamWeek[] = [];
+    /*
+     * Chunked on the bound-parameter ceiling like every other multi-id read in
+     * this file. Three parameters are spent on the season and the week range,
+     * so the team list gets what is left.
+     */
+    for (const batch of chunk([...wanted], MAX_BOUND_PARAMS - 3)) {
+      const placeholders = batch.map(() => '?').join(', ');
+      const result = await this.db
+        .prepare(
+          `SELECT season, week, team, opponent, home, kickoff, roof
+             FROM nfl_schedule
+            WHERE season = ? AND week >= ? AND week <= ? AND team IN (${placeholders})
+            ORDER BY team, week`,
+        )
+        .bind(season, range.from, range.to, ...batch)
+        .all<Record<string, unknown>>();
+      for (const row of result.results ?? []) rows.push(toRow(row));
+    }
+    return rows;
+  }
+
+  /**
+   * One week, every team — who is at home, and against whom.
+   *
+   * Thirty-two rows, read so the defence model can finally have the home-field
+   * term it was written with. Deliberately not taken from `vegas_events`, whose
+   * `home_team` column means "a team we asked about" rather than "the home
+   * side" — the exact vocabulary trap that had every stored spread in this app
+   * pointing the wrong way until the foundation lane found it.
+   */
+  async forWeek(season: string, week: number): Promise<ScheduleTeamWeek[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT season, week, team, opponent, home, kickoff, roof
+           FROM nfl_schedule WHERE season = ? AND week = ? ORDER BY team`,
+      )
+      .bind(season, week)
+      .all<Record<string, unknown>>();
+    return (result.results ?? []).map(toRow);
+  }
+
   /** How much of a season is stored, for the health line and for the tests. */
   async coverage(season: string): Promise<{ rows: number; weeks: number; teams: number; fetchedAt: string | null }> {
     const result = await this.db

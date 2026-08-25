@@ -100,14 +100,20 @@ import { describeScoring, projectionScoringFrom, scoringKey } from '../core/star
 import { DecisionFeedRepo } from './repos/decisionFeed.ts';
 import { NO_XFP, assessXfp } from '../core/xfp/model.ts';
 import type { NeedLevel } from '../core/league/competition.ts';
-import { byeOutlook, playoffEmphasis, playoffWeeks } from '../core/league/planning.ts';
+import { byeOutlook } from '../core/league/planning.ts';
 import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/tradeFit.ts';
 import { SleeperSyncService } from './services/sleeperSync.ts';
 /* Which season it is, from Sleeper's own state rather than from the clock. */
 import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
-import { startSitInputsFor } from './services/startSitInputs.ts';
+import { buildStartSitContext, startSitInputsFor } from './services/startSitInputs.ts';
+/* And the one assembly of everything the defence planner reads. */
+import { buildDstPlan, playoffContextFor } from './services/dstPlanService.ts';
+import { NflScheduleRepo } from './repos/nflSchedule.ts';
+import { detectBestBall } from '../core/sleeper/bestBall.ts';
+import { isDraftComplete } from '../core/sleeper/phase.ts';
+import { DEFENCE_POSITION } from '../core/startsit/engine.ts';
 import { MatchupService } from './services/matchupService.ts';
 import { SleeperProjectionService } from './services/sleeperProjectionService.ts';
 import { resolveWeek } from '../core/matchup/build.ts';
@@ -826,9 +832,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const allPlayers = await new PlayerRepo(db).listAll();
     const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable, players: allPlayers });
 
+    /*
+     * The slate, the defences and the fixture list, built once for both scans.
+     *
+     * `startSitInputsFor` builds this itself when it is not given one, so the
+     * two calls below would otherwise assemble the same league-wide context
+     * twice on one request. Passing it also guarantees the roster and the wire
+     * are read against the *same* week — which now includes which teams are at
+     * home, the input the defence model's smallest residual has been waiting
+     * for.
+     */
+    const waiverContext = await buildStartSitContext(db);
+    const waiverState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const waiverWeek = waiverState?.week ?? 1;
+    const startsDefence = (shape.starters[DEFENCE_POSITION] ?? 0) > 0;
+
     const [rosterInputs, candidateInputs, freshness] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds),
-      startSitInputsFor(db, candidateIds),
+      startSitInputsFor(db, mine.playerIds, { context: waiverContext }),
+      startSitInputsFor(db, candidateIds, { context: waiverContext }),
       new PropsRepo(db).freshness(),
     ]);
 
@@ -853,7 +874,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * bid history — and every one of them degrades to a sentence rather than
      * taking the upgrade list with it.
      */
-    const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const nflState = waiverState;
 
     /*
      * What each recommended add is worth past this Sunday.
@@ -934,12 +955,78 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
       : [];
 
+    /*
+     * The defence, decided in one place and drawn in two.
+     *
+     * Team and Waivers both read this response, so the DST recommendation is
+     * computed once here rather than on each screen — which is the only way
+     * `Stream NYJ over BUF` and `Hold BUF` can never be on screen at the same
+     * time in the same app.
+     *
+     * A failure is swallowed to null. Every other column on this page is a
+     * complete answer to a different question, and a schedule read that fell
+     * over is not a reason to take the waiver board down.
+     */
+    const draft = league.draftId ? await leagueRepo.getDraft(league.draftId).catch(() => null) : null;
+    const format = detectBestBall({
+      leagueSettings: league.leagueSettings,
+      draftSettings: draft?.settings ?? null,
+    });
+    const playoffs = playoffContextFor({
+      leagueSettings: league.leagueSettings,
+      rosters,
+      mine,
+      totalRosters: league.totalRosters,
+      currentWeek: waiverWeek,
+    });
+    const dst = startsDefence
+      ? await buildDstPlan(db, {
+          season: league.season,
+          week: waiverWeek,
+          shape,
+          profile,
+          bestBall: format.confident && format.bestBall,
+          /*
+           * Post-draft is a fact about the draft, never about the calendar.
+           *
+           * A league whose draft has not finished has no weekly acquisition
+           * pressure, whatever the date says — and a league that drafts in
+           * week 2 is not behind, it is a league that drafts in week 2.
+           */
+          draftComplete: isDraftComplete(draft?.status ?? league.status ?? null),
+          rosterInputs,
+          candidateInputs,
+          lineup,
+          reserveIds: mine.reserveIds,
+          playoff: { weeks: playoffs.weeks, emphasis: playoffs.emphasis },
+        }).catch(() => null)
+      : null;
+
+    /*
+     * One owner for the DEF row, and it is the planner.
+     *
+     * The generic waiver scan already refuses a DEF-over-DEF swap — that guard
+     * is the foundation lane's and it stays. What it does still offer is a
+     * defence for an *empty* DEF slot, which is the ordinary answer to an
+     * ordinary hole and was right while nothing modelled the alternative. Now
+     * something does, and it can say `Wait — no DST needed yet` about the same
+     * empty slot, so the two would contradict each other on the same screen.
+     *
+     * The planner wins wherever it has an opinion; the generic row survives
+     * only when it could not be computed at all, which is a deployment with no
+     * schedule stored rather than a normal week.
+     */
+    const upgrades = withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure).filter(
+      (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
+    );
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: freshness,
       ...advice,
-      upgrades: withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure),
+      dst,
+      upgrades,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
@@ -1348,72 +1435,66 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const players = mine ? await new PlayerRepo(db).listByIds(mine.playerIds) : new Map();
     const starters = new Set(mine?.starterIds ?? []);
-    /*
-     * The season record, from Sleeper's own roster settings.
-     *
-     * Stored whole on `RosterRecord.settings` by the league sync, so this needs
-     * no second request and no table of its own. Absent means the sync predates
-     * the column, which `playoffEmphasis` reads as too few games played and
-     * answers with zero weight — the correct behaviour for an unknown record.
-     */
-    const mySettings = (mine?.settings ?? null) as Record<string, unknown> | null;
-    const record = {
-      wins: Number(mySettings?.['wins'] ?? 0) || 0,
-      losses: Number(mySettings?.['losses'] ?? 0) || 0,
-    };
 
     /*
-     * There is no bye-week source connected.
+     * Byes, from the fixture list this app now stores.
      *
-     * Sleeper's player dictionary does not carry one — checked against the live
-     * payload, which has forty-nine fields and no bye — and this app stores no
-     * NFL schedule. So the planner runs against `null` byes, correctly finds
-     * nothing, and says which input is missing rather than reporting an all-clear
-     * it has not earned.
+     * They used to be `null` for everybody, with a note saying so: Sleeper's
+     * player dictionary does not carry a bye — checked against the live
+     * payload, which has forty-nine fields and no bye — and until migration
+     * 0032 there was no schedule to derive one from. There is now, and a bye is
+     * the *absence* of a fixture in it rather than a stored field, so a hole in
+     * an ingest cannot masquerade as a week off: a team with no rows at all
+     * reports no bye instead of thirteen.
+     *
+     * One read of one season, and the map is per team rather than per player —
+     * a bye belongs to a team and every player on it shares one.
      */
+    const scheduleRows = await new NflScheduleRepo(db).season(league.season).catch(() => []);
+    const byeByTeam = new Map<string, number>();
+    if (scheduleRows.length > 0) {
+      const weeksSeen = new Map<string, Set<number>>();
+      let lastWeek = 0;
+      for (const row of scheduleRows) {
+        lastWeek = Math.max(lastWeek, row.week);
+        const team = row.team.toUpperCase();
+        const seen = weeksSeen.get(team) ?? new Set<number>();
+        if (row.opponent) seen.add(row.week);
+        weeksSeen.set(team, seen);
+      }
+      for (const [team, seen] of weeksSeen) {
+        for (let week = 1; week <= lastWeek; week++) {
+          if (!seen.has(week)) {
+            byeByTeam.set(team, week);
+            break;
+          }
+        }
+      }
+    }
+
     const roster = [...players.values()].map((p) => ({
       playerId: p.id,
       name: p.fullName,
       position: p.position,
-      byeWeek: null as number | null,
+      byeWeek: byeByTeam.get((p.team ?? '').toUpperCase()) ?? null,
       starter: starters.has(p.id),
     }));
 
     const byes = byeOutlook({ roster, shape, currentWeek });
     /*
-     * The first playoff week, read the way the rest of the app reads it.
+     * The playoff weeks and their weight, through the one reader.
      *
-     * `?? 15` was never a default: it fires only when the key is absent or null,
-     * and a real league publishes `playoff_week_start` as a number that is not a
-     * usable week. That value survived the `??`, became the start week, and
-     * produced an empty list of playoff weeks -- which the live probe caught in
-     * production after the seeded database, which publishes 15, had passed.
-     *
-     * `readFinalWeek` is the canonical reader and validates the range before it
-     * trusts the value, so this derives from it rather than parsing the same
-     * setting a second way. It returns the last week a bid can still pay off,
-     * which is the week before the playoffs begin.
+     * Shared with the defence planner rather than computed twice: a stash that
+     * thought the playoffs began in week 15 while this screen said 14 would be
+     * a roster spot spent on the wrong month, and the league publishes the
+     * answer.
      */
-    const playoffStartWeek = readFinalWeek(league.leagueSettings) + 1;
-    const rawPlayoffStart = Number(league.leagueSettings?.['playoff_week_start']);
-    const playoffWeekPublished = Number.isFinite(rawPlayoffStart) && rawPlayoffStart > 1 && rawPlayoffStart <= 19;
-    const playoffTeams = Number(league.leagueSettings?.['playoff_teams'] ?? 6);
-
-    /*
-     * The record comes from the synced seats, not from a guess.
-     *
-     * With no history synced there is no record, and `playoffEmphasis` is given
-     * 0-0 — which its own gate reads as "too few games played" and answers with
-     * zero weight. That is the correct behaviour for an unknown record: playoff
-     * weeks stay out of the ranking until something is actually known.
-     */
-    const emphasis = playoffEmphasis({
+    const playoffs = playoffContextFor({
+      leagueSettings: league.leagueSettings,
+      rosters,
+      mine,
+      totalRosters: league.totalRosters,
       currentWeek,
-      playoffStartWeek,
-      wins: record.wins,
-      losses: record.losses,
-      playoffTeams,
-      totalTeams: rosters.length || league.totalRosters,
     });
 
     return jsonResponse({
@@ -1421,20 +1502,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       currentWeek,
       byes: {
         ...byes,
-        available: false,
-        note: 'no bye-week source is connected, so bye planning reports nothing rather than an all-clear',
+        available: scheduleRows.length > 0,
+        note:
+          scheduleRows.length > 0
+            ? `byes are derived from the stored ${league.season} fixture list`
+            : 'no schedule has been ingested yet, so bye planning reports nothing rather than an all-clear',
       },
       playoffs: {
-        startWeek: playoffStartWeek,
-        weeks: playoffWeeks(playoffStartWeek),
+        startWeek: playoffs.startWeek,
+        weeks: playoffs.weeks,
         /*
          * Whether that week came from the league or from the standard fallback.
          * A reader told the playoffs start in week 15 deserves to know whether
          * the league said so or the app assumed it.
          */
-        startWeekPublished: playoffWeekPublished,
-        record: mySettings ? record : null,
-        ...emphasis,
+        startWeekPublished: playoffs.startWeekPublished,
+        record: playoffs.record,
+        weight: playoffs.emphasis,
+        reason: playoffs.reason,
       },
     });
   });

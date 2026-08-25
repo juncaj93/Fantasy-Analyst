@@ -208,6 +208,29 @@ export function byeWeeks(
   return out;
 }
 
+/**
+ * Which teams are at home in a set of fixtures.
+ *
+ * A derivation rather than a read, and it lives here for the same reason
+ * {@link byeWeeks} does: the fixture list is the only source in this app that
+ * knows which side is the home one. `vegas_events.home_team` means "a team we
+ * asked about", which is a different fact wearing the same word — reading it as
+ * home field is the vocabulary trap that had every stored spread in this app
+ * pointing the wrong way until it was found.
+ *
+ * A bye contributes nothing: a team with no fixture is neither at home nor on
+ * the road, and an entry saying otherwise would put a road penalty on a defence
+ * that is not playing.
+ */
+export function homeByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  for (const row of fixtures) {
+    if (!row.opponent) continue;
+    out.set(row.team.toUpperCase(), row.home);
+  }
+  return out;
+}
+
 function normaliseTeam(raw: string | undefined): string | null {
   const value = (raw ?? '').trim().toUpperCase();
   return value.length === 0 ? null : value;

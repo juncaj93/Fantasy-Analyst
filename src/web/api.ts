@@ -1,5 +1,6 @@
 /** Typed API client. All calls are same-origin and credentialed. */
 
+import type { DstPlan } from '../core/dst/planner.ts';
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 /*
  * The rule about what a response has to be before it is parsed.
@@ -1333,6 +1334,15 @@ export interface WaiverAdvice {
   pool?: { scanned: number; perPosition: number };
   /** What each upgrade would cost, or why no price can honestly be quoted. */
   faab?: FaabAdvice | null;
+  /**
+   * The defence decision, or null when this league does not have one.
+   *
+   * It rides on this response rather than on an endpoint of its own so Team and
+   * Waivers cannot draw two different answers to the same question — Team
+   * already fetches this, and a second request would have been a second chance
+   * to disagree.
+   */
+  dst?: DstPlan | null;
 }
 
 /** A roster's budget position, in dollars and as a share of the league. */
