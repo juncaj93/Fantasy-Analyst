@@ -123,6 +123,28 @@ The draft cadence is the only aggressive number here, it applies for a few
 hours a year, and `core/season/lifecycle.ts` caps it by lifecycle state: there
 is no cadence at which polling a finished draft is correct.
 
+## Third-party image bytes
+
+The page-weight budgets above govern this repository's own JavaScript, CSS and
+HTML. They do not govern player portraits, and deliberately do not grow a
+media-budget system for one image on one surface. What is written down instead:
+
+| | |
+|---|---|
+| measured source | JPEG, dominant 350×254, ~30 kB median (thumb variant ~23 kB, unused) |
+| cache policy | Sleeper's own `public, max-age=2678400` — 31 days, Cloudflare `HIT` |
+| approved surface | the expanded player sheet, one image, loaded eagerly |
+| image-free by decision | Matchup, Draft, Waivers, the Players index, compact Smart Trades rows, and Team |
+| eager loading across a result set | never — the sheet is the only eager loader |
+| bytes served by this deployment | none: the browser fetches Sleeper directly |
+
+The last two lines are the ones that keep this from needing a budget at all. One
+opened card is one ~30 kB request, to somebody else's CDN, cached for a month;
+there is no path by which a list can turn that into fifty. Both are asserted in
+`tests/playerHeadshotSurfaces.test.ts` rather than left as intentions, and
+`e2e/player-face.spec.ts` checks the running app makes no portrait request from
+any list. See "Player portraits" in `docs/ARCHITECTURE.md`.
+
 ## Browser-side computation
 
 The board arrives ranked and scored from the server. The client filters, sorts

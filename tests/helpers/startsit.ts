@@ -89,6 +89,8 @@ export function defence(
     now?: string | Date;
     lineAsOf?: string | null;
     opponentQuarterback?: { starterOut: boolean; observedAt: string | null } | null;
+    /** True at home, false away, absent when the fixture list is unread. */
+    home?: boolean | null;
   } = {},
 ): StartSitInput {
   return {
@@ -103,5 +105,6 @@ export function defence(
     ...(extra.now === undefined ? {} : { now: extra.now }),
     ...(extra.lineAsOf === undefined ? {} : { lineAsOf: extra.lineAsOf }),
     ...(extra.opponentQuarterback === undefined ? {} : { opponentQuarterback: extra.opponentQuarterback }),
+    ...(extra.home === undefined ? {} : { home: extra.home }),
   };
 }

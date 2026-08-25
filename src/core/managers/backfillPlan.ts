@@ -60,6 +60,36 @@ export type DatasetName = 'drafts' | 'transactions' | 'identity';
 export const MAX_CHAIN_DEPTH = 20;
 
 /**
+ * How many seasons of history this app is willing to hold an opinion about.
+ *
+ * A product policy, and the counterpart to {@link MAX_CHAIN_DEPTH} rather than a
+ * second copy of it: that one stops a cycle, this one stops a walk that would
+ * terminate correctly and still not be worth taking. Sleeper keeps every season
+ * a league has ever played, and a league founded in 2016 is ten chain links and
+ * a fortnight of daily batches deep — for seasons the derivation has already
+ * decided are nearly worthless.
+ *
+ * **Four, counting the current season as the first.** The number comes from the
+ * weighting rather than from taste. `tradeProfile.SEASON_DECAY` and
+ * `tradeTendencies.seasonDecay` are both 0.6 and compound on a season's age
+ * against the newest one on record, so the four seasons in policy carry weights
+ * 1, 0.6, 0.36 and 0.216 — and the fifth would arrive at 0.13, roughly an
+ * eighth of a vote, in exchange for another season's worth of drafts and
+ * eighteen transaction weeks. Every request that buys the fifth season buys
+ * less than a tenth of what the same request buys in the first.
+ *
+ * The window moves with the league's current season, so it is a rolling four
+ * and not a fixed floor: a chain walked to 2023 today stops at 2024 next year
+ * without anything being reconfigured.
+ *
+ * What this does **not** do is delete. Seasons already in the ledger stay there
+ * and stay readable; the policy governs what is *fetched* from here on, which
+ * is where the budget is spent. There are no exceptions by league name, size or
+ * age — a policy with an exception is not one a test can hold.
+ */
+export const MAX_HISTORY_SEASONS = 4;
+
+/**
  * The last transaction leg Sleeper will answer for.
  *
  * Sleeper indexes transactions by leg, and a league's legs run to 18 in the
@@ -147,6 +177,41 @@ export interface BackfillPlan {
 }
 
 /**
+ * The oldest season {@link MAX_HISTORY_SEASONS} still admits, as a year.
+ *
+ * Null when the current season is not a number this can count back from, which
+ * is the one case where the policy declines to apply rather than guessing —
+ * a league whose season string is unparseable falls back to the chain depth
+ * guard, which is a worse bound but a real one.
+ */
+export function oldestSeasonInPolicy(currentSeason: string): number | null {
+  const current = Number(currentSeason);
+  if (!Number.isFinite(current)) return null;
+  return current - (MAX_HISTORY_SEASONS - 1);
+}
+
+/**
+ * Whether one season is inside the history policy.
+ *
+ * A season *newer* than the current one is in policy too. That is not a case
+ * this app expects to see, but the alternative — a January state that still
+ * reads December's season while the ledger has already seen the new one —
+ * would silently refuse to fetch the league that is actually being played.
+ *
+ * An unknown season (a chain link discovered before its year is known) is in
+ * policy: refusing what cannot be judged would stop the walk at the first link
+ * whose season Sleeper had not yet told us.
+ */
+export function withinHistoryPolicy(season: string | null, currentSeason: string): boolean {
+  if (season == null) return true;
+  const floor = oldestSeasonInPolicy(currentSeason);
+  if (floor == null) return true;
+  const year = Number(season);
+  if (!Number.isFinite(year)) return true;
+  return year >= floor;
+}
+
+/**
  * Seasons in the order the brief asks for: current, then newest back.
  *
  * A string comparison rather than a numeric one, because a Sleeper season is a
@@ -208,7 +273,17 @@ export function planBackfill(state: BackfillState, budget: number): BackfillPlan
  * fits in the next batch.
  */
 export function enumerateWork(state: BackfillState): WorkUnit[] {
-  const ordered = prioritiseSeasons(state.seasons, state.currentSeason);
+  /*
+   * Priority order first, then the history policy, and the order of those two
+   * does not matter — but the filter's position does. It is applied once, here,
+   * so that every kind of unit below inherits it: a season outside the window
+   * yields no identity read, no draft index, no picks and no transaction week,
+   * and there is no path that quietly exempts one dataset. A season already in
+   * the ledger from before the policy existed simply stops being asked about.
+   */
+  const ordered = prioritiseSeasons(state.seasons, state.currentSeason).filter((season) =>
+    withinHistoryPolicy(season.season, state.currentSeason),
+  );
   const units: WorkUnit[] = [];
 
   /*
@@ -274,11 +349,28 @@ export function enumerateWork(state: BackfillState): WorkUnit[] {
  * at all.
  */
 export function unresolvedChainLink(state: BackfillState): WorkUnit | null {
+  /*
+   * The cycle guard first, and independently of the history policy.
+   *
+   * The two bounds answer different questions and neither implies the other.
+   * Ordinarily the policy stops the walk long before twenty seasons — each link
+   * is a year older than the one before it, so the fourth is the last — but
+   * that reasoning rests on the chain's seasons descending, which is exactly
+   * what a cycle in Sleeper's data does not do. A chain that loops back to a
+   * league of the same year stays inside the window for ever, and this is what
+   * ends it.
+   */
   if (state.seasons.length >= MAX_CHAIN_DEPTH) return null;
   const known = new Set(state.seasons.map((s) => s.sleeperLeagueId));
 
-  // Oldest first: the tail of the chain is where the unread link is.
-  const oldestFirst = [...state.seasons].sort((a, b) => a.season.localeCompare(b.season));
+  /*
+   * Oldest first: the tail of the chain is where the unread link is. Seasons
+   * past the window are skipped rather than walked — reading one to learn what
+   * came before it would spend a request extending a chain nothing may fetch.
+   */
+  const oldestFirst = [...state.seasons]
+    .filter((season) => withinHistoryPolicy(season.season, state.currentSeason))
+    .sort((a, b) => a.season.localeCompare(b.season));
   for (const season of oldestFirst) {
     if (!season.resolved) {
       return { kind: 'discover', sleeperLeagueId: season.sleeperLeagueId, season: season.season };
@@ -296,10 +388,21 @@ export function unresolvedChainLink(state: BackfillState): WorkUnit | null {
        * record it under.
        */
       const parentYear = Number(season.season);
+      const parentSeason = Number.isFinite(parentYear) ? String(parentYear - 1) : null;
+      /*
+       * And this is where a ten-season league stops being a ten-season league.
+       *
+       * The link is left unread rather than followed: the season it points at
+       * is outside the window, so discovering it would cost a request to learn
+       * the name of a year nothing is allowed to fetch. Returning null here
+       * rather than continuing the loop is deliberate — the seasons after this
+       * one in the walk are all older still.
+       */
+      if (!withinHistoryPolicy(parentSeason, state.currentSeason)) return null;
       return {
         kind: 'discover',
         sleeperLeagueId: season.previousLeagueId,
-        season: Number.isFinite(parentYear) ? String(parentYear - 1) : null,
+        season: parentSeason,
       };
     }
   }

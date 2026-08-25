@@ -98,6 +98,17 @@ export interface StartSitInput {
    * over in. Absent — the state through this lane — is no adjustment.
    */
   opponentQuarterback?: { starterOut: boolean; observedAt: string | null } | null;
+  /**
+   * Whether this player's team is at home this week.
+   *
+   * Read by the defence model and nobody else, for the smallest of its three
+   * residuals. It comes from the stored fixture list rather than from the
+   * betting event, because `vegas_events.home_team` means "a team we asked
+   * about" and not "the home side" — the same vocabulary trap that had every
+   * spread in this app pointing the wrong way. Absent is not "on the road":
+   * absent removes the term entirely.
+   */
+  home?: boolean | null;
   /** The forecast for his game, when one is available. */
   weather?: GameWeather | null;
   /** Opponent tendencies by role, built once for the whole board. */
@@ -601,6 +612,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     scoring: profile.dst,
     opponentQuarterback: input.opponentQuarterback ?? null,
     lineAsOf: input.lineAsOf ?? null,
+    home: input.home ?? null,
   });
 
   /*

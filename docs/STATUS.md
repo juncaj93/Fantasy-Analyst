@@ -389,6 +389,16 @@ suggestions).
 
 ## Known limitations
 
+0. **Player portraits were never seen against Sleeper's real images here.** The
+   sandbox this was built in denies `sleepercdn.com` at the network policy, so
+   the CDN's behaviour is taken from the brief's probe rather than re-measured,
+   and every screenshot and every test uses a generated stand-in at the source's
+   own 350×254 framing. What that leaves unverified is narrow but real: whether
+   the circular crop flatters actual portraits, and whether the URL still
+   resolves in production. The first is a one-line change to `object-position`
+   in `.player-face`; the second is what the initials fallback exists for, and
+   it is the most tested thing in the feature. See docs/ARCHITECTURE.md.
+
 0. **SportsGameOdds publishes no season-long NFL player markets.** Established
    by probe against the live API and its own market catalogue: every NFL event
    is a single game, `type=prop` and `type=tournament` are empty for the league,
@@ -1735,6 +1745,199 @@ as the props. The Demo Mode bundle budget was raised 108KB → 115KB in this
 commit with the reason attached, because the two new modules add ~2.2KB to a
 chunk that had 0.4KB of headroom left.
 
+## DST streaming and playoff planning
+
+**The question this lane answers is not "which defence is best".** Making a
+defence scorable made "somebody better is available" true almost every week —
+the gap across a slate clears any upgrade bar comfortably — and that fact is not
+advice. The useful question is whether the better defence is worth what taking
+him costs: a transaction, a bench spot, and whatever that bench spot was going
+to become. `core/dst/planner.ts` is the whole of it, and it answers in seven
+states — `wait`, `add`, `hold`, `stream`, `stash`, `stream_and_stash`, `unknown`
+— with `wait` first among them. **There is no assumption anywhere that a defence
+must be rostered at all times.**
+
+**Three things stop it churning, and they compose.** Replacement level is the
+*median of the top few* available defences rather than the best of them, through
+`assessStreaming` — written in the foundation lane, unwired until now, and used
+rather than replaced. The churn bar is `MEANINGFUL_UPGRADE_GAIN`, the same 2.5
+points every other add in this app has to clear, widening to 4 when either side
+of the comparison is thin. And the roster spot is priced: `netGain = points
+gained − what the slot was already earning`, in the same weekly points, from the
+same `bench.ts` surplus the drop list is built from. A +3.5 defence does not beat
+a bench player earning +4.
+
+**A bench player who cannot be scored is never given a number.** `valueOfSlot`
+returns a figure for everybody, including somebody it could not score at all —
+for whom the figure is the optionality and bye-cover terms over a base of zero.
+Passed on as a price that would make every marginal defence look free, so it is
+turned back into null and the *bar* widens instead. The card says `costs a bench
+spot — X cannot be scored, so what it costs is unknown`. That flier is exactly
+the player this product's manager keeps the last slot for.
+
+**Activation is game state, never a date.** Pre-draft is silent, decided from
+the draft's own status: a league that drafts in week 2 is not behind. Post-draft,
+advice activates inside a centralised 72-hour window before the next kickoff —
+read from the stored fixture list, so it is the first thing in this app to put
+`nfl_schedule` on a request path. The one exception is the schedule change a
+reader has to act on early: a rostered defence with a bye inside two weeks opens
+the window regardless, because a bye discovered on Saturday is a bye nobody can
+cover. No kickoff known is treated as *outside* the window rather than inside
+it — the cost of being quiet a day too long is far below the cost of telling
+somebody to claim a defence for a game that has kicked off.
+
+**Multi-week holds are two conditions, not one blended number.** The weekly gain
+still has to clear the churn bar, *and* the horizon — this week's gain plus what
+each defence is worth over the next three — must not be a net loss. Streaming
+gives up the incumbent's schedule as well as taking the challenger's, and a
+half-point edge on Sunday that costs two points a week for a month is the trade
+every weekly comparison in fantasy football makes. With no outlook on either
+side the second condition cannot fire: a hold is never argued from a schedule
+this app has not read.
+
+**The forward outlook says what its anchor is.** `core/dst/outlook.ts` values a
+future week on a real line where the market has reached it, and otherwise on the
+opponent's **mean implied team total across the games already priced** — a
+measurement of an offence, not a forecast of a fixture, marked low confidence
+wherever it is used and refused below three games. Neither available means the
+week is *unrated* and left out of the mean; an unknown week is not a neutral
+week, and a bye is a missing week rather than a terrible opponent. **No future
+Vegas line is invented.** `outlookDst` is `projectDst`'s own arithmetic over a
+different anchor — extracted, not reimplemented — with the game-script residual
+*absent* rather than zeroed, because there is no spread, and confidence capped at
+`medium` however good the inputs are.
+
+**A playoff stash has to beat the wire, not beat zero.** The alternative to
+carrying a second defence into week 15 is not fielding nothing; it is streaming
+whatever is free that week. So the arithmetic is stated: per-week gain over
+replacement level, amortised by playoff weeks played over weeks carried, minus
+the bench spot's own weekly value at a 1.5× premium for a player you are not
+starting. The gate is the app's existing `playoffEmphasis.weight >= 0.5`, which
+is zero for most of the year and zero for a team not heading there — and the
+weeks are the league's own `playoff_week_start`, through the one reader the
+`plan` endpoint now shares, never a hard-coded 15–17.
+
+**Byes.** A defence on a bye gets a one-week fill, flagged `temporary`, with the
+incumbent still the incumbent — treating a week off as an upgrade would drop a
+defence held all season. A bye two weeks out surfaces early enough to act on.
+And `plan`'s bye outlook, which reported `null` for every player and said so,
+now derives byes from the stored fixture list: a team with no rows reports no
+bye rather than thirteen.
+
+**One owner for the DEF row.** The generic waiver scan's DEF-over-DEF guard
+stays exactly as the foundation lane wrote it — it was never the problem. What
+changed is the *empty* DEF slot: the scan offered a defence for it, which was
+right while nothing modelled the alternative, and would now contradict a planner
+saying `Wait — no DST needed yet` on the same screen. So the planner wins
+wherever it has an opinion and the generic row survives only when no plan could
+be computed at all. Team and Waivers read one response, so they cannot diverge.
+
+**Home and road, finally.** Written and dormant in the foundation lane because
+`vegas_events.home_team` means "a team we asked about" rather than "the home
+side" — the vocabulary trap that had every stored spread pointing the wrong way.
+`nfl_schedule` carries the real flag. The term is ±0.3, enough to break a tie and
+never enough to decide one, and it is asserted that a skill player evaluated with
+the flag is byte-identical to one without it. **The quarterback residual stays at
+zero**: it requires news that post-dates a line, no caller supplies a trustworthy
+freshness source, and a forced one would count an injury twice.
+
+**Best ball, no DEF, two DEF.** Best ball is silent — there is no weekly add,
+drop or start to advise on. A league that starts no defence gets nothing, before
+any read at all. A league starting two or more is answered on its own terms: the
+slots are filled and never streamed, because one-defence philosophy applied to
+two slots leaves one of them empty most Sundays. All three read off `RosterShape`
+and Sleeper's own `best_ball` flag; there are no league-name exceptions.
+
+**One line, not a dashboard.** Six weeks of schedule, a bench spot's opportunity
+cost and a playoff carry, shown as one row on Team and one above the Waivers
+board — the same words on both, tap for why, tap again for the evidence. There
+is deliberately no Defense Strategy screen, no chart, and no context-free DST
+ranking. A `hold` or a `wait` draws no board row on purpose: there is nobody to
+add, and the answer is *none, and here is why*.
+
+**Free tier.** Three bounded D1 reads on top of what the waiver scan already
+loads — thirty-two fixtures for the week, about a hundred rows for the planner's
+teams across its weeks, and one row per team of implied totals aggregated in
+SQL. No new cron, no new provider, no read-path fetch, no backfill, and not one
+extra Vegas entity: every number here comes out of rows an earlier refresh
+already paid for. No FAAB model was built for a two-dollar add, and a defence row
+is excluded from the board's "still to arrive" line rather than promising a
+column that is not coming.
+
+## Milestone — a face on the expanded player (done)
+
+Sleeper publishes a portrait per player at a path its own clients use and its
+API never documents. A probe of 91 players resolved 80 of them, 78 distinct, no
+redirects, ~30 kB median, cached for 31 days. This puts one on the expanded
+player sheet at 64px and nowhere else, and everything below is about keeping
+that from costing anything.
+
+**The whole feature is optional, structurally.** `playerHeadshotUrl` returns
+`string | null`; `PlayerFace` treats a 403, a 404, a network error and an
+offline first paint as the same ordinary outcome and draws deterministic
+initials in the same box, on the same circle, on the same ground. No retry, no
+toast, no banner, no logging, no broken-image chrome — the `<img>` is unmounted
+the instant it errors. Twelve percent of probed players have no portrait, so
+this is the normal path rather than the sad one, and the app is fully usable
+with every image on it missing.
+
+**Failure is remembered per URL, at module scope.** Per-instance would have let
+one missing portrait blank out whoever React drew into that component next —
+the bug `TeamLogo` already avoids the same way. Module scope is the second
+half: a rookie with no portrait is opened, closed and opened again, and a
+per-mount memory would re-request an image that is not going to exist this week.
+`e2e/player-face.spec.ts` asserts both directions — one request for a URL known
+to be missing, and a full attempt for the next player's.
+
+**Nothing about this costs the deployment a request.** The path is
+`browser → sleepercdn.com` and never through the Worker: no API route, no proxy
+fetch, no D1/KV/R2, no change to the app's own request count when a reader
+looks at a player, and an incremental Cloudflare cost of effectively zero. That
+is the entire reason hot-linking was accepted here after being rejected for club
+marks, so `tests/playerHeadshotSurfaces.test.ts` fails if a server or Worker
+module ever names the host, if the router grows a headshot route, if a migration
+stores an image, or if a storage binding appears.
+
+**Only the sheet draws one, and the protected lists are named rather than
+merely omitted.** Matchup, Draft, Waivers, the Players index and the compact
+Smart Trades rows stay image-free by decision — on Matchup at 390px a face takes
+the name column from about 85px to about 60px, and a shortened name is
+information traded for decoration. The source scan holds the files; the e2e
+holds the running app, which never requests a portrait from a list.
+
+**The 64px face cost the sheet's one-line header more than it was worth, and
+that is measured rather than argued.** The line — pill, club, name, status —
+carried about twenty pixels of slack; the face wanted sixty-eight. At 360px it
+truncated nineteen of twenty-two seeded names, `Julian Reyes` down to
+`Julian…`, where none truncated before; at 375px, eleven. No size was free —
+even 40px cost ten names. So the height the portrait already forces is now
+spent: the name takes a line of its own beside the face and the marks that
+qualify him take the one under it, which is `PlayerPage`'s own arrangement for
+the same player. At 430, 390, 375 and 360, no name truncates at all, and the
+header is exactly 64px on every one of them. `e2e/player-face.spec.ts` walks
+every seeded player at each width and requires zero.
+
+**Team is deferred, and the discovery's own gate is why.** It expected a 28px
+face inside the 44px row, and the row height does hold. But a prototype
+measured at all four widths introduced truncation at 390 (`Cal Whitfield`, 28px
+short, from none), tripled it at 375 (3px → 43px) and at 360 (18px → 58px) — on
+the row carrying the most tags, which is the row a reader most needs to read —
+and left the identity column of a populated slot indented 32px from the empty
+slots above it, so the leading edge no longer lines up down the screen. Two of
+the seven conditions fail. Team keeps its club mark and no portrait.
+
+**A defence is held out twice, and the second rule is the one that matters.**
+Live Sleeper keys defences by the club abbreviation, so refusing a non-numeric
+id already excludes every defence in production data. This repository's own seed
+does not: `1030` is Jacksonville's. So `playerHeadshotUrl` takes the position as
+well and refuses `DEF` whatever the id looks like — a rule that holds only
+because one provider formats its keys a certain way is a rule waiting to be
+broken by a fixture, and the fixture landed in the same week.
+
+**The thumb variant is not used.** It saves roughly 7 kB on an asset the browser
+holds for a month, on one image per opened card, in exchange for a second
+undocumented path that can rot independently of the first.
+
 ## Polish — one fact, one home, and the eight pixels under a thumb (done)
 
 A bounded finishing pass, deliberately narrow: four demonstrable defects, no
@@ -1796,16 +1999,15 @@ dependency, request path, cron or data source.
 
 ## Recommended next work
 
-0. **DST streaming and playoff planning.** The sequential next lane, and the
-   foundation it needs is now in place: defences are scorable, the Smart Trades
-   invariant is a rule, and the fixture list is stored. What it has to decide is
-   the product this lane deliberately withheld — the weekly `Stream X over Y`
-   row, the Waivers DEF behaviour, transaction-cost awareness, multi-week holds
-   and the playoff stash. Two concrete starting points: `assessStreaming` is
-   written and unwired, and `waivers.ts` has one guard to remove (with a model
-   behind it, not without one). It will also want the schedule on a read path
-   for the first time, which is the only part of §12 this lane left untested in
-   anger.
+0. **Watch the defence planner through one real week.** DST is complete enough
+   to archive as a product lane: every state it can be in is tested and every
+   surface it reaches is drawn. What a preseason league cannot show is the two
+   things that need a live season underneath them — whether the 72-hour window
+   lands where a reader expects it once real kickoffs are stored, and how much
+   of a future week is actually rated from a *line* rather than from form in
+   the first fortnight, when no team has the three priced games the fallback
+   requires. Both degrade honestly and both are visible in the plan's own
+   `confidence` and notes; neither can be judged until September.
 0. **Watch one real waiver run.** The FAAB layer is built and tested against
    constructed transactions; what a preseason league cannot show is what
    Sleeper's `transactions/{week}` actually returns for a live waiver run —

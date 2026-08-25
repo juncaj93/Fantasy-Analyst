@@ -60,6 +60,7 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
+import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
@@ -556,6 +557,21 @@ export function TeamScreen({
                 <>
                   {lineup?.found ? <LineupCard lineup={lineup} /> : null}
 
+                  {/*
+                    One quiet line about the defence, and only when there is one
+                    to draw.
+
+                    It sits between the lineup changes and the waiver wire
+                    because that is what it is: a slot decision that happens to
+                    be made on the wire. It renders nothing for a best-ball
+                    league, a league with no DEF slot, a season that has not
+                    drafted, or — most weeks — a reader holding a defence with
+                    no decision to make. There is deliberately no defence
+                    dashboard behind it; the whole model is one tap away on this
+                    row and nowhere else.
+                  */}
+                  <DstLine plan={waivers?.dst ?? null} />
+
                   {waiverBoard ? (
                     <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
                   ) : null}
@@ -1026,7 +1042,18 @@ function WaiverSection({
   faab: FaabAdvice | null;
   onOpen: (row: WaiverBoardRow) => void;
 }) {
-  if (board.rows.length === 0) {
+  /*
+   * The defence is not one of these rows on this screen.
+   *
+   * It has its own line immediately above — `DstLine` — and a teaser that
+   * repeated it would put the same recommendation on the same screen twice, in
+   * two different shapes, one of them ranked by a gain that was measured
+   * against a different bar. The Waivers board draws it as a row, because that
+   * is the page where "which defence should I add" is a list question.
+   */
+  const rows = board.rows.filter((row) => row.dst == null);
+
+  if (rows.length === 0) {
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
@@ -1041,7 +1068,7 @@ function WaiverSection({
       <div className="section-title" data-testid="waiver-title">
         Waiver upgrades
       </div>
-      {board.rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
+      {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
       {/*

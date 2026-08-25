@@ -275,3 +275,40 @@ describe('the wire can fill an empty DEF slot, and cannot yet stream one', () =>
     expect(advice.upgrades.some((s) => s.candidates.some((c) => c.playerId === 'freeRb'))).toBe(true);
   });
 });
+
+/**
+ * The regressions this lane could plausibly have caused, asserted rather than
+ * assumed.
+ *
+ * `home` was added to `StartSitInput` for one term in one model, and it is set
+ * for every player on the request because the assembly does not know which of
+ * them is a defence. So the claim that has to hold is that it reaches nobody
+ * else: a receiver evaluated with a home flag must be the same object as one
+ * evaluated without it, field for field.
+ */
+describe('the home flag reaches the defence model and nothing else', () => {
+  it('leaves a skill player byte-identical', () => {
+    const receiver = candidate('wr9', 'Receiver Nine', 'WR', 14);
+
+    const without = evaluatePlayer(receiver, PROFILE);
+    const withHome = evaluatePlayer({ ...receiver, home: true }, PROFILE);
+
+    expect(withHome).toEqual(without);
+  });
+
+  it('does move a defence, by the small amount it is capped at', () => {
+    const unit = defence('def9', 'Seattle', { spread: -3, total: 44, opponent: 'ARI' }, { team: 'SEA' });
+
+    const road = evaluatePlayer({ ...unit, home: false }, PROFILE).score!;
+    const home = evaluatePlayer({ ...unit, home: true }, PROFILE).score!;
+
+    expect(home).toBeGreaterThan(road);
+    expect(home - road).toBeLessThan(1);
+  });
+
+  it('still refuses a defence with no game line, home flag or not', () => {
+    const unpriced = defence('def10', 'Chicago', null, { team: 'CHI' });
+
+    expect(evaluatePlayer({ ...unpriced, home: true }, PROFILE).score).toBeNull();
+  });
+});

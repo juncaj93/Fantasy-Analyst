@@ -2164,6 +2164,100 @@ body,
 }
 
 /*
+ * A player's face, and the two letters that stand in for it.
+ *
+ * One block for both, because the whole promise of the fallback is that it is
+ * the *same box*: same square, same corner, same edge, same ground. A portrait
+ * that arrives and a portrait that never does must be indistinguishable in
+ * layout terms, or a screen of players with mixed coverage develops a ragged
+ * column and the missing ones read as broken rather than as absent.
+ *
+ * `--face` is set inline by the component rather than being a token here, and
+ * that is deliberate: unlike a club's mark, which is one size everywhere
+ * because a club is a club, a face is sized by the job it is doing on the
+ * surface it is on — 64px where a reader has committed to one player, smaller
+ * in a list. The component states the number and the `width`/`height`
+ * attributes state it again, so the slot is reserved in the first frame,
+ * before this stylesheet applies and permanently if the image never lands.
+ *
+ * Circular, because a portrait cropped square in a list of square things reads
+ * as an asset and a portrait cropped round reads as a person — and because the
+ * source framing is a wide 350x254, so squaring it off already throws away the
+ * background at the sides and leaves a head and shoulders behind.
+ *
+ * The hairline is `inset` rather than a border: a real border would grow the
+ * box by two pixels and put the fallback and the image on two different
+ * geometries the moment one of them lost it. It is there so a dark portrait on
+ * the dark theme still has an edge.
+ */
+.player-face {
+  flex: 0 0 auto;
+  width: var(--face);
+  height: var(--face);
+  border-radius: var(--radius-pill);
+  /*
+   * The ground under a portrait that is still arriving, and the ground the
+   * fallback keeps. Sunken rather than raised: a face sits *in* the surface.
+   */
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* A block in a fixed box, so it adds no descender to the flex line it is on. */
+  display: block;
+  object-fit: cover;
+  /*
+   * Centred across, biased up — and the second half of that is a guard rather
+   * than the active crop.
+   *
+   * At the source's measured 350x254, `cover` into a 64px square scales by the
+   * *height*: the image renders 88x64, so 24px comes off the sides and nothing
+   * at all comes off the top or bottom. The horizontal 50% is what is doing the
+   * work, and the sides of a headshot are background, which is exactly what one
+   * wants taken away.
+   *
+   * The 30% therefore changes nothing today, and it is here on purpose for the
+   * day it does. The URL is an undocumented convention (see
+   * `core/players/headshot.ts`) and nothing promises the dimensions either —
+   * the moment a portrait arrives square or taller than it is wide, the
+   * limiting axis flips and the crop starts eating the frame vertically. From
+   * the middle that takes the top of the head off; from 30% down it takes the
+   * chest, which is the half nobody needs. A default that is inert on the
+   * measured case and correct on the unmeasured one is the right way round.
+   */
+  object-position: 50% 30%;
+}
+
+/*
+ * The initials, in the box the face would have had.
+ *
+ * Deliberately not a silhouette. A generic head is a picture of somebody who is
+ * not this player, and at a glance that is worse than no picture — the reader
+ * has to look twice to find out they learned nothing. Two letters are honest
+ * about being a placeholder and still tell them apart.
+ *
+ * Deliberately not the club's mark either: it is already on the line beside
+ * this, and drawing it twice would make the row say one thing and appear to say
+ * two.
+ *
+ * The type is sized from the box rather than from the theme scale so one rule
+ * covers 64px on a sheet and 28px in a list, and it is quiet — `--text-faint`,
+ * not the name's own colour — because a fallback that shouts is a fallback the
+ * eye stops at.
+ */
+.player-face-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--face) * 0.36);
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+  overflow: hidden;
+  /* Never selectable and never a line-height surprise: it is a placeholder. */
+  line-height: 1;
+  user-select: none;
+}
+
+/*
  * Metadata: readable, but plainly subordinate to the name. Labels are tertiary,
  * values secondary, and every number is tabular so columns line up down the
  * list even though they are not in a table.
@@ -4600,13 +4694,20 @@ table.compact tr:last-child td {
   background-clip: content-box;
 }
 
+/* Strongest action: a filled, unmissable chip. */
+.tag-take {
+  background: var(--pos);
+  color: var(--on-accent);
+}
+
 /*
  * Positional urgency: tinted, loud enough to see, quieter than an action.
  *
- * The two filled chips that used to head this block — `.tag-take` and
- * `.tag-avoid` — went with the badges that wore them. Nothing on any screen
- * asks for a saturated fill behind two words any more, and the tints below are
- * the whole of the tag language now.
+ * `.tag-avoid` used to sit above this — the filled red twin of `.tag-take` —
+ * and went with the `AVOID` badge that was the only thing wearing it. Its
+ * partner stayed: the defence planner marks `Add`, `Stream` and `Stream + stash`
+ * with `.tag-take`, which is the one decision in the app loud enough to earn a
+ * fill.
  */
 .tag-urgent {
   background: var(--warn-tint);
@@ -6135,20 +6236,25 @@ table.compact tr:last-child td {
 }
 
 /*
- * A player's name and what he is, on the sheet's own header line.
+ * A player's name and what he is, beside his face, on the sheet's header.
  *
- * The pushed page can afford a title and a subtitle under it. A sheet cannot —
- * every row it spends on itself is a row of the player it came to show — so the
- * identity is one line: the position pill, the club's mark, the name, and the
- * availability tag against the name it qualifies. The same marks in the same
- * order as every list row in the app, which is now true rather than merely
- * written here: this line put the name first and the cluster after it, so the
- * one screen where a reader has committed to a single player was the one screen
- * that reversed the grammar they had just been reading.
+ * One line for as long as the header was one line tall. A 64px portrait makes
+ * it 64px tall whatever else is on it, and the single line then cost the name
+ * more than the height was worth: measured across the seed at 360px, the face
+ * truncated nineteen of twenty-two names — `Julian Reyes` down to `Julian…` —
+ * where none truncated before it. The header line had about twenty pixels of
+ * slack and the portrait wanted sixty-eight.
  *
- * The gap matches the dense row's own — see `--row-gap` — so the cluster and
- * the name sit at the same distance here as they do on the row the reader
- * tapped.
+ * So the block beside the face is two lines, and it is the arrangement the
+ * pushed page already uses for the same player — `.nav-title` over
+ * `.nav-subtitle`. The name is the heading; the marks that qualify him sit
+ * under it in the row's own order. Nothing on any *list* changes: pill, club
+ * and name still read across one line there, which is the situation that rule
+ * was written for.
+ *
+ * The gap matches the dense row's own — see `--row-gap` — so the marks under
+ * the name sit at the same distances from each other as they do on the row the
+ * reader tapped.
  */
 .sheet-player-title {
   display: flex;
@@ -6158,20 +6264,78 @@ table.compact tr:last-child td {
 }
 
 /*
+ * The portrait's own distance from the block it leads.
+ *
+ * The title's `gap` is the dense row's 6px, which is the right distance between
+ * a pill and a club's mark and much too tight against a 64px circle — at that
+ * size six pixels reads as the face touching the type. This is the only place
+ * the number differs, and it differs because the object does.
+ *
+ * `margin-right` rather than a second `gap`, so the six pixels every other pair
+ * in the header uses is untouched.
+ */
+.sheet-player-title .player-face {
+  margin-right: 4px;
+}
+
+/*
+ * The name over what qualifies it.
+ *
+ * `min-width: 0` for the reason every truncation chain in this file needs it:
+ * a flex item will not go below its content's width unless it is told it may,
+ * and without it a long name grows this column, the column pushes the reader's
+ * own control past the sheet's edge, and the ellipsis never happens.
+ *
+ * `flex: 1` rather than `0 1 auto`, because this column is now the only thing
+ * between the face and the control at the far end — it should take the room
+ * rather than leave a gap in the middle of the header.
+ */
+.sheet-player-ident {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+/*
  * The name yields first, and it is the only thing that yields.
  *
- * `flex: 0 1 auto` with `min-width: 0` is what lets a long name shorten instead
- * of pushing the availability tag off the end of the sheet — the same rule
- * `.player-name` follows on every row. Without the `min-width` a flex item
- * refuses to shrink below its content, and `Gutekunst-Vandagriff OUT` would
- * overflow the header rather than truncate inside it.
+ * It has a line to itself now, so what it yields to is the portrait and the
+ * reader's control rather than three marks sharing its line — which is the
+ * whole reason the block was split. `min-width: 0` above is what lets it
+ * shorten at all; without it `Gutekunst-Vandagriff` would overflow the header
+ * rather than truncate inside it.
  */
 .sheet-player-name {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.15;
+}
+
+/*
+ * Position, club, availability — the second line, and quieter than the first.
+ *
+ * Not smaller: the availability tag is the one fact on this card that can
+ * change a decision before any of the numbers do, and shrinking it to make a
+ * tidier stack would be trading legibility for tidiness on exactly the wrong
+ * mark. What changes is weight and colour, which is enough to make the line
+ * read as qualifying the name above it rather than competing with it.
+ *
+ * `overflow: hidden` so a long club mark and a status tag cannot push the
+ * reader's control off the header on a 360px phone.
+ */
+.sheet-player-quals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 550;
+  color: var(--text-faint);
 }
 
 /* The reader's own control — the heart — at the far end, never in the name. */
@@ -8340,4 +8504,40 @@ div.matchup-result {
   flex-direction: column;
   gap: var(--sp-2);
   margin-bottom: var(--sp-3);
+}
+
+/*
+ * The defence line: one tappable row, three parts, and it fits at 360.
+ *
+ * The identity cluster and the state tag are fixed columns; the sentence
+ * between them is the only thing that shrinks, and it truncates rather than
+ * wrapping — a two-line defence row on the Team screen would be louder than
+ * the lineup slot above it, which is not what a defence is worth. The whole
+ * thing is a button because the answer is the surface and the reasoning is one
+ * tap away; see `components/dst.tsx`.
+ */
+.dst-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+}
+
+.dst-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.dst-line > .tag {
+  flex: none;
 }
