@@ -2118,15 +2118,28 @@ widths.
    the ladder, the gaps and the ratios per position; nothing draws them.
 5. **Re-reading everything at once**, rather than one newsletter at a time.
    Worth doing only once real issues have accumulated.
-6. **Shard the WebKit matrix, and look at gate efficiency as a whole.** Each
-   width currently runs the entire browser suite on one runner, and the suite
-   has grown to roughly nineteen minutes of testing per width — close enough to
-   its ceiling that a slow runner reads as a failure with no test having failed.
-   That happened twice while the sheet-dismissal work was being gated, and the
-   step's budget was raised from twenty minutes to twenty-five to cover it. That
-   is time, not capacity: the next few features spend it. Splitting each width
-   across two runners halves the wall clock and makes the ceiling mean "stuck"
-   again, and it is worth doing alongside a wider look at what the gate spends —
-   which specs overlap, and which of them need all four widths rather than one.
-   Deliberately deferred to a workflow-optimisation pass after the Codex UI
-   audit rather than solved inside a product change.
+6. **Shard the WebKit matrix — this is now blocking, not recommended.** Each
+   width runs the entire browser suite on one runner. The suite was roughly
+   nineteen minutes of testing per width when this item was written, close
+   enough to its ceiling that a slow runner read as a failure with no test
+   having failed; that happened twice while the sheet-dismissal work was being
+   gated, and the step's budget went from twenty minutes to twenty-five to cover
+   it. The note then said "that is time, not capacity: the next few features
+   spend it."
+
+   They have. The waiver-plan lane spent the rest of it. On one commit, one
+   afternoon: 375 at ~17m50s, 360 at ~21m27s, 390 at ~22m15s, and 430 cut at the
+   twenty-five-minute ceiling on test 649 of about 660 with nothing having
+   failed. Two of four widths inside three minutes of the ceiling on the same
+   run is the suite's size rather than one unlucky runner, so the budget was
+   raised again — twenty-five to thirty, and the job ceiling thirty-five to
+   forty — with the measurement recorded in `ci.yml` beside it.
+
+   That is the third raise, and a number raised three times is a number on its
+   way to meaning nothing. Splitting each width across two runners halves the
+   wall clock and makes the ceiling mean "stuck" again. It is worth doing
+   alongside a wider look at what the gate spends — which specs overlap, and
+   which of them need all four widths rather than one; every spec in `e2e/`
+   currently runs at every width by convention, and a good share of them assert
+   content rather than layout. **The next feature that adds browser tests should
+   do this first rather than raise the ceiling a fourth time.**
