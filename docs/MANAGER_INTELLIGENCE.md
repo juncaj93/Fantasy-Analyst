@@ -71,13 +71,26 @@ than a re-read of four seasons.
 
 ## The request budget
 
-`core/sleeper/budget.ts`. `MAX_SLEEPER_SUBREQUESTS_PER_BATCH = 24`, against a
-ceiling of 50.
+`core/sleeper/budget.ts`. One budget for the **whole 09:00 invocation** —
+`MAX_CRON_SUBREQUESTS = 48`, against a free-plan ceiling of 50 — and the
+backfill takes an allowance out of it rather than holding a budget of its own.
 
-The headroom is not rounding. The same daily invocation also syncs the player
-dictionary, the injury report, per-game usage, the season market lines, the
-trending list and three nflverse files — every one of them a subrequest against
-the same 50.
+That distinction is the repair. The batch was bounded to 24 from the day it was
+written and it was never enough, because Cloudflare counts subrequests per
+*invocation* and 24 covered one subsystem inside one. The same tick syncs the
+player dictionary, last season's statistics, the injury report, per-game usage,
+the season market, the schedule, the trending list, the calibration ledger, the
+published projections and three nflverse files. Measured against a fixture with
+a four-week calibration backlog and an active backfill:
+
+| morning | before | after |
+| --- | --- | --- |
+| healthy | 47 | 47 |
+| Sleeper answering 500 | **60** | 48 |
+| player dictionary itself failing | tick abandoned at request 3 | 48 |
+
+Sixty is ten past the ceiling, and the batch's own counter read a comfortable
+24/24 throughout.
 
 **Counted at the transport, not at the call.** `SleeperClient` retries a 5xx
 twice, so one logical `getTransactions` can be three real subrequests, and a bad
@@ -87,9 +100,58 @@ low while the invocation sailed past the ceiling. The budget therefore wraps
 an invariant rather than a measurement — `used` cannot exceed `limit`, so the
 test asserting it is asserting something the code cannot violate.
 
-Running out mid-backfill is the expected steady state of the first few days, not
-an error. `BudgetExhaustedError` is caught, the checkpoint stays where it was,
-and tomorrow's run picks up the same unit.
+**And redirects are counted too.** Every nflverse file is a GitHub release
+asset, and `github.com/nflverse/nflverse-data/releases/download/...` answers 302
+with a signed `release-assets.githubusercontent.com` URL that `fetch` follows
+itself — before the conditional validator is considered, so a 304 costs two as
+well. Seven nflverse-family reads on this tick are fourteen subrequests, not
+seven, which is most of the headroom this budget exists to protect. Those
+transports are charged `REDIRECTING_FETCH_COST`; Sleeper does not redirect and
+is charged one.
+
+**The backfill is last, and takes what is left.** Everything above it feeds a
+surface somebody is looking at today; this feeds a signal measured in seasons.
+Its allowance is `min(24, budget.remaining)` — the full batch on a healthy
+morning, eight on a bad one — and zero means skipped, not failed. Running out
+mid-backfill is the expected steady state of the first few days:
+`BudgetExhaustedError` is caught, the checkpoint stays where it was, and
+tomorrow's run picks up the same unit.
+
+One log line per tick says what it cost:
+
+```
+cron 09:00 subrequests 47/48 (ceiling 50, 1 unspent); manager intelligence: allowance 24, used 24 (allowance bound)
+```
+
+`tests/cron.subrequestBudget.test.ts` drives the real `scheduled()` handler over
+a real database and asserts the total, that the budget's count *equals* the wire
+count (which is what proves no path fetches unmetered), and that the backfill
+yields before any feed above it does.
+
+---
+
+## How far back history goes
+
+`MAX_HISTORY_SEASONS = 4` in `core/managers/backfillPlan.ts`: the newest four
+seasons, **counting the current season as the first**, rolling forward with it.
+
+The number comes from the weighting rather than from taste. Trade and
+transaction profiles weight a season at `SEASON_DECAY ** age` with
+`SEASON_DECAY = 0.6`, so the four in policy carry 1, 0.6, 0.36 and 0.216 — and a
+fifth would arrive at 0.13, an eighth of a vote, in exchange for a season's
+worth of drafts and eighteen transaction weeks. A league founded in 2016 is ten
+chain links and a fortnight of daily batches deep for signal in that range.
+
+The filter is applied once, to the season list, so no dataset is exempt: a
+season outside the window yields no identity read, no draft index, no picks and
+no transaction week. It governs **fetching only** — seasons already in the
+ledger stay there and stay readable, and there are no exceptions by league name
+or age.
+
+`MAX_CHAIN_DEPTH = 20` stays, and is not a duplicate of this. It is a cycle
+guard, and the argument that the policy stops the walk rests on each chain link
+being a year older than the last — which is exactly what a cycle in Sleeper's
+data does not do.
 
 ---
 

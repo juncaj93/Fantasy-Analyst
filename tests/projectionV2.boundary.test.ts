@@ -180,7 +180,7 @@ describe('no live surface can render a Projection v2 number', () => {
     expect(app).not.toMatch(/router\.post\('\/api\/diagnostics\/projection-v2'/);
   });
 
-  it('the nflverse refresh is the last thing the daily tick does', () => {
+  it('the nflverse refresh runs after every live surface on the daily tick', () => {
     /*
      * A queue position is part of the phase-1 promise, not just the dependency
      * graph. Everything above it on the daily tick feeds a live surface — the
@@ -193,22 +193,41 @@ describe('no live surface can render a Projection v2 number', () => {
      *
      * It was written directly after the usage refresh, which read well and was
      * wrong. This is what stops it drifting back.
+     *
+     * It is no longer the *last* thing the tick does, and that is a separate
+     * promise rather than a weakening of this one: the manager backfill moved
+     * below it when the invocation got a shared subrequest budget, because
+     * history measured in seasons is the one thing on this tick that should
+     * absorb a bad provider day. Nothing between the two feeds a live surface,
+     * so the guarantee this test exists for is unchanged — and the other half,
+     * that only the backfill is below, is asserted here too.
      */
     const worker = readFileSync(path.join(ROOT, 'worker', 'index.ts'), 'utf8');
-    const nflverse = worker.indexOf('new NflverseService(env.DB).refreshAll()');
+    const nflverse = worker.indexOf('new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll()');
     expect(nflverse, 'the daily tick should refresh the nflverse feeds').toBeGreaterThan(-1);
 
     for (const live of [
       'syncPlayers()',
       'refreshSeasonStats()',
-      'new InjuryService(env.DB).refresh()',
-      'new SeasonMarketService(env.DB, appEnv.vegas).refresh()',
-      'refreshMatchupCalibration(env, appEnv)',
-      'refreshPublishedProjections(env, appEnv)',
+      'new InjuryService(env.DB, { fetch: meteredRedirectingFetch }).refresh()',
+      'new SeasonMarketService(env.DB, cronEnv.vegas).refresh()',
+      'refreshMatchupCalibration(env, cronEnv)',
+      'refreshPublishedProjections(env, cronEnv)',
     ]) {
       const at = worker.indexOf(live);
       expect(at, `${live} should be on the daily tick`).toBeGreaterThan(-1);
       expect(at, `${live} must run before the nflverse refresh`).toBeLessThan(nflverse);
+    }
+
+    // And the only external work below it is the backfill that must yield first.
+    const start = worker.indexOf("event.cron.startsWith('0 9')");
+    // Bounded at the weekend branch, which refreshes some of the same feeds on
+    // clocks of its own — an unbounded slice would read those as "after".
+    const daily = worker.slice(start, worker.indexOf('await refreshVegas(appEnv)', start));
+    const after = daily.slice(daily.indexOf('new NflverseService('));
+    expect(after).toContain('ManagerIntelService');
+    for (const live of ['new InjuryService(', 'new UsageService(', 'new SeasonMarketService(', 'refreshPublishedProjections(']) {
+      expect(after, `${live} must not run after the nflverse refresh`).not.toContain(live);
     }
   });
 
