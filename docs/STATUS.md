@@ -2186,6 +2186,24 @@ rather than four, named `webkit-iphone-430 (2/3)` so a red tick says which phone
 and which third before anything is opened. The test step's budget is eighteen
 minutes and the job ceiling thirty-two, both down for the first time.
 
+Measured on the first sharded run, all twelve green:
+
+| width | 1/3 | 2/3 | 3/3 |
+|---|---|---|---|
+| `webkit-iphone-430` | **10m11s** | 8m19s | 6m15s |
+| `webkit-iphone-390` | 9m37s | 7m50s | 6m58s |
+| `webkit-iphone-375` | 9m25s | 7m46s | 5m50s |
+| `webkit-small-360` | 9m29s | 7m41s | 6m46s |
+
+**The whole workflow went from 25m47s to 10m59s.** Expect a steady state of six
+to ten minutes a shard. The eighteen-minute budget is 1.77× the worst shard
+measured, so it covers the half-again-slower runner this repo has met twice and
+still means "stuck" rather than "big". Aggregate runner time rose about 5% —
+three server boots per width instead of one, which is what buys the wall clock.
+
+Shard 1 is the slowest at every width, consistently rather than randomly: that
+is the count-versus-time imbalance below, showing up exactly where predicted.
+
 Nothing was dropped to get there. All four widths still run, WebKit is still
 authoritative, every spec file still runs at every width, no assertion moved and
 no test is skipped or retried that was not before. Playwright splits by whole

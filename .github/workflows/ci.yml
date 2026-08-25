@@ -201,12 +201,27 @@ jobs:
       # worse spread. Three puts the slowest shard of the slowest width at
       # roughly eleven minutes.
       #
-      # So eighteen: about 1.6× the expected worst shard, which is the variance
-      # a shared runner has actually shown, and it is a ceiling that means
-      # "stuck" again rather than "big". The suite can roughly half again in
-      # size before this needs looking at, and when it does the answer is a
-      # fourth shard — a one-character change to the three literals above and
-      # below — rather than a fourth raise.
+      # Measured, on the first sharded run — the twelve test steps, in minutes:
+      #
+      #             1/3     2/3     3/3
+      #     430   10m11    8m19    6m15
+      #     390    9m37    7m50    6m58
+      #     375    9m25    7m46    5m50
+      #     360    9m29    7m41    6m46
+      #
+      # All twelve green. **Expect a steady state of six to ten minutes a shard,
+      # and about eleven for the whole workflow** — it was 25m47s. Shard 1 is
+      # the slowest at every width, consistently rather than randomly, which is
+      # the count-versus-time imbalance the paragraph above predicted at 42%.
+      # Aggregate runner time went up 5%, which is the price of three server
+      # boots per width instead of one and is what buys the wall clock.
+      #
+      # So eighteen: 1.77× the worst shard actually measured, which covers the
+      # half-again-slower runner this file has seen twice, and it is a ceiling
+      # that means "stuck" again rather than "big". The suite can grow by
+      # three quarters before this needs looking at, and when it does the answer
+      # is a fourth shard — a one-character change to the three literals above
+      # and below — rather than a fourth raise.
       - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
         timeout-minutes: 18
       - uses: actions/upload-artifact@v4
