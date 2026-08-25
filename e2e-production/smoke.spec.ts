@@ -1487,8 +1487,14 @@ test.describe('the season features', () => {
    * does not own is one; a plan that reaches a reader still carrying the
    * planner's machine vocabulary is the other.
    *
-   * The screen half is separate and guarded, because the seasonal slot means
-   * Waivers is not a destination in preseason. The API half is true either way.
+   * The screen half is a **separate test** rather than a guarded tail of this
+   * one, and that is the whole reason it is separate. The seasonal slot means
+   * Waivers is not a destination in preseason, so a `test.skip` at the bottom of
+   * a single test would fire after these assertions had already run and passed —
+   * and Playwright would report the whole thing as skipped. A production check
+   * that reads as "skipped" for the entire feature is the same failure this
+   * file's opening comment is about: it looks like coverage and is not. The API
+   * half below is true in every season and is never guarded on the season.
    */
   test('the waiver plan cuts only your own players, and says so in English', async ({ page }) => {
     await page.goto('/');
@@ -1541,13 +1547,24 @@ test.describe('the season features', () => {
       expect(text, `the reason code "${code}" reached a reader`).not.toContain(code);
     }
     expect(text.toLowerCase(), 'nothing this app produces is optimal').not.toContain('optimal');
+  });
 
-    /* And on screen: one See Why, and no control that could transact. */
+  /**
+   * The plan on screen: one See Why, and no control that could transact.
+   *
+   * Skipped out of season, and only this half is — the contract assertions above
+   * run in every season. This card is a list of transactions and there is no
+   * control on it that performs one, which is the guarantee the whole app is
+   * held to and this is the surface closest to breaking it.
+   */
+  test('the waiver plan offers one See Why, and nothing that would transact', async ({ page }) => {
+    await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
+
     await open(page, 'waivers');
     const card = page.getByTestId('waiver-plan');
-    if ((await card.count()) === 0) return;
+    test.skip((await card.count()) === 0, 'this deployment surfaced no plan to draw');
 
     await expect(card.getByRole('button')).toHaveCount(1);
     const label = (await card.getByRole('button').innerText()).toLowerCase();
@@ -1555,6 +1572,12 @@ test.describe('the season features', () => {
       expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
         new RegExp(`\\b${forbidden}\\b`),
       );
+    }
+
+    /* And the claims are not controls, so there is nothing to nest one inside. */
+    await expect(card.locator('button button')).toHaveCount(0);
+    for (const claim of await card.getByTestId('waiver-plan-claim').all()) {
+      await expect(claim.locator('button')).toHaveCount(0);
     }
   });
 });
