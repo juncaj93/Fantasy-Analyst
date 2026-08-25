@@ -42,6 +42,7 @@ import { normalizeMode } from '../../startsit/mode.ts';
 import { recommendWaiverUpgrades } from '../../startsit/waivers.ts';
 import { priceWaiverUpgrades } from '../../waivers/pricing.ts';
 import { waiverLeagueIntel, withCompetition } from '../../waivers/intel.ts';
+import { buildWaiverClaimPlan } from '../../waivers/claimPlan.ts';
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
@@ -546,12 +547,39 @@ function waivers(data: ScenarioData) {
     ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
     : [];
 
+  const upgrades = withCompetition(upgradesWithValue, intel.competition);
+
+  /*
+   * The claims, from the same seam and the same inputs as the live handler.
+   *
+   * One call, mirroring `app.ts` line for line, so a scenario and a real league
+   * cannot draw two different shapes of the same screen. The clock is the
+   * scenario's rather than the device's — which is the whole reason Demo Mode
+   * can be on a Tuesday — and it is what makes a demo plan reproducible.
+   *
+   * The fixtures themselves are untouched. A scenario whose wire produces no
+   * worthwhile claim gets the honest empty plan, which is the same thing a real
+   * quiet week gets.
+   */
+  const claimPlan = buildWaiverClaimPlan({
+    roster: rosterInputs,
+    candidates: candidateInputs,
+    advice: { ...advice, upgrades, faab: { bids } },
+    shape,
+    profile,
+    reserveIds: mine.reserveIds,
+    budget: strategy?.budget ?? null,
+    now: data.clock.now(),
+    generatedAt: data.clock.iso(),
+  });
+
   return {
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     found: true,
     dataFreshness: freshness(data),
     ...advice,
-    upgrades: withCompetition(upgradesWithValue, intel.competition),
+    upgrades,
+    claimPlan,
     notes: [...advice.notes, ...data.notes],
     pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
     faab: strategy

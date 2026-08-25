@@ -139,6 +139,72 @@ export function targets(
   });
 }
 
+/**
+ * The wire as the *screen* sees it: one board row per available player.
+ *
+ * The integration layer takes the advice object the endpoint is about to send
+ * and rebuilds the board from it, so a test of that layer has to hand it the
+ * same shape rather than a list of targets. One upgrade block per candidate is
+ * the smallest thing `buildWaiverBoard` will turn into one row each, and
+ * `leagueRank` is what fixes the order — it becomes the planner's `boardRank`,
+ * which is the whole of how the league-intelligence ranking reaches the plan.
+ *
+ * `bar` is the points a claim had to clear; it decides the row's strength badge
+ * and nothing the planner reads.
+ */
+export function adviceFor(
+  inputs: StartSitInput[],
+  bids: Record<string, { recommended: number | null; doNotExceed?: number | null; headline?: string; withheld?: string | null }> = {},
+  overrides: Partial<import('../../src/core/waivers/board.ts').WaiverAdviceLike> = {},
+): import('../../src/core/waivers/board.ts').WaiverAdviceLike {
+  return {
+    upgrades: inputs.map((input, index) => ({
+      slot: input.player.position,
+      accepts: [input.player.position],
+      need: 'upgrade' as const,
+      currentPlayerId: 'incumbent',
+      currentName: 'The Incumbent',
+      currentScore: 5,
+      bar: 1,
+      candidates: [
+        {
+          playerId: input.player.id,
+          name: input.player.fullName,
+          position: input.player.position,
+          team: input.player.team ?? 'FA',
+          score: null,
+          gain: inputs.length - index,
+          reasons: [],
+          leagueRank: index + 1,
+        },
+      ],
+    })),
+    headline: null,
+    notes: [],
+    considered: inputs.length,
+    faab: {
+      bids: Object.entries(bids).map(([playerId, bid]) => ({
+        playerId,
+        expected: bid.recommended == null ? null : { low: bid.recommended, high: bid.recommended + 4 },
+        recommended: bid.recommended,
+        doNotExceed: bid.doNotExceed ?? bid.recommended,
+        headline: bid.headline ?? `Recommended max $${bid.recommended}`,
+        withheld: bid.withheld ?? null,
+      })),
+    },
+    ...overrides,
+  };
+}
+
+/** A league that bids, with a wallet this deep. */
+export function budgetState(remaining: number | null, usesFaab = true): import('../../src/core/faab/budget.ts').LeagueBudgetState {
+  return {
+    rule: { total: remaining, usesFaab, provenance: 'test fixture' },
+    rosters: [{ rosterId: 1, ownerName: 'Me', isMine: true, remaining, spent: null, share: null }],
+    notes: [],
+  };
+}
+
 /** The plan inputs every test starts from. */
 export function plannerInput(overrides: Partial<Parameters<typeof identity>[0]> = {}) {
   return identity({

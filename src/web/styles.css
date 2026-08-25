@@ -8541,3 +8541,110 @@ div.matchup-result {
 .dst-line > .tag {
   flex: none;
 }
+
+/*
+ * The waiver plan: a numbered list of instructions, and nothing that looks
+ * tappable.
+ *
+ * It sits at the top of Waivers above the board, and the two are deliberately
+ * different objects — the board ranks players and this ranks *claims*, which
+ * have an order that is itself the instruction. So it is an ordered list with
+ * real markers rather than a stack of rows: the indent is the browser's, a
+ * screen reader announces "list, four items", and nothing on it carries the
+ * affordance of a control this app would refuse to honour.
+ *
+ * Sized to fit four claims at 360px without becoming the whole first screen.
+ * The board underneath is the evidence for the plan, and a reader who cannot
+ * see any of it has been handed a verdict rather than an argument.
+ */
+.claim-plan {
+  padding: var(--sp-3);
+}
+
+.claim-plan-list {
+  list-style: decimal;
+  margin: var(--sp-2) 0 0;
+  /*
+   * Room for a marker and no more.
+   *
+   * A single-digit marker in the default indent leaves the text starting a
+   * third of the way across a 360px card, which is where a long player name
+   * runs out of room. Four claims is the planner's own ceiling, so the widest
+   * marker this ever draws is one character.
+   */
+  padding-inline-start: 1.35em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.claim-plan-claim {
+  /*
+   * The instruction, then its qualifier — inline, wrapping rather than
+   * shrinking.
+   *
+   * Deliberately *not* a flex container. An `li` that is given `display: flex`
+   * stops being `display: list-item`, and its marker disappears with it — which
+   * on this card would delete the numbering, and the numbering is the
+   * instruction. So the two parts flow inline instead: `Only if 1 loses` sits
+   * beside the claim where there is room and drops under it where there is not,
+   * and that is the right trade in both directions. The alternative — clipping a
+   * player's name to keep a contingency note on the same line — keeps the wrong
+   * half.
+   */
+  line-height: 1.3;
+}
+
+.claim-plan-claim::marker {
+  color: var(--text-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.claim-plan-headline {
+  font-size: 0.86rem;
+  font-weight: 620;
+  /* Never the reason the card scrolls sideways — a long name wraps instead. */
+  overflow-wrap: anywhere;
+}
+
+.claim-plan-qualifier {
+  margin-inline-start: var(--sp-2);
+  vertical-align: 1px;
+}
+
+.claim-plan-note {
+  margin-top: var(--sp-2);
+  line-height: 1.4;
+}
+
+/*
+ * One claim's argument on the See Why sheet, and the number that ties it back
+ * to the line on the card.
+ *
+ * The marker cannot be a list marker here because each claim is a block with a
+ * heading and a list of its own, so the rank is drawn — quietly, and hidden
+ * from assistive technology, which reads the instruction beside it instead of
+ * a bare digit.
+ */
+.claim-why + .claim-why {
+  margin-top: var(--sp-3);
+}
+
+.claim-why-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.claim-plan-rank {
+  flex: none;
+  min-width: 1.1em;
+  color: var(--text-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.claim-why-qualifier {
+  margin: 2px 0 0 calc(1.1em + var(--sp-2));
+}
