@@ -31,7 +31,17 @@ import {
   type ScenarioData,
   type ScenarioStrategy,
 } from './build.ts';
-import { DEMO_MANAGERS, MY_ROSTER_ID, WORLD_DEFENCES, WORLD_PLAYERS, adpOrder, worldPlayer } from './world.ts';
+import {
+  DEMO_MANAGERS,
+  DEMO_SEASON,
+  MY_ROSTER_ID,
+  WORLD_DEFENCES,
+  WORLD_PLAYERS,
+  adpOrder,
+  worldPlayer,
+} from './world.ts';
+import { collectBids, losingBidNote, summarisePrices } from '../../faab/bids.ts';
+import { LEDGER_WEEKS, demoTransactions, spendByRosterId } from './ledger.ts';
 import { teamWeek } from './slate.ts';
 import {
   MATCHUP_INJURY,
@@ -56,6 +66,10 @@ import {
  * question with no interesting answer.
  */
 export const MY_DEFENCE = 'd08';
+
+/** What the week-seven run added, and what it cost a roster spot. */
+const RUN_LANDED = 'p039';
+const RUN_DROPPED = 'p030';
 
 /** Roster id → the defence that roster holds. Mine is nine. */
 const DEFENCE_BY_ROSTER_ID = new Map<number, string>([
@@ -142,9 +156,26 @@ const FREE_AGENTS = [
  * case: he is held out of the pool exactly as my own roster is, so no player
  * ends up on two teams.
  */
-function seasonRosters(pinned?: Map<number, string[]>): Map<number, string[]> {
+function seasonRosters(opts: { pinned?: Map<number, string[]>; afterRun?: boolean } = {}): Map<number, string[]> {
+  const pinned = opts.pinned;
+  /*
+   * The claim that landed, on the roster it landed on.
+   *
+   * Every scenario after the Wednesday run holds the player the Tuesday plan
+   * recommended and has cut the player it named — same add, same drop, same
+   * price as the plan and the ledger. A demo that recommended a claim on one
+   * screen and showed the roster unchanged on the next would be telling two
+   * stories about one week.
+   */
+  const mine = opts.afterRun
+    ? [...MY_ROSTER.filter((id) => id !== RUN_DROPPED), RUN_LANDED]
+    : [...MY_ROSTER];
+  const wire = opts.afterRun
+    ? [...FREE_AGENTS.filter((id) => id !== RUN_LANDED), RUN_DROPPED]
+    : [...FREE_AGENTS];
+
   const pinnedIds = [...(pinned?.values() ?? [])].flat();
-  const taken = new Set([...MY_ROSTER, ...FREE_AGENTS, ...pinnedIds]);
+  const taken = new Set([...mine, ...wire, ...pinnedIds]);
   /*
    * Defences are dealt by name and never from the pool.
    *
@@ -159,7 +190,7 @@ function seasonRosters(pinned?: Map<number, string[]>): Map<number, string[]> {
     .filter((id) => !taken.has(id));
 
   const out = new Map<number, string[]>();
-  out.set(MY_ROSTER_ID, [...MY_ROSTER]);
+  out.set(MY_ROSTER_ID, mine);
   const others = DEMO_MANAGERS.filter((m) => !m.isMine);
   for (const manager of others) out.set(manager.rosterId, []);
   for (const [rosterId, ids] of pinned ?? []) out.set(rosterId, [...ids]);
@@ -428,42 +459,26 @@ function weekFromSlate(
 // ------------------------------------------------------------- the money
 
 /**
- * What the room has spent by week seven.
+ * What the room has spent, and what it paid — both read off the ledger.
  *
- * Deliberately uneven. Two managers have almost nothing left, four are
- * comfortable, and the reader is in the middle with $37 — which is the position
- * in which the difference between "what he will go for" and "what he is worth
- * to you" actually decides something.
- */
-const SPENT_BY_WEEK_SEVEN = new Map<number, number>([
-  [1, 12], [2, 71], [3, 44], [4, 8], [5, 93], [6, 30],
-  [7, 55], [8, 22], [MY_ROSTER_ID, 45], [10, 4], [11, 88], [12, 41],
-]);
-
-/** After the Wednesday run, the winning claim has come out of the wallet. */
-const SPENT_AFTER_RUN = new Map(SPENT_BY_WEEK_SEVEN);
-SPENT_AFTER_RUN.set(MY_ROSTER_ID, 45 + 27);
-SPENT_AFTER_RUN.set(2, 71 + 9);
-SPENT_AFTER_RUN.set(6, 30 + 17);
-
-/**
- * The league's own bid history, summarised.
+ * Neither is stated here any more. `fixtures/ledger.ts` writes down the
+ * season's transactions in Sleeper's own shape, and the same two functions the
+ * live app runs turn them into a spend per roster and a price summary for the
+ * league: `buildBudgetState` reads the spend off each roster's
+ * `waiver_budget_used`, and `collectBids` + `summarisePrices` read the bids.
  *
- * Sixteen winning claims is a real distribution and the pricing model leads
- * with it rather than with a generic prior — which is the difference between
- * advising in a league where waivers go for two dollars and one where they go
- * for forty.
+ * That is worth the indirection for one reason. The old fixture stated a spend
+ * table *and* a price summary — sample sixteen, median eleven — and nothing
+ * connected them: a demo could show a league whose managers had spent $500
+ * between them while claiming its typical winning bid was $2, and no test would
+ * have noticed. Now the wallet, the price and the named rivals are three
+ * readings of one list.
  */
-const PRICES = {
-  sample: 16,
-  median: 11,
-  low: 5,
-  high: 19,
-  max: 44,
-  highestLosing: 14,
-  losingBidsComplete: false,
-  confidence: 'medium' as const,
-};
+function pricesFor(week: number): { prices: ReturnType<typeof summarisePrices>; losingBids: string } {
+  const history = collectBids(demoTransactions(DEMO_SEASON, { throughWeek: week - 1 }), LEDGER_WEEKS);
+  const prices = summarisePrices(history);
+  return { prices, losingBids: losingBidNote(prices) };
+}
 
 /** A league that has never published a single bid. */
 const NO_PRICES = {
@@ -477,8 +492,25 @@ const NO_PRICES = {
   confidence: 'none' as const,
 };
 
-const LOSING_BIDS =
-  'Sleeper publishes the winning bid and, for failed claims on the same player, the amounts that lost. 6 of 16 runs here had a visible losing bid.';
+/**
+ * The record each roster carries into the week.
+ *
+ * Sleeper publishes wins and losses on the roster, and `playoffEmphasis` reads
+ * them to decide whether December is worth planning for yet — so a fixture
+ * without them is a fixture in which a playoff stash can never be recommended.
+ * Deterministic from the week and the seat: the reader is a game over .500 and
+ * the room is spread around them.
+ */
+function recordsFor(week: number): Map<number, { wins: number; losses: number }> {
+  const played = Math.max(0, week - 1);
+  const out = new Map<number, { wins: number; losses: number }>();
+  for (const manager of DEMO_MANAGERS) {
+    const lean = ((manager.rosterId * 5) % 7) - 3;
+    const wins = Math.min(played, Math.max(0, Math.round(played * 0.5 + lean * 0.35)));
+    out.set(manager.rosterId, { wins, losses: played - wins });
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------- builder
 
@@ -559,33 +591,49 @@ function strategyFor(scenario: DemoScenario, clock: ReturnType<typeof fixedClock
     case 'waivers-tuesday-active':
     case 'late-injury-pivot':
     case 'sunday-pregame':
-      return {
-        week,
-        finalWeek: 14,
-        budget: makeBudget(SPENT_BY_WEEK_SEVEN),
-        prices: PRICES,
-        trending,
-        trendingCapturedAt: hoursBefore(clock, 3),
-        losingBids: LOSING_BIDS,
-        notes: [],
-      };
     case 'waivers-processed':
     case 'trade-window':
-    case 'playoff-week':
+    case 'playoff-week': {
+      /*
+       * One reading of one ledger, whatever week the scenario is in.
+       *
+       * The Tuesday scenario is bidding into a run that has not happened, so
+       * its prices are the six weeks behind it; by Wednesday morning that run
+       * is history and the sample is one week longer. Both come out of
+       * `pricesFor`, so the two scenarios cannot disagree about a league they
+       * share.
+       */
+      const { prices, losingBids } = pricesFor(spentThroughWeek(scenario));
       return {
         week,
         finalWeek: 14,
-        budget: makeBudget(SPENT_AFTER_RUN),
-        prices: { ...PRICES, sample: 19, median: 12 },
+        budget: makeBudget(spendByRosterId({ throughWeek: spentThroughWeek(scenario) })),
+        prices,
         trending,
-        trendingCapturedAt: hoursBefore(clock, 2),
-        losingBids: LOSING_BIDS,
+        trendingCapturedAt: hoursBefore(clock, scenario.id === 'waivers-tuesday-active' ? 3 : 2),
+        losingBids,
         notes: [],
       };
+    }
     default:
       return null;
   }
 }
+
+/**
+ * How much of the season's transaction history a scenario has behind it.
+ *
+ * Week seven's run is the hinge: on Tuesday night it has not processed, so the
+ * ledger stops at week six and the wallet still holds what the plan is about to
+ * spend. From Wednesday morning on it has, and every later scenario inherits
+ * the claim that landed, the money that left and the roster that changed.
+ */
+function spentThroughWeek(scenario: DemoScenario): number {
+  return RUN_PROCESSED.has(scenario.id) ? 7 : 6;
+}
+
+/** The scenarios that are read *after* the week-seven waiver run. */
+const RUN_PROCESSED = new Set(['waivers-processed', 'trade-window', 'playoff-week', 'season-complete']);
 
 function seasonTypeFor(scenario: DemoScenario): 'pre' | 'regular' | 'post' | 'off' {
   switch (scenario.lifecycle) {
@@ -654,9 +702,13 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
    * and trade scenarios are played in for the sake of a screen they never open.
    */
   const matchupWeekend = isMatchupScenario(scenario.id);
+  const throughWeek = spentThroughWeek(scenario);
   const byRosterId = rollover
     ? new Map<number, string[]>()
-    : seasonRosters(matchupWeekend ? new Map([[MATCHUP_OPPONENT_ROSTER_ID, OPPONENT_ROSTER]]) : undefined);
+    : seasonRosters({
+        pinned: matchupWeekend ? new Map([[MATCHUP_OPPONENT_ROSTER_ID, OPPONENT_ROSTER]]) : undefined,
+        afterRun: throughWeek > 6,
+      });
   /* Underdog is a draft-season market; out of season there is nothing current. */
   const dog = makeDog(specs, clock, {
     available: scenario.freshness.dogAdp === 'fresh',
@@ -668,10 +720,7 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
     capturedAt: '2026-08-24T06:00:00.000Z',
   });
 
-  const spent =
-    scenario.id === 'waivers-processed' || scenario.id === 'trade-window' || scenario.id === 'playoff-week'
-      ? SPENT_AFTER_RUN
-      : SPENT_BY_WEEK_SEVEN;
+  const spent = spendByRosterId({ throughWeek });
 
   return {
     scenario,
@@ -689,6 +738,7 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
       starters: rollover ? [] : MY_STARTERS,
       reserve: [],
       spentByRosterId: rollover ? new Map() : spent,
+      recordByRosterId: rollover ? new Map() : recordsFor(scenario.week ?? 1),
     }),
     /*
      * The draft still exists after it has finished, which is what keeps the
@@ -725,6 +775,18 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
         })
       : null,
     strategy: rollover ? null : strategyFor(scenario, clock),
+    /*
+     * The league's own history, and the one scenario that has none.
+     *
+     * `waivers-thin-data` is a league that has never published a bid, and that
+     * has to stay true all the way down: handing it a ledger would give it
+     * named rivals and a spending profile for a room the scenario says nothing
+     * is known about.
+     */
+    transactions:
+      rollover || scenario.id === 'waivers-thin-data'
+        ? []
+        : demoTransactions(DEMO_SEASON, { throughWeek }),
     notes: rollover
       ? [
           'No league has been created for this season yet, so there is nothing to advise on.',

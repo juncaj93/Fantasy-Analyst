@@ -42,6 +42,10 @@ import { normalizeMode } from '../../startsit/mode.ts';
 import { recommendWaiverUpgrades } from '../../startsit/waivers.ts';
 import { priceWaiverUpgrades } from '../../waivers/pricing.ts';
 import { waiverLeagueIntel, withCompetition } from '../../waivers/intel.ts';
+import { collectBids } from '../../faab/bids.ts';
+import { demoManagerHistory } from './history.ts';
+import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../managers/draftProfile.ts';
+import { LEDGER_WEEKS } from '../fixtures/ledger.ts';
 import { buildWaiverClaimPlan } from '../../waivers/claimPlan.ts';
 import { assembleDstPlan } from '../../dst/assemble.ts';
 import { playoffContextFor } from '../../league/planning.ts';
@@ -432,6 +436,18 @@ function smartTrades(data: ScenarioData, limit: number) {
   const me = views.get(String(mine.rosterId));
   if (!me) return emptyBoard(['Your roster could not be evaluated.']);
 
+  /*
+   * What is known about each partner, from the league's own ledger.
+   *
+   * `buildTradeTendencies` has read the season's trades and said what it can
+   * about who trades, with whom, and for what. Most of this room has never
+   * traded, and that is the honest and common case: `plausibilityFor` reports a
+   * thin sample as thin, `managerFit` contributes nothing for a manager it
+   * cannot describe, and the bilateral reasoning stands on its own — which is
+   * exactly what a demo of this feature should show, next to the two managers
+   * the ledger does know something about.
+   */
+  const history = demoManagerHistory(data);
   const report = findBilateralTrades({
     me,
     partners: others.flatMap((roster) => {
@@ -446,7 +462,15 @@ function smartTrades(data: ScenarioData, limit: number) {
                 displayName: roster.ownerName ?? `Roster ${roster.rosterId}`,
                 userId: roster.ownerId,
               },
-              fit: { tendencies: null, seasonsObserved: 0, historyComplete: false },
+              fit: {
+                tendencies: roster.ownerId ? (history.tradeTendencies.get(roster.ownerId) ?? null) : null,
+                userId: roster.ownerId,
+                displayName: roster.ownerName,
+                seasonsObserved: history.seasons.length,
+                historyComplete: history.seasons.length > 0,
+                askingUserId: mine.ownerId,
+                leagueRate: history.tradeBaseline?.tradesPerManagerSeason ?? null,
+              },
             },
           ]
         : [];
@@ -467,7 +491,13 @@ function smartTrades(data: ScenarioData, limit: number) {
       bounds: TRADE_BOUNDS,
     },
     capability,
-    history: { measured: true, profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
+    history: {
+      measured: true,
+      profiles: [...history.tradeTendencies.values()].filter((t) => t.usable).length,
+      seasonsComplete: history.seasons,
+      complete: history.seasons.length > 0,
+      leagueRate: history.tradeBaseline?.tradesPerManagerSeason ?? null,
+    },
     notes: [...report.notes, ...data.notes],
     warnings: [],
   };
@@ -538,6 +568,18 @@ async function waivers(data: ScenarioData) {
   }));
 
   const strategy = data.strategy;
+  /*
+   * The same three suppliers the live handler passes, from the same ledger.
+   *
+   * `observations` is every bid the league has published — which is what turns
+   * "somebody else needs a tight end" into a named rival with a price on him —
+   * and `history` is what the manager-intelligence pass concluded about the
+   * people holding those rosters. Both are absent in a scenario with no ledger,
+   * and the columns then report exactly what they report for a league nobody
+   * has backfilled: not known.
+   */
+  const history = demoManagerHistory(data);
+  const bidHistory = collectBids(data.transactions, LEDGER_WEEKS);
   const intel = waiverLeagueIntel({
     advice,
     rosters: data.rosters,
@@ -545,6 +587,15 @@ async function waivers(data: ScenarioData) {
     shape,
     budgets: strategy?.budget ?? null,
     prices: strategy?.prices ?? null,
+    observations: bidHistory.observations,
+    history: history.transactionBaseline
+      ? {
+          profiles: history.profilesByRoster,
+          baseline: history.transactionBaseline,
+          week: data.nflState?.week ?? 1,
+          finalWeek: history.finalWeek,
+        }
+      : undefined,
   });
 
   const bids = strategy
@@ -593,7 +644,7 @@ async function waivers(data: ScenarioData) {
    * say `Wait — no DST needed yet` about the same slot. Two answers to one
    * question on one screen. The planner wins wherever it has an opinion.
    */
-  const upgrades = withCompetition(upgradesWithValue, intel.competition).filter(
+  const upgrades = withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure).filter(
     (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
   );
 
@@ -670,28 +721,66 @@ function bench(data: ScenarioData) {
 }
 
 function managers(data: ScenarioData) {
+  /*
+   * What the ledger knows, and nothing beyond it.
+   *
+   * This used to answer `null` to everything, on the ground that a tendency
+   * needs a sample and Demo Mode had no history to walk. It has one now — see
+   * `fixtures/ledger.ts` — so the honest answer changed: the same engines the
+   * nightly backfill runs have read the season's transactions and the demo's
+   * own draft, and this reports what they concluded.
+   *
+   * What is still null is still null. `trade` and `draft` here are the
+   * *roster-keyed cached profiles* the live app writes during a backfill, and a
+   * demo runs no backfill and stores nothing; the draft reading is served from
+   * `draftTendencies`, which is derived on the spot from the picks. A scenario
+   * with no ledger at all — a draft, an offseason, the league that has never
+   * published a bid — gets nulls throughout, which is exactly what the live app
+   * returns for a league nobody has run the pass for.
+   */
+  const history = demoManagerHistory(data);
+  const room = history.draftTendencies.size > 0 ? buildRoomProfile(historicalPicks(data)) : null;
+
   return {
     league: { id: data.league.id, name: data.league.name },
-    /*
-     * Every profile is null, and that is the honest answer rather than a gap.
-     *
-     * A tendency needs a sample, and the live feature builds one by walking a
-     * league's history — dozens of requests producing a handful of sentences
-     * that change once a season. Demo Mode has no history to walk, so it says
-     * what the live app says about a league nobody has run the pass for:
-     * nothing. Inventing tendencies would be the one thing §9's "interesting
-     * fixtures" must not become — a demonstration of a claim the product cannot
-     * make about a real league.
-     */
-    room: null,
+    room,
+    baseline: history.transactionBaseline,
     managers: data.rosters.map((roster) => ({
       rosterId: roster.rosterId,
       ownerName: roster.ownerName,
       isMine: roster.isMine,
       trade: null,
-      draft: null,
+      draft:
+        history.draftTendencies.size === 0
+          ? null
+          : buildManagerDraftProfile({
+              rosterId: roster.rosterId,
+              userId: roster.ownerId,
+              ownerName: roster.ownerName,
+              picks: historicalPicks(data),
+            }),
+      tradeTendencies: (roster.ownerId ? history.tradeTendencies.get(roster.ownerId) : null) ?? null,
+      transactions: history.profilesByRoster.get(roster.rosterId) ?? null,
     })),
   };
+}
+
+/** The scenario's own draft, in the shape the draft-profile readers want. */
+function historicalPicks(data: ScenarioData): HistoricalPick[] {
+  const byId = new Map(data.players.map((p) => [p.id, p.position ?? null]));
+  return data.picks
+    .filter((pick) => pick.playerId != null)
+    .map((pick) => ({
+      season: data.league.season,
+      draftId: pick.draftId,
+      pickNo: pick.pickNo,
+      round: pick.round,
+      userId: pick.rosterId == null ? null : `owner-${pick.rosterId}`,
+      rosterId: pick.rosterId ?? null,
+      position: byId.get(pick.playerId!) ?? null,
+      marketRank: null,
+      yearsExp: null,
+    }));
 }
 
 function playerList(data: ScenarioData, params: URLSearchParams) {
