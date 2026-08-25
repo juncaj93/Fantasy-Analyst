@@ -389,6 +389,16 @@ suggestions).
 
 ## Known limitations
 
+0. **Player portraits were never seen against Sleeper's real images here.** The
+   sandbox this was built in denies `sleepercdn.com` at the network policy, so
+   the CDN's behaviour is taken from the brief's probe rather than re-measured,
+   and every screenshot and every test uses a generated stand-in at the source's
+   own 350×254 framing. What that leaves unverified is narrow but real: whether
+   the circular crop flatters actual portraits, and whether the URL still
+   resolves in production. The first is a one-line change to `object-position`
+   in `.player-face`; the second is what the initials fallback exists for, and
+   it is the most tested thing in the feature. See docs/ARCHITECTURE.md.
+
 0. **SportsGameOdds publishes no season-long NFL player markets.** Established
    by probe against the live API and its own market catalogue: every NFL event
    is a single game, `type=prop` and `type=tournament` are empty for the league,
@@ -1853,6 +1863,80 @@ extra Vegas entity: every number here comes out of rows an earlier refresh
 already paid for. No FAAB model was built for a two-dollar add, and a defence row
 is excluded from the board's "still to arrive" line rather than promising a
 column that is not coming.
+
+## Milestone — a face on the expanded player (done)
+
+Sleeper publishes a portrait per player at a path its own clients use and its
+API never documents. A probe of 91 players resolved 80 of them, 78 distinct, no
+redirects, ~30 kB median, cached for 31 days. This puts one on the expanded
+player sheet at 64px and nowhere else, and everything below is about keeping
+that from costing anything.
+
+**The whole feature is optional, structurally.** `playerHeadshotUrl` returns
+`string | null`; `PlayerFace` treats a 403, a 404, a network error and an
+offline first paint as the same ordinary outcome and draws deterministic
+initials in the same box, on the same circle, on the same ground. No retry, no
+toast, no banner, no logging, no broken-image chrome — the `<img>` is unmounted
+the instant it errors. Twelve percent of probed players have no portrait, so
+this is the normal path rather than the sad one, and the app is fully usable
+with every image on it missing.
+
+**Failure is remembered per URL, at module scope.** Per-instance would have let
+one missing portrait blank out whoever React drew into that component next —
+the bug `TeamLogo` already avoids the same way. Module scope is the second
+half: a rookie with no portrait is opened, closed and opened again, and a
+per-mount memory would re-request an image that is not going to exist this week.
+`e2e/player-face.spec.ts` asserts both directions — one request for a URL known
+to be missing, and a full attempt for the next player's.
+
+**Nothing about this costs the deployment a request.** The path is
+`browser → sleepercdn.com` and never through the Worker: no API route, no proxy
+fetch, no D1/KV/R2, no change to the app's own request count when a reader
+looks at a player, and an incremental Cloudflare cost of effectively zero. That
+is the entire reason hot-linking was accepted here after being rejected for club
+marks, so `tests/playerHeadshotSurfaces.test.ts` fails if a server or Worker
+module ever names the host, if the router grows a headshot route, if a migration
+stores an image, or if a storage binding appears.
+
+**Only the sheet draws one, and the protected lists are named rather than
+merely omitted.** Matchup, Draft, Waivers, the Players index and the compact
+Smart Trades rows stay image-free by decision — on Matchup at 390px a face takes
+the name column from about 85px to about 60px, and a shortened name is
+information traded for decoration. The source scan holds the files; the e2e
+holds the running app, which never requests a portrait from a list.
+
+**The 64px face cost the sheet's one-line header more than it was worth, and
+that is measured rather than argued.** The line — pill, club, name, status —
+carried about twenty pixels of slack; the face wanted sixty-eight. At 360px it
+truncated nineteen of twenty-two seeded names, `Julian Reyes` down to
+`Julian…`, where none truncated before; at 375px, eleven. No size was free —
+even 40px cost ten names. So the height the portrait already forces is now
+spent: the name takes a line of its own beside the face and the marks that
+qualify him take the one under it, which is `PlayerPage`'s own arrangement for
+the same player. At 430, 390, 375 and 360, no name truncates at all, and the
+header is exactly 64px on every one of them. `e2e/player-face.spec.ts` walks
+every seeded player at each width and requires zero.
+
+**Team is deferred, and the discovery's own gate is why.** It expected a 28px
+face inside the 44px row, and the row height does hold. But a prototype
+measured at all four widths introduced truncation at 390 (`Cal Whitfield`, 28px
+short, from none), tripled it at 375 (3px → 43px) and at 360 (18px → 58px) — on
+the row carrying the most tags, which is the row a reader most needs to read —
+and left the identity column of a populated slot indented 32px from the empty
+slots above it, so the leading edge no longer lines up down the screen. Two of
+the seven conditions fail. Team keeps its club mark and no portrait.
+
+**A defence is held out twice, and the second rule is the one that matters.**
+Live Sleeper keys defences by the club abbreviation, so refusing a non-numeric
+id already excludes every defence in production data. This repository's own seed
+does not: `1030` is Jacksonville's. So `playerHeadshotUrl` takes the position as
+well and refuses `DEF` whatever the id looks like — a rule that holds only
+because one provider formats its keys a certain way is a rule waiting to be
+broken by a fixture, and the fixture landed in the same week.
+
+**The thumb variant is not used.** It saves roughly 7 kB on an asset the browser
+holds for a month, on one image per opened card, in exchange for a second
+undocumented path that can rot independently of the first.
 
 ## Recommended next work
 
