@@ -351,6 +351,110 @@ export function PlayerFace({
 }
 
 /**
+ * A player as the heading of a focused surface: his face, his name, his marks.
+ *
+ * The one arrangement for "this sheet is about one player", and the reason it is
+ * here rather than in the sheet that first needed it. Three sheets open a
+ * focused view of a single player, on six routes — the shared player card from
+ * Players and Smart Trades, the weekly card from Team and Matchup, the waiver
+ * detail from Team and Waivers — and before this they agreed on the *content* of
+ * that header and disagreed about everything else: one drew a portrait and a
+ * two-line identity block, two drew a bare string and repeated the pill and the
+ * club as the first line of their body.
+ *
+ * So the portrait markup exists exactly once in this app. That is not tidiness
+ * for its own sake: it is what makes the whole feature's contract checkable in
+ * one place — the size, the eager load, the empty `alt`, the defence exclusion,
+ * the initials fallback — instead of being three copies that drift apart on the
+ * next pass. A fourth focused surface gets it by calling this, and a dense list
+ * cannot get it by accident, because a list has no header to put it in.
+ *
+ * The shape is `PlayerPage`'s: the name is a heading on a line of its own, and
+ * the marks that qualify him sit under it in the row's own order — pill, club,
+ * status. A 64px portrait makes the header 64px tall whatever else is on it, and
+ * that measurement is what settled the two lines: on one line at 360px the face
+ * truncated nineteen of twenty-two seeded names. Nothing on any *list* changes;
+ * pill → club → name still reads across one line there.
+ *
+ * `status` is optional and is the one thing the callers genuinely differ on. The
+ * shared card has a clean Sleeper designation to hand and shows the code. The
+ * weekly card and the waiver detail carry availability as a *phrase* instead —
+ * `Questionable · hamstring · limited → full` — already printed in words on a
+ * line of their own body, and abbreviating it to `Q` in the header as well would
+ * be the same card saying the same thing twice in two vocabularies.
+ */
+export function PlayerSheetTitle({
+  playerId,
+  name,
+  position,
+  team,
+  status,
+  trailing,
+}: {
+  playerId: string | null | undefined;
+  name: string;
+  position: string | null;
+  team?: string | null;
+  /** A Sleeper designation, when the caller has one. See the note above. */
+  status?: string | null;
+  /** A control belonging to the player rather than to the sheet — the heart. */
+  trailing?: ReactNode;
+}) {
+  return (
+    <span className="sheet-player-title">
+      {/*
+        His face, and it is the first thing on the header for the same reason
+        the pill is the first thing on a row.
+
+        Everything that says *who* sits on the leading side, in the order a
+        reader asks for it — the rule `PlayerIdentity` settles and every list in
+        the app follows. A portrait is the most immediate answer to "who is
+        this" there is: it is recognised rather than read, which is half a beat
+        sooner than a name can be. So it leads.
+
+        Sixty-four pixels, in the sheet's *header* rather than at the top of its
+        body, and both halves of that matter. The header does not scroll, so the
+        face costs the reader no scrolling at all and is still there when they
+        are four blocks down the card; putting it in the body would have pushed
+        every fact on the card down by its own height. And it is a face rather
+        than hero art — the name beside it is still the largest thing in the
+        header, and the readings under it did not move.
+
+        `eager`, because the reader has already committed to this player by
+        opening the card. Focused surfaces are the only place in the app where a
+        portrait is the thing that was asked for rather than something passed on
+        the way to something else, and this is the only component that asks for
+        one that way.
+
+        A team defence gets no portrait, and the position is passed for exactly
+        that reason. Live Sleeper keys defences by the club abbreviation — `CHI`
+        is a real `player_id` — so the helper's numeric rule already excludes
+        them there; this app's own demo seed keys them numerically, which is why
+        the rule is not left to the id shape alone. Either way `DEF` draws its
+        initials and keeps the club's bundled mark on the line beside it. A club
+        is not a person.
+      */}
+      <PlayerFace
+        playerId={playerId}
+        name={name}
+        position={position}
+        size={64}
+        loading="eager"
+        testId="sheet-player-face"
+      />
+      <span className="sheet-player-ident">
+        <span className="sheet-player-name">{name}</span>
+        <span className="sheet-player-quals">
+          <PlayerIdentity position={position} {...(team === undefined ? {} : { team })} />
+          <InjuryTag status={status} />
+        </span>
+      </span>
+      {trailing ? <span className="sheet-player-aside">{trailing}</span> : null}
+    </span>
+  );
+}
+
+/**
  * A player's position, colour-coded so a long list can be scanned at a glance.
  *
  * The letters stay: colour is an accelerator, never the carrier of the meaning,

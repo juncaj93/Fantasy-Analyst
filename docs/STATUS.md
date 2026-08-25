@@ -389,15 +389,17 @@ suggestions).
 
 ## Known limitations
 
-0. **Player portraits were never seen against Sleeper's real images here.** The
-   sandbox this was built in denies `sleepercdn.com` at the network policy, so
-   the CDN's behaviour is taken from the brief's probe rather than re-measured,
-   and every screenshot and every test uses a generated stand-in at the source's
-   own 350×254 framing. What that leaves unverified is narrow but real: whether
-   the circular crop flatters actual portraits, and whether the URL still
-   resolves in production. The first is a one-line change to `object-position`
-   in `.player-face`; the second is what the initials fallback exists for, and
-   it is the most tested thing in the feature. See docs/ARCHITECTURE.md.
+0. **Player portraits cannot be seen against Sleeper's real images from here.**
+   The sandbox this is built in denies `sleepercdn.com` at the network policy,
+   so the CDN's behaviour is taken from the brief's probe rather than
+   re-measured, and every screenshot and every test uses a generated stand-in at
+   the source's own 350×254 framing. The crop and the URL were since confirmed
+   against real portraits on an iPhone, on the surface that shipped first, which
+   is the check this environment cannot make — and the surfaces added since use
+   the same 64px circle from the same component, so what was confirmed there
+   holds. What remains unverifiable here is the same as before: that the URL
+   still resolves in production, which is what the initials fallback exists for
+   and is the most tested thing in the feature. See docs/ARCHITECTURE.md.
 
 0. **SportsGameOdds publishes no season-long NFL player markets.** Established
    by probe against the live API and its own market catalogue: every NFL event
@@ -2007,6 +2009,81 @@ the comment above it now says who wears it. `.tag-avoid`, `.tag-cliff`,
 are still unreferenced, so those four removals stand. `common.tsx` was
 deliberately left alone in this pass because the headshot lane owned it — it
 edited that file, so the restraint was load-bearing rather than theoretical.
+
+## Milestone — the face on every focused player, and nowhere else (done)
+
+The portrait shipped on one surface: the expanded player card, reached from
+Players and from Smart Trades. This puts it on every *other* place the app opens
+a single player on purpose, and takes the opportunity to make that a fact about
+one component rather than a convention four files are trusted to keep.
+
+**Three more routes, and not one new piece of portrait markup.** Team and
+Matchup open a starter or a lineup row into the weekly card; Team and Waivers
+open a candidate into the waiver detail. Both of those sheets headed themselves
+with the player's name as a bare string and printed his pill and club as the
+first line of their *body*. They now render `PlayerSheetTitle` — the header the
+shared card already drew, lifted into `common.tsx` — so the same six routes
+produce one header: face, name, and the marks that qualify him underneath. Smart
+Trades needed nothing at all; its focused player has always been the shared
+card, and its *offer* sheet is about a trade rather than a player, so it stays
+image-free with no face grid.
+
+**`PlayerFace` is now rendered in exactly one file, and that is the invariant.**
+The old rule was a list of approved screens, which was the right shape while one
+screen had a face and would have said nothing by the sixth. What replaced it is
+stronger and does not decay: `tests/playerHeadshotSurfaces.test.ts` fails if any
+file but `common.tsx` renders a portrait, fails if one of the three focused files
+stops rendering the shared header, and fails if a protected surface grows either.
+The size, the eager load, the empty `alt`, the defence exclusion and the initials
+fallback are decided once — so a seventh surface gets all five by calling the
+header, and cannot get four of them by copying markup.
+
+**The identity marks moved rather than doubled.** Removing `PositionBadge` from
+the weekly card's and the waiver detail's first body line is what keeps this from
+costing height: the header above them now carries the same pill and club beside
+the name, so those cards are not taller and do not say anything twice. What is
+left in the band under the header is what it was always for — how sure the
+lineup is, and what it projects.
+
+**Availability is deliberately not repeated in those two headers.** The shared
+card has a clean Sleeper designation and shows the code. The weekly card and the
+waiver detail carry availability as a phrase — `Questionable · hamstring ·
+limited → full` — already printed in words on a line of their own body, and
+abbreviating the same fact to `Q` two centimetres above it would be one card
+speaking two vocabularies.
+
+**Draft did not ship a face, and that is a measurement rather than an
+omission.** Its expanded player card is the one expanded detail in the app that
+is not a sheet: it unfolds inside the board, and it is budgeted at about two and
+a half collapsed rows precisely so the board it opened from stays on screen. Both
+placements were prototyped and measured at 360 and 390. Beside the content, the
+working — `Sleeper ADP · DOG ADP · Pick · Val`, which the card is arranged to
+keep on one line at 360px — wraps from 15px to 31px on four of five seeded cards,
+at 40px as well as at 64px. Above the content costs about 30px on a card whose
+ceiling has about 36px left. The widest seeded card goes from 2.53x a collapsed
+row to 2.80x, against a 3x ceiling `e2e/draft-card.spec.ts` enforces. The rollout
+brief's own rule is that decision content wins where 64px will not fit cleanly,
+so Draft keeps the club mark, the status tag, the star and the whole of its
+working. It is on the protected list with those numbers attached rather than
+quietly missing.
+
+**The dense lists are still image-free, and each page load proves both halves.**
+`e2e/player-face-focused.spec.ts` asserts on the same load that the Team roster,
+the Matchup lineups with the bench opened, and the waivers board requested zero
+portraits *and* that the sheet each of them opens requested exactly one, keyed on
+the player the reader tapped. A rule that only forbids is satisfied by deleting
+the feature; a rule that only requires is satisfied by putting a face on every
+row. It also re-checks, per surface, that the header is 64px tall and that the
+name beside it loses no letter — the measurement that decided the header's shape
+in the first place, now made on three more screens.
+
+**Nothing about the cost story changed, because nothing about the path did.**
+Still `browser → sleepercdn.com`, still no Worker subrequest, no D1/KV/R2, no API
+route, no migration, no service worker and no list prefetch. One image per opened
+card, per player, cached by the browser for Sleeper's 31 days. JS is 126.4 kB
+gzipped against a 140 kB budget and CSS 14.1 kB against 20 kB — the stylesheet
+did not grow at all, because the header this rolled out to three more surfaces is
+the one the shared card was already using.
 
 ## Recommended next work
 
