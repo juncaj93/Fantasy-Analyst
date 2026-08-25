@@ -1938,6 +1938,76 @@ broken by a fixture, and the fixture landed in the same week.
 holds for a month, on one image per opened card, in exchange for a second
 undocumented path that can rot independently of the first.
 
+## Polish — one fact, one home, and the eight pixels under a thumb (done)
+
+A bounded finishing pass, deliberately narrow: four demonstrable defects, no
+feature invention, and nothing taken from the DST streaming or headshot lanes.
+
+**`Lineup impact` was the recommendation, printed a third time.** The Matchup
+screen answers the lineup question above the fold now, and `Best move` explains
+itself in a sheet of its own. `Behind the odds` was still restating the same
+`decision.best` near its bottom — the same swap, the same `44% → 48%`, the same
+sentence — four sections below where the reader had already met it and under a
+heading about something else. The duplicated half is gone. The half that was
+only ever there stays: `decision.note` tells the three empty cases apart, and
+the screen's own footnote says one thing for all three, so `Every remaining
+lineup decision is already locked` still has exactly one home and it is this
+one. The section is keyed on the note rather than on the absence of a move,
+which is the same condition in the terms the block is about. **No model
+change**: `core/matchup/decision.ts` is untouched, the 0.02 threshold is
+untouched, and `tests/matchup.bestMove.test.ts` still holds.
+
+**One product name.** A snapshot import that was refused for looking like a
+projection table told the reader "Junculator did not import it as Preseason
+Vegas". Every other surface in the app — the title, the manifest, the install
+copy, the Matchup degraded notice, Setup's own prose — says `Fantasy Analyst`,
+and the sibling refusal two branches up already said `Nothing was imported as
+Preseason Vegas`. That is now what both say. Nothing else was renamed: the
+package is still `fantasy-analyst`, the Home Screen short name is still
+`Fantasy`, and `The Junculator` remains what it always was — a league name in
+the rollover fixtures, not a product.
+
+**The badges that were replaced, deleted rather than left reachable.**
+`components/decisions.tsx` still carried `WaitTag` (the `Take Now` /
+`can probably wait` chips), `TierCliffTag`, `MyGuyStars`, `Verdict`,
+`draftVerdict` and `saidAlready`. Nothing imports any of them. Each was
+superseded rather than merely dropped — the tier cliff is drawn by
+`player-row-cliff` on the board, which knows the row's width; the heart is
+`MyGuyControl`; a verdict belongs to the weekly card — so the file kept only
+what something on screen still calls, and the five stylesheet rules that went
+dead with them (`.tag-take`, `.tag-avoid`, `.tag-cliff`, `.tag-risky`,
+`.verdict-risky`) went too. `.tag-calm`, `.tag-star`, `.tag-warn` and
+`.tag-urgent` stayed, because the Team screen still draws them. **No model
+change**: every judgement behind those badges is still computed and still
+travels on the API.
+
+**Eight pixels, and then fourteen.** §5 of the design system says a touch target
+stays 44px even when the visible control is smaller, and `.search-toggle`
+implements that with an inset `::after` and documents it. Two controls beside it
+did not. `.icon-btn` — the draft-board glyph, the board's own close, the install
+prompt's dismiss — measured 44×36 while its comment claimed "a full tap target".
+The three sort segments measured 30px tall. Both now carry the same `::after`,
+vertically only: sideways would reach under the neighbour in the same track and
+re-sort the board the wrong way. **Not one pixel of any of them moved** — the
+dense bar is exactly as dense as it was. Hit-tested with `elementFromPoint` at
+430, 390, 375 and 360 rather than measured as a box, because a box measurement
+is what passed on the day the target was short.
+
+**Cost.** App JS 126.4kB → 126.3kB gzipped, total render weight 142.0kB →
+141.9kB, both inside budget; two CSS rules added, four removed. No new
+dependency, request path, cron or data source.
+
+**Resynced against both parallel lanes.** DST streaming (#175) and the expanded
+player's face (#177) landed while this was being gated, and both touch
+`styles.css`. One real collision: the defence planner adopted `.tag-take` for
+`Add`, `Stream` and `Stream + stash`, which this pass had deleted as dead with
+the `Take Now` badge that was its only previous wearer. The rule is restored and
+the comment above it now says who wears it. `.tag-avoid`, `.tag-cliff`,
+`.tag-risky` and `.verdict-risky` were re-checked against the merged tree and
+are still unreferenced, so those four removals stand. `common.tsx` was
+deliberately left alone in this pass because the headshot lane owned it — it
+edited that file, so the restraint was load-bearing rather than theoretical.
+
 ## Recommended next work
 
 0. **Watch the defence planner through one real week.** DST is complete enough

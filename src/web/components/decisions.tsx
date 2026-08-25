@@ -1,121 +1,31 @@
 /**
- * Decision-quality controls and tags.
+ * Decision-quality controls, and the list shape the reasons behind them use.
  *
- * Three rules govern everything here, all from the brief:
+ * What is left here is what something on screen still calls. The badges this
+ * file was originally written for — `Take Now` / `can probably wait`, a tier
+ * cliff of its own, a stars flag, a verdict block over an expanded player — are
+ * gone, each of them replaced rather than merely dropped:
  *
- *  1. a tag is only worth screen space if it changes what the user does, so a
- *     row shows at most the one or two that do — the rest live behind the
- *     expander with the numbers that produced them;
- *  2. state is never expressed by colour alone. Every tag carries a word, and
- *     usually a glyph, so it survives a colourblind reader and a bright phone
- *     screen in sunlight;
- *  3. the states are not peers. Take Now and AVOID stop a reader and are filled;
- *     a tier cliff is tinted; "risky to wait" is an outline; "can probably
- *     wait" is nearly silent, because that is exactly how much attention it
- *     deserves.
+ *  - wait guidance is not shown as a badge at all any more. It was the loudest
+ *    thing on a dense board and it said less than the numbers beside it;
+ *  - the tier cliff is drawn by the Draft board itself, as a row pill that
+ *    knows the row's width and abbreviates with it — see `player-row-cliff` in
+ *    `DraftScreen`, which is the only tier-cliff mark left;
+ *  - the heart is a control now, not a read-only tag: `MyGuyControl` below;
+ *  - a verdict over a player belongs to the weekly card, which draws its own —
+ *    see `weekly.tsx`.
+ *
+ * None of the model behind them changed. Every one of those judgements is still
+ * computed and still travels on the API; this file simply stopped being a
+ * second place they could be drawn.
+ *
+ * The one rule that still governs what is here: state is never expressed by
+ * colour alone. Every control carries a word or a glyph, so it survives a
+ * colourblind reader and a bright phone screen in sunlight.
  */
 
 import type { ReactNode } from 'react';
-import type { MyGuyFlag, TierCliff, WaitGuidance } from '../api.ts';
-
-/** Wait guidance, shown only when it is telling the user to move. */
-export function WaitTag({ wait }: { wait: WaitGuidance }) {
-  if (wait.state === 'unknown') return null;
-  const tone =
-    wait.state === 'take_now' ? 'tag tag-take' : wait.state === 'risky_to_wait' ? 'tag tag-risky' : 'tag tag-calm';
-  const glyph = wait.state === 'take_now' ? '!' : wait.state === 'risky_to_wait' ? '~' : '·';
-  return (
-    <span className={tone} title={wait.detail} data-testid="wait-tag" data-state={wait.state}>
-      {glyph} {wait.label}
-    </span>
-  );
-}
-
-/*
- * There is no AVOID badge here any more, and that is deliberate.
- *
- * It used to be the loudest thing that could appear on a row: `⚠ AVOID —
- * lifetime tally -5`, filled, costing a line of the card. What it said was
- * exactly what the signed tally beside the player's name already says, in a
- * form the reader can weigh for themselves — `-5` is a reading, `AVOID` is a
- * verdict placed on top of it. The number stays and the label is gone.
- *
- * What did **not** change: the tally, the lifetime threshold in
- * core/draft/decisions.ts, and the bounded penalty the draft engine applies
- * below it. `AvoidTag` is still computed and still travels on the API, because
- * the model has not stopped believing it — it has stopped shouting it.
- */
-
-export function TierCliffTag({ cliff }: { cliff: TierCliff }) {
-  if (cliff.severity === 'none' || !cliff.message) return null;
-  return (
-    <span
-      className={cliff.severity === 'last_in_tier' ? 'tag tag-cliff' : 'tag tag-risky'}
-      title={cliff.message}
-      data-testid="tier-cliff-tag"
-    >
-      ▚ {cliff.severity === 'last_in_tier' ? 'Tier cliff' : 'Tier thinning'}
-    </span>
-  );
-}
-
-export function MyGuyStars({ myGuy }: { myGuy: MyGuyFlag }) {
-  if (myGuy.level === 0) return null;
-  return (
-    <span className="tag tag-star" title={`${myGuy.label} — your own flag, separate from the news tally`} data-testid="my-guy-stars">
-      {myGuy.stars}
-    </span>
-  );
-}
-
-/**
- * The conclusion, stated once at the top of an expanded player.
- *
- * One label and one supporting sentence — both of them text the engine already
- * produced. Nothing is recomputed here; this only decides which of the existing
- * strings is the headline and which are the supporting detail, so the same
- * point stops appearing three times down the card.
- */
-export function Verdict({
-  tone,
-  label,
-  detail,
-  glyph,
-}: {
-  tone: 'take' | 'avoid' | 'risky' | 'calm';
-  label: string;
-  detail?: string | null;
-  glyph?: string;
-}) {
-  return (
-    <div className={`verdict verdict-${tone}`} data-testid="verdict" data-tone={tone}>
-      <div className="verdict-label">
-        {glyph ? <span aria-hidden="true">{glyph}</span> : null}
-        {label}
-      </div>
-      {detail ? <div className="verdict-detail">{detail}</div> : null}
-    </div>
-  );
-}
-
-/**
- * Which conclusion leads an expanded draft player.
- *
- * Urgency outranks the fact that somebody can wait. When the engine has no wait
- * guidance there is no conclusion to state, and this returns null rather than
- * inventing one.
- *
- * The lifetime-tally caution used to outrank both and is no longer stated as a
- * conclusion anywhere — see the note where the badge used to be.
- */
-export function draftVerdict(
-  wait: WaitGuidance,
-): { tone: 'take' | 'avoid' | 'risky' | 'calm'; label: string; detail: string | null; glyph: string } | null {
-  if (wait.state === 'unknown') return null;
-  const tone = wait.state === 'take_now' ? 'take' : wait.state === 'risky_to_wait' ? 'risky' : 'calm';
-  const glyph = wait.state === 'take_now' ? '!' : wait.state === 'risky_to_wait' ? '~' : '·';
-  return { tone, label: wait.label, detail: wait.detail, glyph };
-}
+import type { MyGuyFlag } from '../api.ts';
 
 /**
  * Drop lines that have already been said.
@@ -135,24 +45,6 @@ export function withoutRepeats(lines: string[], alreadySaid: (string | null | un
     out.push(line);
   }
   return out;
-}
-
-/**
- * Has this already been said, in this form or inside a longer sentence?
- *
- * Looser than `withoutRepeats` on purpose: the wait guidance often quotes the
- * tier-cliff message inside a longer sentence, and printing the quoted half
- * again two blocks later is the exact repetition this pass is removing.
- */
-export function saidAlready(text: string | null | undefined, alreadySaid: (string | null | undefined)[]): boolean {
-  if (!text) return true;
-  const key = normalise(text);
-  if (!key) return true;
-  return alreadySaid.some((said) => {
-    if (!said) return false;
-    const other = normalise(said);
-    return other.includes(key) || key.includes(other);
-  });
 }
 
 function normalise(text: string): string {

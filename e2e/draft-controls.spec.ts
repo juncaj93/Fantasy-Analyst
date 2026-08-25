@@ -106,6 +106,76 @@ test.describe('collapsed', () => {
     }
   });
 
+  /**
+   * The bar's own controls, measured as a thumb meets them rather than as they
+   * are drawn.
+   *
+   * The two are not the same number here and are not meant to be. §5 of the
+   * design system says a target stays 44px even when the visible control is
+   * smaller, and the board glyph and the three sort segments are all smaller:
+   * 36px and 30px of painted control respectively, chosen so the bar costs the
+   * board no rows. What was missing was the other half of that rule — the
+   * target itself, which each of them now carries as an inset `::after`.
+   *
+   * So this hit-tests rather than reading `getBoundingClientRect`, because a box
+   * measurement cannot tell the two halves apart and would have passed happily
+   * on the day the target was eight pixels short.
+   *
+   * Height only. These sit shoulder to shoulder in one track, so growing a
+   * target sideways would put it under its neighbour — asserted below, and it
+   * is the reason the widths here are deliberately left as they are.
+   */
+  test('the board glyph and the sort segments are 44px to a thumb', async ({ page }) => {
+    await openDraft(page);
+
+    const measured = await page.evaluate(() => {
+      const owns = (el: Element, x: number, y: number) => {
+        const hit = document.elementFromPoint(x, y);
+        return hit === el || el.contains(hit);
+      };
+      const reach = (el: Element) => {
+        const b = el.getBoundingClientRect();
+        const cx = b.left + b.width / 2;
+        const cy = b.top + b.height / 2;
+        let top = b.top;
+        let bottom = b.bottom;
+        for (let y = b.top - 1; y > b.top - 24; y -= 1) {
+          if (!owns(el, cx, y)) break;
+          top = y;
+        }
+        for (let y = b.bottom + 1; y < b.bottom + 24; y += 1) {
+          if (!owns(el, cx, y)) break;
+          bottom = y;
+        }
+        let left = b.left;
+        let right = b.right;
+        for (let x = b.left - 1; x > b.left - 24; x -= 1) {
+          if (!owns(el, x, cy)) break;
+          left = x;
+        }
+        for (let x = b.right + 1; x < b.right + 24; x += 1) {
+          if (!owns(el, x, cy)) break;
+          right = x;
+        }
+        return { hitH: bottom - top, hitW: right - left, boxW: b.width };
+      };
+
+      const ids = ['draft-board-open', 'sort-score', 'sort-adp', 'sort-dog', 'sort-pts'];
+      return ids
+        .map((id) => ({ id, el: document.querySelector(`[data-testid="${id}"]`) }))
+        .filter((e): e is { id: string; el: Element } => e.el != null)
+        .map((e) => ({ id: e.id, ...reach(e.el) }));
+    });
+
+    expect(measured.length, 'the bar lost a control').toBe(5);
+    for (const m of measured) {
+      // Two pixels of slack: the probe steps in whole pixels from the edges.
+      expect(m.hitH, `${m.id} answers over ${Math.round(m.hitH)}px of height`).toBeGreaterThanOrEqual(42);
+      // Sideways it must NOT have grown, or it is stealing its neighbour's taps.
+      expect(m.hitW, `${m.id} reaches past its own box sideways`).toBeLessThanOrEqual(m.boxW + 1);
+    }
+  });
+
   test('fits this width without wrapping or overflowing', async ({ page }) => {
     await openDraft(page);
     const fit = await page.evaluate(() => {

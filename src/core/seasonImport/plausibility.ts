@@ -261,7 +261,7 @@ export function assessColumns(columns: string[]): PlausibilityReport | null {
     explanation:
       'This looks like a fantasy projection table, not season-long betting lines. ' +
       `It has ${signals[0]!.detail} and ${signals[1]!.detail}, and no over/under prices or ` +
-      'sportsbook provenance, so Junculator did not import it as Preseason Vegas. ' +
+      'sportsbook provenance, so nothing was imported as Preseason Vegas. ' +
       'A market export names a book or carries prices — look for a season-long odds or ' +
       'props page rather than a projections page.',
   };
