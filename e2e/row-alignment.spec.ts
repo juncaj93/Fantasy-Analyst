@@ -21,7 +21,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { inSeason } from './helpers.ts';
+import { exploreMarket, inSeason } from './helpers.ts';
 
 async function openDraft(page: Page) {
   await page.goto('/');
@@ -159,6 +159,7 @@ test.describe('the identity cluster', () => {
   test('and on Trades', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-trades').click();
+    await exploreMarket(page);
     await expect(page.locator('[data-testid="trade-row"]').first()).toBeVisible();
     await identityReadsLeftToRight(page, 'trade-row', 3);
   });

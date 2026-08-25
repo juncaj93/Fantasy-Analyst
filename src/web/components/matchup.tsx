@@ -317,8 +317,13 @@ function WinBar({
 /** What the slot above the starters is currently saying. */
 export type BestMoveState =
   | { kind: 'move'; move: LineupImpact }
-  /** A forecast exists and offers nothing worth interrupting somebody for. */
-  | { kind: 'none' }
+  /**
+   * A forecast exists and offers nothing worth interrupting somebody for.
+   *
+   * Which is a recommendation — *hold* — rather than the absence of one, and
+   * it is drawn as one. See `BestMoveHoldRow`.
+   */
+  | { kind: 'hold' }
   /** No forecast, so no comparison — which is not the same as no move. */
   | { kind: 'unavailable' }
   /** Nothing left to decide, and nothing worth saying about it. */
@@ -332,20 +337,19 @@ export type BestMoveState =
  * screen that showed a recommendation and a line saying there was none would be
  * contradicting itself in twenty pixels.
  *
- * The `final` case is silence rather than restraint. `No lineup change
- * recommended` is true of a finished afternoon and it is also pointless — the
- * card above has already stopped forecasting and turned into a result, and a
- * screen in recap mode has no business carrying advice about a lineup nobody
- * can change. Everywhere else the note stays, including once the last kickoff
- * has passed: `No lineup change recommended` is deliberately not `Optimal
- * lineup`, so it remains honest when the reason there is nothing to offer is
- * that it is too late rather than that the lineup is already right.
+ * The `final` case is silence rather than restraint. `Hold your lineup` is a
+ * recommendation, and recommending anything about a lineup nobody can change is
+ * worse than saying nothing — the card above has already stopped forecasting
+ * and turned into a result. Everywhere else the hold state stays, including
+ * once the last kickoff has passed: it is deliberately not `Optimal lineup`,
+ * and the reason behind it — locked, nobody legal, nothing better — is written
+ * by the model and printed one tap in, so `hold` never overstates itself.
  */
 export function bestMoveState(forecast: MatchupForecast): BestMoveState {
   if (forecast.degraded) return { kind: 'unavailable' };
   if (forecast.decision.best) return { kind: 'move', move: forecast.decision.best };
   if (forecast.phase === 'final') return { kind: 'silent' };
-  return { kind: 'none' };
+  return { kind: 'hold' };
 }
 
 /**
@@ -410,23 +414,72 @@ export function BestMoveRow({
 }
 
 /**
- * There is nothing to do, said as quietly as it can be said.
+ * Hold, as a recommendation rather than as an absence.
  *
- * A sentence on the section heading rather than a card of its own, which is the
- * whole difference between the two states: something to act on earns a control,
- * and the absence of one earns a footnote. It costs the screen no height at
- * all, which on the one page whose purpose is fitting a starting lineup onto a
- * phone is not a small thing.
+ * This used to be a footnote hung on the `Starters` heading reading `No lineup
+ * change recommended`, on the argument that something to act on earns a control
+ * and the absence of one earns a sentence. The argument was wrong about what
+ * the state *is*. Doing nothing is a decision — most weeks it is the right one
+ * — and a reader who opens the screen forty minutes before kickoff, sees no
+ * card where the answer lives and a grey line beside a heading, does not read
+ * "hold": they read "the app has nothing to say", and then they go and make a
+ * change nobody recommended.
+ *
+ * So it is the same control, in the same slot above the starters, in the same
+ * shape as a swap — and it says the thing out loud. What it deliberately does
+ * not do is claim more than the model does: the reason there is nothing to
+ * change (the decisions are locked, the bench cannot legally fill a slot, or
+ * nothing on it wins more often) is the model's own sentence, and it is one tap
+ * in rather than on the face of the row, exactly as a swap's reasoning is.
+ *
+ * The `unavailable` case is not this and must never be drawn as this. "We
+ * cannot say" is not "hold" — see `BestMoveNote`, which is what is left of the
+ * footnote and now carries only that one state.
+ */
+export function BestMoveHoldRow({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className="matchup-best-move"
+      data-testid="matchup-best-move"
+      data-state="hold"
+      onClick={onOpen}
+      aria-label="Best move: hold your lineup. Show why."
+    >
+      <span className="matchup-best-move-body">
+        <span className="matchup-best-move-label">Best move</span>
+        <span className="matchup-best-move-swap">
+          {/*
+            The same class the swap's names use, so the two states are one
+            sentence in two moods rather than two designs: `Start C. Olave over
+            B. Hall` and `Hold your lineup` sit at the same size, the same
+            weight and the same baseline, and the row does not change height
+            when the advice changes.
+          */}
+          <span className="matchup-best-move-names">Hold your lineup</span>
+        </span>
+      </span>
+      <span className="dense-chevron" aria-hidden="true">
+        <ChevronIcon />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The one state that is not a recommendation, said as quietly as it can be said.
+ *
+ * A forecast that could not be computed has no opinion about the lineup, and a
+ * screen that turned that into `Hold your lineup` would be inventing advice out
+ * of a failure — the one thing this row must never do. It stays a footnote on
+ * the section heading, at no cost in height, because there is nothing here to
+ * act on and nothing to explain.
  */
 export function BestMoveNote({ state }: { state: BestMoveState }) {
-  if (state.kind === 'move' || state.kind === 'silent') return null;
+  if (state.kind !== 'unavailable') return null;
   return (
-    <span
-      className="matchup-best-move-note"
-      data-testid="matchup-best-move"
-      data-state={state.kind}
-    >
-      {state.kind === 'unavailable' ? 'No lineup recommendation without a forecast' : 'No lineup change recommended'}
+    <span className="matchup-best-move-note" data-testid="matchup-best-move" data-state={state.kind}>
+      No lineup recommendation without a forecast
     </span>
   );
 }

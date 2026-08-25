@@ -14,6 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { exploreMarket } from './helpers.ts';
 
 const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
 
@@ -339,6 +340,8 @@ test.describe('the two themes are one design', () => {
     await page.goto('/');
     for (const tab of ['players', 'trades'] as const) {
       await open(page, tab);
+      // The trade board is folded away until it is asked for.
+      if (tab === 'trades') await exploreMarket(page);
       const testId = tab === 'players' ? 'player-search-row' : 'trade-row';
       await expect(page.getByTestId(testId).first()).toBeVisible();
       const painted = await backgrounds(page, `[data-testid="${testId}"]`);

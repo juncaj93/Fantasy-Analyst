@@ -26,7 +26,7 @@ import { CompactTally, InjuryTag, PlayerIdentity, positionAccentClass } from './
 
 /** One labelled number in the row's second line. */
 export interface RowMetric {
-  /** The short word above nothing — `21d`, `ADP`, `Life`. */
+  /** The short word above nothing — `30d`, `ADP`, `Life`. */
   label: string;
   value: ReactNode;
   /** Two columns instead of one, for a cell that carries a badge as well. */

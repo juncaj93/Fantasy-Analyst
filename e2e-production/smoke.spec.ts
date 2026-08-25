@@ -169,6 +169,21 @@ async function settledIds(page: Page): Promise<string[]> {
   return previous;
 }
 
+/**
+ * Open the Trades market inventory, if this deployment has one.
+ *
+ * The buy/sell/hold board is folded away behind `Explore the market` and its
+ * rows are not rendered while it is shut, so a spec that reads a `trade-row`
+ * has to ask for it. Deliberately tolerant, like everything else in this file:
+ * a deployment with no board draws no control, and that is a skip rather than
+ * a failure — the caller's own `settled` count decides.
+ */
+async function exploreMarket(page: Page): Promise<void> {
+  const toggle = page.getByTestId('market-fold-toggle');
+  if ((await toggle.count()) === 0) return;
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 async function settled(page: Page, rowTestId: string): Promise<number> {
   const rows = page.getByTestId(rowTestId);
   await Promise.race([
@@ -688,7 +703,7 @@ test.describe('the deployed app', () => {
      * cells only where his statistics have been ingested. What may never happen
      * is two of them swapping places.
      */
-    const ORDER = ['rank', 'adp', '7d', '21d', 'life', 'pts'];
+    const ORDER = ['rank', 'adp', '7d', '30d', 'life', 'pts'];
     const inOrder = (labels: string[]) => {
       const fixed = labels.filter((l) => ORDER.includes(l));
       const season = labels.filter((l) => /^\d{4} (gp|rank)$/.test(l));
@@ -798,6 +813,7 @@ test.describe('the deployed app', () => {
     await page.keyboard.press('Escape');
 
     await open(page, 'trades');
+    await exploreMarket(page);
     if ((await settled(page, 'trade-row')) === 0) return; // no board today; Players proved the card
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
@@ -830,6 +846,7 @@ test.describe('the deployed app', () => {
   test('a card swiped away on Trades takes the board with it, not the network', async ({ page }) => {
     await page.goto('/');
     await open(page, 'trades');
+    await exploreMarket(page);
     test.skip((await settled(page, 'trade-row')) === 0, 'no trade board on this deployment');
 
     await page.getByTestId('trade-row').first().click();

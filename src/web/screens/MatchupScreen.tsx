@@ -24,6 +24,7 @@ import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, Sheet, SkeletonRows } from '../components/native.tsx';
 import {
   BenchSection,
+  BestMoveHoldRow,
   BestMoveNote,
   BestMoveRow,
   bestMoveState,
@@ -230,9 +231,21 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             it is about — which is the whole of this pass. Everything that
             explains it is still one tap away and nothing that explains it came
             up here with it.
+
+            Two moods, one slot. A swap when there is one worth making, and
+            `Hold your lineup` when there is not: the second is a decision as
+            much as the first, and it used to be a grey footnote next to the
+            `Starters` heading, which reads as the screen having nothing to say
+            rather than as it having said something. Both open the same sheet
+            for the same reason — a reader who is told what to do is owed why.
+
+            The third state, a forecast that failed, is neither and stays a
+            footnote — see `BestMoveNote`.
           */}
           {move ? (
             <BestMoveRow move={move} players={players} onOpen={() => setBestMoveOpen(true)} />
+          ) : moveState?.kind === 'hold' ? (
+            <BestMoveHoldRow onOpen={() => setBestMoveOpen(true)} />
           ) : null}
 
           <div className="section-title section-title-row" data-testid="starters-title">
@@ -272,6 +285,24 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
            */
           onCompare={() => setOpenPlayer(null)}
         />
+      ) : null}
+
+      {/*
+        Why holding is the answer, in the model's own words.
+
+        The same sheet grammar and the same entry point as a swap's, because it
+        is the same question asked of the opposite advice: the row says what to
+        do and this says why to believe it. What it prints is `decision.note`,
+        which is written in `core/matchup/decision.ts` beside the arithmetic —
+        and which tells the three empty cases apart. That distinction is the
+        whole reason this sheet exists rather than a longer row: `Every
+        remaining lineup decision is already locked` at one on a Sunday and
+        `Nobody on your bench could legally take a starting slot` at ten in the
+        morning are different facts about a reader's afternoon, and flattening
+        them into one line on the face of the row would lose it.
+      */}
+      {bestMoveOpen && !move && moveState?.kind === 'hold' ? (
+        <HoldSheet note={forecast?.decision.note ?? null} onClose={() => setBestMoveOpen(false)} />
       ) : null}
 
       {bestMoveOpen && move ? (
@@ -429,6 +460,36 @@ function BestMoveSheet({
 }
 
 /**
+ * Why there is nothing to change.
+ *
+ * Deliberately short. There is one thing to say — the model's own sentence
+ * about which of the three empty cases this is — and then the standing promise
+ * that this app does not touch a lineup, which is the same sentence the swap's
+ * sheet closes with. Anything more would be the screen arguing for inaction,
+ * and the evidence for that is already the whole page underneath it.
+ *
+ * The note is read from the forecast rather than composed here: no sentence
+ * about a lineup decision is written on this side of the wire.
+ */
+function HoldSheet({ note, onClose }: { note: string | null; onClose: () => void }) {
+  return (
+    <Sheet title="Best move" onClose={onClose} testId="best-move-sheet">
+      <div className="matchup-best-move-lead" data-testid="best-move-lead">
+        Hold your lineup
+      </div>
+      {note ? (
+        <div className="faint" style={{ margin: '8px 2px 0' }} data-testid="best-move-reason">
+          {note}
+        </div>
+      ) : null}
+      <div className="faint" style={{ margin: '10px 2px 0' }} data-testid="best-move-footer">
+        Change your lineup in Sleeper. Fantasy Analyst does not edit it.
+      </div>
+    </Sheet>
+  );
+}
+
+/**
  * What is behind the odds.
  *
  * Everything the brief asks the engine to be able to answer, kept off the main
@@ -545,9 +606,16 @@ function OddsSheet({
 
         What was **only** ever here is the other branch. `decision.note` tells
         the three empty cases apart — the decisions are locked, the bench cannot
-        legally fill a slot, or no change wins more often — and the screen's own
-        note says one thing for all three. So the unique half stays, and the
-        duplicated half is gone.
+        legally fill a slot, or no change wins more often — and the row above
+        the starters says `Hold your lineup` for all three. So the unique half
+        stays, and the duplicated half is gone.
+
+        The hold state's own sheet now prints the same sentence, which is not a
+        third home for it: it is this fact answering the question it was written
+        for, one tap from the advice it qualifies. This block is the same fact
+        answering a different one — *why are the odds what they are* — and a
+        reader who tapped a win probability should not have to go back out and
+        tap something else to be told the lineup is settled.
 
         Keyed on the note rather than on the absence of a move, which is the same
         condition said in the terms this block is actually about: the model

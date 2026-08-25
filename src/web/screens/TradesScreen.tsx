@@ -1,6 +1,12 @@
 /**
  * Trades.
  *
+ * Offers first, market research second — and the research folded away until it
+ * is asked for. The question this tab exists to answer is *what trade should I
+ * pursue*, and the bilateral ideas are the only thing on the page that answers
+ * it; the buy/sell/hold inventory behind `Explore the market` is what those
+ * ideas are made of, which is a different question and a much longer list.
+ *
  * Sections in a fixed order so the screen does not reshuffle under the reader
  * as evidence arrives, and every row says why it is there. A trade call with no
  * reason attached is a horoscope.
@@ -22,7 +28,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type SmartTradeBoard, type TradeBoard, type TradeSuggestion } from '../api.ts';
 import { Confidence, DetailLabel, Empty, Notice, SignedValue, StatusRow } from '../components/common.tsx';
-import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
+import { Fold, NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
@@ -41,12 +47,37 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
    * it is in flight and null for ever if it fails — see `load`.
    */
   const [smart, setSmart] = useState<SmartTradeBoard | null>(null);
+  /**
+   * Whether the offers request has finished, however it finished.
+   *
+   * `smart` alone cannot say: it is null while the request is in flight and
+   * null for ever if it fails, and those are the same value standing for "not
+   * yet" and "never". The market fold needs them told apart — a screen with no
+   * offers to show should show its research rather than one closed control,
+   * and a screen that has not asked yet should show neither.
+   */
+  const [offersSettled, setOffersSettled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   /** Which bilateral offer's detail sheet is open, if any. */
   const [openOffer, setOpenOffer] = useState<string | null>(null);
   /** Whether a skim has turned into a study — see `PlayerSheet`. */
   const [full, setFull] = useState(false);
+  /*
+   * Whether the market inventory is open, and whether the reader said so.
+   *
+   * Here rather than inside `Fold` because it has to outlive the fold: opening
+   * a player's own page returns a different tree from this component, so the
+   * board is unmounted while that page is up, and a fold holding its own state
+   * came back closed from every Back — throwing away the reader's place in a
+   * list they had asked to see. The query, the scroll and the open sheet are
+   * kept up here for exactly the same reason.
+   *
+   * `marketTouched` is what stops the default below from ever overriding a
+   * decision the reader has made.
+   */
+  const [marketOpen, setMarketOpen] = useState(false);
+  const [marketTouched, setMarketTouched] = useState(false);
 
   /*
    * Tapping Trades while already on Trades.
@@ -78,7 +109,8 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
     const offers = api
       .get<SmartTradeBoard>('/api/trades/smart', { onFresh: setSmart })
       .then(setSmart)
-      .catch(() => setSmart(null));
+      .catch(() => setSmart(null))
+      .finally(() => setOffersSettled(true));
 
     try {
       setBoard(await api.get<TradeBoard>('/api/trades', { onFresh: setBoard }));
@@ -92,6 +124,31 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /*
+   * Closed when there is something for it to compete with, and open when there
+   * is not.
+   *
+   * The fold exists so the inventory does not bury the offers. A league with no
+   * bilateral offer to propose — a quiet week, a two-manager demo, a roster the
+   * engine could not read — has no offers to bury, and a Trades screen whose
+   * entire content is one closed control is a worse answer than the research it
+   * is hiding. So the reason the fold exists is also the condition it applies
+   * under.
+   *
+   * `offersSettled` rather than `smart == null`, because null is both "not yet"
+   * and "never" and only one of those is an answer. And it has to be able to
+   * arrive late: the offers are the slower of this screen's two requests by a
+   * wide margin — they price two rosters through the lineup optimiser — so a
+   * decision taken at mount would be taken before the answer existed.
+   *
+   * Never against the reader. Once they have touched the control this stops
+   * running, so a poll that comes back cannot reopen a fold somebody shut.
+   */
+  useEffect(() => {
+    if (marketTouched) return;
+    setMarketOpen(offersSettled && (smart?.offers.length ?? 0) === 0);
+  }, [marketTouched, offersSettled, smart]);
 
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!board) {
@@ -185,12 +242,14 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
       ))}
 
       {/*
-        The bilateral ideas, above the discovery board.
+        The bilateral ideas, above the discovery board — and now the only part
+        of the screen that is open when it loads.
 
         Above rather than below because they answer a further question: the
         board says whose news is moving, and these say what to actually offer
         whom. A reader who opens Trades wanting to *do* something finds the
-        do-something list first, and the board is still one thumb-flick down.
+        do-something list first, and the research it rests on is one tap down
+        under `Explore the market`.
 
         Absent entirely until the request lands, and absent for ever if it
         fails or finds nothing worth proposing. Nothing on this screen depends
@@ -233,7 +292,34 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           issues have been read, this fills in.
         </Empty>
       ) : (
-        board.sections.map((section) => {
+        /*
+          The market, folded away.
+
+          What is under this control is an *inventory*: every player the
+          evidence ledger has an opinion about, sorted into buy, sell and hold.
+          It is genuinely useful research and it is not a decision — and left
+          open it was most of the screen, because a hold list runs to dozens of
+          names. A reader who opened Trades to ask "what should I offer, and to
+          whom" scrolled past a hundred rows of classification to reach two
+          actual offers, and the offers are the thing this tab is for.
+
+          So the offers above stay open and this closes. Nothing is deleted,
+          nothing is truncated and nothing is re-sorted: the same sections, the
+          same players, in the same order, at the same confidences, one tap in.
+          Presentation hierarchy only — see the note at the top of this file
+          about how little of the board this screen is allowed to decide.
+        */
+        <Fold
+          label="Explore the market"
+          summary={marketSummary(board)}
+          open={marketOpen}
+          onToggle={() => {
+            setMarketTouched(true);
+            setMarketOpen((was) => !was);
+          }}
+          testId="market-fold"
+        >
+        {board.sections.map((section) => {
           /*
            * A confidence every row shares is a fact about the section.
            *
@@ -269,7 +355,25 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
               </div>
             </div>
           );
-        })
+        })}
+
+        {/*
+          What the board looked at, said inside the board it is about.
+
+          This line used to close the whole screen, three sections below the
+          list it describes. It is a statement about the inventory — how wide
+          the sweep was, and why a player with no recent coverage is absent
+          rather than filed under hold — so it belongs with the inventory, and
+          a sentence about players considered floating under a collapsed fold
+          would be a footnote to something the reader cannot see.
+        */}
+        {board.considered > 0 ? (
+          <div className="faint" style={{ margin: '8px 2px' }} data-testid="trades-considered">
+            {board.considered} player{board.considered === 1 ? '' : 's'} with evidence were considered. Players nobody
+            has written about recently are left out rather than listed as holds.
+          </div>
+        ) : null}
+        </Fold>
       )}
 
       {/*
@@ -302,14 +406,26 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         />
       ) : null}
 
-      {board.considered > 0 ? (
-        <div className="faint" style={{ margin: '8px 2px' }}>
-          {board.considered} player{board.considered === 1 ? '' : 's'} with evidence were considered. Players nobody
-          has written about recently are left out rather than listed as holds.
-        </div>
-      ) : null}
     </PullToRefresh>
   );
+}
+
+/**
+ * What is inside the market fold, in three words.
+ *
+ * The size of it, and not the section names. `Trade target · Possible sell
+ * high · Trade away / reduce risk · Hold — mixed signal` is four labels and
+ * sixty characters on a control that gets one clipped line, so it would arrive
+ * as `Trade target · Possible sell hi…` — a summary that fails at the one thing
+ * a summary is for. The count says the thing a reader is actually weighing
+ * before they open a research list: how much of it there is.
+ *
+ * Counted from the sections themselves, so it can never disagree with the rows
+ * underneath.
+ */
+function marketSummary(board: TradeBoard): string {
+  const players = board.sections.reduce((total, section) => total + section.players.length, 0);
+  return `${players} player${players === 1 ? '' : 's'}`;
 }
 
 /**

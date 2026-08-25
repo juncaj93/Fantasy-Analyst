@@ -34,6 +34,25 @@ export async function inSeason(page: Page): Promise<void> {
 }
 
 /**
+ * Open the Trades market inventory.
+ *
+ * The buy/sell/hold board is folded away behind `Explore the market` and its
+ * rows are not rendered while it is shut, so any spec that reads a `trade-row`
+ * has to ask for them first. One helper rather than a line in each spec,
+ * because the affordance is a product decision and a suite that spelled it out
+ * thirty times would be thirty places to edit when it changes.
+ *
+ * Idempotent: a fold that is already open is left alone, so a spec may call it
+ * without knowing what the one before it did.
+ */
+export async function exploreMarket(page: Page): Promise<void> {
+  const toggle = page.getByTestId('market-fold-toggle');
+  await toggle.waitFor();
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await page.getByTestId('market-fold-body').waitFor();
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one

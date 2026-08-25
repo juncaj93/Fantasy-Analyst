@@ -643,6 +643,74 @@ export function PullToRefresh({
   );
 }
 
+/* --------------------------------------------------------------------- fold */
+
+/**
+ * A secondary section, folded away.
+ *
+ * The Team screen's bench and the Matchup screen's bench have folded like this
+ * since the density pass — a quiet control carrying a label, a word about what
+ * is inside, and a chevron — and this is that same control with the word
+ * "bench" taken out of it, for the sections that are not one. It shares their
+ * stylesheet rules rather than copying them (see `.bench, .fold`), so the
+ * affordance cannot drift into two.
+ *
+ * **The children are not rendered while it is closed**, which is the difference
+ * between this and a `<details>`: a fold holding a hundred rows of market
+ * inventory would otherwise cost the page every one of them on first paint in
+ * order to hide them. It also means there is nothing inside for a stray tab
+ * stop to land on.
+ *
+ * ## Why the state is the caller's
+ *
+ * Because on some screens the fold has to outlive this component. Trades pushes
+ * a player's own page by *returning a different tree* — the board is not
+ * mounted while it is open — so a fold holding its own `useState` came back
+ * closed from every Back, throwing away the reader's place in a list they had
+ * asked to see. The screen keeps the flag, exactly as it already keeps the
+ * query and the scroll for the same reason.
+ *
+ * `aria-expanded` is on the control and the region it names is the sibling
+ * below it, which is the pattern the benches already publish. No nested
+ * controls: the whole row is the button, and everything inside it is text.
+ */
+export function Fold({
+  label,
+  summary,
+  open,
+  onToggle,
+  testId,
+  children,
+}: {
+  /** The affordance's own words, and its accessible name: `Explore the market`. */
+  label: string;
+  /** One short phrase about what is inside, in the quietest type on the control. */
+  summary?: string | null;
+  open: boolean;
+  onToggle: () => void;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="fold" data-testid={testId} data-open={open ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="fold-toggle"
+        data-testid={testId ? `${testId}-toggle` : undefined}
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="fold-label">{label}</span>
+        {summary ? <span className="fold-summary">{summary}</span> : null}
+        <span className="fold-chevron" aria-hidden="true">
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open ? <div data-testid={testId ? `${testId}-body` : undefined}>{children}</div> : null}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ loading */
 
 /**

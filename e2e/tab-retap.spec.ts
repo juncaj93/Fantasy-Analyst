@@ -19,6 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { exploreMarket } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -135,6 +136,7 @@ test.describe('a retap returns the screen home', () => {
   test('Trades: a sheet covers the bar, and closes on its own terms', async ({ page }) => {
     await page.goto('/');
     await open(page, 'trades');
+    await exploreMarket(page);
     const rows = page.getByTestId('trade-row');
     test.skip((await rows.count()) === 0, 'no trade suggestions on this seed');
 
@@ -170,7 +172,14 @@ test.describe('a retap returns the screen home', () => {
     await page.getByTestId('sheet-backdrop').click({ position: { x: 5, y: 5 } });
     await expect(sheet).toHaveCount(0);
 
-    // Once it is gone the bar is the bar again, and the ladder applies.
+    /*
+     * Once it is gone the bar is the bar again, and the ladder applies.
+     *
+     * The market fold is still open across the retap, which is deliberate: a
+     * tab tap unwinds what the app put over the screen, and an inventory the
+     * reader chose to open is a view they set rather than an overlay they are
+     * stuck under. See `unwindOne` in `TradesScreen`.
+     */
     await retap(page, 'trades');
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
   });

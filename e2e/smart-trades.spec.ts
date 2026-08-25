@@ -25,6 +25,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { exploreMarket } from './helpers.ts';
 
 /**
  * A board of three offers, in the payload shape the service returns.
@@ -200,6 +201,16 @@ test.describe('the trade ideas', () => {
      * on the strength of the thing it was meant to catch. The ideas are new
      * context above an existing screen, not a replacement for it.
      */
+    /*
+     * And it survives *folded*, which is the second half of the same claim.
+     *
+     * `Explore the market` is closed when the screen loads, so the ideas are
+     * the only thing on it — that is the point of the fold. What the fold must
+     * not be is a deletion, so the control is opened here and the rows are
+     * required to be all there behind it.
+     */
+    await expect(page.getByTestId('market-fold-body')).toHaveCount(0);
+    await exploreMarket(page);
     const boardRows = page.getByTestId('trade-row');
     await expect(boardRows.first()).toBeVisible();
     expect(await boardRows.count()).toBeGreaterThan(0);
@@ -219,6 +230,7 @@ test.describe('the trade ideas', () => {
      * — and compared. The board is a separate request that this feature does not
      * touch, and this is what says so.
      */
+    await exploreMarket(page);
     const withOffers = await page.getByTestId('trade-row').allInnerTexts();
 
     await page.route('**/api/trades/smart*', (route) => route.fulfill({ status: 500, body: 'off' }));
@@ -227,6 +239,7 @@ test.describe('the trade ideas', () => {
     await expect(page.getByTestId('trades-nav')).toBeVisible();
     await expect(page.getByTestId('smart-trades')).toHaveCount(0);
 
+    await exploreMarket(page);
     const withoutOffers = await page.getByTestId('trade-row').allInnerTexts();
     expect(withoutOffers).toEqual(withOffers);
     expect(withoutOffers.length).toBeGreaterThan(0);
@@ -407,6 +420,132 @@ test.describe('when there is nothing to propose', () => {
     await expect(page.getByTestId('trades-nav')).toBeVisible();
     await expect(page.getByTestId('smart-trades')).toHaveCount(0);
     await expect(page.getByTestId('smart-trades-empty')).toHaveCount(0);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+/**
+ * The market inventory, folded away.
+ *
+ * Trades is asked one question — *what should I offer, and to whom* — and the
+ * bilateral ideas are the only thing on the screen that answers it. The
+ * buy/sell/hold board is the research those ideas are made of: genuinely useful
+ * and not a decision, and long enough that a reader scrolled past a hundred
+ * rows of classification to reach two actual offers.
+ *
+ * So it closes, and everything below is the shape of that being a *fold* rather
+ * than a deletion: nothing is removed, nothing is truncated, nothing is
+ * re-sorted, and one tap has all of it back.
+ */
+test.describe('the market inventory', () => {
+  test.beforeEach(async ({ page }) => {
+    await openTrades(page);
+  });
+
+  test('is closed when the screen loads, with the offers above it', async ({ page }) => {
+    const toggle = page.getByTestId('market-fold-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('Explore the market');
+
+    // Not merely hidden: the rows are not rendered at all while it is shut, so
+    // a folded inventory costs the page nothing rather than costing it silently.
+    await expect(page.getByTestId('market-fold-body')).toHaveCount(0);
+    await expect(page.getByTestId('trade-row')).toHaveCount(0);
+
+    // The ideas are the screen, and they are above the control.
+    await expect(page.getByTestId('smart-trade-row')).toHaveCount(3);
+    const idea = (await page.getByTestId('smart-trade-row').last().boundingBox())!;
+    expect(idea.y).toBeLessThan((await toggle.boundingBox())!.y);
+  });
+
+  /**
+   * And it says how much is behind it before the reader commits to a scroll.
+   *
+   * The size rather than the section names: four labels and sixty characters on
+   * a control that gets one clipped line arrives as `Trade target · Possible
+   * sell hi…`, which fails at the one thing a summary is for.
+   */
+  test('says how much is inside before it is opened', async ({ page }) => {
+    const summary = page.getByTestId('market-fold-toggle').locator('.fold-summary');
+    await expect(summary).toHaveText(/^\d+ players?$/);
+
+    const claimed = Number((await summary.innerText()).split(' ')[0]);
+    await exploreMarket(page);
+    expect(await page.getByTestId('trade-row').count()).toBe(claimed);
+  });
+
+  /**
+   * One tap, and every section is back exactly as the API sent it.
+   *
+   * §5 of the cleanup brief: the underlying information is not deleted and the
+   * board is not re-ranked. Compared against `/api/trades` itself rather than
+   * against a snapshot, so this keeps meaning something when the fixture moves.
+   */
+  test('gives back every section, in the API\'s own order, when it is opened', async ({ page }) => {
+    await exploreMarket(page);
+    await expect(page.getByTestId('market-fold-toggle')).toHaveAttribute('aria-expanded', 'true');
+
+    const onScreen = await page.getByTestId('market-fold-body').evaluate((body) =>
+      [...body.querySelectorAll('[role="list"][aria-label]')].map((group) => ({
+        label: group.getAttribute('aria-label'),
+        players: [...group.querySelectorAll('[data-testid="trade-row"]')].map((row) =>
+          (row.querySelector('.player-name')?.textContent ?? '').trim(),
+        ),
+      })),
+    );
+    const fromApi = await page.evaluate(async () => {
+      const board = await (await fetch('/api/trades')).json();
+      return board.sections.map((s: { label: string; players: { name: string }[] }) => ({
+        label: s.label,
+        players: s.players.map((p) => p.name),
+      }));
+    });
+    expect(onScreen.length).toBeGreaterThan(0);
+    expect(onScreen, 'the fold changed which players are in which section').toEqual(fromApi);
+
+    // The sentence about what was swept is inside the thing it describes.
+    await expect(page.getByTestId('market-fold-body').getByTestId('trades-considered')).toBeVisible();
+  });
+
+  /** It shuts again, which is what makes it a fold rather than a one-way door. */
+  test('closes again when the control is tapped a second time', async ({ page }) => {
+    const toggle = page.getByTestId('market-fold-toggle');
+    await exploreMarket(page);
+    await expect(page.getByTestId('trade-row').first()).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('trade-row')).toHaveCount(0);
+  });
+
+  /**
+   * The control is a control, and there is nothing inside it to trip over.
+   *
+   * One tab stop, a full thumb of height, its own accessible name, and no
+   * nested button — §13 of the brief, and the same rule the folded benches on
+   * Team and Matchup already publish.
+   */
+  test('is one tap target with an accessible name and no nested control', async ({ page }) => {
+    const toggle = page.getByTestId('market-fold-toggle');
+    const box = (await toggle.boundingBox())!;
+    expect(box.height, `the control is ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(44);
+    expect(await toggle.evaluate((el) => el.tagName)).toBe('BUTTON');
+    expect(await toggle.locator('button, a, input, summary').count()).toBe(0);
+
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('trade-row').first()).toBeVisible();
+    // Focus stays on the control that moved, rather than being thrown anywhere.
+    await expect(toggle).toBeFocused();
+  });
+
+  test('never scrolls sideways, open or shut', async ({ page }) => {
+    expect(await horizontalOverflow(page)).toBe(0);
+    await exploreMarket(page);
+    await expect(page.getByTestId('trade-row').first()).toBeVisible();
     expect(await horizontalOverflow(page)).toBe(0);
   });
 });

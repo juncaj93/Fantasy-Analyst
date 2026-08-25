@@ -2250,6 +2250,84 @@ need all four widths rather than one — is deliberately still open. Sharding bu
 the headroom to answer it without a deadline; the answer is a coverage decision
 about the product and this lane changed no product behaviour at all.
 
+## Milestone — the final UX simplification pass (done)
+
+Five approved changes from the decision-clarity audit, and nothing else. The
+lane is subtractive by design: **default screen = answer first, tap =
+explanation, deeper tap = evidence**, applied to the handful of screens that
+still had it the other way round. No model, threshold, ranking or calculation
+was touched anywhere in it.
+
+**Team answers before it inventories.** `Changes to consider` used to sit three
+sections down — under eight recommended starters and a folded bench — so the
+screen showed a roster the reader already owns before saying whether anything
+needed doing with it. It is now the first thing under the controls, with the
+lineup below it as its evidence. Same card, same `lineup` object, same swap,
+same threshold, same disclosure; the defence line and the waiver teaser stay
+where they were, because three cards of equal weight at the top of a screen mean
+there is no primary recommendation on it at all.
+
+**Trades leads with trades.** The buy/sell/hold inventory — every player the
+evidence ledger has an opinion about, which runs to dozens of hold rows — is
+behind `Explore the market`, closed. The bilateral offers are what is left open,
+which is the only part of the screen that answers *what should I offer, and to
+whom*. Nothing was deleted, truncated or re-sorted: the fold is asserted against
+`/api/trades` itself, section by section and player by player. The one
+conditional in it is deliberate — with no offers to compete with, the fold opens
+by itself, because a Trades screen whose entire content is one closed control is
+a worse answer than the research it is hiding.
+
+**Matchup says hold out loud.** `No lineup change recommended`, a grey footnote
+on the `Starters` heading, is now `Best move: Hold your lineup` in the same slot
+and the same shape as a swap. Holding is what the engine is recommending most
+weeks, and a reader who finds nothing where the answer lives reads "the app has
+nothing to say" and changes something nobody suggested. The three causes are not
+flattened: `decision.note` still tells locked, nobody-legal and nothing-better
+apart, and it is one tap in behind the row as well as in `Behind the odds`. A
+degraded forecast is emphatically *not* this — it stays a footnote, because
+"we cannot say" turned into "hold" would be advice invented out of a failure.
+
+**One name per number.** Players' row and player page said `21d` for a field the
+Trades row has always called `30d` — and `21d` was simply false:
+`RECENCY_WINDOWS.last30` has been thirty days since the window was widened and
+the label never followed. Renamed, along with `Lifetime` → `Life` in the window
+grid that sat a few hundred pixels under a band already calling it `Life`. No
+value, weighting, ordering or aggregation changed; `README.md` and
+`docs/ARCHITECTURE.md` were carrying the same stale number and were corrected
+with it.
+
+**Waivers instructs rather than explains.** The card's closing sentence — `Enter
+them in this order — Sleeper runs claims top to bottom, and a claim whose drop is
+already gone does not run.` — wrapped to two lines under the claims on the one
+card in this app a reader is copying into another app. What they have to *do* is
+four words, and they are now above the list they introduce; why the order matters
+is the same fact every week and is behind `See why` under `Why the order
+matters`. The per-claim qualifier stays inline where it was: `Only if 1 loses` is
+the whole of what stops a repeated line reading as a mistake, and §8 asks for
+shorter copy and unambiguous copy in the same breath.
+
+**Draft was left alone, and there is now a fence saying so.** The audit proposed
+removing `DOG` and `PTS`; the user rejected it, because Draft is where players
+are compared in seconds while on the clock. `e2e/draft-market-delta.spec.ts`
+asserts both are on the *collapsed* row — `PTS` against a board answered with
+projections, so the claim is required rather than merely permitted — and that no
+`Take now` / `Can wait` verdict has crept back.
+
+**One fold, not two.** `Fold` in `native.tsx` is the folded bench's control with
+the word "bench" taken out of it, sharing the bench's stylesheet rules rather
+than copying them. Its children are not rendered while it is shut — a
+`<details>` holding a hundred market rows would cost the page every one of them
+in order to hide them — and its state belongs to the screen, because Trades
+pushes a player's page by returning a different tree and a fold holding its own
+state came back closed from every Back.
+
+**What was deliberately not done.** Players' ordinal rank was inspected and
+left: the audit floated removing it and the user did not approve it, it is the
+column the list is sorted by, and the row's own `ADP` beside it is what makes
+the app's own order legible as a *disagreement* with the market rather than as a
+number. Nothing about Draft, the scoreboard, the win-probability model, the
+lineup optimiser, trade valuation or offer generation was touched.
+
 ## Recommended next work
 
 0. **Watch the defence planner through one real week.** DST is complete enough

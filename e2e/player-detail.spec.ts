@@ -39,6 +39,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { exploreMarket } from './helpers.ts';
 
 /** A snapshot the demo seed does not carry, injected the way a deployment would. */
 const PROJECTION = {
@@ -80,6 +81,8 @@ async function openPlayer(page: Page, playerId: string): Promise<void> {
 }
 
 async function openFirstTrade(page: Page): Promise<void> {
+  // The board is behind `Explore the market` — see `exploreMarket`.
+  await exploreMarket(page);
   await page.getByTestId('trade-row').first().click();
   await expect(page.getByTestId('player-sheet')).toBeVisible();
   await expect(page.getByTestId('player-page-metrics')).toBeVisible();
@@ -272,7 +275,7 @@ test.describe('the expanded player, opened from Players', () => {
      * can watch being done is not a third reading.
      */
     const labels = await bandLabels(page);
-    expect(labels.slice(0, 6)).toEqual(['rank', 'adp', '7d', '21d', 'life', 'pts']);
+    expect(labels.slice(0, 6)).toEqual(['rank', 'adp', '7d', '30d', 'life', 'pts']);
     expect(labels[6], 'games played should name its season').toMatch(/^\d{4} gp$/);
     expect(labels[7], 'the finish should name its season').toMatch(/^\d{4} rank$/);
     expect(labels).toHaveLength(8);
@@ -429,7 +432,7 @@ test.describe('the expanded player, opened from Players', () => {
     await expect(page.getByTestId('metric-last-season-gp')).toHaveCount(0);
     await expect(page.getByTestId('metric-last-season-rank')).toHaveCount(0);
     // …and the band is still a band, with the readings that do exist on it.
-    expect(await bandLabels(page)).toEqual(['rank', 'adp', '7d', '21d', 'life']);
+    expect(await bandLabels(page)).toEqual(['rank', 'adp', '7d', '30d', 'life']);
   });
 
   /**
@@ -513,13 +516,14 @@ test.describe('the same expanded player, opened from Trades', () => {
     await page.keyboard.press('Escape');
 
     await openTab(page, 'trades');
+    await exploreMarket(page);
     await page.locator('[data-testid="trade-row"]', { hasText: 'Devin Okafor' }).first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await expect(page.getByTestId('metric-preseason-pts')).toBeVisible();
 
     await expectRowGrammar(page, ['position', 'club', 'name']);
     const fromTrades = await bandLabels(page);
-    expect(fromTrades.slice(0, 4)).toEqual(['7d', '21d', 'life', 'pts']);
+    expect(fromTrades.slice(0, 4)).toEqual(['7d', '30d', 'life', 'pts']);
     expect(fromPlayers.slice(0, 2)).toEqual(['rank', 'adp']);
     expect(fromPlayers.slice(2), 'the two surfaces have drifted apart again').toEqual(fromTrades);
 
@@ -527,6 +531,46 @@ test.describe('the same expanded player, opened from Trades', () => {
     // The trade case is Trades' own advisory content, and it stays.
     await expect(page.getByTestId('trade-case')).toContainText('Why');
     await expectNoSidewaysScroll(page, 'trades');
+  });
+
+  /**
+   * One name per number, across the two screens that share it.
+   *
+   * Players' row said `21d` and Trades' said `30d` for the same field — and one
+   * of the two was simply false: `RECENCY_WINDOWS.last30` has been thirty days
+   * since the window was widened, and the label never followed. `Life` had the
+   * same problem in the other direction, spelled out as `Lifetime` in the
+   * window grid a few hundred pixels under a band that called it `Life`.
+   *
+   * Asserted as vocabulary rather than as arithmetic, because the arithmetic
+   * did not change: `tests/evidence.test.ts` owns what the window counts, and
+   * this owns what it is called.
+   */
+  test('calls the same window the same thing on Players and on Trades', async ({ page }) => {
+    await page.goto('/');
+    await openTab(page, 'players');
+    const row = page.getByTestId('player-search-row').first();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('30d');
+    await expect(row, 'the stale twenty-one-day label is back').not.toContainText('21d');
+
+    await openTab(page, 'trades');
+    await exploreMarket(page);
+    const trade = page.getByTestId('trade-row').first();
+    await expect(trade).toBeVisible();
+    await expect(trade).toContainText('30d');
+    await expect(trade).toContainText('Life');
+
+    // And the page behind either of them names its windows the same way.
+    await trade.click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await page.getByTestId('player-full-profile').click();
+    const windows = page.getByTestId('player-page-windows');
+    await expect(windows).toBeVisible();
+    // Lower-cased on the way out: the stylesheet upper-cases these, and the
+    // claim is the vocabulary rather than the type treatment.
+    const labels = await windows.locator('.window-label').allInnerTexts();
+    expect(labels.map((l) => l.trim().toLowerCase())).toEqual(['7d', '30d', 'season', 'life']);
   });
 
   /**
@@ -576,6 +620,7 @@ test.describe('the same expanded player, opened from Trades', () => {
     expect(listed, 'Players is no longer the order its API returned').toEqual(ranked.slice(0, listed.length));
 
     await openTab(page, 'trades');
+    await exploreMarket(page);
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
     const onScreen = await page.evaluate(() =>
       [...document.querySelectorAll('[role="list"][aria-label]')].map((group) => ({

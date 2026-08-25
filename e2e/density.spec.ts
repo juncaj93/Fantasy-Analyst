@@ -14,6 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { exploreMarket } from './helpers.ts';
 
 async function open(page: Page, tab: 'players' | 'trades') {
   await page.getByTestId(`tab-${tab}`).click();
@@ -147,6 +148,8 @@ test.describe('a trade suggestion is a row', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await open(page, 'trades');
+    // The board is behind `Explore the market` now — see `exploreMarket`.
+    await exploreMarket(page);
   });
 
   /**
@@ -307,7 +310,7 @@ test.describe('the player dossier', () => {
     const snapshot = page.getByTestId('player-page-snapshot');
     await expect(snapshot).toBeVisible();
     // The windows moved up into the band above the snapshot; the news is here.
-    await expect(page.getByTestId('player-page-metrics')).toContainText('21d');
+    await expect(page.getByTestId('player-page-metrics')).toContainText('30d');
     await expect(snapshot.getByTestId('evidence-heading')).toBeVisible();
 
     // It dismisses without touching the list, which is still exactly there.
@@ -358,6 +361,7 @@ test.describe('the player dossier', () => {
     await page.keyboard.press('Escape');
 
     await open(page, 'trades');
+    await exploreMarket(page);
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-page-metrics')).toHaveAttribute('data-mode', 'tally');
     await expect(page.getByTestId('player-page-metrics')).toContainText('Life');

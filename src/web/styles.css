@@ -5846,15 +5846,21 @@ table.compact tr:last-child td {
 }
 
 /*
- * The folded bench.
+ * The folded bench — and every other folded-away section in the app.
  *
  * Deliberately the same control as the Matchup screen's — same shape, same
  * chevron, same test ids — because two screens that both fold a bench away
  * should not be two things to learn. It is a system surface rather than a
  * player card: quieter than the rows above it, and quiet is the point, because
  * the thing under it is the card asking to be acted on.
+ *
+ * `.fold` is the same control under a name that is not about benches, for the
+ * sections that are not one — the market inventory on Trades is the first. It
+ * shares these rules rather than copying them, so a change to the affordance
+ * cannot land on one screen and not the other; see `Fold` in `native.tsx`.
  */
-.bench {
+.bench,
+.fold {
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow-1);
@@ -5862,7 +5868,8 @@ table.compact tr:last-child td {
   margin: var(--sp-1) 0 var(--sp-3);
 }
 
-.bench-toggle {
+.bench-toggle,
+.fold-toggle {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -5878,12 +5885,14 @@ table.compact tr:last-child td {
   cursor: pointer;
 }
 
-.bench-label {
+.bench-label,
+.fold-label {
   flex: none;
 }
 
 /* What the fold is worth saying, in the quietest type on the control. */
-.bench-summary {
+.bench-summary,
+.fold-summary {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -5894,7 +5903,8 @@ table.compact tr:last-child td {
   color: var(--text-faint);
 }
 
-.bench-chevron {
+.bench-chevron,
+.fold-chevron {
   flex: none;
   color: var(--text-faint);
   font-size: 0.8rem;
@@ -8559,6 +8569,22 @@ div.matchup-result {
  */
 .claim-plan {
   padding: var(--sp-3);
+}
+
+/*
+ * `Enter in this order`, between the card's heading and the claims.
+ *
+ * Quieter than the heading above it and quieter than the claims below it,
+ * because it is neither the name of the card nor a thing to type into Sleeper —
+ * it is the one word of instruction that makes the numbering mean something.
+ * It gets no margin of its own above: the heading already has the gap, and this
+ * belongs to the list it introduces.
+ */
+.claim-plan-instruction {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 560;
+  color: var(--text-dim);
 }
 
 .claim-plan-list {

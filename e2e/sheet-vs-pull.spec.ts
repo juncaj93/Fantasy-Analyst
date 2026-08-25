@@ -34,7 +34,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { inSeason } from './helpers.ts';
+import { exploreMarket, inSeason } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -170,6 +170,13 @@ async function openTrades(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByTestId('tab-trades').click();
   await expect(page.getByTestId('trades-pull')).toBeVisible();
+  /*
+   * With the board open, because these specs need a `trade-row` to open a sheet
+   * from and the market inventory is folded away by default. It is also the
+   * harder case for the gesture arbitration this file is about: a long page
+   * that can actually scroll, rather than a short one that cannot.
+   */
+  await exploreMarket(page);
 }
 
 /**

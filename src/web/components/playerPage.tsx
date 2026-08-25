@@ -404,11 +404,26 @@ function PlayerMetrics({
         hint="Research tally over the last 7 days"
         spoken={`Research tally over the last 7 days: ${signal ? net(signal.last7.net) : 'unknown'}`}
       />
+      {/*
+        `30d`, because the window is thirty days.
+
+        This cell said `21d` for as long as the window was twenty-one, and went
+        on saying it after `RECENCY_WINDOWS.last30` widened to thirty — the
+        label outliving the arithmetic it describes, which is the worst kind of
+        stale copy because it is checkable and wrong. Trades has printed `30d`
+        for the same field the whole time, so the two screens were also naming
+        one number two things.
+
+        Nothing about the value moved: it is the same `signal.last30`,
+        aggregated by the same function, over the same thirty days it has
+        covered since that constant changed. Only the word did. See
+        `core/evidence/aggregate.ts`.
+      */}
       <Stat
-        label="21d"
+        label="30d"
         value={signal ? <SignedValue net={signal.last30.net} /> : '—'}
-        hint="Research tally over the last 21 days"
-        spoken={`Research tally over the last 21 days: ${signal ? net(signal.last30.net) : 'unknown'}`}
+        hint="Research tally over the last 30 days"
+        spoken={`Research tally over the last 30 days: ${signal ? net(signal.last30.net) : 'unknown'}`}
       />
       <Stat
         label="Life"
@@ -674,13 +689,21 @@ function Overview({
       {compact ? null : signal ? (
         <>
           <DetailLabel>News by window</DetailLabel>
+          {/*
+            The same four windows, under the same words the band above uses.
+
+            `21d` was the thirty-day window under its old name, and `Lifetime`
+            was `Life` spelled out — one page naming the same two numbers two
+            ways, a few hundred pixels apart. `Season` has no shorter form worth
+            having and no counterpart on Trades, so it is left as it is.
+          */}
           <div className="window-row" data-testid="player-page-windows">
             {(
               [
                 ['7d', signal.last7],
-                ['21d', signal.last30],
+                ['30d', signal.last30],
                 ['Season', signal.seasonToDate],
-                ['Lifetime', signal.raw],
+                ['Life', signal.raw],
               ] as const
             ).map(([label, w]) => (
               <div className="window-cell" key={label} title={`${w.positive} positive, ${w.negative} negative, ${w.items} item(s)`}>

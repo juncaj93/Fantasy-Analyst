@@ -71,7 +71,10 @@ function planFixture(over: Record<string, unknown> = {}) {
         why: ['Claim 2 is the better way to land Emerging Receiver.'],
       },
     ],
-    note: 'Enter them in this order — Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run.',
+    instruction: 'Enter in this order',
+    note: null,
+    mechanics:
+      'Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run — so enter them in the order above.',
     outcomes: [
       'Best case — you land Breakout Back and Emerging Receiver, cutting Depth Back and Roster Filler for $42.',
       'If the room outbids you on all of them, nothing on your roster changes and you spend nothing.',
@@ -193,7 +196,36 @@ test.describe('the plan as a card', () => {
     await expect(qualifiers).toHaveCount(2);
     await expect(qualifiers.nth(0)).toHaveText('Only if 1 loses');
     await expect(qualifiers.nth(1)).toHaveText('Only if 2 does not land him');
-    await expect(page.getByTestId('waiver-plan-note')).toContainText('Sleeper runs claims top to bottom');
+  });
+
+  /**
+   * Four words of instruction, and the mechanic behind **See Why**.
+   *
+   * The card used to close with the whole sentence — `Enter them in this order
+   * — Sleeper runs claims top to bottom, and a claim whose drop is already gone
+   * does not run.` — which wraps to two lines under the claims on a phone, on
+   * the one card in this app a reader is copying into another app. What they
+   * have to do is the four words, and they are above the list they are about;
+   * why Sleeper's waiver run makes the order matter is the same fact every week
+   * and is one tap in.
+   *
+   * Both halves are asserted, because a shortening that dropped the mechanic
+   * would be the reader inferring a contingency from a list — which §8 of the
+   * brief forbids in the same breath as it asks for the shorter copy.
+   */
+  test('says the order in four words, and keeps the mechanic behind See why', async ({ page }) => {
+    const instruction = page.getByTestId('waiver-plan-instruction');
+    await expect(instruction).toHaveText('Enter in this order');
+
+    const card = page.getByTestId('waiver-plan');
+    await expect(card).not.toContainText('Sleeper runs claims top to bottom');
+    // Above the claims it introduces, not under them.
+    const claims = (await page.getByTestId('waiver-plan-claims').boundingBox())!;
+    expect((await instruction.boundingBox())!.y).toBeLessThan(claims.y);
+
+    await page.getByTestId('waiver-plan-why').click();
+    await expect(page.getByTestId('waiver-plan-detail')).toBeVisible();
+    await expect(page.getByTestId('waiver-plan-mechanics')).toContainText('Sleeper runs claims top to bottom');
   });
 
   /**
