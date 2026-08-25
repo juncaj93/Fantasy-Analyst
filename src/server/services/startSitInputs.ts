@@ -13,11 +13,15 @@ import { PropsRepo } from '../repos/props.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
+import { NflScheduleRepo } from '../repos/nflSchedule.ts';
+import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
+import { homeByTeam } from '../../core/nfl/schedule.ts';
 import { InjuryService } from './injuryService.ts';
 import { UsageService } from './usageService.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { StartSitMode } from '../../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../../core/startsit/defense.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
 import type { Database } from '../db.ts';
 
 /**
@@ -110,6 +114,18 @@ export async function startSitInputsFor(
       usageWeeks: weeks.get(id) ?? undefined,
       game: game ? { spread: game.spread, total: game.total, opponent: game.opponent } : null,
       opponent: game?.opponent ?? null,
+      /*
+       * At home or on the road, for the one model that reads it.
+       *
+       * Set from the shared context so every screen agrees: a defence worth
+       * 8.4 on Team and 8.1 on Waivers is not a rounding difference, it is two
+       * answers to one question. Absent when the fixture list has not been
+       * ingested, which removes the term rather than putting anybody on the
+       * road by default.
+       */
+      ...(context.home.has((player.team ?? '').toUpperCase())
+        ? { home: context.home.get((player.team ?? '').toUpperCase())! }
+        : {}),
       defenseTendencies: context.defense,
       mode: opts.mode ?? 'balanced',
       propsStale: false,
@@ -130,6 +146,15 @@ export interface StartSitContext {
   /** Team abbreviation -> the game they are in, from the paid-for schedule. */
   schedule: Map<string, { opponent: string | null; spread: number | null; total: number | null; kickoff: string | null }>;
   defense: DefenseTendencyIndex;
+  /**
+   * Which teams are at home this week, from the stored fixture list.
+   *
+   * A third league-wide fact, built once beside the other two. Empty until a
+   * schedule has been ingested, which is the state every deployment was in
+   * before migration 0032 and which the defence model already handles by
+   * dropping the term.
+   */
+  home: Map<string, boolean>;
 }
 
 export async function buildStartSitContext(
@@ -140,10 +165,23 @@ export async function buildStartSitContext(
   const from = new Date(now.getTime() - 12 * 3_600_000).toISOString();
   const to = new Date(now.getTime() + 9 * 86_400_000).toISOString();
 
-  const [events, defense] = await Promise.all([
+  const [events, defense, state] = await Promise.all([
     new VegasEventsRepo(db).between(from, to).catch(() => []),
     usageService.defenseTendencies().catch(() => new Map() as DefenseTendencyIndex),
+    new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null).catch(() => null),
   ]);
+
+  /*
+   * The fixture list for the week in play — thirty-two rows, or none.
+   *
+   * Read here rather than by each route because the alternative was one route
+   * knowing which side of a game a defence is on and the next one not. A season
+   * or a week Sleeper has not published yet skips the read entirely.
+   */
+  const home =
+    state?.season && state.week != null && state.week > 0
+      ? homeByTeam(await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => []))
+      : new Map<string, boolean>();
 
   const schedule: StartSitContext['schedule'] = new Map();
   for (const event of events) {
@@ -171,6 +209,6 @@ export async function buildStartSitContext(
     }
   }
 
-  return { schedule, defense };
+  return { schedule, defense, home };
 }
 

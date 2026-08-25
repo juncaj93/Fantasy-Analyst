@@ -278,6 +278,105 @@ export function projectDst(input: DstProjectionInput): DstProjection {
     return { ...UNKNOWN_BASE, opponentImpliedTotal, reasons: ['this league does not score defences'] };
   }
 
+  return buildFromAnchor({
+    opponentImpliedTotal,
+    spread,
+    scoring,
+    qb: quarterbackAdjustment(input),
+    home: input.home ?? null,
+  });
+}
+
+/**
+ * What a defence is worth against an implied total, without a line for the game.
+ *
+ * The forward half of the same model, for the one question a weekly projection
+ * cannot answer: is this defence worth holding through the next three weeks, or
+ * carrying to a playoff round in December. No book has priced week 15 in
+ * October, and this app will not invent one — so what it is given instead is an
+ * implied total the caller is prepared to stand behind, and it says plainly in
+ * the returned confidence that a fixture is not a line.
+ *
+ * Three things are deliberately absent rather than defaulted:
+ *
+ *   - **the game script residual**, because it is a function of the spread and
+ *     there is no spread. Zero here is the honest value, not a missing one;
+ *   - **the quarterback residual**, which is zero on the weekly path too unless
+ *     news post-dates a line, and there is no line to post-date;
+ *   - **`high` confidence**, which is capped at `medium` however good the
+ *     inputs are — see {@link DstProjection.confidence}.
+ *
+ * Everything else — this league's own points-allowed and yards-allowed bands,
+ * its sack and takeaway pricing, the home-field nudge — is the same arithmetic
+ * the weekly card shows, run over a different anchor. There is deliberately no
+ * second defence model in this codebase.
+ */
+export function outlookDst(opts: {
+  /** The anchor. Where it came from is the caller's business and its honesty. */
+  opponentImpliedTotal: number;
+  scoring: DstScoring;
+  home?: boolean | null;
+}): DstProjection {
+  if (!opts.scoring.supported) {
+    return {
+      ...UNKNOWN_BASE,
+      reasons: [
+        opts.scoring.unsupported.length > 0
+          ? `this league scores defences on rules this app cannot map (${opts.scoring.unsupported.join(', ')})`
+          : 'this league\u2019s defence scoring could not be read',
+      ],
+    };
+  }
+  if (!scoresDefences(opts.scoring)) {
+    return {
+      ...UNKNOWN_BASE,
+      opponentImpliedTotal: round1(opts.opponentImpliedTotal),
+      reasons: ['this league does not score defences'],
+    };
+  }
+
+  const projection = buildFromAnchor({
+    opponentImpliedTotal: round1(opts.opponentImpliedTotal),
+    spread: null,
+    scoring: opts.scoring,
+    qb: { points: 0, detail: '', reason: null },
+    home: opts.home ?? null,
+  });
+
+  return {
+    ...projection,
+    /*
+     * A fixture is not a line, and the confidence field is where that is said.
+     *
+     * The arithmetic above is exactly as good as the anchor it was handed, and
+     * the anchor on this path is a forecast of a market rather than a reading
+     * of one. `high` would put a December outlook on the same footing as
+     * Sunday's card, which is the one claim this function must never make.
+     */
+    confidence: projection.confidence === 'high' ? 'medium' : projection.confidence,
+    reasons: [...projection.reasons, 'no game line for this week yet \u2014 an outlook, not a projection'],
+  };
+}
+
+/**
+ * The anchor turned into this league's points. One copy, two callers.
+ *
+ * Extracted from {@link projectDst} unchanged when {@link outlookDst} arrived:
+ * a second implementation of the bands, the baselines and the caps is how a
+ * weekly card and a three-week hold start disagreeing about the same defence
+ * against the same opponent, which is the disagreement this app most has to
+ * avoid. `spread: null` is the forward path's honest statement that the shape
+ * of the game is unknown, and it removes the residual rather than zeroing an
+ * input to it.
+ */
+function buildFromAnchor(args: {
+  opponentImpliedTotal: number;
+  spread: number | null;
+  scoring: DstScoring;
+  qb: { points: number; detail: string; reason: string | null };
+  home: boolean | null;
+}): DstProjection {
+  const { opponentImpliedTotal, spread, scoring } = args;
   const components: DstComponent[] = [];
   const reasons: string[] = [];
 
@@ -360,9 +459,16 @@ export function projectDst(input: DstProjectionInput): DstProjection {
    * Bounded hard, because it is the term most likely to be an elaborate way of
    * re-reading the spread that is already inside the anchor.
    */
-  const scriptStrength = clamp(-spread / DST_BASELINES.fullSpread, -1, 1);
-  const gameScript = round2(scriptStrength * DST_CAPS.gameScript);
-  if (gameScript !== 0) {
+  /*
+   * No spread, no residual — and deliberately not a residual of zero.
+   *
+   * A forward outlook knows who the fixture is against and nothing about how
+   * the afternoon will be shaped, so the term is *absent* rather than computed
+   * from a handicap nobody has published. Omitting the component says that on
+   * the card; pushing a zero one would claim the game was priced pick'em.
+   */
+  const gameScript = spread == null ? 0 : round2(clamp(-spread / DST_BASELINES.fullSpread, -1, 1) * DST_CAPS.gameScript);
+  if (spread != null && gameScript !== 0) {
     components.push({
       key: 'game_script',
       label: 'Game script',
@@ -384,17 +490,17 @@ export function projectDst(input: DstProjectionInput): DstProjection {
    * timestamps come from the caller because only the caller knows when its own
    * line was drawn.
    */
-  const qb = quarterbackAdjustment(input);
+  const qb = args.qb;
   if (qb.points !== 0) {
     components.push({ key: 'opponent_qb', label: 'Opponent quarterback', points: qb.points, detail: qb.detail });
   }
   if (qb.reason) reasons.push(qb.reason);
 
-  if (input.home != null) {
-    const homeField = round2((input.home ? 1 : -1) * DST_CAPS.homeField);
+  if (args.home != null) {
+    const homeField = round2((args.home ? 1 : -1) * DST_CAPS.homeField);
     components.push({
       key: 'home_field',
-      label: input.home ? 'At home' : 'On the road',
+      label: args.home ? 'At home' : 'On the road',
       points: homeField,
       detail: 'a small, bounded edge — never enough to decide a start',
     });
@@ -472,13 +578,14 @@ function quarterbackAdjustment(input: DstProjectionInput): { points: number; det
 }
 
 /** The one sentence a row gets, and it is always about the anchor. */
-function driverFor(opponentImpliedTotal: number, spread: number): string {
+function driverFor(opponentImpliedTotal: number, spread: number | null): string {
   const environment =
     opponentImpliedTotal <= DST_BASELINES.neutralImpliedTotal - 3
       ? 'Facing a low-scoring offence'
       : opponentImpliedTotal >= DST_BASELINES.neutralImpliedTotal + 3
         ? 'Facing a high-scoring offence'
         : 'An ordinary offence across the field';
+  if (spread == null) return `${environment} · ${opponentImpliedTotal} implied against`;
   const side = spread < 0 ? `favoured by ${Math.abs(spread)}` : spread > 0 ? `underdog by ${spread}` : 'pick’em';
   return `${environment} · ${opponentImpliedTotal} implied against, ${side}`;
 }

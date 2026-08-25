@@ -60,6 +60,7 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
+import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
@@ -555,6 +556,21 @@ export function TeamScreen({
               {roster.live ? null : (
                 <>
                   {lineup?.found ? <LineupCard lineup={lineup} /> : null}
+
+                  {/*
+                    One quiet line about the defence, and only when there is one
+                    to draw.
+
+                    It sits between the lineup changes and the waiver wire
+                    because that is what it is: a slot decision that happens to
+                    be made on the wire. It renders nothing for a best-ball
+                    league, a league with no DEF slot, a season that has not
+                    drafted, or — most weeks — a reader holding a defence with
+                    no decision to make. There is deliberately no defence
+                    dashboard behind it; the whole model is one tap away on this
+                    row and nowhere else.
+                  */}
+                  <DstLine plan={waivers?.dst ?? null} />
 
                   {waiverBoard ? (
                     <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />

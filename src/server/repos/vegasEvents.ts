@@ -134,6 +134,54 @@ export class VegasEventsRepo {
   }
 
   /** When the schedule was last learned, so discovery is not repeated daily. */
+  /**
+   * What the market has been pricing each offence at, over games it has priced.
+   *
+   * The one input a forward-looking defence outlook can honestly have when no
+   * book has quoted week 15 yet. It is a **measurement of an offence** — the
+   * mean implied team total across that team's own priced games — and never a
+   * line for any particular fixture; `core/dst/outlook.ts` is where that
+   * distinction is enforced and reported, and this only supplies the number.
+   *
+   * Aggregated in SQL rather than in the Worker because the alternative is
+   * pulling every event of the season across the wire on a request path to
+   * average thirty-two numbers. What comes back is at most one row per team.
+   *
+   * A team's own implied total is `total/2 - spread/2` with the spread taken
+   * from that team's point of view, which is the same arithmetic — and the same
+   * sign convention — `dstProjection.ts` uses for the other side of the game. A
+   * row whose `spread_team` is neither side is excluded rather than guessed at,
+   * exactly as `buildStartSitContext` excludes it.
+   */
+  async impliedTotalsByTeam(fromIso: string, toIso: string): Promise<Map<string, { impliedTotal: number; games: number }>> {
+    const side = (team: 'home_team' | 'away_team') => `
+      SELECT ${team} AS team,
+             game_total / 2.0 - (CASE WHEN spread_team = ${team} THEN spread ELSE -spread END) / 2.0 AS implied
+        FROM vegas_events
+       WHERE kickoff IS NOT NULL AND kickoff >= ? AND kickoff <= ?
+         AND game_total IS NOT NULL AND spread IS NOT NULL AND spread_team IS NOT NULL
+         AND ${team} IS NOT NULL
+         AND (spread_team = home_team OR spread_team = away_team)`;
+
+    const result = await this.db
+      .prepare(
+        `SELECT team, AVG(implied) AS implied, COUNT(*) AS games
+           FROM (${side('home_team')} UNION ALL ${side('away_team')})
+          GROUP BY team`,
+      )
+      .bind(fromIso, toIso, fromIso, toIso)
+      .all<Record<string, unknown>>();
+
+    const out = new Map<string, { impliedTotal: number; games: number }>();
+    for (const row of result.results ?? []) {
+      const team = String(row['team'] ?? '').toUpperCase();
+      const implied = Number(row['implied']);
+      if (team.length === 0 || !Number.isFinite(implied)) continue;
+      out.set(team, { impliedTotal: Math.round(implied * 100) / 100, games: Number(row['games'] ?? 0) });
+    }
+    return out;
+  }
+
   async lastSeenAt(): Promise<string | null> {
     const row = await this.db
       .prepare('SELECT MAX(seen_at) AS seen_at FROM vegas_events')
