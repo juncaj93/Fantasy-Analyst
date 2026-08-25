@@ -2161,6 +2161,95 @@ gzipped against a 140 kB budget and CSS 14.1 kB against 20 kB — the stylesheet
 did not grow at all, because the header this rolled out to three more surfaces is
 the one the shared card was already using.
 
+## The browser gate is sharded (done)
+
+The item below this used to read "shard the WebKit matrix — this is now
+blocking, not recommended". It is done, and this is what it was blocking on.
+
+**Before**, from `main` at `a5448ef` — four widths, the whole suite on one
+runner each, against a step budget of thirty minutes:
+
+| width | testing | job |
+|---|---|---|
+| `webkit-small-360` | 19m24s | 20m19s |
+| `webkit-iphone-375` | 23m12s | 23m52s |
+| `webkit-iphone-390` | 23m36s | 24m16s |
+| `webkit-iphone-430` | **25m03s** | 25m44s |
+
+Every width green, nothing flaky, and 430 inside five minutes of a ceiling that
+had already been raised three times. The number had stopped measuring a stuck
+browser and started measuring how big the suite is, which is the failure mode
+`ci.yml` spends several paragraphs warning about.
+
+**After**: each width runs across three runners as `--shard=n/3`. Twelve jobs
+rather than four, named `webkit-iphone-430 (2/3)` so a red tick says which phone
+and which third before anything is opened. The test step's budget is eighteen
+minutes and the job ceiling thirty-two, both down for the first time.
+
+Measured on the first sharded run, all twelve green:
+
+| width | 1/3 | 2/3 | 3/3 |
+|---|---|---|---|
+| `webkit-iphone-430` | **10m11s** | 8m19s | 6m15s |
+| `webkit-iphone-390` | 9m37s | 7m50s | 6m58s |
+| `webkit-iphone-375` | 9m25s | 7m46s | 5m50s |
+| `webkit-small-360` | 9m29s | 7m41s | 6m46s |
+
+**The whole workflow went from 25m47s to 10m59s.** Expect a steady state of six
+to ten minutes a shard. The eighteen-minute budget is 1.77× the worst shard
+measured, so it covers the half-again-slower runner this repo has met twice and
+still means "stuck" rather than "big". Aggregate runner time rose about 5% —
+three server boots per width instead of one, which is what buys the wall clock.
+
+Shard 1 is the slowest at every width, consistently rather than randomly: that
+is the count-versus-time imbalance below, showing up exactly where predicted.
+
+Nothing was dropped to get there. All four widths still run, WebKit is still
+authoritative, every spec file still runs at every width, no assertion moved and
+no test is skipped or retried that was not before. Playwright splits by whole
+spec file — `fullyParallel: false` makes a file the unit — so a shard is a set
+of complete files in their own order against their own freshly seeded server,
+which is stricter isolation than the one server a whole width used to share, not
+looser. A new spec file needs nothing added anywhere.
+
+**Three, not two or four.** Playwright balances shards by test count, so the
+question worth measuring is what that does to time. Against the real per-file
+durations of a full local run, the slowest shard carries 54% of the suite at two
+shards, 42% at three, 35% at four. Two leaves the slowest width near fourteen
+minutes — not far enough from the ceiling to keep this conversation from
+happening again. Four buys three more minutes for a third again as many runners
+and a worse spread. Three puts the slowest shard of the slowest width at roughly
+eleven minutes, which is what eighteen is 1.6× of.
+
+**Measured rather than projected**, on the fallback engine at 360 locally, where
+the whole suite takes 14.1 minutes on one runner:
+
+| shard | tests | result | wall |
+|---|---|---|---|
+| 1/3 | 225 | all passed | 5m54s |
+| 2/3 | 227 | all passed | 4m15s |
+| 3/3 | 199 | 198 passed, 1 known Chromium-360 failure | 4m09s |
+
+Slowest shard against whole suite: **2.4× less wall clock**, for 1.4% more total
+runner time — three server boots instead of one, at about 17 seconds each.
+
+**Coverage is exact, and checked rather than assumed.** For each of the four
+WebKit widths, the union of the three shard listings is byte-identical to the
+unsharded listing: 652 tests, no test in two shards, none missing. The only
+entry that repeats is the `setup` project's login, which each shard needs
+because each shard has its own server.
+
+**No order dependence was exposed.** Every shard passes standing alone. (One run
+did show a `draft-queue-order` failure; it was a rebuild running against the
+live server mid-suite, and it did not reproduce once the box was quiet. Recorded
+because a shard failure that turns out to be the harness is worth knowing about
+before it is diagnosed as a test.)
+
+The wider question the old item raised — which specs overlap, and which of them
+need all four widths rather than one — is deliberately still open. Sharding buys
+the headroom to answer it without a deadline; the answer is a coverage decision
+about the product and this lane changed no product behaviour at all.
+
 ## Recommended next work
 
 0. **Watch the defence planner through one real week.** DST is complete enough
@@ -2195,28 +2284,12 @@ the one the shared card was already using.
    the ladder, the gaps and the ratios per position; nothing draws them.
 5. **Re-reading everything at once**, rather than one newsletter at a time.
    Worth doing only once real issues have accumulated.
-6. **Shard the WebKit matrix — this is now blocking, not recommended.** Each
-   width runs the entire browser suite on one runner. The suite was roughly
-   nineteen minutes of testing per width when this item was written, close
-   enough to its ceiling that a slow runner read as a failure with no test
-   having failed; that happened twice while the sheet-dismissal work was being
-   gated, and the step's budget went from twenty minutes to twenty-five to cover
-   it. The note then said "that is time, not capacity: the next few features
-   spend it."
-
-   They have. The waiver-plan lane spent the rest of it. On one commit, one
-   afternoon: 375 at ~17m50s, 360 at ~21m27s, 390 at ~22m15s, and 430 cut at the
-   twenty-five-minute ceiling on test 649 of about 660 with nothing having
-   failed. Two of four widths inside three minutes of the ceiling on the same
-   run is the suite's size rather than one unlucky runner, so the budget was
-   raised again — twenty-five to thirty, and the job ceiling thirty-five to
-   forty — with the measurement recorded in `ci.yml` beside it.
-
-   That is the third raise, and a number raised three times is a number on its
-   way to meaning nothing. Splitting each width across two runners halves the
-   wall clock and makes the ceiling mean "stuck" again. It is worth doing
-   alongside a wider look at what the gate spends — which specs overlap, and
-   which of them need all four widths rather than one; every spec in `e2e/`
-   currently runs at every width by convention, and a good share of them assert
-   content rather than layout. **The next feature that adds browser tests should
-   do this first rather than raise the ceiling a fourth time.**
+6. **Decide which specs need all four widths.** Sharding is done — see "the
+   browser gate is sharded" above — and it bought the headroom, but it did not
+   answer the question that item raised alongside it. Every spec in `e2e/` runs
+   at every width by convention, and a good share of them assert content rather
+   than layout; a content assertion does not get more true at 430 than at 360.
+   Splitting the suite into what is genuinely width-sensitive and what is not
+   would cut the gate again without adding a runner. It is a coverage decision
+   rather than a workflow one, which is why sharding went first, and there is no
+   deadline on it now: the next feature to add browser tests can add them.

@@ -175,6 +175,20 @@ test.describe('density', () => {
    * and the depth of the first screen is measured in ordinary cards, which is
    * what "spends the space on padding" would move. A padding regression fails
    * this exactly as it did before; a reordered board no longer does.
+   *
+   * **Known to fail on the Chromium fallback at 360, and only there.** The
+   * first assertion measures 146.59 rather than the 129 WebKit gives it. The
+   * cause is the roster-progress strip: at 360 Chromium fits six of its seven
+   * chips on a row and drops `0/4 BN` onto a second one, 17.8px lower, which is
+   * the whole of the difference. It measures those chips a shade wider than
+   * WebKit does; the strip is meant to wrap when it must, so neither engine is
+   * drawing the wrong thing. (`isMobile` was the obvious suspect and is not it —
+   * forcing it either way gives Chromium the same 146.59.)
+   *
+   * The bound stays tuned to WebKit, because iPhone Safari is what ships and
+   * 177 is the regression the margin exists to catch. Note that the second
+   * assertion — the one this test is named for — passes in both engines: the
+   * board is nine ordinary cards deep at Chromium 360. See `docs/HANDOFF.md`.
    */
   test('the draft board shows at least eight players before a scroll', async ({ page }) => {
     // No tap: Draft is where the app lands, and tapping the destination you are

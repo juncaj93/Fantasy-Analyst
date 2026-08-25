@@ -389,8 +389,35 @@ that prints a provider payload must do the same.
   that mutate global config break later tests. Prefer asserting presence over
   flipping shared state.
 - **WebKit is not installed in this container.** `npm run e2e` fails; use
-  `CI=1 npm run e2e:chromium`. WebKit runs in CI and has never disagreed with
-  Chromium in this repo.
+  `CI=1 npm run e2e:chromium`. WebKit runs in CI.
+- **One spec disagrees between the engines, and it is the fallback that is
+  wrong.** `e2e/shell.spec.ts:179` — "the draft board shows at least eight
+  players before a scroll" — fails at **Chromium 360 only**, on `main`, with no
+  change in front of it. It is the first of the test's two assertions that goes:
+  the chrome above the board measures 146.6px against a bound of 132, where
+  WebKit 360 measures the 129px the comment describes. The count of cards on the
+  first screen — the thing the test is named for — is not what fails.
+
+  The cause is measured, not guessed. It is the roster-progress strip — the
+  `0/1 QB · 1/2 RB · …` chips under the nav bar — wrapping to a second row. At
+  360 Chromium lays out six chips on the first row and drops `0/4 BN` onto a
+  second at `top=74.8` against the first row's `57.0`; that 17.8px is the whole
+  of the 146.6-against-129 gap. Chromium simply measures the chips a shade wider
+  than WebKit does and the seventh no longer fits. `isMobile` is not the reason
+  and was checked: the fallback projects set `isMobile: true` and the WebKit ones
+  cannot, but forcing it either way gives 146.59 in Chromium both times.
+
+  So it is a font-metric difference between two engines over a strip that is
+  *designed* to wrap when it has to, and neither engine is drawing the wrong
+  thing. iPhone Safari is what ships, WebKit is the authority, and the bound
+  stays tuned to it.
+
+  Do not loosen the 132 to make the fallback green: 177 is the regression it was
+  written to catch, and the margin is most of what it is worth. Note also that
+  the assertion which fails is the chrome-height guard, not the claim the test
+  is named for — the board is nine ordinary cards deep at Chromium 360, against
+  the eight it asks for. `e2e:chromium` at 360 is expected to come back with
+  this one failure and nothing else.
 - **`actions_list` responses are enormous.** They get saved to a file; parse it
   with `python3` rather than reading it inline.
 
@@ -401,10 +428,21 @@ that prints a provider payload must do the same.
 ```bash
 npm run typecheck          # tsc
 npx vitest run             # 882 tests, 39 files
-CI=1 npm run e2e:chromium  # 253 tests at 390/375/360
+CI=1 npm run e2e:chromium  # all four widths, fallback engine
 npm run build
 npx wrangler deploy --dry-run
 ```
+
+A single width is 652 tests and about fourteen minutes here. CI shards each
+width across three runners, and one of those runners is reproducible locally:
+
+```bash
+npx playwright test --project=chromium-small-360 --shard=2/3
+```
+
+Playwright splits by whole spec file (the config sets `fullyParallel: false`),
+so a shard is a set of complete files running in their own order against their
+own freshly seeded server — nothing is added anywhere when a spec file is.
 
 Note `npx playwright test` with no project will try WebKit, which is not
 installed here, and report ~225 failures that are all the missing browser. Use
