@@ -244,7 +244,8 @@ describe('the weekly scenarios build a legal lineup', () => {
     const lineup = res.body as LineupRecommendation;
 
     expect(lineup.found).toBe(true);
-    expect(lineup.slots.length).toBe(8);
+    /* Nine: eight skill slots and the defence the league starts. */
+    expect(lineup.slots.length).toBe(9);
     for (const slot of lineup.slots) {
       if (!slot.playerId) continue;
       expect(slot.accepts).toContain(slot.position);
@@ -266,10 +267,24 @@ describe('the weekly scenarios build a legal lineup', () => {
     expect(new Set(points).size).toBeGreaterThan(1);
   });
 
-  it('a player whose game has kicked off is locked', async () => {
-    const runtime = await runtimeFor('late-injury-pivot');
-    const lineup = (await runtime.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
-    expect(lineup.slots.some((s) => s.locked)).toBe(true);
+  /**
+   * The clock decides what can still be changed, and the slate decides when.
+   *
+   * At 12:52 on the Sunday nothing in the lineup has kicked off — the London
+   * game is over and the one o'clock games are eight minutes away — so every
+   * slot is still legal to change, which is precisely what makes the downgrade
+   * below actionable. By the late afternoon the morning and early windows are
+   * finished and most of the lineup is locked. Both readings come from the same
+   * fixture kickoffs measured from two different scenario clocks.
+   */
+  it('what is locked is what the scenario clock says has kicked off', async () => {
+    const pivot = await runtimeFor('late-injury-pivot');
+    const early = (await pivot.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
+    expect(early.slots.every((s) => !s.locked)).toBe(true);
+
+    const afternoon = await runtimeFor('matchup-live-close');
+    const later = (await afternoon.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
+    expect(later.slots.some((s) => s.locked)).toBe(true);
   });
 
   it('a downgraded starter is no longer recommended as one', async () => {
@@ -293,7 +308,7 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     expect(advice.faab?.rule.total).toBe(100);
 
     // The wallet is derived from the spend the fixture recorded, not stated.
-    expect(advice.faab?.mine?.remaining).toBe(37);
+    expect(advice.faab?.mine?.remaining).toBe(55);
 
     const bids = advice.faab?.bids ?? [];
     expect(bids.length).toBeGreaterThan(0);
@@ -361,13 +376,20 @@ describe('the waiver scenarios price a bid with the real engine', () => {
    * Competition is not decoration: it reaches the price.
    *
    * `priceWaiverUpgrades` takes the assessed bidder count as `rivalsWithNeed`,
-   * which feeds the demand reading, which moves the recommended maximum. The
-   * contested tight end must therefore be recommended above the uncontested
-   * receiver despite a comparable gain — and if a future change stopped passing
-   * the assessment through, both would fall back to the same league-wide
-   * estimate and this would fail.
+   * which feeds the demand reading, which stretches the band the room is
+   * expected to pay. The contested tight end must therefore carry a higher
+   * expected top than the uncontested receiver — and if a future change stopped
+   * passing the assessment through, both would fall back to the same
+   * league-wide funded-roster count and the two bands would be identical, which
+   * is what this asserts against.
+   *
+   * The *recommended* maximum is deliberately not the assertion. That number is
+   * what the player is worth to this roster capped by what the week may spend,
+   * and it is a fact about the lineup rather than about the room — reading a
+   * competition effect into it would be asserting something the model does not
+   * claim.
    */
-  it('prices the contested add above the uncontested one', async () => {
+  it('the contested add carries a higher expected price than the quiet one', async () => {
     const runtime = await runtimeFor('waivers-tuesday-active');
     const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
     const bids = new Map((advice.faab?.bids ?? []).map((b) => [b.playerId, b] as const));
@@ -377,9 +399,11 @@ describe('the waiver scenarios price a bid with the real engine', () => {
 
     const a = bids.get(contested.playerId);
     const b = bids.get(quiet.playerId);
-    expect(a?.recommended, 'the contested add is priced').not.toBeNull();
-    expect(b?.recommended, 'the quiet add is priced').not.toBeNull();
-    expect(a!.recommended!).toBeGreaterThan(b!.recommended!);
+    expect(a?.expected, 'the contested add is priced').toBeTruthy();
+    expect(b?.expected, 'the quiet add is priced').toBeTruthy();
+    expect(contested.competition!.level).toBe('high');
+    expect(quiet.competition!.level).toBe('low');
+    expect(a!.expected!.high).toBeGreaterThan(b!.expected!.high);
   });
 
   it('the winning claim has come out of the wallet by Wednesday', async () => {
@@ -417,13 +441,13 @@ describe('the matchup scenarios forecast a real afternoon', () => {
       const body = await matchupFor(id);
       expect(body.found, `${id} found`).toBe(true);
       const forecast = body.forecast!;
-      expect(forecast.slots.length).toBe(8);
+      expect(forecast.slots.length).toBe(9);
       for (const row of forecast.slots) {
         expect(row.mine?.projectedFinal, `${id} ${row.slot} mine`).not.toBeNull();
         expect(row.theirs?.projectedFinal, `${id} ${row.slot} theirs`).not.toBeNull();
       }
       // A card per player in the matchup, both benches included.
-      expect(Object.keys(body.cards).length).toBe(28);
+      expect(Object.keys(body.cards).length).toBe(30);
       /*
        * With anything left to play, the projected final is ahead of the score.
        * (Once the week is settled the two are equal by definition, which is

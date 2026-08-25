@@ -166,6 +166,79 @@ export function playoffWeeks(playoffStartWeek: number, rounds = 3): number[] {
   return Array.from({ length: rounds }, (_, i) => playoffStartWeek + i);
 }
 
+/** The last week of the regular season when a league does not publish one. */
+export const DEFAULT_FINAL_WEEK = 14;
+
+/**
+ * The last week of the regular season, from the league's own settings.
+ *
+ * The canonical reader, and it validates before it trusts: a real league was
+ * found publishing a `playoff_week_start` that was not a usable week, survived
+ * a `??` default, and produced an empty list of playoff weeks in production.
+ */
+export function readFinalWeek(settings: Record<string, unknown> | null | undefined): number {
+  const raw = settings?.['playoff_week_start'];
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (Number.isFinite(value) && value > 1 && value <= 19) return Math.round(value) - 1;
+  return DEFAULT_FINAL_WEEK;
+}
+
+/**
+ * The league's own playoff weeks, and how much they are allowed to matter yet.
+ *
+ * One reader, shared by the plan endpoint, the defence planner and Demo Mode,
+ * because two callers that disagreed about when the playoffs start would
+ * disagree about whether a stash is worth a bench spot — and one of them would
+ * be wrong about a fact the league publishes.
+ *
+ * It lives here rather than beside the defence planner because nothing in it is
+ * about defences: it reads a league's settings and its own record, which is
+ * exactly what the rest of this file does.
+ */
+export function playoffContextFor(opts: {
+  leagueSettings: Record<string, unknown> | null | undefined;
+  rosters: readonly { settings?: Record<string, unknown> | null }[];
+  mine: { settings?: Record<string, unknown> | null } | null;
+  totalRosters: number;
+  currentWeek: number;
+}): {
+  weeks: number[];
+  emphasis: number;
+  reason: string;
+  startWeek: number;
+  startWeekPublished: boolean;
+  record: { wins: number; losses: number } | null;
+} {
+  const startWeek = readFinalWeek(opts.leagueSettings ?? {}) + 1;
+  const raw = Number(opts.leagueSettings?.['playoff_week_start']);
+  const startWeekPublished = Number.isFinite(raw) && raw > 1 && raw <= 19;
+  const playoffTeams = Number(opts.leagueSettings?.['playoff_teams'] ?? 6);
+
+  const settings = (opts.mine?.settings ?? null) as Record<string, unknown> | null;
+  const record = {
+    wins: Number(settings?.['wins'] ?? 0) || 0,
+    losses: Number(settings?.['losses'] ?? 0) || 0,
+  };
+
+  const emphasis = playoffEmphasis({
+    currentWeek: opts.currentWeek,
+    playoffStartWeek: startWeek,
+    wins: record.wins,
+    losses: record.losses,
+    playoffTeams,
+    totalTeams: opts.rosters.length || opts.totalRosters,
+  });
+
+  return {
+    weeks: playoffWeeks(startWeek),
+    emphasis: emphasis.weight,
+    reason: emphasis.reason,
+    startWeek,
+    startWeekPublished,
+    record: settings ? record : null,
+  };
+}
+
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }

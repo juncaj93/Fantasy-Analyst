@@ -239,9 +239,9 @@ fixture asserting one.
 |---|---|
 | Sleeper ADP | Every draft scenario. The platform snapshot, unchanged. |
 | DOG | `draft-*`. A `raw_adp` Underdog snapshot six hours old, so the column lights and carries its share. |
-| Strong DOG/Sleeper disagreement | `draft-mid`. Underdog has `Emeka Falade` at 12.0 against Sleeper's 41.2 — 29 picks, inside the outlier guard, so it is carried into the blend as information and reported with a leader. |
+| Strong DOG/Sleeper disagreement | `draft-mid`. Underdog has `Rashad Bellinger` at 12.0 against Sleeper's 41.2 — 29 picks, inside the outlier guard, so it is carried into the blend as information and reported with a leader. |
 | Stale DOG | `dog-stale`. Nine days past its effective time, so `dogFreshness` says stale, `dogIsUsable` says no, and the board warns out loud. |
-| Missing DOG | `dog-unavailable` for the whole file; `Teo Ferreira` and a generated stretch of the depth pool for a single player Underdog has not priced. |
+| Missing DOG | `dog-unavailable` for the whole file; `Isaiah Coker` and a generated stretch of the depth pool for a single player Underdog has not priced. |
 | Missing Sleeper | A stretch of the depth pool past the end of the Sleeper file that Underdog still ranks — `singleSource`, weights `{dog: 1, sleeper: 0}`. |
 
 And what §13 asks to *verify*:

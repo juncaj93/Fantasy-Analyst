@@ -326,14 +326,16 @@ describe('a scenario reproduces identically for the same fixture version', () =>
     const lineup = (await runtime.request('GET', '/api/leagues/demo-league-2026/lineup')).body as {
       slots: { locked: boolean }[];
     };
-    // Twenty minutes before kickoff: nothing has locked yet.
+    // An hour and change before the one o'clock kickoffs: nothing has locked.
     expect(lineup.slots.every((s) => !s.locked)).toBe(true);
 
-    const later = await DemoRuntime.forScenario(findScenario('late-injury-pivot')!);
-    expect(later.asOf).toBe('2026-10-11T16:52:00.000Z');
+    const later = await DemoRuntime.forScenario(findScenario('matchup-live-close')!);
+    expect(later.asOf).toBe('2026-10-11T21:20:00.000Z');
     const after = (await later.request('GET', '/api/leagues/demo-league-2026/lineup')).body as {
       slots: { locked: boolean }[];
     };
+    // The same slate, five and a half hours later: the morning and early
+    // windows are finished, so those slots can no longer be changed.
     expect(after.slots.some((s) => s.locked)).toBe(true);
   });
 });

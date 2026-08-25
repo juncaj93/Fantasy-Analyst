@@ -154,13 +154,13 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     id: 'sunday-pregame',
     label: 'Sunday, 11:40am',
     description:
-      'Twenty minutes to kickoff in week 6. One flex decision is genuinely close, Floor and Ceiling disagree about it, and the market disagrees with both.',
+      'An hour and a bit before the one o’clock kickoffs in week 6, with the London game already gone. One flex decision is genuinely close, Floor and Ceiling disagree about it, and the matchup card is forecasting a week nothing has happened in yet.',
     group: 'weekly',
     lifecycle: 'regular_season',
     week: 6,
     asOf: '2026-10-11T15:40:00.000Z',
     freshness: fresh(),
-    surfaces: ['team', 'waivers', 'trades', 'players', 'setup'],
+    surfaces: ['team', 'matchup', 'waivers', 'trades', 'players', 'setup'],
     previous: 'post-draft-roster',
     next: 'late-injury-pivot',
     bundle: 'season',
@@ -170,7 +170,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     id: 'late-injury-pivot',
     label: 'Sunday, 12:52pm',
     description:
-      'A starter is downgraded eight minutes before kickoff. His backup is on the wire, one bench player is already locked, and the flex is still legal — barely.',
+      'A starter is downgraded eight minutes before the one o’clock kickoffs. The London game is over, his replacement is on the wire and does not play until the afternoon, and the lineup is still legal to change — barely.',
     group: 'weekly',
     lifecycle: 'regular_season',
     week: 6,
@@ -258,7 +258,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     group: 'season',
     lifecycle: 'playoffs',
     week: 15,
-    asOf: '2026-12-20T16:00:00.000Z',
+    asOf: '2026-12-11T16:00:00.000Z',
     freshness: fresh(),
     surfaces: ['team', 'waivers', 'trades', 'players', 'setup'],
     previous: 'trade-window',
@@ -449,10 +449,10 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
    */
   ...(
     [
-      ['matchup-live-close', 'Matchup · one point in it', 'Three games finished, three running and two to come, with the two projected finals less than half a point apart.', '2026-10-11T20:15:00.000Z'],
-      ['matchup-live-leading', 'Matchup · leading', 'Ahead with players left, and the card is about which of the opponent’s remaining names can still take it.', '2026-10-11T20:15:00.000Z'],
-      ['matchup-live-trailing', 'Matchup · trailing', 'Behind, and the card does the arithmetic: how much is needed, from whom, to get back to a real chance.', '2026-10-11T20:15:00.000Z'],
-      ['matchup-injury-swing', 'Matchup · an injury swings it', 'A starter is ruled out of the night game while his slot is still changeable, and the swap is priced in win probability.', '2026-10-11T20:15:00.000Z'],
+      ['matchup-live-close', 'Matchup · one point in it', 'Three games finished, three running and two to come, with the two projected finals less than half a point apart.', '2026-10-11T21:20:00.000Z'],
+      ['matchup-live-leading', 'Matchup · leading', 'Ahead with players left, and the card is about which of the opponent’s remaining names can still take it.', '2026-10-11T21:20:00.000Z'],
+      ['matchup-live-trailing', 'Matchup · trailing', 'Behind, and the card does the arithmetic: how much is needed, from whom, to get back to a real chance.', '2026-10-11T21:20:00.000Z'],
+      ['matchup-injury-swing', 'Matchup · an injury swings it', 'A starter is ruled out of the night game while his slot is still changeable, and the swap is priced in win probability.', '2026-10-11T21:20:00.000Z'],
       ['matchup-final', 'Matchup · final', 'The week is over. What decided it, and what would have.', '2026-10-12T06:30:00.000Z'],
     ] as const
   ).map(([id, label, description, asOf], index, all): DemoScenario => ({

@@ -35,7 +35,7 @@ import { buildLiveRoster } from '../../draft/liveRoster.ts';
    functions the live roster route calls — see the note where it is used. */
 import { bestMove } from '../../draft/bestMove.ts';
 import { computeNeed } from '../../draft/need.ts';
-import { compareStartSit } from '../../startsit/engine.ts';
+import { DEFENCE_POSITION, compareStartSit } from '../../startsit/engine.ts';
 import { recommendLineup } from '../../startsit/lineup.ts';
 import { waiverMultiWeekFor, weeklyIntelligence } from '../../contracts/integration.ts';
 import { normalizeMode } from '../../startsit/mode.ts';
@@ -43,6 +43,9 @@ import { recommendWaiverUpgrades } from '../../startsit/waivers.ts';
 import { priceWaiverUpgrades } from '../../waivers/pricing.ts';
 import { waiverLeagueIntel, withCompetition } from '../../waivers/intel.ts';
 import { buildWaiverClaimPlan } from '../../waivers/claimPlan.ts';
+import { assembleDstPlan } from '../../dst/assemble.ts';
+import { playoffContextFor } from '../../league/planning.ts';
+import { detectBestBall } from '../../sleeper/bestBall.ts';
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
@@ -62,6 +65,7 @@ import { resolveLifecycle } from '../../season/lifecycle.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 import {
   draftBoardSourcesFrom,
+  dstPlanSourcesFrom,
   matchupSourcesFrom,
   startSitInputsFrom,
   tradeCandidatesFrom,
@@ -184,7 +188,7 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
       case 'lineup':
         return ok(lineup(data, normalizeMode(params.get('mode'))));
       case 'waivers':
-        return ok(waivers(data));
+        return ok(await waivers(data));
       case 'bench':
         return ok(bench(data));
       case 'managers':
@@ -479,7 +483,7 @@ function candidateIdsFor(data: ScenarioData): string[] {
   });
 }
 
-function waivers(data: ScenarioData) {
+async function waivers(data: ScenarioData) {
   const { profile, shape, mine, rosteredIds } = leagueContext(data);
   if (!mine || mine.playerIds.length === 0) {
     return {
@@ -547,7 +551,51 @@ function waivers(data: ScenarioData) {
     ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
     : [];
 
-  const upgrades = withCompetition(upgradesWithValue, intel.competition);
+  /*
+   * The defence, decided in one place and drawn in two.
+   *
+   * Team and Waivers both read this response, so the DST recommendation is
+   * computed once here rather than on each screen — which is the only way
+   * `Stream PHI over DEN` and `Hold DEN` can never be on screen at the same
+   * time in the same app. Same call the live handler makes, over the same
+   * `assembleDstPlan`, with the schedule and the season form coming from the
+   * slate instead of from D1.
+   */
+  const playoff = playoffContextFor({
+    leagueSettings: data.league.leagueSettings,
+    rosters: data.rosters,
+    mine,
+    totalRosters: data.league.totalRosters,
+    currentWeek: data.nflState?.week ?? 1,
+  });
+  const dst = await assembleDstPlan(dstPlanSourcesFrom(data), {
+    season: data.league.season,
+    week: data.nflState?.week ?? 1,
+    shape,
+    profile,
+    bestBall: detectBestBall({ leagueSettings: data.league.leagueSettings, draftSettings: data.draft?.settings ?? null })
+      .bestBall,
+    /* Post-draft is a fact about the draft, never about the calendar. */
+    draftComplete: (data.draft?.status ?? '') === 'complete',
+    rosterInputs,
+    candidateInputs,
+    lineup: currentLineup,
+    reserveIds: mine.reserveIds,
+    playoff: { weeks: playoff.weeks, emphasis: playoff.emphasis },
+    now: data.clock.now(),
+  }).catch(() => null);
+
+  /*
+   * One owner for the DEF row, and it is the planner.
+   *
+   * The same filter the live handler applies, for the same reason: the generic
+   * scan can still offer a defence for an *empty* DEF slot, and the planner can
+   * say `Wait — no DST needed yet` about the same slot. Two answers to one
+   * question on one screen. The planner wins wherever it has an opinion.
+   */
+  const upgrades = withCompetition(upgradesWithValue, intel.competition).filter(
+    (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
+  );
 
   /*
    * The claims, from the same seam and the same inputs as the live handler.
@@ -564,7 +612,7 @@ function waivers(data: ScenarioData) {
   const claimPlan = buildWaiverClaimPlan({
     roster: rosterInputs,
     candidates: candidateInputs,
-    advice: { ...advice, upgrades, faab: { bids } },
+    advice: { ...advice, upgrades, dst, faab: { bids } },
     shape,
     profile,
     reserveIds: mine.reserveIds,
@@ -578,6 +626,7 @@ function waivers(data: ScenarioData) {
     found: true,
     dataFreshness: freshness(data),
     ...advice,
+    dst,
     upgrades,
     claimPlan,
     notes: [...advice.notes, ...data.notes],
