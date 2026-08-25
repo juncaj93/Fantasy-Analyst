@@ -2244,7 +2244,7 @@ body,
  * to disappear into.
  *
  * So the pills stop carrying their own slab and go back to the app's own tag
- * language — see `.tag`, `.tag-cliff`, `.tag-risky`: a tint, the hue as text, a
+ * language — see `.tag`, `.tag-urgent`, `.tag-warn`: a tint, the hue as text, a
  * hairline of the hue, a pill radius, no shadow. Measured on all six positions
  * in both themes:
  *
@@ -3339,14 +3339,6 @@ body,
   color: var(--neg);
 }
 
-.verdict-risky {
-  background: var(--warn-tint);
-}
-
-.verdict-risky .verdict-label {
-  color: var(--warn);
-}
-
 .verdict-calm .verdict-label {
   color: var(--text-dim);
 }
@@ -3687,8 +3679,22 @@ button:disabled {
 /*
  * A compact icon control. Quiet, and a full tap target — used where a labelled
  * pill would cost more room than the action is worth.
+ *
+ * "A full tap target" was the intention and not the measurement. The box is
+ * 44px wide and was 36px tall, so the glyph a thumb aims at was eight pixels
+ * short of §5's floor in the one dimension a scrolling list makes hardest to
+ * hit. It is fixed the way `.search-toggle` two hundred lines down already
+ * fixes the same eight pixels: the visible control keeps every dimension it
+ * had, and an inset `::after` takes the hit area out to 44 without the layout
+ * knowing anything happened.
+ *
+ * Vertically only. These sit in a row beside other controls — the sort chips on
+ * the Draft bar, `How` on the install prompt — and a target that grew sideways
+ * would reach under its neighbour, which trades a control that is hard to hit
+ * for one that fires the wrong action.
  */
 .icon-btn {
+  position: relative;
   flex: 0 0 auto;
   width: var(--tap);
   height: 36px;
@@ -3705,6 +3711,12 @@ button:disabled {
   line-height: 1;
   cursor: pointer;
   transition: opacity var(--dur-fast) ease;
+}
+
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
 }
 
 .icon-btn:active {
@@ -3790,7 +3802,31 @@ button:disabled {
 }
 
 .sort-chip {
+  position: relative;
   border-radius: calc(var(--radius-sm) - 2px);
+}
+
+/*
+ * The 14 pixels the paragraph above was quietly spending.
+ *
+ * "The row itself is a full-height tap target" is true of the row and not of
+ * these: each segment is a separate choice, so each segment is a separate
+ * target, and a 30px one is fourteen short of §5's floor on the control a
+ * drafter re-sorts the board with mid-pick. The face keeps every pixel it has —
+ * the density argument above is exactly right and nothing here moves — and the
+ * hit area alone goes to 44, the same way `.search-toggle` and `.icon-btn`
+ * already do it.
+ *
+ * Vertically only, and that is not a compromise but the point: these three sit
+ * shoulder to shoulder in one track, so a target that grew sideways would reach
+ * under the segment beside it and re-sort the board the wrong way. Up and down
+ * there is nothing to reach into — the bar's own padding above, the board
+ * below — which is also the axis a thumb misses on while scrolling.
+ */
+.sort-chip::after {
+  content: '';
+  position: absolute;
+  inset: -7px 0;
 }
 
 /*
@@ -4564,20 +4600,14 @@ table.compact tr:last-child td {
   background-clip: content-box;
 }
 
-/* Strongest action: a filled, unmissable chip. */
-.tag-take {
-  background: var(--pos);
-  color: var(--on-accent);
-}
-
-/* Strongest warning. */
-.tag-avoid {
-  background: var(--neg);
-  color: var(--on-accent);
-}
-
-/* Positional urgency: tinted, loud enough to see, quieter than an action. */
-.tag-cliff,
+/*
+ * Positional urgency: tinted, loud enough to see, quieter than an action.
+ *
+ * The two filled chips that used to head this block — `.tag-take` and
+ * `.tag-avoid` — went with the badges that wore them. Nothing on any screen
+ * asks for a saturated fill behind two words any more, and the tints below are
+ * the whole of the tag language now.
+ */
 .tag-urgent {
   background: var(--warn-tint);
   color: var(--warn);
@@ -4625,7 +4655,6 @@ table.compact tr:last-child td {
 }
 
 /* Moderate caution: outline only. */
-.tag-risky,
 .tag-warn {
   background: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 40%, transparent);
@@ -7674,11 +7703,6 @@ div.matchup-result {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
-}
-
-.matchup-decision {
-  font-size: 0.84rem;
-  line-height: 1.4;
 }
 
 /*

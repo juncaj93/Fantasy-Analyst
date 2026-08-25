@@ -432,11 +432,18 @@ function BestMoveSheet({
  * What is behind the odds.
  *
  * Everything the brief asks the engine to be able to answer, kept off the main
- * screen and put one tap away: the biggest remaining swings, what a lineup
- * change would be worth, and which question the lineup should be asked. The
- * approved concept rejected all of this as permanent furniture and it is right
- * — but "not on the screen" is not the same as "not available", and a reader
- * who taps a win probability is asking exactly this question.
+ * screen and put one tap away: the biggest remaining swings, which question the
+ * lineup should be asked, and how confident the forecast is. The approved
+ * concept rejected all of this as permanent furniture and it is right — but
+ * "not on the screen" is not the same as "not available", and a reader who taps
+ * a win probability is asking exactly this question.
+ *
+ * What is deliberately *not* here is the recommendation itself. It has its own
+ * home now — the `Best move` row above the starters, and the sheet behind it —
+ * and a fact with two primary homes is a fact the reader has to reconcile. The
+ * only thing this sheet still says about the lineup is the one thing that home
+ * cannot: which of the three empty cases is the reason there is no move to
+ * make. See the note above that branch.
  */
 function OddsSheet({
   forecast,
@@ -525,27 +532,38 @@ function OddsSheet({
         </>
       ) : null}
 
-      <div className="detail-label" style={{ marginTop: 12 }}>
-        Lineup impact
-      </div>
-      {decision.best ? (
-        <div className="matchup-decision" data-testid="lineup-impact">
-          <div>
-            <strong>
-              Start {name(decision.best.inPlayerId)} over {name(decision.best.outPlayerId)}
-            </strong>{' '}
-            <span className="faint">({decision.best.slot})</span>
+      {/*
+        Why there is nothing to change, and only that.
+
+        This section used to restate the recommendation — the swap, the odds it
+        moves and the reason for it — under a heading called `Lineup impact`.
+        Every one of those facts is now on the Matchup screen itself, in the
+        `Best move` row above the starters, and spelled out again in the sheet
+        behind it. One fact, one primary home: the sheet that explains a *number*
+        has no business printing the app's headline recommendation a third time,
+        four sections below where the reader already read it.
+
+        What was **only** ever here is the other branch. `decision.note` tells
+        the three empty cases apart — the decisions are locked, the bench cannot
+        legally fill a slot, or no change wins more often — and the screen's own
+        note says one thing for all three. So the unique half stays, and the
+        duplicated half is gone.
+
+        Keyed on the note rather than on the absence of a move, which is the same
+        condition said in the terms this block is actually about: the model
+        writes a note exactly when it has no change to offer, and a heading over
+        an empty paragraph is not an improvement on the duplication it replaced.
+      */}
+      {decision.note ? (
+        <>
+          <div className="detail-label" style={{ marginTop: 12 }}>
+            Lineup impact
           </div>
-          <div className="faint">
-            {Math.round(decision.best.winNow * 100)}% → {Math.round(decision.best.winAfter * 100)}% ·{' '}
-            {decision.best.reason}
+          <div className="faint" data-testid="lineup-impact">
+            {decision.note}
           </div>
-        </div>
-      ) : (
-        <div className="faint" data-testid="lineup-impact">
-          {decision.note}
-        </div>
-      )}
+        </>
+      ) : null}
 
       <div className="faint" style={{ margin: '10px 2px 0' }}>
         Advisory only. Change a lineup in Sleeper — this app never edits one. Model {forecast.modelVersion}.

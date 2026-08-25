@@ -200,8 +200,40 @@ test.describe('the real matchup', () => {
   test('explains the odds one tap away, and says it never edits a lineup', async ({ page }) => {
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('lineup-impact')).toBeVisible();
     await expect(page.getByTestId('odds-sheet')).toContainText('never edits one');
+  });
+
+  /**
+   * One fact, one primary home.
+   *
+   * The recommendation lives above the starters and is explained in the sheet
+   * behind that row. It used to be printed a third time near the bottom of
+   * `Behind the odds`, under a heading about something else, where a reader who
+   * had already acted on it met it again out of order. Asserted against the
+   * real endpoint rather than a fixture because the duplication was of a real
+   * decision, and either branch of it is a pass: a screen with a move to offer
+   * must not restate it here, and a screen with none must still say which of
+   * the three empty cases it is in.
+   */
+  test('does not restate the recommendation inside Behind the odds', async ({ page }) => {
+    /*
+     * Read before the sheet opens, because it is what decides which branch is
+     * under test. `silent` is the fourth state — a finished afternoon draws no
+     * row at all — and it is grouped with the empty cases here: what matters is
+     * only whether a move is on offer.
+     */
+    const row = page.getByTestId('matchup-best-move');
+    const hasMove = (await row.count()) > 0 && (await row.getAttribute('data-state')) === 'move';
+
+    await page.getByTestId('matchup-win').click();
+    await expect(page.getByTestId('odds-sheet')).toBeVisible();
+
+    if (hasMove) {
+      await expect(page.getByTestId('lineup-impact')).toHaveCount(0);
+      await expect(page.getByTestId('odds-sheet')).not.toContainText('Lineup impact');
+    } else {
+      await expect(page.getByTestId('lineup-impact')).toBeVisible();
+    }
   });
 
   /**
@@ -1006,6 +1038,53 @@ test.describe('the best move', () => {
   });
 
   /**
+   * The recommendation has one primary home, and `Behind the odds` is not it.
+   *
+   * `Lineup impact` used to print the swap, the odds it moves and the reason
+   * for it — every word of which the `Best move` row above the starters and the
+   * sheet behind it now say first. Both fixtures are driven here because the
+   * removal was conditional: the duplicated half is gone and the half that was
+   * only ever in this sheet is not.
+   */
+  test('drops Lineup impact once the best move has a home of its own', async ({ page }) => {
+    await serve(page, morning());
+    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'move');
+
+    await page.getByTestId('matchup-win').click();
+    const sheet = page.getByTestId('odds-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('lineup-impact')).toHaveCount(0);
+    await expect(sheet).not.toContainText('Lineup impact');
+    await expect(sheet).not.toContainText('Start C. Olave over B. Hall');
+    await expect(sheet).not.toContainText('C. Olave projects higher');
+
+    // Everything this sheet is actually for is still in it. (No leverage rows in
+    // this fixture — the swings list is covered where the fixture carries some.)
+    await expect(page.getByTestId('mode-why')).toBeVisible();
+    await expect(sheet).toContainText('Projected final');
+    await expect(sheet).toContainText('Recommended mode');
+    await expect(sheet).toContainText('never edits one');
+  });
+
+  /**
+   * The half that was only ever here.
+   *
+   * The screen's own note says `No lineup change recommended` for all three
+   * empty cases. Which one it is — locked, nobody legal, nothing better — is
+   * `decision.note`, and this sheet is still the only place it is printed.
+   */
+  test('keeps the reason there is no move, which the screen cannot say', async ({ page }) => {
+    await serve(page, morning({ decision: decides(null, [], 'Nobody on your bench could legally take a starting slot.') }));
+    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'none');
+
+    await page.getByTestId('matchup-win').click();
+    await expect(page.getByTestId('odds-sheet')).toBeVisible();
+    await expect(page.getByTestId('lineup-impact')).toHaveText(
+      'Nobody on your bench could legally take a starting slot.',
+    );
+  });
+
+  /**
    * "Nothing to change" and "we cannot say" are different answers.
    *
    * Both leave `decision.best` null, and a screen that keyed off that alone
@@ -1306,7 +1385,6 @@ test.describe('the best move', () => {
 
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('lineup-impact')).toBeVisible();
     await expect(page.getByTestId('odds-sheet')).toContainText('never edits one');
     await page.getByTestId('sheet-close').click();
 
