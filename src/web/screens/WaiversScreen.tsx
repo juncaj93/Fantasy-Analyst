@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LeagueSummary, type StartSitRefreshReport, type WaiverAdvice } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
-import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
+import { WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -103,6 +103,19 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const segments = useMemo(() => [ALL_FILTER, ...(board?.positions ?? [])], [board]);
   const rows = useMemo(() => (board?.rows ?? []).filter((row) => rowMatches(row, filter)), [board, filter]);
 
+  /*
+   * Who this roster would cut for each target, by player.
+   *
+   * Computed on the server beside the plan itself and merely looked up here —
+   * the sheet must never be able to name a different cut from the plan card at
+   * the top of the same screen, and the only way to guarantee that is for both
+   * to be reading one answer.
+   */
+  const dropHints = useMemo(
+    () => new Map((advice?.claimPlan?.dropHints ?? []).map((hint) => [hint.addPlayerId, hint.label])),
+    [advice],
+  );
+
   return (
     <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull">
       <NavBar title="Waivers" testId="waivers-nav" />
@@ -117,6 +130,16 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         <Empty>Your roster was not found in this league. Check the connected Sleeper user.</Empty>
       ) : (
         <>
+          {/*
+            The answer, before the board that supports it.
+
+            Above the position chips deliberately: a chip narrows the *board*,
+            and the plan is not a view of the board — it is the claims to enter,
+            in the order to enter them, and hiding it behind a filter for WRs
+            would hide the tight end claim that the same plan depends on.
+          */}
+          <WaiverPlanCard plan={advice.claimPlan} />
+
           {segments.length > 1 ? (
             <SegmentedControl
               label="Filter by position"
@@ -195,7 +218,9 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         </>
       )}
 
-      {open ? <WaiverDetailSheet row={open} onClose={() => setOpen(null)} /> : null}
+      {open ? (
+        <WaiverDetailSheet row={open} onClose={() => setOpen(null)} dropHint={dropHints.get(open.playerId) ?? null} />
+      ) : null}
     </PullToRefresh>
   );
 }

@@ -2010,6 +2010,82 @@ are still unreferenced, so those four removals stand. `common.tsx` was
 deliberately left alone in this pass because the headshot lane owned it — it
 edited that file, so the restraint was load-bearing rather than theoretical.
 
+## Milestone — the waiver plan, wired (done)
+
+The claim planner shipped in #179 as core intelligence with nothing calling it,
+which was the right way to build it and a strange thing to leave: the app knew
+who to add, what to bid, who to drop and in what order to enter the claims, and
+the Waivers screen still answered only the first half. This wires it, and the
+whole of the wiring is `core/waivers/claimPlan.ts` — two functions, one call
+from `app.ts` and one from the demo runtime.
+
+**The gather computes nothing.** `planWaiversFor` takes the objects the waivers
+handler is already holding when it is about to reply — the roster inputs it just
+scored, the bounded wire it just scanned, the advice it is about to send, the
+bids `core/faab` just priced, the IR slots and the wallet — and calls
+`planWaiverClaims` once. No provider is touched, no player rescored, no price
+recomputed. It rebuilds the board with `buildWaiverBoard`, the same pure function
+the screen calls, so the targets the planner ranks are in the order the reader is
+looking at; a second ordering would have been a second opinion about who is worth
+chasing, arrived at with strictly less information. `PlannerBid` is a structural
+subset of the priced bid, so the seam passes a reference and "the displayed bid
+is the recommended bid" is a fact about the types rather than a thing to keep
+true by hand.
+
+**The wording is the integration's, and it is written once.** The planner emits
+`WaiverReasonCode` values and no prose, deliberately, because a plan is read
+three ways and prose written there would be prose written for whichever of the
+three was imagined first. `describeWaiverPlan` is the only place in the app that
+turns a code into a sentence. It runs on the server, beside the arithmetic that
+justifies it, which is why the browser paid ~0.7 kB for a feature whose model is
+nine files — and the same reason the DST planner writes its own headline.
+
+**The card is an ordered list and nothing on it is a button.** A plan naming one
+target twice and one drop twice is exactly right and looks exactly like a
+mistake, so `Only if 1 loses` is on the card and not behind **See Why** — a
+reader who cannot see it deletes one of the two lines, and which one they delete
+decides whether they land the player. The numbering is the instruction, so it is
+a real `<ol>` marker rather than a printed digit; the first attempt gave the
+`li` a `display: flex` and silently deleted every number on the card, which a
+screenshot caught and no assertion would have. One `See why`, at 44px, and no
+control anywhere on the screen that could transact.
+
+**An empty plan surfaces only when it says something the board does not.** A
+quiet week is already `Nothing available beats what you already have` four
+pixels below; `No safe drop for this upgrade` is a different fact — a roster
+that needs a trade rather than a better target — and earns its line. A roster
+the engine cannot score keeps its adds and its bids and says the cut is the
+reader's, and never leaves a blank where a name should be, because a blank reads
+as *no cut needed*.
+
+**Two boundaries were held rather than blurred.** The defence is excluded inside
+`planWaiverClaims`, so the generic plan can never contradict the DST planner on
+the same screen — and because the model reports a rostered defence as
+`core_value`, the sheet recovers the position from the drop ranking and says *a
+defence, which belongs to the defence plan* rather than filing it under "worth
+too much to cut". And the add-specific cut is drawn on a player's own detail
+sheet rather than on the compact row, because a row four lines under the plan
+card would be repeating it; it reaches the targets the plan had no room for,
+which is what makes it worth a line at all. The plan and the sheet are
+reconciled inside the seam — they rank on different things underneath and would
+otherwise legitimately name two different cuts for one add.
+
+**Demo Mode calls the same function and pays for it.** The demo waivers handler
+adds the one line `app.ts` adds, on the scenario's own clock, so a scenario and a
+real league cannot draw two different shapes of the same screen. That pulls the
+whole planner into the demo chunk for ~9 kB and the budget was raised from 115 kB
+to 124 kB in the same commit with the reason recorded — a Demo Mode whose Waivers
+screen is missing its headline card is a worse demo than an ideal one is a better
+bundle, and reimplementing the plan for the demo would be exactly the second
+model this repository refuses to keep honest. The fixtures themselves are
+untouched; staging a realistic A → C, B → C, B → D scenario belongs to the Demo
+refresh.
+
+Thirty-eight unit and integration tests over the seam and the endpoint, and
+twenty-one browser tests over the card, the sheet, the honest endings, a
+forty-five-character name, a four-figure bid and a one-dollar one, at all four
+widths.
+
 ## Milestone — the face on every focused player, and nowhere else (done)
 
 The portrait shipped on one surface: the expanded player card, reached from
@@ -2119,15 +2195,28 @@ the one the shared card was already using.
    the ladder, the gaps and the ratios per position; nothing draws them.
 5. **Re-reading everything at once**, rather than one newsletter at a time.
    Worth doing only once real issues have accumulated.
-6. **Shard the WebKit matrix, and look at gate efficiency as a whole.** Each
-   width currently runs the entire browser suite on one runner, and the suite
-   has grown to roughly nineteen minutes of testing per width — close enough to
-   its ceiling that a slow runner reads as a failure with no test having failed.
-   That happened twice while the sheet-dismissal work was being gated, and the
-   step's budget was raised from twenty minutes to twenty-five to cover it. That
-   is time, not capacity: the next few features spend it. Splitting each width
-   across two runners halves the wall clock and makes the ceiling mean "stuck"
-   again, and it is worth doing alongside a wider look at what the gate spends —
-   which specs overlap, and which of them need all four widths rather than one.
-   Deliberately deferred to a workflow-optimisation pass after the Codex UI
-   audit rather than solved inside a product change.
+6. **Shard the WebKit matrix — this is now blocking, not recommended.** Each
+   width runs the entire browser suite on one runner. The suite was roughly
+   nineteen minutes of testing per width when this item was written, close
+   enough to its ceiling that a slow runner read as a failure with no test
+   having failed; that happened twice while the sheet-dismissal work was being
+   gated, and the step's budget went from twenty minutes to twenty-five to cover
+   it. The note then said "that is time, not capacity: the next few features
+   spend it."
+
+   They have. The waiver-plan lane spent the rest of it. On one commit, one
+   afternoon: 375 at ~17m50s, 360 at ~21m27s, 390 at ~22m15s, and 430 cut at the
+   twenty-five-minute ceiling on test 649 of about 660 with nothing having
+   failed. Two of four widths inside three minutes of the ceiling on the same
+   run is the suite's size rather than one unlucky runner, so the budget was
+   raised again — twenty-five to thirty, and the job ceiling thirty-five to
+   forty — with the measurement recorded in `ci.yml` beside it.
+
+   That is the third raise, and a number raised three times is a number on its
+   way to meaning nothing. Splitting each width across two runners halves the
+   wall clock and makes the ceiling mean "stuck" again. It is worth doing
+   alongside a wider look at what the gate spends — which specs overlap, and
+   which of them need all four widths rather than one; every spec in `e2e/`
+   currently runs at every width by convention, and a good share of them assert
+   content rather than layout. **The next feature that adds browser tests should
+   do this first rather than raise the ceiling a fourth time.**

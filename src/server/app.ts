@@ -42,6 +42,7 @@ import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
  * bid and a live one can never be two different numbers.
  */
 import { priceWaiverUpgrades } from '../core/waivers/pricing.ts';
+import { buildWaiverClaimPlan } from '../core/waivers/claimPlan.ts';
 import { waiverLeagueIntel, withCompetition } from '../core/waivers/intel.ts';
 /* Still used directly by handlers in this file. */
 import { evaluatePlayer } from '../core/startsit/engine.ts';
@@ -1020,6 +1021,36 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
     );
 
+    /*
+     * And the claims themselves: who to add, what to bid, who to drop, in what
+     * order to enter them.
+     *
+     * Built from what this handler is already holding rather than from a second
+     * read of anything — the roster inputs, the wire inputs, the board that is
+     * about to be sent, the priced bids on it, the IR slots and the wallet. No
+     * provider is touched, no player is rescored, and no price is recomputed;
+     * see `core/waivers/claimPlan.ts`, which is the whole of the seam.
+     *
+     * A failure is swallowed to an unsurfaced plan, on the same principle as the
+     * defence above: the board is a complete answer to a different question, and
+     * a planner that fell over is not a reason to take the page down.
+     */
+    const claimPlan = (() => {
+      try {
+        return buildWaiverClaimPlan({
+          roster: rosterInputs,
+          candidates: candidateInputs,
+          advice: { ...advice, upgrades, dst, faab: { bids: budgets } },
+          shape,
+          profile,
+          reserveIds: mine.reserveIds,
+          budget: strategy?.budget ?? null,
+        });
+      } catch {
+        return null;
+      }
+    })();
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
@@ -1027,6 +1058,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       ...advice,
       dst,
       upgrades,
+      /** The claims to enter, in order. Advisory — nothing here transacts. */
+      claimPlan,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy

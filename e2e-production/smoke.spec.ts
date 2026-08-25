@@ -1476,6 +1476,110 @@ test.describe('the season features', () => {
       }
     }
   });
+
+  /**
+   * The claim plan, live: the instructions this app hands somebody to type into
+   * Sleeper by hand.
+   *
+   * Two things are checked against whatever real roster and real wire the
+   * deployment is serving, because both are the kind of mistake that costs all
+   * the trust the rest of the plan earned. A claim that names a cut the reader
+   * does not own is one; a plan that reaches a reader still carrying the
+   * planner's machine vocabulary is the other.
+   *
+   * The screen half is a **separate test** rather than a guarded tail of this
+   * one, and that is the whole reason it is separate. The seasonal slot means
+   * Waivers is not a destination in preseason, so a `test.skip` at the bottom of
+   * a single test would fire after these assertions had already run and passed —
+   * and Playwright would report the whole thing as skipped. A production check
+   * that reads as "skipped" for the entire feature is the same failure this
+   * file's opening comment is about: it looks like coverage and is not. The API
+   * half below is true in every season and is never guarded on the season.
+   */
+  test('the waiver plan cuts only your own players, and says so in English', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'team');
+
+    const data = await page.evaluate(async () => {
+      const overview = await (await fetch('/api/overview')).json();
+      const id = overview?.selectedLeague?.id;
+      if (!id) return null;
+      const [waivers, roster] = await Promise.all([
+        (await fetch(`/api/leagues/${id}/waivers`)).json(),
+        (await fetch(`/api/leagues/${id}/roster`)).json(),
+      ]);
+      return { waivers, roster } as {
+        waivers: {
+          found: boolean;
+          claimPlan: {
+            claims: { rank: number; addName: string; addPosition: string; dropPlayerId: string | null; bid: number | null }[];
+          } | null;
+        };
+        roster: { starters: { playerId: string }[]; bench: { playerId: string }[] };
+      };
+    });
+    test.skip(!data?.waivers?.found, 'no roster on this deployment');
+    test.skip(!data!.waivers.claimPlan, 'this deployment produced no plan');
+
+    const plan = data!.waivers.claimPlan!;
+    const mine = new Set([
+      ...data!.roster.starters.map((p) => p.playerId),
+      ...data!.roster.bench.map((p) => p.playerId),
+    ]);
+
+    for (const [index, claim] of plan.claims.entries()) {
+      expect(claim.rank, 'the ranks are the order to enter the claims in').toBe(index + 1);
+      if (claim.dropPlayerId == null) continue;
+      expect(mine.has(claim.dropPlayerId), 'the plan named a cut this roster does not hold').toBe(true);
+    }
+
+    /*
+     * The defence is the DST planner's, on a live deployment as much as on a
+     * fixture. Two surfaces recommending different things about one DEF slot is
+     * the failure the boundary inside `planWaiverClaims` exists to prevent.
+     */
+    for (const claim of plan.claims) {
+      expect(claim.addPosition, 'the generic plan claimed a defence').not.toBe('DEF');
+    }
+
+    const text = JSON.stringify(plan);
+    for (const code of ['add_enters_lineup', 'protected_in_lineup', 'drop_covered_by_add', 'net_gain_below_bar']) {
+      expect(text, `the reason code "${code}" reached a reader`).not.toContain(code);
+    }
+    expect(text.toLowerCase(), 'nothing this app produces is optimal').not.toContain('optimal');
+  });
+
+  /**
+   * The plan on screen: one See Why, and no control that could transact.
+   *
+   * Skipped out of season, and only this half is — the contract assertions above
+   * run in every season. This card is a list of transactions and there is no
+   * control on it that performs one, which is the guarantee the whole app is
+   * held to and this is the surface closest to breaking it.
+   */
+  test('the waiver plan offers one See Why, and nothing that would transact', async ({ page }) => {
+    await page.goto('/');
+    const tabs = await expectedTabs(page);
+    test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
+
+    await open(page, 'waivers');
+    const card = page.getByTestId('waiver-plan');
+    test.skip((await card.count()) === 0, 'this deployment surfaced no plan to draw');
+
+    await expect(card.getByRole('button')).toHaveCount(1);
+    const label = (await card.getByRole('button').innerText()).toLowerCase();
+    for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
+      expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
+        new RegExp(`\\b${forbidden}\\b`),
+      );
+    }
+
+    /* And the claims are not controls, so there is nothing to nest one inside. */
+    await expect(card.locator('button button')).toHaveCount(0);
+    for (const claim of await card.getByTestId('waiver-plan-claim').all()) {
+      await expect(claim.locator('button')).toHaveCount(0);
+    }
+  });
 });
 
 /**

@@ -113,7 +113,13 @@ jobs:
     #
     # Each step that can block still carries its own budget, so a failure names
     # which part overran instead of leaving this one to say only "something".
-    timeout-minutes: 35
+    #
+    # Forty, tracking the test step's move from twenty-five to thirty below. It
+    # moves for one reason only: to stay *larger* than the sum of the steps it
+    # contains, so that an overrun is still named by the step that caused it. A
+    # job ceiling that becomes the binding constraint reports "something took too
+    # long", which is the one thing this number exists not to say.
+    timeout-minutes: 40
 
     # The job number above pays for setup as well as tests, so on its own it
     # still cannot say *which* of the two overran — and that distinction is the
@@ -193,8 +199,33 @@ jobs:
       # runners is the answer that scales, and it is in `docs/STATUS.md` under
       # recommended next work rather than here, because it is a workflow project
       # and not a line in a file.
+      #
+      # Twenty-five to thirty, and this is the third time. The measurement, from
+      # the waiver-plan run on #181 — four widths, one commit, one afternoon:
+      #
+      #     375   ~17m50s   green
+      #     360   ~21m27s   green
+      #     390   ~22m15s   green
+      #     430    25m00s   cut at test 649 of ~660, no test having failed
+      #
+      # 430 is reliably the slowest width — the widest viewport lays out the most
+      # — and it went over by something under half a minute. What matters more is
+      # 390 at 22m15s: two of four widths were inside three minutes of the
+      # ceiling on the same run, so this is the suite's size and not one unlucky
+      # runner. The distinction the paragraphs above spend so long on is the one
+      # that decides it, and the evidence points the same way it did at twenty.
+      #
+      # Thirty, and the job ceiling moves with it so it keeps doing its own job
+      # rather than becoming the binding constraint.
+      #
+      # Being honest about what this is: raising a ceiling for the third time is
+      # the behaviour this file warns about two comments up, and the only reason
+      # it is defensible here is that nothing was skipped, loosened or retried to
+      # get green. Sharding has stopped being an optimisation and started being
+      # the fix — see `docs/STATUS.md`, where it is now recorded as blocking the
+      # next feature rather than merely recommended.
       - run: npx playwright test --project=${{ matrix.project }}
-        timeout-minutes: 25
+        timeout-minutes: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

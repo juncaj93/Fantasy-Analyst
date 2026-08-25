@@ -16,7 +16,9 @@
  * that does anything but open the detail.
  */
 
+import { useState } from 'react';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
+import type { WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
 import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 
@@ -35,6 +37,181 @@ function UnknownField({ what }: { what: string }) {
     <span className="faint" title={`${what} is not known yet — no value is being invented`} data-testid="waiver-unknown">
       —
     </span>
+  );
+}
+
+/**
+ * The plan: what to enter, in the order to enter it.
+ *
+ * The first thing on the screen, and deliberately not a row — the board below it
+ * ranks *players* and this ranks *claims*, which is a different object with a
+ * different unit. Everything a reader has to do is on its face: who to add, what
+ * to bid, who to drop, and the numbering, which is the instruction rather than
+ * decoration since Sleeper runs claims in the order they were entered.
+ *
+ * ## Why the repeated lines are not a bug
+ *
+ * A plan routinely names one target twice and one drop twice, and read as a list
+ * that is nonsense. The qualifier at the end of the line is the whole of what
+ * turns it back into sense — `Only if 1 loses` — and it is here rather than
+ * behind **See Why** because a reader who does not see it will delete the line.
+ *
+ * ## Not a control
+ *
+ * The card is a `div` and every claim is an `li`. The only button on it is
+ * `See why`, and there is exactly one: this app makes no transaction, and a
+ * claim line that looked tappable would be offering to make one. The claims are
+ * typed into Sleeper by hand, which is also why the order matters.
+ */
+export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefined }) {
+  const [open, setOpen] = useState(false);
+  if (!plan?.surface) return null;
+
+  /*
+   * The sheet is offered only when it has something the card does not.
+   *
+   * An empty plan whose whole story is its own headline — a quiet week — would
+   * open onto a sheet repeating that headline, which is a control that exists to
+   * disappoint. A plan with claims always has more; a `no safe drop` plan has
+   * the protected list, which is precisely the argument somebody wants with it.
+   */
+  const hasWhy =
+    plan.claims.length > 0 ||
+    plan.protectedPlayers.length > 0 ||
+    plan.outcomes.length > 0 ||
+    plan.relationships.length > 0 ||
+    plan.budget != null;
+
+  return (
+    <>
+      <div className="card claim-plan" data-testid="waiver-plan" data-state={plan.state}>
+        <div className="detail-label" data-testid="waiver-plan-headline">
+          {plan.headline}
+        </div>
+
+        {plan.claims.length > 0 ? (
+          <ol className="claim-plan-list" data-testid="waiver-plan-claims">
+            {plan.claims.map((claim) => (
+              <ClaimLine key={claim.claimId} claim={claim} />
+            ))}
+          </ol>
+        ) : null}
+
+        {plan.note ? (
+          <div className="faint claim-plan-note" data-testid="waiver-plan-note">
+            {plan.note}
+          </div>
+        ) : null}
+
+        {hasWhy ? (
+          <div className="btn-row" style={{ marginTop: 'var(--sp-2)' }}>
+            <button className="btn btn-compact" data-testid="waiver-plan-why" onClick={() => setOpen(true)}>
+              See why
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {open ? <WaiverPlanSheet plan={plan} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
+/**
+ * One instruction, on as few lines as it takes.
+ *
+ * The number is the list's own marker rather than a printed character, so the
+ * indent is a real one and a screen reader announces an ordered list instead of
+ * a paragraph beginning with a digit. The qualifier wraps under the instruction
+ * on a narrow phone rather than shrinking it — a name clipped to fit a
+ * contingency note is the wrong half kept.
+ */
+function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
+  return (
+    <li className="claim-plan-claim" data-testid="waiver-plan-claim" data-rank={claim.rank} data-relation={claim.relation}>
+      <span className="claim-plan-headline">{claim.headline}</span>
+      {claim.qualifier ? (
+        <span className="tag tag-mini claim-plan-qualifier" data-testid="waiver-plan-qualifier">
+          {claim.qualifier}
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * The whole argument, in one sheet with no tabs in it.
+ *
+ * Per claim: why him, why that cut, what the roster gains, what the lineup
+ * gains, what the pricing pass said, who else wants him, and how the claim
+ * stands to the ones above it. Then the three things that are about the plan
+ * rather than about any one claim — how the week can go, whether two adds are
+ * worth two cuts, and who the plan refuses to touch.
+ *
+ * No reason codes reach this file. Every sentence below was written in
+ * `core/waivers/claimPlan.ts`, next to the arithmetic that justifies it.
+ */
+export function WaiverPlanSheet({ plan, onClose }: { plan: WaiverClaimPlan; onClose: () => void }) {
+  return (
+    <Sheet title={plan.headline} onClose={onClose} testId="waiver-plan-detail">
+      <div className="weekly" data-testid="waiver-plan-detail-body" data-state={plan.state}>
+        {plan.claims.map((claim) => (
+          <div key={claim.claimId} className="claim-why" data-testid="waiver-plan-why-claim" data-rank={claim.rank}>
+            <div className="claim-why-head">
+              {/*
+                Read out, not hidden.
+
+                The number is half the instruction on this sheet — every
+                relation sentence under it says `Claim 2` — so a reader using a
+                screen reader needs to hear which claim they are inside.
+              */}
+              <span className="claim-plan-rank">{claim.rank}</span>
+              <span className="claim-plan-headline">{claim.headline}</span>
+            </div>
+            {claim.qualifier ? (
+              <div className="faint claim-why-qualifier">{claim.qualifier}</div>
+            ) : null}
+            <ul className="reason-list">
+              {claim.why.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        <PlanSection label="How the week can go" lines={plan.outcomes} testId="waiver-plan-outcomes" />
+        <PlanSection label="Two adds, or one" lines={plan.relationships} testId="waiver-plan-relationships" />
+        <PlanSection label="Not on offer as a cut" lines={plan.protectedPlayers} testId="waiver-plan-protected" />
+        <PlanSection label="What your budget allows" lines={plan.budget ? [plan.budget] : []} testId="waiver-plan-budget" />
+
+        {/*
+          The promise, beside the instructions it qualifies.
+
+          The same sentence the player sheet carries, in the one other place
+          somebody is about to act — and enforced by something stronger than a
+          sentence: there is no control on this screen that could transact, which
+          `e2e/waivers.spec.ts` asserts by reading every button on it.
+        */}
+        <div className="faint" style={{ marginTop: 'var(--sp-2)' }}>
+          Advisory only — enter these in Sleeper yourself. This app never makes a transaction.
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function PlanSection({ label, lines, testId }: { label: string; lines: string[]; testId: string }) {
+  if (lines.length === 0) return null;
+  return (
+    <>
+      <div className="detail-label" style={{ marginTop: 12 }}>
+        {label}
+      </div>
+      <ul className="reason-list" data-testid={testId}>
+        {lines.map((line, index) => (
+          <li key={index}>{line}</li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -144,10 +321,22 @@ export function WaiverDetailSheet({
   row,
   onClose,
   onCompare,
+  dropHint,
 }: {
   row: WaiverBoardRow;
   onClose: () => void;
   onCompare?: () => void;
+  /**
+   * Who this roster would cut for *him*, from the claim planner.
+   *
+   * The one thing this sheet has never been able to answer, and the reason the
+   * planner exists: the preferred cut moves with the incoming player, so a
+   * single "worst player on my roster" list is the wrong answer to a claim. It
+   * is here rather than on the compact row because the row sits a few lines
+   * under a plan card that already names the cut for the players it claims —
+   * and this reaches the targets the plan had no room for as well.
+   */
+  dropHint?: string | null;
 }) {
   return (
     <Sheet
@@ -258,6 +447,12 @@ export function WaiverDetailSheet({
               ) : null}
             </dd>
           </div>
+          {dropHint ? (
+            <div className="weekly-line" data-testid="waiver-drop-hint">
+              <dt>If you claim him</dt>
+              <dd>{dropHint}</dd>
+            </div>
+          ) : null}
           {row.statusFlag ? (
             <div className="weekly-line">
               <dt>Availability</dt>
