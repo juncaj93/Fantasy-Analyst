@@ -379,7 +379,7 @@ describe('the free-tier promises, as facts about the wiring', () => {
 
   it('is called from the daily tick, inside a try/catch of its own', () => {
     const daily = worker.slice(worker.indexOf("event.cron.startsWith('0 9')"));
-    const call = daily.indexOf('new ScheduleService(env.DB)');
+    const call = daily.indexOf('new ScheduleService(env.DB, { fetch: meteredRedirectingFetch })');
     expect(call).toBeGreaterThan(-1);
 
     // The refresh and its own catch, so a fixture list that fails to refresh
