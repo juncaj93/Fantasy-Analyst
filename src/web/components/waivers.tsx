@@ -19,7 +19,7 @@
 import { useState } from 'react';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
 import type { WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
-import { Badge, PlayerIdentity, PositionBadge } from './common.tsx';
+import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 
 /**
@@ -339,10 +339,34 @@ export function WaiverDetailSheet({
   dropHint?: string | null;
 }) {
   return (
-    <Sheet title={row.name} onClose={onClose} testId="waiver-detail">
+    <Sheet
+      /*
+        The candidate, headed the way every focused player in this app is
+        headed — see `PlayerSheetTitle`.
+
+        This is a sheet about exactly one player: the reader picked him out of
+        the board, and the whole card is the case for claiming *him*. That is
+        the same act as opening the shared player card, so it gets the same
+        header rather than a second answer — his face, his name, and the pill
+        and club that used to open the body's first line.
+
+        The compact board behind it is untouched and stays image-free. A face
+        per row is what the discovery measured and rejected: it costs the name
+        column more than a portrait is worth on a list somebody is scanning.
+
+        Availability stays in the body, where it is a sentence under
+        `Availability` rather than a code. The row's own badge already shows the
+        short form to a reader who has not opened anything.
+      */
+      title={
+        <PlayerSheetTitle playerId={row.playerId} name={row.name} position={row.position} team={row.team} />
+      }
+      accessibleLabel={row.name}
+      onClose={onClose}
+      testId="waiver-detail"
+    >
       <div className="weekly" data-testid="waiver-detail-body" data-player-id={row.playerId}>
         <div className="weekly-head">
-          <PositionBadge position={row.position} team={row.team} />
           <span className="metric">{row.strength.label}</span>
           {row.score == null ? null : (
             <span className="metric">

@@ -15,7 +15,7 @@
 
 import { useState } from 'react';
 import type { WeeklyCard } from '../../core/startsit/weekCard.ts';
-import { Confidence, PositionBadge } from './common.tsx';
+import { Confidence, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 import {
   InjuryDetail,
@@ -43,10 +43,40 @@ export function WeeklyCardSheet({
   onCompare: () => void;
 }) {
   return (
-    <Sheet title={card.name} onClose={onClose} testId="weekly-sheet">
+    <Sheet
+      /*
+        Who the week is about, in the app's one arrangement for that.
+
+        The header was the player's name as a string, and the line under it —
+        the pill, the club, the confidence and the projection — carried his
+        identity as the first row of the *body*. Both halves of that were worth
+        changing. A reader reaches this sheet by choosing one player out of a
+        lineup, which is the same act that opens the shared player card from
+        Players or Trades, and it should not produce two different headers; and
+        the identity marks were sitting in the body's scroll, above the verdict,
+        where they pushed the one thing this card exists to say down the screen.
+
+        So identity moves into the header — face, name, pill, club, in
+        `PlayerSheetTitle`, the same block the shared card draws — and the band
+        below keeps only what it was always for: how sure the lineup is and what
+        it projects. The header does not scroll, so the portrait costs the
+        verdict nothing and is still there when the reader is four blocks down.
+
+        Availability is deliberately not repeated in the header. It is on its
+        own line in the body as a phrase — `Questionable · hamstring · limited →
+        full` — and abbreviating the same fact to `Q` two centimetres above it
+        would be the card saying one thing in two vocabularies.
+
+        `accessibleLabel`, because the title is no longer a string a dialog can
+        read its name from. Without it this card announces as an unnamed modal.
+      */
+      title={<PlayerSheetTitle playerId={card.playerId} name={card.name} position={card.position} team={card.team} />}
+      accessibleLabel={card.name}
+      onClose={onClose}
+      testId="weekly-sheet"
+    >
       <div className="weekly" data-testid="weekly-card" data-player-id={card.playerId}>
         <div className="weekly-head">
-          <PositionBadge position={card.position} team={card.team} />
           <Confidence level={card.confidence} />
           {card.score == null ? null : (
             <span className="metric" data-testid="weekly-score" data-projection-source={card.projectionSource ?? 'none'}>

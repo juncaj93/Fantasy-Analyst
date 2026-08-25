@@ -422,7 +422,10 @@ purpose, and the difference between the two cases is what justifies it.
 `src/core/players/headshot.ts` answers "does this player have a face, and what is
 its URL" and nothing else. Screens reach it through the `PlayerFace` primitive in
 `src/web/components/common.tsx`, exactly as they reach `nflTeamLogoUrl` through
-`TeamLogo` — no component builds the string itself.
+`TeamLogo` — no component builds the string itself. Screens do not reach
+`PlayerFace` directly either: every focused surface renders `PlayerSheetTitle`,
+the one header in the app that draws a player as a heading, so the portrait's
+size and loading behaviour are also decided in a single place.
 
 ### The URL is a convention, not a contract
 
@@ -524,27 +527,86 @@ the line beside it.
 
 ### Where portraits are drawn, and where they are not
 
-**Drawn:** the expanded player sheet only, at 64px, loaded eagerly, because that
-is the one surface where a reader has already committed to a single player.
+The rule is one sentence: **dense lists stay image-free, and a view of one
+player gets his face.** Everything below is that rule applied, plus the two
+places where applying it cost a measurement.
 
-**Not drawn**, by decision rather than by omission: Matchup, Draft, Waivers, the
-Players index, and the compact Smart Trades rows. The read-only discovery
-quantified the worst of these — on Matchup at 390px the name column falls from
-about 85px to about 60px — and a shortened name is information lost in exchange
-for decoration. `tests/playerHeadshotSurfaces.test.ts` names these files and
-fails if one grows a face; `e2e/player-face.spec.ts` checks the running app never
-requests a portrait from a list.
+**Drawn**, at 64px, loaded eagerly, on every surface where the reader has
+committed to a single player:
 
-**Deferred:** the Team screen. The discovery expected a 28px face to fit inside
-the 44px row, and the row height does hold — but a measured prototype at all four
-widths introduced name truncation at 390 (`Cal Whitfield`, 28px short, from
-none), 375 (3px → 43px) and 360 (18px → 58px), and left the identity column of a
-populated slot indented 32px from the empty slots above it. Two of the gate's
-conditions therefore fail. Team keeps its bundled club mark and no portrait.
+| surface | reached from | implementation |
+|---|---|---|
+| shared player card / page | Players, Smart Trades | `PlayerSheetTitle` |
+| weekly card | Team (a starter or bench player), Matchup (a lineup row) | `PlayerSheetTitle` |
+| waiver detail | Team (a waiver upgrade), Waivers (the board) | `PlayerSheetTitle` |
 
-### The sheet header, and what the portrait changed about it
+Six routes, one implementation. `PlayerSheetTitle` in
+`src/web/components/common.tsx` is the only thing in this app that renders
+`PlayerFace`, so the size, the eager load, the empty `alt`, the defence
+exclusion and the initials fallback are decided once. That is enforced rather
+than intended: `tests/playerHeadshotSurfaces.test.ts` fails if a second file
+renders a face, and fails if one of the three focused files stops rendering the
+shared header. A seventh surface gets a portrait by calling the header, and a
+dense list cannot get one by accident because a list has no header to put it in.
 
-A 64px portrait makes the sheet's header 64px tall whatever else is on it. On the
+The header is also where the identity marks now live on the weekly card and the
+waiver detail. Both used to print the position pill and the club as the first
+line of their *body*, above the verdict; that line is gone, because the header
+above it now carries the same two marks beside the name. The card is not taller
+and does not say anything twice.
+
+Availability is deliberately **not** repeated in those two headers. The shared
+card has a clean Sleeper designation and shows the code; the weekly card and the
+waiver detail carry availability as a phrase — `Questionable · hamstring ·
+limited → full` — already printed in words on a line of their own body, and
+abbreviating the same fact to `Q` two centimetres above it would be one card
+speaking two vocabularies.
+
+**Not drawn**, by decision rather than by omission: Matchup's mirrored lineup
+rows, the draft board, the waivers list, the Players index, Team's roster rows,
+and the compact Smart Trades rows. The read-only discovery quantified the worst
+of these — on Matchup at 390px the name column falls from about 85px to about
+60px — and a shortened name is information lost in exchange for decoration.
+`tests/playerHeadshotSurfaces.test.ts` names these files and fails if one grows a
+face; `e2e/player-face.spec.ts` and `e2e/player-face-focused.spec.ts` check the
+running app never requests a portrait from a list, on the same page load that
+proves the sheet it opens requests exactly one.
+
+The Smart Trades **offer** sheet is image-free for a different reason: it is not
+about one player. A trade has two sides and several names on each, and a grid of
+faces there would be decoration competing with the one thing the sheet is for.
+Trades reaches a portrait the same way Players does — by opening a player.
+
+**Deferred, by measurement:** Team's compact rows. The discovery expected a 28px
+face to fit inside the 44px row, and the row height does hold — but a measured
+prototype at all four widths introduced name truncation at 390 (`Cal Whitfield`,
+28px short, from none), 375 (3px → 43px) and 360 (18px → 58px), and left the
+identity column of a populated slot indented 32px from the empty slots above it.
+Two of the gate's conditions fail. Team keeps its bundled club mark and no
+portrait on the row — and gets the face in the card that row opens.
+
+**Ruled out, by measurement:** Draft's expanded player card. It is the one
+expanded player detail in the app that is not a sheet — it unfolds *inside* the
+board, and it is budgeted at about two and a half collapsed rows precisely so the
+board it opened from stays on screen. Both placements were prototyped and
+measured at 360 and 390:
+
+* **beside the content** — the working (`Sleeper ADP · DOG ADP · Pick · Val`,
+  which the card is arranged to keep on one line at 360px) wraps from 15px to
+  31px on four of five seeded cards. At 64px and at 40px alike: no face size that
+  is worth drawing leaves the line intact.
+* **above the content** — about 30px on a card whose ceiling has about 36px left.
+
+The widest seeded card goes from 2.53× a collapsed row to 2.80×, against a
+ceiling of 3× that `e2e/draft-card.spec.ts` enforces. The feature's own rule is
+that decision content wins when 64px will not fit cleanly, so Draft keeps the
+club mark, the status tag, the star and the whole of its working, and no face.
+Draft is the one surface named in the rollout that did not ship one, and it is on
+the protected list with those numbers attached.
+
+### The focused header, and what the portrait changed about it
+
+A 64px portrait makes a sheet's header 64px tall whatever else is on it. On the
 single identity line the header used to have — pill, club, name, status — that
 was expensive rather than free: the line carried about twenty pixels of slack and
 the face wanted sixty-eight, so at 360px it truncated nineteen of twenty-two
@@ -555,8 +617,10 @@ The height the portrait already costs is now spent instead of wasted. The name
 takes a line of its own beside the face and the marks that qualify him — pill,
 club, status — take the line under it. That is the arrangement `PlayerPage`
 already uses for the same player in a navigation bar (`.nav-title` over
-`.nav-subtitle`), so the two surfaces where a player is a *heading* read the same
-way. Every **list** is untouched: pill → club → name still reads across one line
+`.nav-subtitle`), so every surface where a player is a *heading* reads the same
+way — and since they all render `PlayerSheetTitle`, that is a fact about one
+component rather than a convention four files are trusted to keep. Every **list**
+is untouched: pill → club → name still reads across one line
 on Draft, Players, Trades and Waivers, which is the situation that rule was
 written for — making forty names start on one column. A header has one name in
 it. At 430, 390, 375 and 360, no name truncates.
@@ -597,8 +661,9 @@ deliberately do not grow a media-budget system for one image. What holds instead
 * no prefetch of the roster or the player pool, no background batch loading, no
   service worker;
 * dense lists stay image-free (above), so nothing eager-loads across a large
-  result set — `tests/playerHeadshotSurfaces.test.ts` asserts the sheet is the
-  only eager loader;
+  result set — `tests/playerHeadshotSurfaces.test.ts` asserts the shared focused
+  header is the only eager loader, and it draws one image for the one player the
+  reader opened;
 * repeat visits are the browser's HTTP cache, at Sleeper's 31-day `max-age`.
 
 ## Season as data
