@@ -326,14 +326,34 @@ session and the API hook, and nothing else.
 
 | | gzip |
 |---|---|
-| App JavaScript, without Demo Mode | ~98 kB |
-| App JavaScript, with it | 104.8 kB |
-| Demo Mode (never on the render path) | 92.3 kB across 8 chunks |
+| App JavaScript | 127.5 kB, against a 140 kB budget |
+| Everything the browser must fetch to render | 143.4 kB, against 160 kB |
+| Demo Mode (never on the render path) | 135.6 kB across 9 chunks, against 150 kB |
 
 `vite.config.ts` names every demo chunk `assets/demo-*.js`, which is what lets
 `perf-budgets.json` exclude them from the render-path budgets *and* cap them
 with a budget of their own. Excluding without capping is how a budget stops
 meaning anything, so both were done in the same commit.
+
+### The edge that has to stay cut
+
+A demo that runs a production engine can put that engine on the render path
+without anybody choosing to, and it happened once here — worth writing down,
+because the next lane to wire an engine into Demo Mode will meet it again.
+
+`core/waivers/board.ts` is on the render path and imported `weekRange` from
+`core/dst/planner.ts`. One line of formatting, and free: the bundler kept the
+function and tree-shook the rest of the planner. Then the demo began running
+`planDst` for real — so the planner was retained in full, and a module reachable
+from the entry belongs to the entry. The defence model, its outlook and the
+whole start/sit engine behind them moved into the chunk every page load fetches:
+**25 kB gzip, to print `Weeks 15–17`.**
+
+`weekRange` now lives in `core/dst/weeks.ts`, which imports nothing. The rule
+that falls out of it is worth keeping: **a render-path module may take types
+from an engine, but a runtime import is an edge, and an edge is a dependency
+tree.** The app-JavaScript number above is what it was before the demo ran the
+planner at all.
 
 ---
 

@@ -157,7 +157,8 @@ test.describe('Demo Mode on the deployed site', () => {
     await expect(page.getByTestId('matchup-score')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
     await expect(page.getByTestId('matchup-win-mine')).toBeVisible();
-    await expect(page.getByTestId('matchup-row')).toHaveCount(8);
+    /* Nine: the eight skill slots and the defence the demo league starts. */
+    await expect(page.getByTestId('matchup-row')).toHaveCount(9);
 
     /*
      * No Live Insights element, and the insights themselves still reachable.
