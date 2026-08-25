@@ -639,19 +639,36 @@ test.describe('the deployed app', () => {
    * that can actually regress.
    */
   test('opens one expanded player, in one identity order, on Players and on Trades', async ({ page }) => {
-    /** Left edges of the identity marks, in the order they are painted. */
+    /**
+     * Where the header's marks are painted — face, name, and the marks under it.
+     *
+     * This read one line for as long as the header was one line: position,
+     * club, name, status, left to right. The card carries a 64px portrait now
+     * and the block beside it is two lines — the name, and under it the marks
+     * that qualify him — because a face on the single line cost the name too
+     * much: measured across the seed at 360px it truncated nineteen of
+     * twenty-two names. See the note on `PlayerSheet`.
+     *
+     * Read as geometry rather than as DOM order, exactly as before: a card can
+     * put the pill first in the markup and paint it anywhere.
+     */
     const identity = () =>
       page.locator('.sheet-player-title').evaluate((title) => {
         const pick = (sel: string, mark: string) => {
           const el = title.querySelector(sel) as HTMLElement | null;
-          return el ? { mark, x: el.getBoundingClientRect().left } : null;
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { mark, x: r.left, top: r.top, bottom: r.bottom };
         };
-        return [
-          pick('.pos-pill', 'position'),
-          pick('.team-logo, .team-code', 'club'),
-          pick('.sheet-player-name', 'name'),
-          pick('[data-testid="injury-tag"]', 'status'),
-        ].filter((p): p is { mark: string; x: number } => p != null);
+        return {
+          face: pick('[data-testid="sheet-player-face"]', 'face'),
+          name: pick('.sheet-player-name', 'name'),
+          quals: [
+            pick('.pos-pill', 'position'),
+            pick('.team-logo, .team-code', 'club'),
+            pick('[data-testid="injury-tag"]', 'status'),
+          ].filter((p): p is { mark: string; x: number; top: number; bottom: number } => p != null),
+        };
       });
 
     /**
@@ -689,16 +706,35 @@ test.describe('the deployed app', () => {
 
     const card = async () => {
       const marks = await identity();
-      expect(marks.map((m) => m.mark).slice(0, 3), 'the identity is not in the row’s order').toEqual([
-        'position',
-        'club',
-        'name',
-      ]);
-      for (let i = 1; i < marks.length; i++) {
-        expect(marks[i]!.x, `${marks[i]!.mark} is drawn left of ${marks[i - 1]!.mark}`).toBeGreaterThan(
-          marks[i - 1]!.x,
-        );
+
+      // A portrait is optional presentation and may legitimately be initials,
+      // but the box is always drawn — so its absence is a real failure.
+      expect(marks.face, 'the expanded card is not drawing a portrait at all').not.toBeNull();
+      expect(marks.name, 'the expanded card is not drawing a name').not.toBeNull();
+
+      // The portrait leads: everything that says *who* is on the leading side.
+      expect(marks.face!.x, 'the portrait is not the leading mark in the header').toBeLessThan(marks.name!.x);
+      for (const q of marks.quals) {
+        expect(marks.face!.x, `${q.mark} is drawn left of the portrait`).toBeLessThan(q.x);
       }
+
+      // The name is a line above the marks that qualify it, not beside them.
+      for (const q of marks.quals) {
+        expect(q.top, `${q.mark} is back on the name's own line`).toBeGreaterThanOrEqual(marks.name!.bottom - 1);
+      }
+
+      // And those marks keep the row's order, left to right, on their own line.
+      expect(
+        marks.quals.map((m) => m.mark),
+        'the expanded card reordered the marks that qualify the name',
+      ).toEqual(['position', 'club', 'status'].filter((m) => marks.quals.some((q) => q.mark === m)));
+      for (let i = 1; i < marks.quals.length; i++) {
+        expect(
+          marks.quals[i]!.x,
+          `${marks.quals[i]!.mark} is drawn left of ${marks.quals[i - 1]!.mark}`,
+        ).toBeGreaterThan(marks.quals[i - 1]!.x);
+      }
+
       inOrder(await band());
 
       /*
