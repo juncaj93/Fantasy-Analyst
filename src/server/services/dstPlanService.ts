@@ -181,6 +181,7 @@ export async function buildDstPlan(db: Database, request: DstPlanRequest): Promi
        */
       unavailable: evaluation.ruledOut || evaluation.lock.locked || evaluation.score == null,
       unavailableReason: unavailableReason(evaluation, input),
+      locked: evaluation.lock.locked,
       opponent: evaluation.opponent,
       opponentImpliedTotal: evaluation.dst?.opponentImpliedTotal ?? null,
       forward: outlookFor(team, forward),

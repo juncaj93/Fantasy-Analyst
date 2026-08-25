@@ -51,6 +51,7 @@ function option(team: string, thisWeek: number | null, extra: Partial<DstOption>
     confidence: extra.confidence ?? 'high',
     unavailable: extra.unavailable ?? false,
     unavailableReason: extra.unavailableReason ?? null,
+    locked: extra.locked ?? false,
     opponent: extra.opponent ?? 'OPP',
     opponentImpliedTotal: extra.opponentImpliedTotal ?? 20,
     forward: extra.forward ?? null,
@@ -291,6 +292,21 @@ describe('a bye is a missing week, not a bad defence', () => {
 
     expect(plan.why.join(' ')).toMatch(/one-week fill/i);
     expect(plan.notes.join(' ')).toMatch(/still the rostered defence/);
+  });
+
+  it('goes quiet once the rostered defence has kicked off', () => {
+    /*
+     * A settled slot is not a decision. This is the same rule every locked
+     * slot in the app is held to, and it is separated from the bye above on
+     * purpose: a bye leaves a hole somebody has to fill, and a kickoff leaves a
+     * slot that cannot be changed.
+     */
+    const current = option('BUF', 6, { locked: true, unavailable: true, unavailableReason: 'has already kicked off' });
+    const plan = planDst(input({ rostered: [current], available: [option('NYJ', 14)] }));
+
+    expect(plan.decision).toBe('hold');
+    expect(plan.surface).toBe(false);
+    expect(plan.target).toBeNull();
   });
 
   it('surfaces a bye far enough ahead to act on it', () => {

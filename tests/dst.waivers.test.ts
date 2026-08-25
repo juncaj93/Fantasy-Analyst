@@ -58,6 +58,7 @@ function option(team: string, thisWeek: number) {
     confidence: 'high' as const,
     unavailable: false,
     unavailableReason: null,
+    locked: false,
     opponent: 'OPP',
     opponentImpliedTotal: 18,
     forward: null,

@@ -159,10 +159,20 @@ export interface DstOption {
   /** This week's score, through the shipped engine. Null when unscorable. */
   thisWeek: number | null;
   confidence: 'high' | 'medium' | 'low';
-  /** Cannot be started this week — on bye, or ruled out. */
+  /** Cannot be started this week — on bye, ruled out, or already kicked off. */
   unavailable: boolean;
   /** Why not, when so. */
   unavailableReason: string | null;
+  /**
+   * The game has started, which is a different unavailability from the rest.
+   *
+   * A defence on a bye leaves a hole somebody has to fill; a defence whose game
+   * has kicked off leaves a slot that is *settled*. The first is a decision and
+   * the second is a fact, and advising on the second would be offering an
+   * action the reader cannot take — the rule every lock state in this app is
+   * held to.
+   */
+  locked: boolean;
   opponent: string | null;
   opponentImpliedTotal: number | null;
   /** The next few weeks. Null when the schedule has not reached this app. */
@@ -399,6 +409,29 @@ export function planDst(input: DstPlanInput): DstPlan {
 
   if (current.thisWeek == null && !current.unavailable) {
     return { ...unavailablePlan(playoffWeeks, cost, `${current.name} cannot be scored this week`), current };
+  }
+
+  /*
+   * A settled slot is not a decision any more, so it gets no advice.
+   *
+   * The rule `waivers.ts` states for every other slot, applied here: once this
+   * defence's game has started the swap is not available to make, and a card
+   * offering one is offering an action the reader cannot take. Quiet rather
+   * than wrong — next week's decision arrives with next week's lines.
+   */
+  if (current.locked) {
+    return {
+      ...base(playoffWeeks),
+      decision: 'hold',
+      activation: window.activation,
+      surface: false,
+      headline: '',
+      why: [`${current.name} has already kicked off, so the DEF slot is settled for this week.`],
+      current,
+      cost,
+      confidence: current.confidence,
+      notes: ['the defence in the lineup has played — this week\u2019s DEF decision is closed'],
+    };
   }
 
   /*
