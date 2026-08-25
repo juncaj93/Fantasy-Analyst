@@ -103,13 +103,14 @@ is which.
 | `PlayerPage` | The player's own pushed destination: four adaptive metric tiles, then Overview / Outlook / Market / Evidence behind a segmented control. Reached from Players directly, and from Trades with its case as context above the sections. The evidence ledger is entire, with a polarity lens over it. |
 | `.dense-group` | The grouped list those rows sit in: one surface, hairlines between rows, no gaps and no per-row shadow. The alternative to forty cards. |
 | `Disclose` | Inline expand/collapse that animates height without mounting its children until it opens. |
+| `Fold` | A whole secondary section behind one control: a label, a word about what is inside, a chevron. The folded benches' affordance with the word "bench" taken out of it — it shares their stylesheet rules (`.bench, .fold`), so the two cannot drift apart. Its children are not rendered while it is shut, which is why it exists rather than a `<details>`: the market inventory on Trades runs to dozens of rows, and hiding them is not the same as not paying for them. The open flag belongs to the screen, not to the control, because a screen that pushes a detail page returns a different tree and a fold holding its own state comes back closed from every Back. Use it where a section is genuinely secondary to the one above it and would otherwise bury it. |
 | `PositionBadge` / `positionCardClass` | The position, as letters and as a card tint. `positionCardClass` paints a fill and belongs to the draft board; `positionAccentClass` hands over the hue without the fill, and is what every other list uses. |
 | `CompactTally` / `SignedValue` / `Signal` | The research tally at three levels of loudness. |
 | Draft card bottom row | `1fr auto`: the four metrics on the left, the tier-cliff warning tucked into the right-hand end of the same line. A warning costs the card no height, so a thinning position no longer puts a stutter in the board's rhythm. The chip has a short spelling below 376px, where four labelled numbers and nineteen characters will not share the line — the full sentence stays in its accessible name at every width. |
 | `Badge` / tags / `Confidence` | Status pills, ranked by how much attention each state deserves. |
 | `ScoreCard` | The head-to-head, in one card. Sleeper's score is the largest type on the screen; the projection sits under it in the quieter weight everything derived uses, and carries the word `proj` every time it appears — an unlabelled number that size beside a real score reads as another real score. Once the matchup is settled the projection and the odds both go and a result line takes their place: a probability shown for a finished game is a forecast presented as a fact. |
 | `WinBar` | Both percentages printed, and a `role="meter"` between them. The bar is an accelerator and never the carrier of the meaning. |
-| `BestMoveRow` / `BestMoveNote` | The one lineup change worth making, between the scoreboard and the starters: a quiet label, the swap, the slot, and the projected delta beside the odds before and after. One button and one tab stop at the grouped-row height — the same material as the starter rows below it, because a recommendation that needs a tint to be noticed is in the wrong place. When there is no move it is a footnote on the `Starters` heading instead, which costs the page no height; a degraded forecast says so in different words, and a finished matchup says nothing. `bestMoveState` decides which, so exactly one of the two ever draws. |
+| `BestMoveRow` / `BestMoveHoldRow` / `BestMoveNote` | The lineup advice, between the scoreboard and the starters: a quiet label, then either the swap with the projected delta beside the odds before and after, or `Hold your lineup`. One button and one tab stop at the grouped-row height — the same material as the starter rows below it, because a recommendation that needs a tint to be noticed is in the wrong place. Hold is a control and not a footnote: doing nothing is a decision, and an absence where the answer lives reads as the app having nothing to say. The two moods share the row's shape and typography so the page does not change height when the advice changes, and both open the same sheet — the reason to hold is the model's own sentence, which tells locked, nobody-legal and nothing-better apart. A forecast that failed is the exception and stays a footnote on the `Starters` heading: "we cannot say" turned into "hold" would be advice invented out of a failure. A finished matchup says nothing at all. `bestMoveState` decides which, so exactly one ever draws. |
 | `HeroCarousel` | One live insight at a time: auto-advancing slowly, pausing the instant it is touched, swipeable, and pageable by a button because a gesture is never the only way through. A single insight renders as a card with no pager at all — a carousel with one slide is a control that lies about having more to say. |
 | `SlotRow` | Both sides of one lineup slot on one line, around a fixed-width position pill that never moves between rows. Names truncate rather than wrap; below 400px the numbers and the club marks each give up a point so the names get their letters back. |
 | `BenchSection` | Collapsed on arrival, always. The bench is hindsight, and hindsight belongs behind a tap. Its rows are a starter's row exactly — same `PlayerIdentity`, same value field, same widths — so opening the fold adds rows without moving the columns above it. A bench player's pill says what he plays, never `BN`: where he is sitting is what the section heading is for. |
@@ -191,10 +192,19 @@ blank strip under the navigation twice:
   geometry back off the deployed site, where the 28×28 was measured.
 - `e2e/matchup.spec.ts` — the matchup screen, and the best move above its fold:
   where the row sits relative to the scoreboard and the starters, that it is one
-  control rather than a card, that it never outlives a kickoff, that a
-  degraded forecast produces no confident copy, that a projection given up keeps
-  its minus sign and the gain is printed nowhere, and that the sheet behind it
-  is its own rather than the one behind the odds.
+  control rather than a card, that a hold reads as a recommendation and keeps
+  its three reasons apart behind the row, that it never outlives a kickoff, that
+  a degraded forecast produces no confident copy and is never drawn as a hold,
+  that a projection given up keeps its minus sign and the gain is printed
+  nowhere, and that the sheet behind it is its own rather than the one behind
+  the odds.
+- `e2e/smart-trades.spec.ts` — the offers, and the market inventory folded under
+  them: that the fold is shut on arrival with the offers above it, that its rows
+  are absent rather than merely hidden, that opening it returns every section in
+  `/api/trades`'s own order, that it shuts again, and that the control is one
+  44px tap target with an accessible name and nothing nested inside it.
+- `e2e/draft-market-delta.spec.ts` — and the fence around Draft: `DOG` and `PTS`
+  on the collapsed row rather than behind a tap, and no `Take now` / `Can wait`.
 - `e2e/density.spec.ts` — the compact lists: players per screen, row-height floor
   and ceiling, that the position is a pill and neither a rail nor a wash, that no column
   truncates a value, that a trade suggestion is a row rather than a card, and

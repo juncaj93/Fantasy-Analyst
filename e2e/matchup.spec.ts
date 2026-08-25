@@ -1017,24 +1017,73 @@ test.describe('the best move', () => {
   });
 
   /**
-   * Nothing worth changing, said without claiming the lineup is optimal.
+   * Nothing worth changing, said as a decision and not as an absence.
    *
-   * The engine suppresses everything under two points of win probability, so
-   * "no move" means "nothing worth interrupting you for" and not "this lineup
-   * is the best one" — and the copy has to survive that distinction. It is a
-   * footnote on the heading rather than a card, because an absence that takes
-   * seventy pixels of a phone is an absence charging rent.
+   * This used to be a grey footnote beside the `Starters` heading reading `No
+   * lineup change recommended`, on the argument that an absence taking seventy
+   * pixels of a phone is an absence charging rent. The argument mistook what
+   * the state is. Holding is what the engine is recommending — most weeks it is
+   * the right call — and a reader who opens the screen before kickoff, finds
+   * nothing where the answer lives and a faint line next to a heading, reads
+   * "the app has nothing to say" rather than "hold", and goes and changes
+   * something nobody recommended.
+   *
+   * So it is the same control in the same slot as a swap, saying the thing out
+   * loud — and it still does not claim the lineup is optimal, because the
+   * engine suppresses everything under two points of win probability and the
+   * reason is one tap in rather than asserted on the face of the row.
    */
-  test('says only that no change is recommended when none clears the bar', async ({ page }) => {
+  test('recommends holding when no change clears the bar', async ({ page }) => {
     await serve(page, morning({ decision: decides(null, [], 'No legal change improves your chance of winning this matchup.') }));
 
-    const note = page.getByTestId('matchup-best-move');
-    await expect(note).toHaveAttribute('data-state', 'none');
-    await expect(note).toHaveText('No lineup change recommended');
+    const row = page.getByTestId('matchup-best-move');
+    await expect(row).toHaveAttribute('data-state', 'hold');
+    await expect(row).toContainText('Best move');
+    await expect(row).toContainText('Hold your lineup');
     await expect(page.getByText(/optimal lineup/i)).toHaveCount(0);
-    // Nothing to tap, because there is nothing to explain.
-    await expect(page.locator('button[data-testid="matchup-best-move"]')).toHaveCount(0);
-    await expect(page.getByTestId('best-move-sheet')).toHaveCount(0);
+
+    /*
+     * A control, in the same slot and above the same list as a swap: the two
+     * moods of one recommendation, not two designs.
+     */
+    await expect(page.locator('button[data-testid="matchup-best-move"]')).toHaveCount(1);
+    await expect(row).toHaveAttribute('aria-label', /Best move: hold your lineup/);
+    const starters = (await page.getByTestId('starters-title').boundingBox())!;
+    expect((await row.boundingBox())!.y).toBeLessThan(starters.y);
+
+    // And why, in the model's own sentence, one tap in.
+    await row.click();
+    await expect(page.getByTestId('best-move-sheet')).toBeVisible();
+    await expect(page.getByTestId('best-move-lead')).toHaveText('Hold your lineup');
+    await expect(page.getByTestId('best-move-reason')).toHaveText(
+      'No legal change improves your chance of winning this matchup.',
+    );
+    await expect(page.getByTestId('best-move-footer')).toContainText('does not edit it');
+  });
+
+  /**
+   * The three reasons to hold stay three reasons.
+   *
+   * §6 of the cleanup brief is explicit that the causes must not be flattened
+   * in the evidence layer: the row says `Hold your lineup` in all three cases,
+   * and what is behind it has to keep telling them apart. `Every remaining
+   * lineup decision is already locked` at one on a Sunday and `Nobody on your
+   * bench could legally take a starting slot` on the Thursday before are
+   * different facts about a reader's week.
+   */
+  test('keeps the three reasons to hold apart behind the row', async ({ page }) => {
+    for (const note of [
+      'Every remaining lineup decision is already locked.',
+      'Nobody on your bench could legally take a starting slot.',
+      'No legal change improves your chance of winning this matchup.',
+    ]) {
+      await serve(page, morning({ decision: decides(null, [], note) }));
+      await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
+      await page.getByTestId('matchup-best-move').click();
+      await expect(page.getByTestId('best-move-reason')).toHaveText(note);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('best-move-sheet')).toHaveCount(0);
+    }
   });
 
   /**
@@ -1069,13 +1118,14 @@ test.describe('the best move', () => {
   /**
    * The half that was only ever here.
    *
-   * The screen's own note says `No lineup change recommended` for all three
-   * empty cases. Which one it is — locked, nobody legal, nothing better — is
-   * `decision.note`, and this sheet is still the only place it is printed.
+   * The row above the starters says `Hold your lineup` for all three empty
+   * cases. Which one it is — locked, nobody legal, nothing better — is
+   * `decision.note`, and this sheet still prints it for a reader who arrived by
+   * tapping a win probability rather than the recommendation.
    */
   test('keeps the reason there is no move, which the screen cannot say', async ({ page }) => {
     await serve(page, morning({ decision: decides(null, [], 'Nobody on your bench could legally take a starting slot.') }));
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'none');
+    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
 
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
@@ -1085,12 +1135,12 @@ test.describe('the best move', () => {
   });
 
   /**
-   * "Nothing to change" and "we cannot say" are different answers.
+   * "Hold" and "we cannot say" are different answers.
    *
    * Both leave `decision.best` null, and a screen that keyed off that alone
-   * would tell somebody their lineup was fine on the morning the forecast had
-   * failed. §5 asks for the two to be distinguishable, and they are — by the
-   * words and by the state the row publishes.
+   * would recommend holding on the morning the forecast had failed. §5 asks for
+   * the two to be distinguishable, and they are — by the words, by the state
+   * the row publishes, and by whether it is a control at all.
    */
   test('refuses to recommend anything when there is no forecast to recommend from', async ({ page }) => {
     await serve(
@@ -1105,7 +1155,13 @@ test.describe('the best move', () => {
     const note = page.getByTestId('matchup-best-move');
     await expect(note).toHaveAttribute('data-state', 'unavailable');
     await expect(note).toHaveText('No lineup recommendation without a forecast');
-    await expect(page.getByText(/no lineup change recommended/i)).toHaveCount(0);
+    /*
+     * And emphatically not `Hold your lineup`, which would be advice invented
+     * out of a failure — the one thing the hold state must never be. It is also
+     * not a control: there is nothing to explain.
+     */
+    await expect(page.getByText(/hold your lineup/i)).toHaveCount(0);
+    await expect(page.locator('button[data-testid="matchup-best-move"]')).toHaveCount(0);
     await expect(page.getByTestId('matchup-degraded')).toBeVisible();
   });
 
@@ -1307,7 +1363,12 @@ test.describe('the best move', () => {
     });
     await returnToScreen(page);
 
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'none');
+    /*
+     * `hold`, not silence: the swap is gone and what replaces it is the honest
+     * remaining advice, with the model's own `already locked` behind it. The
+     * one thing that must not survive is the swap itself.
+     */
+    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
     await expect(page.getByText(/Start C\. Olave over B\. Hall/)).toHaveCount(0);
   });
 

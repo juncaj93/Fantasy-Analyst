@@ -66,14 +66,13 @@ value, no Next%: the board is for reading the room, and the analysis is on the
 card you came from. It draws the picks the Draft screen already has, so it adds
 no polling of its own, and it stays readable as history once the draft is done.
 
-**Team** — the recommended lineup, the bench behind it and the short list of
-anybody unrostered worth a move, all built from Vegas market expectation, news
-signal, availability and an uncertainty penalty. Every recommended starter fits
-on one phone screen: a slot, a name, a projection, a club mark and a tag only
-when a tag is material. Under them the bench is folded to `Bench (6) ›` with a
-line saying whether anything back there is better, and directly under that is
-the card that says what to change. Balanced, Floor and Ceiling ask the same
-question three ways. Tapping one of your players opens his week in a concise
+**Team** — what to change, and then the lineup it is about. The screen opens on
+the card that answers *is there anything I should do?*; under it the recommended
+starters, built from Vegas market expectation, news signal, availability and an
+uncertainty penalty, and under them the bench folded to `Bench (6) ›` with a
+line saying whether anything back there is better. Every recommended starter is
+one phone row: a slot, a name, a projection, a club mark and a tag only when a
+tag is material. Balanced, Floor and Ceiling ask the same question three ways. Tapping one of your players opens his week in a concise
 card — the verdict, the role trend, the matchup, the market and the availability
 — with his full profile and the comparison one tap further on. Pull the screen
 down to refresh it. It never changes a lineup.
@@ -88,15 +87,20 @@ a player whose game is over is an addend, so a matchup that is finished says
 100% rather than 94%. Under the score sits one card at a time saying what
 actually matters right now: what you need from whom, what the opponent needs to
 flip it, whose remaining game holds the most of the outcome, and whether an
-availability question is worth acting on before kickoff. Starters are one
-compact row per slot, both sides on one line; the bench is collapsed until you
-ask for it. Nothing here sets a lineup — it says what a change would be worth in
-win probability, and the change is made in Sleeper.
+availability question is worth acting on before kickoff. Above the starters is
+the one thing to do about it: `Best move: Start C. Olave over B. Hall` when a
+change is worth making, and `Best move: Hold your lineup` when it is not —
+because holding is a decision too, and most weeks it is the right one. Either
+way, one tap says why. Starters are one compact row per slot, both sides on one
+line; the bench is collapsed until you ask for it. Nothing here sets a lineup —
+it says what a change would be worth in win probability, and the change is made
+in Sleeper.
 
 **Waivers** — in season, where Draft used to be. It opens on the plan:
 
 ```
 Your waiver plan
+Enter in this order
 1. Add Breakout Back · $24 · Drop Depth Back
 2. Add Emerging Receiver · $14 · Drop Depth Back    Only if 1 loses
 3. Add Emerging Receiver · $14 · Drop Roster Filler
@@ -106,8 +110,9 @@ One player claimed twice, one cut spent twice, and it is not a mistake. Sleeper
 runs claims in the order they were entered and a claim whose drop is already
 gone does not run, so if claim 1 lands, claim 2 cannot execute and the receiver
 is only pursued through claim 3 at the cost of a second cut. Working that out is
-the app's job, not yours; the qualifier on the repeated line is what says so. One
-**See why** opens the argument — why him, why that cut, what the roster gains,
+the app's job, not yours; the qualifier on the repeated line is what says so, and
+the four words above the list are all the instruction the card spends space on.
+One **See why** opens the argument — why him, why that cut, what the roster gains,
 what the pricing pass said, who else wants him, and what changes if an earlier
 claim lands. Nothing says *optimal*, and no branch carries a percentage, because
 this app has an observed distribution of what past bids cost and no model of
@@ -130,8 +135,8 @@ invented figure. Beside it, what a bid costs you in leverage
 Sleeper is chasing. Nothing here bids, claims, adds or drops: every transaction
 in this app happens in Sleeper, by hand, on purpose.
 
-**Players** — searchable intelligence with tallies by window (7d / 21d / season
-/ lifetime), category breakdown, cached prop lines and the full evidence
+**Players** — searchable intelligence with tallies by window (7d / 30d / season
+/ life), category breakdown, cached prop lines and the full evidence
 timeline. Every original excerpt is preserved.
 
 Each expanded card opens with a **newsletter takeaway**: one sentence saying why

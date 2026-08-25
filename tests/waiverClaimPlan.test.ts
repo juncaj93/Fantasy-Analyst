@@ -172,8 +172,38 @@ describe('the plan a reader is handed', () => {
     ]);
   });
 
-  it('tells the reader the numbering is the instruction', () => {
-    expect(planFor().note).toContain('Sleeper runs claims top to bottom');
+  /**
+   * The instruction on the card, the mechanic behind **See Why**.
+   *
+   * The card used to carry both in one sentence, which is two wrapped lines of
+   * theory on the one card in the app a reader is copying into another app.
+   * What they have to *do* is four words; why Sleeper's waiver run makes the
+   * order matter is the same fact every week and belongs with the rest of the
+   * argument. Both are asserted here because the split only works if neither
+   * half went missing.
+   */
+  it('puts the order on the card and the mechanic behind See Why', () => {
+    const plan = planFor();
+    expect(plan.instruction).toBe('Enter in this order');
+    expect(plan.mechanics).toContain('Sleeper runs claims top to bottom');
+    // The card's own note is for what qualifies the claims, and this plan's
+    // claims need no qualifying — the mechanic is not left on it by another name.
+    expect(plan.note).toBeNull();
+  });
+
+  /**
+   * One claim has no order to be entered in.
+   *
+   * `Enter in this order` over a list of one is an instruction about nothing,
+   * and the mechanic behind it explains a contingency that cannot arise. Same
+   * condition the long sentence appeared under before the split.
+   */
+  it('says nothing about ordering when there is a single claim', () => {
+    const one = [at('wireRb', 'Breakout Back', 'RB', 15)];
+    const plan = planFor({ candidates: one, advice: adviceFor(one), budget: budgetState(null, false) });
+    expect(plan.claims).toHaveLength(1);
+    expect(plan.instruction).toBeNull();
+    expect(plan.mechanics).toBeNull();
   });
 
   /**

@@ -80,6 +80,7 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
     plan.protectedPlayers.length > 0 ||
     plan.outcomes.length > 0 ||
     plan.relationships.length > 0 ||
+    plan.mechanics != null ||
     plan.budget != null;
 
   return (
@@ -88,6 +89,29 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
         <div className="detail-label" data-testid="waiver-plan-headline">
           {plan.headline}
         </div>
+
+        {/*
+          Four words, above the list they are about.
+
+          The card used to close with the whole mechanic — `Enter them in this
+          order — Sleeper runs claims top to bottom, and a claim whose drop is
+          already gone does not run.` — which is two wrapped lines under the
+          claims on a 375pt phone, and it is an explanation rather than an
+          instruction. Everything a reader does with this card is above it: add
+          whom, bid what, drop whom, in what order. So the four words that are
+          the instruction come up here where the list starts, and the sentence
+          that explains why the order matters goes behind `See why` with the
+          rest of the argument.
+
+          What is *not* shortened is the per-claim qualifier — `Only if 1 loses`
+          — which stays inline on the line it saves from looking like a
+          duplicate. See `ClaimLine`.
+        */}
+        {plan.instruction ? (
+          <div className="claim-plan-instruction" data-testid="waiver-plan-instruction">
+            {plan.instruction}
+          </div>
+        ) : null}
 
         {plan.claims.length > 0 ? (
           <ol className="claim-plan-list" data-testid="waiver-plan-claims">
@@ -178,6 +202,17 @@ export function WaiverPlanSheet({ plan, onClose }: { plan: WaiverClaimPlan; onCl
           </div>
         ))}
 
+        {/*
+          Why the order is the order — the sentence the card no longer spends
+          two lines on. First, because it is the mechanic the claims above are
+          arranged by, and a reader who tapped `See why` on a numbered list is
+          most likely asking about the numbering.
+        */}
+        <PlanSection
+          label="Why the order matters"
+          lines={plan.mechanics ? [plan.mechanics] : []}
+          testId="waiver-plan-mechanics"
+        />
         <PlanSection label="How the week can go" lines={plan.outcomes} testId="waiver-plan-outcomes" />
         <PlanSection label="Two adds, or one" lines={plan.relationships} testId="waiver-plan-relationships" />
         <PlanSection label="Not on offer as a cut" lines={plan.protectedPlayers} testId="waiver-plan-protected" />

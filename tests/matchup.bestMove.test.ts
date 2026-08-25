@@ -82,36 +82,38 @@ describe('what the slot above the lineup says', () => {
     expect(state.move).toEqual(forecast(withBetterBench()).decision.best);
   });
 
-  it('says nothing is recommended when no change clears the threshold', () => {
+  it('recommends holding when no change clears the threshold', () => {
     const state = bestMoveState(forecast([...lineups(), bench({ playerId: 'bench-worse', projection: 3 })]));
-    expect(state.kind).toBe('none');
+    expect(state.kind).toBe('hold');
   });
 
   /**
    * The distinction §5 asks for, and the one it is easiest to lose.
    *
-   * "Nothing is worth changing" and "we cannot tell you" are different answers
-   * and a reader acts differently on each. Both produce `decision.best ===
-   * null`, so a screen that keyed off that field alone would tell somebody
-   * their lineup was fine on a morning the forecast had failed entirely.
+   * "Hold your lineup" and "we cannot tell you" are different answers and a
+   * reader acts differently on each. Both produce `decision.best === null`, so
+   * a screen that keyed off that field alone would recommend holding on a
+   * morning the forecast had failed entirely — which is advice invented out of
+   * a failure, and the one thing the hold state must never be.
    */
-  it('distinguishes a forecast with no move from no forecast at all', () => {
+  it('distinguishes a hold from no forecast at all', () => {
     const blind = lineups().map((p) => (p.side === 'theirs' ? { ...p, projection: null } : p));
     const degraded = forecast(blind);
     expect(degraded.degraded).toBe(true);
     expect(degraded.decision.best).toBeNull();
 
     expect(bestMoveState(degraded).kind).toBe('unavailable');
-    expect(bestMoveState(forecast([...lineups(), bench({ playerId: 'b', projection: 3 })])).kind).toBe('none');
+    expect(bestMoveState(forecast([...lineups(), bench({ playerId: 'b', projection: 3 })])).kind).toBe('hold');
   });
 
   /**
    * A finished afternoon gets silence rather than restraint.
    *
-   * `No lineup change recommended` is true of a settled matchup and it is also
-   * pointless: the card above has already dropped its projection and its odds
-   * for a result line, and advice about a lineup nobody can change is the kind
-   * of furniture this screen has been compacted to remove.
+   * `Hold your lineup` is a recommendation, and recommending anything about a
+   * lineup nobody can change is worse than saying nothing: the card above has
+   * already dropped its projection and its odds for a result line, and advice
+   * about a settled afternoon is the kind of furniture this screen has been
+   * compacted to remove.
    */
   it('says nothing at all once the matchup is over', () => {
     const settled = forecast(
@@ -150,7 +152,14 @@ describe('what the slot above the lineup says', () => {
     const underway = forecast(players, KICKED_OFF);
     expect(underway.phase).toBe('live');
     expect(underway.decision.note).toMatch(/locked/);
-    expect(bestMoveState(underway).kind).toBe('none');
+    /*
+     * `hold` rather than `move`: the row stops being a swap. What it becomes is
+     * `Hold your lineup`, which is honest here for the reason the note beside
+     * it gives — the decisions are locked — and that note is what the sheet
+     * behind the row prints, so the state never has to claim the lineup is
+     * right when the truth is that it is too late.
+     */
+    expect(bestMoveState(underway).kind).toBe('hold');
   });
 
   /**

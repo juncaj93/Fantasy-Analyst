@@ -115,9 +115,29 @@ export interface WaiverClaimPlan {
   state: WaiverClaimPlanState;
   /** `Your waiver plan`, or the honest sentence for an empty one. */
   headline: string;
+  /**
+   * Four words above the list, when the order is the instruction.
+   *
+   * `Enter in this order`, and nothing else. The card used to carry the whole
+   * mechanic here — why Sleeper runs claims top to bottom and what happens to a
+   * claim whose drop is already gone — which is two wrapped lines of theory on
+   * a card whose job is to be typed into another app. What a reader has to *do*
+   * is enter them in that order; why the order matters is `mechanics`, one tap
+   * in. Null for a single claim, which has no order to be in.
+   */
+  instruction: string | null;
   claims: WaiverClaimLine[];
   /** One line under the list, when there is something to qualify. */
   note: string | null;
+  /**
+   * **See Why**: why the order is the order.
+   *
+   * The sentence `instruction` is the short form of. It is here rather than on
+   * the card because it explains a rule of Sleeper's rather than naming a
+   * claim, and because a reader who has understood it once does not need it
+   * again every week. Set exactly when `instruction` is.
+   */
+  mechanics: string | null;
   /** **See Why**: the branches, as reachable worlds and never as odds. */
   outcomes: string[];
   /** **See Why**: whether two adds are worth two drops. */
@@ -262,8 +282,10 @@ export function describeWaiverPlan(
     surface: false,
     state: 'no_targets',
     headline: NO_TARGETS,
+    instruction: null,
     claims: [],
     note: null,
+    mechanics: null,
     outcomes: [],
     relationships: [],
     protectedPlayers: [],
@@ -305,8 +327,18 @@ export function describeWaiverPlan(
     surface: true,
     state: unknownDrop ? 'drop_unknown' : 'plan',
     headline: 'Your waiver plan',
+    /*
+     * The order, said as an instruction rather than as an explanation.
+     *
+     * Same condition the full sentence used to appear under — more than one
+     * claim — because one claim has no order to enter it in. The note below
+     * keeps only what qualifies the *claims*: a roster the engine could not
+     * score is a fact about the lines themselves and stays on the card.
+     */
+    instruction: claims.length > 1 ? ORDER_INSTRUCTION : null,
+    mechanics: claims.length > 1 ? ORDER_NOTE : null,
     claims,
-    note: unknownDrop ? ROSTER_UNSCORABLE_NOTE : claims.length > 1 ? ORDER_NOTE : null,
+    note: unknownDrop ? ROSTER_UNSCORABLE_NOTE : null,
     outcomes: outcomeLines(plan),
     relationships: relationshipLines(plan, rows),
     protectedPlayers: protectedLines(plan),
@@ -320,7 +352,17 @@ export function describeWaiverPlan(
  * The lines
  * ------------------------------------------------------------------ */
 
-const ORDER_NOTE = 'Enter them in this order — Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run.';
+/**
+ * The instruction, and the mechanic behind it.
+ *
+ * Two strings for one idea, and the split is the point. `ORDER_INSTRUCTION` is
+ * what the reader does; `ORDER_NOTE` is why it works, which is a fact about how
+ * Sleeper processes a waiver run and is the same fact every week. The first is
+ * on the card above the claims, the second is behind **See why** with the rest
+ * of the argument.
+ */
+const ORDER_INSTRUCTION = 'Enter in this order';
+const ORDER_NOTE = 'Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run — so enter them in the order above.';
 const ROSTER_UNSCORABLE_NOTE =
   'Your roster cannot be scored this week, so the plan names who to add and leaves the cut to you.';
 const NO_SAFE_DROP_NOTE =

@@ -98,7 +98,7 @@ can be rebuilt at any time from the ledger.
   `pending`, `rejected` and `ignored` rows stay in the ledger and out of the
   numbers.
 - `mixed` and `neutral` items count as items but contribute exactly 0.
-- Recency windows (7d / 21d / season-to-date) are computed from `source_date`;
+- Recency windows (7d / 30d / season-to-date) are computed from `source_date`;
   old evidence is never deleted.
 
 ## Newsletter ingestion

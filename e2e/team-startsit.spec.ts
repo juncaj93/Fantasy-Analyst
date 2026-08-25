@@ -201,8 +201,8 @@ test.describe('the recommended lineup, at a glance', () => {
  * The density pass, measured rather than eyeballed.
  *
  * The claim is specific and it is the whole point of the layout: at every width
- * this suite runs at, the recommended starters are on the first screen, the
- * bench is folded under them, and the card that says what to change is next.
+ * this suite runs at, the card that says what to change is on the first screen,
+ * the recommended starters are under it, and the bench is folded under them.
  * A screenshot cannot fail; a measurement can.
  */
 test.describe('a weekly command centre, on one screen', () => {
@@ -260,17 +260,57 @@ test.describe('a weekly command centre, on one screen', () => {
     await expect(page.getByTestId('bench-rows')).toBeVisible();
   });
 
-  /** The thing to act on comes immediately after the fold. */
-  test('puts the changes card straight under the bench', async ({ page }) => {
-    const bench = (await page.getByTestId('bench-toggle').boundingBox())!;
+  /**
+   * The thing to act on comes before the inventory it is about.
+   *
+   * The card used to sit under the folded bench, three sections down: the
+   * screen opened with eight recommended starters, folded a bench under them,
+   * and only then said whether any of it needed touching. Team's first job is
+   * *what should I change?*, and answering it after a roster the reader already
+   * owns is the wrong way round — at 390 and 360 the answer was below the fold
+   * on every visit.
+   *
+   * So the order is the card, the starters, the bench, and then the questions
+   * about players you do not own. All four are asserted, because "first" is
+   * only the useful half of the claim: the other half is that nothing else came
+   * up here with it.
+   */
+  test('answers what to change before it shows the roster', async ({ page }) => {
     const card = (await page.getByTestId('lineup-card').boundingBox())!;
-    expect(card.y).toBeGreaterThan(bench.y);
-    // Nothing between them but the gap the design puts there.
-    expect(card.y - (bench.y + bench.height)).toBeLessThanOrEqual(24);
+    const title = (await page.getByTestId('starters-title').boundingBox())!;
+    const starters = (await page.getByTestId('starters-group').boundingBox())!;
+    const bench = (await page.getByTestId('bench-toggle').boundingBox())!;
 
-    // And the waiver section is after it, not between.
+    expect(card.y, 'the recommendation is under the roster again').toBeLessThan(title.y);
+    expect(title.y).toBeLessThan(starters.y);
+    expect(starters.y).toBeLessThan(bench.y);
+
+    // And the whole of it is on the first screen, which is the point of moving it.
+    const viewport = page.viewportSize()!.height;
+    expect(card.y + card.height, `the changes card ends at ${Math.round(card.y + card.height)}px`).toBeLessThanOrEqual(
+      viewport,
+    );
+
+    // The waiver teaser and the defence line stay secondary, under the roster.
     const waivers = await page.getByTestId('waiver-card').boundingBox();
-    if (waivers) expect(waivers.y).toBeGreaterThan(card.y);
+    if (waivers) expect(waivers.y).toBeGreaterThan(bench.y);
+  });
+
+  /**
+   * One recommendation, not two.
+   *
+   * The move was an ordering change and nothing else, and the failure mode of
+   * an ordering change is a copy left behind. There is exactly one changes card
+   * on the screen, and the waiver teaser — which is also a recommendation —
+   * does not become a second hero beside it.
+   */
+  test('does not grow a second recommendation on the way up', async ({ page }) => {
+    await expect(page.getByTestId('lineup-card')).toHaveCount(1);
+    // The best change is still said once, on the card and nowhere else.
+    expect(await page.getByTestId('lineup-swap').count()).toBeLessThanOrEqual(1);
+    const card = (await page.getByTestId('lineup-card').boundingBox())!;
+    const waivers = await page.getByTestId('waiver-card').boundingBox();
+    if (waivers) expect(waivers.y).toBeGreaterThan(card.y + card.height);
   });
 
   /**

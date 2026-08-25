@@ -564,8 +564,9 @@ function PlayerRow({
           Two numbers clustered at the leading edge, which is how the draft
           board's own second line reads.
 
-          This was three equal columns — `21d`, `ADP`, and a movement arrow —
-          spread across the width of the row, and the spread was the problem:
+          This was three equal columns — the recent window, `ADP`, and a
+          movement arrow — spread across the width of the row, and the spread
+          was the problem:
           three numbers at three alignments, a rank on the leading edge and a
           heart, a club mark and a chevron on the trailing one, all at the same
           visual weight. A player index that looks like a spreadsheet is harder
@@ -589,7 +590,17 @@ function PlayerRow({
             the reading the label could not give you: how he has moved lately,
             and where the market has him.
           */
-          { label: '21d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
+          /*
+            `30d`, and it is the same field Trades has always called `30d`.
+
+            The label read `21d` because the window used to be twenty-one days;
+            `RECENCY_WINDOWS.last30` has been thirty for some time and this
+            never followed it. Two screens naming one number differently is a
+            translation the reader was doing for no reason, and one of the two
+            names was simply false. No value, weighting or ordering changes —
+            see `core/evidence/aggregate.ts`.
+          */
+          { label: '30d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
           {
             label: 'ADP',
             testId: 'players-adp',

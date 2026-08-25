@@ -2,11 +2,13 @@
  * Team: who to start this week, who is on the bench, and whether anybody
  * unrostered would be better.
  *
- * The screen answers one question at a glance — **who does Fantasy Analyst
- * currently recommend starting?** — and it answers it as an inset grouped
- * roster: white rows on one surface, divided by hairlines, with the position
- * carried by the slot chip on the leading edge rather than by a wash across the
- * row. The tint belongs to the draft board alone, so that a tinted row anywhere
+ * The screen answers one question before any other — **is there anything I
+ * should change?** — and it answers it in the first card, above the roster.
+ * Under that answer is the roster it was made from, which answers the second:
+ * **who does Fantasy Analyst currently recommend starting?** That one is an
+ * inset grouped list — white rows on one surface, divided by hairlines, with
+ * the position carried by the slot chip on the leading edge rather than by a
+ * wash across the row. The tint belongs to the draft board alone, so that a tinted row anywhere
  * in this app means "you are on Draft"; here the colour is in the chip, and the
  * chip also says the word, because a colour that is the only cue is not a cue
  * for everybody.
@@ -468,6 +470,33 @@ export function TeamScreen({
               */}
               {roster.live ? <LiveDraftRoster roster={roster} /> : null}
 
+              {/*
+                What to change, before the inventory it is about.
+
+                This card used to sit under the bench, three sections down: the
+                screen opened with eight recommended starters, folded a bench
+                under them, and only then said whether any of it needed
+                touching. That is the wrong way round for the one question this
+                tab exists to answer — *what should I change?* — because it
+                makes the reader scan a roster they already own before learning
+                whether there is anything to do with it. On a 390pt phone the
+                answer was below the fold on every visit.
+
+                So the answer comes first and the roster follows as its
+                evidence. Nothing about the answer itself has moved: it is the
+                same `LineupCard`, reading the same `lineup` the starters below
+                are drawn from, with the same swap, the same threshold and the
+                same disclosure. This is an ordering change and only an
+                ordering change.
+
+                It is also deliberately the *only* thing up here. The defence
+                line and the waiver teaser are recommendations too, and both
+                stay below the roster where they were: a screen with three
+                cards of equal weight at the top has no primary
+                recommendation at all.
+              */}
+              {!roster.live && lineup?.found ? <LineupCard lineup={lineup} /> : null}
+
               {hasRecommendation && !roster.live ? (
                 <>
                   <div className="section-title" data-testid="starters-title">
@@ -508,13 +537,13 @@ export function TeamScreen({
               ) : null}
 
               {/*
-                Bench, then the changes, then the waiver wire.
+                Then the bench, then the wire.
 
-                That order is the screen's whole argument: the starters answer
-                "who do I start", the folded bench keeps the answer on one
-                screen, and the card immediately under it is the only thing on
-                the page asking to be *acted* on. The free-agent scan is a
-                different question and goes last.
+                The order above this is the screen's whole argument now: the
+                changes card says whether anything needs doing, the starters
+                say what the recommendation actually is, the folded bench keeps
+                the rest of the roster on one screen, and the free-agent scan —
+                a different question about players you do not own — goes last.
               */}
               {/*
                 Nothing about a week, while the week has not been reached.
@@ -544,26 +573,23 @@ export function TeamScreen({
               {/*
                 Neither of these exists yet while a draft is running.
 
-                `Changes to consider` compares your lineup to the recommended
-                one — of a roster that is half unpicked, for a week that has not
-                started. `Waiver upgrades` offers free agents to a manager whose
-                next transaction is a draft pick. Both were drawn through the
-                whole draft, under the roster, answering questions nobody had
-                yet; the same flag that hides the mode chips and Compare hides
-                them, so there is one answer on this screen to "is a draft
-                happening".
+                `Waiver upgrades` offers free agents to a manager whose next
+                transaction is a draft pick, and the defence line is a slot
+                decision for a week that has not started. Both were drawn
+                through the whole draft, under the roster, answering questions
+                nobody had yet; the same flag that hides the mode chips, Compare
+                and the changes card above hides them, so there is one answer on
+                this screen to "is a draft happening".
               */}
               {roster.live ? null : (
                 <>
-                  {lineup?.found ? <LineupCard lineup={lineup} /> : null}
-
                   {/*
                     One quiet line about the defence, and only when there is one
                     to draw.
 
-                    It sits between the lineup changes and the waiver wire
-                    because that is what it is: a slot decision that happens to
-                    be made on the wire. It renders nothing for a best-ball
+                    It sits between the roster and the waiver wire because that
+                    is what it is: a slot decision that happens to be made on
+                    the wire. It renders nothing for a best-ball
                     league, a league with no DEF slot, a season that has not
                     drafted, or — most weeks — a reader holding a defence with
                     no decision to make. There is deliberately no defence
@@ -1384,9 +1410,11 @@ function availabilityLabel(availability: PickerPlayer['availability']): string {
 /**
  * Whole-roster start/sit, as a difference from what Sleeper currently has set.
  *
- * The recommended lineup itself is drawn above as cards; this is the part that
- * asks something of the reader — which slots differ, and by how much. Nothing
- * here can alter a lineup: Sleeper is still where a change is made.
+ * The first thing on the screen, because it is the part that asks something of
+ * the reader — which slots differ, and by how much. The recommended lineup
+ * itself is drawn below it as cards: the answer, then the roster it was made
+ * from. Nothing here can alter a lineup: Sleeper is still where a change is
+ * made.
  */
 function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   const gain =

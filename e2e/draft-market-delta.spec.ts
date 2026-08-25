@@ -28,7 +28,14 @@ async function boardJson(page: Page) {
   const res = await page.request.get('/api/drafts/demo-draft/board?limit=40');
   return res.json() as Promise<{
     currentPick: number;
-    recommendations: { playerId: string; name: string; adp: number | null; dogAdp: number | null; score: number | null }[];
+    recommendations: {
+      playerId: string;
+      name: string;
+      adp: number | null;
+      dogAdp: number | null;
+      score: number | null;
+      preseasonPoints?: number | null;
+    }[];
   }>;
 }
 
@@ -270,5 +277,105 @@ test.describe('the sorts still sort on the raw markets', () => {
     for (let i = 1; i < scores.length; i++) {
       expect(scores[i], `score went ${scores[i - 1]} → ${scores[i]} at row ${i}`).toBeLessThanOrEqual(scores[i - 1]!);
     }
+  });
+});
+
+
+/**
+ * What the Draft board is not allowed to lose.
+ *
+ * The final simplification pass moved a recommendation up on Team, folded the
+ * market inventory away on Trades, gave Matchup an explicit hold and shortened
+ * the waiver instruction — every one of them a subtraction from a screen. Draft
+ * was deliberately exempt: the reader is on the clock, comparing players in
+ * seconds, and the two numbers an audit proposed removing are the two that
+ * carry the most information per pixel there.
+ *
+ * So this is a fence rather than a feature test. `DOG` and `PTS` are on the
+ * face of the compact row — not behind the expanded card, not on tap — and
+ * they stay there.
+ */
+test.describe('the Draft row keeps the metrics it was built around', () => {
+  test('shows DOG and PTS on the collapsed row, not behind a tap', async ({ page }) => {
+    await openDraft(page);
+    const rows = page.getByTestId('recommendation-row');
+    await expect(rows.first()).toBeVisible();
+
+    /*
+     * Every row that has a value shows it, and the ones without are absent
+     * rather than blank — which is the board's own rule for an unpriced player,
+     * and is why this counts rather than asserting on the first row.
+     */
+    const board = await boardJson(page);
+    const priced = board.recommendations.filter((r) => r.dogAdp != null).length;
+    if (priced > 0) {
+      expect(await page.getByTestId('dog-metric').count(), 'DOG has left the compact row').toBeGreaterThan(0);
+      await expect(page.getByTestId('dog-metric').first()).toBeVisible();
+    }
+
+    /*
+     * PTS on the same rule, and the rule is the board's own: the column is
+     * drawn when this league has a preseason snapshot behind it and is absent —
+     * not blank — when it has none, which is the demo seed's case. So the
+     * board's own coverage decides whether the column is required, exactly as
+     * `hasPreseasonPointsCoverage` decides whether it is drawn.
+     */
+    const projected = board.recommendations.filter((r) => Number.isFinite(r.preseasonPoints ?? NaN)).length;
+    const pts = page.getByTestId('pts-metric');
+    if (projected > 0) {
+      expect(await pts.count(), 'PTS has left the compact row').toBeGreaterThan(0);
+      await expect(pts.first()).toBeVisible();
+      expect(await rows.first().locator('[data-testid="pts-metric"]').count()).toBe(1);
+    } else {
+      expect(await pts.count(), 'PTS appeared with nothing to show').toBe(0);
+    }
+
+    // On the row itself, with no card expanded — collapsed is the state a
+    // reader on the clock is actually in.
+    await expect(page.getByTestId('player-detail')).toHaveCount(0);
+  });
+
+  /**
+   * PTS, on a board that actually has a snapshot behind it.
+   *
+   * The demo seed imports no StartWho paste, so the column is correctly absent
+   * there — which makes the test above a conditional one, and a conditional
+   * test is a weak fence. So the board is answered with preseason points on it,
+   * which is a real field the real endpoint sends, and the column is required
+   * on the collapsed row rather than merely permitted.
+   */
+  test('draws PTS on the collapsed row wherever the board has a projection', async ({ page }) => {
+    await page.route('**/api/drafts/*/board*', async (route) => {
+      const response = await route.fetch();
+      const board = await response.json();
+      await route.fulfill({
+        response,
+        body: JSON.stringify({
+          ...board,
+          recommendations: (board.recommendations as { name: string }[]).map((rec, i) => ({
+            ...rec,
+            preseasonPoints: 240 - i,
+          })),
+        }),
+      });
+    });
+    await openDraft(page);
+
+    const rows = page.getByTestId('recommendation-row');
+    await expect(rows.first()).toBeVisible();
+    const first = rows.first().getByTestId('pts-metric');
+    await expect(first).toBeVisible();
+    await expect(first).toContainText('PTS');
+    await expect(first).toContainText('240');
+    // Every row carries it, and none of them needed a tap to.
+    expect(await page.getByTestId('pts-metric').count()).toBe(await rows.count());
+    await expect(page.getByTestId('player-detail')).toHaveCount(0);
+  });
+
+  /** And the audit's other rejected suggestion has not crept back either. */
+  test('offers no Take now or Can wait verdict', async ({ page }) => {
+    await openDraft(page);
+    await expect(page.getByText(/take now/i)).toHaveCount(0);
+    await expect(page.getByText(/can wait/i)).toHaveCount(0);
   });
 });
