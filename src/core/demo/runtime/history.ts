@@ -34,7 +34,14 @@ import { readManagerTendencies, type ManagerTendencies } from '../../managers/ma
 import type { HistoricalPick } from '../../managers/draftProfile.ts';
 import { readFinalWeek } from '../../league/planning.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
-import { LEDGER_WEEKS, displayNames, userByRoster } from '../fixtures/ledger.ts';
+import {
+  LEDGER_WEEKS,
+  PRIOR_SEASON,
+  PRIOR_SEASON_WEEKS,
+  demoTransactions,
+  displayNames,
+  userByRoster,
+} from '../fixtures/ledger.ts';
 
 export interface DemoManagerHistory {
   /** Transaction profiles, keyed by *current* roster id, as the waiver board wants them. */
@@ -81,7 +88,25 @@ function build(data: ScenarioData): DemoManagerHistory {
   const names = displayNames();
   const finalWeek = readFinalWeek(data.league.leagueSettings);
 
-  const ledger = data.transactions.map((txn) => toLedgerTransaction({ txn, season, userByRoster: byRoster }));
+  /*
+   * Two seasons, because one is a thin sample.
+   *
+   * The live feature walks the previous-league chain for exactly this reason —
+   * a manager who traded once in a season is indistinguishable from a manager
+   * nobody has ingested — so a demo built on one season would only ever
+   * demonstrate the uncertain branch of every reading. The season being played
+   * is the scenario's own ledger; the season before it is generated on the same
+   * habits over a full fourteen weeks.
+   *
+   * Only the current season's rows are on the response anywhere: the price
+   * summary the Waivers screen prints is `collectBids` over `data.transactions`
+   * alone, because what a claim goes for is a fact about this season's market.
+   */
+  const priorSeason = demoTransactions(PRIOR_SEASON);
+  const ledger = [
+    ...priorSeason.map((txn) => toLedgerTransaction({ txn, season: PRIOR_SEASON, userByRoster: byRoster })),
+    ...data.transactions.map((txn) => toLedgerTransaction({ txn, season, userByRoster: byRoster })),
+  ];
 
   /*
    * How many weeks of history the profiles are rates over.
@@ -91,8 +116,12 @@ function build(data: ScenarioData): DemoManagerHistory {
    * across six weeks who claimed twice claims a third as often as one observed
    * across two who did the same.
    */
-  const weeksBySeason = new Map([[season, LEDGER_WEEKS.length]]);
-  const seasonsByUser = new Map<string, string[]>([...byRoster.values()].map((userId) => [userId, [season]]));
+  const weeksBySeason = new Map([
+    [PRIOR_SEASON, PRIOR_SEASON_WEEKS],
+    [season, LEDGER_WEEKS.length],
+  ]);
+  const seasons = [PRIOR_SEASON, season];
+  const seasonsByUser = new Map<string, string[]>([...byRoster.values()].map((userId) => [userId, [...seasons]]));
   const positionOf = positionLookup(data);
 
   const transactionInput = {
@@ -159,7 +188,7 @@ function build(data: ScenarioData): DemoManagerHistory {
     tradeTendencies: buildTradeTendencies(tradeInput),
     tradeBaseline: buildLeagueTradeBaseline(tradeInput),
     draftTendencies,
-    seasons: [season],
+    seasons,
     finalWeek,
     ledger,
   };

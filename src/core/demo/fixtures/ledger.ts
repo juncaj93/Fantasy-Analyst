@@ -41,8 +41,23 @@
 import type { SleeperTransaction } from '../../sleeper/types.ts';
 import { DEMO_MANAGERS, MY_ROSTER_ID, WORLD_PLAYERS } from './world.ts';
 
-/** The weeks of transaction history this ledger covers. */
+/** The weeks of transaction history this ledger covers in the season being played. */
 export const LEDGER_WEEKS = [1, 2, 3, 4, 5, 6];
+
+/**
+ * The season before, which the league also played.
+ *
+ * The live feature walks the previous-league chain precisely because one
+ * season is a thin sample — a manager who traded once is indistinguishable
+ * from a manager nobody has ingested. A demo with a single season would
+ * therefore demonstrate the *thin* branch of every reading and never the
+ * confident one, which is only half the feature.
+ *
+ * It is the same room and the same habits a year earlier, over a full
+ * fourteen weeks. Nothing about it is on screen; it is there to be counted.
+ */
+export const PRIOR_SEASON = '2025';
+export const PRIOR_SEASON_WEEKS = 14;
 
 /**
  * One manager's habit, as the two numbers a ledger actually shows.
@@ -172,13 +187,32 @@ function processedAt(season: string, week: number): number {
 export function demoTransactions(season: string, opts: { throughWeek?: number } = {}): SleeperTransaction[] {
   const out: SleeperTransaction[] = [];
   const through = opts.throughWeek ?? LEDGER_WEEKS.at(-1)!;
+  const prior = season === PRIOR_SEASON;
   let sequence = 0;
-  const nextId = () => `demo-txn-${String(++sequence).padStart(4, '0')}`;
+  /*
+   * Unique across seasons, because Sleeper's are.
+   *
+   * The sequence restarts per call, so without the season in the key the
+   * previous season's rows would carry the same ids as this one's — a fixture
+   * quietly stating something no provider ever would, and a trap for the first
+   * reader downstream who decides to deduplicate by id.
+   */
+  const nextId = () => `demo-txn-${season}-${String(++sequence).padStart(4, '0')}`;
 
   for (const habit of HABITS) {
-    const weeks = [...habit.claimWeeks, ...(through > 6 ? (WEEK_SEVEN_RUN.get(habit.rosterId) ? [7] : []) : [])];
+    /*
+     * A full season a year earlier, from the same habit.
+     *
+     * The claim weeks are shifted forward through the autumn rather than
+     * doubled, so a manager who claims twice a season claims twice and a
+     * manager who claims every week claims every week — the *shape* is the
+     * habit and the sample is what a fourteen-week season gives it.
+     */
+    const weeks = prior
+      ? [...habit.claimWeeks, ...habit.claimWeeks.map((w) => w + 7).filter((w) => w <= PRIOR_SEASON_WEEKS)]
+      : [...habit.claimWeeks, ...(through > 6 ? (WEEK_SEVEN_RUN.get(habit.rosterId) ? [7] : []) : [])];
     weeks.forEach((week, i) => {
-      if (week > through) return;
+      if (!prior && week > through) return;
       const position = habit.positions[i % habit.positions.length]!;
       const candidates = poolFor(position);
       const added = candidates[(habit.rosterId * 3 + i * 5) % candidates.length]!;
@@ -195,13 +229,18 @@ export function demoTransactions(season: string, opts: { throughWeek?: number } 
         /* A failed claim adds nobody, which is the whole difference. */
         adds: failed ? {} : { [added]: habit.rosterId },
         drops: failed || added === dropped ? {} : { [dropped]: habit.rosterId },
-        settings: { waiver_bid: week === 7 ? (WEEK_SEVEN_RUN.get(habit.rosterId)?.bid ?? 0) : (habit.bids[i % habit.bids.length] ?? 0) },
+        settings: {
+          waiver_bid:
+            week === 7 && !prior
+              ? (WEEK_SEVEN_RUN.get(habit.rosterId)?.bid ?? 0)
+              : (habit.bids[i % habit.bids.length] ?? 0),
+        },
         creator: `owner-${habit.rosterId}`,
       });
     });
 
     habit.addWeeks.forEach((week, i) => {
-      if (week > through) return;
+      if (!prior && week > through) return;
       const position = habit.positions[(i + 1) % habit.positions.length]!;
       const candidates = poolFor(position);
       const added = candidates[(habit.rosterId * 5 + i * 7 + 3) % candidates.length]!;
@@ -243,7 +282,49 @@ export function demoTransactions(season: string, opts: { throughWeek?: number } 
       a: { rosterId: 7, gives: ['p185'], gets: ['p192'] },
       b: { rosterId: 12, gives: ['p192'], gets: ['p185'] },
     }),
+    /*
+     * And one involving the manager the trade board most often lands on.
+     *
+     * Not a thumb on the scale: which partner the bilateral engine surfaces is
+     * decided by roster fit and nothing here touches that. It is the difference
+     * between demonstrating a partner the app knows something about and
+     * demonstrating the empty state twice — and the empty state is still on
+     * screen, because nine of the eleven rivals have never traded.
+     */
+    tradeBetween({
+      id: nextId(),
+      season,
+      week: 4,
+      a: { rosterId: 11, gives: ['p158'], gets: ['p177'] },
+      b: { rosterId: 5, gives: ['p177'], gets: ['p158'] },
+    }),
   );
+
+  if (prior) {
+    out.push(
+      tradeBetween({
+        id: nextId(),
+        season,
+        week: 9,
+        a: { rosterId: 11, gives: ['p166'], gets: ['p154', 'p199'] },
+        b: { rosterId: 3, gives: ['p154', 'p199'], gets: ['p166'] },
+      }),
+      tradeBetween({
+        id: nextId(),
+        season,
+        week: 11,
+        a: { rosterId: 11, gives: ['p188'], gets: ['p173'] },
+        b: { rosterId: 7, gives: ['p173'], gets: ['p188'] },
+      }),
+      tradeBetween({
+        id: nextId(),
+        season,
+        week: 12,
+        a: { rosterId: 7, gives: ['p160'], gets: ['p181'] },
+        b: { rosterId: 5, gives: ['p181'], gets: ['p160'] },
+      }),
+    );
+  }
 
   return out;
 }

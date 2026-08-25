@@ -47,13 +47,21 @@
  */
 
 import { assessStreaming, type StreamingAssessment } from '../startsit/streaming.ts';
+/*
+ * `weekRange` moved to a module of its own, and is re-exported here so every
+ * caller keeps the import it has. It is one line of formatting and it was the
+ * only *runtime* thing the render path took from this file — which meant the
+ * whole defence model followed it into the entry chunk the moment Demo Mode
+ * started running the planner for real. See `weeks.ts`.
+ */
+import { weekRange } from './weeks.ts';
 import { MEANINGFUL_UPGRADE_GAIN } from '../startsit/waivers.ts';
 import { DEFENCE_POSITION } from '../startsit/engine.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { DstOutlook } from './outlook.ts';
 import { DST_OUTLOOK } from './outlook.ts';
 
-export { assessStreaming };
+export { assessStreaming, weekRange };
 
 /**
  * The seven things this planner is allowed to say.
@@ -935,12 +943,7 @@ function describeWeeks(outlook: DstOutlook): string {
     .join(' · ');
 }
 
-/** `Weeks 15–17`, from the league's own list and never from a constant. */
-export function weekRange(weeks: number[]): string {
-  if (weeks.length === 0) return 'the playoffs';
-  if (weeks.length === 1) return `Week ${weeks[0]}`;
-  return `Weeks ${weeks[0]}–${weeks.at(-1)}`;
-}
+
 
 function byScoreDescending(a: DstOption, b: DstOption): number {
   return (b.thisWeek ?? -Infinity) - (a.thisWeek ?? -Infinity) || a.name.localeCompare(b.name);

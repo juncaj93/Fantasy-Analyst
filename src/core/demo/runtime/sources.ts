@@ -24,6 +24,7 @@ import type { DstPlanSources } from '../../dst/assemble.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 import { toProps, toUsageWeeks } from '../fixtures/spec.ts';
 import { scheduleRows, teamForm } from '../fixtures/slate.ts';
+import { preseasonPoints } from '../fixtures/world.ts';
 
 /**
  * The board's sources.
@@ -83,12 +84,24 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
      */
     flags: async () => data.flags,
     /*
-     * The demo world imports no preseason projection snapshot, so the board it
-     * builds has none — which is the honest rehearsal of a league that has not
-     * pasted one, and leaves the market component reading the demo's own season
-     * lines exactly as it did before.
+     * The projection somebody pasted in August, for the board's `PTS` column.
+     *
+     * A separate source from the draft market beside it, and it used to be
+     * empty here — so `PTS —` was on every row of every demo board while the
+     * column worked in production, which is the one thing Demo Mode exists to
+     * make impossible. See `preseasonPoints` in `fixtures/world.ts` for why the
+     * numbers deliberately disagree with ADP, and for why no defence has one.
      */
-    preseasonPoints: async () => new Map<string, number>(),
+    preseasonPoints: async (playerIds) => {
+      const out = new Map<string, number>();
+      const wanted = new Set(playerIds);
+      for (const spec of data.specs) {
+        if (!wanted.has(spec.id)) continue;
+        const points = preseasonPoints(spec);
+        if (points != null) out.set(spec.id, points);
+      }
+      return out;
+    },
     seasonMarkets: async (ids) => {
       const out: typeof data.seasonMarkets = new Map();
       for (const id of ids) {

@@ -36,7 +36,16 @@
  * reader: not known. Present-and-null is what a pass that ran and found nothing
  * looks like; absent is what a deployment without the pass looks like.
  */
-import { weekRange, type DstDecision, type DstOption, type DstPlan } from '../dst/planner.ts';
+/*
+ * The plan's vocabulary, not the planner.
+ *
+ * `weekRange` comes from its own leaf module and the rest is types, so a board
+ * on the render path carries no runtime edge into `core/dst/planner.ts` — which
+ * is what keeps the defence model, and the start/sit engine behind it, out of
+ * the bundle a phone downloads to draw this screen.
+ */
+import { weekRange } from '../dst/weeks.ts';
+import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
 
 export interface WaiverLeagueIntel {
   /**

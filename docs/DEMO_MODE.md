@@ -26,16 +26,18 @@ Demo Mode is a **data-source substitution layer**. There is no second app.
   repositories  ────────┐          ┌──── fixture sources
                         ▼          ▼
                  the same interfaces
-                 DraftBoardSources · MatchupSources
-                 StartSitInput[] · TradeCandidate[]
+                 DraftBoardSources · MatchupSources · DstPlanSources
+                 StartSitInput[] · TradeCandidate[] · SleeperTransaction[]
                         │
                         ▼
                  the same engines
                  buildDraftBoard · buildMatchupResponse · recommendLineup
                  recommendWaiverUpgrades · priceWaiverUpgrades
                  waiverLeagueIntel · waiverMultiWeekFor · weeklyIntelligence
+                 buildWaiverClaimPlan · assembleDstPlan · planDst
+                 buildTransactionProfiles · buildTradeTendencies
                  evaluateBench · compareStartSit · rankTrades
-                 orderPlayers · resolveLifecycle
+                 findBilateralTrades · orderPlayers · resolveLifecycle
                         │
                         ▼
                  the same React screens
@@ -54,13 +56,14 @@ written next year inherits the behaviour for free.
 
 ### What had to change in production code
 
-Four things, all of them "one implementation instead of two":
+Five things, all of them "one implementation instead of two":
 
 | Change | Why |
 |---|---|
 | `core/draft/boardBuilder.ts` — the board assembly moved out of `server/services/draftBoard.ts` and is driven by a `DraftBoardSources` interface | So the demo runs the *same* board builder. `DraftBoardService` keeps its exact public API; every existing caller and test is untouched. |
 | `core/matchup/build.ts` — the matchup assembly moved out of `server/services/matchupService.ts` and is driven by a `MatchupSources` interface | Same reason, same shape. The service keeps the D1 reads, the Sleeper client, the per-database forecast cache and the calibration ledger, and satisfies the interface. Its exports and tests are untouched. The ledger is no longer part of that interface — see §4 — and is reached only from the worker's scheduled handler. |
 | `core/waivers/pricing.ts`, `core/waivers/intel.ts`, `core/roster/held.ts`, `core/roster/freeAgents.ts`, `core/trades/ladderInputs.ts` — assembly helpers moved out of `server/app.ts` | So a rehearsed bid and a live one are the same arithmetic, and a rehearsed waiver card carries the same competition and multi-week columns. Moved verbatim. |
+| `core/dst/assemble.ts` — the defence-plan assembly moved out of `server/services/dstPlanService.ts` and is driven by a `DstPlanSources` interface; `core/league/planning.ts` gained `readFinalWeek` and `playoffContextFor` | So a streamed defence in a demo was chosen by the code that would choose one for a real league. The service keeps `buildDstPlan(db, request)` and does the three D1 reads; the demo answers the same three questions from the slate. |
 | `POST /api/demo/enter` · `exit` · `GET status`, and a write-refusing middleware | The second half of the mutation guard — see §3. |
 
 Demo-only UI is limited to the indicator bar and the Settings picker.
@@ -184,19 +187,19 @@ All twenty-eight are wired. Nothing in the picker is greyed out.
 | | `draft-late` | Round 13, where most of the pool has no ADP and is ranked on what is known. |
 | | `draft-complete` | All 168 picks. The board as history. |
 | Post-draft | `post-draft-roster` | Nav transition, Team as home, draft provenance, the wire already worth a look. |
-| Weekly | `sunday-pregame` | 11:40am, week 6. One genuinely close flex call; Floor and Ceiling disagree. |
-| | `late-injury-pivot` | 12:52pm. A starter downgraded, his beneficiary on the wire, one bench player already locked. |
-| Waivers | `waivers-tuesday-active` | $37 left, several funded rivals, one obvious add. Expected cost, worth-to-you and do-not-exceed are three different numbers; one estimate is withheld outright for want of a measured role. |
+| Weekly | `sunday-pregame` | 11:40am, week 6. One genuinely close flex call; Floor and Ceiling disagree — **and a pregame matchup**, forecasting a week nothing has happened in, whose best move is `Hold your lineup`. |
+| | `late-injury-pivot` | 12:52pm. A starter downgraded eight minutes before the one o'clock kickoffs; the London game is over and his replacement on the wire does not play until the afternoon. |
+| Waivers | `waivers-tuesday-active` | $55 left, several funded rivals, one obvious add and a defence worth streaming. Expected cost, worth-to-you and do-not-exceed are three different numbers; the plan is three claims over two players; the rivals are named from the league's own ledger. |
 | | `waivers-thin-data` | A priority league that has never published a bid. Upgrades stand; every price says unknown. |
 | | `waivers-processed` | Wednesday. The claim landed and the wallet moved. |
-| Matchup | `matchup-live-close` | Sunday 4:15pm, week 6. Three games finished, three running, two to come — and the two projected finals under a point apart. |
+| Matchup | `matchup-live-close` | Sunday 5:20pm, week 6. Three games finished, three running, two to come — and the two projected finals under a point apart. |
 | | `matchup-live-leading` | The same afternoon gone the reader's way. The card is about which of the opponent's remaining names can still take it. |
 | | `matchup-live-trailing` | The mirror. How much is needed, from whom, to get back to a real chance. |
 | | `matchup-injury-swing` | A starter ruled out of the night game while his slot is still changeable, and the swap priced in win probability. |
 | | `matchup-final` | Monday morning. Lost by a point and a half: what decided it, and which bench player would have won it. |
 | Trades | `trade-window` | Discovery: whose news has moved, who holds them, and which way. |
 | Draft | `draft-best-ball` | The same board in a league Sleeper flags as best ball, so Underdog's share of the baseline widens from 60% to 75%. |
-| Season | `playoff-week` | Week 15. Thin wire, no byes left, one game to plan for. |
+| Season | `playoff-week` | Week 15. Thin wire, one game to plan for, and a defence held because the wire's best has a bye coming. |
 | | `season-complete` | Nothing left to decide, said plainly. |
 | | `rollover-new-season` | March. Last season's league is finished and Sleeper has moved on — which is the gap `resolveSeasonPhase` reads. |
 | | `provider-waiting` | July. The new league exists; half the sources have not published for it. |
@@ -219,12 +222,40 @@ The fixtures deliberately carry: market/ledger disagreement in both directions,
 a conflicted tally with a large mixed count, a tight-end tier that runs out, a
 back whose role is rising while his touchdowns dry up, a spike week that must
 *not* be priced as a settled role, a bye with no market at all, a player nobody
-has measured, an injury where Sleeper and the report disagree, and a wire in a
-league where one manager has spent $93 of $100.
+has measured, an injury where Sleeper and the report disagree, a wire in a
+league where one manager has spent $93 of $100, a defence that is worth starting
+one week and worth replacing the next, and a room whose managers claim at
+visibly different rates and for visibly different positions.
 
 None of it is a stated conclusion. A fixture writes down what a provider would
-have said — a market line, a designation, a target count, a pick, a spend — and
-every score, bid, verdict, percentage and sentence is computed from it.
+have said — a market line, a designation, a target count, a pick, a spend, a
+transaction — and every score, bid, verdict, percentage and sentence is computed
+from it.
+
+### One slate, one league, one season
+
+Three things are stated once and read everywhere, and each of them replaced a
+pair of tables that could disagree:
+
+| Stated once in | What reads it |
+|---|---|
+| `fixtures/slate.ts` — who plays whom, when each window kicks off, who is at home, what the book made of it | every week spec, every defence projection, the matchup scoreboard, and the schedule the DST outlook walks three weeks forward |
+| `fixtures/ledger.ts` — the season's transactions in Sleeper's own shape | the price summary, each roster's remaining budget, the named rivals on a waiver row, the pressure column, and the trade partner's own record |
+| `fixtures/world.ts` — the league shape, the cast and the defences | every roster, every board and every lineup |
+
+Week six used to be written down twice — once by the lineup scenarios and once
+by the matchup ones — with different opponents, different kickoffs and a tight
+end on a bye in one telling and playing in the other. The money was written down
+twice too: a spend table and a price summary with nothing connecting them, so a
+demo could show a room that had spent $500 between them while claiming a typical
+winning bid of $2. Neither is possible now.
+
+The league starts a **`DEF`**, which is what makes the defence half of the
+product reachable at all: sixteen defences, twelve rostered and four on the
+wire, with the reader's own unit a comfortable home favourite in week six and a
+touchdown-and-a-half underdog in Kansas City in week seven. `Stream PHI over
+DEN` on the Tuesday and `No clear upgrade` on the Sunday are two readings of
+that schedule by `core/dst/planner.ts`, not two fixtures.
 
 ---
 
@@ -310,6 +341,9 @@ meaning anything, so both were done in the same commit.
 
 ```
 tests/demo.scenarios.test.ts   every scenario through the real engines
+tests/demo.showcase.test.ts    the demonstrations themselves: the waiver
+                               contingency, the defence decision, the best move,
+                               a bilateral offer, a focused player, DOG and PTS
 tests/demo.isolation.test.ts   mutation refusal, structural isolation, determinism
 tests/demo.server.test.ts      the server boundary, against a real database
 e2e/demo.spec.ts               enter → choose → navigate → assert → exit → verify live
@@ -349,16 +383,12 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
 
 ## 12. Limitations
 
-- **Only the five Matchup scenarios carry a schedule.** The other in-season
-  scenarios — `sunday-pregame`, `late-injury-pivot`, the waiver Tuesday and
-  `playoff-week` — show the Matchup tab, because `resolveLifecycle` puts it
-  there and Demo Mode does not override the production toolbar, and the screen
-  correctly reports that Sleeper has published no matchup for the week. Giving
-  them one would mean pricing the opponent's whole roster in each of those
-  weeks; pricing it badly would produce four *degraded* forecasts, which is a
-  worse demonstration than an honest empty one. The obvious next fixture is a
-  pregame matchup on `sunday-pregame`, which is the one live phase these five do
-  not cover.
+- **Two in-season scenarios still carry no matchup.** `sunday-pregame` now has
+  one — the pregame phase the five matchup scenarios did not cover — but
+  `late-injury-pivot` and the week-seven waiver scenarios do not: Sleeper has
+  published no row for them, which the screen reports honestly. Giving the
+  waiver week one would mean pricing the opponent's whole roster in a week whose
+  whole subject is the wire.
 - **No newsletter excerpts.** The evidence ledger holds publisher text, and
   inventing plausible excerpts would put words in a publisher's mouth on a
   screen whose premise is that every original excerpt is preserved verbatim. The
@@ -366,15 +396,26 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
   the expanded card's takeaway is `null` rather than templated.
 - **Review and newsletter queues are empty** in every scenario, for the same
   reason.
-- **No manager tendencies.** A tendency needs a sample, and the live feature
-  builds one by walking a league's history. Demo Mode has none to walk, so
-  `/api/leagues/:id/managers` returns the same nulls the live app returns for a
-  league nobody has run that pass for. Inventing them would be the one thing an
-  "interesting" fixture must never become: a demonstration of a claim the
-  product cannot make about a real league.
-- **`/api/leagues/:id/bench`, `/managers` and `/trades/ladder`** are served by
-  the runtime but are not yet consumed by any screen, so no scenario
-  demonstrates them visually.
+- **No portrait, ever.** A fixture player id is not a Sleeper player id, so
+  `playerHeadshotUrl` returns null for every one of them and the focused view
+  draws its deterministic initials instead. That is the intended state and not a
+  gap to be closed: the alternative is either two hundred requests to
+  `sleepercdn` that can only 404, or a bundled photo pack. The shared header,
+  its sizing and its fallback are all exercised; the photograph is the one thing
+  a demo cannot show. Asserted in `tests/demo.showcase.test.ts` and in
+  `e2e/demo.spec.ts`, which watches for a request to `sleepercdn` and fails if
+  one is made.
+- **Manager tendencies are read from two seasons and no more.** They used to be
+  absent entirely, on the ground that a tendency needs a sample and Demo Mode
+  had no history to walk. It has one now — `fixtures/ledger.ts` — and the
+  distinction that matters held: the fixture states *transactions*, and
+  `buildTransactionProfiles`, `buildTradeTendencies` and `readManagerTendencies`
+  state the tendencies. Two seasons is a real sample and a thin one, which is
+  why several readings on screen say so out loud rather than rounding up.
+- **`/api/leagues/:id/bench` and `/trades/ladder`** are served by the runtime
+  but are not yet consumed by any screen, so no scenario demonstrates them
+  visually. `/managers` is served with real profiles now, and is likewise not on
+  a screen.
 - **Demo fixtures are one league**: 12-team, half-PPR, 1QB, single flex. A
   superflex or best-ball scenario would need a second world; the format is
   already declared per scenario, so adding one is a fixture, not a change here.

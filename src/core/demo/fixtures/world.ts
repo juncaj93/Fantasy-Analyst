@@ -445,6 +445,39 @@ export const WORLD_PLAYERS: DemoPlayerSpec[] = [...HEADLINE, ...depthPool(), ...
   return patch ? { ...spec, ...patch } : spec;
 });
 
+/**
+ * A pasted preseason projection, which is a thing a reader does once in August.
+ *
+ * The `PTS` column on the draft board is a *projection snapshot* — somebody's
+ * season-long numbers, pasted in and converted at the league's own scoring —
+ * and it is a separate source from the draft market beside it. Demo Mode had
+ * none, so `PTS —` was on every row of every demo board while the column worked
+ * perfectly in production. A demo that cannot show a column the product has is
+ * a demo of a different product.
+ *
+ * Derived rather than typed out, because two hundred and seventy-six season
+ * totals by hand is unreadable — but deliberately **not** a function of ADP
+ * alone. A projection that agreed with the market everywhere would make the
+ * column decoration; the deviation below is a fixed function of the player's
+ * own id, so some players are projected well above where they are being drafted
+ * and some well below, and the disagreement is stable across every run.
+ *
+ * Defences are absent, as they are from a real projection file of this kind:
+ * nobody pastes a defence into a season-long points sheet, and `PTS —` on the
+ * one position that has no projection is the honest state.
+ */
+export function preseasonPoints(spec: DemoPlayerSpec): number | null {
+  if (spec.position === 'DEF') return null;
+  const adp = spec.adp ?? 220;
+  /* A decay curve: the first pick is worth about twice the hundredth. */
+  const base = 330 - 118 * Math.log10(adp + 3);
+  const byPosition = spec.position === 'QB' ? 1.22 : spec.position === 'TE' ? 0.78 : 1;
+  /* ±9%, fixed per player, so the sheet and the market genuinely disagree. */
+  const digits = Number(spec.id.replace(/\D/g, '')) || 1;
+  const swing = 1 + (((digits * 37) % 19) - 9) / 100;
+  return Math.round(Math.max(20, base * byPosition * swing) * 10) / 10;
+}
+
 const BY_ID = new Map(WORLD_PLAYERS.map((p) => [p.id, p]));
 
 export function worldPlayer(id: string): DemoPlayerSpec {
