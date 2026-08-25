@@ -12,7 +12,14 @@
  * environment and are never sent to the browser.
  */
 
-import { SleeperClient } from '../core/sleeper/client.ts';
+import { SleeperClient, type FetchLike } from '../core/sleeper/client.ts';
+import {
+  budgetedFetch,
+  MAX_CRON_SUBREQUESTS,
+  MAX_SLEEPER_SUBREQUESTS_PER_BATCH,
+  REDIRECTING_FETCH_COST,
+  RequestBudget,
+} from '../core/sleeper/budget.ts';
 import { decodeEncodedWords, parseMimeMessage } from '../core/newsletter/mime.ts';
 import { toEmailMessage } from '../core/newsletter/source.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
@@ -59,22 +66,30 @@ export interface WorkerEnv {
 
 const app = createApp();
 
-function buildVegasProvider(env: WorkerEnv): VegasProvider {
+function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike): VegasProvider {
   if (env.VEGAS_PROVIDER === 'sportsgameodds') {
-    return new SportsGameOddsProvider({ apiKey: env.SPORTSGAMEODDS_API_KEY });
+    return new SportsGameOddsProvider({ apiKey: env.SPORTSGAMEODDS_API_KEY, fetch: fetchImpl });
   }
   if (env.VEGAS_PROVIDER === 'the-odds-api') {
-    return new OddsApiProvider({ apiKey: env.ODDS_API_KEY });
+    return new OddsApiProvider({ apiKey: env.ODDS_API_KEY, fetch: fetchImpl });
   }
   // Default: deterministic mock. Never calls out, never costs quota.
   return new MockVegasProvider([]);
 }
 
-function toAppEnv(env: WorkerEnv): AppEnv {
+/**
+ * This deployment's services, optionally on a transport somebody is counting.
+ *
+ * `fetchImpl` is how the daily cron's shared subrequest budget reaches the two
+ * providers built here. A request path passes nothing and gets the ordinary
+ * global `fetch`, because a budget belongs to an invocation and an invocation
+ * serving one API call has no ceiling worth defending.
+ */
+function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike): AppEnv {
   return {
     db: env.DB,
-    sleeper: new SleeperClient(),
-    vegas: buildVegasProvider(env),
+    sleeper: fetchImpl ? new SleeperClient({ fetch: fetchImpl }) : new SleeperClient(),
+    vegas: buildVegasProvider(env, fetchImpl),
     APP_PASSPHRASE: env.APP_PASSPHRASE,
     SESSION_SECRET: env.SESSION_SECRET,
     inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
@@ -128,10 +143,19 @@ export default {
    *                       everything 288 of them would), the season-long
    *                       market lines the draft board prices against, the
    *                       matchup calibration ledger — the forecast written
-   *                       down and finished weeks closed out — and one bounded
-   *                       batch of manager history, which is why a league's
-   *                       four seasons of drafts and transactions arrive over
-   *                       a few days instead of failing in one invocation
+   *                       down and finished weeks closed out — and, last of
+   *                       everything and on whatever budget the rest of the
+   *                       tick leaves it, one bounded batch of manager
+   *                       history, which is why a league's four seasons of
+   *                       drafts and transactions arrive over a few days
+   *                       instead of failing in one invocation
+   *
+   * The daily tick is the one with a ceiling to defend. Every external call it
+   * makes — Sleeper, nflverse, the Vegas provider — is charged to a single
+   * `RequestBudget` created at the top of that branch, so the invariant is not
+   * "each subsystem is careful" but "the fifty-first subrequest is never
+   * initiated". See `core/sleeper/budget.ts`, and `cron.subrequestBudget.test.ts`
+   * for the worst case it is asserted against.
    *
    * The calibration ledger is on a clock at all because of the final audit's
    * F-01: it used to be written from inside `GET /api/leagues/:id/matchup`, so
@@ -196,8 +220,51 @@ export default {
     }
 
     if (event.cron.startsWith('0 9')) {
-      const sleeperSync = new SleeperSyncService(env.DB, appEnv.sleeper);
-      await sleeperSync.syncPlayers();
+      /*
+       * One budget, and everything below it spends the same one.
+       *
+       * Cloudflare counts subrequests per invocation, so this is the only place
+       * a ceiling can honestly be defended: the manager backfill was budgeted
+       * for a year while the tick around it was not, which meant a bad
+       * afternoon at Sleeper — where every read retries twice — could put the
+       * invocation into the sixties with the backfill's own counter reading a
+       * comfortable 24/24. See `core/sleeper/budget.ts`.
+       *
+       * Two transports, because a subrequest is not always a request. Sleeper
+       * answers directly and costs one; every nflverse file is a GitHub release
+       * asset that answers 302 to a signed `release-assets.githubusercontent.com`
+       * URL, and `fetch` follows that hop itself — so one call is two
+       * subrequests, and a wrapper that counted calls would undercount the
+       * seven nflverse-family reads on this tick by seven.
+       */
+      const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);
+      const meteredFetch = budgetedFetch(budget);
+      const meteredRedirectingFetch = budgetedFetch(budget, undefined, { cost: REDIRECTING_FETCH_COST });
+      const cronEnv = toAppEnv(env, meteredFetch);
+      let intelNote = 'not reached';
+
+      const sleeperSync = new SleeperSyncService(env.DB, cronEnv.sleeper);
+      /*
+       * The player dictionary, and separately caught like everything else here.
+       *
+       * It was the one call on this tick that was not, which meant a Sleeper
+       * outage at 09:00 — the exact morning the retry paths matter — threw out
+       * of `syncPlayers` and abandoned the entire invocation: no injury check,
+       * no usage, no market lines, no schedule, no calibration, nothing. A feed
+       * failing is a reason to skip that feed and not a reason to skip the ten
+       * below it, which is the argument every other block here already makes.
+       *
+       * Nothing downstream is broken by a dictionary that did not refresh. Every
+       * feed that matches rows against known players matches them against
+       * yesterday's dictionary, which is what it would have used anyway; the
+       * cost of a skipped sync is that a player who signed overnight is unknown
+       * for one more day.
+       */
+      try {
+        await sleeperSync.syncPlayers();
+      } catch (err) {
+        console.error('player dictionary sync failed', err);
+      }
       /*
        * Where the season is, once a day.
        *
@@ -219,7 +286,7 @@ export default {
        * nothing, which is what they said before this existed.
        */
       try {
-        await new PlayerDetailService(env.DB, { sleeper: appEnv.sleeper }).refreshSeasonStats();
+        await new PlayerDetailService(env.DB, { sleeper: cronEnv.sleeper }).refreshSeasonStats();
       } catch (err) {
         console.error('season stats refresh failed', err);
       }
@@ -237,7 +304,7 @@ export default {
        * scheduled — a floor under the freshest thing this app has.
        */
       try {
-        await new InjuryService(env.DB).refresh();
+        await new InjuryService(env.DB, { fetch: meteredRedirectingFetch }).refresh();
       } catch (err) {
         console.error('injury report refresh failed', err);
       }
@@ -263,7 +330,7 @@ export default {
        * a nudge in a close call, and it must never take down the player sync.
        */
       try {
-        const usage = new UsageService(env.DB);
+        const usage = new UsageService(env.DB, { fetch: meteredRedirectingFetch });
         const run = await usage.refresh();
         // And one week of any gap an outage left behind, but never on the same
         // tick as a real ingest — a catch-up week is history and can wait a day.
@@ -294,7 +361,7 @@ export default {
        * a lineup depends on.
        */
       try {
-        const result = await new SeasonMarketService(env.DB, appEnv.vegas).refresh();
+        const result = await new SeasonMarketService(env.DB, cronEnv.vegas).refresh();
         if (result.error) console.error('season market refresh failed', result.error);
       } catch (err) {
         console.error('season market refresh failed', err);
@@ -323,7 +390,7 @@ export default {
        * failure leaves the stored schedule exactly where it is.
        */
       try {
-        const schedule = await new ScheduleService(env.DB).refresh(usageSeason());
+        const schedule = await new ScheduleService(env.DB, { fetch: meteredRedirectingFetch }).refresh(usageSeason());
         if (schedule.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
       } catch (err) {
         console.error('schedule refresh failed', err);
@@ -350,67 +417,24 @@ export default {
        * take a lineup feed down.
        */
       try {
-        await new LeagueStrategyService(env.DB, { sleeper: appEnv.sleeper }).captureTrending();
+        await new LeagueStrategyService(env.DB, { sleeper: cronEnv.sleeper }).captureTrending();
       } catch (err) {
         console.error('trending capture failed', err);
       }
 
-      /*
-       * One bounded batch of manager history, on the same daily clock.
-       *
-       * The subsystem this feeds is the reason the batch exists. Sleeper keeps
-       * a league's drafts and transactions for every season it has ever played,
-       * and reading them is how `Next%` learns that the man three seats over
-       * takes his quarterback in round fourteen — but reading them all at once
-       * cost about sixty-six subrequests against a free-plan ceiling of fifty,
-       * and it failed in production for exactly that reason.
-       *
-       * So it is a batch. At most twenty-four requests, checkpointed at every
-       * unit, resumed here tomorrow. An established league fills its ledger
-       * over a few days and then costs two requests a day for ever — the live
-       * draft's index and the week still in play — because a finished draft and
-       * a finished week can never change and are never re-read.
-       *
-       * **Last of the Sleeper work on this tick, and deliberately.** Everything
-       * above it feeds a surface somebody is looking at today: the player
-       * dictionary, the injury report, the market lines, the current week's
-       * transactions. This feeds a signal measured in seasons, and a signal
-       * measured in seasons can wait a day. Its budget is spent after theirs,
-       * so a batch can never crowd out a lineup feed.
-       *
-       * Separately caught, like every other feed here: a history that fails to
-       * advance costs a small `Next%` adjustment and nothing else.
-       */
-      try {
-        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
-        if (selected) {
-          const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
-          const report = await new ManagerIntelService(env.DB, { sleeper: appEnv.sleeper }).advance({
-            leagueId: selected.id,
-            sleeperLeagueId: selected.sleeperLeagueId,
-            season: selected.season,
-            week: state?.week ?? 1,
-          });
-          if (report.errors.length > 0) {
-            console.error('manager intelligence batch had failures', report.errors);
-          }
-        }
-      } catch (err) {
-        console.error('manager intelligence batch failed', err);
-      }
-
-      await refreshMatchupCalibration(env, appEnv);
-      await refreshPublishedProjections(env, appEnv);
+      await refreshMatchupCalibration(env, cronEnv);
+      await refreshPublishedProjections(env, cronEnv);
 
       /*
-       * The three nflverse feeds Projection v2 reads — **last on this tick, and
-       * that position is the point.**
+       * The three nflverse feeds Projection v2 reads — **last of the live
+       * feeds on this tick, and that position is the point.**
        *
        * Everything above it feeds a live surface: the player dictionary, last
        * season's statistics, the injury report, per-game usage, the season-long
        * market lines the draft board prices against, the matchup calibration
-       * ledger, and the published weekly fallback. Nothing below it does,
-       * because there is nothing below it.
+       * ledger, and the published weekly fallback. The one thing below it feeds
+       * no surface at all — the manager backfill is history, measured in
+       * seasons, and it takes what this leaves.
        *
        * It was written directly after the usage refresh, which read well and was
        * wrong. A slow or hanging fetch there delays the season markets and the
@@ -421,8 +445,13 @@ export default {
        * dependency graph.
        *
        * Costs three conditional GETs on an ordinary day, two of which answer
-       * 304 with no body. The depth chart is a ranged read of the first 768KiB
-       * of a 42MiB file rather than the file; see `core/nflverse/depthChart.ts`.
+       * 304 with no body — but six subrequests, because each is a GitHub
+       * release asset and the 302 to `release-assets.githubusercontent.com` is
+       * a subrequest of its own that `fetch` follows before the validator is
+       * ever considered. That is why this transport is charged double; see
+       * `REDIRECTING_FETCH_COST`. The depth chart is a ranged read of the first
+       * 768KiB of a 42MiB file rather than the file; see
+       * `core/nflverse/depthChart.ts`.
        *
        * After the player dictionary, like everything else here, because snap
        * rows are matched against the players this app knows. Separately caught,
@@ -431,10 +460,112 @@ export default {
        * recommendation anywhere in the app.
        */
       try {
-        await new NflverseService(env.DB).refreshAll();
+        await new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll();
       } catch (err) {
         console.error('nflverse refresh failed', err);
       }
+
+      /*
+       * One bounded batch of manager history — **last on this tick, and last is
+       * now the truth rather than a claim.**
+       *
+       * The subsystem this feeds is the reason the batch exists. Sleeper keeps
+       * a league's drafts and transactions for every season it has ever played,
+       * and reading them is how `Next%` learns that the man three seats over
+       * takes his quarterback in round fourteen — but reading them all at once
+       * cost about sixty-six subrequests against a free-plan ceiling of fifty,
+       * and it failed in production for exactly that reason.
+       *
+       * So it is a batch, checkpointed at every unit and resumed here tomorrow.
+       * An established league fills its ledger over a few days and then costs
+       * two requests a day for ever — the live draft's index and the week still
+       * in play — because a finished draft and a finished week can never change
+       * and are never re-read.
+       *
+       * **Its allowance is whatever is left.** This used to be a flat
+       * twenty-four whatever the rest of the tick had spent, which is the
+       * defect: twenty-four is safe on a healthy morning and is exactly what
+       * takes an invocation over the ceiling on a morning where the feeds above
+       * retried. Now it is `budget.remaining`, capped at the batch maximum so a
+       * quiet morning does not turn into an unusually large one — and because
+       * nothing external runs after this, no reserve is held back. Every unit
+       * it does not get is a unit the feeds above already spent on something
+       * somebody is looking at today.
+       *
+       * A tight morning is not a failure. Zero remaining means the batch is
+       * skipped, the checkpoints stay exactly where they are, and tomorrow's
+       * tick picks up the same unit — the same thing that happens every day
+       * during the first week of a backfill.
+       *
+       * The position is the other half of it. Everything above feeds a surface
+       * somebody is looking at today: the player dictionary, the injury report,
+       * per-game usage, the market lines, the schedule, the trending list, the
+       * calibration ledger, the published projections and the three nflverse
+       * files. An earlier version of this comment claimed to be "last of the
+       * Sleeper work" while five Sleeper reads and three nflverse reads still
+       * ran after it, so a backfill could and did crowd out the calibration
+       * ledger. It is last now.
+       *
+       * Separately caught, like every other feed here: a history that fails to
+       * advance costs a small `Next%` adjustment and nothing else.
+       */
+      try {
+        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
+        if (!selected) {
+          intelNote = 'no league selected';
+        } else {
+          const allowance = Math.min(MAX_SLEEPER_SUBREQUESTS_PER_BATCH, budget.remaining);
+          if (allowance <= 0) {
+            intelNote = 'skipped: no budget left after the feeds above';
+            console.log(`manager intelligence skipped: ${budget.used}/${budget.limit} subrequests already spent`);
+          } else {
+            const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+            const report = await new ManagerIntelService(env.DB, { sleeper: cronEnv.sleeper }).advance({
+              leagueId: selected.id,
+              sleeperLeagueId: selected.sleeperLeagueId,
+              season: selected.season,
+              week: state?.week ?? 1,
+              /*
+               * A cap on the shared pool, not a second charge against it.
+               *
+               * The batch runs on `cronEnv.sleeper` like everything else here,
+               * so the invocation counts its requests at the transport; this
+               * says only how many of them it may have. Handing it a budget
+               * that also charged the invocation would count every request
+               * twice and stop a batch that still had room — see
+               * `RequestBudget.allowance`.
+               */
+              budget: budget.allowance(allowance),
+            });
+            intelNote =
+              `allowance ${allowance}, used ${report.requestsUsed}` +
+              (report.requestsUsed < allowance ? ' (finished what it had to do)' : ' (allowance bound)');
+            if (report.errors.length > 0) {
+              console.error('manager intelligence batch had failures', report.errors);
+            }
+          }
+        }
+      } catch (err) {
+        intelNote = `failed: ${err instanceof Error ? err.message : String(err)}`;
+        console.error('manager intelligence batch failed', err);
+      }
+
+      /*
+       * What the invocation actually cost, once per tick.
+       *
+       * One line, at the end, and deliberately not one per request: the number
+       * that matters is the total against the ceiling, and a per-request log
+       * would be fifty lines a day to learn it. It is here so that "we are
+       * close to the ceiling" is visible in the tail before it is visible as an
+       * outage — a healthy morning reads about 40/48, and a morning that reads
+       * 48/48 with the batch skipped is the tick telling you the feeds above it
+       * are retrying.
+       */
+      const spent = budget.snapshot();
+      console.log(
+        `cron 09:00 subrequests ${spent.used}/${spent.limit} (ceiling 50, ${spent.remaining} unspent); ` +
+          `manager intelligence: ${intelNote}`,
+      );
       return;
     }
 
@@ -581,9 +712,15 @@ export function parseRawEmail(raw: string): {
  * optional feed here: grading the model is a thing this app owes itself over a
  * season, and it must never be the reason an injury check does not run.
  *
- * What it costs: two Sleeper requests and at most six D1 writes per run, three
- * runs a day. The GET path it replaces could cost four writes per score change
- * on a Sunday afternoon, once per polling client.
+ * What it costs: up to five Sleeper requests — `SETTLE_WEEKS_PER_RUN` of them
+ * closing out finished weeks, plus one for the capture — and at most six D1
+ * writes per run, three runs a day. The GET path it replaces could cost four
+ * writes per score change on a Sunday afternoon, once per polling client.
+ *
+ * On the daily tick those requests are charged to the invocation's shared
+ * subrequest budget, because they are made through the client `scheduled()`
+ * hands it; the two weekend clocks pass the unmetered one, which is right —
+ * they run four external calls between them and have no ceiling to defend.
  */
 async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promise<void> {
   try {
