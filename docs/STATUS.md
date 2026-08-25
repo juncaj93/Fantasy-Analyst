@@ -1993,9 +1993,20 @@ dense bar is exactly as dense as it was. Hit-tested with `elementFromPoint` at
 430, 390, 375 and 360 rather than measured as a box, because a box measurement
 is what passed on the day the target was short.
 
-**Cost.** App JS 124.7kB → 124.6kB gzipped, total render weight 140.1kB →
-140.0kB, both inside budget; two CSS rules added, five removed. No new
+**Cost.** App JS 126.4kB → 126.3kB gzipped, total render weight 142.0kB →
+141.9kB, both inside budget; two CSS rules added, four removed. No new
 dependency, request path, cron or data source.
+
+**Resynced against both parallel lanes.** DST streaming (#175) and the expanded
+player's face (#177) landed while this was being gated, and both touch
+`styles.css`. One real collision: the defence planner adopted `.tag-take` for
+`Add`, `Stream` and `Stream + stash`, which this pass had deleted as dead with
+the `Take Now` badge that was its only previous wearer. The rule is restored and
+the comment above it now says who wears it. `.tag-avoid`, `.tag-cliff`,
+`.tag-risky` and `.verdict-risky` were re-checked against the merged tree and
+are still unreferenced, so those four removals stand. `common.tsx` was
+deliberately left alone in this pass because the headshot lane owned it — it
+edited that file, so the restraint was load-bearing rather than theoretical.
 
 ## Recommended next work
 
