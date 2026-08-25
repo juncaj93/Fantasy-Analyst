@@ -356,3 +356,45 @@ describe('the pieces the curve is built from', () => {
     expect(tierFor(tiers, 99)?.points).toBe(-4);
   });
 });
+
+/**
+ * Home and road, which was written and dormant until the fixture list arrived.
+ *
+ * The foundation lane built the term and left it at zero, because the only
+ * schedule this app held was the one that fell out of the betting data, and
+ * `vegas_events.home_team` means "a team we asked about" rather than "the home
+ * side" — reading it as home field would have been the same vocabulary trap
+ * that had every stored spread pointing the wrong way. `nfl_schedule` carries
+ * the real flag, so the term is now supplied from there.
+ *
+ * What matters is that it stayed tiny. It is allowed to break a tie between two
+ * defences and must never decide one.
+ */
+describe('the home-field residual, now that there is a schedule to read it from', () => {
+  it('is worth more at home than on the road, and by less than a point either way', () => {
+    const at = project(-3, 44, { home: true }).points!;
+    const away = project(-3, 44, { home: false }).points!;
+
+    expect(at).toBeGreaterThan(away);
+    expect(at - away).toBeCloseTo(2 * DST_CAPS.homeField, 5);
+    expect(DST_CAPS.homeField).toBeLessThan(0.5);
+  });
+
+  it('is absent rather than zero when the fixture list has not been read', () => {
+    const unknown = project(-3, 44);
+
+    expect(unknown.components.some((c) => c.key === 'home_field')).toBe(false);
+  });
+
+  it('never reorders two defences the anchor separates', () => {
+    /*
+     * The claim the cap exists for. A defence facing an offence implied three
+     * points lower is ahead on the anchor by far more than the whole home-field
+     * term, so the worse matchup cannot overtake it by playing at home.
+     */
+    const softRoad = project(0, 34, { home: false }).points!;
+    const hardHome = project(0, 40, { home: true }).points!;
+
+    expect(softRoad).toBeGreaterThan(hardHome);
+  });
+});

@@ -36,6 +36,8 @@
  * reader: not known. Present-and-null is what a pass that ran and found nothing
  * looks like; absent is what a deployment without the pass looks like.
  */
+import { weekRange, type DstDecision, type DstOption, type DstPlan } from '../dst/planner.ts';
+
 export interface WaiverLeagueIntel {
   /**
    * What he is expected to cost, in this league's own currency.
@@ -143,9 +145,33 @@ export interface WaiverAdviceLike {
    * row's cost reads as unknown, which is the honest answer and not a bug.
    */
   faab?: { bids?: WaiverBidLike[] } | null;
+  /**
+   * The defence decision, decided elsewhere and drawn here.
+   *
+   * A DST does not arrive through `upgrades` and deliberately does not: the
+   * generic scan compares one player against the man in the slot, and the
+   * question at defence is whether the slot is worth holding at all, over how
+   * many weeks, against what the bench spot was earning. That is
+   * `core/dst/planner.ts`, and this is where its answer joins the board so
+   * there is one surface rather than a defence dashboard.
+   */
+  dst?: DstPlan | null;
 }
 
 export type WaiverStrength = 'strong' | 'solid' | 'speculative';
+
+/** What a defence row is: the plan's decision, and which half of it this is. */
+export interface WaiverDstRole {
+  decision: DstDecision;
+  /** `stream` and `add` fill the slot; `stash` is carried for the playoffs. */
+  role: 'slot' | 'stash';
+  /** The compact sentence the plan wrote. */
+  headline: string;
+  /** What the roster spot costs, always in words. */
+  cost: string;
+  /** One week only — a bye fill rather than a replacement. */
+  temporary: boolean;
+}
 
 export interface WaiverBoardRow {
   playerId: string;
@@ -188,6 +214,8 @@ export interface WaiverBoardRow {
    * the bid.
    */
   bid: WaiverBidLike | null;
+  /** Present only on a defence row. Absent everywhere else, not null-filled. */
+  dst?: WaiverDstRole;
 }
 
 export interface WaiverBoard {
@@ -205,6 +233,15 @@ export interface WaiverBoard {
    * times down a list.
    */
   pending: string[];
+  /**
+   * The whole defence answer, including the ones with nobody to add.
+   *
+   * `wait`, `hold` and `unknown` have no player attached and therefore no row,
+   * but they are still the answer to "which defence should I add" — the answer
+   * being *none, and here is why*. Carried beside the rows so the screen can
+   * say it in one line without inventing a player to hang it on.
+   */
+  dst: DstPlan | null;
 }
 
 /** How far past the bar a gain has to be before it is called strong. */
@@ -242,8 +279,14 @@ const STRENGTH_LABEL: Record<WaiverStrength, string> = {
   speculative: 'Worth a look',
 };
 
-/** Positions the filter row offers, in the order the rest of the app uses. */
-export const BOARD_POSITIONS = ['QB', 'RB', 'WR', 'TE'];
+/**
+ * Positions the filter row offers, in the order the rest of the app uses.
+ *
+ * `DEF` is last and is not flex-eligible, which is the whole of what makes it
+ * behave: it earns a chip when the planner has named a defence and gets none
+ * when it has not, exactly like every other position on this board.
+ */
+export const BOARD_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'DEF'];
 export const FLEX_POSITIONS = ['RB', 'WR', 'TE'];
 
 export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
@@ -301,13 +344,34 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
     }
   }
 
+  /*
+   * The defence rows, if the plan named anybody.
+   *
+   * At most two — the defence to start this week and the defence to carry into
+   * the playoffs — and only when the planner actually chose one. A `hold` or a
+   * `wait` produces no row on purpose: there is nobody to add, and a board row
+   * for a player you are not being told to add is the context-free DST ranking
+   * this lane exists to avoid.
+   */
+  for (const row of dstRows(advice.dst ?? null)) byPlayer.set(row.playerId, row);
+
   const rows = [...byPlayer.values()].sort(compareRows);
 
+  /*
+   * What the league-intelligence pass has still to fill — for the rows it fills.
+   *
+   * A defence row is excluded from this count rather than counted as missing,
+   * because nothing is coming for it: the price model runs over waiver upgrades
+   * and a DST does not arrive as one, and this lane deliberately did not build a
+   * second auction model for a two-dollar add. Counting it would have the page
+   * promise a column that will never arrive.
+   */
+  const priced = rows.filter((r) => r.dst == null);
   const pending: string[] = [];
-  if (rows.length > 0) {
-    if (rows.every((r) => r.faab == null)) pending.push('expected cost');
-    if (rows.every((r) => r.competition == null)) pending.push('likely competition');
-    if (rows.every((r) => r.multiWeek == null)) pending.push('multi-week value');
+  if (priced.length > 0) {
+    if (priced.every((r) => r.faab == null)) pending.push('expected cost');
+    if (priced.every((r) => r.competition == null)) pending.push('likely competition');
+    if (priced.every((r) => r.multiWeek == null)) pending.push('multi-week value');
   }
 
   return {
@@ -317,8 +381,134 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
     notes: advice.notes ?? [],
     considered: advice.considered ?? 0,
     pending,
+    dst: advice.dst ?? null,
   };
 }
+
+/**
+ * The plan's chosen defences, as board rows.
+ *
+ * Everything a defence row shows is the plan's own: the strength is the
+ * decision rather than a ratio against a waiver bar, the fit is the DEF slot or
+ * the playoff carry, and `shortTerm.gain` is the gain the plan measured against
+ * the defence already rostered. Nothing here re-decides anything.
+ */
+function dstRows(plan: DstPlan | null): WaiverBoardRow[] {
+  if (!plan || !plan.surface) return [];
+  const rows: WaiverBoardRow[] = [];
+
+  if (plan.target) {
+    rows.push(
+      dstRow(plan.target, plan, {
+        decision: plan.decision,
+        role: 'slot',
+        headline: plan.headline,
+        cost: plan.cost.label,
+        temporary: plan.temporary,
+      }),
+    );
+  }
+  if (plan.stash) {
+    /* The stash's own gain is a playoff figure, not this week's — see `dstRow`. */
+    rows.push(
+      dstRow(plan.stash, plan, {
+        decision: plan.decision,
+        role: 'stash',
+        headline: `Playoff stash · ${plan.stash.team}`,
+        cost: plan.cost.label,
+        temporary: false,
+      }),
+    );
+  }
+  return rows;
+}
+
+function dstRow(option: DstOption, plan: DstPlan, role: WaiverDstRole): WaiverBoardRow {
+  const stash = role.role === 'stash';
+  const gain = stash ? (option.playoff?.perWeek ?? 0) : (plan.gain ?? option.thisWeek ?? 0);
+  /*
+   * A defence's strength is its decision, not a multiple of a bar.
+   *
+   * `strengthOf` prices a claim against the points threshold a waiver upgrade
+   * had to clear, and the defence bar already has the roster-spot cost folded
+   * into it — running the ratio again would report the same restraint twice and
+   * call a cleared decision speculative.
+   */
+  const level: WaiverStrength =
+    role.decision === 'add' || role.decision === 'stream' || role.decision === 'stream_and_stash'
+      ? stash
+        ? 'solid'
+        : 'strong'
+      : 'solid';
+
+  return {
+    playerId: option.playerId,
+    name: option.name,
+    position: 'DEF',
+    team: option.team,
+    strength: { level, label: stash ? 'Playoff stash' : DST_DECISION_LABEL[role.decision] },
+    fit: {
+      slot: 'DEF',
+      need: plan.current == null && !stash ? 'unfilled' : 'upgrade',
+      label: stash ? `Carry for ${weekRange(plan.playoffWeeks)}` : plan.current ? `Streams over ${plan.current.team}` : 'Fills DEF',
+      alsoFits: [],
+    },
+    shortTerm: {
+      gain,
+      label: `${gain >= 0 ? '+' : ''}${gain.toFixed(1)} pts`,
+      over: stash ? null : (plan.current?.name ?? null),
+    },
+    multiWeek: dstMultiWeek(option, stash),
+    faab: null,
+    competition: null,
+    bidders: null,
+    why: role.headline,
+    reasons: [...plan.why, ...plan.evidence.map((e) => `${e.label}: ${e.value}`)],
+    statusFlag: option.unavailable ? (option.unavailableReason ?? 'unavailable') : null,
+    score: option.thisWeek,
+    leagueRank: null,
+    bid: null,
+    dst: role,
+  };
+}
+
+/**
+ * The forward view, in the column the board already has for one.
+ *
+ * Reported as an outlook rather than as a projection — `medium` at its very
+ * best — because no book has priced these weeks; see `core/dst/outlook.ts`.
+ */
+function dstMultiWeek(option: DstOption, stash: boolean): WaiverBoardRow['multiWeek'] {
+  const outlook = stash ? option.playoff : option.forward;
+  if (!outlook || outlook.perWeek == null) return null;
+  return {
+    /*
+     * `streamer` rather than a level of its own.
+     *
+     * The column's vocabulary already has a word for "worth a week or a few
+     * rather than a season", and a defence is the position it was coined for.
+     * Adding a fifth level to describe the same thing would put two words for
+     * one idea in front of a reader.
+     */
+    level: 'streamer',
+    label: `${outlook.perWeek.toFixed(1)} pts a week`,
+    detail:
+      outlook.confidence === 'medium'
+        ? `${stash ? 'the playoff weeks' : 'the next few weeks'}, on the lines the market has published`
+        : `${stash ? 'the playoff weeks' : 'the next few weeks'} — an outlook rather than a projection, because nobody has priced them yet`,
+  };
+}
+
+/** The decision, in the words the badge has room for. */
+export const DST_DECISION_LABEL: Record<DstDecision, string> = {
+  add: 'Add',
+  stream: 'Stream',
+  stream_and_stash: 'Stream',
+  stash: 'Playoff stash',
+  hold: 'Hold',
+  wait: 'Wait',
+  unknown: 'Unknown',
+};
 
 function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): WaiverBoardRow {
   const level = strengthOf(candidate.gain, upgrade.bar, upgrade.need);

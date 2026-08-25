@@ -1735,18 +1735,136 @@ as the props. The Demo Mode bundle budget was raised 108KB → 115KB in this
 commit with the reason attached, because the two new modules add ~2.2KB to a
 chunk that had 0.4KB of headroom left.
 
+## DST streaming and playoff planning
+
+**The question this lane answers is not "which defence is best".** Making a
+defence scorable made "somebody better is available" true almost every week —
+the gap across a slate clears any upgrade bar comfortably — and that fact is not
+advice. The useful question is whether the better defence is worth what taking
+him costs: a transaction, a bench spot, and whatever that bench spot was going
+to become. `core/dst/planner.ts` is the whole of it, and it answers in seven
+states — `wait`, `add`, `hold`, `stream`, `stash`, `stream_and_stash`, `unknown`
+— with `wait` first among them. **There is no assumption anywhere that a defence
+must be rostered at all times.**
+
+**Three things stop it churning, and they compose.** Replacement level is the
+*median of the top few* available defences rather than the best of them, through
+`assessStreaming` — written in the foundation lane, unwired until now, and used
+rather than replaced. The churn bar is `MEANINGFUL_UPGRADE_GAIN`, the same 2.5
+points every other add in this app has to clear, widening to 4 when either side
+of the comparison is thin. And the roster spot is priced: `netGain = points
+gained − what the slot was already earning`, in the same weekly points, from the
+same `bench.ts` surplus the drop list is built from. A +3.5 defence does not beat
+a bench player earning +4.
+
+**A bench player who cannot be scored is never given a number.** `valueOfSlot`
+returns a figure for everybody, including somebody it could not score at all —
+for whom the figure is the optionality and bye-cover terms over a base of zero.
+Passed on as a price that would make every marginal defence look free, so it is
+turned back into null and the *bar* widens instead. The card says `costs a bench
+spot — X cannot be scored, so what it costs is unknown`. That flier is exactly
+the player this product's manager keeps the last slot for.
+
+**Activation is game state, never a date.** Pre-draft is silent, decided from
+the draft's own status: a league that drafts in week 2 is not behind. Post-draft,
+advice activates inside a centralised 72-hour window before the next kickoff —
+read from the stored fixture list, so it is the first thing in this app to put
+`nfl_schedule` on a request path. The one exception is the schedule change a
+reader has to act on early: a rostered defence with a bye inside two weeks opens
+the window regardless, because a bye discovered on Saturday is a bye nobody can
+cover. No kickoff known is treated as *outside* the window rather than inside
+it — the cost of being quiet a day too long is far below the cost of telling
+somebody to claim a defence for a game that has kicked off.
+
+**Multi-week holds are two conditions, not one blended number.** The weekly gain
+still has to clear the churn bar, *and* the horizon — this week's gain plus what
+each defence is worth over the next three — must not be a net loss. Streaming
+gives up the incumbent's schedule as well as taking the challenger's, and a
+half-point edge on Sunday that costs two points a week for a month is the trade
+every weekly comparison in fantasy football makes. With no outlook on either
+side the second condition cannot fire: a hold is never argued from a schedule
+this app has not read.
+
+**The forward outlook says what its anchor is.** `core/dst/outlook.ts` values a
+future week on a real line where the market has reached it, and otherwise on the
+opponent's **mean implied team total across the games already priced** — a
+measurement of an offence, not a forecast of a fixture, marked low confidence
+wherever it is used and refused below three games. Neither available means the
+week is *unrated* and left out of the mean; an unknown week is not a neutral
+week, and a bye is a missing week rather than a terrible opponent. **No future
+Vegas line is invented.** `outlookDst` is `projectDst`'s own arithmetic over a
+different anchor — extracted, not reimplemented — with the game-script residual
+*absent* rather than zeroed, because there is no spread, and confidence capped at
+`medium` however good the inputs are.
+
+**A playoff stash has to beat the wire, not beat zero.** The alternative to
+carrying a second defence into week 15 is not fielding nothing; it is streaming
+whatever is free that week. So the arithmetic is stated: per-week gain over
+replacement level, amortised by playoff weeks played over weeks carried, minus
+the bench spot's own weekly value at a 1.5× premium for a player you are not
+starting. The gate is the app's existing `playoffEmphasis.weight >= 0.5`, which
+is zero for most of the year and zero for a team not heading there — and the
+weeks are the league's own `playoff_week_start`, through the one reader the
+`plan` endpoint now shares, never a hard-coded 15–17.
+
+**Byes.** A defence on a bye gets a one-week fill, flagged `temporary`, with the
+incumbent still the incumbent — treating a week off as an upgrade would drop a
+defence held all season. A bye two weeks out surfaces early enough to act on.
+And `plan`'s bye outlook, which reported `null` for every player and said so,
+now derives byes from the stored fixture list: a team with no rows reports no
+bye rather than thirteen.
+
+**One owner for the DEF row.** The generic waiver scan's DEF-over-DEF guard
+stays exactly as the foundation lane wrote it — it was never the problem. What
+changed is the *empty* DEF slot: the scan offered a defence for it, which was
+right while nothing modelled the alternative, and would now contradict a planner
+saying `Wait — no DST needed yet` on the same screen. So the planner wins
+wherever it has an opinion and the generic row survives only when no plan could
+be computed at all. Team and Waivers read one response, so they cannot diverge.
+
+**Home and road, finally.** Written and dormant in the foundation lane because
+`vegas_events.home_team` means "a team we asked about" rather than "the home
+side" — the vocabulary trap that had every stored spread pointing the wrong way.
+`nfl_schedule` carries the real flag. The term is ±0.3, enough to break a tie and
+never enough to decide one, and it is asserted that a skill player evaluated with
+the flag is byte-identical to one without it. **The quarterback residual stays at
+zero**: it requires news that post-dates a line, no caller supplies a trustworthy
+freshness source, and a forced one would count an injury twice.
+
+**Best ball, no DEF, two DEF.** Best ball is silent — there is no weekly add,
+drop or start to advise on. A league that starts no defence gets nothing, before
+any read at all. A league starting two or more is answered on its own terms: the
+slots are filled and never streamed, because one-defence philosophy applied to
+two slots leaves one of them empty most Sundays. All three read off `RosterShape`
+and Sleeper's own `best_ball` flag; there are no league-name exceptions.
+
+**One line, not a dashboard.** Six weeks of schedule, a bench spot's opportunity
+cost and a playoff carry, shown as one row on Team and one above the Waivers
+board — the same words on both, tap for why, tap again for the evidence. There
+is deliberately no Defense Strategy screen, no chart, and no context-free DST
+ranking. A `hold` or a `wait` draws no board row on purpose: there is nobody to
+add, and the answer is *none, and here is why*.
+
+**Free tier.** Three bounded D1 reads on top of what the waiver scan already
+loads — thirty-two fixtures for the week, about a hundred rows for the planner's
+teams across its weeks, and one row per team of implied totals aggregated in
+SQL. No new cron, no new provider, no read-path fetch, no backfill, and not one
+extra Vegas entity: every number here comes out of rows an earlier refresh
+already paid for. No FAAB model was built for a two-dollar add, and a defence row
+is excluded from the board's "still to arrive" line rather than promising a
+column that is not coming.
+
 ## Recommended next work
 
-0. **DST streaming and playoff planning.** The sequential next lane, and the
-   foundation it needs is now in place: defences are scorable, the Smart Trades
-   invariant is a rule, and the fixture list is stored. What it has to decide is
-   the product this lane deliberately withheld — the weekly `Stream X over Y`
-   row, the Waivers DEF behaviour, transaction-cost awareness, multi-week holds
-   and the playoff stash. Two concrete starting points: `assessStreaming` is
-   written and unwired, and `waivers.ts` has one guard to remove (with a model
-   behind it, not without one). It will also want the schedule on a read path
-   for the first time, which is the only part of §12 this lane left untested in
-   anger.
+0. **Watch the defence planner through one real week.** DST is complete enough
+   to archive as a product lane: every state it can be in is tested and every
+   surface it reaches is drawn. What a preseason league cannot show is the two
+   things that need a live season underneath them — whether the 72-hour window
+   lands where a reader expects it once real kickoffs are stored, and how much
+   of a future week is actually rated from a *line* rather than from form in
+   the first fortnight, when no team has the three priced games the fallback
+   requires. Both degrade honestly and both are visible in the plan's own
+   `confidence` and notes; neither can be judged until September.
 0. **Watch one real waiver run.** The FAAB layer is built and tested against
    constructed transactions; what a preseason league cannot show is what
    Sleeper's `transactions/{week}` actually returns for a live waiver run —

@@ -160,8 +160,14 @@ describe('the questions nothing else answers', () => {
       playoffs: { weight: number; weeks: number[] };
     };
     expect(body.byes.gaps).toEqual([]);
+    /*
+     * The input is now the fixture list rather than a bye field nobody
+     * publishes, and it is still named rather than silently absent: this
+     * database has no schedule ingested, so bye planning reports nothing and
+     * says which read came back empty.
+     */
     expect(body.byes.available).toBe(false);
-    expect(body.byes.note).toContain('no bye-week source');
+    expect(body.byes.note).toContain('no schedule has been ingested');
     expect(body.playoffs.weight).toBe(0);
     expect(body.playoffs.weeks).toEqual([15, 16, 17]);
   });

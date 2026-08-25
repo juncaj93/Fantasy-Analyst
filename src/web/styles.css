@@ -8317,3 +8317,39 @@ div.matchup-result {
   gap: var(--sp-2);
   margin-bottom: var(--sp-3);
 }
+
+/*
+ * The defence line: one tappable row, three parts, and it fits at 360.
+ *
+ * The identity cluster and the state tag are fixed columns; the sentence
+ * between them is the only thing that shrinks, and it truncates rather than
+ * wrapping — a two-line defence row on the Team screen would be louder than
+ * the lineup slot above it, which is not what a defence is worth. The whole
+ * thing is a button because the answer is the surface and the reasoning is one
+ * tap away; see `components/dst.tsx`.
+ */
+.dst-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+}
+
+.dst-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.dst-line > .tag {
+  flex: none;
+}
