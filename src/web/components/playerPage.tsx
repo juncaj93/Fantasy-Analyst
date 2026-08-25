@@ -44,6 +44,7 @@ import {
   DetailLabel,
   Empty,
   InjuryTag,
+  PlayerFace,
   PlayerIdentity,
   PositionBadge,
   SignedValue,
@@ -220,27 +221,114 @@ export function PlayerSheet({
       accessibleLabel={player.name}
       title={
         /*
-          The identity grammar, in the order the compact rows already use.
+          Who he is: his face, his name, and what qualifies the name under it.
 
-          This line read name-first, with the pill, the club and the status
-          clustered after it — the row's own order reversed at exactly the
-          moment the reader has committed to one player. The comment under
-          `.sheet-player-title` even claimed it was "the same three marks, in
-          the same order, as every list row in the app", which is how a
-          convention stops being one: it is written down as though it holds
-          while the code says otherwise.
+          This has been through two shapes and it is worth saying what each one
+          was for, because the second undid part of the first on purpose.
 
-          So: position, club, name, and whatever is wrong with him immediately
-          to the right of the name it qualifies. `PlayerIdentity` is the same
-          `flex: none` cluster the rows draw, so the pill lands on one column
-          and the club's mark stays 16px — a qualifier on the name rather than
-          the loudest object on the line. The name takes the slack and truncates
-          before anything after it is pushed off the sheet.
+          It began name-first, with the pill, the club and the status clustered
+          after it — the row's own order reversed at exactly the moment the
+          reader has committed to one player. That was fixed by putting all
+          four on one line in the row's order, position → club → name → status,
+          so a reader arriving from a list was not asked to re-learn the
+          sequence.
+
+          A 64px portrait makes that line unaffordable; see the note on the
+          face below for the measurements. So the header is now the face and,
+          beside it, the name over its qualifiers — `PlayerPage`'s own
+          arrangement for the same player, and the marks under the name still
+          run pill → club → status. `PlayerIdentity` is still the same
+          `flex: none` cluster the rows draw, so the club's mark stays 16px: a
+          qualifier rather than the loudest object on its line.
+
+          What the first pass was defending is intact. The name is not one of
+          four things sharing a line any more — it is the heading, on a line
+          nothing else is on, which is more than the original ever gave it.
         */
         <span className="sheet-player-title">
-          <PlayerIdentity position={player.position} {...(player.team === undefined ? {} : { team: player.team })} />
-          <span className="sheet-player-name">{player.name}</span>
-          <InjuryTag status={headerStatus(player.status, record.detail)} />
+          {/*
+            His face, and it is the first thing on the header for the same
+            reason the pill is the first thing on a row.
+
+            Everything that says *who* sits on the leading side, in the order a
+            reader asks for it — the rule `PlayerIdentity` settles and every
+            list in the app follows. A portrait is the most immediate answer to
+            "who is this" there is: it is recognised rather than read, which is
+            half a beat sooner than a name can be. So it leads.
+
+            Sixty-four pixels, in the sheet's *header* rather than at the top of
+            its body, and both halves of that matter. The header does not
+            scroll, so the face costs the reader no scrolling at all and is
+            still there when they are four blocks down the card; putting it in
+            the body would have pushed every fact on the card down by its own
+            height. And it is a face rather than hero art — the name beside it
+            is still the largest thing in the header, and the band of readings
+            under it did not move.
+
+            `eager`, because the reader has already committed to this player by
+            opening the card. This is the one place in the app where a portrait
+            is the thing that was asked for rather than something passed on the
+            way to something else.
+
+            A team defence gets no portrait, and the position is passed for
+            exactly that reason. Live Sleeper keys defences by the club
+            abbreviation — `CHI` is a real `player_id` — so the helper's
+            numeric rule already excludes them there; this app's own demo seed
+            keys them numerically, which is why the rule is not left to the id
+            shape alone. Either way `DEF` draws its initials and keeps the
+            club's bundled mark on the line beside it. A club is not a person.
+          */}
+          <PlayerFace
+            playerId={player.id}
+            name={player.name}
+            position={player.position}
+            size={64}
+            loading="eager"
+            testId="sheet-player-face"
+          />
+          {/*
+            Two lines beside the face, and the arrangement is the pushed page's
+            rather than a third one invented here.
+
+            The identity used to be one line — pill, club, name, status — and
+            that was right while the header was one line tall. A 64px portrait
+            makes it 64px tall whatever else is on it, and a single line inside
+            a box that size is both odd-looking and, on a narrow phone,
+            expensive: the face takes 68px off the width the name was sharing
+            with three other marks, and that line had about twenty pixels of
+            slack. Measured across the seed at 360px, a 64px face on one line
+            truncated nineteen of twenty-two names, the worst losing 38% of
+            itself — `Julian Reyes` became `Julian…`. None of them truncated
+            before it.
+
+            So the height the portrait already costs is spent instead of
+            wasted. The name takes a line of its own and the marks that qualify
+            him take the one under it, which is exactly what `PlayerPage` does
+            with the same player in a navigation bar — `.nav-title` over
+            `.nav-subtitle` — and it is why this reuses that shape rather than
+            inventing a second answer to the same question.
+
+            Be clear about what this does change. The one-line grammar put the
+            pill and the club *before* the name; a two-line block cannot, and
+            does not pretend to — the name is the title and everything
+            qualifying him sits under it, in the row's own order: pill, club,
+            status. That is the same trade `PlayerPage` already made and gave
+            the same reason for, and it is confined to the two surfaces where
+            a player is a heading rather than a row. Every list in the app
+            still reads pill → club → name across one line, which is where
+            that rule was written to do its work: making forty names start on
+            one column. A header has one name in it.
+
+            Nothing was dropped and nothing was reordered within a line. At
+            430, 390, 375 and 360, no name truncates at all.
+          */}
+          <span className="sheet-player-ident">
+            <span className="sheet-player-name">{player.name}</span>
+            <span className="sheet-player-quals">
+              <PlayerIdentity position={player.position} {...(player.team === undefined ? {} : { team: player.team })} />
+              <InjuryTag status={headerStatus(player.status, record.detail)} />
+            </span>
+          </span>
           {trailing ? <span className="sheet-player-aside">{trailing}</span> : null}
         </span>
       }
