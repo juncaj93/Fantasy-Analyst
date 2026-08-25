@@ -25,6 +25,7 @@ import { api, type LeagueSummary, type StartSitRefreshReport, type WaiverAdvice 
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
+import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
@@ -127,12 +128,35 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             />
           ) : null}
 
+          {/*
+            The defence, when it has no row of its own to be said in.
+
+            A `wait` or a `hold` names nobody, so it cannot be a row — and it is
+            still the answer to "which defence should I add", which is the
+            question this page exists for. When the planner *has* named
+            somebody, the row below carries the same words and this line would
+            be the same recommendation twice.
+
+            Read from the whole board rather than from `rows`, which the
+            position chips have already narrowed: filtering to QB must not make
+            a defence line appear.
+          */}
+          {board?.rows.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
+
           {rows.length === 0 ? (
-            <Empty>
-              {filter === ALL_FILTER
-                ? (board?.headline ?? 'Nothing available beats what you already have.')
-                : `Nothing available at ${filter} beats what you already have.`}
-            </Empty>
+            /*
+              Nothing on the board, said once — and not said at all when the
+              defence line above is already carrying an answer. A page reading
+              `Add PIT` over `Nothing available beats what you already have` is
+              two claims about the same wire.
+            */
+            board?.dst?.surface && filter === ALL_FILTER && !board.rows.some((row) => row.dst != null) ? null : (
+              <Empty>
+                {filter === ALL_FILTER
+                  ? (board?.headline ?? 'Nothing available beats what you already have.')
+                  : `Nothing available at ${filter} beats what you already have.`}
+              </Empty>
+            )
           ) : (
             rows.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
           )}
