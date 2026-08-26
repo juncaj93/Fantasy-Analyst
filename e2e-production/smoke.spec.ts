@@ -927,6 +927,31 @@ test.describe('the deployed app', () => {
     await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 
+  /**
+   * The one row somebody reaches for when something is wrong.
+   *
+   * Presence and size only, and deliberately not the tap. Everything else about
+   * the affordance is proved in `e2e/support-snapshot.spec.ts` against a dev
+   * server whose league is known; capturing here would pull a couple of hundred
+   * kilobytes of a real league down on every smoke run and then assert
+   * something about whatever draft happened to be loaded that day, which is
+   * exactly what this suite's own rules say it may not do.
+   *
+   * What it *can* say is the thing that would be worst to discover during a
+   * draft: that the row a reader was told to look for is not on the deployed
+   * screen at all. It is a read either way — the capture route has no write on
+   * it — so nothing here can touch the real league.
+   */
+  test('the support snapshot row is on the deployed Settings screen', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+
+    const row = page.getByTestId('setup-support-snapshot');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('Copy Draft support snapshot');
+    expect((await row.boundingBox())!.height, 'the row is under the 44px floor').toBeGreaterThanOrEqual(44);
+  });
+
   test('the three appearances all apply, and none of them hides the text', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');

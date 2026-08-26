@@ -59,7 +59,7 @@ export interface DraftComponentWeights {
   survivalUrgency: number;
   /** What the season-long betting market expects of him, in this league's points. */
   marketExpectation: number;
-  /** How far the user's own ★ flag can move a player. */
+  /** How far the user's own ♥ flag can move a player. */
   myGuy: number;
   /** Extra caution on a player the accumulated research is against. */
   avoid: number;
@@ -88,7 +88,7 @@ export interface DraftComponentWeights {
  *
  * Every weight but the market's is zero, and that is the whole statement: a
  * defence is ranked on where the draft market has it and on nothing else. No
- * news tally, no roster need, no ★, no AVOID, no tier cliff, no scarcity, no
+ * news tally, no roster need, no ♥, no AVOID, no tier cliff, no scarcity, no
  * league fit, no season-long betting line, no imported projection.
  *
  * Not an oversight and not a shortcut — it is what the app already knew and was
@@ -155,7 +155,7 @@ export const DEFAULT_WEIGHTS: DraftComponentWeights = {
   // scale — see `preseasonPoints.ts`; the ceiling is unchanged because the
   // weight is the same one.
   marketExpectation: 0.2,
-  // At full strength (★★★) this contributes 0.5 — about ten picks of ADP, the
+  // At full strength (♥♥♥) this contributes 0.5 — about ten picks of ADP, the
   // "modest reach" the brief asks for and no more.
   myGuy: 0.5,
   // Stacks on top of the negative the news components already produce, so a
@@ -230,7 +230,7 @@ export interface AvailablePlayerInput {
   /** ADP rank within the snapshot, when present. */
   adpRank: number | null;
   signal: PlayerSignal | null;
-  /** The user's own ★ flag, 0 when they have not marked this player. */
+  /** The user's own ♥ flag, 0 when they have not marked this player. */
   myGuyLevel?: MyGuyLevel;
   /**
    * Season-long market lines for this player, already resolved to him.
@@ -978,7 +978,7 @@ export function rankAvailablePlayers(
     components.push({
       key: 'my_guy',
       label: 'Personal preference',
-      display: flag.level > 0 ? `${flag.stars} ${flag.label}` : 'not flagged',
+      display: flag.level > 0 ? `${flag.marks} ${flag.label}` : 'not flagged',
       score: round3(flag.score),
       weight: weights.myGuy,
       contribution: round3(flag.score * weights.myGuy),
@@ -1380,11 +1380,25 @@ export function capPositionalStructure(components: ComponentScore[]): void {
  * A contribution, said in the unit the rest of the card uses.
  *
  * In the reach regime a point of ADP is worth about 0.05 of contribution, so
- * this is the honest translation of "how far did that move him".
+ * this is the honest translation of what a component was worth.
+ *
+ * **"picks of ADP", not "spots".** It said spots, and a reader has every reason
+ * to read that as places on the board — which is a claim this number cannot
+ * make and frequently does not keep. Measured against a real board, a ♥ worth
+ * `0.084` announced "about 2 spots" and moved the player zero places, and
+ * twice moved him *down* one: the composite is finished in a second pass —
+ * separation from the alternatives, and the cost of waiting — and that pass
+ * runs over the whole pool, so raising one player also changes what every
+ * comparable player is measured against. A nudge smaller than the reshuffle it
+ * causes has no promise to make about board position.
+ *
+ * What the number *is* is a distance in market terms, and that is exactly what
+ * it now says. The claim is true, checkable against the ADP column on the same
+ * card, and unchanged in magnitude — only the noun was wrong.
  */
 function picksMoved(contribution: number): string {
   const picks = Math.round(Math.abs(contribution) / 0.05);
-  return picks >= 1 ? ` (about ${picks} ${picks === 1 ? 'spot' : 'spots'})` : '';
+  return picks >= 1 ? ` (about ${picks} ${picks === 1 ? 'pick' : 'picks'} of ADP)` : '';
 }
 
 /**
@@ -1515,7 +1529,7 @@ function explain(
   if (extra.myGuyFlag.level > 0) {
     const myGuyComponent = by('my_guy');
     reasons.push(
-      `personal preference boost: you marked him ${extra.myGuyFlag.stars} ${extra.myGuyFlag.label}` +
+      `personal preference boost: you marked him ${extra.myGuyFlag.marks} ${extra.myGuyFlag.label}` +
         `${myGuyComponent ? picksMoved(myGuyComponent.contribution) : ''}`,
     );
   }

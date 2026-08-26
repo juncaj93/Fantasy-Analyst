@@ -23,6 +23,7 @@ src/
     schedule/  role-specific schedule strength, weeks ahead
     value/     this-week and next-four-week player value
     grading/   recommendation ledger, counterfactual grading, weekly self-grade
+    support/   capture a decision's inputs and output, redact it, replay it
     contracts/ the versioned surface all of the above is consumed through
   server/      D1-shaped persistence, services, HTTP router, auth
   worker/      Cloudflare Worker entry (fetch + scheduled + email)
@@ -39,6 +40,16 @@ e2e/           Playwright, iPhone portrait widths
 is a pure function or a class with injected dependencies, which is why the
 recommendation engines, the classifier and the identity ladder are all testable
 without a database, a network or a browser.
+
+Injected dependencies buy more than testability, and `core/support/` is where
+that becomes obvious. Because `buildDraftBoard` receives every fact it knows
+through one interface — `DraftBoardSources`, which the server fills from D1,
+Demo Mode fills from fixtures, and a support snapshot fills from a file — a
+capture can be a *recording proxy* around that interface rather than a
+hand-maintained list of "the inputs", and a replay can be the same board
+assembly over `Map`s. Completeness is then structural: a source the board calls
+is a source the snapshot has. See
+[SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md).
 
 ## Runtime portability
 

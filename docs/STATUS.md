@@ -2629,3 +2629,152 @@ no destination hangs out of the capsule; and no two destinations claim the same
 pixel — `elementFromPoint` down every destination's centre line and across both
 sides of every shared edge, which is the check that larger glyphs and larger
 words could have broken and reasoning about could not have caught.
+
+## Milestone — a recommendation can be reproduced instead of remembered (done)
+
+**The problem was never that the app is wrong. It is that it is wrong once.** A
+Draft recommendation somebody disputes was produced against live Sleeper state,
+a market snapshot fetched that morning and a newsletter ledger nobody else has,
+on a Tuesday, on a phone — and none of that exists by the time anybody looks. A
+report became archaeology, and the fix became a guess with a test written after
+it to agree.
+
+**Setup → This app → Copy Draft support snapshot.** One row, one tap, and the
+exact state behind the board is on the clipboard as
+`junculator/support-snapshot@1` — or in the Files app when the clipboard refuses,
+which the row says rather than leaving the reader to find out by pasting
+nothing. No dashboard, no upload, no backend, no telemetry, no background
+collection. `npm run support:fixture -- snapshot.json` on the other end rebuilds
+the board deterministically, with the network unplugged, and
+`--write <name>` turns the real case into a committed regression fixture.
+
+**The capture is a recording proxy over `DraftBoardSources`, and that is the
+whole design.** `buildDraftBoard` is handed its facts rather than fetching them,
+which the demo has relied on for a year; a snapshot is the same substitution
+run backwards. Two properties fall out that a hand-maintained list of "the
+inputs" could not have: completeness is structural — a source method the board
+calls is one the snapshot has, and a new member fails to compile in two files
+until both know about it — and read-only is a property of the type, because that
+interface has no write on it. Replay rebuilds those sources from `Map`s and
+hands them to the same `buildDraftBoard` the server and Demo Mode call, so
+nothing is reimplemented and nothing can drift.
+
+**The one unbounded read is distilled, and what it dropped is counted.** The
+Sleeper dictionary is ~2,500 rows and the board scores at most 300. The file
+keeps the players who can reach the answer — the scored pool the board itself
+reveals by handing it to three sources, the simulated pool cut with the board's
+own exported `simulationEligible` and `byMarketThenSearch`, everybody either
+market has priced, and everybody already drafted — and `playerCensus` records
+what was listed, what was kept and why. Against a padded 2,476-row table the
+capture keeps 300-odd and replays byte-identically. Exactly one board-level
+number the distillation moves, `poolHealth.activeEligible`, and the replay
+reports it under `distillation` with both values rather than letting a smaller
+pool pass quietly as a match.
+
+**Arguments are bounded to the top 24 rows plus every marked player, wherever he
+finished.** The second half is the one that matters: a snapshot is usually taken
+*because* of a specific player, and the player being argued about is very often
+the one that was hearted and did not move — who may be ranked eightieth,
+precisely because that is the complaint. The ordering is complete at any depth,
+so a reordering is always detectable even for a row whose argument is not in the
+file.
+
+**Redaction aliases what the engine needs and refuses what it does not.**
+Sleeper user ids and display names become `manager-1` / `Manager 1`,
+consistently everywhere they appear, so slot → roster → owner still resolves and
+the board is unchanged — a test proves a league of realistic identities emits
+none of them *and* still replays exactly. The league and draft ids go with them,
+and that is the part worth understanding: a user id is obviously an identity, a
+league id is not, and it is worse — `GET /v1/league/<id>/users` is public, needs
+no key, and hands back every manager's username. Replacing eleven user ids and
+then printing the league id would have been a redaction-shaped object rather
+than a redaction. `LeagueRecord.id` *is* the Sleeper league id here, so
+`league-1` and `draft-1` are the whole answer. Cookies, authorization, headers,
+tokens, provider keys, passphrases, email addresses and newsletter excerpts are
+forbidden at any depth and a capture carrying one throws rather than emitting a
+partly-redacted file, because a partly-redacted file is worse than none: it
+looks safe. The scan runs again at replay, since the copy being replayed is not
+necessarily the copy that was emitted. The rules travel inside every snapshot,
+so the person holding the file can read what was taken out of it.
+
+**Reproduced means seven terms, compared exactly, with no numeric tolerance.**
+Every ranked id in order; every component's score, weight, contribution,
+`unknown` and display string; the composite and the 0–100 score; reasons,
+counterpoints and warnings as sets of sentences; the favourite's level and what
+it spent; degraded and freshness states; and the `Next%` seed, so the samples
+match by construction rather than by luck.
+
+The seventh is the one that was easy to leave out and is the reason the list is
+not six: **the lines no component score stands behind.** Everything else is the
+ranking or an input to it, so matching components are strong evidence the rest
+matched too — but `injuryStates` reaches the board through `injuryLine` and
+nothing else, and no score reads it. Without that term a snapshot could
+reproduce every number on the board while silently losing the availability line
+under a player's name, which is precisely the kind of report this exists to
+answer. `tierContext`, `marketHeadline`, `preseasonPoints` and the per-player
+`Next%` model travel and are compared for the same reason. `elapsedMs` and `cached` measure the
+machine rather than the board and are not in the file at all — a field that
+cannot be compared should not be in a document whose purpose is comparison. One
+concession, and it is not numeric: JSON cannot express `-0`.
+
+**Six outcome words, checked in an order that matters.**
+`schema_unsupported` before `data_mismatch` before `engine_version_mismatch`
+before `freshness_difference` before `output_difference`. A moved engine version
+explains a difference, so it is reported ahead of the difference — otherwise
+every replay after a legitimate calibration commit reads `output_difference` and
+a real regression becomes indistinguishable from Tuesday.
+
+**Aliasing the draft id broke reproduction, for a reason worth keeping.** That
+id is one of the strings hashed into the `Next%` Monte Carlo seed — a *model
+input*, not only an identifier — so the alias drew a different sample and the
+replay disagreed with its own capture by a point of survival on a handful of
+players, indistinguishable from a regression. The seed travels in the file
+instead of the identity that produced it: `SimulationInput.seed` is an optional
+override, `nextPickModel.seed` is reported on every board, and the replay hands
+it back and compares it, so matching samples are a consequence rather than a
+coincidence. Reporting it is worth having on its own — "the same board returns
+the same numbers" was a promise, and is now something a reader can check. With
+no seed supplied the derivation is the one it always had, so no existing board
+moved.
+
+**`DRAFT_ENGINE_VERSION` is new, and is not the git SHA.** A SHA says which
+commit shipped and changes on every commit including the ones that change
+nothing here; the engine version says whether the *reasoning* moved, which is
+the question a replay is asking.
+
+**The first case, run through the lane it was built for.** "I hearted a player
+and he did not move up" was traced with the harness rather than reasoned about,
+and it was three facts. The boost does reach the ranking — ♥/♥♥/♥♥♥ contribute
+0.084/0.25/0.5 of composite, exactly as calibrated, with persistence,
+propagation and recompute all intact. At one heart the board frequently does not
+visibly move, and that is the design: 0.084 is under two picks of ADP against a
+board where ten consecutive players sat inside 0.53 of each other. No weight was
+touched.
+
+**Two sentences were genuinely wrong, and both are fixed.** The card credited
+the boost to `★★` — the *queue* mark, which this app documents as changing no
+ranking at all — so a reader who believed it would tap the star and wait for a
+board that was never going to move. `MyGuyFlag.stars` is now `marks` and holds
+hearts; a field called `stars` holding hearts is the next person's version of
+the same bug. And every component sentence promised "about N spots", a claim
+about board position that the second-pass composite does not keep: measured, a ♥
+announcing "about 2 spots" moved a player zero places and twice moved him down
+one. It says "about N picks of ADP" now — the unit the number is actually in,
+and one a reader can check against the ADP column on the same card.
+
+**Performance.** App JavaScript 127,380 → 127,994 gzipped (+614 B, the Settings
+row) against 11.8kB of headroom; the stylesheet is byte-identical, because the
+row reuses `ListRow` and added no rule. Demo Mode's lazy chunk grows 4.0kB
+(135.4kB → 139.4kB) since a scenario serves the capture route in the browser.
+The *replay* machinery reaches no browser chunk at all, and the capture reaches
+none outside Demo Mode's lazy bundle — asserted by grepping the built assets.
+No budget raised.
+
+**Phase 2 is a contract, not a promise.** `decision.kind` is already the union
+of `draft-board`, `lineup`, `matchup`, `waiver-plan`, `dst-plan` and
+`trade-offer`, and everything outside `decision` — schema identity, both
+versions, the fixed clock, redaction, the replay harness, the fixture converter,
+the CLI, the runbook — is surface-independent. Adding a lane is a payload type,
+a recorder over that surface's own sources interface, and a replay adapter that
+calls the real assembly function. What each lane would capture is written down
+in [docs/SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md).

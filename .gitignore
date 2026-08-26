@@ -14,6 +14,15 @@ local-data/
 test-results*/
 playwright-report/
 blob-report/
+# The same directories under any other name.
+#
+# A run pointed at `--output=tr-s2` fell outside `test-results*/` and put two
+# and a half thousand screenshots into a commit, because `git add -A` cannot
+# tell a Playwright output directory from a source tree. The convention above
+# is the one to use; this is the net under it, matched on the artifact
+# directory Playwright always creates rather than on the name somebody chose.
+.playwright-artifacts-*/
+**/.playwright-artifacts-*/
 # Screenshots from scripts/demo-screenshots.mjs. Regenerable from any build in
 # a couple of minutes, several megabytes of PNG, and out of date the moment a
 # screen changes — a CI artifact, never a committed one.

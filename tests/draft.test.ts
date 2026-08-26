@@ -508,7 +508,10 @@ describe('rankAvailablePlayers', () => {
         { ...ctx, currentPick: 40, nextPick: 52 },
       );
       expect(top!.reasons.join(' ')).toContain('strong lifetime signal');
-      expect(top!.reasons.join(' ')).toMatch(/about \d+ spots?/);
+      // In picks of ADP — the unit the number is actually in, and the one the
+      // ADP column on the same card can be checked against. Never "spots",
+      // which reads as places on the board and is a promise this cannot keep.
+      expect(top!.reasons.join(' ')).toMatch(/about \d+ picks? of ADP/);
     });
 
     it('trusts both less when recent news contradicts the lifetime record', () => {

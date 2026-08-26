@@ -497,6 +497,8 @@ export interface DraftBoardState {
     } | null;
     marketOnly: boolean;
     degraded: string[];
+    /** What drew every random sample. Same board, same seed, same numbers. */
+    seed: number;
     elapsedMs: number;
     cached: boolean;
   };
@@ -522,6 +524,46 @@ export const MAX_CANDIDATES = 300;
 export const DEFENCE = 'DEF';
 
 /**
+ * Draft order first, `search_rank` to break a tie, name to break that.
+ *
+ * The order both pools are cut at `MAX_CANDIDATES` in, so which players get
+ * scored and which get simulated is one comparator rather than two copies of
+ * one. Exported because a support snapshot has to reproduce the same cut from
+ * a distilled player list — see `core/support/draftSnapshot.ts` — and a second
+ * copy of these three lines living over there is exactly how a replay starts
+ * quietly scoring a different three hundred players.
+ *
+ * `search_rank` is emphatically not ADP (it measures who gets looked up) and is
+ * never allowed to set the board's order; it orders thirty-two defences nobody
+ * prices better than accident does, and that is the whole of its job here.
+ */
+export function byMarketThenSearch(
+  rankOf: (player: CanonicalPlayer) => number | null,
+): (a: CanonicalPlayer, b: CanonicalPlayer) => number {
+  return (a, b) =>
+    (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
+    (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
+    a.fullName.localeCompare(b.fullName);
+}
+
+/**
+ * Who the room could still draft: active, not yet taken, at a position this
+ * league starts.
+ *
+ * Deliberately *not* `eligible` — no `draftable` gate and no position chip.
+ * The simulator drafts from the room's board rather than from the reader's
+ * filter, and the reasoning for that is beside `simulationPool` below.
+ * Exported for the same reason the comparator is.
+ */
+export function simulationEligible(
+  player: CanonicalPlayer,
+  takenIds: ReadonlySet<string>,
+  startable: ReadonlySet<string>,
+): boolean {
+  return player.active && !takenIds.has(player.id) && (startable.size === 0 || startable.has(player.position));
+}
+
+/**
  * Build the board.
  *
  * `sources` decides where the facts come from; everything else here is the
@@ -530,7 +572,21 @@ export const DEFENCE = 'DEF';
 export async function buildDraftBoard(
   sources: DraftBoardSources,
   draftId: string,
-  opts: { limit?: number; position?: string | null; queuedOnly?: boolean } = {},
+  opts: {
+    limit?: number;
+    position?: string | null;
+    queuedOnly?: boolean;
+    /**
+     * The `Next%` simulation seed, supplied rather than derived.
+     *
+     * For replaying a support snapshot and for nothing else. The draft id is
+     * hashed into the seed, so a snapshot that aliases it — as one must, since
+     * a Sleeper draft id is one public URL away from every manager's username —
+     * would otherwise draw different samples and disagree with the board it was
+     * captured from. See `nextpick/simulate.ts`.
+     */
+    nextPickSeed?: number;
+  } = {},
 ): Promise<DraftBoardState> {
   const draft = await sources.leagues.getDraft(draftId);
   if (!draft) throw new Error(`draft ${draftId} not found`);
@@ -771,12 +827,7 @@ export async function buildDraftBoard(
    * Their market-value component is still `unknown` and they are still marked
    * degraded, so nothing here pretends to a draft position it does not have.
    */
-  pool.sort(
-    (a, b) =>
-      (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
-      (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
-      a.fullName.localeCompare(b.fullName),
-  );
+  pool.sort(byMarketThenSearch(rankOf));
 
   /*
    * No warning for a position the ranking does not cover.
@@ -891,13 +942,8 @@ export async function buildDraftBoard(
    * is not part of it.
    */
   const simulationPool = allPlayers
-    .filter((player) => player.active && !takenIds.has(player.id) && (startable.size === 0 || startable.has(player.position)))
-    .sort(
-      (a, b) =>
-        (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity) ||
-        (a.searchRank ?? Infinity) - (b.searchRank ?? Infinity) ||
-        a.fullName.localeCompare(b.fullName),
-    )
+    .filter((player) => simulationEligible(player, takenIds, startable))
+    .sort(byMarketThenSearch(rankOf))
     .slice(0, MAX_CANDIDATES);
   const simCandidates: SimCandidate[] = simulationPool.map((player) => ({
     playerId: player.id,
@@ -991,6 +1037,7 @@ export async function buildDraftBoard(
   const nextPick = estimateNextPickAvailability({
     managerPrior,
     draftId,
+    ...(opts.nextPickSeed === undefined ? {} : { seed: opts.nextPickSeed }),
     currentPick,
     targetPick: horizon?.pickNo ?? null,
     mySlot,
@@ -1375,6 +1422,17 @@ export async function buildDraftBoard(
       // are the ADP model's rather than the simulation's.
       marketOnly: nextPick.marketOnly,
       degraded: nextPick.degraded,
+      /*
+       * The seed, so the determinism claim is checkable from the response.
+       *
+       * `Next%` is a Monte Carlo estimate that must not move when nothing has
+       * moved, and it is seeded from the board state for exactly that reason.
+       * Two polls of an unchanged board reporting the same seed is what makes
+       * "the same numbers, forever" something a reader can verify rather than
+       * take on trust — and it is what lets a support snapshot reproduce the
+       * draws without carrying the draft id that produced them.
+       */
+      seed: nextPick.seed,
       elapsedMs: nextPick.elapsedMs,
       cached: nextPick.cached,
     },

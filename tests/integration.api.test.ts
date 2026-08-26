@@ -223,11 +223,11 @@ describe('API with seeded data', () => {
     );
     const target = board.recommendations[0]!;
 
-    const set = await json<{ myGuy: { level: number; stars: string; label: string } }>(
+    const set = await json<{ myGuy: { level: number; marks: string; label: string } }>(
       post(`/api/players/${target.playerId}/my-guy`, { level: 2 }, cookie),
     );
     expect(set.myGuy.level).toBe(2);
-    expect(set.myGuy.stars).toBe('★★');
+    expect(set.myGuy.marks).toBe('♥♥');
 
     const after = await json<{ recommendations: { playerId: string; myGuy: { level: number }; reasons: string[] }[] }>(
       get('/api/drafts/demo-draft/board', cookie),

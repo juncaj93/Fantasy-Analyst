@@ -130,6 +130,16 @@ export interface NextPickReport {
   /** True when this answer came from the cache rather than a fresh run. */
   cached: boolean;
   stateKey: string;
+  /**
+   * The number that drew every random sample in this run.
+   *
+   * Reported so that "the same board returns the same numbers" is checkable
+   * rather than promised — two runs with the same seed and different answers is
+   * a bug, and without this the only way to see it was to get different answers
+   * and wonder. A support snapshot also carries it back into a replay; see
+   * `SimulationInput.seed` for why an aliased draft id makes that necessary.
+   */
+  seed: number;
 }
 
 export interface NextPickRequest extends Omit<SimulationInput, 'room' | 'stateKey' | 'teamPrior'> {
@@ -418,6 +428,7 @@ export function estimateNextPickAvailability(request: NextPickRequest): NextPick
     elapsedMs: result.elapsedMs,
     cached: hit != null,
     stateKey,
+    seed: result.seed,
   };
 }
 

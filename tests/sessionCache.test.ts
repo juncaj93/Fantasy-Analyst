@@ -160,6 +160,39 @@ describe('freshness', () => {
     await cached('/a', WORLD, fetcher, { fresh: true });
     expect(await cached('/a', WORLD, fetcher)).toEqual({ n: 2 });
   });
+
+  /*
+   * `fresh` and `store` are different questions, and everything until the
+   * support snapshot wanted the first without the second.
+   *
+   * A manual refresh should not *read* a stale answer and should absolutely
+   * leave the fresh one behind for the next screen. A one-shot artifact is the
+   * other case: a support snapshot is a claim about a single moment, so serving
+   * one from a cache would be serving the wrong moment, and it is a couple of
+   * hundred kilobytes that would take one of the forty-eight slots — and be
+   * stringified a second time to do it — for an answer nothing will ask for
+   * again.
+   */
+  it('store: false answers without leaving anything behind', async () => {
+    const { state, fetcher } = server({ n: 1 });
+    expect(await cached('/a', WORLD, fetcher, { fresh: true, store: false })).toEqual({ n: 1 });
+
+    // Nothing was remembered, so the next read is a request rather than a hit.
+    state.value = { n: 2 };
+    expect(await cached('/a', WORLD, fetcher)).toEqual({ n: 2 });
+    expect(state.calls).toBe(2);
+  });
+
+  it('store: false does not evict what is already held', async () => {
+    const { state, fetcher } = server({ n: 1 });
+    await cached('/a', WORLD, fetcher);
+    state.value = { n: 2 };
+    await cached('/a', WORLD, fetcher, { fresh: true, store: false });
+
+    // The earlier entry is untouched: a read that declined to remember its own
+    // answer has no business forgetting somebody else's.
+    expect(await cached('/a', WORLD, fetcher)).toEqual({ n: 1 });
+  });
 });
 
 describe('invalidation', () => {

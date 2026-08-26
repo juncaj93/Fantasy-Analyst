@@ -87,7 +87,8 @@ import { PlayerFlagsRepo } from './repos/playerFlags.ts';
 import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
-import { DraftBoardService } from './services/draftBoard.ts';
+import { DraftBoardService, draftBoardSourcesFromDatabase } from './services/draftBoard.ts';
+import { captureDraftSnapshot, SnapshotRedactionError } from '../core/support/draftSnapshot.ts';
 import { InjuryService } from './services/injuryService.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
@@ -1621,6 +1622,48 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     // `queued=1` narrows the board to the user's own queue.
     const queuedOnly = ctx.url.searchParams.get('queued') === '1';
     return jsonResponse(await service.build(ctx.params['id']!, { limit, position, queuedOnly }));
+  });
+
+  /**
+   * The whole state behind this board, in one file the user can send somebody.
+   *
+   * The support workflow's first step. It builds the board through a recording
+   * proxy over the same sources `/board` uses, redacts every identity, bounds
+   * the player table to the players who can reach the answer, and returns a
+   * `junculator/support-snapshot@1` document that replays deterministically
+   * with no network — see `core/support/schema.ts`.
+   *
+   * **A GET, and everything about it is a read.** `DraftBoardSources` has no
+   * write on it, so that is a property of the type rather than a promise. It
+   * also syncs nothing and refreshes nothing: a diagnostic that went and
+   * fetched fresher data would be changing the thing being diagnosed, and the
+   * board this describes is the board the user is looking at.
+   *
+   * The deployed revision comes from the same `releaseSha` `/api/health`
+   * reports, so a snapshot names a revision that actually shipped rather than
+   * one somebody typed. Where none was injected it is `unknown`, which is the
+   * honest answer for a local server and reads as one.
+   *
+   * A capture that would have contained something a snapshot must never carry
+   * is refused with a 500 and the field named, rather than emitted with the
+   * offending value quietly dropped — a partly-redacted file is worse than
+   * none, because it looks safe.
+   */
+  router.get('/api/drafts/:id/support-snapshot', async (ctx) => {
+    const sources = draftBoardSourcesFromDatabase(ctx.env.db);
+    try {
+      return jsonResponse(
+        await captureDraftSnapshot(sources, {
+          draftId: ctx.params['id']!,
+          gitSha: reportedGitSha(ctx.env.releaseSha),
+          position: ctx.url.searchParams.get('position'),
+          queuedOnly: ctx.url.searchParams.get('queued') === '1',
+        }),
+      );
+    } catch (err) {
+      if (err instanceof SnapshotRedactionError) return errorResponse(err.message, 500);
+      throw err;
+    }
   });
 
   router.post('/api/drafts/:id/sync', async (ctx) => {
