@@ -1,0 +1,566 @@
+name: Release
+
+# Puts one exact revision into production, and is the only thing that does.
+#
+# Not startable by hand and not attached to a branch: it runs when `deploy.yml`
+# (authoritative CI went green on main) or `rollback.yml` (an operator named a
+# known-good revision) calls it with a full 40-character commit id. Everything
+# that used to be spelled "whatever main points at right now" is spelled with
+# that id instead — the checkout, the var compiled into the Worker, the health
+# response, the smoke comparison.
+#
+# The chain it exists to close, end to end:
+#
+#     CI passes for SHA  ->  this checks out SHA  ->  builds SHA
+#                        ->  deploys SHA          ->  production reports SHA
+#                        ->  smoke asserts SHA
+#
+# See docs/RELEASE.md.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN  - lets this workflow talk to your Cloudflare account
+#   APP_PASSPHRASE        - the passphrase for making changes in the app
+#
+# Re-running is safe: every step is idempotent.
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: 'Exact commit to deploy — a full 40-character SHA, already resolved by the caller'
+        required: true
+        type: string
+      origin:
+        description: 'Why this release is happening, for the logs and the summary'
+        required: true
+        type: string
+    outputs:
+      url:
+        description: 'The address the deployment is live at'
+        value: ${{ jobs.release.outputs.url }}
+      sha:
+        description: 'The revision that was deployed'
+        value: ${{ jobs.release.outputs.sha }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+      sha: ${{ inputs.sha }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Only needed if the token can see more than one Cloudflare account.
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+      RELEASE_SHA: ${{ inputs.sha }}
+
+    steps:
+      # The revision, not the branch. `actions/checkout` defaults to the ref
+      # the event carries, which for every trigger that could reach here is
+      # "main, now" — the one thing this workflow may not deploy, because it is
+      # not necessarily what CI validated.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Prove the working tree is the revision that was asked for
+        run: |
+          set -euo pipefail
+          want="$RELEASE_SHA"
+          got="$(git rev-parse HEAD)"
+          echo "asked for:   $want"
+          echo "checked out: $got"
+          echo "reason:      ${{ inputs.origin }}"
+          # A full commit id or nothing. Both callers resolve their input to one
+          # before calling, so a short SHA, a tag or a branch name arriving here
+          # means a caller stopped resolving and a deploy is about to mean
+          # "whatever that name points at today" again.
+          case "$want" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::Release wants a full 40-character commit id; got '$want'."; exit 1 ;;
+          esac
+          if [ "$want" != "$got" ]; then
+            echo "::error::Asked to release $want but the working tree is $got. Refusing to deploy."
+            exit 1
+          fi
+          echo "::notice::Releasing $want (${{ inputs.origin }})"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Check the required secrets exist
+        run: |
+          missing=0
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          if [ -z "${{ secrets.APP_PASSPHRASE }}" ]; then
+            echo "::error::APP_PASSPHRASE is not set. Add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          exit $missing
+
+      - run: npm ci
+
+      # Authoritative CI has already run this for a revision arriving from
+      # `deploy.yml`, and has *not* for one arriving from `rollback.yml`: a
+      # known-good SHA was validated by the CI of its own day, against the
+      # dependencies of its own day. Cheap, and the one gate a rollback gets.
+      - name: Run the test suite
+        run: npm test
+
+      - name: Find or create the database
+        id: d1
+        run: |
+          set -euo pipefail
+          # `d1 list` needs no confirmation and is safe to run repeatedly.
+          # Tolerate wrangler printing a banner before the JSON.
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then
+            echo "No database called $DATABASE_NAME yet — creating it."
+            npx wrangler d1 create "$DATABASE_NAME" > /tmp/created.txt 2>&1 || {
+              cat /tmp/created.txt; exit 1;
+            }
+            id=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/created.txt | head -1)
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::Could not determine the database id."
+            exit 1
+          fi
+          echo "database_id=$id" >> "$GITHUB_OUTPUT"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      - name: Point the config at that database
+        run: |
+          set -euo pipefail
+          # The id is account-specific, not a secret, but it is injected at build
+          # time so the repository stays deployable by anyone.
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            const id = process.argv[1];
+            const next = fs.readFileSync(file, 'utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + id + '\"');
+            fs.writeFileSync(file, next);
+          " "${{ steps.d1.outputs.database_id }}"
+          grep 'database_id' wrangler.toml
+
+      # The one place the deployed revision is written down, and it happens
+      # before the build so the value is compiled into the Worker rather than
+      # looked up at runtime. No GitHub API call from production, no row in D1
+      # holding a version number, nothing to go stale on its own.
+      #
+      # It fails rather than warns if the placeholder is gone: a release that
+      # quietly shipped `unknown` would leave production unable to say what it
+      # is running, which is the failure this whole lane exists to remove.
+      - name: Stamp the revision into the Worker
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            const sha = process.argv[1];
+            const before = fs.readFileSync(file, 'utf8');
+            const after = before.replace(/^RELEASE_SHA = \"[^\"]*\"$/m, 'RELEASE_SHA = \"' + sha + '\"');
+            if (after === before) {
+              console.error('::error::wrangler.toml has no RELEASE_SHA line to stamp.');
+              process.exit(1);
+            }
+            fs.writeFileSync(file, after);
+          " "$RELEASE_SHA"
+          grep '^RELEASE_SHA' wrangler.toml
+          grep -q "^RELEASE_SHA = \"$RELEASE_SHA\"\$" wrangler.toml
+
+      # Applied forward only, and never rolled back by a code rollback. This is
+      # why the migration discipline in docs/RELEASE.md is expand/contract: the
+      # revision this workflow can put back is the code, not the schema.
+      - name: Create the database tables
+        run: npx wrangler d1 migrations apply "$DATABASE_NAME" --remote
+
+      - name: Build the site
+        run: npm run build
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -uo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            if grep -qi 'subdomain' /tmp/deploy.log; then
+              echo "::error::This Cloudflare account has no workers.dev subdomain yet. Register one at Cloudflare dashboard -> Workers & Pages -> Subdomain, then re-run this workflow."
+            fi
+            exit "$status"
+          fi
+          url=$(grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice::Deployed $RELEASE_SHA to $url"
+
+      - name: Store the passphrase used for making changes
+        run: |
+          # Piped in, never echoed. Overwrites cleanly on every run.
+          printf '%s' "${{ secrets.APP_PASSPHRASE }}" | npx wrangler secret put APP_PASSPHRASE
+
+      # The odds provider's key, on the same principle as the passphrase: a
+      # deployment should not need anyone to open a terminal.
+      #
+      # `wrangler.toml` selects the provider and this makes its key reachable.
+      # Without both, the Worker builds a provider that reports itself
+      # unconfigured — which Setup now says plainly, but which is a live site
+      # fetching nothing, so it is worth not shipping in the first place.
+      #
+      # Skipped rather than failed when the secret is absent: a fork or a fresh
+      # clone deploying with VEGAS_PROVIDER = "mock" needs no key, and a deploy
+      # that refused for the want of one would be refusing to do the job it was
+      # asked to do.
+      - name: Store the odds provider key
+        run: |
+          set -uo pipefail
+          if [ -z "${{ secrets.SPORTSGAMEODDS_API_KEY }}" ]; then
+            echo "::warning::SPORTSGAMEODDS_API_KEY is not set, so no odds key was published. If wrangler.toml selects sportsgameodds, Setup will report the key as missing."
+            exit 0
+          fi
+          # Piped in, never echoed. Overwrites cleanly on every run.
+          printf '%s' "${{ secrets.SPORTSGAMEODDS_API_KEY }}" | npx wrangler secret put SPORTSGAMEODDS_API_KEY
+          echo "Odds provider key published to the Worker."
+
+      # The first question after any deploy, asked before the slower ones: is
+      # the code that answers requests the code this run built? Production says
+      # so itself, and the answer is compared here rather than eyeballed.
+      #
+      # Deploying a Worker is not instant, and the version that answers in the
+      # first seconds can still be the previous one — so this retries, and only
+      # a revision that is still wrong after the retries is a failure. That is
+      # exactly the case worth failing on: it means the deploy reported success
+      # and production is running something else.
+      - name: Check production is answering as this revision
+        run: |
+          set -euo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "::error::The deploy produced no site address, so the revision could not be checked."
+            exit 1
+          fi
+          node scripts/check-release-sha.mjs "$url" "$RELEASE_SHA" --attempts 8 --delay 10
+
+      - name: Check the deployed site actually works
+        id: verify
+        run: |
+          set -euo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "::warning::Could not read the site address from the deploy output; skipping checks."
+            exit 0
+          fi
+          echo "Checking $url"
+
+          # A fresh deployment takes a few seconds to become reachable, and the
+          # passphrase secret propagates as its own version right after.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' "$url/api/health" || true)
+            [ "$code" = "200" ] && break
+            echo "  waiting for the site to come up (attempt $attempt, got $code)"
+            sleep 10
+          done
+
+          fail=0
+          echo "health: $code $(cat /tmp/health.json 2>/dev/null)"
+          [ "$code" = "200" ] || fail=1
+
+          code=$(curl -s -o /tmp/overview.json -w '%{http_code}' "$url/api/overview")
+          echo "overview (database read): $code"
+          [ "$code" = "200" ] || fail=1
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$url/")
+          echo "home page: $code"
+          [ "$code" = "200" ] || fail=1
+
+          # Prove the lineup route is actually registered. An unknown league
+          # must be refused by the handler ("league not found"), not by the
+          # router ("not found") — the latter would mean the route is missing
+          # and the Team screen would silently show nothing.
+          body=$(curl -s "$url/api/leagues/does-not-exist/lineup")
+          echo "lineup route: $body"
+          case "$body" in
+            *"league not found"*) ;;
+            *) echo "::error::The lineup route did not respond as expected."; fail=1 ;;
+          esac
+
+          # A write with no session must be refused, or the site would be
+          # editable by anyone who found the address. 503 means the passphrase
+          # has not propagated yet, which is still closed, so retry briefly.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/sleeper/sync-players")
+            [ "$code" = "401" ] && break
+            echo "  waiting for the passphrase to take effect (attempt $attempt, got $code)"
+            sleep 10
+          done
+          echo "unauthenticated write: $code (expected 401 = refused)"
+          [ "$code" = "401" ] || fail=1
+
+          exit $fail
+
+      # Whether the deployed site can be added to an iPhone Home Screen as a
+      # standalone app. iOS decides this silently — a missing icon or a manifest
+      # served with the wrong content type produces a bookmark that opens in a
+      # Safari tab, with no error anywhere — so it is checked here rather than
+      # discovered on a phone. See docs/IOS_WEB_APP.md.
+      - name: Check it can be installed to the Home Screen
+        run: |
+          url="${{ steps.deploy.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "::warning::No site address; skipping the install checks."
+            exit 0
+          fi
+          node scripts/probe-pwa.mjs "$url"
+
+      - name: Load the NFL player list on first run
+        id: bootstrap
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          players=$(curl -s "$url/api/overview" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              try { process.stdout.write(String(JSON.parse(s).players ?? 0)); }
+              catch { process.stdout.write('0'); }
+            })")
+          echo "players currently stored: $players"
+          if [ "$players" != "0" ]; then
+            echo "Player list already present; nothing to do."
+            exit 0
+          fi
+
+          # The app is unusable until the player dictionary exists, and this is
+          # the one setup step that is slow and dull to do by hand. It is
+          # idempotent, so running it once here is safe.
+          echo "Logging in to perform the first player sync..."
+          login=$(curl -s -o /tmp/login.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies.txt)
+          echo "login: $login"
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to bootstrap the player list (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/sync.json -w '%{http_code}' -X POST "$url/api/sleeper/sync-players" \
+            -b /tmp/cookies.txt --max-time 120)
+          echo "player sync: $code"
+          head -c 500 /tmp/sync.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::The player list could not be loaded automatically (HTTP $code). It can be retried from Setup in the app."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
+      # Last season's line, which the expanded player card reads.
+      #
+      # Normally the nightly Sleeper cron fills this in, right after the player
+      # dictionary it is matched against. This covers the gap that leaves on the
+      # deployment which first ships the feature: without it the cards would say
+      # nothing about last season until the next 09:00 UTC, which reads as a
+      # broken feature rather than as a pending one.
+      #
+      # Skipped the moment there is any coverage, so ordinary deployments do no
+      # work here, and never fatal — the cron is still the real path.
+      - name: Load last season's statistics if they are missing
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          covered=$(curl -s "$url/api/setup/status" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              try { process.stdout.write(String(JSON.parse(s).playerDetail?.stats?.players ?? 0)); }
+              catch { process.stdout.write('0'); }
+            })")
+          echo "players with last-season statistics: $covered"
+          if [ "$covered" != "0" ]; then
+            echo "Already loaded; the nightly sync keeps it current."
+            exit 0
+          fi
+
+          login=$(curl -s -o /tmp/login2.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies2.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to load last season's statistics (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/stats.json -w '%{http_code}' -X POST "$url/api/players/season-stats/refresh" \
+            -b /tmp/cookies2.txt --max-time 180)
+          echo "season stats refresh: $code"
+          head -c 500 /tmp/stats.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::Last season's statistics could not be loaded (HTTP $code). The nightly sync will retry, and Setup can trigger it."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
+      # The injury report, on the same first-run principle.
+      #
+      # The five-minute cron keeps it current from here on. This read is still
+      # worth doing at deploy time: it puts a report in a brand-new database
+      # immediately instead of on the next tick, and -- unlike a cron, whose
+      # failures are only visible in the Worker's logs -- it reports what
+      # happened in this workflow's output, where a broken ingest is noticed.
+      #
+      # A season with nothing published yet answers `not_published` and that is
+      # a success: there is no injury report in August because the NFL has not
+      # filed one. Only a real failure is worth a warning.
+      - name: Read the injury report on first run
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          login=$(curl -s -o /tmp/login3.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies3.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to read the injury report (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/injuries.json -w '%{http_code}' -X POST "$url/api/injuries/refresh" \
+            -b /tmp/cookies3.txt --max-time 180)
+          echo "injury report refresh: $code"
+          head -c 500 /tmp/injuries.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::The injury report could not be read (HTTP $code). The daily cron will retry, and Setup can trigger it."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
+      # Per-game usage, on the same first-run principle as the injury report.
+      #
+      # The daily 09:00 cron keeps it current from here on -- weekly stats
+      # settle when a game ends, so there is nothing a faster cadence would
+      # learn. This read is still worth doing at deploy time for the same reason
+      # the injury one is: it puts a week into a brand-new database immediately
+      # rather than on the next morning's tick, and it reports what happened
+      # here, in this workflow's output, where a broken ingest is noticed --
+      # unlike a cron, whose failures are only visible in the Worker's logs.
+      #
+      # A season with nothing published yet answers `not_published`, and that is
+      # a success rather than a fault: there are no weekly statistics in August
+      # because no games have been played. Only a real failure earns a warning.
+      - name: Read the weekly usage file on first run
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          login=$(curl -s -o /tmp/login4.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies4.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to read the usage file (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/usage.json -w '%{http_code}' -X POST "$url/api/usage/refresh" \
+            -b /tmp/cookies4.txt --max-time 180)
+          echo "weekly usage refresh: $code"
+          head -c 500 /tmp/usage.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::The usage file could not be read (HTTP $code). The daily cron will retry, and Setup can trigger it."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
+      # The three nflverse feeds Projection v2 reads, on the same first-run
+      # principle -- and this one earns its place for a reason the others do not
+      # have.
+      #
+      # Projection v2 is side-by-side only: nothing on a screen reads what these
+      # feeds write. That makes waiting until 09:00 UTC harmless for a *user*
+      # and useless for a *reviewer*, because the evaluation this phase exists
+      # to produce cannot be read until the tables have something in them. A
+      # deploy that leaves them empty for six hours leaves the gate unopenable
+      # for six hours.
+      #
+      # Cheap on a repeat deploy: all three are conditional GETs, and once the
+      # ETags are stored they answer 304 with no body and write nothing.
+      #
+      # `not_published` is a success, exactly as it is for the injury report --
+      # `snap_counts_2026.csv` is a 404 until games have been played, and a
+      # calendar fact must not raise a warning.
+      #
+      # `continue-on-error` and a warning rather than a failure, because a feed
+      # no recommendation reads must never be the reason a deploy is marked bad.
+      - name: Read the nflverse feeds on first run
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          [ -z "$url" ] && exit 0
+
+          login=$(curl -s -o /tmp/login5.json -w '%{http_code}' -X POST "$url/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(printf '{"passphrase":%s}' "$(node -e 'process.stdout.write(JSON.stringify(process.env.PASSPHRASE))')") \
+            -c /tmp/cookies5.txt)
+          if [ "$login" != "200" ]; then
+            echo "::warning::Could not log in to read the nflverse feeds (HTTP $login)."
+            exit 0
+          fi
+
+          code=$(curl -s -o /tmp/nflverse.json -w '%{http_code}' -X POST "$url/api/nflverse/refresh" \
+            -b /tmp/cookies5.txt --max-time 180)
+          echo "nflverse refresh: $code"
+          head -c 900 /tmp/nflverse.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::warning::The nflverse feeds could not be read (HTTP $code). Projection v2 is side-by-side only, so nothing a user sees is affected."
+          fi
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+
+      - name: Write the summary
+        if: always()
+        run: |
+          {
+            echo "## Fantasy Analyst"
+            echo
+            echo "**Revision:** \`$RELEASE_SHA\`"
+            echo
+            echo "**Released because:** ${{ inputs.origin }}"
+            echo
+            if [ -n "${{ steps.deploy.outputs.url }}" ]; then
+              echo "**Live at:** ${{ steps.deploy.outputs.url }}"
+              echo
+              echo "Confirm for yourself: \`curl -s ${{ steps.deploy.outputs.url }}/api/health\`"
+            else
+              echo "Deployment did not produce a URL — check the Deploy step above."
+            fi
+            echo
+            echo "Database: \`${{ env.DATABASE_NAME }}\` (\`${{ steps.d1.outputs.database_id }}\`)"
+            echo
+            echo "Migrations are applied forward only. Rolling the code back does not roll the schema back — see \`docs/RELEASE.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"

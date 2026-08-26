@@ -225,6 +225,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | Doc | Contents |
 |---|---|
 | [docs/SETUP.md](docs/SETUP.md) | local dev, deployment, exact manual steps |
+| [docs/RELEASE.md](docs/RELEASE.md) | how a release reaches production, what is live right now, and how to put a previous revision back |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, identity ladder, engines |
 | [docs/EMAIL_INGESTION.md](docs/EMAIL_INGESTION.md) | wiring automatic newsletter delivery |
 | [docs/VEGAS.md](docs/VEGAS.md) | provider abstraction, caching, what to verify |

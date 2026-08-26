@@ -1,8 +1,13 @@
 # Setting up Fantasy Analyst
 
-**Deployment is automated.** Pushing to `main` builds, tests, migrates the
-database and deploys to Cloudflare via GitHub Actions
-(`.github/workflows/deploy.yml`). Nobody needs to run commands by hand.
+**Deployment is automated.** Merging to `main` runs the full CI gate, and the
+exact revision that passed it is then built, migrated and deployed to Cloudflare
+by GitHub Actions (`.github/workflows/deploy.yml`). Nobody needs to run commands
+by hand.
+
+Production says which revision it is running at `/api/health`, and a previous
+one can be put back from the Actions tab in a couple of minutes — see
+**[docs/RELEASE.md](RELEASE.md)**.
 
 Two repository secrets make that work (GitHub → Settings → Secrets and
 variables → Actions):
@@ -329,3 +334,5 @@ npm run e2e             # iPhone-sized browser tests (needs: npx playwright inst
 npm run e2e:chromium    # same tests, fallback browser
 npx wrangler deploy --dry-run   # check it builds without deploying
 ```
+
+Releasing, and rolling a release back: **[docs/RELEASE.md](RELEASE.md)**.

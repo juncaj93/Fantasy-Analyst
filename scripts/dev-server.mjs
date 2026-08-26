@@ -13,6 +13,7 @@
  *   FA_SEED=1           load demo fixtures into a fresh database
  *   FA_DB=path.sqlite   persist to disk instead of memory
  *   NEWSLETTER_ADDRESS  dedicated inbound address shown in Settings
+ *   FA_RELEASE_SHA      revision /api/health should report (default: unknown)
  */
 
 import { createServer } from 'node:http';
@@ -72,6 +73,13 @@ const env = {
   sleeper: new SleeperClient(seed ? { fetch: withDemoSleeper() } : {}),
   vegas: new MockVegasProvider(MOCK_GAMES),
   inboundAddress: process.env.NEWSLETTER_ADDRESS ?? null,
+  /*
+   * Unset locally, and that is the honest answer: a dev server was not built
+   * by a release. Settable so the production smoke suite — which asserts the
+   * revision — can be rehearsed against a local build before it is pointed at
+   * the deployed site. See docs/RELEASE.md.
+   */
+  releaseSha: process.env.FA_RELEASE_SHA ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,

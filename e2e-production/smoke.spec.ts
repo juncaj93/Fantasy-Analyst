@@ -2232,6 +2232,45 @@ test.describe('the decision intelligence', () => {
  * Every request here is safe. Two are GETs, and the third is the refusal this
  * suite already exercises above.
  */
+/*
+ * Which code is this?
+ *
+ * Every other assertion in this file is about a deployment it assumes is the
+ * right one. This is the assertion that earns that assumption: the site names
+ * the revision it was built from, and when the caller said which revision it
+ * expects — the release workflow does, and passes it in as
+ * `EXPECTED_RELEASE_SHA` — the two have to be the same commit.
+ *
+ * A green suite against the wrong build is the failure this prevents, and it is
+ * a quiet one: nothing else here would notice.
+ *
+ * Run by hand with no expectation set, it asserts only that production can
+ * answer the question at all. `unknown` is allowed there and only there,
+ * because a local dev server is not a release. The workflow always sets it.
+ */
+test.describe('the deployed revision', () => {
+  test('says which revision it is running, and it is the released one', async ({ request }) => {
+    const res = await request.get('/api/health');
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { ok: boolean; release?: { gitSha?: string } };
+
+    expect(body.ok).toBe(true);
+    const live = body.release?.gitSha;
+    console.log(`production reports revision: ${live}`);
+    expect(typeof live, '/api/health must report release.gitSha').toBe('string');
+
+    const expected = process.env.EXPECTED_RELEASE_SHA?.trim();
+    if (!expected) {
+      // Nothing to compare against: assert the shape and say so in the log.
+      expect(live).toMatch(/^([0-9a-f]{7,40}|unknown)$/);
+      return;
+    }
+    expect(live?.toLowerCase(), `production is not running the released revision`).toBe(
+      expected.toLowerCase(),
+    );
+  });
+});
+
 test.describe('the API boundary', () => {
   const isJson = (contentType: string | null) => /^application\/json/.test(contentType ?? '');
 

@@ -448,9 +448,15 @@ Note `npx playwright test` with no project will try WebKit, which is not
 installed here, and report ~225 failures that are all the missing browser. Use
 `e2e:chromium`; CI runs WebKit and has never disagreed.
 
-Deployment is automatic on push to `main` (`deploy.yml`), which applies D1
-migrations first. Crons in `wrangler.toml`: Sat 23:00 and Sun 15:00 UTC for the
-Vegas refresh, daily 09:00 UTC for the Sleeper player dictionary.
+Deployment is automatic, but it starts from **CI passing on main**, not from the
+push (`deploy.yml` → `release.yml`), and what it deploys is the exact SHA CI
+validated. Production reports that SHA at `/api/health`, and `rollback.yml` puts
+a named known-good revision back. Migrations are applied forward only and a code
+rollback does not undo them — see `docs/RELEASE.md`, which is short and is the
+first thing to read before touching anything under `.github/workflows/`.
+
+Crons in `wrangler.toml`: Sat 23:00 and Sun 15:00 UTC for the Vegas refresh,
+daily 09:00 UTC for the Sleeper player dictionary.
 
 Useful probes (all read-only, all via `probe.yml`):
 

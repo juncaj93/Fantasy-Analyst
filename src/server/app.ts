@@ -137,6 +137,30 @@ export interface AppEnv extends AuthEnv {
   inboundAddress?: string | null;
   /** Set true to skip auth entirely (local dev / e2e only). */
   disableAuth?: boolean;
+  /**
+   * The exact git revision this deployment was built from, injected at deploy
+   * time and reported by `/api/health` — so "what code is production running?"
+   * is a question the site answers itself rather than one anybody has to infer
+   * from the Actions tab. Null anywhere it was not injected (a local dev
+   * server, a hand-run `wrangler deploy`), which reads as `unknown`.
+   *
+   * See docs/RELEASE.md.
+   */
+  releaseSha?: string | null;
+}
+
+/**
+ * What `/api/health` says the running code is.
+ *
+ * Deliberately narrow: a revision or the word `unknown`, nothing else. A blank
+ * or whitespace-only value is a failed injection rather than a revision, and
+ * saying `unknown` is the honest answer to that — a smoke check comparing an
+ * expected SHA against `unknown` fails, where one comparing against `""` could
+ * be read as an empty match.
+ */
+export function reportedGitSha(value: string | null | undefined): string {
+  const trimmed = (value ?? '').trim();
+  return trimmed === '' ? 'unknown' : trimmed;
 }
 
 export function createApp(): (request: Request, env: AppEnv) => Promise<Response> {
@@ -209,7 +233,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   // ------------------------------------------------------------- health/auth
-  router.get('/api/health', () => jsonResponse({ ok: true, service: 'fantasy-analyst' }));
+  /*
+   * Small on purpose: is it up, which app is it, and which revision is it
+   * running. `release.gitSha` is the whole of the version surface — no build
+   * host, no branch, no environment dump — because everything else a debug
+   * dump could carry is either already public in the repository or is
+   * something a public endpoint should not be handing out.
+   */
+  router.get('/api/health', (ctx) =>
+    jsonResponse({
+      ok: true,
+      service: 'fantasy-analyst',
+      release: { gitSha: reportedGitSha(ctx.env.releaseSha) },
+    }));
 
   router.get('/api/auth/status', async (ctx) => {
     const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
