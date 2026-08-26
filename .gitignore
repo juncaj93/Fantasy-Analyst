@@ -10,6 +10,10 @@ local-data/
 test-results/
 playwright-report/
 blob-report/
+# Screenshots from scripts/demo-screenshots.mjs. Regenerable from any build in
+# a couple of minutes, several megabytes of PNG, and out of date the moment a
+# screen changes — a CI artifact, never a committed one.
+artifacts/
 coverage/
 .DS_Store
 *.tsbuildinfo
