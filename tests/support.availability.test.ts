@@ -30,7 +30,7 @@ import { findScenario } from '../src/core/demo/registry.ts';
 import { captureDraftSnapshot } from '../src/core/support/draftSnapshot.ts';
 import { readSnapshot, replayDraftSnapshot } from '../src/core/support/replay.ts';
 import { buildDraftBoard, type DraftBoardSources } from '../src/core/draft/boardBuilder.ts';
-import type { InjuryState } from '../src/core/injury/model.ts';
+import { practiceTrend, type InjuryState } from '../src/core/injury/model.ts';
 
 /**
  * A designation with enough behind it that the board prints a line.
@@ -45,7 +45,16 @@ function questionable(bodyPart: string, observedAt: string): InjuryState {
     designationSource: 'nflverse',
     bodyPart,
     bodyPartSource: 'nflverse',
-    practice: { status: 'full', source: 'nflverse', observedAt },
+    /*
+     * Built by the app's own reader rather than written out by hand.
+     *
+     * `practiceTrend` decides what a week of reports adds up to and what clause
+     * describes it, and the board's line quotes that clause. A hand-written
+     * `PracticeReading` would be this test's opinion of the wording, which is
+     * the one thing it must not supply — the point is to move a real value
+     * through the round trip, not a plausible-looking one.
+     */
+    practice: practiceTrend(['limited', 'limited', 'full']),
     practiceSource: 'nflverse',
     freshness: 'fresh',
     observedAt,
@@ -53,10 +62,10 @@ function questionable(bodyPart: string, observedAt: string): InjuryState {
     conflict: false,
     conflictNote: null,
     observations: [
-      { source: 'nflverse', designation: 'questionable', raw: 'Q', observedAt, bodyPart },
+      { source: 'nflverse', designation: 'questionable', raw: 'Q', observedAt, bodyPart, practice: ['limited', 'full'] },
       { source: 'sleeper', designation: 'questionable', raw: 'Questionable', observedAt, bodyPart },
     ],
-  } as InjuryState;
+  };
 }
 
 /**
