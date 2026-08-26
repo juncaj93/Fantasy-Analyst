@@ -1,0 +1,125 @@
+name: Rollback
+
+# Put a named, known-good revision back into production.
+#
+# This is the only manual path to production, and it is deliberately the same
+# machinery as a normal release — `release.yml` — with the revision coming from
+# an operator instead of from CI. Nothing here reverts a commit, rewrites
+# history, force-pushes or touches main: it deploys a revision that already
+# exists, exactly as it was, and main is dealt with afterwards in a pull request
+# like any other change.
+#
+# The operator flow, from the Actions tab:
+#
+#   1. Run workflow -> paste the known-good revision (a SHA, or a tag)
+#   2. this validates it exists and is part of main's history
+#   3. `release.yml` checks out exactly that revision and deploys it
+#   4. production reports it at /api/health
+#   5. smoke asserts production is answering as that revision
+#
+# **It rolls back code, not data.** Migrations are applied forward only and
+# nothing here un-applies them. That is safe because of the expand/contract
+# discipline in docs/RELEASE.md — the previous code has to be able to live with
+# the newer schema, which is what makes putting it back a routine operation
+# rather than a second incident.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Known-good revision to deploy: a commit SHA (full or short), or a tag. No default — name it explicitly.'
+        required: true
+        type: string
+      reason:
+        description: 'Why (goes in the run summary, e.g. "Week 3 lineup screen blank at 360")'
+        required: false
+        type: string
+
+# Shared with `deploy.yml`, so a rollback and an ordinary release never write to
+# the Worker at the same time — and, since CI has its own group, an ordinary CI
+# run can never cancel a rollback that is in flight.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # A name is not a revision. This turns whatever was typed into one 40-character
+  # commit id, or it fails — there is no fallback to main anywhere in this file,
+  # because "the rollback quietly deployed the broken code again" is the one
+  # outcome worse than the rollback not running at all.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: resolve
+        # Both inputs reach the shell as environment variables and are read as
+        # `"$REF"` / `"$REASON"`, never interpolated into the script text.
+        # `${{ }}` would paste whatever was typed straight into the shell, and
+        # the Actions tab is not a trusted keyboard just because it needs write
+        # access to reach.
+        env:
+          REF: ${{ inputs.ref }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --tags --force origin
+
+          if [ -z "${REF// /}" ]; then
+            echo "::error::No revision given. Rollback deploys what you name and nothing else."
+            exit 1
+          fi
+
+          sha="$(git rev-parse --verify --quiet "${REF}^{commit}" || true)"
+          if [ -z "$sha" ]; then
+            echo "::error::'$REF' is not a commit in this repository. Give a SHA from the deploy history, or a tag."
+            exit 1
+          fi
+
+          # A known-good revision is one that was on main. Anything else — a
+          # branch that never merged, a commit from a fork — has never been
+          # through the release path, and a rollback is the worst moment to be
+          # shipping code for the first time.
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not in main's history, so it is not a revision production has ever run. Refusing."
+            exit 1
+          fi
+
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::Rolling back to $sha ($REF)"
+          {
+            echo "## Rollback"
+            echo
+            echo "**Requested:** \`$REF\`"
+            echo
+            echo "**Resolves to:** \`$sha\`"
+            echo
+            git log -1 --pretty='%s' "$sha"
+            echo
+            if [ -n "${REASON:-}" ]; then
+              echo "**Reason:** $REASON"
+              echo
+            fi
+            echo "Code only. Migrations already applied stay applied — see \`docs/RELEASE.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: resolve
+    uses: ./.github/workflows/release.yml
+    with:
+      sha: ${{ needs.resolve.outputs.sha }}
+      origin: manual rollback
+    secrets: inherit
+
+  # The rollback is not finished when the deploy is: it is finished when
+  # production says it is running the revision that was asked for.
+  smoke:
+    needs: release
+    uses: ./.github/workflows/smoke.yml
+    with:
+      url: ${{ needs.release.outputs.url }}
+      expected_sha: ${{ needs.release.outputs.sha }}

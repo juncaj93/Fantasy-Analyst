@@ -62,6 +62,16 @@ export interface WorkerEnv {
    * subscribe. Can also be set in-app, which overrides this value.
    */
   NEWSLETTER_ADDRESS?: string;
+  /**
+   * The git revision this deployment was built from, written into
+   * `wrangler.toml` by the release workflow immediately before it builds. A
+   * plain var rather than a secret: it is a public commit id, and it has to
+   * survive into the deployed Worker so `/api/health` can report it.
+   *
+   * `"unknown"` in the file that is committed, so a hand-run `wrangler deploy`
+   * says so instead of claiming a revision it did not check out.
+   */
+  RELEASE_SHA?: string;
 }
 
 const app = createApp();
@@ -93,6 +103,7 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike): AppEnv {
     APP_PASSPHRASE: env.APP_PASSPHRASE,
     SESSION_SECRET: env.SESSION_SECRET,
     inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
+    releaseSha: env.RELEASE_SHA ?? null,
   };
 }
 

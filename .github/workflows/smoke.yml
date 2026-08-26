@@ -4,28 +4,54 @@ name: Smoke-test production
 # widths, both themes. Read-only — it makes GET requests anyone can make, plus
 # the one write that has to be refused.
 #
-# Runs automatically after every successful deploy, and can be run by hand at
-# any time from the Actions tab.
+# Called by `deploy.yml` and `rollback.yml` the moment their release is live,
+# and runnable by hand at any time from the Actions tab.
+#
+# Called rather than triggered by `workflow_run`, which is what it used to be,
+# for one reason: a `workflow_run` smoke knows only that *a* deploy finished. It
+# then checks whatever is live at the moment it gets a runner, which is not
+# necessarily what that deploy published — a second release, or a rollback, can
+# land in between, and the run would go green describing the wrong build. Being
+# called means the release hands over the revision it just published, and this
+# refuses to report on anything else.
 
 on:
-  workflow_run:
-    workflows: ['Deploy']
-    types: [completed]
+  workflow_call:
+    inputs:
+      url:
+        description: 'Site to check'
+        required: false
+        default: 'https://fantasy-analyst.juncaj93.workers.dev'
+        type: string
+      expected_sha:
+        description: 'The revision the caller published; production must report exactly this'
+        required: false
+        default: ''
+        type: string
   workflow_dispatch:
     inputs:
       url:
         description: 'Site to check (defaults to the live one)'
         required: false
         default: 'https://fantasy-analyst.juncaj93.workers.dev'
+        type: string
+      expected_sha:
+        description: 'Revision production should be running (optional; leave blank to accept whatever is live)'
+        required: false
+        default: ''
+        type: string
 
+# Keyed by the revision under test, so a re-run of the same check supersedes the
+# one before it and two different releases never cancel each other. A smoke run
+# that outlives the release it was started for cannot silently mislead in any
+# case: the first thing it does is compare revisions, and it fails if production
+# has moved on.
 concurrency:
-  group: smoke
+  group: smoke-${{ inputs.expected_sha || 'manual' }}
   cancel-in-progress: true
 
 jobs:
   smoke:
-    # A deploy that failed has nothing worth smoke-testing.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     # The browser and its system libraries arrive with the image, rather than
     # being installed onto a runner that is busy installing something else.
@@ -52,8 +78,52 @@ jobs:
     timeout-minutes: 45
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
+      EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
     steps:
+      # The suite that shipped with the code being tested, not the one on main.
+      #
+      # It matters for a rollback: the assertions in `e2e-production/` describe
+      # a particular UI, and a rollback deliberately puts an older UI live. Main's
+      # copy of the suite would go red on every assertion main has since changed
+      # — a wall of failures that says nothing about whether the rollback worked.
+      # Checking out the released revision asks the right question: does this
+      # code do what this code was shipped believing it does?
       - uses: actions/checkout@v4
+        with:
+          # Empty (a hand-started run with no revision named) means the default:
+          # whatever ref this workflow was started from.
+          ref: ${{ inputs.expected_sha }}
+
+      # And a second, shallow copy of *this* revision, purely for the revision
+      # check below. Rolling back far enough reaches code from before releases
+      # had identities at all, and the check has to be able to say that clearly
+      # rather than fail on a missing file.
+      - uses: actions/checkout@v4
+        with:
+          path: .release-tools
+
+      # First, and before anything is installed: is the site running the code
+      # this run is supposed to be reporting on?
+      #
+      # Everything below takes twenty minutes and describes "production". If
+      # production is not the revision the release published, every one of those
+      # assertions is about something else, and a green tick would be a lie
+      # about the wrong build. Cheap enough to be free, and it uses nothing but
+      # node's own fetch, so it runs before `npm ci`.
+      #
+      # With no revision given — a hand-started run against an arbitrary URL —
+      # there is nothing to compare, so it prints what production says it is and
+      # moves on.
+      - name: Check production is the revision that was released
+        run: |
+          set -euo pipefail
+          if [ -z "$EXPECTED_RELEASE_SHA" ]; then
+            echo "No expected revision given; reporting on whatever is live at $PRODUCTION_URL."
+            node .release-tools/scripts/check-release-sha.mjs "$PRODUCTION_URL"
+            exit 0
+          fi
+          node .release-tools/scripts/check-release-sha.mjs "$PRODUCTION_URL" "$EXPECTED_RELEASE_SHA" --attempts 6 --delay 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -99,6 +169,12 @@ jobs:
             echo "## Production smoke test"
             echo
             echo "**Site:** $PRODUCTION_URL"
+            echo
+            if [ -n "$EXPECTED_RELEASE_SHA" ]; then
+              echo "**Revision checked:** \`$EXPECTED_RELEASE_SHA\`"
+            else
+              echo "**Revision checked:** whatever was live (no revision given)"
+            fi
             echo
             echo "Screens photographed in Light and Dark are attached as the"
             echo "\`production-screenshots\` artifact."
