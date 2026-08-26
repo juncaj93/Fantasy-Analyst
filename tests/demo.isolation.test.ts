@@ -236,6 +236,48 @@ describe('the demo cannot reach live truth even by accident', () => {
     }
   });
 
+  /**
+   * The third injected seam, held to the same rule as the other two.
+   *
+   * `DstPlanSources` was extracted from `server/services/dstPlanService.ts` so
+   * that Demo Mode could run `assembleDstPlan` — the real one — over fixture
+   * schedules instead of a database. That is the whole reason the interface
+   * exists, and it is also the reason it needs this: a seam invented so a demo
+   * can reach an engine is a seam a future change can widen, and the moment one
+   * of its three members takes a write, `GET .../waivers` writes to D1 for a
+   * reader holding the demo cookie. That is exactly the failure the matchup
+   * ledger produced once already, so the new bag is asserted rather than
+   * trusted.
+   */
+  it('the defence-plan interface offers no write either, and the demo satisfies it with reads', async () => {
+    const assemble = readFileSync(join(SRC, 'core', 'dst', 'assemble.ts'), 'utf8');
+    const start = assemble.indexOf('export interface DstPlanSources {');
+    expect(start, 'DstPlanSources is declared').toBeGreaterThan(-1);
+    let depth = 0;
+    let end = assemble.indexOf('{', start);
+    for (let i = end; i < assemble.length; i++) {
+      if (assemble[i] === '{') depth++;
+      else if (assemble[i] === '}' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    const iface = assemble.slice(start, end + 1);
+    expect(iface).toContain('fixturesForWeek');
+    for (const forbidden of ['upsert', 'insert', 'save', 'delete', 'write']) {
+      expect(iface.toLowerCase(), `DstPlanSources must not offer "${forbidden}"`).not.toContain(forbidden);
+    }
+    expect(iface, 'DstPlanSources must not declare a record member').not.toMatch(/\brecord\s*[(?:]/);
+
+    const { loadScenarioData } = await import('../src/core/demo/fixtures/index.ts');
+    const { dstPlanSourcesFrom } = await import('../src/core/demo/runtime/sources.ts');
+    const data = await loadScenarioData(findScenario('waivers-tuesday-active')!);
+    const sources = dstPlanSourcesFrom(data);
+    for (const [key, value] of Object.entries(sources)) {
+      expect(typeof value === 'function' || typeof value === 'object', `${key} is a read`).toBe(true);
+    }
+  });
+
   it('no production module imports a demo fixture', () => {
     const offenders: string[] = [];
     for (const dir of ['core', 'server', 'worker', 'devserver']) {
