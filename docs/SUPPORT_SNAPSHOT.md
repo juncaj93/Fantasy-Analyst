@@ -33,8 +33,10 @@ the picks made, the market numbers used, your own ♥ and ★ marks, every compo
 of every score at the top of the board, and the reasons on the cards. Not: your
 Sleeper username or anybody else's, cookies, session tokens, provider keys, your
 passphrase, email addresses, or newsletter text. Managers appear as `manager-1`,
-`Manager 1`. The rules are written into every snapshot under `redaction.rules`,
-so the file itself tells you what was taken out of it.
+`Manager 1`; your league is `league-1` and your draft is `draft-1`, because a
+Sleeper league id is enough on its own to look every manager in it up. The rules
+are written into every snapshot under `redaction.rules`, so the file itself
+tells you what was taken out of it.
 
 ---
 
@@ -192,6 +194,21 @@ one-way and never written into the file: a snapshot listing
 identities put back in an appendix, which is worse than not redacting at all,
 because it looks safe.
 
+**The league and draft ids are aliased for the same reason, and it is the part
+worth understanding.** A user id is obviously an identity. A league id is not,
+and it is worse: `GET /v1/league/<id>/users` is public, needs no key, and
+returns every manager's username. A snapshot that replaced eleven user ids and
+then printed the league id would have handed all eleven back to anybody who
+typed one URL — a redaction-shaped object rather than a redaction. The draft id
+publishes both, through `/v1/draft/<id>/picks`. `LeagueRecord.id` *is* the
+Sleeper league id in this app, so there is no internal identifier to fall back
+on: `league-1` and `draft-1` are the whole answer, and the board — which only
+ever compares these against each other — is unchanged.
+
+That has one consequence worth knowing about, and it is under *Determinism*
+below: the draft id is hashed into the `Next%` seed, so aliasing it would have
+changed the numbers. The seed travels in the file instead.
+
 **Scanning** is the backstop, and it refuses rather than cleans. Cookies,
 authorization, headers, tokens, provider keys, passphrases, email addresses,
 bearer tokens and newsletter excerpts are forbidden at any depth, and a capture
@@ -203,6 +220,7 @@ necessarily the copy that was emitted.
 
 Every term is compared exactly. No numeric tolerance anywhere.
 
+0. the `Next%` simulation seed, so the samples match by construction;
 1. every ranked player id, in order, for the whole board;
 2. every recorded component's score, weight, contribution, `unknown` and display
    string;
@@ -230,6 +248,21 @@ the one Monte Carlo in the pipeline — the next-pick simulation — was already
 seeded from draft state rather than `Math.random`, because a board polled every
 three seconds must not wander. `tests/support.api.test.ts` replays with `fetch`
 replaced by something that throws.
+
+**The seed travels, because the draft id does not.** That id is one of the
+strings hashed into the seed, which makes it a *model input* and not only an
+identifier — so replacing it with an alias drew a different sample and the
+replay disagreed with its own capture by a point of survival on a handful of
+players. Indistinguishable, from the outside, from a regression. So
+`nextPickModel.seed` is reported on every board and carried in every snapshot,
+and the replay hands it back. A 32-bit hash of a string the file no longer
+contains reproduces the draws without carrying the identity that produced them,
+and the replay compares the seed as well as using it — so matching samples are
+a consequence rather than a coincidence.
+
+Reporting the seed is worth having on its own. "The same board returns the same
+numbers" was a promise; with the seed in the response it is something a reader
+can check.
 
 ### Two versions, answering different questions
 

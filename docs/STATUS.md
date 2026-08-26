@@ -2683,7 +2683,13 @@ file.
 Sleeper user ids and display names become `manager-1` / `Manager 1`,
 consistently everywhere they appear, so slot → roster → owner still resolves and
 the board is unchanged — a test proves a league of realistic identities emits
-none of them *and* still replays exactly. Cookies, authorization, headers,
+none of them *and* still replays exactly. The league and draft ids go with them,
+and that is the part worth understanding: a user id is obviously an identity, a
+league id is not, and it is worse — `GET /v1/league/<id>/users` is public, needs
+no key, and hands back every manager's username. Replacing eleven user ids and
+then printing the league id would have been a redaction-shaped object rather
+than a redaction. `LeagueRecord.id` *is* the Sleeper league id here, so
+`league-1` and `draft-1` are the whole answer. Cookies, authorization, headers,
 tokens, provider keys, passphrases, email addresses and newsletter excerpts are
 forbidden at any depth and a capture carrying one throws rather than emitting a
 partly-redacted file, because a partly-redacted file is worse than none: it
@@ -2706,6 +2712,19 @@ before `freshness_difference` before `output_difference`. A moved engine version
 explains a difference, so it is reported ahead of the difference — otherwise
 every replay after a legitimate calibration commit reads `output_difference` and
 a real regression becomes indistinguishable from Tuesday.
+
+**Aliasing the draft id broke reproduction, for a reason worth keeping.** That
+id is one of the strings hashed into the `Next%` Monte Carlo seed — a *model
+input*, not only an identifier — so the alias drew a different sample and the
+replay disagreed with its own capture by a point of survival on a handful of
+players, indistinguishable from a regression. The seed travels in the file
+instead of the identity that produced it: `SimulationInput.seed` is an optional
+override, `nextPickModel.seed` is reported on every board, and the replay hands
+it back and compares it, so matching samples are a consequence rather than a
+coincidence. Reporting it is worth having on its own — "the same board returns
+the same numbers" was a promise, and is now something a reader can check. With
+no seed supplied the derivation is the one it always had, so no existing board
+moved.
 
 **`DRAFT_ENGINE_VERSION` is new, and is not the git SHA.** A SHA says which
 commit shipped and changes on every commit including the ones that change

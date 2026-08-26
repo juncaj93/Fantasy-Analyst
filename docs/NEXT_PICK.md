@@ -230,6 +230,17 @@ are already carried in the candidate pool.
   pick, target pick, rosters, board, ADP. `Math.random` is never called. Refresh
   a board that has not moved and the numbers are identical; land a pick and they
   change because the situation did.
+- **The seed is reported**, as `nextPickModel.seed`, so that identity is
+  checkable rather than promised: two polls of an unchanged board naming the
+  same seed is the observable form of "the same numbers, forever", and a
+  changed seed on an unchanged board is a bug that used to be invisible.
+  `SimulationInput.seed` can also supply one, which exists for exactly one
+  caller — a support snapshot replaces the draft id with an alias (a Sleeper
+  draft id is one public URL away from every manager's username), and since
+  that id is hashed into the seed, the seed has to travel with the file for the
+  replay to draw the same samples. See
+  [SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md). With nothing supplied the
+  derivation is unchanged.
 - **5,000 simulations**, which puts the sampling error at 0.7 points worst case —
   inside the whole number the card shows. Measured in
   `tests/nextpick.simulate.test.ts` rather than assumed, both by comparing
