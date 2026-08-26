@@ -114,9 +114,19 @@ jobs:
       # With no revision given — a hand-started run against an arbitrary URL —
       # there is nothing to compare, so it prints what production says it is and
       # moves on.
+      #
+      # `set -eu`, and deliberately not `-o pipefail`. This job runs inside a
+      # container, and the shell a container step gets is `sh -e {0}` rather than
+      # bash — dash has no `pipefail`, so asking for it is a syntax error on line
+      # one: `set: Illegal option -o pipefail`, exit 2, before a single check has
+      # run. Both of the first two releases under this workflow failed here, and
+      # neither failure was about production. Nothing is lost by dropping it:
+      # there is no pipeline in this script for `pipefail` to have an opinion
+      # about. The other workflows that ask for it run on the runner itself,
+      # where the shell is bash and it works.
       - name: Check production is the revision that was released
         run: |
-          set -euo pipefail
+          set -eu
           if [ -z "$EXPECTED_RELEASE_SHA" ]; then
             echo "No expected revision given; reporting on whatever is live at $PRODUCTION_URL."
             node .release-tools/scripts/check-release-sha.mjs "$PRODUCTION_URL"
