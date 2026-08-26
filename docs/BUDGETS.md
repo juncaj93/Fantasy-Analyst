@@ -26,11 +26,17 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 140 kB | 105 kB |
-| app CSS | 20 kB | 11 kB |
+| app JavaScript | 140 kB | 128 kB |
+| app CSS | 20 kB | 14 kB |
 | HTML shell | 4 kB | 1.6 kB |
-| everything needed to render | 160 kB | 117 kB |
-| Demo Mode, fetched only when opened | 108 kB | 92 kB |
+| everything needed to render | 160 kB | 144 kB |
+| Demo Mode, fetched only when opened | 150 kB | 140 kB |
+
+Both columns are read from `perf-budgets.json` and `npm run perf:report`
+respectively; the second is a snapshot and will drift, which is why the command
+rather than this table is the thing to believe. The Demo Mode *budget* had
+fallen out of step here at 108 kB while the file said 150 kB, which is worse
+than drift — a table that understates a ceiling reads as headroom nobody has.
 
 The total exists so that splitting one large file into three does not quietly
 pass three budgets. Each file is gzipped **individually** and then summed,
