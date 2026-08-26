@@ -194,6 +194,21 @@ export interface CacheOptions<T> {
    * cached answer instantly would be a lie told very quickly.
    */
   fresh?: boolean;
+  /**
+   * Do not remember the answer either.
+   *
+   * `fresh` says "do not read the cache"; this says "do not write it". They are
+   * different, and everything in this app until now wanted the first without
+   * the second — a manual refresh should not read a stale board and *should*
+   * leave the fresh one behind for the next screen.
+   *
+   * The exception is a one-shot artifact: a support snapshot is a claim about a
+   * single moment, so serving one from a cache would be serving the wrong
+   * moment, and it is a couple of hundred kilobytes that would take one of the
+   * forty-eight slots — and be stringified a second time to do it — on a phone
+   * whose owner only wanted to send a bug report.
+   */
+  store?: boolean;
 }
 
 /**
@@ -250,7 +265,7 @@ export function cached<T>(
 
   const run = fetcher()
     .then((value) => {
-      if (stillCurrent(startWorld, startGeneration)) store(id, value);
+      if (options.store !== false && stillCurrent(startWorld, startGeneration)) store(id, value);
       return value;
     })
     .finally(() => {

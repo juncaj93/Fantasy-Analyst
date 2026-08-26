@@ -325,14 +325,18 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
     setDetail(null);
     try {
       /*
-       * `fresh` so this is the board as it stands, not the board the session
-       * cache last saw. A snapshot is a claim about a moment, and answering it
+       * Around the session cache in both directions.
+       *
+       * `fresh` because a snapshot is a claim about a moment, and answering it
        * from a cache would date the claim by however long the reader had been
-       * on another screen.
+       * on another screen. `store: false` because it is a one-shot artifact of
+       * a couple of hundred kilobytes: keeping it would take one of the
+       * forty-eight slots, and stringify it a second time to do so, for an
+       * answer nothing will ever ask for again.
        */
       const snapshot = await api.get<{ capturedAt: string; decision: { output: { order: string[] } } }>(
         `/api/drafts/${encodeURIComponent(draftId)}/support-snapshot`,
-        { fresh: true },
+        { fresh: true, store: false },
       );
       const text = JSON.stringify(snapshot, null, 2);
       const size = `${Math.round(text.length / 1024)} KB · ${snapshot.decision.output.order.length} ranked players`;
