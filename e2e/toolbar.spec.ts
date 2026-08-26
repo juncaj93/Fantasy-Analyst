@@ -543,10 +543,25 @@ test.describe('shape and reach', () => {
   test('is a compact floating pill, not a full-width band', async ({ page }) => {
     await page.goto('/');
     const bar = await toolbar(page);
-    // Narrower than the screen, with real margin either side — 20px is the
-    // least that reads as floating rather than as a band with a gutter.
+    /*
+     * Narrower than the screen, with real margin either side.
+     *
+     * The margin is `--page-x` and not a number of its own, which is the
+     * change: this asked for 20px either side, and 20px either side was a
+     * bound the bar happened to clear rather than one it was built to. Six
+     * destinations at 54 come to 336 and a 360px phone leaves 336 between its
+     * page margins, so the widest bar on the narrowest phone sits exactly
+     * inside the page it floats over — and a fixed 20 would have failed it for
+     * being 12, which is the margin every screen's content already keeps.
+     *
+     * Read from the page rather than repeated here, so the pill and the page
+     * cannot drift apart without this failing.
+     */
+    const pageX = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-x')),
+    );
     expect(bar.width, `the bar is ${bar.width}px on a ${bar.viewportWidth}px screen`).toBeLessThanOrEqual(
-      bar.viewportWidth - 40,
+      bar.viewportWidth - 2 * pageX,
     );
 
     /*
@@ -820,7 +835,12 @@ test.describe('Draft, once the regular season starts', () => {
     await expect(page.getByTestId('tab-team')).toBeVisible();
 
     const bar = await toolbar(page);
-    expect(bar.width).toBeLessThanOrEqual(bar.viewportWidth - 40);
+    // Bounded by the page it floats over — see the first test in `shape and
+    // reach` for why that is the bound and 20px either side is not.
+    const pageX = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-x')),
+    );
+    expect(bar.width).toBeLessThanOrEqual(bar.viewportWidth - 2 * pageX);
     expect(bar.bottom).toBeLessThan(bar.viewportHeight);
     expect(bar.height).toBeGreaterThanOrEqual(54);
     expect(bar.height).toBeLessThanOrEqual(64);
@@ -1035,6 +1055,12 @@ test.describe('Matchup, once the draft is finished', () => {
    * app supports, so there is no trade left to make: the pill is the same height
    * everywhere, out of the same padding, with the targets untouched. That is a
    * number worth failing on for exactly the reason the old one was.
+   *
+   * Sixty rather than fifty-six, and the four points are in the destination
+   * rather than in the pill: `--tab-h` is 48 where it used to be the 44px floor.
+   * The number is asserted exactly, at every width, for the reason it always
+   * was — a bar that is a different height on one phone is a bar that bought
+   * something there, and what it usually bought was a target.
    */
   test('is the same height at every width, having nothing left to trade', async ({ page }) => {
     await postDraft(page);
@@ -1045,7 +1071,7 @@ test.describe('Matchup, once the draft is finished', () => {
     const count = await page.locator('.tabbar button').count();
     expect(count).toBe(6);
 
-    expect(bar.height, `a six-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(56);
+    expect(bar.height, `a six-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(60);
 
     // Sampled at both ends of the bar and in the middle, which is where a
     // destination being paid for out of the targets would show up.
@@ -1053,6 +1079,146 @@ test.describe('Matchup, once the draft is finished', () => {
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} gave up a fingertip`).toBeGreaterThanOrEqual(44);
     }
+  });
+
+  /**
+   * One destination width, at every width, including the narrowest.
+   *
+   * This is the assertion the removed narrow-phone override needed and never
+   * had. `@media (max-width: 374px)` used to take a destination down to 48px,
+   * written when the bar carried seven and kept after it carried six — so the
+   * phone with the least room to give was the only one still paying for a
+   * destination that had left. Nothing failed, because every test here asked
+   * whether a destination cleared the 44px floor and none of them asked whether
+   * it was the size the design says it is.
+   *
+   * So it is asked exactly, at the widest count, where a width-conditional rule
+   * would show up first: 54 and 48 on every supported phone. A floor test
+   * cannot tell "the design changed its mind" from "one screen is quietly
+   * getting less", and the second one is the bug that lasted.
+   */
+  test('draws the same destination on the narrowest phone as on the widest', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    for (const tab of ['team', 'matchup', 'waivers', 'trades', 'players', 'setup'] as const) {
+      const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
+      const bar = await toolbar(page);
+      expect(box.width, `${tab} is ${box.width}px wide at ${bar.viewportWidth}px`).toBe(54);
+      expect(box.height, `${tab} is ${box.height}px tall at ${bar.viewportWidth}px`).toBe(48);
+    }
+
+    /*
+     * And the glyph and the word grew with it, rather than the box growing
+     * around the same small control. Read from the destination itself so the
+     * numbers cannot drift from the tokens that set them.
+     */
+    const inside = await page.evaluate(() => {
+      const button = document.querySelector('.tabbar button')!;
+      const svg = button.querySelector('.tab-glyph svg')!.getBoundingClientRect();
+      return {
+        icon: Math.round(svg.width),
+        label: Number.parseFloat(getComputedStyle(button).fontSize),
+      };
+    });
+    expect(inside.icon, 'the glyph').toBe(24);
+    // 0.6875rem against a 15px root, which is the size iOS sets a tab label in.
+    expect(inside.label, 'the label').toBeCloseTo(10.3125, 2);
+  });
+
+  /**
+   * The pill stays inside the page's own content edges, on the phone where that
+   * is not free.
+   *
+   * `--page-x` is what every screen already keeps between its content and the
+   * edge of the phone, and it is what bounds the bar: at 360px that leaves
+   * 336px, and six destinations at 54 plus the pill's padding and border come
+   * to exactly 336. That is where the enlargement stopped, so it is worth a
+   * test — the next point of destination width is the first one that puts the
+   * bar wider than the page under it.
+   */
+  test('never reaches past the page it floats over', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    const bar = await toolbar(page);
+    const pageX = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-x')),
+    );
+    expect(bar.width, `the bar is ${bar.width}px inside ${bar.viewportWidth - 2 * pageX}px of page`).toBeLessThanOrEqual(
+      bar.viewportWidth - 2 * pageX,
+    );
+
+    /*
+     * And its contents are inside *it*. The destinations used to carry the
+     * width themselves, which made the pill's `max-width` a decoration: a bar
+     * too wide for it drew its destinations at full size and let them hang out
+     * of the rounded ends over the page. The width is on the grid track now, as
+     * a `minmax` floored at a fingertip, so the same overflow gives width back
+     * instead of escaping. Nothing at a supported width is near that — which is
+     * exactly why the failure mode needs asserting rather than assuming.
+     */
+    const escaped = await page.evaluate(() => {
+      const rect = document.querySelector('.tabbar')!.getBoundingClientRect();
+      return [...document.querySelectorAll('.tabbar button')]
+        .map((b) => b.getBoundingClientRect())
+        .filter((b) => b.left < rect.left - 0.5 || b.right > rect.right + 0.5).length;
+    });
+    expect(escaped, 'a destination is hanging out of the capsule').toBe(0);
+  });
+
+  /**
+   * Six targets that tile, and a tap lands on the one under the thumb.
+   *
+   * The bar is the one control on screen the whole time and the destinations
+   * abut, so the thing that goes wrong here is not a gap — it is two hit areas
+   * claiming the same pixel, which is a tap that navigates somewhere the reader
+   * did not point at. Larger glyphs and larger words are exactly the change
+   * that could introduce one, so it is hit-tested rather than reasoned about:
+   * `elementFromPoint` down each destination's centre line, and across the
+   * boundary between every neighbouring pair.
+   */
+  test('no two destinations claim the same pixel', async ({ page }) => {
+    await postDraft(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-matchup')).toBeVisible();
+
+    const result = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('.tabbar button')] as HTMLElement[];
+      const boxes = buttons.map((b) => ({ id: b.dataset.testid!, r: b.getBoundingClientRect() }));
+
+      // Neighbours touch and never lap: a negative gap is an overlap.
+      const gaps = boxes.slice(1).map((b, i) => +(b.r.left - boxes[i]!.r.right).toFixed(2));
+
+      /*
+       * Who actually receives a tap. Sampled down the middle of each
+       * destination — where a thumb lands — and at the two columns either side
+       * of every shared edge, which is where an overlap would first show.
+       */
+      const at = (x: number, y: number) =>
+        (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('button')?.dataset.testid ?? null;
+      const wrong: string[] = [];
+      for (const { id, r } of boxes) {
+        for (let y = Math.ceil(r.top) + 1; y < r.bottom - 1; y += 2) {
+          const owner = at(r.left + r.width / 2, y);
+          if (owner !== id) wrong.push(`${id} centre at y=${Math.round(y)} went to ${owner}`);
+        }
+      }
+      for (let i = 1; i < boxes.length; i++) {
+        const edge = boxes[i]!.r.left;
+        const y = boxes[i]!.r.top + boxes[i]!.r.height / 2;
+        const before = at(edge - 2, y);
+        const after = at(edge + 2, y);
+        if (before !== boxes[i - 1]!.id) wrong.push(`left of the ${boxes[i]!.id} edge went to ${before}`);
+        if (after !== boxes[i]!.id) wrong.push(`right of the ${boxes[i]!.id} edge went to ${after}`);
+      }
+      return { gaps, wrong };
+    });
+
+    for (const gap of result.gaps) expect(gap, `neighbouring targets lap by ${-gap}px`).toBeGreaterThanOrEqual(0);
+    expect(result.wrong, result.wrong.join('; ')).toEqual([]);
   });
 
   /**

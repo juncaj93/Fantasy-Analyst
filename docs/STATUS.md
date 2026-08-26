@@ -2546,9 +2546,10 @@ target. The widest it now gets is six — the stretch between a draft completing
 and week one, when Matchup has arrived and Draft has not left — and six fit at
 their full width on a 360px phone. That retired the two `data-count='7'` rules
 that used to narrow a destination and spend two points of the pill's own padding
-to make a seventh fit; the bar is 56px at every supported width again, which
-both `toolbar.spec.ts` and the production smoke suite now assert as one number
-instead of two.
+to make a seventh fit; the bar was 56px at every supported width again, which
+both `toolbar.spec.ts` and the production smoke suite asserted as one number
+instead of two. (It is 60 now — see *the taskbar spends what Review left*
+below — and still one number.)
 
 **Demo Mode tells the truth about it.** The scenarios ship no review fixtures,
 and the overview was publishing the count of unresolved *aliases* as
@@ -2568,3 +2569,63 @@ Settings root with no history entry; Settings staying current and alone while th
 queue is open; a retap closing it and deciding nothing; and any saved path
 opening the app with Review still one step away and its own reads still
 answering.
+
+## Milestone — the taskbar spends what Review left (done)
+
+**A destination is 54 × 48 now, and it is the same one on every phone.** Review
+moving into Settings gave the bar back a seventh of its width and nothing was
+promoted into the slot, so the bar had been carrying six destinations at numbers
+tuned for seven. This lane spends that room on the destinations themselves
+rather than on air: 52 × 44 becomes 54 × 48, the glyph goes from 22 to 24, and
+the label goes from `0.625rem` to `0.6875rem` — 9.4px to 10.3px against this
+app's 15px root, which is the size iOS sets a tab label in and the first time
+this bar's words have been drawn at it. The pill comes out 336 × 60 at six
+destinations and 282 × 60 at five, against 324 × 56 and 272 × 56 before.
+
+**The narrowest phone gained the most, because it was the one still paying.**
+`@media (max-width: 374px)` took a destination down to 48px. It was written when
+the bar carried seven and seven at 52 did not fit; the seventh left with Review
+and the override did not, so a 360px phone was the only screen still giving up
+six points a destination for a rule whose reason had gone. A destination there
+goes 48 → 54 and the bar 300 → 336. Every test the bar had asked whether a
+destination cleared the 44px floor, and none asked whether it was the size the
+design says it is — which is why nothing failed. `toolbar.spec.ts` now asserts
+54 and 48 exactly, at every supported width.
+
+**336 is where the enlargement stopped.** `--page-x` is what every screen keeps
+between its content and the edge of the phone, and at 360px that leaves 336 —
+exactly six destinations at 54 plus the pill's padding and its border. The next
+point of destination width would put the bar wider than the page it floats over.
+Both `toolbar.spec.ts` and the production smoke suite bound the bar by `--page-x`
+read from the page now, rather than by the 20px-either-side they carried before:
+that number was one the bar happened to clear, and it would have failed the
+widest bar on the narrowest phone for sitting exactly where the page sits.
+
+**The pill's `max-width` does something now.** The destination width was
+declared on the button, so the grid tracks were fixed and the clamp was a
+decoration: a bar too wide for it drew its destinations at full size and let
+them hang out of the rounded ends over the page — the opposite of what the
+comment at the rule claimed, for as long as nothing tested it. The width moved
+to `grid-auto-columns: minmax(var(--tap), var(--tab-w))` with the button filling
+its track, so the same overflow gives width back a point at a time and stops at
+a fingertip. Nothing at a supported width reaches that; it is the failure mode,
+and it is asserted rather than assumed.
+
+**Nothing else moved.** Not the destinations or their order, not Review's home
+in Settings, not the pending-review dot, not retap, swipe, routing or lock
+behaviour, not the bar's vertical position or its safe-area arithmetic, and not
+the visual language: no pill, no underline, no bloom, no selected-item scaling.
+The selected destination is still the accent colour, a heavier glyph and a
+heavier word, and the bar still reflows on nothing. No dependency, no API, no
+model, no flag, and no performance budget was raised — the stylesheet is 27
+bytes larger gzipped (14,307 → 14,334) against 5.8kB of headroom, and the
+JavaScript moves 10 bytes (127,686 → 127,696), which is the stylesheet's new
+content hash written into it and not a line of code.
+
+**Asserted in** `e2e/toolbar.spec.ts`: the bar is 60px at every width and every
+count; a destination is exactly 54 × 48 on the narrowest phone and the widest,
+with a 24px glyph and a 10.3px label; the bar never reaches past `--page-x` and
+no destination hangs out of the capsule; and no two destinations claim the same
+pixel — `elementFromPoint` down every destination's centre line and across both
+sides of every shared edge, which is the check that larger glyphs and larger
+words could have broken and reasoning about could not have caught.

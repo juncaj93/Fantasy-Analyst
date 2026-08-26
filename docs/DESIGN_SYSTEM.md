@@ -49,7 +49,7 @@ icon, asset or branding — every glyph in the app is drawn in
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
 | Motion | `--dur-fast: 120ms` `--dur: 220ms` `--dur-slow: 320ms` `--ease` |
 | Elevation | `--shadow-1` `--shadow-2` `--shadow-sheet` `--shadow-toolbar` |
-| Toolbar | `--tab-w: 52` (48 under 375px) `--toolbar-pad: 5` `--toolbar-height` (measured) `--toolbar-gap` |
+| Toolbar | `--tab-w: 54` `--tab-h: 48` `--tab-icon: 24` `--tab-label: 0.6875rem` `--toolbar-pad: 5` `--toolbar-height` (measured) `--toolbar-gap` |
 | Device | `--safe-top` `--safe-bottom` `--nav-inset` `--content-inset` |
 
 `--text-faint` is the quietest text allowed: it reads at 4.5:1 against both the
@@ -136,10 +136,24 @@ blank strip under the navigation twice:
   widens the bar rather than wrapping onto a second row. Six is what the bar
   carries at its widest, between a draft completing and week one, when Matchup
   has arrived and Draft has not left. Six fit at their full width on the
-  narrowest phone supported, so no rule narrows a destination for the count any
-  more — the bar still publishes `data-count`, and the 44px floor is hard: a
-  destination narrower than a fingertip is not a destination, and
-  `toolbar.spec.ts` asserts it at every width.
+  narrowest phone supported, so no rule narrows a destination for the count or
+  for the screen any more — the bar still publishes `data-count`, and the 44px
+  floor is hard: a destination narrower than a fingertip is not a destination,
+  and `toolbar.spec.ts` asserts it at every width.
+- **One destination, at one size, on every phone.** 54 × 48, a 24px glyph and a
+  10.3px word — the size iOS sets a tab label in. The bar comes to 336 × 60 at
+  six destinations and 282 × 60 at five, and 336 is exactly what `--page-x`
+  leaves at 360px: the pill is at its limit on the narrowest supported phone by
+  construction, and the enlargement stopped there rather than reaching past the
+  page it floats over. `toolbar.spec.ts` asserts the destination's size rather
+  than only its floor, because the narrow-phone override this replaced was a
+  rule that had stopped being needed and that no floor test could see.
+- **The width lives on the grid track, not on the button.** The track is
+  `minmax(var(--tap), var(--tab-w))` and the button fills it, so the pill's
+  `max-width` gives width back a point at a time down to a fingertip. With the
+  width on the button the tracks were fixed and the clamp did nothing: a bar
+  too wide for it drew its destinations at full size and let them hang out of
+  the rounded ends over the page.
 - **Review is not one of them.** It is maintenance — a queue of newsletter items
   and unrecognised names to confirm — and it lives in Settings as a row that
   says how much is waiting (`3 items need attention`, or `Nothing waiting for

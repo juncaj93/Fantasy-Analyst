@@ -401,18 +401,70 @@
   --page-x: 12px;
 
   /*
-   * The floating toolbar, in three numbers.
+   * The floating toolbar, in five numbers.
    *
-   * `--tab-w` is one destination's width, and the bar is however many of those
-   * there are — six today — plus its own padding. Sizing the bar from its
-   * contents rather than from a column count is what stops a seventh
+   * `--tab-w` is one destination's width and `--tab-h` its height, and the bar
+   * is however many of those there are plus its own padding. Sizing the bar
+   * from its contents rather than from a column count is what stops a seventh
    * destination wrapping onto a second row, which is a bug this app has had.
    *
    * `--toolbar-pad` is the inset between the pill's edge and a destination's
-   * box, and it is what makes the bar 56px tall rather than 44: it is the only
-   * height the container adds.
+   * box, and it is the only height the container adds on top of `--tab-h`.
+   *
+   * `--tab-icon` and `--tab-label` are what is *inside* a destination, and they
+   * are here rather than at the rules that spend them because they are the
+   * other half of the same decision: a destination that grows without its glyph
+   * and its word growing with it is a wider box around the same small control,
+   * which is the thing this set of numbers was last tuned to avoid.
    */
-  --tab-w: 52px;
+
+  /*
+   * Fifty-two, until Review left the bar.
+   *
+   * The bar carries six at its widest and it carried seven before that, so
+   * every one of these numbers was set under a width budget that no longer
+   * applies: at 360px, six destinations, the pill's own padding and its border
+   * have 336px to fit inside — `--page-x` either side of the screen — and at 52
+   * they were spending 324 of it. Fifty-four spends all 336 and is the largest
+   * that still lets the pill sit exactly inside the page's own content edges,
+   * which is where the increase stops. It is deliberately not a number that
+   * only works on a wide phone: there is one destination width now, at every
+   * supported width, and the narrow-screen override that used to exist below is
+   * gone with the seventh destination that needed it.
+   */
+  --tab-w: 54px;
+  /*
+   * Forty-eight, and the 44px floor is still the floor.
+   *
+   * `--tap` is what a fingertip is *owed*; it is not a target to sit exactly
+   * on when there is room above it, and with Review gone there is room. Four
+   * points here is four points of bar, spent on the destination itself rather
+   * than on air around it — a taller box under the same thumb, and the slack
+   * the larger glyph and the larger word below need in order not to sit
+   * pressed against the top and bottom of their own button.
+   */
+  --tab-h: 48px;
+  /*
+   * Twenty-two was set when a destination was 52 wide and 44 tall, and it moves
+   * with them. Two points is the smallest step that reads at all at this size,
+   * and it keeps the glyph the same fraction of its button that it was.
+   */
+  --tab-icon: 24px;
+  /*
+   * The word under the glyph, at the size the platform sets tab labels in.
+   *
+   * 0.625rem is 9.4px against this app's 15px root, which is under every
+   * bottom-bar label iOS draws and was legible only because the words are
+   * short and familiar. 0.6875rem is 10.3px — the platform's own tab-label
+   * size, and the point of the whole lane: the labels are what a reader
+   * actually aims at.
+   *
+   * It costs the widest word in the bar about 4px, which the destination's own
+   * two points give most of back. See the `nowrap` at the rule, and
+   * `toolbar.spec.ts`, which holds the words to one line at every supported
+   * width and at both destination counts.
+   */
+  --tab-label: 0.6875rem;
   /*
    * Four rather than five, and it is the honest way to slim the bar.
    *
@@ -429,6 +481,12 @@
    * 54–64 the toolbar spec allows, and the difference between a capsule and a
    * box with buttons pressed against its edge.
    */
+  /*
+   * Still five. The bar was asked to get taller and the height came out of
+   * `--tab-h` instead, because the reader's thumb lands on the destination and
+   * not on the pill's margin — the same argument that took the last change out
+   * of here rather than out of the target, run in the other direction.
+   */
   --toolbar-pad: 5px;
 
   /*
@@ -440,7 +498,7 @@
    * which is `--toolbar-gap`. Two numbers, added in exactly one place — see
    * `--content-inset`.
    */
-  --toolbar-height: 56px;
+  --toolbar-height: 60px;
 
   /*
    * Motion, in three speeds and one curve.
@@ -532,17 +590,21 @@
 }
 
 /*
- * A narrower phone gets a narrower destination before it gets smaller type.
+ * There is no narrow-phone destination width any more, and that is the point.
  *
- * At 360px the six labels still have to be readable and the targets still have
- * to be 44px, so what gives is the width of a destination — 48px is still wider
- * than a fingertip is asked to be — rather than the size of the word in it.
+ * A narrower phone used to get a narrower destination — 48px under 375px —
+ * because the bar carried seven and seven at 52 did not fit inside the page's
+ * own content edges at 360. Review moved into Settings, the seventh slot went
+ * with it, and six at 54 fit at 360 with nothing left over: `--tab-w` is one
+ * number at every supported width now.
+ *
+ * It is worth saying why the override outlived its reason. It was written
+ * against a count and expressed as a width, so when the count dropped it went
+ * on quietly costing the narrowest phone six points a destination — the screen
+ * with the least room to give was the only one still paying. `toolbar.spec.ts`
+ * now asserts the destination width at 360 rather than only its floor, which is
+ * what turns "it still fits" into something that fails when it stops being true.
  */
-@media (max-width: 374px) {
-  :root {
-    --tab-w: 48px;
-  }
-}
 
 /*
  * Dark is a designed expression of the same system, not an inversion: a softer
@@ -981,12 +1043,32 @@ body,
   z-index: 30;
   display: grid;
   grid-auto-flow: column;
+  /*
+   * A destination is `--tab-w` wide, and never less than a fingertip.
+   *
+   * The track carries the width rather than the button, and it is a `minmax`
+   * rather than a fixed number, because that is the difference between the
+   * clamp below working and only appearing to. With the width declared on the
+   * button the tracks were fixed: a bar too wide for the clamp did not shrink
+   * its destinations at all — it drew them at full width and let them hang out
+   * of the ends of the capsule, past the rounded corners, over the page. The
+   * comment here claimed the opposite for as long as nothing tested it.
+   *
+   * `minmax(var(--tap), var(--tab-w))` is that claim made true: a bar with room
+   * gets `--tab-w`, a bar without it gives width back a point at a time, and
+   * `--tap` is the floor it stops at. Nothing at a supported width reaches the
+   * floor — six at 54 fit at 360 with the pill inside the page's own content
+   * edges — so this is the failure mode, not the layout.
+   */
+  grid-auto-columns: minmax(var(--tap), var(--tab-w));
   width: max-content;
   /*
-   * Narrower than the screen, always, but never wider than it. The clamp is
-   * what a very narrow phone or a very large text setting runs into, and it
-   * scrolls nothing and clips nothing: the destinations shrink to fit inside
-   * their own minimum, which is still a full target.
+   * Narrower than the screen, always, but never wider than it — and never wider
+   * than the page under it, which is what `--sp-3` is here: `--page-x`, the
+   * inset every screen's content already keeps from the edge of the phone. At
+   * 360px that is 336px, and 336px is exactly what six destinations, the pill's
+   * padding and its border come to. The pill is at its limit on the narrowest
+   * phone this app supports, by construction rather than by luck.
    */
   max-width: calc(100% - 2 * var(--sp-3));
   padding: var(--toolbar-pad);
@@ -1041,7 +1123,13 @@ body,
 
 .tabbar button {
   position: relative;
-  width: var(--tab-w);
+  /*
+   * The track owns the width — see `grid-auto-columns` above — and the button
+   * fills it. Declaring `--tab-w` here instead is what made the bar's own clamp
+   * a decoration, so the number is in one place and this end of it just says
+   * "all of my column".
+   */
+  width: 100%;
   /*
    * The pill's height is this plus its own padding, and nothing else adds to
    * it — a bar that grows is a bar that starts eating the page.
@@ -1052,15 +1140,21 @@ body,
    * design system is written around, and five specs across three files assert
    * it at every supported width. The bulk came out of the pill's own padding
    * instead — see `--toolbar-pad` — which costs a reader nothing.
+   *
+   * `--tab-h` is 48, and it is that argument with the sign reversed: 44 is the
+   * floor and a floor is not a target, so where there is room the destination
+   * takes it rather than the padding. The floor itself has not moved — it is
+   * still what `grid-auto-columns` refuses to go under, and still what those
+   * five specs assert.
    */
-  min-height: var(--tap);
+  min-height: var(--tab-h);
   padding: 1px 1px;
   background: none;
   border: none;
   border-radius: calc(var(--radius-toolbar) - var(--toolbar-pad));
   color: var(--text-faint);
-  /* Six labels at 360px; none of them may wrap. */
-  font-size: 0.625rem;
+  /* Six labels at 360px; none of them may wrap. See `--tab-label`. */
+  font-size: var(--tab-label);
   line-height: 1.25;
   white-space: nowrap;
   font-weight: 600;
@@ -1070,8 +1164,9 @@ body,
   align-items: center;
   justify-content: center;
   /* Tight enough that the icon and its label read as one control, loose
-     enough that they are not touching. */
-  gap: 2px;
+     enough that they are not touching — and a point more of it now that both
+     of them are bigger, so the pair keeps the proportions it was drawn at. */
+  gap: 3px;
   cursor: pointer;
   transition:
     color var(--dur-fast) ease,
@@ -1157,13 +1252,13 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
+  height: var(--tab-icon);
   transition: opacity var(--dur-fast) ease;
 }
 
 .tabbar .tab-glyph svg {
-  width: 22px;
-  height: 22px;
+  width: var(--tab-icon);
+  height: var(--tab-icon);
 }
 
 /* The selected tab is the one drawn with a heavier hand. */
