@@ -161,6 +161,40 @@ test.describe('tapping it', () => {
     }
   });
 
+  /**
+   * The clipboard is allowed to say no, and often does.
+   *
+   * `navigator.clipboard` is unavailable outside a secure context, refused by
+   * some browsers for a payload this size, and refused by iOS whenever it
+   * decides the write was not close enough to a user gesture. A row that tried
+   * once and gave up would leave somebody holding nothing with no way to tell
+   * that from an empty snapshot — so the file is offered instead, and the row
+   * says which of the two happened rather than claiming "Copied" either way.
+   */
+  test('saves the file when the clipboard refuses, and says that it did', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async () => {
+            throw new Error('NotAllowedError');
+          },
+        },
+      });
+    });
+
+    await openSetup(page);
+    const download = page.waitForEvent('download', { timeout: 20_000 });
+    await page.getByTestId(ROW).click();
+
+    const file = await download;
+    expect(file.suggestedFilename()).toMatch(/^junculator-draft-snapshot-\d{8}-\d{6}\.json$/);
+
+    await expect(page.getByTestId(ROW)).toHaveAttribute('data-state', 'downloaded');
+    await expect(page.getByTestId(ROW)).toContainText('saved as a file instead');
+    await expect(page.getByTestId(ROW)).toContainText(/KB · \d+ ranked players/);
+  });
+
   test('says so honestly when the server refuses, rather than copying an error', async ({ page }) => {
     await page.route('**/support-snapshot*', (route) =>
       route.fulfill({ status: 503, json: { error: 'the draft could not be read' } }),

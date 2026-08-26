@@ -346,9 +346,18 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
         setState('copied');
         setDetail(`${size}. Paste it to your AI assistant and ask why the board says what it says.`);
       } catch {
-        downloadJson(`junculator-draft-snapshot-${snapshot.capturedAt.slice(0, 19).replace(/[:T]/g, '')}.json`, text);
+        downloadJson(`junculator-draft-snapshot-${stamp(snapshot.capturedAt)}.json`, text);
         setState('downloaded');
-        setDetail(`${size}. Too large for this browser’s clipboard, so it was saved as a file instead.`);
+        /*
+         * What happened, not why.
+         *
+         * A clipboard write is refused for several reasons this code cannot
+         * tell apart — an insecure context, a payload the browser thinks is too
+         * big, or iOS deciding the write was not close enough to the tap — so
+         * naming one of them would be a guess presented as a diagnosis. What
+         * the reader needs is that the file exists and where it went.
+         */
+        setDetail(`${size}. This browser would not take it on the clipboard, so it was saved as a file instead.`);
       }
     } catch (err) {
       setState('failed');
@@ -373,6 +382,20 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
       {...(draftId ? { onClick: () => void capture() } : {})}
     />
   );
+}
+
+/**
+ * `2026-08-31T00:51:00.000Z` → `20260831-005100`.
+ *
+ * Sortable, filename-safe on every platform, and readable at a glance — which
+ * matters because somebody may be sitting on three of these while working out
+ * which draft they were complaining about. The instant is the snapshot's own
+ * `capturedAt`, not the moment of the download, so the file names the board
+ * rather than the tap.
+ */
+function stamp(capturedAt: string): string {
+  const [date = '', time = ''] = capturedAt.slice(0, 19).split('T');
+  return `${date.replace(/-/g, '')}-${time.replace(/:/g, '')}`;
 }
 
 /**
