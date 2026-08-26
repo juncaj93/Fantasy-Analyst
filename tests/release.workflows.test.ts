@@ -434,3 +434,65 @@ describe('authoritative CI keeps its teeth', () => {
     }
   });
 });
+
+/* ------------------------------------------------- the shell inside a container */
+
+/*
+ * A job that runs in a container gets `sh -e {0}`, not bash.
+ *
+ * This is not a style rule, it is a defect that has already happened. The first
+ * release through the new path deployed perfectly and then went red in smoke,
+ * in zero seconds, on:
+ *
+ *     /__w/_temp/….sh: 1: set: Illegal option -o pipefail
+ *
+ * `pipefail` is a bashism, dash rejects it before the first command runs, and
+ * the step that carried it was the one asserting the deployed revision — so a
+ * good release reported as a bad one. The identical script passed in the deploy
+ * job moments earlier, because that job has no container and therefore has bash.
+ *
+ * The trap is that it is invisible in review: the same three words are correct
+ * one file away. So it is checked here, across every containerised job in the
+ * repository, rather than remembered.
+ */
+describe('steps inside a container stay POSIX', () => {
+  const BASHISMS: Array<{ pattern: RegExp; what: string }> = [
+    { pattern: /\bset\s+-[a-z]*o\s+pipefail/, what: 'set -o pipefail' },
+    { pattern: /\bPIPESTATUS\b/, what: '$PIPESTATUS' },
+    { pattern: /\[\[/, what: '[[ ]]' },
+    // Process substitution: `--data-binary @<(printf …)`, which the deploy job
+    // uses freely and legally, because it has bash.
+    { pattern: /<\(/, what: 'process substitution' },
+    { pattern: /\bsource\s+\S/, what: 'source' },
+  ];
+
+  const containerJobs = readdirSync(join(ROOT, '.github', 'workflows')).flatMap((name) => {
+    const { yaml } = readWorkflow(name);
+    return Object.entries(jobs(yaml))
+      .filter(([, one]) => asMap(one)['container'] !== undefined)
+      .map(([jobName]) => ({ workflow: name, job: jobName }));
+  });
+
+  it('finds the containerised jobs to check', () => {
+    // ci.yml's `e2e` and smoke.yml's `smoke`, at least. A refactor that lost
+    // them would leave every assertion below passing over an empty list.
+    expect(containerJobs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it.each(containerJobs)('$workflow → $job uses no bashism', ({ workflow, job: jobName }) => {
+    const { yaml } = readWorkflow(workflow);
+    for (const step of steps(yaml, jobName)) {
+      const script = String(step['run'] ?? '');
+      if (script === '') continue;
+      // A step may opt into bash explicitly; then the bashisms are legal.
+      if (String(step['shell'] ?? '').includes('bash')) continue;
+      for (const { pattern, what } of BASHISMS) {
+        expect(
+          pattern.test(script),
+          `${workflow} → ${jobName} → "${step['name'] ?? 'unnamed step'}" uses ${what}, ` +
+            'which dash rejects. Container jobs run under `sh`: use POSIX, or set `shell: bash` on the step.',
+        ).toBe(false);
+      }
+    }
+  });
+});
