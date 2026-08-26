@@ -2451,3 +2451,63 @@ the idiom of an NFL roster and belong to nobody, because the fixtures are full o
 claims — a role falling apart, a hamstring, a manager who overpays — and
 attaching an invented claim to a real professional is the one kind of realism a
 fixture must not buy.
+
+## The release path is gated, identified and reversible (done)
+
+Production used to be deployed by `push: main`. Authoritative CI ran from the
+same push, in parallel — so the deploy and the strongest gate for the same
+commit started at the same moment and raced, and a commit that broke a phone at
+360 could be live before the runner that would have said so had finished
+installing its browser. The window was the length of the browser suite: about
+eleven minutes since sharding, twenty-five before it.
+
+Production also could not say what it was running, and a rollback meant reverting
+on main and waiting for the whole pipeline again.
+
+**Now:**
+
+```
+CI passes for a SHA -> Deploy checks that SHA is still main's head
+                    -> Release checks out that SHA, stamps it, builds, deploys
+                    -> production reports it at /api/health
+                    -> Smoke asserts production is answering as that SHA
+```
+
+Four workflows where there were two. `deploy.yml` is triggered by CI's
+*completion* on main and deploys `github.event.workflow_run.head_sha` — CI's own
+report of what it validated — rather than whatever main points at by then.
+`release.yml` is the single deploy implementation, callable only, and it refuses
+anything that is not a full 40-character commit id and refuses again if the
+checkout does not match it. `rollback.yml` is the one manual path to production:
+it takes a revision, resolves it, refuses one that was never on main, and deploys
+exactly that. `smoke.yml` is now *called* with the revision it is meant to be
+reporting on instead of being triggered by "a deploy finished", because the
+latter checks whatever is live when it gets a runner — which a second release can
+have changed underneath it.
+
+**Production identifies itself.** `wrangler.toml` carries `RELEASE_SHA`, the
+release stamps it in the step before the build, and `/api/health` answers
+`{"ok":true,"service":"fantasy-analyst","release":{"gitSha":"…"}}`. Nothing is
+looked up at runtime: no GitHub API call, no row in D1. A deployment that did not
+come from the release path says `unknown` rather than a stale SHA, and
+`scripts/check-release-sha.mjs` compares expected against actual for the deploy,
+for smoke, and for anyone with a terminal.
+
+**When main moves during CI** — A merges, B merges before A's CI finishes —
+whichever revision is main's head when its own CI passes is the one that
+deploys; the other stands down and says so. The cost is written down in
+`docs/RELEASE.md`: if A is superseded and B's CI then fails, production stays on
+the revision before A, which is behind main and is a revision that passed CI.
+
+**Migrations are the part that does not roll back**, and pretending otherwise
+with invented down migrations would be worse than saying so. The policy is
+expand / contract, and `tests/release.migrations.test.ts` enforces the half that
+can be enforced: a migration that drops, renames or deletes has to carry a
+`-- contract:` line saying why the rollback window has passed. Two migrations
+predate the policy and are listed by name rather than exempted by a rule.
+
+**Nothing about the gate itself changed.** Typecheck, unit and integration,
+build, perf budget, wrangler dry-run, and WebKit at 430/390/375/360 across three
+shards all run exactly as before; `tests/release.workflows.test.ts` asserts the
+matrix and both browser timeouts so this lane cannot be the reason confidence
+drops. No fantasy model, screen or scoring path was touched.

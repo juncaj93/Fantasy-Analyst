@@ -27,6 +27,19 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 [vars]
+# The exact git revision this deployment was built from, reported by
+# /api/health as `release.gitSha`.
+#
+# The release workflow rewrites this line with the SHA it checked out, in the
+# step immediately before the build — so the revision CI validated, the revision
+# the build came from and the revision production reports are one value that was
+# only ever written down once. Committed as "unknown" deliberately: a hand-run
+# `wrangler deploy` from a working tree has no release behind it, and saying so
+# is better than a stale SHA that would make production look verified.
+#
+# See docs/RELEASE.md.
+RELEASE_SHA = "unknown"
+
 # "mock" (no network, no quota), "sportsgameodds" or "the-odds-api".
 #
 # Live on SportsGameOdds. The hold until now was that the strategy had never
