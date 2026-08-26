@@ -486,6 +486,31 @@ function compareRows(
     exact('wait', where, row.wait.state, rec.wait.state, into);
 
     /*
+     * The four lines no component stands behind, and the model behind `Next%`.
+     *
+     * Compared explicitly because they are the only output of several sources:
+     * lose the injury round trip and every score still matches while the
+     * availability line under a player's name quietly disappears. See
+     * `SnapshotRecommendation.injuryLine`.
+     */
+    exact('injuryLine', where, row.injuryLine, rec.injuryLine, into);
+    exact('tierContext', where, row.tierContext, rec.tierContext, into);
+    exact('marketHeadline', where, row.marketHeadline, rec.marketHeadline, into);
+    exact('preseasonPoints', where, row.preseasonPoints, rec.preseasonPoints, into);
+
+    if (row.nextPick == null || rec.nextPick == null) {
+      exact('nextPick', where, row.nextPick == null, rec.nextPick == null, into);
+    } else {
+      exact('nextPick.probability', where, row.nextPick.probability, rec.nextPick.probability, into);
+      exact('nextPick.marketBaseline', where, row.nextPick.marketBaseline, rec.nextPick.marketBaseline, into);
+      exact('nextPick.historyBaseline', where, row.nextPick.historyBaseline, rec.nextPick.historyBaseline, into);
+      exact('nextPick.historyAdjustment', where, row.nextPick.historyAdjustment, rec.nextPick.historyAdjustment, into);
+      exact('nextPick.confidence', where, row.nextPick.confidence, rec.nextPick.confidence, into);
+      compareSets(`nextPick.drivers · ${where}`, row.nextPick.drivers, rec.nextPick.drivers, into);
+      compareSets(`nextPick.degraded · ${where}`, row.nextPick.degraded, rec.nextPick.degraded, into);
+    }
+
+    /*
      * The favourite, compared as its own term.
      *
      * It would be caught by the component sweep below, and it is called out

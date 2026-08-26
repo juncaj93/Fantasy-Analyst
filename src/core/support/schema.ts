@@ -501,6 +501,44 @@ export interface SnapshotRecommendation {
   newsLifetimeNet: number;
   news30Net: number;
   news7Net: number;
+  /**
+   * The lines on the card that no component score stands behind.
+   *
+   * Every field above is either the ranking or an input to it, so a matching
+   * set of components is very strong evidence that they matched too. These four
+   * are not: they are the *only* thing several sources produce.
+   * `injuryStates` reaches the board through `injuryLine` and nothing else;
+   * `preseasonPoints` is read by a component but also printed on its own;
+   * `tierContext` comes from the demand model, which reads the pick stream
+   * through a path no score touches; `marketHeadline` is the season market said
+   * as a sentence.
+   *
+   * Without them a snapshot could reproduce every number on the board and
+   * silently lose the availability line under a player's name — which is
+   * exactly the kind of report this feature exists to answer.
+   */
+  injuryLine: string | null;
+  tierContext: string | null;
+  marketHeadline: string | null;
+  preseasonPoints: number | null;
+  /**
+   * The `Next%` model's own workings for this player.
+   *
+   * `survivalProbability` above is the number the card shows; this is what is
+   * behind it — what the market alone would have said, what historical manager
+   * behaviour moved it by, and which drivers were found. It is the only
+   * per-player evidence that a manager prior applied at all, which makes it the
+   * thing to read when a survival percentage is the complaint.
+   */
+  nextPick: {
+    probability: number | null;
+    marketBaseline: number | null;
+    historyBaseline: number | null;
+    historyAdjustment: number | null;
+    drivers: string[];
+    confidence: string;
+    degraded: string[];
+  } | null;
 }
 
 // ------------------------------------------------------------ replay verdict

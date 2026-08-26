@@ -869,6 +869,19 @@ function toSnapshotRecommendation(
     newsLifetimeNet: rec.newsLifetimeNet,
     news30Net: rec.news30Net,
     news7Net: rec.news7Net,
+    injuryLine: rec.injuryLine,
+    tierContext: rec.tierContext,
+    marketHeadline: rec.marketHeadline,
+    preseasonPoints: rec.preseasonPoints,
+    nextPick: rec.nextPick && {
+      probability: rec.nextPick.probability,
+      marketBaseline: rec.nextPick.marketBaseline,
+      historyBaseline: rec.nextPick.historyBaseline,
+      historyAdjustment: rec.nextPick.historyAdjustment,
+      drivers: rec.nextPick.drivers,
+      confidence: rec.nextPick.confidence,
+      degraded: rec.nextPick.degraded,
+    },
   };
 }
 

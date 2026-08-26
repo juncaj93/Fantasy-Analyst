@@ -6941,6 +6941,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -6952,8 +6954,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p231",
           "position": "QB",
+          "preseasonPoints": 69.1,
           "queued": false,
           "rank": 1,
           "reasons": [
@@ -6968,6 +6982,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.294,
           "wait": {
             "state": "unknown",
@@ -7105,6 +7120,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7116,8 +7133,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p191",
           "position": "QB",
+          "preseasonPoints": 70.3,
           "queued": false,
           "rank": 2,
           "reasons": [
@@ -7132,6 +7161,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.294,
           "wait": {
             "state": "unknown",
@@ -7269,6 +7299,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7280,8 +7312,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p175",
           "position": "QB",
+          "preseasonPoints": 68.4,
           "queued": false,
           "rank": 3,
           "reasons": [
@@ -7296,6 +7340,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.267,
           "wait": {
             "state": "unknown",
@@ -7433,6 +7478,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7444,8 +7491,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p215",
           "position": "QB",
+          "preseasonPoints": 67.1,
           "queued": false,
           "rank": 4,
           "reasons": [
@@ -7460,6 +7519,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.214,
           "wait": {
             "state": "unknown",
@@ -7597,6 +7657,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7608,8 +7670,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p159",
           "position": "QB",
+          "preseasonPoints": 66.5,
           "queued": false,
           "rank": 5,
           "reasons": [
@@ -7624,6 +7698,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.181,
           "wait": {
             "state": "unknown",
@@ -7762,6 +7837,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7773,8 +7850,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p172",
           "position": "TE",
+          "preseasonPoints": 45,
           "queued": false,
           "rank": 6,
           "reasons": [
@@ -7788,6 +7877,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.166,
           "wait": {
             "state": "unknown",
@@ -7925,6 +8015,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -7936,8 +8028,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p255",
           "position": "QB",
+          "preseasonPoints": 65.8,
           "queued": false,
           "rank": 7,
           "reasons": [
@@ -7952,6 +8056,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.152,
           "wait": {
             "state": "unknown",
@@ -8090,6 +8195,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8101,8 +8208,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p211",
           "position": "WR",
+          "preseasonPoints": 57.1,
           "queued": false,
           "rank": 8,
           "reasons": [
@@ -8116,6 +8235,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.151,
           "wait": {
             "state": "unknown",
@@ -8254,6 +8374,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8265,8 +8387,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p156",
           "position": "TE",
+          "preseasonPoints": 43.7,
           "queued": false,
           "rank": 9,
           "reasons": [
@@ -8280,6 +8414,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.142,
           "wait": {
             "state": "unknown",
@@ -8418,6 +8553,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8429,8 +8566,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p210",
           "position": "RB",
+          "preseasonPoints": 57.7,
           "queued": false,
           "rank": 10,
           "reasons": [
@@ -8444,6 +8593,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.136,
           "wait": {
             "state": "unknown",
@@ -8581,6 +8731,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8592,8 +8744,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p199",
           "position": "QB",
+          "preseasonPoints": 65.2,
           "queued": false,
           "rank": 11,
           "reasons": [
@@ -8608,6 +8772,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.131,
           "wait": {
             "state": "unknown",
@@ -8746,6 +8911,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8757,8 +8924,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p174",
           "position": "WR",
+          "preseasonPoints": 56.6,
           "queued": false,
           "rank": 12,
           "reasons": [
@@ -8772,6 +8951,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.127,
           "wait": {
             "state": "unknown",
@@ -8910,6 +9090,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -8921,8 +9103,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p155",
           "position": "WR",
+          "preseasonPoints": 56.6,
           "queued": false,
           "rank": 13,
           "reasons": [
@@ -8936,6 +9130,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.127,
           "wait": {
             "state": "unknown",
@@ -9074,6 +9269,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9085,8 +9282,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p193",
           "position": "WR",
+          "preseasonPoints": 56.6,
           "queued": false,
           "rank": 14,
           "reasons": [
@@ -9100,6 +9309,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.127,
           "wait": {
             "state": "unknown",
@@ -9238,6 +9448,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9249,8 +9461,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p252",
           "position": "TE",
+          "preseasonPoints": 43.3,
           "queued": false,
           "rank": 15,
           "reasons": [
@@ -9264,6 +9488,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.118,
           "wait": {
             "state": "unknown",
@@ -9402,6 +9627,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9413,8 +9640,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p173",
           "position": "RB",
+          "preseasonPoints": 57.1,
           "queued": false,
           "rank": 16,
           "reasons": [
@@ -9428,6 +9667,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.115,
           "wait": {
             "state": "unknown",
@@ -9566,6 +9806,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9577,8 +9819,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p251",
           "position": "WR",
+          "preseasonPoints": 56.1,
           "queued": false,
           "rank": 17,
           "reasons": [
@@ -9592,6 +9846,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.103,
           "wait": {
             "state": "unknown",
@@ -9730,6 +9985,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9741,8 +9998,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p137",
           "position": "WR",
+          "preseasonPoints": 56.1,
           "queued": false,
           "rank": 18,
           "reasons": [
@@ -9756,6 +10025,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.103,
           "wait": {
             "state": "unknown",
@@ -9895,6 +10165,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -9906,8 +10178,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p249",
           "position": "WR",
+          "preseasonPoints": 57.1,
           "queued": false,
           "rank": 19,
           "reasons": [
@@ -9921,6 +10205,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.101,
           "wait": {
             "state": "unknown",
@@ -10060,6 +10345,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -10071,8 +10358,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p153",
           "position": "WR",
+          "preseasonPoints": 57.7,
           "queued": false,
           "rank": 20,
           "reasons": [
@@ -10086,6 +10385,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.101,
           "wait": {
             "state": "unknown",
@@ -10223,6 +10523,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -10234,8 +10536,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p143",
           "position": "QB",
+          "preseasonPoints": 64.5,
           "queued": false,
           "rank": 21,
           "reasons": [
@@ -10250,6 +10564,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.092,
           "wait": {
             "state": "unknown",
@@ -10388,6 +10703,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -10399,8 +10716,20 @@
           "news30Net": -1,
           "news7Net": 0,
           "newsLifetimeNet": -1,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p212",
           "position": "TE",
+          "preseasonPoints": 44.2,
           "queued": false,
           "rank": 22,
           "reasons": [
@@ -10414,6 +10743,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.091,
           "wait": {
             "state": "unknown",
@@ -10553,6 +10883,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -10564,8 +10896,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p229",
           "position": "RB",
+          "preseasonPoints": 57.7,
           "queued": false,
           "rank": 23,
           "reasons": [
@@ -10579,6 +10923,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.086,
           "wait": {
             "state": "unknown",
@@ -10717,6 +11062,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0,
             "label": "",
@@ -10728,8 +11075,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p196",
           "position": "TE",
+          "preseasonPoints": 42.9,
           "queued": false,
           "rank": 24,
           "reasons": [
@@ -10743,6 +11102,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.086,
           "wait": {
             "state": "unknown",
@@ -10881,6 +11241,8 @@
           ],
           "degraded": true,
           "dogAdp": null,
+          "injuryLine": null,
+          "marketHeadline": null,
           "myGuy": {
             "contribution": 0.084,
             "label": "My Guy",
@@ -10892,8 +11254,20 @@
           "news30Net": 0,
           "news7Net": 0,
           "newsLifetimeNet": 0,
+          "nextPick": {
+            "confidence": "low",
+            "degraded": [
+              "124 candidates have no market ADP and were simulated on a damped fallback"
+            ],
+            "drivers": [],
+            "historyAdjustment": null,
+            "historyBaseline": null,
+            "marketBaseline": null,
+            "probability": null
+          },
           "playerId": "p141",
           "position": "RB",
+          "preseasonPoints": 54,
           "queued": true,
           "rank": 27,
           "reasons": [
@@ -10908,6 +11282,7 @@
             "message": null,
             "severity": "none"
           },
+          "tierContext": null,
           "total": 0.067,
           "wait": {
             "state": "unknown",
