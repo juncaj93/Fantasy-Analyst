@@ -2371,3 +2371,83 @@ lineup optimiser, trade valuation or offer generation was touched.
    would cut the gate again without adding a runner. It is a coverage decision
    rather than a workflow one, which is why sharding went first, and there is no
    deadline on it now: the next feature to add browser tests can add them.
+
+## Milestone — the demo refresh, for the launch showcase (done)
+
+Demo Mode was built before half of what it now has to demonstrate. It showed a
+league that started no defence, a week six written down twice with two different
+slates in it, a room whose managers were all identically anonymous, and a draft
+board whose `PTS` column was empty on every row. Every one of those was a fixture
+gap rather than a product one, and each made the demo a demonstration of a
+slightly different product from the deployed one.
+
+This lane is fixture work, one production seam and no new features. No model,
+threshold, ranking or piece of copy was changed anywhere in it.
+
+**One slate, read by everything.** `fixtures/slate.ts` states the season's
+games once — who plays whom, when each window kicks off, who is at home, what
+the book made of it — and the weekly market, the defence projections, the
+matchup scoreboard and the schedule the DST outlook walks three weeks forward
+all read it. Week six had been stated twice, by the lineup fixtures and by the
+matchup fixtures, with different opponents, different kickoffs and a tight end on
+a bye in one telling and playing in the other. The kickoffs are now real wall
+clocks rather than offsets from whoever is reading: a Thursday night game, a
+London game, one o'clock, four o'clock and the night game. That Thursday game is
+load-bearing — the first kickoff of a week is the deadline every piece of weekly
+advice is measured against, and without one in the fixture every waiver scenario
+sat outside the defence planner's seventy-two-hour action window and the `DEF`
+row went quiet for a reason that was not about defences at all.
+
+**The league starts a defence.** Sixteen of them, twelve rostered and four on the
+wire. The reader's own unit is a comfortable home favourite in week six and a
+touchdown-and-a-half underdog in Kansas City in week seven, so `No clear upgrade`
+on the Sunday and `Stream PHI over DEN · +3.4` on the Tuesday are two readings of
+one schedule by `core/dst/planner.ts` rather than two fixtures. The DST plan
+reaches the demo through the same code the deployment uses: the assembly moved
+out of `server/services/dstPlanService.ts` into `core/dst/assemble.ts` behind a
+`DstPlanSources` interface — the same move the draft board and the matchup made
+before it — and the service keeps `buildDstPlan(db, request)` and its three D1
+reads. `readFinalWeek` and `playoffContextFor` moved to `core/league/planning.ts`
+for the same reason, and both are re-exported where they were.
+
+**A league with a history.** `fixtures/ledger.ts` writes down two seasons of
+this room's transactions in Sleeper's own shape — claims that won, claims that
+lost, free-agent adds and five trades — and `runtime/history.ts` runs the same
+four engines the nightly backfill runs over them. The Waivers board now names
+the rivals who are short at the position and says what they have paid before;
+the pressure column reports what those particular managers actually do, which is
+allowed to disagree with what they need; and a Smart Trades offer carries the
+partner's own record. The previous limitation said a demo must not state a
+tendency, and that still holds: the fixture states transactions, and
+`buildTransactionProfiles`, `buildTradeTendencies` and `readManagerTendencies`
+state the tendencies.
+
+The ledger is also the single source for the money. The spend on each roster and
+the league's price summary are two readings of one list now, where they used to
+be two hand-written tables with nothing connecting them — a demo could have
+shown a room that had spent $500 between them while claiming a typical winning
+bid of $2, and no test would have caught it. The week-seven run is in the ledger
+too, so Wednesday morning holds the player Tuesday's plan recommended, at the
+price it recommended, with the player it named cut.
+
+**The claim planner has a scenario worth showing.** The Tuesday wire now
+produces the three-claim contingency the plan was built for — add A, then the
+same drop again for B in case A loses, then B on a different drop in case A
+lands — with the wallet covering both claims that can land together. The plan is
+the real planner's; the fixtures were tuned until the *scenario* was interesting
+rather than until the output was.
+
+**Two things a demo still cannot show, and both are deliberate.** A fixture
+player id is not a Sleeper player id, so no portrait exists to request and the
+focused view draws its deterministic initials — the alternative being two
+hundred requests that can only 404, or a bundled photo pack. And nothing here
+invents a newsletter excerpt, which leaves the evidence timeline empty exactly
+as it was.
+
+**Realism.** Every club is real and every person is invented. The teams are the
+thirty-two actual NFL clubs, because a reader has to recognise a slate to judge
+whether the advice about it is sensible; the names on the players are written in
+the idiom of an NFL roster and belong to nobody, because the fixtures are full of
+claims — a role falling apart, a hamstring, a manager who overpays — and
+attaching an invented claim to a real professional is the one kind of realism a
+fixture must not buy.

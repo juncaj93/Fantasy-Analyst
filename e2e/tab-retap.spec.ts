@@ -207,6 +207,15 @@ test.describe('a retap returns the screen home', () => {
    */
   test('every destination stays on its feet when tapped twice', async ({ page }) => {
     await page.goto('/');
+    /*
+     * Wait for the bar before reading it. `evaluateAll` is not a Playwright
+     * assertion and does not retry: it answers with whatever matches at the
+     * instant it runs, and on a loaded machine that instant lands before the
+     * bar has mounted. The failure that produces is `Received: 0` with a
+     * screenshot showing all six destinations present — the test asking too
+     * early, wearing the costume of a missing toolbar.
+     */
+    await expect(page.locator('.tabbar button').first()).toBeVisible();
     const tabs = await page
       .locator('.tabbar button')
       .evaluateAll((buttons) => buttons.map((b) => b.getAttribute('data-testid')!.replace('tab-', '')));

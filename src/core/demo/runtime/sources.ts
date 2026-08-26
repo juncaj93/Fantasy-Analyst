@@ -20,8 +20,11 @@ import type { TradeCandidate, Ownership } from '../../trades/engine.ts';
 import type { DefenseTendencyIndex } from '../../startsit/defense.ts';
 import type { StartSitMode } from '../../startsit/mode.ts';
 import { hoursAfter } from '../clock.ts';
+import type { DstPlanSources } from '../../dst/assemble.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 import { toProps, toUsageWeeks } from '../fixtures/spec.ts';
+import { scheduleRows, teamForm } from '../fixtures/slate.ts';
+import { preseasonPoints } from '../fixtures/world.ts';
 
 /**
  * The board's sources.
@@ -81,12 +84,24 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
      */
     flags: async () => data.flags,
     /*
-     * The demo world imports no preseason projection snapshot, so the board it
-     * builds has none — which is the honest rehearsal of a league that has not
-     * pasted one, and leaves the market component reading the demo's own season
-     * lines exactly as it did before.
+     * The projection somebody pasted in August, for the board's `PTS` column.
+     *
+     * A separate source from the draft market beside it, and it used to be
+     * empty here — so `PTS —` was on every row of every demo board while the
+     * column worked in production, which is the one thing Demo Mode exists to
+     * make impossible. See `preseasonPoints` in `fixtures/world.ts` for why the
+     * numbers deliberately disagree with ADP, and for why no defence has one.
      */
-    preseasonPoints: async () => new Map<string, number>(),
+    preseasonPoints: async (playerIds) => {
+      const out = new Map<string, number>();
+      const wanted = new Set(playerIds);
+      for (const spec of data.specs) {
+        if (!wanted.has(spec.id)) continue;
+        const points = preseasonPoints(spec);
+        if (points != null) out.set(spec.id, points);
+      }
+      return out;
+    },
     seasonMarkets: async (ids) => {
       const out: typeof data.seasonMarkets = new Map();
       for (const id of ids) {
@@ -166,6 +181,15 @@ export function startSitInputsFrom(
           ? null
           : { spread: week.spread ?? null, total: week.total ?? null, opponent: week.opponent },
       opponent: week?.opponent ?? null,
+      /*
+       * At home or on the road, for the one model that reads it.
+       *
+       * Set from the slate exactly as the live assembly sets it from the stored
+       * fixture list, so a defence worth 8.4 on Team and 8.1 on Waivers is not
+       * a rounding difference — it is two answers to one question, and it
+       * cannot happen because both screens read this.
+       */
+      ...(week?.home == null ? {} : { home: week.home }),
       defenseTendencies: defense,
       mode: opts.mode ?? 'balanced',
       propsStale: data.freshness.vegas === 'stale',
@@ -174,6 +198,34 @@ export function startSitInputsFrom(
     });
   }
   return inputs;
+}
+
+/**
+ * The defence planner's three reads, from the slate.
+ *
+ * `DstPlanSources` is the same interface `server/services/dstPlanService.ts`
+ * satisfies out of the schedule and betting repositories — the assembly itself
+ * is `core/dst/assemble.ts` and is shared, so a streamed defence in Demo Mode
+ * was chosen by the code that would choose one for a real league.
+ *
+ * The fixture answers exactly what a deployment answers, including the shape of
+ * what it does *not* know: `impliedTotals` is a season average per club and the
+ * generated weeks carry no line at all, which is what sends the outlook down
+ * its honest fallback path instead of down an invented one.
+ */
+export function dstPlanSourcesFrom(data: ScenarioData): DstPlanSources {
+  const season = data.league.season;
+  const week = data.nflState?.week ?? 1;
+  return {
+    fixturesForWeek: async (_season, forWeek) => scheduleRows(season, [forWeek]),
+    scheduleForTeams: async (_season, teams, range) => {
+      const wanted = new Set(teams.map((t) => t.toUpperCase()));
+      const weeks: number[] = [];
+      for (let w = range.from; w <= range.to; w++) weeks.push(w);
+      return scheduleRows(season, weeks).filter((row) => wanted.has(row.team.toUpperCase()));
+    },
+    impliedTotals: async () => teamForm(week),
+  };
 }
 
 /**

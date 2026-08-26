@@ -29,6 +29,7 @@ import type {
   LeagueRecord,
   RosterRecord,
   SleeperMatchup,
+  SleeperTransaction,
 } from '../../sleeper/types.ts';
 import type { NflState } from '../../sleeper/phase.ts';
 import type { Clock } from '../clock.ts';
@@ -104,6 +105,17 @@ export interface ScenarioData {
   matchups: SleeperMatchup[] | null;
   /** The FAAB world, or null in a league that does not bid. */
   strategy: ScenarioStrategy | null;
+  /**
+   * The league's own transaction history, in Sleeper's shape.
+   *
+   * Read by the manager-intelligence engines exactly as the nightly backfill
+   * reads a real league's: `toLedgerTransaction` projects it,
+   * `buildTransactionProfiles` and `buildTradeTendencies` decide what it means,
+   * and `collectBids` turns the same rows into the price summary. Empty for a
+   * scenario with no history to have — a draft, an offseason, or the league
+   * that has never published a bid.
+   */
+  transactions: SleeperTransaction[];
   /** Extra sentences the scenario wants surfaced, e.g. an outage explanation. */
   notes: string[];
 }
@@ -180,10 +192,20 @@ export function makeRosters(opts: {
   starters?: string[];
   reserve?: string[];
   spentByRosterId?: Map<number, number>;
+  /**
+   * Each roster's record, which Sleeper publishes on the roster itself.
+   *
+   * It is what `playoffEmphasis` reads to decide whether December is worth
+   * planning for yet, so a league with no records stated is a league in which a
+   * playoff stash can never be recommended — a whole branch of the defence
+   * planner unreachable for want of two numbers.
+   */
+  recordByRosterId?: Map<number, { wins: number; losses: number }>;
 }): RosterRecord[] {
   return DEMO_MANAGERS.map((manager) => {
     const playerIds = opts.byRosterId.get(manager.rosterId) ?? [];
     const spent = opts.spentByRosterId?.get(manager.rosterId);
+    const record = opts.recordByRosterId?.get(manager.rosterId);
     return {
       leagueId: DEMO_LEAGUE_ID,
       rosterId: manager.rosterId,
@@ -193,7 +215,10 @@ export function makeRosters(opts: {
       starterIds: manager.isMine ? (opts.starters ?? []) : [],
       reserveIds: manager.isMine ? (opts.reserve ?? []) : [],
       isMine: manager.isMine,
-      settings: spent == null ? {} : { waiver_budget_used: spent },
+      settings: {
+        ...(spent == null ? {} : { waiver_budget_used: spent }),
+        ...(record == null ? {} : { wins: record.wins, losses: record.losses }),
+      },
     };
   });
 }

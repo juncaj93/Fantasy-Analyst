@@ -1,31 +1,32 @@
 /**
- * One Sunday afternoon, from five different points in it.
+ * One Sunday afternoon, from six different points in it.
  *
- * Everything a matchup scenario states is an *input*: which game a player is
- * in, when it kicked off, what the market expected of him, and what he has
- * actually scored so far. Sleeper's own matchup rows carry the last of those,
- * exactly as they do live, and the app reads them exactly as it does live.
+ * Everything a matchup scenario states is an *input*: what the market expected
+ * of a player and what he has actually scored so far. Where the games are and
+ * when they kick off is not stated here at all — that is `slate.ts`, which
+ * every other week of the demo reads too, and moving it there is what stopped
+ * week six being two different Sundays depending on which screen was open.
  *
  * Nothing here states a projection, a win probability, a phase, an insight or a
  * lineup verdict. Those are `core/matchup`'s, computed from the numbers below
  * by the same `buildMatchupResponse` the server calls — which is the whole
- * point of the five scenarios: if the model changes its mind about a close
- * game, these screens change with it.
+ * point of the scenarios: if the model changes its mind about a close game,
+ * these screens change with it.
  *
  * ## How a scenario reaches a state
  *
- * The clock is fixed and every kickoff is written as an offset from it, so the
- * phase of each player's game is arithmetic the distribution module does:
- * before kickoff he has not started, up to 185 minutes after it he is live with
- * that share elapsed, and past that he is final. A Sunday with games in all
- * three states is therefore not a flag — it is three kickoff times.
+ * The clock is fixed and the kickoffs belong to the slate, so the phase of each
+ * player's game is arithmetic the distribution module does: before kickoff he
+ * has not started, up to 185 minutes after it he is live with that share
+ * elapsed, and past that he is final. A Sunday with games in all three states
+ * is therefore not a flag — it is three kickoff times and one clock.
  */
 
 import type { SleeperMatchup } from '../../sleeper/types.ts';
 import type { DemoScenario } from '../types.ts';
-import type { DemoWeekSpec } from './spec.ts';
+import type { DemoInjurySpec } from './spec.ts';
 
-/** The manager on the other side of the table for all five scenarios. */
+/** The manager on the other side of the table for all six scenarios. */
 export const MATCHUP_OPPONENT_ROSTER_ID = 2;
 
 /**
@@ -40,19 +41,19 @@ export const MATCHUP_OPPONENT_ROSTER_ID = 2;
  * one is in the night game, which is the same shape as the reader's side.
  */
 export const OPPONENT_ROSTER = [
-  'p011', // QB  Emil Draeger (MIN)
-  'p004', // RB  Roshan Villiers (PHI)
-  'p006', // RB  Silas Mbeki (GB)
-  'p002', // WR  Devin Okafor (CIN)
-  'p005', // WR  Owen Fitzgerald (SF)
+  'p011', // QB  Gunnar Petrie (MIN)
+  'p004', // RB  Trey Alcorn (PHI)
+  'p006', // RB  Darius Whitten (GB)
+  'p002', // WR  Deion Rackley (CIN)
+  'p005', // WR  Cade Robinette (SF)
   'p024', // WR  Dax Merriweather (LAC)
-  'p017', // TE  Miles Barrowman (ATL)
-  'p021', // FLEX Bo Ashworth (RB, LAR)
-  'p007', // BN  Julian Reyes (RB, MIA)
+  'p017', // TE  Brady Ferrante (ATL)
+  'p021', // FLEX Bo Ashcroft (RB, LAR)
+  'p007', // BN  Elijah Nunez (RB, MIA)
   'p026', // BN  Corbin Ledoux (RB, NO)
-  'p012', // BN  Jonah Priestley (QB, TB)
-  'p014', // BN  Ruben Castellanos (QB, PIT)
-  'p018', // BN  Teo Ferreira (TE, SEA)
+  'p012', // BN  Beau Callahan (QB, TB)
+  'p014', // BN  Diego Marchand (QB, PIT)
+  'p018', // BN  Isaiah Coker (TE, SEA)
   /*
    * Doubtful in the shared world, and benched here on purpose.
    *
@@ -64,77 +65,19 @@ export const OPPONENT_ROSTER = [
    * reader's own side, where it is actionable.
    */
   'p022', // BN  Cal Whitfield (WR, NYJ)
+  /*
+   * And a defence, because the league starts one.
+   *
+   * Baltimore is in the night game, on the same slate as the reader's own
+   * Denver — so a matchup that comes down to the last window has a defence in
+   * it on both sides, which is what a real one does and what the screen has to
+   * be able to draw.
+   */
+  'd02', // DEF Baltimore
 ];
 
-/** In lineup-slot order: QB, RB, RB, WR, WR, WR, TE, FLEX. */
-export const OPPONENT_STARTERS = ['p011', 'p004', 'p006', 'p002', 'p005', 'p024', 'p017', 'p021'];
-
-/**
- * The three windows of an NFL Sunday, as offsets from the scenario clock.
- *
- * A game is final once 185 minutes have passed — see `GAME_MINUTES` — so 3.6
- * hours ago is comfortably over, 1.1 hours ago is a little over a third
- * through, and the night game has not kicked off. Every team on either roster
- * is in exactly one of them, which is what stops a demo Sunday from being a
- * slate where everything happens at once.
- */
-type Window = 'early' | 'late' | 'night';
-
-const WINDOW_KICKOFF: Record<Window, number> = { early: -3.6, late: -1.1, night: 3.75 };
-
-const TEAM_WINDOW: Record<string, Window> = {
-  KC: 'early', BUF: 'early', DAL: 'early', PHI: 'early', CIN: 'early', ATL: 'early', IND: 'early', NO: 'early',
-  MIN: 'late', HOU: 'late', TB: 'late', GB: 'late', SF: 'late', LAR: 'late', CHI: 'late', MIA: 'late',
-  BAL: 'night', DET: 'night', NYJ: 'night', PIT: 'night', WAS: 'night', DEN: 'night', SEA: 'night', LAC: 'night',
-};
-
-/** The slate itself: who is playing whom, and what the book made of it. */
-const GAME: Record<string, { opponent: string; spread: number; total: number }> = {
-  KC: { opponent: 'IND', spread: -6.5, total: 47.5 },
-  IND: { opponent: 'KC', spread: 6.5, total: 47.5 },
-  BUF: { opponent: 'CIN', spread: -1.5, total: 51 },
-  CIN: { opponent: 'BUF', spread: 1.5, total: 51 },
-  DAL: { opponent: 'PHI', spread: 3, total: 44.5 },
-  PHI: { opponent: 'DAL', spread: -3, total: 44.5 },
-  ATL: { opponent: 'NO', spread: -2, total: 42 },
-  NO: { opponent: 'ATL', spread: 2, total: 42 },
-  MIN: { opponent: 'GB', spread: 1, total: 45.5 },
-  GB: { opponent: 'MIN', spread: -1, total: 45.5 },
-  HOU: { opponent: 'TB', spread: -3.5, total: 43 },
-  TB: { opponent: 'HOU', spread: 3.5, total: 43 },
-  SF: { opponent: 'LAR', spread: -4.5, total: 46 },
-  LAR: { opponent: 'SF', spread: 4.5, total: 46 },
-  CHI: { opponent: 'MIA', spread: 2.5, total: 41.5 },
-  MIA: { opponent: 'CHI', spread: -2.5, total: 41.5 },
-  BAL: { opponent: 'DET', spread: -2.5, total: 49.5 },
-  DET: { opponent: 'BAL', spread: 2.5, total: 49.5 },
-  NYJ: { opponent: 'PIT', spread: 1.5, total: 38.5 },
-  PIT: { opponent: 'NYJ', spread: -1.5, total: 38.5 },
-  WAS: { opponent: 'SEA', spread: 1, total: 44 },
-  SEA: { opponent: 'WAS', spread: -1, total: 44 },
-  DEN: { opponent: 'LAC', spread: -1, total: 40.5 },
-  LAC: { opponent: 'DEN', spread: 1, total: 40.5 },
-};
-
-/**
- * What the market expected of each man in the matchup, in this league's points.
- *
- * A target the expander turns into the lines a book would publish; the number
- * the screen shows is the engine's reading of those lines, not this figure.
- * Everybody on either roster has one, because a matchup where half a lineup is
- * unpriced is a *degraded* matchup and the model says so — which is a state
- * worth demonstrating deliberately and not by accident.
- */
-const EXPECTED: Record<string, number> = {
-  // The reader's starters.
-  p010: 21.0, p001: 18.5, p023: 13.1, p003: 16.2, p009: 14.8, p008: 15.5, p016: 9.6, p025: 12.4,
-  // The reader's bench.
-  p013: 17.2, p028: 9.1, p030: 7.4, p031: 11.8, p037: 12.9, p019: 6.3,
-  // The opponent's starters.
-  p011: 20.2, p004: 17.9, p006: 15.4, p002: 17.1, p005: 16.6, p024: 14.2, p017: 10.3, p021: 13.8,
-  // The opponent's bench.
-  p007: 11.4, p026: 8.7, p012: 16.1, p014: 14.9, p018: 5.8, p022: 12.2,
-};
+/** In lineup-slot order: QB, RB, RB, WR, WR, WR, TE, FLEX, DEF. */
+export const OPPONENT_STARTERS = ['p011', 'p004', 'p006', 'p002', 'p005', 'p024', 'p017', 'p021', 'd02'];
 
 /**
  * How each player's afternoon has actually gone.
@@ -151,7 +94,7 @@ type Scores = Record<string, number>;
 /** One point in it, with the reader's night game still to come. */
 const CLOSE: Scores = {
   p001: 22.1, p003: 12.6, p016: 12.7, p023: 8.1, p009: 8.7, p025: 4.9,
-  p004: 15.8, p002: 22.1, p017: 6.4, p011: 13.4, p006: 7.2, p005: 9.3, p021: 4.8,
+  p004: 17.0, p002: 22.1, p017: 6.4, p011: 14.7, p006: 7.2, p005: 9.3, p021: 4.8,
 };
 
 /** The finished games went the reader's way, and the live ones are following. */
@@ -194,18 +137,33 @@ const FINAL: Scores = {
 };
 
 /**
+ * Nothing has kicked off yet.
+ *
+ * `sunday-pregame` is a matchup as well as a lineup, and the empty scoreboard
+ * is the whole of what makes it one: two rosters, a full slate ahead, and a
+ * forecast built entirely out of what the market expects rather than partly out
+ * of what has happened. It is the one live phase the other five did not cover,
+ * and it is the phase in which a lineup change is still worth anything.
+ */
+const PREGAME: Scores = {};
+
+/**
  * The clock each scenario is read at.
  *
- * Three of them share the same instant, because "close", "ahead" and "behind"
+ * Four of them share the same instant, because "close", "ahead" and "behind"
  * are three different Sundays at the same time of day rather than three times
- * of day. `matchup-final` is read on the Monday, after everything including the
- * night game has finished.
+ * of day. `sunday-pregame` is read in the morning, before anything has
+ * happened, and `matchup-final` on the Monday after the night game.
+ *
+ * Every one of them is a *clock*, not a schedule: what has finished, what is
+ * running and what is still to come is the slate's kickoffs measured from here.
  */
 export const MATCHUP_CLOCKS: Record<string, string> = {
-  'matchup-live-close': '2026-10-11T20:15:00.000Z',
-  'matchup-live-leading': '2026-10-11T20:15:00.000Z',
-  'matchup-live-trailing': '2026-10-11T20:15:00.000Z',
-  'matchup-injury-swing': '2026-10-11T20:15:00.000Z',
+  'sunday-pregame': '2026-10-11T15:40:00.000Z',
+  'matchup-live-close': '2026-10-11T21:20:00.000Z',
+  'matchup-live-leading': '2026-10-11T21:20:00.000Z',
+  'matchup-live-trailing': '2026-10-11T21:20:00.000Z',
+  'matchup-injury-swing': '2026-10-11T21:20:00.000Z',
   'matchup-final': '2026-10-12T06:30:00.000Z',
 };
 
@@ -214,6 +172,7 @@ export function isMatchupScenario(id: string): boolean {
 }
 
 const SCORES: Record<string, Scores> = {
+  'sunday-pregame': PREGAME,
   'matchup-live-close': CLOSE,
   'matchup-live-leading': LEADING,
   'matchup-live-trailing': TRAILING,
@@ -221,87 +180,31 @@ const SCORES: Record<string, Scores> = {
   'matchup-final': FINAL,
 };
 
+/**
+ * The starter ruled out of the night game.
+ *
+ * The only fixture difference between `matchup-injury-swing` and
+ * `matchup-live-close`, and it is stated as what the two sources said rather
+ * than as a conclusion: `resolveInjury` decides what a DNP week and an `Out`
+ * designation add up to, and `core/matchup/decision.ts` decides what the swap
+ * is worth. He is in the night game, so his slot is still changeable — which is
+ * what makes this an alert rather than a regret.
+ */
+export const MATCHUP_INJURY: Record<string, { injury: DemoInjurySpec }> = {
+  p008: {
+    injury: {
+      designation: 'Out',
+      bodyPart: 'ankle',
+      practice: ['DNP', 'DNP', 'DNP'],
+      reportHoursAgo: 0.6,
+      sleeperSays: 'Out',
+    },
+  },
+};
+
 /** Everybody in the matchup, which is what has to be priced. */
 export function matchupPlayerIds(mine: string[]): string[] {
   return [...new Set([...mine, ...OPPONENT_ROSTER])];
-}
-
-/**
- * The week's market for everybody in the matchup.
- *
- * Built from the slate rather than written out per player: the kickoff, the
- * opponent and the line are properties of the *game*, and stating them
- * twenty-eight times is twenty-eight chances for the two sides of one game to
- * disagree about who is favoured.
- *
- * `matchup-final` shifts every kickoff back by the ten and a quarter hours
- * between the two clocks, so the same slate reads as finished rather than being
- * a second slate that happens to be over.
- */
-export function matchupWeek(
-  scenario: DemoScenario,
-  players: { id: string; team: string }[],
-  base: Record<string, DemoWeekSpec>,
-): Record<string, DemoWeekSpec> {
-  const ids = new Set(matchupPlayerIds(Object.keys(EXPECTED)));
-  const settled = scenario.id === 'matchup-final';
-  const out: Record<string, DemoWeekSpec> = {};
-
-  for (const player of players) {
-    if (!ids.has(player.id)) continue;
-    const points = EXPECTED[player.id];
-    if (points == null) continue;
-
-    const window = TEAM_WINDOW[player.team];
-    const game = GAME[player.team];
-    /*
-     * A player whose team is not on this slate has no market at all, which is
-     * the bye state and is passed through as absent rather than invented.
-     */
-    if (!window || !game) {
-      out[player.id] = { points: null, kickoffInHours: null, opponent: null };
-      continue;
-    }
-
-    out[player.id] = {
-      points,
-      // Roughly last week's line, so movement is real rather than flat.
-      previousPoints: Math.round((points * 0.94 + 0.6) * 10) / 10,
-      kickoffInHours: WINDOW_KICKOFF[window] - (settled ? 10.25 : 0),
-      opponent: game.opponent,
-      spread: game.spread,
-      total: game.total,
-      // The usage series the shared world already carries for him, when it does:
-      // a role read is about the season, not about this afternoon.
-      ...(base[player.id]?.usage ? { usage: base[player.id]!.usage } : {}),
-    };
-  }
-
-  /*
-   * The starter who leaves the lineup, and the only fixture difference between
-   * `matchup-injury-swing` and `matchup-live-close`.
-   *
-   * He is in the night game, so his slot is still changeable — which is what
-   * makes this an alert rather than a regret, and is why the insight engine can
-   * price the swap in win probability instead of merely reporting it.
-   */
-  if (scenario.id === 'matchup-injury-swing') {
-    const hurt = out['p008'];
-    if (hurt) {
-      out['p008'] = {
-        ...hurt,
-        injury: {
-          designation: 'Out',
-          bodyPart: 'ankle',
-          practice: ['DNP', 'DNP', 'DNP'],
-          reportHoursAgo: 0.6,
-          sleeperSays: 'Out',
-        },
-      };
-    }
-  }
-
-  return out;
 }
 
 /**

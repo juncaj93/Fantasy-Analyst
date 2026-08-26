@@ -9,7 +9,7 @@
  * Nothing here states a recommendation, a bid, a lineup or a verdict.
  */
 
-import { fixedClock, hoursBefore } from '../clock.ts';
+import { fixedClock, hoursBefore, type Clock } from '../clock.ts';
 import type { DemoScenario } from '../types.ts';
 import type { DemoWeekSpec } from './spec.ts';
 import {
@@ -31,40 +31,87 @@ import {
   type ScenarioData,
   type ScenarioStrategy,
 } from './build.ts';
-import { DEMO_MANAGERS, MY_ROSTER_ID, WORLD_PLAYERS, adpOrder } from './world.ts';
 import {
+  DEMO_MANAGERS,
+  DEMO_SEASON,
+  MY_ROSTER_ID,
+  WORLD_DEFENCES,
+  WORLD_PLAYERS,
+  adpOrder,
+  worldPlayer,
+} from './world.ts';
+import { collectBids, losingBidNote, summarisePrices } from '../../faab/bids.ts';
+import { LEDGER_WEEKS, demoTransactions, spendByRosterId } from './ledger.ts';
+import { teamWeek } from './slate.ts';
+import {
+  MATCHUP_INJURY,
   MATCHUP_OPPONENT_ROSTER_ID,
   OPPONENT_ROSTER,
   isMatchupScenario,
   matchupRows,
-  matchupWeek,
 } from './matchup.ts';
+
+/**
+ * Who holds which defence.
+ *
+ * Twelve of the sixteen are rostered, one apiece, because that is what a DEF
+ * slot looks like in October: everybody has one and nobody is attached to it.
+ * The four left over are the wire, and they are the only reason a streaming
+ * recommendation is possible at all — a league where every defence is owned has
+ * no defence question, only a defence.
+ *
+ * Written down rather than dealt from the draft order, because the arrangement
+ * *is* the demonstration: the reader's own unit and the best one available have
+ * to be the two the schedule separates, or the planner is being asked a
+ * question with no interesting answer.
+ */
+export const MY_DEFENCE = 'd08';
+
+/** What the week-seven run added, and what it cost a roster spot. */
+const RUN_LANDED = 'p039';
+const RUN_DROPPED = 'p030';
+
+/** Roster id → the defence that roster holds. Mine is nine. */
+const DEFENCE_BY_ROSTER_ID = new Map<number, string>([
+  [1, 'd01'], [2, 'd02'], [3, 'd03'], [4, 'd05'], [5, 'd06'], [6, 'd07'],
+  [7, 'd09'], [8, 'd10'], [MY_ROSTER_ID, MY_DEFENCE], [10, 'd11'], [11, 'd12'], [12, 'd14'],
+]);
+
+/** The defences on the wire, in board order. */
+const WIRE_DEFENCES = ['d04', 'd13', 'd15', 'd16'];
 
 /**
  * The team the reader is looking after all season.
  *
- * Eight starters and six on the bench, chosen so the lineup has one genuinely
+ * Nine starters and six on the bench, chosen so the lineup has one genuinely
  * close call, one player the market and the ledger disagree about, one
  * fragile starter and one bench player who is plainly not earning his slot.
+ *
+ * The ninth starter is a defence, and it is not decoration. Denver draws a
+ * comfortable home game in week six and a road trip to the best offence on the
+ * slate in week seven, which is the whole of the streaming question in two
+ * fixtures: the same unit, worth starting one week and worth replacing the
+ * next, with the decision left to `core/dst/planner.ts`.
  */
 const MY_ROSTER = [
-  'p010', // QB  Trey Halloran
-  'p001', // RB  Marcus Vance
+  'p010', // QB  Colton Reeves
+  'p001', // RB  Jalen Whitmore
   'p023', // RB  Ike Sandoval
-  'p003', // WR  Kai Brennan
-  'p009', // WR  Emeka Falade
-  'p008', // WR  Silas Brandt
-  'p016', // TE  Andre Sotelo
-  'p025', // FLEX Yusuf Adeyemi
-  'p013', // BN  Casey Lindqvist (QB)
+  'p003', // WR  Amari Sellers
+  'p009', // WR  Rashad Bellinger
+  'p008', // WR  Micah Stallworth
+  'p016', // TE  Chase Delgado
+  'p025', // FLEX Josiah Adeyemi
+  MY_DEFENCE, // DEF Denver
+  'p013', // BN  Wyatt Kessler (QB)
   'p028', // BN  Rey Villanueva (RB)
   'p030', // BN  Femi Adebayo (RB)
   'p031', // BN  Karl Ostrowski (WR)
   'p037', // BN  Kwame Boateng (WR) — the other half of the flex argument
-  'p019', // BN  Grant Aldous (TE)
+  'p019', // BN  Grant Halsey (TE)
 ];
 
-const MY_STARTERS = ['p010', 'p001', 'p023', 'p003', 'p009', 'p008', 'p016', 'p025'];
+const MY_STARTERS = ['p010', 'p001', 'p023', 'p003', 'p009', 'p008', 'p016', 'p025', MY_DEFENCE];
 
 /**
  * The wire.
@@ -82,7 +129,19 @@ const MY_STARTERS = ['p010', 'p001', 'p023', 'p003', 'p009', 'p008', 'p016', 'p0
  * would be honestly computed and uniformly uncontested — a working feature the
  * demo never actually shows working.
  */
-const FREE_AGENTS = ['p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p027', 'p029', 'p032', 'p052'];
+const FREE_AGENTS = [
+  'p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p027', 'p029', 'p032', 'p052',
+  /*
+   * And four defences nobody owns.
+   *
+   * One of them — Philadelphia — is a five-and-a-half-point home favourite in
+   * week seven while the reader's own unit is a touchdown-and-a-half underdog
+   * in Kansas City. That is a streaming decision with a real gap in it, and it
+   * is the fixture's whole contribution: whether the gap is worth a roster
+   * move is the planner's to decide and it is decided nowhere in this file.
+   */
+  ...WIRE_DEFENCES,
+];
 
 /**
  * Rosters for a season scenario.
@@ -97,15 +156,41 @@ const FREE_AGENTS = ['p039', 'p034', 'p036', 'p033', 'p035', 'p038', 'p040', 'p0
  * case: he is held out of the pool exactly as my own roster is, so no player
  * ends up on two teams.
  */
-function seasonRosters(pinned?: Map<number, string[]>): Map<number, string[]> {
+function seasonRosters(opts: { pinned?: Map<number, string[]>; afterRun?: boolean } = {}): Map<number, string[]> {
+  const pinned = opts.pinned;
+  /*
+   * The claim that landed, on the roster it landed on.
+   *
+   * Every scenario after the Wednesday run holds the player the Tuesday plan
+   * recommended and has cut the player it named — same add, same drop, same
+   * price as the plan and the ledger. A demo that recommended a claim on one
+   * screen and showed the roster unchanged on the next would be telling two
+   * stories about one week.
+   */
+  const mine = opts.afterRun
+    ? [...MY_ROSTER.filter((id) => id !== RUN_DROPPED), RUN_LANDED]
+    : [...MY_ROSTER];
+  const wire = opts.afterRun
+    ? [...FREE_AGENTS.filter((id) => id !== RUN_LANDED), RUN_DROPPED]
+    : [...FREE_AGENTS];
+
   const pinnedIds = [...(pinned?.values() ?? [])].flat();
-  const taken = new Set([...MY_ROSTER, ...FREE_AGENTS, ...pinnedIds]);
+  const taken = new Set([...mine, ...wire, ...pinnedIds]);
+  /*
+   * Defences are dealt by name and never from the pool.
+   *
+   * Ownership of a defence is a fact this fixture states — see
+   * `DEFENCE_BY_ROSTER_ID` — so every one of them is held out of the
+   * skill-position deal below and handed to its roster afterwards.
+   */
+  for (const id of DEFENCE_BY_ROSTER_ID.values()) taken.add(id);
+
   const pool = adpOrder()
     .map((p) => p.id)
     .filter((id) => !taken.has(id));
 
   const out = new Map<number, string[]>();
-  out.set(MY_ROSTER_ID, [...MY_ROSTER]);
+  out.set(MY_ROSTER_ID, mine);
   const others = DEMO_MANAGERS.filter((m) => !m.isMine);
   for (const manager of others) out.set(manager.rosterId, []);
   for (const [rosterId, ids] of pinned ?? []) out.set(rosterId, [...ids]);
@@ -118,6 +203,11 @@ function seasonRosters(pinned?: Map<number, string[]>): Map<number, string[]> {
       if (!id) break;
       out.get(manager.rosterId)!.push(id);
     }
+  }
+
+  for (const [rosterId, defence] of DEFENCE_BY_ROSTER_ID) {
+    const roster = out.get(rosterId);
+    if (roster && !roster.includes(defence)) roster.push(defence);
   }
   return out;
 }
@@ -159,56 +249,101 @@ const W6 = [1, 2, 3, 4, 5];
 const W7 = [1, 2, 3, 4, 5, 6];
 
 /**
- * Week six, Sunday morning.
+ * What the market expects of a player in a week, and what is known about how he
+ * got there.
  *
- * The flex is the argument: `p025` is a steady, high-floor target hog whose
- * market number is unspectacular, and `p037` is priced almost identically off a
- * far more concentrated role. Floor and Ceiling are being asked to disagree,
- * and the engine — not this file — decides whether they do.
+ * Deliberately *not* a `DemoWeekSpec`. A week spec carries an opponent, a
+ * spread, a total and a kickoff — and those belong to the **game**, which is
+ * `slate.ts`'s to state. Writing them here as well is how week six came to be
+ * written down twice, with a tight end on a bye in one telling and playing in
+ * the other. So a market entry is only the part that is about the player: what
+ * a book thinks he scores, what it thought last week, how his role has gone and
+ * what the injury report says.
  */
-const WEEK_SIX: Record<string, DemoWeekSpec> = {
-  p010: { points: 19.4, previousPoints: 18.2, kickoffInHours: 1.3, opponent: 'CLE', spread: -3.5, total: 44.5,
-    usage: steady(34, 4, W6) },
-  p001: { points: 17.8, previousPoints: 17.1, kickoffInHours: 1.3, opponent: 'LV', spread: -6.5, total: 47.5,
-    usage: steady(19, 4, W6) },
-  p023: { points: 11.2, previousPoints: 12.6, kickoffInHours: 1.3, opponent: 'CHI', spread: 1.5, total: 41,
-    usage: steady(13, 3, W6) },
-  p003: { points: 16.1, previousPoints: 15.4, kickoffInHours: 1.3, opponent: 'NYJ', spread: -4.5, total: 46,
-    usage: steady(9, 0.26, W6) },
-  p009: { points: 14.9, previousPoints: 12.8, kickoffInHours: 4.3, opponent: 'IND', spread: 2.5, total: 48.5,
-    usage: rising(6, 11, 0.17, 0.29, W6) },
-  p008: { points: 12.3, previousPoints: 13.9, kickoffInHours: 1.3, opponent: 'GB', spread: 3, total: 43,
-    usage: steady(8, 0.22, W6) },
-  p016: { points: 9.6, previousPoints: 9.1, kickoffInHours: 1.3, opponent: 'PHI', spread: 2.5, total: 45,
+interface DemoMarketEntry {
+  /** In this league's points. Null means no market at all — see the expander. */
+  points: number | null;
+  previousPoints?: number;
+  usage?: DemoWeekSpec['usage'];
+  injury?: NonNullable<DemoWeekSpec['injury']>;
+}
+
+/**
+ * Week six, for everybody the week is about.
+ *
+ * One table for the reader's roster, the matchup opponent's roster and the
+ * wire, because they are all in the same week: the Sunday the lineup scenarios
+ * are read on **is** the Sunday the matchup scenarios are read on, and the two
+ * used to disagree about what the market thought of the same player.
+ *
+ * The flex is the argument the lineup screen is built around: `p025` is a
+ * steady, high-floor target hog whose market number is unspectacular, and
+ * `p037` is priced almost identically off a far more concentrated role. Floor
+ * and Ceiling are being asked to disagree, and the engine — not this file —
+ * decides whether they do.
+ */
+const WEEK_SIX_MARKET: Record<string, DemoMarketEntry> = {
+  // ------------------------------------------------------- the reader's team
+  p010: { points: 21.0, previousPoints: 18.2, usage: steady(34, 4, W6) },
+  p001: { points: 18.5, previousPoints: 17.1, usage: steady(19, 4, W6) },
+  p023: { points: 13.1, previousPoints: 12.6, usage: steady(13, 3, W6) },
+  p003: { points: 16.2, previousPoints: 15.4, usage: steady(9, 0.26, W6) },
+  p009: { points: 14.8, previousPoints: 12.8, usage: rising(6, 11, 0.17, 0.29, W6) },
+  p008: { points: 15.5, previousPoints: 13.9, usage: steady(8, 0.22, W6) },
+  p016: {
+    points: 9.6,
+    previousPoints: 9.1,
     usage: steady(7, 0.19, W6),
     // Questionable in the report, and he practised in full on Friday. Those two
     // facts together are the most useful thing either source said.
-    injury: { designation: 'Questionable', bodyPart: 'ankle', practice: ['DNP', 'Limited', 'Full'], reportHoursAgo: 19 } },
-  p025: { points: 11.4, previousPoints: 11.2, kickoffInHours: 1.3, opponent: 'ATL', spread: -1, total: 44,
-    usage: steady(8, 0.23, W6) },
-  p037: { points: 11.6, previousPoints: 10.1, kickoffInHours: 4.3, opponent: 'PIT', spread: -2.5, total: 40.5,
-    usage: spike(4, 13, W6) },
-  p013: { points: 15.2, kickoffInHours: 1.3, opponent: 'SEA', spread: 2, total: 43.5, usage: steady(31, 2, W6) },
-  p028: { points: 8.9, kickoffInHours: 1.3, opponent: 'TEN', spread: -1.5, total: 42, usage: steady(9, 2, W6) },
-  p030: { points: 6.4, kickoffInHours: 1.3, opponent: 'MIN', spread: 4.5, total: 40, usage: steady(6, 1, W6) },
-  p031: { points: 7.8, kickoffInHours: 1.3, opponent: 'BAL', spread: 5.5, total: 41.5, usage: steady(5, 0.13, W6) },
-  // No market at all. A bye, and the app has to say so rather than score a zero.
-  p019: { points: null, kickoffInHours: null, opponent: null },
+    injury: { designation: 'Questionable', bodyPart: 'ankle', practice: ['DNP', 'Limited', 'Full'], reportHoursAgo: 19 },
+  },
+  p025: { points: 12.4, previousPoints: 11.2, usage: steady(8, 0.23, W6) },
+  /*
+   * The bench, and it is priced to be a bench.
+   *
+   * These four are the reason the lineup screen has anything to say: a backup
+   * quarterback who is not close, a fourth receiver who is plainly not earning
+   * his slot, and two backs behind him. A bench priced like a starting lineup
+   * would leave every waiver upgrade looking marginal and every drop looking
+   * expensive, which is a fixture quietly deciding the answer.
+   */
+  p013: { points: 15.2, usage: steady(31, 2, W6) },
+  p028: { points: 8.9, usage: steady(9, 2, W6) },
+  p030: { points: 6.4, usage: steady(6, 1, W6) },
+  p031: { points: 7.8, usage: steady(5, 0.13, W6) },
+  /* Except this one, who is the other half of the flex argument. */
+  p037: { points: 12.9, previousPoints: 10.1, usage: spike(4, 13, W6) },
+  p019: { points: 6.3 },
 
-  // ------------------------------------------------------------- the wire
-  p039: { points: 12.8, previousPoints: 8.4, kickoffInHours: 1.3, opponent: 'NE', spread: -3, total: 45,
-    usage: rising(4, 10, 0.11, 0.27, W6) },
-  p034: { points: 10.1, previousPoints: 9.7, kickoffInHours: 1.3, opponent: 'DAL', spread: 6, total: 44,
-    usage: steady(11, 3, W6) },
+  // ------------------------------------------------------------ the opponent
+  p011: { points: 20.2 },
+  p004: { points: 17.9 },
+  p006: { points: 15.4 },
+  p002: { points: 17.1 },
+  p005: { points: 16.6 },
+  p024: { points: 14.2 },
+  p017: { points: 10.3 },
+  p021: { points: 13.8 },
+  p007: { points: 11.4 },
+  p026: { points: 8.7 },
+  p012: { points: 16.1 },
+  p014: { points: 14.9 },
+  p018: { points: 5.8 },
+  p022: { points: 12.2 },
+
+  // ----------------------------------------------------------------- the wire
+  p039: { points: 15.2, previousPoints: 8.4, usage: rising(4, 10, 0.11, 0.27, W6) },
+  p034: { points: 10.1, previousPoints: 9.7, usage: steady(11, 3, W6) },
   // Nobody has measured him. Every role-dependent number must decline to answer.
-  p036: { points: 9.4, kickoffInHours: 1.3, opponent: 'ARI', spread: 2.5, total: 43 },
-  p033: { points: 7.1, kickoffInHours: 1.3, opponent: 'HOU', spread: 3.5, total: 42.5, usage: steady(4, 0.11, W6) },
-  p035: { points: 6.8, kickoffInHours: 1.3, opponent: 'DEN', spread: 7, total: 39, usage: steady(4, 0.1, W6) },
-  p038: { points: 5.9, kickoffInHours: 1.3, opponent: 'CAR', spread: -1, total: 41, usage: steady(5, 1, W6) },
-  p040: { points: 5.2, kickoffInHours: 1.3, opponent: 'JAX', spread: 4, total: 40, usage: steady(4, 1, W6) },
-  p027: { points: 6.1, kickoffInHours: 1.3, opponent: 'LAC', spread: 2, total: 44, usage: steady(5, 0.12, W6) },
-  p029: { points: 5.4, kickoffInHours: 1.3, opponent: 'NO', spread: 1, total: 41, usage: steady(4, 0.1, W6) },
-  p032: { points: 4.8, kickoffInHours: 1.3, opponent: 'TB', spread: 5, total: 42, usage: steady(4, 1, W6) },
+  p036: { points: 9.4 },
+  p033: { points: 7.1, usage: steady(4, 0.11, W6) },
+  p035: { points: 6.8, usage: steady(4, 0.1, W6) },
+  p038: { points: 5.9, usage: steady(5, 1, W6) },
+  p040: { points: 5.2, usage: steady(4, 1, W6) },
+  p027: { points: 6.1, usage: steady(5, 0.12, W6) },
+  p029: { points: 5.4, usage: steady(4, 0.1, W6) },
+  p032: { points: 4.8, usage: steady(4, 1, W6) },
   /*
    * The contested add: a tight end whose role has genuinely moved.
    *
@@ -217,14 +352,22 @@ const WEEK_SIX: Record<string, DemoWeekSpec> = {
    * thin at the position, which is what makes the competition read on his card
    * say something other than "nobody else needs him".
    */
-  p052: { points: 13.7, previousPoints: 6.2, kickoffInHours: 1.3, opponent: 'GB', spread: -2.5, total: 46,
-    usage: rising(3, 9, 0.09, 0.24, W6) },
+  p052: { points: 11.3, previousPoints: 6.2, usage: rising(3, 9, 0.09, 0.24, W6) },
 };
 
-/** Ten to eight minutes before kickoff, a starter is downgraded. */
-const LATE_PIVOT: Record<string, Partial<DemoWeekSpec>> = {
+/**
+ * Eight minutes before the one o'clock kickoff, a starter is downgraded.
+ *
+ * The only thing this scenario states that its predecessor does not. Everything
+ * else that makes it a *pivot* is the clock moving from 11:40 to 12:52 against
+ * a fixed slate: the morning game in London is over, so a bench receiver can no
+ * longer be moved; the early games are minutes away, so the injured starter
+ * still can be; and the wire's beneficiary is in the afternoon window, so
+ * claiming him would still buy something. None of that is written down here,
+ * because a fixture that stated it could state it inconsistently.
+ */
+const LATE_PIVOT: Record<string, Partial<DemoMarketEntry>> = {
   p003: {
-    kickoffInHours: 0.13,
     injury: {
       designation: 'Doubtful',
       bodyPart: 'hamstring',
@@ -233,11 +376,8 @@ const LATE_PIVOT: Record<string, Partial<DemoWeekSpec>> = {
       sleeperSays: 'Doubtful',
     },
   },
-  // Already playing, so no longer a swap however good he looks.
-  p008: { kickoffInHours: -0.7 },
-  p016: { kickoffInHours: -0.7 },
-  // His direct beneficiary is on the wire and about to be very popular.
-  p039: { points: 14.2, kickoffInHours: 3.9 },
+  /* The wire is about to be very interested in him. */
+  p039: { points: 16.5 },
 };
 
 /**
@@ -259,62 +399,86 @@ function playedAnotherWeek(usage: DemoWeekSpec['usage']): DemoWeekSpec['usage'] 
   };
 }
 
-/** Week seven, the following Tuesday night, with byes biting. */
-const WEEK_SEVEN: Record<string, DemoWeekSpec> = Object.fromEntries(
-  Object.entries(WEEK_SIX).map(([id, week]) => [
+/** Week seven: the same market, a week of role history further on. */
+const WEEK_SEVEN_MARKET: Record<string, DemoMarketEntry> = Object.fromEntries(
+  Object.entries(WEEK_SIX_MARKET).map(([id, entry]) => [
     id,
-    {
-      ...week,
-      // Two days out, so nothing is locked and the wire is the whole story.
-      kickoffInHours: 110,
-      usage: playedAnotherWeek(week.usage),
-    },
+    { ...entry, usage: playedAnotherWeek(entry.usage), injury: undefined },
   ]),
 );
 
-/* On a bye in week seven, which is what makes the wire urgent rather than nice. */
-WEEK_SEVEN['p008'] = { points: null, kickoffInHours: null, opponent: null };
-WEEK_SEVEN['p025'] = { points: null, kickoffInHours: null, opponent: null };
+/**
+ * A week, assembled from the slate and the market.
+ *
+ * The one place a `DemoWeekSpec` is built, so the opponent, the spread, the
+ * total and the kickoff on every player in every scenario came out of
+ * `slate.ts` and cannot contradict each other. A club that is not playing gets
+ * the bye state the whole app has language for — no market, no projection, and
+ * never a zero — and that is decided here by the absence of a fixture rather
+ * than stated per player.
+ *
+ * Defences are included whether or not the market has an entry for them,
+ * because a defence never has one: the prop expander has no shape for a defence
+ * and its projection comes from the game line. See `core/dst/dstProjection.ts`.
+ */
+function weekFromSlate(
+  week: number,
+  market: Record<string, DemoMarketEntry>,
+  clock: Clock,
+  overrides: Record<string, Partial<DemoMarketEntry>> = {},
+): Record<string, DemoWeekSpec> {
+  const out: Record<string, DemoWeekSpec> = {};
+  const ids = new Set([...Object.keys(market), ...WORLD_DEFENCES.map((d) => d.id)]);
+
+  for (const id of ids) {
+    const spec = worldPlayer(id);
+    const entry: DemoMarketEntry = { ...(market[id] ?? { points: null }), ...(overrides[id] ?? {}) };
+    const game = teamWeek(week, spec.team, clock.now());
+
+    if (!game) {
+      out[id] = { points: null, kickoffInHours: null, opponent: null };
+      continue;
+    }
+
+    out[id] = {
+      /* A defence's number is the game's, never a prop's. */
+      points: spec.position === 'DEF' ? null : entry.points,
+      ...(entry.previousPoints == null ? {} : { previousPoints: entry.previousPoints }),
+      kickoffInHours: game.kickoffInHours,
+      opponent: game.opponent,
+      spread: game.spread,
+      total: game.total,
+      home: game.home,
+      ...(entry.usage ? { usage: entry.usage } : {}),
+      ...(entry.injury ? { injury: entry.injury } : {}),
+    };
+  }
+  return out;
+}
 
 // ------------------------------------------------------------- the money
 
 /**
- * What the room has spent by week seven.
+ * What the room has spent, and what it paid — both read off the ledger.
  *
- * Deliberately uneven. Two managers have almost nothing left, four are
- * comfortable, and the reader is in the middle with $37 — which is the position
- * in which the difference between "what he will go for" and "what he is worth
- * to you" actually decides something.
- */
-const SPENT_BY_WEEK_SEVEN = new Map<number, number>([
-  [1, 12], [2, 71], [3, 44], [4, 8], [5, 93], [6, 30],
-  [7, 55], [8, 22], [MY_ROSTER_ID, 63], [10, 4], [11, 88], [12, 41],
-]);
-
-/** After the Wednesday run, the winning claim has come out of the wallet. */
-const SPENT_AFTER_RUN = new Map(SPENT_BY_WEEK_SEVEN);
-SPENT_AFTER_RUN.set(MY_ROSTER_ID, 63 + 21);
-SPENT_AFTER_RUN.set(2, 71 + 9);
-SPENT_AFTER_RUN.set(6, 30 + 17);
-
-/**
- * The league's own bid history, summarised.
+ * Neither is stated here any more. `fixtures/ledger.ts` writes down the
+ * season's transactions in Sleeper's own shape, and the same two functions the
+ * live app runs turn them into a spend per roster and a price summary for the
+ * league: `buildBudgetState` reads the spend off each roster's
+ * `waiver_budget_used`, and `collectBids` + `summarisePrices` read the bids.
  *
- * Sixteen winning claims is a real distribution and the pricing model leads
- * with it rather than with a generic prior — which is the difference between
- * advising in a league where waivers go for two dollars and one where they go
- * for forty.
+ * That is worth the indirection for one reason. The old fixture stated a spend
+ * table *and* a price summary — sample sixteen, median eleven — and nothing
+ * connected them: a demo could show a league whose managers had spent $500
+ * between them while claiming its typical winning bid was $2, and no test would
+ * have noticed. Now the wallet, the price and the named rivals are three
+ * readings of one list.
  */
-const PRICES = {
-  sample: 16,
-  median: 11,
-  low: 5,
-  high: 19,
-  max: 44,
-  highestLosing: 14,
-  losingBidsComplete: false,
-  confidence: 'medium' as const,
-};
+function pricesFor(week: number): { prices: ReturnType<typeof summarisePrices>; losingBids: string } {
+  const history = collectBids(demoTransactions(DEMO_SEASON, { throughWeek: week - 1 }), LEDGER_WEEKS);
+  const prices = summarisePrices(history);
+  return { prices, losingBids: losingBidNote(prices) };
+}
 
 /** A league that has never published a single bid. */
 const NO_PRICES = {
@@ -328,39 +492,71 @@ const NO_PRICES = {
   confidence: 'none' as const,
 };
 
-const LOSING_BIDS =
-  'Sleeper publishes the winning bid and, for failed claims on the same player, the amounts that lost. 6 of 16 runs here had a visible losing bid.';
+/**
+ * The record each roster carries into the week.
+ *
+ * Sleeper publishes wins and losses on the roster, and `playoffEmphasis` reads
+ * them to decide whether December is worth planning for yet — so a fixture
+ * without them is a fixture in which a playoff stash can never be recommended.
+ * Deterministic from the week and the seat: the reader is a game over .500 and
+ * the room is spread around them.
+ */
+function recordsFor(week: number): Map<number, { wins: number; losses: number }> {
+  const played = Math.max(0, week - 1);
+  const out = new Map<number, { wins: number; losses: number }>();
+  for (const manager of DEMO_MANAGERS) {
+    const lean = ((manager.rosterId * 5) % 7) - 3;
+    const wins = Math.min(played, Math.max(0, Math.round(played * 0.5 + lean * 0.35)));
+    out.set(manager.rosterId, { wins, losses: played - wins });
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------- builder
 
-function weekFor(scenario: DemoScenario): Record<string, DemoWeekSpec> {
+function weekFor(scenario: DemoScenario, clock: Clock): Record<string, DemoWeekSpec> {
   /*
-   * A matchup scenario prices both rosters, not just mine.
+   * Every in-season scenario reads the same slate.
    *
-   * Built from the slate in `matchup.ts` rather than listed here, because the
-   * kickoff and the line belong to the game and twenty-eight hand-written
-   * copies are twenty-eight chances for the two halves of one game to
-   * contradict each other. It carries `WEEK_SIX`'s usage series through for the
-   * players who have one, since a role read is about the season rather than
-   * about this afternoon.
+   * Which is the whole of §14: the Sunday the lineup scenarios are read on is
+   * the Sunday the matchup scenarios are read on, the Tuesday waiver run is
+   * bidding into the week that follows it, and the defence being started in one
+   * is the defence being replaced in the other. A scenario chooses a week and a
+   * market; the games come from `slate.ts` and are the same games for
+   * everybody.
    */
-  if (isMatchupScenario(scenario.id)) {
-    return matchupWeek(scenario, WORLD_PLAYERS, WEEK_SIX);
-  }
-
   switch (scenario.id) {
     case 'sunday-pregame':
-      return WEEK_SIX;
+    case 'matchup-pregame':
+    case 'matchup-live-close':
+    case 'matchup-live-leading':
+    case 'matchup-live-trailing':
+    case 'matchup-final':
+      return weekFromSlate(6, WEEK_SIX_MARKET, clock);
     case 'late-injury-pivot':
-      return Object.fromEntries(
-        Object.entries(WEEK_SIX).map(([id, week]) => [id, { ...week, ...(LATE_PIVOT[id] ?? {}) }]),
-      );
+      return weekFromSlate(6, WEEK_SIX_MARKET, clock, LATE_PIVOT);
+    /*
+     * The starter ruled out of the night game, and the only fixture difference
+     * between this scenario and `matchup-live-close`.
+     *
+     * He is in the night game, so his slot is still changeable — which is what
+     * makes this an alert rather than a regret, and is why the insight engine
+     * can price the swap in win probability instead of merely reporting it.
+     */
+    case 'matchup-injury-swing':
+      return weekFromSlate(6, WEEK_SIX_MARKET, clock, MATCHUP_INJURY);
     case 'waivers-tuesday-active':
     case 'waivers-thin-data':
     case 'waivers-processed':
-      return WEEK_SEVEN;
+      return weekFromSlate(7, WEEK_SEVEN_MARKET, clock);
+    /*
+     * A playoff week is played on the same generated schedule as every other
+     * week past seven — which carries no line, because a book prices the coming
+     * Sunday and not December. That is not a gap in the fixture: it is the
+     * state the defence outlook exists to report honestly.
+     */
     case 'playoff-week':
-      return WEEK_SEVEN;
+      return weekFromSlate(scenario.week ?? 15, WEEK_SEVEN_MARKET, clock);
     default:
       return {};
   }
@@ -395,33 +591,49 @@ function strategyFor(scenario: DemoScenario, clock: ReturnType<typeof fixedClock
     case 'waivers-tuesday-active':
     case 'late-injury-pivot':
     case 'sunday-pregame':
-      return {
-        week,
-        finalWeek: 14,
-        budget: makeBudget(SPENT_BY_WEEK_SEVEN),
-        prices: PRICES,
-        trending,
-        trendingCapturedAt: hoursBefore(clock, 3),
-        losingBids: LOSING_BIDS,
-        notes: [],
-      };
     case 'waivers-processed':
     case 'trade-window':
-    case 'playoff-week':
+    case 'playoff-week': {
+      /*
+       * One reading of one ledger, whatever week the scenario is in.
+       *
+       * The Tuesday scenario is bidding into a run that has not happened, so
+       * its prices are the six weeks behind it; by Wednesday morning that run
+       * is history and the sample is one week longer. Both come out of
+       * `pricesFor`, so the two scenarios cannot disagree about a league they
+       * share.
+       */
+      const { prices, losingBids } = pricesFor(spentThroughWeek(scenario));
       return {
         week,
         finalWeek: 14,
-        budget: makeBudget(SPENT_AFTER_RUN),
-        prices: { ...PRICES, sample: 19, median: 12 },
+        budget: makeBudget(spendByRosterId({ throughWeek: spentThroughWeek(scenario) })),
+        prices,
         trending,
-        trendingCapturedAt: hoursBefore(clock, 2),
-        losingBids: LOSING_BIDS,
+        trendingCapturedAt: hoursBefore(clock, scenario.id === 'waivers-tuesday-active' ? 3 : 2),
+        losingBids,
         notes: [],
       };
+    }
     default:
       return null;
   }
 }
+
+/**
+ * How much of the season's transaction history a scenario has behind it.
+ *
+ * Week seven's run is the hinge: on Tuesday night it has not processed, so the
+ * ledger stops at week six and the wallet still holds what the plan is about to
+ * spend. From Wednesday morning on it has, and every later scenario inherits
+ * the claim that landed, the money that left and the roster that changed.
+ */
+function spentThroughWeek(scenario: DemoScenario): number {
+  return RUN_PROCESSED.has(scenario.id) ? 7 : 6;
+}
+
+/** The scenarios that are read *after* the week-seven waiver run. */
+const RUN_PROCESSED = new Set(['waivers-processed', 'trade-window', 'playoff-week', 'season-complete']);
 
 function seasonTypeFor(scenario: DemoScenario): 'pre' | 'regular' | 'post' | 'off' {
   switch (scenario.lifecycle) {
@@ -450,7 +662,7 @@ function leagueStatusFor(scenario: DemoScenario): string {
 
 export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
   const clock = fixedClock(scenario.asOf);
-  const week = weekFor(scenario);
+  const week = weekFor(scenario, clock);
 
   /*
    * A new season is a league with nobody in it yet.
@@ -490,9 +702,13 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
    * and trade scenarios are played in for the sake of a screen they never open.
    */
   const matchupWeekend = isMatchupScenario(scenario.id);
+  const throughWeek = spentThroughWeek(scenario);
   const byRosterId = rollover
     ? new Map<number, string[]>()
-    : seasonRosters(matchupWeekend ? new Map([[MATCHUP_OPPONENT_ROSTER_ID, OPPONENT_ROSTER]]) : undefined);
+    : seasonRosters({
+        pinned: matchupWeekend ? new Map([[MATCHUP_OPPONENT_ROSTER_ID, OPPONENT_ROSTER]]) : undefined,
+        afterRun: throughWeek > 6,
+      });
   /* Underdog is a draft-season market; out of season there is nothing current. */
   const dog = makeDog(specs, clock, {
     available: scenario.freshness.dogAdp === 'fresh',
@@ -504,10 +720,7 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
     capturedAt: '2026-08-24T06:00:00.000Z',
   });
 
-  const spent =
-    scenario.id === 'waivers-processed' || scenario.id === 'trade-window' || scenario.id === 'playoff-week'
-      ? SPENT_AFTER_RUN
-      : SPENT_BY_WEEK_SEVEN;
+  const spent = spendByRosterId({ throughWeek });
 
   return {
     scenario,
@@ -525,6 +738,7 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
       starters: rollover ? [] : MY_STARTERS,
       reserve: [],
       spentByRosterId: rollover ? new Map() : spent,
+      recordByRosterId: rollover ? new Map() : recordsFor(scenario.week ?? 1),
     }),
     /*
      * The draft still exists after it has finished, which is what keeps the
@@ -561,6 +775,18 @@ export function buildSeasonScenario(scenario: DemoScenario): ScenarioData {
         })
       : null,
     strategy: rollover ? null : strategyFor(scenario, clock),
+    /*
+     * The league's own history, and the one scenario that has none.
+     *
+     * `waivers-thin-data` is a league that has never published a bid, and that
+     * has to stay true all the way down: handing it a ledger would give it
+     * named rivals and a spending profile for a room the scenario says nothing
+     * is known about.
+     */
+    transactions:
+      rollover || scenario.id === 'waivers-thin-data'
+        ? []
+        : demoTransactions(DEMO_SEASON, { throughWeek }),
     notes: rollover
       ? [
           'No league has been created for this season yet, so there is nothing to advise on.',

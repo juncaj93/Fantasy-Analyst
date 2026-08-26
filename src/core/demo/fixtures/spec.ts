@@ -111,6 +111,15 @@ export interface DemoWeekSpec {
   /** His team's spread. Negative is favoured. */
   spread?: number | null;
   total?: number | null;
+  /**
+   * Whether his team is at home.
+   *
+   * Read by exactly one model — the defence projection, which is the only place
+   * in this app where home field is worth a term. Absent removes the term
+   * rather than putting anybody on the road by default, which is the same rule
+   * the live assembly follows when no fixture list has been ingested.
+   */
+  home?: boolean | null;
   /** Per-game opportunity, newest week last. */
   usage?: DemoUsageSpec;
   injury?: DemoInjurySpec;

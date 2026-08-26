@@ -214,8 +214,9 @@ test.describe('the scenarios render the production screens', () => {
       await expect(page.getByTestId('matchup-actual-theirs')).toBeVisible();
       // And no Live Insights element, which the lock keeps off this page.
       await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
-      // Every starting slot, both sides, off the league's own roster positions.
-      await expect(page.getByTestId('matchup-row')).toHaveCount(8);
+      // Every starting slot, both sides, off the league's own roster positions —
+      // nine of them, because the demo league starts a defence.
+      await expect(page.getByTestId('matchup-row')).toHaveCount(9);
       await expect(page.getByTestId('demo-scenario')).toContainText(name, { ignoreCase: true });
     });
   }
@@ -233,6 +234,119 @@ test.describe('the scenarios render the production screens', () => {
     await openScenario(page, 'matchup-final');
     await tab(page, 'matchup');
     await expect(page.getByTestId('matchup-result')).toBeVisible();
+  });
+
+  /**
+   * The five things the launch showcase has to be able to put on a screen.
+   *
+   * Deliberately assertions about *presence and shape* rather than about
+   * numbers: the numbers are asserted against the engines in
+   * `tests/demo.showcase.test.ts`, and repeating them here would make a
+   * fixture tweak a two-file change for no extra coverage. What this adds is
+   * the half that unit tests cannot reach — that the response the demo builds
+   * actually reaches the production screen and draws.
+   */
+  test('the Tuesday waiver run shows the plan, in order, with the mechanic one tap in', async ({ page }) => {
+    await openScenario(page, 'waivers-tuesday-active');
+    await tab(page, 'waivers');
+
+    const plan = page.getByTestId('waiver-plan');
+    await expect(plan).toBeVisible();
+    await expect(page.getByTestId('waiver-plan-instruction')).toHaveText('Enter in this order');
+
+    /* An ordered list, because the order is the instruction. */
+    await expect(page.getByTestId('waiver-plan-claims')).toHaveJSProperty('tagName', 'OL');
+    const claims = page.getByTestId('waiver-plan-claim');
+    await expect(claims).toHaveCount(3);
+    /* Add · bid · drop, on one line, for every claim. */
+    for (const claim of await claims.all()) {
+      await expect(claim).toContainText(/Add .+ · \$\d+ · Drop .+/);
+    }
+    /* And the repeated ones say why they are not the duplicate they look like. */
+    await expect(page.getByTestId('waiver-plan-qualifier').first()).toContainText(/only if/i);
+
+    /* The mechanic is behind See why, not on the card. */
+    await expect(plan).not.toContainText('Sleeper runs claims top to bottom');
+    await page.getByTestId('waiver-plan-why').click();
+    await expect(page.getByTestId('waiver-plan-detail-body')).toContainText('Sleeper runs claims top to bottom');
+  });
+
+  test('the defence is a decision on Waivers and the same decision on Team', async ({ page }) => {
+    await openScenario(page, 'waivers-tuesday-active');
+    await tab(page, 'waivers');
+
+    /*
+     * On Waivers a defence the planner named is a *row*, because it is
+     * something to add — and the standalone line is deliberately suppressed
+     * while that row is on screen, or the page would carry the same
+     * recommendation twice. See `WaiversScreen`.
+     */
+    const defRow = page.locator('[data-testid="waiver-row"][data-position="DEF"]');
+    await expect(defRow).toHaveCount(1);
+    await expect(page.getByTestId('dst-line')).toHaveCount(0);
+
+    /*
+     * On Team there is no board to put it in, so the same plan draws as its own
+     * line — one decision, two presentations, computed once on the response
+     * both screens read.
+     */
+    await tab(page, 'team');
+    await expect(page.getByTestId('dst-line')).toBeVisible();
+    await expect(page.getByTestId('dst-state')).toHaveText('Stream');
+    await expect(page.getByTestId('dst-headline')).toContainText('DEN');
+  });
+
+  test('the pregame matchup recommends holding, and the injury scenario recommends a swap', async ({ page }) => {
+    await openScenario(page, 'sunday-pregame');
+    await tab(page, 'matchup');
+    const hold = page.getByTestId('matchup-best-move');
+    await expect(hold).toBeVisible();
+    await expect(hold).toHaveAttribute('data-state', 'hold');
+    await expect(hold).toContainText(/hold your lineup/i);
+
+    await openScenario(page, 'matchup-injury-swing');
+    await tab(page, 'matchup');
+    const move = page.getByTestId('matchup-best-move');
+    await expect(move).toHaveAttribute('data-state', 'move');
+    await expect(move).toContainText(/start .+ over .+/i);
+    await expect(page.getByTestId('best-move-metrics')).toContainText('%');
+  });
+
+  test('Trades leads with an offer and keeps the market folded away', async ({ page }) => {
+    await openScenario(page, 'trade-window');
+    await tab(page, 'trades');
+
+    await expect(page.getByTestId('smart-trades')).toBeVisible();
+    /* The inventory exists and is closed until it is asked for. */
+    const fold = page.getByTestId('market-fold');
+    await expect(fold).toBeVisible();
+    await expect(fold).toHaveAttribute('data-open', 'false');
+    await expect(fold).toContainText('Explore the market');
+  });
+
+  test('a focused player draws the shared face treatment, and asks for no portrait', async ({ page }) => {
+    const requested: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('sleepercdn.com')) requested.push(req.url());
+    });
+
+    await openScenario(page, 'sunday-pregame');
+    await tab(page, 'players');
+    await expect(page.getByTestId('players-list')).toBeVisible();
+    /* Dense rows never carry a portrait at all — that rule is the product's. */
+    await expect(page.getByTestId('sheet-player-face')).toHaveCount(0);
+
+    await page.locator('[data-testid="player-search-row"]').first().click();
+    const face = page.getByTestId('sheet-player-face');
+    await expect(face).toBeVisible();
+    /*
+     * A fixture id is not a Sleeper id, so there is no portrait to ask for and
+     * the shared header draws its deterministic initials instead. That is Demo
+     * Mode's independence from `sleepercdn` in one assertion: not a blocked
+     * request, but a request that is never made.
+     */
+    await expect(face).toHaveText(/^[A-Z]{1,2}$/);
+    expect(requested, 'a demo asks sleepercdn for nothing').toEqual([]);
   });
 
   test('offline-draft falls back to the captured board and says how old it is', async ({ page }) => {

@@ -244,7 +244,8 @@ describe('the weekly scenarios build a legal lineup', () => {
     const lineup = res.body as LineupRecommendation;
 
     expect(lineup.found).toBe(true);
-    expect(lineup.slots.length).toBe(8);
+    /* Nine: eight skill slots and the defence the league starts. */
+    expect(lineup.slots.length).toBe(9);
     for (const slot of lineup.slots) {
       if (!slot.playerId) continue;
       expect(slot.accepts).toContain(slot.position);
@@ -266,10 +267,24 @@ describe('the weekly scenarios build a legal lineup', () => {
     expect(new Set(points).size).toBeGreaterThan(1);
   });
 
-  it('a player whose game has kicked off is locked', async () => {
-    const runtime = await runtimeFor('late-injury-pivot');
-    const lineup = (await runtime.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
-    expect(lineup.slots.some((s) => s.locked)).toBe(true);
+  /**
+   * The clock decides what can still be changed, and the slate decides when.
+   *
+   * At 12:52 on the Sunday nothing in the lineup has kicked off — the London
+   * game is over and the one o'clock games are eight minutes away — so every
+   * slot is still legal to change, which is precisely what makes the downgrade
+   * below actionable. By the late afternoon the morning and early windows are
+   * finished and most of the lineup is locked. Both readings come from the same
+   * fixture kickoffs measured from two different scenario clocks.
+   */
+  it('what is locked is what the scenario clock says has kicked off', async () => {
+    const pivot = await runtimeFor('late-injury-pivot');
+    const early = (await pivot.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
+    expect(early.slots.every((s) => !s.locked)).toBe(true);
+
+    const afternoon = await runtimeFor('matchup-live-close');
+    const later = (await afternoon.request('GET', '/api/leagues/demo-league-2026/lineup')).body as LineupRecommendation;
+    expect(later.slots.some((s) => s.locked)).toBe(true);
   });
 
   it('a downgraded starter is no longer recommended as one', async () => {
@@ -293,7 +308,7 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     expect(advice.faab?.rule.total).toBe(100);
 
     // The wallet is derived from the spend the fixture recorded, not stated.
-    expect(advice.faab?.mine?.remaining).toBe(37);
+    expect(advice.faab?.mine?.remaining).toBe(55);
 
     const bids = advice.faab?.bids ?? [];
     expect(bids.length).toBeGreaterThan(0);
@@ -348,7 +363,14 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     // Three rosters carry one tight end; nobody is short at receiver.
     expect(te!.competition!.level).toBe('high');
     expect(wr!.competition!.level).toBe('low');
-    expect(te!.competition!.detail).toMatch(/teams need [A-Z]{1,3}/);
+    /*
+     * And the detail names the people, because the ledger says who they are.
+     *
+     * `withCompetition` replaces the bare count with the named summary exactly
+     * when `waiverLeagueIntel` was able to name anybody — so this asserting a
+     * count would be asserting the state the demo used to be stuck in.
+     */
+    expect(te!.competition!.detail).toMatch(/likely bidders ·/);
 
     // And the multi-week supplier answers for both, off measured usage.
     for (const c of [te!, wr!]) {
@@ -358,28 +380,80 @@ describe('the waiver scenarios price a bid with the real engine', () => {
   });
 
   /**
-   * Competition is not decoration: it reaches the price.
+   * The room, read off the room's own ledger.
    *
-   * `priceWaiverUpgrades` takes the assessed bidder count as `rivalsWithNeed`,
-   * which feeds the demand reading, which moves the recommended maximum. The
-   * contested tight end must therefore be recommended above the uncontested
-   * receiver despite a comparable gain — and if a future change stopped passing
-   * the assessment through, both would fall back to the same league-wide
-   * estimate and this would fail.
+   * `fixtures/ledger.ts` writes down six weeks of this league's transactions in
+   * Sleeper's shape and nothing else — no tendency, no bidder, no price. Every
+   * assertion below is something an engine concluded from those rows:
+   * `summarisePrices` for what a claim goes for here, `waiverLeagueIntel` for
+   * who is short at the position and can pay, and `waiverManagerPressure` for
+   * what those particular managers have historically done about it.
+   *
+   * The demo used to answer all three with nulls, on the ground that a demo
+   * must not *state* a tendency. It still does not state one.
    */
-  it('prices the contested add above the uncontested one', async () => {
+  it('names the rivals and prices the room from the league ledger', async () => {
     const runtime = await runtimeFor('waivers-tuesday-active');
     const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
-    const bids = new Map((advice.faab?.bids ?? []).map((b) => [b.playerId, b] as const));
 
-    const contested = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'TE')!;
-    const quiet = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'WR')!;
+    /* The price summary is a reading of published bids, not a stated figure. */
+    const prices = advice.faab!.prices;
+    expect(prices.sample).toBeGreaterThan(20);
+    expect(prices.median).not.toBeNull();
+    /* Including the one thing only a failed claim can show. */
+    expect(prices.highestLosing).not.toBeNull();
+    expect(prices.losingBidsComplete).toBe(false);
 
-    const a = bids.get(contested.playerId);
-    const b = bids.get(quiet.playerId);
-    expect(a?.recommended, 'the contested add is priced').not.toBeNull();
-    expect(b?.recommended, 'the quiet add is priced').not.toBeNull();
-    expect(a!.recommended!).toBeGreaterThan(b!.recommended!);
+    /*
+     * `withCompetition` widens a candidate with the league-intelligence columns,
+     * which are not on `WaiverCandidate` itself — the waiver engine does not
+     * know they exist, which is the point of the fold. Read as the screen reads
+     * them.
+     */
+    const contested = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'TE') as unknown as {
+      bidders: { displayName: string; remaining: number | null; needReason: string; basis: string; estimate: unknown }[] | null;
+      managerPressure: { rivalsWithHistory: number; detail: string } | null;
+    };
+    expect(contested.bidders, 'the contested add names its rivals').toBeTruthy();
+    expect(contested.bidders!.length).toBeGreaterThan(1);
+    for (const bidder of contested.bidders!) {
+      /* A name, a wallet and a reason — and never a number without a basis. */
+      expect(bidder.displayName.length).toBeGreaterThan(0);
+      expect(bidder.remaining).not.toBeNull();
+      expect(bidder.needReason.length).toBeGreaterThan(0);
+      expect(bidder.estimate == null || bidder.basis.length > 0).toBe(true);
+    }
+
+    /*
+     * And what those rivals have actually done, which is allowed to disagree
+     * with what they need. The managers short at tight end in this room are the
+     * ones who have barely claimed all season, and the pressure column is the
+     * only place that shows.
+     */
+    const pressure = contested.managerPressure;
+    expect(pressure, 'the pressure column is filled').toBeTruthy();
+    expect(pressure!.rivalsWithHistory).toBeGreaterThan(0);
+    expect(pressure!.detail.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A league with no ledger says so, all the way down.
+   *
+   * The same code path over a scenario that has never published a bid: no
+   * price, no named rival, no pressure reading. It is here because the
+   * interesting failure of the change above would be a demo that invented a
+   * rival for a league nobody has any history for.
+   */
+  it('says nothing about a room it has no history for', async () => {
+    const runtime = await runtimeFor('waivers-thin-data');
+    const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
+
+    expect(advice.faab!.prices.sample).toBe(0);
+    for (const candidate of advice.upgrades.flatMap((u) => u.candidates)) {
+      const row = candidate as unknown as { bidders?: unknown; managerPressure?: unknown };
+      expect(row.bidders ?? null).toBeNull();
+      expect(row.managerPressure ?? null).toBeNull();
+    }
   });
 
   it('the winning claim has come out of the wallet by Wednesday', async () => {
@@ -417,13 +491,13 @@ describe('the matchup scenarios forecast a real afternoon', () => {
       const body = await matchupFor(id);
       expect(body.found, `${id} found`).toBe(true);
       const forecast = body.forecast!;
-      expect(forecast.slots.length).toBe(8);
+      expect(forecast.slots.length).toBe(9);
       for (const row of forecast.slots) {
         expect(row.mine?.projectedFinal, `${id} ${row.slot} mine`).not.toBeNull();
         expect(row.theirs?.projectedFinal, `${id} ${row.slot} theirs`).not.toBeNull();
       }
       // A card per player in the matchup, both benches included.
-      expect(Object.keys(body.cards).length).toBe(28);
+      expect(Object.keys(body.cards).length).toBe(30);
       /*
        * With anything left to play, the projected final is ahead of the score.
        * (Once the week is settled the two are equal by definition, which is

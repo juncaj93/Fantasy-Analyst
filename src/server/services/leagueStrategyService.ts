@@ -21,6 +21,7 @@ import { SleeperClient } from '../../core/sleeper/client.ts';
 import { buildBudgetState, type LeagueBudgetState } from '../../core/faab/budget.ts';
 import { collectBids, losingBidNote, summarisePrices, type BidHistory, type PriceSummary } from '../../core/faab/bids.ts';
 import { toSnapshot, velocity, trendingHeadline, type TrendingVelocity } from '../../core/market/trending.ts';
+import { readFinalWeek } from '../../core/league/planning.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import { TrendingRepo } from '../repos/trending.ts';
@@ -48,8 +49,17 @@ export const MAX_WEEKS_PER_REFRESH = 4;
  * bid prices and market attention for the season being played.
  */
 
-/** The last week of the fantasy regular season, when the league does not say. */
-export const DEFAULT_FINAL_WEEK = 14;
+/*
+ * The last week of the fantasy regular season, and how to read it.
+ *
+ * `readFinalWeek` answers "the last week a waiver can still pay off": Sleeper
+ * publishes `playoff_week_start`, which is the first week a bid no longer buys
+ * a regular-season game, so the last useful week is the one before it. Both it
+ * and the default moved to `core/league/planning.ts` — the defence planner and
+ * Demo Mode need the same reader, and Demo Mode cannot import a server module.
+ * Re-exported here so every existing caller and test keeps the import it has.
+ */
+export { DEFAULT_FINAL_WEEK, readFinalWeek } from '../../core/league/planning.ts';
 
 export interface StrategyContext {
   leagueId: string;
@@ -220,18 +230,3 @@ export class LeagueStrategyService {
   }
 }
 
-/**
- * The last week a waiver can still pay off.
- *
- * Sleeper publishes `playoff_week_start`, which is the first week the bid no
- * longer buys a regular-season game — so the last useful week is the one before
- * it. A league that does not publish it gets the standard fourteen rather than
- * an invented number, because being wrong by a week here shifts a budget curve
- * slightly and being silent shows no bid advice at all.
- */
-export function readFinalWeek(settings: Record<string, unknown> | null | undefined): number {
-  const raw = settings?.['playoff_week_start'];
-  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
-  if (Number.isFinite(value) && value > 1 && value <= 19) return Math.round(value) - 1;
-  return DEFAULT_FINAL_WEEK;
-}

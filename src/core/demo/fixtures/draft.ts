@@ -162,6 +162,8 @@ export function buildDraftScenario(scenario: DemoScenario): ScenarioData {
     /* A draft is not a week, so this league has no schedule to read. */
     matchups: null,
     strategy: null,
+    /* A draft has no transaction history. Nothing has happened yet. */
+    transactions: [],
     notes: [],
   };
 }
