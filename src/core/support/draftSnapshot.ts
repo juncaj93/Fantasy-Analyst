@@ -199,7 +199,7 @@ export async function captureDraftSnapshot(
         marketFormat: board.marketFormat,
       },
       inputs,
-      output: outputOf(board, detailRows),
+      output: outputOf(board, detailRows, aliases, ownerBySlot(seen)),
       warnings: board.warnings,
     },
   };
@@ -620,6 +620,25 @@ function aliasTendencies(
   aliases: SnapshotAliases,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...tendencies };
+
+  /*
+   * `byPosition` is a `Map`, and `JSON.stringify` turns a Map into `{}`.
+   *
+   * Silently — which is what makes it worth a comment rather than a line. The
+   * profile would have travelled with its identity aliased, its sample counts
+   * intact and its actual content deleted, and the board it replayed would have
+   * had every manager prior quietly neutralised. That is a *different board*,
+   * and it would have hit exactly the leagues with the most interesting ones:
+   * the only leagues that have manager history are the ones somebody synced.
+   *
+   * The replay rebuilds the Map from this — see `replay.ts`. Nothing else in
+   * the captured surface is a Map; `evidence`, `injuryStates` and the ADP
+   * tables are all converted where they are recorded because they arrive as
+   * Maps from the source, and this one arrives *inside* a value.
+   */
+  if (out['byPosition'] instanceof Map) {
+    out['byPosition'] = Object.fromEntries(out['byPosition'] as Map<string, unknown>);
+  }
   if (typeof out['userId'] === 'string') out['userId'] = aliases.id(out['userId'] as string);
   if (typeof out['displayName'] === 'string') {
     out['displayName'] = aliases.name(out['displayName'] as string, tendencies['userId'] as string | undefined);
@@ -704,8 +723,14 @@ function selectDetailRows(
   return { rows, topRows: top, marked: keep.size - top };
 }
 
-function outputOf(board: DraftBoardState, detailRows: number): DraftBoardOutput {
-  const { elapsedMs: _elapsed, cached: _cached, ...nextPickModel } = board.nextPickModel;
+function outputOf(
+  board: DraftBoardState,
+  detailRows: number,
+  aliases: SnapshotAliases,
+  ownerBySlot: ReadonlyMap<number, string | null>,
+): DraftBoardOutput {
+  const { elapsedMs: _elapsed, cached: _cached, ...raw } = board.nextPickModel;
+  const nextPickModel = aliasNextPickModel(raw, aliases, ownerBySlot);
   const detail = selectDetailRows(board.recommendations, detailRows);
   const rankOf = new Map(board.recommendations.map((rec, i) => [rec.playerId, i]));
   const componentLabels: Record<string, string> = {};
@@ -730,6 +755,66 @@ function outputOf(board: DraftBoardState, detailRows: number): DraftBoardOutput 
     offersFlex: board.offersFlex,
     nextPickModel,
   };
+}
+
+/**
+ * The `Next%` diagnostics, with the managers in them aliased.
+ *
+ * This is the second place identities reach a snapshot, and it is the one that
+ * is easy to miss: the *inputs* were aliased carefully and then the *output*
+ * was copied verbatim — including `managerHistory`, which names every manager
+ * picking ahead of you and writes them into sentences like
+ * `slot 4 (juncaj93): RB demand ×1.2 from 3 historical draft(s)`. Aliasing the
+ * inputs and publishing the output would have been a redaction that removed
+ * nothing.
+ *
+ * Two mechanisms, matching the ones in `redaction.ts`. `displayName` is a
+ * structured field and gets the *same* alias the roster got, resolved through
+ * slot → roster → owner so `Manager 3` is the same person everywhere in the
+ * file. The notes are sentences this app composed, so they are scrubbed by
+ * exact substring — which is safe precisely because the app wrote them and
+ * knows what it interpolated.
+ *
+ * Nothing else in the model carries an identity: the room's notes are about
+ * position runs and the team prior's are about NFL clubs. They are scrubbed
+ * anyway, because a diagnostic that grows a name later should not need anybody
+ * to remember this file.
+ */
+function aliasNextPickModel(
+  model: Omit<DraftBoardState['nextPickModel'], 'elapsedMs' | 'cached'>,
+  aliases: SnapshotAliases,
+  ownerBySlot: ReadonlyMap<number, string | null>,
+): Omit<DraftBoardState['nextPickModel'], 'elapsedMs' | 'cached'> {
+  const scrub = (line: string) => aliases.scrub(line);
+  return {
+    ...model,
+    roomNotes: model.roomNotes.map(scrub),
+    managerHistory: model.managerHistory && {
+      ...model.managerHistory,
+      entries: model.managerHistory.entries.map((entry) => ({
+        ...entry,
+        displayName: aliases.name(entry.displayName, ownerBySlot.get(entry.slot)),
+      })),
+      notes: model.managerHistory.notes.map(scrub),
+    },
+    teamPrior: model.teamPrior && { ...model.teamPrior, notes: model.teamPrior.notes.map(scrub) },
+  };
+}
+
+/**
+ * Which Sleeper user holds each seat, by the chain the board itself follows.
+ *
+ * slot → roster id → owner, in that order and every time: a roster id is a seat
+ * and seats change hands between seasons. Used only to give a manager named in
+ * the diagnostics the same alias his roster got.
+ */
+function ownerBySlot(seen: RecordedReads): Map<number, string | null> {
+  const byRosterId = new Map(seen.rosters.map((roster) => [roster.rosterId, roster.ownerId]));
+  const out = new Map<number, string | null>();
+  for (const [slot, rosterId] of Object.entries(seen.draft?.slotToRosterId ?? {})) {
+    out.set(Number(slot), byRosterId.get(rosterId) ?? null);
+  }
+  return out;
 }
 
 function toSnapshotRecommendation(

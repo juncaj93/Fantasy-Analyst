@@ -320,6 +320,26 @@ function rehydratePlayer(player: SnapshotPlayer): CanonicalPlayer {
 }
 
 /**
+ * A manager profile, with its `byPosition` Map put back.
+ *
+ * `JSON.stringify` turns a Map into `{}`, so the profile crosses the wire as a
+ * plain object and has to become a Map again before `readManagerPrior` reads
+ * it. Handing back the object instead would produce a board with every manager
+ * prior neutralised — a different board, arrived at silently, in exactly the
+ * leagues that have a history to be wrong about.
+ */
+function rehydrateTendencies(tendencies: Record<string, unknown>): ManagerTendencies {
+  const byPosition = tendencies['byPosition'];
+  return {
+    ...(tendencies as unknown as ManagerTendencies),
+    byPosition:
+      byPosition instanceof Map
+        ? byPosition
+        : new Map(Object.entries((byPosition ?? {}) as Record<string, never>)),
+  };
+}
+
+/**
  * Rebuild the board and compare it with what was captured.
  *
  * Never throws for a difference — a replay that disagrees is a *result*, and
@@ -332,7 +352,7 @@ export async function replayDraftSnapshot(snapshot: SupportSnapshot<DraftBoardPa
   const sources = snapshotDraftBoardSources(snapshot);
   if (inputs.managerTendencies != null) {
     const byRoster = new Map<number, ManagerTendencies>(
-      inputs.managerTendencies.map((entry) => [entry.rosterId, entry.tendencies as unknown as ManagerTendencies]),
+      inputs.managerTendencies.map((entry) => [entry.rosterId, rehydrateTendencies(entry.tendencies)]),
     );
     sources.managerTendencies = async () => byRoster;
   }
