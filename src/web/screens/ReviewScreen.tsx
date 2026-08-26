@@ -7,13 +7,20 @@
  *
  * Every action is a visible, labelled button — nothing important is hidden
  * behind a gesture. Decisions here are authoritative and survive reprocessing.
+ *
+ * **It is reached from Settings rather than from the toolbar, and nothing about
+ * the queue itself changed when it moved.** It is maintenance: real work, done
+ * occasionally, that has no business sitting beside the destinations somebody
+ * opens the app on a Sunday morning to use. So it is a pushed screen like every
+ * other settings panel — its own title, its own Back control, the same edge
+ * gesture — and how much of it is waiting is printed on the row that leads here.
+ * See `SetupScreen`.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EvidenceItem, type IdentityReview } from '../api.ts';
 import { Badge, Disclose, Empty, Notice, PositionBadge, formatDate } from '../components/common.tsx';
-import { NavBar, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
-import { unwindOne } from '../tabReset.ts';
+import { PushScreen, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
@@ -24,7 +31,7 @@ function reasonFor(item: EvidenceItem): string {
   return 'Matched a news rule but was not clear enough to apply on its own.';
 }
 
-export function ReviewScreen({ onChanged, resetNonce }: { onChanged: () => void; resetNonce: number }) {
+export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onBack: () => void }) {
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [identity, setIdentity] = useState<IdentityReview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,17 +40,19 @@ export function ReviewScreen({ onChanged, resetNonce }: { onChanged: () => void;
   const [applied, setApplied] = useState<EvidenceItem[]>([]);
 
   /*
-   * Tapping Review while already on Review.
+   * There is no retap rung here, and that is the settings convention rather
+   * than an omission.
    *
-   * Back to the queue it opens on, and to the top of it. The three tabs here
-   * are views of the same work rather than a filter the reader set, so
-   * returning to the first one is returning home; nothing in the queue itself
-   * is touched, because every item in it is a decision waiting to be made.
+   * Tapping Setup while Setup is showing walks back out of whatever panel is
+   * open — the same single step Back takes — and Review is now one of those
+   * panels. Every other one behaves this way: an open panel is a place the
+   * reader navigated to, and coming back out of it is the whole gesture. What
+   * this used to do instead, when Review was a destination of its own, was
+   * return the segmented control to Evidence; that lives one layer further in
+   * than a settings panel's own existence, and the tap that closes the panel
+   * makes it moot.
    */
-  useEffect(() => {
-    if (resetNonce === 0) return;
-    unwindOne([{ when: tab !== 'evidence', undo: () => setTab('evidence') }]);
-  }, [resetNonce]);
+
   /** The scoring key, which is reference rather than part of the queue. */
   const [keyOpen, setKeyOpen] = useState(false);
 
@@ -101,29 +110,29 @@ export function ReviewScreen({ onChanged, resetNonce }: { onChanged: () => void;
 
   if (loading) {
     return (
-      <>
-        <NavBar title="Review" subtitle="Loading the queue…" />
+      <PushScreen title="Review" subtitle="Loading the queue…" backLabel="Setup" onBack={onBack} testId="setup-detail-review">
         <SkeletonRows rows={5} testId="review-skeleton" />
-      </>
+      </PushScreen>
     );
   }
 
   return (
-    <>
-      <NavBar
-        testId="review-nav"
-        title="Review"
-        subtitle={
-          evidence.length + identity.length === 0
-            ? 'Nothing waiting for you'
-            : `${evidence.length + identity.length} waiting for you`
-        }
-        trailing={
-          <button type="button" className="btn btn-sm" onClick={() => setKeyOpen(true)} data-testid="scoring-key-open">
-            How it works
-          </button>
-        }
-      />
+    <PushScreen
+      testId="setup-detail-review"
+      title="Review"
+      backLabel="Setup"
+      onBack={onBack}
+      subtitle={
+        evidence.length + identity.length === 0
+          ? 'Nothing waiting for you'
+          : `${evidence.length + identity.length} waiting for you`
+      }
+      trailing={
+        <button type="button" className="btn btn-sm" onClick={() => setKeyOpen(true)} data-testid="scoring-key-open">
+          How it works
+        </button>
+      }
+    >
       {error ? <Notice tone="error">{error}</Notice> : null}
       <SegmentedControl
         label="Review queues"
@@ -197,7 +206,7 @@ export function ReviewScreen({ onChanged, resetNonce }: { onChanged: () => void;
           ))}
         </>
       )}
-    </>
+    </PushScreen>
   );
 }
 

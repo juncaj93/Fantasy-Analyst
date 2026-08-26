@@ -144,10 +144,13 @@ the tally reads the way it does. It is chosen from evidence the ledger already
 holds, never composed — and it changes no number, because the sentence it quotes
 has already been counted once by the tally it is explaining.
 
-**Review** — anything the classifier was not confident about, plus ambiguous
-player identities and the items already applied. Accept, change, reassign to the
-right player, or ignore. Your corrections are authoritative and survive
-reprocessing.
+**Review** — in **Setup**, under *This app*: anything the classifier was not
+confident about, plus ambiguous player identities and the items already applied.
+Accept, change, reassign to the right player, or ignore. Your corrections are
+authoritative and survive reprocessing. It is maintenance rather than a weekly
+decision, so it does not hold a slot in the bottom bar; the row says how much is
+waiting — `3 items need attention` — and Setup carries a small dot while
+anything does.
 
 **Demo Mode** — a read-only walk through the states that are hard to reach on
 demand: draft night at four different picks, a best-ball board, the morning

@@ -65,13 +65,16 @@ import { expect, test, type Page } from '@playwright/test';
  * The destinations, in the shapes the bar has.
  *
  * One slot is seasonal and exactly one of Draft and Waivers is ever in it, so
- * the bar carries six either way: the board while there is still a draft to
+ * the bar carries five either way: the board while there is still a draft to
  * read, and the waiver wire once the season is under way. Matchup is the
  * exception — it arrives the day a draft completes, which is before Draft
- * leaves, so between those two moments there are seven.
+ * leaves, so between those two moments there are six.
+ *
+ * Review is not a destination. It is maintenance and it lives in Settings; this
+ * suite reaches it the way a reader does, through the row there.
  */
-const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
-const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'review', 'setup'] as const;
+const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
+const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'setup'] as const;
 
 type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 
@@ -257,25 +260,22 @@ test.describe('the deployed app', () => {
       bar.viewportWidth - 40,
     );
     /*
-     * How tall a pill is depends on how many destinations it carries.
+     * One floor again, at every width and every count.
      *
-     * This asserted a flat 54 floor, which was right for the six-destination
-     * bar it was written against and went stale when the seventh arrived.
-     * Seven at 374px or less deliberately spends two points of the pill's *own*
-     * padding either side — `--toolbar-pad` drops to 3, and the rule says why:
-     * the bar has to stay a compact object with a real gutter on a 360px screen,
-     * and its padding is the only thing left that is not a thumb's problem. The
-     * bar is 52 there rather than 56, by design.
+     * This was two numbers for a while. A seventh destination did not fit at
+     * 374px and under, so the stylesheet spent two points of the pill's *own*
+     * padding either side to make it — `--toolbar-pad` dropped to 3 and the bar
+     * came out 52 there rather than 56 — and this test had to know about it.
+     * Review moved into Settings, the widest the bar gets is six, six fit at
+     * their full width on the narrowest phone, and the special case is gone
+     * along with the rule that made it.
      *
-     * The floor that matters is not this one and is not being moved: every
-     * destination is asserted at 44 by 44 at the top of this same test, at every
-     * width, and `toolbar.spec.ts` asserts it in both directions. This band only
-     * says the bar is still a pill rather than a band or a sliver, so it takes
-     * the number the design actually produces for each case rather than one
-     * number for both.
+     * The floor that matters is not this one either way: every destination is
+     * asserted at 44 by 44 at the top of this same test, at every width, and
+     * `toolbar.spec.ts` asserts it in both directions. This band only says the
+     * bar is still a pill rather than a band or a sliver.
      */
-    const floor = expected.length >= 7 && bar.viewportWidth <= 374 ? 52 : 54;
-    expect(bar.height, `the bar is ${bar.height}px with ${expected.length} destinations`).toBeGreaterThanOrEqual(floor);
+    expect(bar.height, `the bar is ${bar.height}px with ${expected.length} destinations`).toBeGreaterThanOrEqual(54);
     expect(bar.height).toBeLessThanOrEqual(64);
   });
 

@@ -232,8 +232,24 @@ function overview(data: ScenarioData) {
     players: data.players.length,
     leagues: 1,
     selectedLeague: { id: data.league.id, name: data.league.name, season: data.league.season },
+    /*
+     * Nothing is waiting in Review, in every scenario, and it is meant to be
+     * nothing.
+     *
+     * Demo Mode ships no review fixtures — the queue below answers both of its
+     * reads with an empty list — so these two counts are the only honest
+     * numbers to publish. `pendingIdentity` used to be the count of unresolved
+     * *aliases*, which is a different ledger belonging to Help my scores, and
+     * borrowing it here made a scenario say "2 items need attention" above a
+     * queue with nothing in it. That mattered less when the number was a badge
+     * on a destination and matters a great deal now that it is a sentence on a
+     * settings row leading to the queue itself.
+     *
+     * The unresolved names are still demonstrated, in the place they are
+     * actually about: `/api/repair`, and the Help my scores row it feeds.
+     */
     pendingEvidence: 0,
-    pendingIdentity: data.repair.summary.names,
+    pendingIdentity: 0,
     vegas: {
       ...freshness(data),
       provider: 'demo fixtures',

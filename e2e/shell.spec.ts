@@ -16,7 +16,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { exploreMarket } from './helpers.ts';
 
-const TABS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
+const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 
 async function open(page: Page, tab: (typeof TABS)[number]) {
   await page.getByTestId(`tab-${tab}`).click();

@@ -8,7 +8,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { inSeason, pullToRefresh } from './helpers.ts';
+import { inSeason, openReview, pullToRefresh } from './helpers.ts';
 
 /**
  * Wait for a disclosure to finish opening before reading its text.
@@ -31,7 +31,7 @@ async function login(page: Page) {
   await expect(page.getByTestId('tab-draft')).toBeVisible();
 }
 
-async function openTab(page: Page, tab: 'draft' | 'team' | 'players' | 'review') {
+async function openTab(page: Page, tab: 'draft' | 'team' | 'players' | 'setup') {
   await page.getByTestId(`tab-${tab}`).click();
 }
 
@@ -45,7 +45,7 @@ async function choose(page: Page, playerId: string) {
 test.describe('shell', () => {
   test('never scrolls horizontally at this width', async ({ page }) => {
     await login(page);
-    for (const tab of ['draft', 'team', 'players', 'review'] as const) {
+    for (const tab of ['draft', 'team', 'players', 'setup'] as const) {
       await openTab(page, tab);
       await page.waitForTimeout(400);
       const overflow = await page.evaluate(
@@ -53,19 +53,42 @@ test.describe('shell', () => {
       );
       expect(overflow, `${tab} tab overflows horizontally`).toBeLessThanOrEqual(1);
     }
+
+    // Review is not a destination any more, and is checked at the same width.
+    await openReview(page);
+    await page.waitForTimeout(400);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, 'the review queue overflows horizontally').toBeLessThanOrEqual(1);
   });
 
   test('tab targets are large enough to tap', async ({ page }) => {
     await login(page);
-    for (const tab of ['draft', 'team', 'players', 'review'] as const) {
+    for (const tab of ['draft', 'team', 'players', 'setup'] as const) {
       const box = await page.getByTestId(`tab-${tab}`).boundingBox();
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
   });
 
-  test('shows the review backlog as a badge on the tab bar', async ({ page }) => {
+  /**
+   * The backlog is still visible from the bar, and it is no longer a numeral.
+   *
+   * Review moved into Settings, so what the bar can say about it is that
+   * Settings has something waiting — a dot, drawn `aria-hidden`, with the count
+   * spelled out once in the destination's accessible name. The number itself is
+   * on the row that leads to the queue.
+   */
+  test('marks Settings when review work is waiting, and says how much', async ({ page }) => {
     await login(page);
-    await expect(page.getByTestId('tab-review').locator('.tab-badge')).toBeVisible();
+    const setup = page.getByTestId('tab-setup');
+    await expect(setup.getByTestId('review-attention')).toBeVisible();
+    await expect(setup).toHaveAttribute('aria-label', /\d+ items? needs? review/);
+    // The dot is decoration; the sentence above is the only announcement.
+    await expect(setup.getByTestId('review-attention')).toHaveAttribute('aria-hidden', 'true');
+
+    await openTab(page, 'setup');
+    await expect(page.getByTestId('setup-review')).toContainText(/\d+ items? need/);
   });
 
   /**
@@ -1848,7 +1871,7 @@ test.describe('review queue', () => {
     expect(res.status()).toBe(200);
 
     await login(page);
-    await openTab(page, 'review');
+    await openReview(page);
     await expect(page.getByTestId('review-card').first()).toBeVisible();
   });
 

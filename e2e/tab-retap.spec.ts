@@ -212,7 +212,7 @@ test.describe('a retap returns the screen home', () => {
      * assertion and does not retry: it answers with whatever matches at the
      * instant it runs, and on a loaded machine that instant lands before the
      * bar has mounted. The failure that produces is `Received: 0` with a
-     * screenshot showing all six destinations present — the test asking too
+     * screenshot showing every destination present — the test asking too
      * early, wearing the costume of a missing toolbar.
      */
     await expect(page.locator('.tabbar button').first()).toBeVisible();

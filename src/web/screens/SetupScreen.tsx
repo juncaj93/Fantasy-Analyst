@@ -25,7 +25,7 @@ import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 
-import { PlayerPicker } from './ReviewScreen.tsx';
+import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import { unwindOne } from '../tabReset.ts';
 import {
@@ -47,7 +47,7 @@ import {
  */
 const DemoPanel = lazy(() => import('../demo/DemoPanel.tsx'));
 
-type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | null;
+type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | 'review' | null;
 
 /**
  * The state of a step, drawn rather than typed.
@@ -87,6 +87,7 @@ const PANEL_TITLES: Record<Exclude<Panel, null>, string> = {
   newsletter: 'Newsletter',
   vegas: 'Vegas lines',
   repair: 'Help my scores',
+  review: 'Review',
 };
 
 export function SetupScreen({
@@ -96,6 +97,7 @@ export function SetupScreen({
   canUnlock,
   onUnlocked,
   resetNonce,
+  reviewPending,
 }: {
   leagues: LeagueSummary[];
   onChanged: () => void;
@@ -104,6 +106,15 @@ export function SetupScreen({
   onUnlocked: () => void;
   /** Bumped when Setup is tapped while already on Setup — see `App`. */
   resetNonce: number;
+  /**
+   * How many items are waiting in Review, counted by `App` from the overview.
+   *
+   * Passed in rather than read here so that the number on the row and the mark
+   * on the Setup destination are the same number from the same read — two
+   * places asking the same question separately is how a bar says 3 and a row
+   * says 2.
+   */
+  reviewPending: number;
 }) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [open, setOpen] = useState<Panel>(null);
@@ -157,6 +168,19 @@ export function SetupScreen({
    */
   if (open === 'repair') {
     return <HelpMyScores open onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />;
+  }
+
+  /*
+   * Review is a pushed panel like any other, and it draws its own.
+   *
+   * It has a subtitle that counts what is waiting and an action in the bar, so
+   * it owns its `PushScreen` rather than being wrapped in the generic one
+   * below — the same arrangement `HelpMyScores` uses, and for the same reason.
+   * `refreshAll` is what re-reads the overview after a decision, which is what
+   * moves the count on the row this was opened from.
+   */
+  if (open === 'review') {
+    return <ReviewScreen onChanged={refreshAll} onBack={() => setOpen(null)} />;
   }
 
   if (open) {
@@ -218,6 +242,32 @@ export function SetupScreen({
         <InstallPanel />
         <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
         <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
+        {/*
+          Review, and how much of it is waiting.
+
+          One row, always present, saying the one thing somebody standing here
+          needs to know: whether there is anything to do. The count is in the
+          row's own words rather than in a badge beside it, because a row that
+          reads "3 items need attention" is already the whole announcement — a
+          numeral in a red circle next to it would be the same fact twice, once
+          silently. Nothing is drawn at zero beyond the row saying so.
+
+          This is not a Review dashboard and must not become one: what is in the
+          queue, and what to do about it, is the screen behind this row.
+        */}
+        <ListRow
+          testId="setup-review"
+          dataState={reviewPending > 0 ? 'warn' : 'ok'}
+          state={<StateMark state={reviewPending > 0 ? 'warn' : 'ok'} />}
+          label="Review"
+          detail={
+            reviewPending > 0
+              ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} attention`
+              : 'Nothing waiting for you'
+          }
+          chevron
+          onClick={() => setOpen('review')}
+        />
         <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
       </ListGroup>
 

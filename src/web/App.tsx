@@ -12,7 +12,6 @@ import {
   BoardIcon,
   GearIcon,
   MatchupIcon,
-  ReviewIcon,
   RosterIcon,
   SearchIcon,
   TradeIcon,
@@ -24,13 +23,12 @@ import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
 import { MatchupScreen } from './screens/MatchupScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
-import { ReviewScreen } from './screens/ReviewScreen.tsx';
 import { SetupScreen } from './screens/SetupScreen.tsx';
 import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 
-type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 'review' | 'setup';
+type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 'setup';
 
 /*
  * The destinations.
@@ -59,10 +57,16 @@ type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 're
  * Matchup is the third seasonal destination and it arrives at a different
  * moment from the other two: the day the draft *finishes*, which is before the
  * season starts and therefore before Draft leaves. For that stretch the bar
- * carries seven, which is the most it ever carries and is why the stylesheet
- * has a rule for exactly that count at narrow widths — see `.tabbar[data-count]`.
- * A head-to-head before a draft is finished would be a projection of a team
- * that does not exist yet, which is why it is not simply always there.
+ * carries six, which is the most it ever carries. A head-to-head before a draft
+ * is finished would be a projection of a team that does not exist yet, which is
+ * why it is not simply always there.
+ *
+ * **Review is not here, and the space it left is not for sale.** It is
+ * maintenance — a queue of newsletter items and unrecognised names to confirm —
+ * and maintenance does not belong in the strip of glass a reader taps to decide
+ * who to start on a Sunday morning. It lives in Settings, as a row that says how
+ * much is waiting; see `SetupScreen`. Nothing was promoted to take its slot: the
+ * bar is sized by its contents and is simply one destination narrower.
  */
 const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
   { id: 'draft', label: 'Draft', Icon: BoardIcon },
@@ -71,7 +75,6 @@ const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[]
   { id: 'waivers', label: 'Waivers', Icon: WaiverIcon },
   { id: 'trades', label: 'Trades', Icon: TradeIcon },
   { id: 'players', label: 'Players', Icon: SearchIcon },
-  { id: 'review', label: 'Review', Icon: ReviewIcon },
   { id: 'setup', label: 'Setup', Icon: GearIcon },
 ];
 
@@ -227,6 +230,19 @@ export function App() {
    */
   const viewOnly = !unlocked && canUnlock;
 
+  /*
+   * How much unresolved review work there is, counted in one place.
+   *
+   * Two queues — evidence whose classification was not confident enough to
+   * apply itself, and mentions whose player could not be identified — and one
+   * number, because a reader deciding whether to open Review does not care
+   * which of the two a given item came from. It is read here rather than by
+   * Review itself because the whole point of the number is to be visible from
+   * somewhere that is *not* Review: the row in Settings, and the mark on the
+   * Settings destination.
+   */
+  const reviewPending = overview ? overview.pendingEvidence + overview.pendingIdentity : 0;
+
   return (
     <div className="app">
       {/*
@@ -286,11 +302,11 @@ export function App() {
         {tab === 'waivers' ? <WaiversScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'trades' ? <TradesScreen resetNonce={resetNonce} /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
-        {tab === 'review' ? <ReviewScreen onChanged={() => void refresh()} resetNonce={resetNonce} /> : null}
         {tab === 'setup' ? (
           <SetupScreen
             leagues={leagues}
             resetNonce={resetNonce}
+            reviewPending={reviewPending}
             onChanged={() => void refresh()}
             unlocked={unlocked}
             canUnlock={canUnlock}
@@ -324,7 +340,7 @@ export function App() {
           if (tab === id) setResetNonce((n) => n + 1);
           else setTab(id);
         }}
-        reviewBadge={overview ? overview.pendingEvidence + overview.pendingIdentity : 0}
+        reviewPending={reviewPending}
         viewOnly={viewOnly}
       />
     </div>
@@ -352,13 +368,14 @@ function FloatingToolbar({
   tabs,
   active,
   onSelect,
-  reviewBadge,
+  reviewPending,
   viewOnly,
 }: {
   tabs: typeof TABS;
   active: Tab;
   onSelect: (id: Tab) => void;
-  reviewBadge: number;
+  /** Unresolved review work, which now lives one level inside Setup. */
+  reviewPending: number;
   viewOnly: boolean;
 }) {
   const measure = useToolbarHeight();
@@ -370,11 +387,14 @@ function FloatingToolbar({
       aria-label="Main navigation"
       ref={measure}
       /*
-       * How many destinations there are, for the stylesheet.
+       * How many destinations there are, published for anything that has to
+       * know — the one thing CSS cannot count for itself.
        *
-       * The one thing CSS cannot count. Seven labels at 360px need a narrower
-       * destination than six do, and the rule that provides it has to be able to
-       * ask how many there are.
+       * No stylesheet rule reads it today: with Review gone the bar carries at
+       * most six, and six fit at their full width on the narrowest phone this
+       * app supports. It is left in place because the count is a real fact about
+       * the bar, it is what a layout test asserts against, and the alternative
+       * is rediscovering it from the DOM every time the seasonal slot moves.
        */
       data-count={tabs.length}
       /*
@@ -386,24 +406,45 @@ function FloatingToolbar({
       data-keyboard={keyboardOpen ? 'open' : 'closed'}
     >
       {tabs.map((t) => {
-        const badge = t.id === 'review' ? reviewBadge : 0;
+        /*
+         * Review needs attention, and Review is inside Setup.
+         *
+         * A dot rather than the count it used to print on a destination of its
+         * own. The number itself is one tap away, in words, on the Review row —
+         * and a red numeral on the bar is how a maintenance queue starts
+         * competing with the decisions the bar is for. It is the count that
+         * decides whether the dot is drawn, so zero draws nothing at all.
+         */
+        const attention = t.id === 'setup' && reviewPending > 0;
         // Where unlocking happens is where "you cannot change anything yet"
         // belongs. A dot, not a word, because it is a state and not a task.
         const locked = t.id === 'setup' && viewOnly;
+        /*
+         * The marks are decorations and the sentence is the button's name.
+         *
+         * Both of these are drawn `aria-hidden`, so anything they say has to be
+         * said here or it is not said at all — and it has to be said exactly
+         * once. The Review row inside Settings announces its own count when it
+         * is reached; this is the only announcement on the bar.
+         */
+        const notes = [
+          attention ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} review` : null,
+          locked ? 'view only, unlock to make changes' : null,
+        ].filter((note): note is string => note != null);
         return (
           <button
             key={t.id}
             type="button"
             onClick={() => onSelect(t.id)}
             aria-current={active === t.id ? 'page' : undefined}
-            aria-label={locked ? `${t.label} — view only, unlock to make changes` : undefined}
+            aria-label={notes.length > 0 ? `${t.label} — ${notes.join(', ')}` : undefined}
             data-testid={`tab-${t.id}`}
           >
             <span className="tab-glyph" aria-hidden="true">
               <t.Icon />
             </span>
             {t.label}
-            {badge > 0 ? <span className="tab-badge">{badge}</span> : null}
+            {attention ? <span className="tab-attention" data-testid="review-attention" aria-hidden="true" /> : null}
             {locked ? <span className="tab-lock" data-testid="view-only" aria-hidden="true" /> : null}
           </button>
         );

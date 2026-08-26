@@ -281,9 +281,14 @@ without it and says clearly when a betting line is missing rather than guessing.
 
 # Everyday use
 
-- **Review** — anything the app was not confident about. Accept, change, mark as
-  the wrong player, or ignore. Your decisions always win, even if the same
-  newsletter is read again.
+- **Review** — in Setup, under *This app*. Anything the app was not confident
+  about. Accept, change, mark as the wrong player, or ignore. Your decisions
+  always win, even if the same newsletter is read again.
+
+  It is not on the bottom bar: it is occasional maintenance rather than a weekly
+  decision. The row tells you whether there is anything to do — `3 items need
+  attention`, or `Nothing waiting for you` — and Setup carries a small dot for
+  as long as something is waiting, so a backlog cannot build up unseen.
 
   Scoring is one line: good news **+1**, bad news **−1**, neutral or
   self-contradicting news **does not count**. Every item counts once, however

@@ -132,13 +132,21 @@ blank strip under the navigation twice:
   `.app-main` is the only thing that spends it. No screen adds a spacer of its
   own. `scroll-margin-bottom` uses the same number, so a control scrolled to the
   bottom edge mid-page also clears the pill.
-- **The pill is sized by its contents**: `--tab-w` per destination, so a seventh
-  widens the bar rather than wrapping onto a second row. Seven is what the bar
-  carries between a draft completing and week one, when Matchup has arrived and
-  Draft has not left; the bar publishes `data-count` and one rule narrows the
-  destination below 400px. The floor is 44px and it is hard — a destination
-  narrower than a fingertip is not a destination, and `toolbar.spec.ts` asserts
-  it at every width.
+- **The pill is sized by its contents**: `--tab-w` per destination, so one more
+  widens the bar rather than wrapping onto a second row. Six is what the bar
+  carries at its widest, between a draft completing and week one, when Matchup
+  has arrived and Draft has not left. Six fit at their full width on the
+  narrowest phone supported, so no rule narrows a destination for the count any
+  more — the bar still publishes `data-count`, and the 44px floor is hard: a
+  destination narrower than a fingertip is not a destination, and
+  `toolbar.spec.ts` asserts it at every width.
+- **Review is not one of them.** It is maintenance — a queue of newsletter items
+  and unrecognised names to confirm — and it lives in Settings as a row that
+  says how much is waiting (`3 items need attention`, or `Nothing waiting for
+  you`), opening the same screen it always did as a pushed panel. What the bar
+  says about it is a 7px accent dot on Setup, drawn only when the count is above
+  zero and `aria-hidden`, with the count spelled out once in that destination's
+  accessible name. Nothing was promoted into the slot it left.
 - **The selected destination is foreground only.** The accent colour, the glyph
   at a heavier `stroke-width`, and the label at 680 rather than 600 — and
   `aria-current` for anything that can see none of them. Nothing is painted
@@ -154,7 +162,7 @@ blank strip under the navigation twice:
   descendants and a clip does not know a decoration from a focus ring. Both the
   lift and the clip are gone, so the bar draws the same `--focus-ring` every
   other control does, outside the destination's box, unclipped at either end of
-  the pill and at the narrow seven-destination width.
+  the pill.
 - **It holds no state.** The current destination is passed in from the app, so
   the highlight and the screen can never disagree — including on a nested screen
   or a destination the app chose on its own.

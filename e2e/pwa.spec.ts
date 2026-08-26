@@ -209,7 +209,7 @@ test.describe('the shell when launched from the Home Screen', () => {
 
   /* Standalone is a layout difference, not a different app. */
   test('is the same app: every tab still navigates in place', async ({ page }) => {
-    for (const tab of ['team', 'trades', 'players', 'review', 'setup', 'draft'] as const) {
+    for (const tab of ['team', 'trades', 'players', 'setup', 'draft'] as const) {
       await page.getByTestId(`tab-${tab}`).click();
       await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-current', 'page');
       // Navigating away from the app would leave the standalone window.
