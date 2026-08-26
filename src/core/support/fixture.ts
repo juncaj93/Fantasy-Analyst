@@ -32,6 +32,23 @@
  * arguments are bounded to the top of the board plus everybody the reader
  * marked. Doing it a second time here would mean a fixture that replays
  * something other than what was captured.
+ *
+ * ## What is worth committing, and what is not
+ *
+ * A fixture earns its place in git when **its inputs cannot be regenerated** —
+ * a snapshot somebody sent in, of a league and a moment that exist nowhere
+ * else. Several hundred kilobytes of JSON is a fair price for data that is
+ * otherwise gone.
+ *
+ * A snapshot captured from a *demo scenario* is the opposite. `buildDraftScenario`
+ * is deterministic and its fixtures are already committed under
+ * `core/demo/fixtures/`, so such a file is byte-for-byte regenerable from code
+ * in this same repository: eleven thousand lines of duplicate, whose only
+ * non-duplicated content is an assertion that the engine produced that exact
+ * board on the day it was written. That is golden-file testing, which this
+ * repository does nowhere else — `audit.draftScore.test.ts` and
+ * `tier-ordering.spec.ts` pin the *invariant* rather than the output, on
+ * purpose. See the note at the top of `tests/support.fixtures.test.ts`.
  */
 
 import type { DraftBoardPayload, SupportSnapshot } from './schema.ts';

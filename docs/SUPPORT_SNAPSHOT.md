@@ -113,6 +113,17 @@ is a test that asserts a guess. `tests/support.fixtures.test.ts` reads the whole
 `tests/fixtures/support/` directory, so there is no test to edit and nothing to
 register.
 
+**Commit a fixture when its inputs cannot be regenerated** — a snapshot somebody
+sent in, of a league and a moment that exist nowhere else. That is worth several
+hundred kilobytes of JSON in git, because the data is otherwise gone. A snapshot
+captured from a *demo scenario* is not: `buildDraftScenario` is deterministic and
+its fixtures are already committed, so the file would be byte-for-byte
+regenerable from code in the same repository, and its only non-duplicated
+content would be an assertion that the engine produced that board on the day it
+was written. This repository pins invariants rather than outputs — see
+`audit.draftScore.test.ts` — so the directory starts empty and the converter is
+tested against a fixture written to a temporary directory instead.
+
 ### Step 4 — the test ladder
 
 Fast path first. Never a one-worker multi-hour sweep, and never a skipped gate.
