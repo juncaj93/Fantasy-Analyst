@@ -252,12 +252,24 @@ test.describe('the deployed app', () => {
         width: Math.round(nav.width),
         height: Math.round(nav.height),
         viewportWidth: window.innerWidth,
+        pageX: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-x')),
       };
     });
     expect(bar.gap, 'the page owns only the gap the toolbar floats by').toBe(bar.intended);
-    // A compact pill, not a band with a gutter.
+    /*
+     * A compact pill, not a band with a gutter — bounded by the page it floats
+     * over rather than by a number of its own.
+     *
+     * This asked for 20px either side, which the bar cleared at every count
+     * until the destinations grew: six at 54 come to 336, and 336 is exactly
+     * what a 360px phone leaves between the margins every screen's content
+     * already keeps. The old bound would have failed the widest bar on the
+     * narrowest phone for sitting where the page sits, which is not the bug
+     * this is watching for — a band welded across the screen is. Read
+     * `--page-x` from the page so the two cannot drift apart silently.
+     */
     expect(bar.width, `the bar is ${bar.width}px on a ${bar.viewportWidth}px screen`).toBeLessThanOrEqual(
-      bar.viewportWidth - 40,
+      bar.viewportWidth - 2 * bar.pageX,
     );
     /*
      * One floor again, at every width and every count.
