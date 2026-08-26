@@ -55,8 +55,28 @@ jobs:
   # behind main, and it is a revision that passed CI — which is the direction to
   # err. `/api/health` says which one it is, and `rollback.yml` can put A live
   # by name if that is what is wanted.
+  #
+  # This job carries no `if:` and that is deliberate, because it used to.
+  #
+  # `if: github.event.workflow_run.conclusion == 'success'` reads as the gate —
+  # only a green CI deploys — and it is, but it also made every other outcome
+  # *silent*: the whole run came out `skipped`, with no summary, no notice and
+  # nothing anywhere saying main was not in production. That is fine for the
+  # case it was written for (CI is red, everybody can see CI is red) and wrong
+  # for the case that actually happened: run 32983835210 concluded
+  # `startup_failure`, which is GitHub failing to start the run rather than a
+  # word about the code, Deploy skipped in three seconds, and `a56e366` sat
+  # undeployed with the only trace a grey tick.
+  #
+  # Worse, the obvious recovery does not work. Re-running CI to green does not
+  # re-fire this workflow — measured: CI ran its thirteen jobs again, all
+  # passed, and no second Deploy run was created. So "just re-run CI" would have
+  # been advice that quietly does nothing.
+  #
+  # The gate is unchanged — production still only receives a revision whose own
+  # CI *succeeded* — but every other outcome now says so out loud and names the
+  # way out, which is `rollback.yml` with the revision by name.
   decide:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.check.outputs.sha }}
@@ -69,15 +89,63 @@ jobs:
       - id: check
         env:
           CANDIDATE: ${{ github.event.workflow_run.head_sha }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           set -euo pipefail
+
+          # Stand down, saying why, in the one place an operator will look.
+          stand_down() {
+            echo "proceed=no" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Deploy stood down"
+              echo
+              echo "**Revision:** \`$CANDIDATE\`"
+              echo
+              echo "**CI:** \`$CI_CONCLUSION\` — $CI_RUN_URL"
+              echo
+              printf '%s\n' "$1"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          echo "CI concluded: $CI_CONCLUSION"
+          echo "sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+          case "$CI_CONCLUSION" in
+            success)
+              : # the revision has a verdict and it is green; carry on below
+              ;;
+            failure | timed_out)
+              # CI looked at this revision and said no. Nothing to do here: the
+              # fix is a new commit, and its own CI will bring its own deploy.
+              echo "::notice::CI is red for $CANDIDATE, so nothing was deployed. Production keeps the revision it has."
+              stand_down "CI reported a real failure for this revision. Nothing was deployed, and production keeps the revision it already had — \`/api/health\` says which. Fix forward: the next commit's own CI brings its own deploy."
+              exit 0
+              ;;
+            *)
+              # cancelled, startup_failure, neutral, action_required, stale…
+              #
+              # None of these is a statement about the code. Refusing to deploy
+              # is still right — an unvalidated revision must not reach
+              # production — but it needs saying loudly, because this is the
+              # case that otherwise looks exactly like a quiet success.
+              echo "::warning::CI for $CANDIDATE ended as '$CI_CONCLUSION', which is not a verdict on the code. Nothing was deployed, and re-running CI will NOT re-trigger this deploy."
+              stand_down "$(printf '%s\n' \
+                "CI never reached a verdict — \`$CI_CONCLUSION\` means the run stopped without judging this revision (GitHub failed to start it, or somebody cancelled it). It is not a statement about the code. Nothing was deployed." \
+                "" \
+                "**Re-running CI does not re-trigger this deploy.** A re-run completes without creating a new Deploy run, so the revision would stay unreleased." \
+                "" \
+                "To release it: re-run CI and confirm it is green, then run **Rollback** with \`$CANDIDATE\` — it is the supported way to deploy an explicit revision, and it goes through the same build, stamp, deploy and smoke as a normal release.")"
+              exit 0
+              ;;
+          esac
+
           # The refspec is spelled out rather than left to whatever the checkout
           # configured, so `origin/main` is certain to exist when it is read.
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           head="$(git rev-parse origin/main)"
           echo "CI validated: $CANDIDATE"
           echo "main is now:  $head"
-          echo "sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
           if [ "$CANDIDATE" = "$head" ]; then
             echo "proceed=yes" >> "$GITHUB_OUTPUT"
@@ -85,18 +153,12 @@ jobs:
             exit 0
           fi
 
-          echo "proceed=no" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor "$CANDIDATE" "$head"; then
             echo "::notice::$CANDIDATE passed CI but main has moved on to $head. Standing down: the newer revision releases when its own CI passes."
-            {
-              echo "## Deploy stood down"
-              echo
-              echo "\`$CANDIDATE\` passed CI, but main is now \`$head\`."
-              echo "Releasing it would move production backwards, so it was skipped."
-              echo
-              echo "The newer revision deploys when its own CI passes. If it does not,"
-              echo "run **Rollback** with an explicit revision — see \`docs/RELEASE.md\`."
-            } >> "$GITHUB_STEP_SUMMARY"
+            stand_down "$(printf '%s\n' \
+              "main is now \`$head\`. Releasing this revision would move production backwards, so it was skipped." \
+              "" \
+              "The newer revision deploys when its own CI passes. If it does not, run **Rollback** with an explicit revision — see \`docs/RELEASE.md\`.")"
             exit 0
           fi
 

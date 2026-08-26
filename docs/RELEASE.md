@@ -111,6 +111,28 @@ The honest cost: if A is superseded by B and B's CI then fails, production stays
 on the revision before A. It is behind main, and it is a revision that passed
 CI. `/api/health` says which one it is, and Rollback can put A live by name.
 
+## When CI never reaches a verdict
+
+`startup_failure` and `cancelled` are not CI saying the code is bad — they are
+CI not running. Deploy refuses either way, which is right: an unvalidated
+revision must not reach production. But two things about that case are worth
+knowing before you meet it.
+
+**It is loud now.** Every refusal writes a run summary naming the revision, the
+CI conclusion and a link to that run. It used to come out as a `skipped` Deploy
+with nothing in it, which is indistinguishable at a glance from a quiet success.
+
+**Re-running CI does not re-trigger the deploy.** This is measured, not assumed:
+CI for `a56e366` hit `startup_failure`, was re-run, passed all thirteen jobs —
+and no second Deploy run was ever created. So the recovery is:
+
+1. Re-run CI and confirm it is green for that revision.
+2. Run **Rollback** with that SHA.
+
+Rollback is not only for bad releases; it is the supported way to deploy any
+explicit revision, through the same build, stamp, deploy and smoke as a normal
+release. That is why `deploy.yml`'s stand-down message names it.
+
 ## Browser verification
 
 Sharded and parallel, always: four widths × three shards in CI, three widths in

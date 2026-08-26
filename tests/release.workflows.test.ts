@@ -116,8 +116,22 @@ describe('Deploy waits for authoritative CI', () => {
     expect(asList(run['branches'])).toEqual(['main']);
   });
 
-  it('deploys nothing when that CI run failed', () => {
-    expect(String(job(yaml, 'decide')['if'])).toContain("workflow_run.conclusion == 'success'");
+  /*
+   * The gate used to be a job-level `if` on the conclusion. It now lives inside
+   * the decide step, for the reason in "every CI outcome leaves a record"
+   * below — a job-level `if` refuses silently, and silence was the bug. What
+   * must not change is the rule: only a revision whose own CI *succeeded* is
+   * ever released.
+   */
+  it('deploys nothing unless that CI run succeeded', () => {
+    const check = steps(yaml, 'decide').find((step) => step['id'] === 'check');
+    const script = String(check?.['run']);
+    // Anything other than `success` falls into an arm that stands down.
+    expect(script).toMatch(/case "\$CI_CONCLUSION" in/);
+    expect(script).toMatch(/success\)/);
+    // And only `proceed=yes` reaches the release.
+    expect(String(job(yaml, 'release')['if'])).toContain("needs.decide.outputs.proceed == 'yes'");
+    expect(script).not.toMatch(/proceed=yes[\s\S]*case "\$CI_CONCLUSION"/);
   });
 
   it('cannot be started by hand — an explicit revision is Rollback’s job', () => {
@@ -432,6 +446,160 @@ describe('authoritative CI keeps its teeth', () => {
         expect(line, `${name}: ${line.trim()}`).not.toMatch(/\|\s*(tail|grep|head|cat)\b/);
       }
     }
+  });
+});
+
+/* ------------------------------------- what a caller asks of a called workflow */
+
+/*
+ * The contract between a caller and the reusable workflow it calls.
+ *
+ * GitHub validates this when the run *starts*, not when the job runs, and a
+ * mismatch does not fail a job — it fails the whole run with `startup_failure`
+ * and no logs worth reading. There is no local signal at all: the files parse,
+ * every editor is happy, and the first thing anybody learns is a grey tick on
+ * main after a merge.
+ *
+ * Three ways to get it wrong, all of them one typo:
+ *   - pass an input the callee does not declare
+ *   - omit one it declares as required
+ *   - read `needs.<job>.outputs.<name>` that the callee never declares
+ *
+ * So the contract is checked here, from the files, before any of it is pushed.
+ */
+describe('reusable workflows are called the way they are declared', () => {
+  const workflowCall = (yaml: Record<string, YamlValue>) =>
+    asMap(triggers(yaml)['workflow_call']);
+
+  /** Every `uses: ./.github/workflows/x.yml` in the repository. */
+  const calls = readdirSync(join(ROOT, '.github', 'workflows')).flatMap((name) => {
+    const { yaml } = readWorkflow(name);
+    return Object.entries(jobs(yaml))
+      .map(([jobName, one]) => ({ jobName, job: asMap(one) }))
+      .filter(({ job }) => String(job['uses'] ?? '').startsWith('./.github/workflows/'))
+      .map(({ jobName, job }) => ({
+        caller: name,
+        jobName,
+        callee: String(job['uses']).split('/').pop()!,
+        with: asMap(job['with']),
+      }));
+  });
+
+  it('finds the calls to check', () => {
+    // deploy.yml and rollback.yml each call release.yml and smoke.yml.
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(calls)('$caller → $jobName calls $callee with inputs it declares', (call) => {
+    const { yaml: calleeYaml } = readWorkflow(call.callee);
+    const declared = asMap(workflowCall(calleeYaml)['inputs']);
+
+    expect(
+      Object.keys(declared).length,
+      `${call.callee} is called by ${call.caller} but declares no workflow_call inputs`,
+    ).toBeGreaterThan(0);
+
+    for (const given of Object.keys(call.with)) {
+      expect(
+        Object.keys(declared),
+        `${call.caller} → ${call.jobName} passes "${given}", which ${call.callee} does not declare. ` +
+          'GitHub rejects this at run start with startup_failure.',
+      ).toContain(given);
+    }
+
+    const required = Object.entries(declared)
+      .filter(([, spec]) => asMap(spec)['required'] === true)
+      .map(([key]) => key);
+    for (const key of required) {
+      expect(
+        Object.keys(call.with),
+        `${call.caller} → ${call.jobName} omits "${key}", which ${call.callee} requires.`,
+      ).toContain(key);
+    }
+  });
+
+  /*
+   * The other half: a caller reading an output the callee never publishes gets
+   * an empty string, silently, which is how a smoke run ends up checking the
+   * wrong site or an empty revision rather than failing.
+   */
+  it.each(calls)('$caller → $jobName reads only outputs $callee publishes', (call) => {
+    const { yaml: callerYaml } = readWorkflow(call.caller);
+    const referenced = new Set<string>();
+    for (const value of Object.values(call.with)) {
+      for (const [, job, output] of String(value).matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+        referenced.add(`${job}.${output}`);
+      }
+    }
+
+    for (const reference of referenced) {
+      const [jobName, output] = reference.split('.') as [string, string];
+      const producer = asMap(jobs(callerYaml)[jobName]);
+      const producerUses = String(producer['uses'] ?? '');
+      const published = producerUses.startsWith('./.github/workflows/')
+        ? Object.keys(asMap(workflowCall(readWorkflow(producerUses.split('/').pop()!).yaml)['outputs']))
+        : Object.keys(asMap(producer['outputs']));
+      expect(
+        published,
+        `${call.caller} → ${call.jobName} reads needs.${reference}, which job "${jobName}" does not publish.`,
+      ).toContain(output);
+    }
+  });
+});
+
+/* --------------------------------------- a CI outcome that is not a verdict */
+
+/*
+ * `startup_failure` is not "the code is bad".
+ *
+ * It happened on `a56e366`: GitHub failed to start the CI run, Deploy's job
+ * guard evaluated false, the entire run came out `skipped` in three seconds,
+ * and main sat undeployed with nothing anywhere saying so. Re-running CI to
+ * green did not help either — measured, no second Deploy run was created.
+ *
+ * The gate is not what changed. An unvalidated revision still never reaches
+ * production. What changed is that refusing now leaves a record.
+ */
+describe('every CI outcome leaves a record', () => {
+  const { yaml } = readWorkflow('deploy.yml');
+  const decide = job(yaml, 'decide');
+  const check = steps(yaml, 'decide').find((step) => step['id'] === 'check');
+  const script = String(check?.['run'] ?? '');
+
+  it('does not gate the whole job on the conclusion, which would make it silent', () => {
+    expect(
+      decide['if'],
+      'a job-level `if` on the conclusion produces a skipped run with no summary',
+    ).toBeUndefined();
+  });
+
+  it('still deploys only what CI actually passed', () => {
+    expect(script).toContain('CI_CONCLUSION');
+    expect(script).toMatch(/case "\$CI_CONCLUSION" in/);
+    expect(script).toContain('success)');
+    expect(String(job(yaml, 'release')['if'])).toContain("needs.decide.outputs.proceed == 'yes'");
+  });
+
+  it('separates a red verdict from no verdict at all', () => {
+    expect(script).toMatch(/failure \| timed_out/);
+    // The catch-all arm: cancelled, startup_failure, neutral, action_required…
+    expect(script).toContain('*)');
+    expect(script).toContain('::warning::');
+    expect(script).toContain('not a verdict on the code');
+  });
+
+  it('says that re-running CI will not re-trigger the deploy', () => {
+    expect(script).toContain('does not re-trigger this deploy');
+    // …and names the path that does work.
+    expect(script).toContain('Rollback');
+  });
+
+  it('writes a summary on every stand-down, not just some', () => {
+    expect(script).toContain('stand_down()');
+    expect(script).toContain('GITHUB_STEP_SUMMARY');
+    // Every arm that declines to deploy goes through the one helper.
+    const declines = [...script.matchAll(/proceed=no/g)];
+    expect(declines.length, 'proceed=no should only be written by stand_down').toBe(1);
   });
 });
 
