@@ -7,7 +7,11 @@ dist/
 .env.*
 !.env.example
 local-data/
-test-results/
+# The trailing `*` covers the per-shard output directories a local sharded run
+# needs: `--output=test-results-shard2` alongside its own `E2E_AUTH_STATE`, so
+# three shards in one checkout stop deleting each other's login state. See
+# `e2e/constants.ts`.
+test-results*/
 playwright-report/
 blob-report/
 # Screenshots from scripts/demo-screenshots.mjs. Regenerable from any build in
