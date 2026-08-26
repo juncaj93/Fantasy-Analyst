@@ -12,8 +12,8 @@
  * construction: the sources are Maps, the clock is a fixed instant read out of
  * the snapshot, and the next-pick Monte Carlo was already seeded from draft
  * state rather than from `Math.random`. There is no code path from here to a
- * provider, and `tests/support.replay.test.ts` asserts it rather than
- * describing it.
+ * provider, and `tests/support.api.test.ts` asserts it with `fetch` replaced by
+ * something that throws, rather than describing it.
  *
  * ## What "reproduced" means
  *
@@ -29,14 +29,24 @@
  *   5. the favourite's level and the contribution it spent;
  *   6. unknown/degraded flags and the freshness states behind them.
  *
- * No tolerance is applied to any of them. Every number on this path is produced
- * by the same double arithmetic in the same order from the same inputs, so an
- * exact match is achievable — and a tolerance would be a place for real drift to
- * hide. The two fields that genuinely cannot match, `elapsedMs` and `cached`,
- * are not in the snapshot at all; see `DraftBoardOutput.nextPickModel`.
+ * No numeric tolerance is applied to any of them. Every number on this path is
+ * produced by the same double arithmetic in the same order from the same
+ * inputs, so an exact match is achievable — and a tolerance would be a place for
+ * real drift to hide. The single concession is signed zero, which JSON cannot
+ * express at all; the reasoning is beside `exact` at the bottom of this file.
+ *
+ * The two fields that genuinely cannot match, `elapsedMs` and `cached`, are not
+ * in the snapshot at all rather than excluded here — a field that cannot be
+ * compared should not be in a document whose purpose is comparison. See
+ * `DraftBoardOutput.nextPickModel`.
  */
 
-import { buildDraftBoard, type DraftBoardSources, type DraftBoardState } from '../draft/boardBuilder.ts';
+import {
+  UNDERDOG_SOURCE_KEY,
+  buildDraftBoard,
+  type DraftBoardSources,
+  type DraftBoardState,
+} from '../draft/boardBuilder.ts';
 import { DRAFT_ENGINE_VERSION } from '../draft/version.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -199,8 +209,19 @@ export function snapshotDraftBoardSources(snapshot: SupportSnapshot<DraftBoardPa
       get: async (id) => snapshots.get(id) ?? null,
       latestPlatformSnapshot: async () =>
         inputs.adp.platformSnapshotId == null ? null : snapshots.get(inputs.adp.platformSnapshotId) ?? null,
-      latestForSource: async () =>
-        inputs.adp.underdogSnapshotId == null ? null : snapshots.get(inputs.adp.underdogSnapshotId) ?? null,
+      /*
+       * The source it was asked for, and only that one.
+       *
+       * The capture records the Underdog snapshot because that is the one the
+       * board asks for; answering *every* source with it would be the single
+       * worst thing available here — a second market's numbers served under
+       * Underdog's name, which `boardBuilder.ts` spends four paragraphs
+       * explaining must never happen. Same shape the demo's own sources use.
+       */
+      latestForSource: async (source) =>
+        source !== UNDERDOG_SOURCE_KEY || inputs.adp.underdogSnapshotId == null
+          ? null
+          : snapshots.get(inputs.adp.underdogSnapshotId) ?? null,
       valuesByPlayer: async (snapshotId) => (values.get(snapshotId) ?? new Map()) as never,
     },
     evidence: {
@@ -249,7 +270,16 @@ export function snapshotDraftBoardSources(snapshot: SupportSnapshot<DraftBoardPa
       return out;
     },
     now: () => new Date(fixedClock),
-  } as DraftBoardSources & { managerTendencies?: never };
+    /*
+     * `managerTendencies` is deliberately absent.
+     *
+     * The interface declares it optional, and a source that does not implement
+     * it produces a different board from one that implements it and returns
+     * nothing: the first cannot have a manager prior, the second could have had
+     * one and did not. `replayDraftSnapshot` attaches it only where the capture
+     * recorded that the live source had it.
+     */
+  };
 }
 
 /**
@@ -311,6 +341,21 @@ export async function replayDraftSnapshot(snapshot: SupportSnapshot<DraftBoardPa
     limit: request.limit ?? undefined,
     position: request.position,
     queuedOnly: request.queuedOnly,
+    /*
+     * The seed the live board drew with, handed back.
+     *
+     * The draft id is hashed into that seed, and the snapshot replaces it with
+     * an alias — because a Sleeper draft id is one public URL away from every
+     * manager's username, which would undo every alias in the file. Without
+     * this the replay would draw a different sample and disagree with the
+     * captured board by a point of `Next%` on a handful of players, and there
+     * would be no way to tell that apart from a regression.
+     *
+     * Absent in a snapshot written before the seed travelled, which replays as
+     * it always did: the alias seeds it, and the difference shows up as an
+     * honest `output_difference` rather than as a silent one.
+     */
+    ...(output.nextPickModel.seed === undefined ? {} : { nextPickSeed: output.nextPickModel.seed }),
   });
 
   const differences: ReplayDifference[] = [];
@@ -318,6 +363,15 @@ export async function replayDraftSnapshot(snapshot: SupportSnapshot<DraftBoardPa
 
   compareOrder(output.order, board.recommendations.map((r) => r.playerId), differences);
   compareComponentLabels(output.componentLabels, board, differences);
+  /*
+   * The seed is compared as well as supplied.
+   *
+   * It is what every survival percentage on the board was drawn from, so a
+   * replay whose seed differs is not reproducing the board even if the numbers
+   * happen to land in the same place. Checking it turns "the samples matched"
+   * from a coincidence into a consequence.
+   */
+  exact('nextPickModel.seed', 'the Next% simulation', output.nextPickModel.seed, board.nextPickModel.seed, differences);
   compareRows(snapshot, board, differences);
   compareSets('warnings', snapshot.decision.warnings, board.warnings, differences);
   compareFreshness(snapshot, board, differences);
@@ -462,10 +516,24 @@ function compareSets(term: string, captured: string[], replayed: string[], into:
   const a = [...captured].sort();
   const b = [...replayed].sort();
   if (a.length === b.length && a.every((line, i) => line === b[i])) return;
+
+  /*
+   * The sorted lists, compared as sequences rather than as memberships.
+   *
+   * A `missing`/`added` diff over set membership alone would report *nothing*
+   * for a card that said the same sentence twice where it used to say it once —
+   * both sides contain it, so neither list is populated, and a real change to
+   * the argument would pass as a match. Reporting the two lists is still the
+   * useful output when they are non-empty, so both are said.
+   */
   const missing = a.filter((line) => !b.includes(line));
   const added = b.filter((line) => !a.includes(line));
-  if (missing.length === 0 && added.length === 0) return;
-  into.push({ term, at: 'set', captured: missing, replayed: added });
+  into.push({
+    term,
+    at: 'set',
+    captured: missing.length > 0 || added.length > 0 ? missing : a,
+    replayed: missing.length > 0 || added.length > 0 ? added : b,
+  });
 }
 
 function compareFreshness(

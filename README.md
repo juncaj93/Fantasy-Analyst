@@ -45,8 +45,12 @@ adopted rather than migrated.
 **Draft Room** — ranks available players from live Sleeper draft state on a
 best-player-available basis: market value leads, the news tally and your own
 ♥ My Guy ratings matter, and roster need is a light contextual tiebreaker rather
-than a reason to reach. The ★ beside a player is a bookmark — it fills your
-queue and the ★ filter, and deliberately changes no ranking. Each card carries
+than a reason to reach. The two marks are deliberately different things and the
+cards say which is which: ♥ / ♥♥ / ♥♥♥ is an opinion about a player and moves
+him about two, five or ten picks of ADP — a real tiebreak, never enough to
+overrule the board, so a single heart often changes his score without changing
+his place. The ★ beside a player is a bookmark — it fills your queue and the ★
+filter, and deliberately changes no ranking. Each card carries
 ADP, ADP value, the colour-coded chance he is still there at your next pick —
 conditioned on his still being available now, not on his ADP alone — the news
 signal, and the season market expectation where one exists. Tap any player for
@@ -166,6 +170,22 @@ the database, and it is refused twice: in the browser and again at the server.
 It lives under **Settings → Demo Mode**, never in the bottom bar. See
 [docs/DEMO_MODE.md](docs/DEMO_MODE.md).
 
+**Support Snapshot** — when a Draft recommendation looks wrong, **Setup → This
+app → Copy Draft support snapshot** puts the exact state behind it on the
+clipboard: the scoring, the roster, the picks made, the market numbers used,
+your own ♥ and ★ marks, and every component of every score at the top of the
+board. Send it to ChatGPT or Claude and ask why. On the other end one command
+replays it — deterministically, through the real engine, with the network
+unplugged — so the case is reproduced rather than reconstructed from memory,
+and the exact board that was complained about becomes a regression test.
+
+Nothing is uploaded. There is no support backend, no telemetry and no
+collection: the file goes where you send it. Sleeper usernames and user ids
+become `manager-1`; cookies, tokens, provider keys, your passphrase, email
+addresses and newsletter text are refused outright rather than trimmed, and
+each snapshot carries the list of what was taken out of it. See
+[docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md).
+
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
@@ -237,6 +257,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |
+| [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md) | capturing the state behind a recommendation, replaying it deterministically, and turning a real case into a regression fixture |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
 | [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) | the market-anchored usage model, evaluated side by side and consumed by nothing |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
@@ -249,6 +270,9 @@ npm test               # unit + integration tests
 npm run perf:budget    # gzipped page weight against perf-budgets.json
 npm run e2e            # WebKit at 430x932, 390x844, 375x812, 360x800
 npm run e2e:chromium   # same specs, fallback engine
+
+npm run support:fixture -- snapshot.json           # replay a support snapshot
+npm run support:fixture -- snapshot.json --write x # and commit it as a fixture
 ```
 
 CI runs each of those four widths across three runners rather than one, so a

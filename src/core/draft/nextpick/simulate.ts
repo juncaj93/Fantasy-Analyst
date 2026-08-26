@@ -193,6 +193,22 @@ export interface SimCandidate {
 export interface SimulationInput {
   /** Stable identity for the seed. */
   draftId: string;
+  /**
+   * The seed, supplied rather than derived — for a replay, and for nothing else.
+   *
+   * The draft id is one of the strings hashed into the seed below, which makes
+   * it a *model input* and not only an identifier. A support snapshot replaces
+   * it with an alias, because a Sleeper draft id is one public URL away from
+   * every manager's username — and an aliased id would draw different numbers,
+   * so a replay would disagree with the board it was taken from by a point of
+   * `Next%` and there would be no way to tell that apart from a regression.
+   *
+   * So the seed travels in the snapshot instead. It is a 32-bit hash of a
+   * string the file no longer contains, which is the point: it reproduces the
+   * draws without carrying the identity that produced them. Undefined
+   * everywhere else, and the derivation below is unchanged.
+   */
+  seed?: number;
   currentPick: number;
   /** The user's next owned selection, strictly after the clock. Null on their last. */
   targetPick: number | null;
@@ -497,7 +513,7 @@ export function simulateNextPick(input: SimulationInput): SimulationResult {
 
   // ------------------------------------------------------- the simulation
 
-  const seed = hashString(
+  const seed = input.seed ?? hashString(
     [
       input.draftId,
       input.currentPick,

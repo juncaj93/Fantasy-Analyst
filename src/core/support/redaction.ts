@@ -135,23 +135,43 @@ export function findRedactionViolations(value: unknown, path = ''): RedactionVio
 }
 
 /**
- * Stable, support-local names for the people in a league.
+ * Stable, support-local names for everything in a snapshot that points at a
+ * real person — directly, or by being something anybody can look up.
  *
  * Allocated in first-seen order over a deterministic walk of the snapshot, so
  * the same league captured twice produces the same aliases and two snapshots of
- * the same draft can be diffed against each other. `manager-1` is a valid
- * Sleeper-shaped opaque id as far as every consumer is concerned — the board
- * only ever compares owner ids for equality — so the slot → roster → owner
- * chain, the manager-history match and `isMine` all behave exactly as they did.
+ * the same draft can be diffed against each other. Every alias is a valid
+ * opaque id as far as every consumer is concerned — the board only ever
+ * compares these for equality — so the slot → roster → owner chain, the
+ * manager-history match, `isMine` and the draft-to-league link all behave
+ * exactly as they did.
+ *
+ * ## The league and draft ids are aliased too, and that is the important part
+ *
+ * A Sleeper user id is obviously an identity. A Sleeper *league* id does not
+ * look like one, and it is worse: `GET /v1/league/<id>/users` is public, needs
+ * no key, and returns every manager's username and display name. So a snapshot
+ * that carefully replaced eleven user ids with `manager-N` and then printed the
+ * league id would have handed all eleven of them back to anybody who typed one
+ * URL. The draft id is the same story through `/v1/draft/<id>/picks`, which
+ * carries `picked_by`.
+ *
+ * `LeagueRecord.id` *is* the Sleeper league id in this app — see
+ * `toLeagueRecord` — so there is no internal identifier to fall back on and the
+ * alias has to be the whole answer. Nothing is lost: the board compares these
+ * ids against each other and never against the outside world, and the person
+ * who captured the file already knows which league they were in.
  *
  * The map is held by the caller for the duration of one capture and thrown
  * away. It is never serialised: a file carrying `{"manager-3": "782...041"}`
  * would be a snapshot with the PII put back in an appendix.
  */
-export class ManagerAliases {
+export class SnapshotAliases {
   private readonly byId = new Map<string, string>();
   /** Aliases already handed out for display names, keyed by the real name. */
   private readonly byName = new Map<string, string>();
+  /** Aliases for league and draft ids, keyed by the real Sleeper id. */
+  private readonly byScope = new Map<string, string>();
 
   /**
    * The alias for one Sleeper user id.
@@ -194,9 +214,26 @@ export class ManagerAliases {
     return alias;
   }
 
-  /** How many distinct people were aliased. Reported in the snapshot. */
-  get counts(): { ids: number; names: number } {
-    return { ids: this.byId.size, names: this.byName.size };
+  /**
+   * The alias for a Sleeper league id, or for a draft id.
+   *
+   * One counter per kind so the aliases read as what they are — `league-1`,
+   * `draft-1` — and one map, because a league id and a draft id are never the
+   * same string and collapsing them would only make the code longer.
+   */
+  scope(kind: 'league' | 'draft', id: string | null | undefined): string | null {
+    if (id == null || id === '') return null;
+    const existing = this.byScope.get(id);
+    if (existing) return existing;
+    const seen = [...this.byScope.values()].filter((alias) => alias.startsWith(`${kind}-`)).length;
+    const alias = `${kind}-${seen + 1}`;
+    this.byScope.set(id, alias);
+    return alias;
+  }
+
+  /** How many distinct identifiers were aliased. Reported in the snapshot. */
+  get counts(): { ids: number; names: number; scopes: number } {
+    return { ids: this.byId.size, names: this.byName.size, scopes: this.byScope.size };
   }
 
   /**
@@ -210,6 +247,7 @@ export class ManagerAliases {
     let out = text;
     for (const [real, alias] of this.byId) out = out.split(real).join(alias);
     for (const [real, alias] of this.byName) out = out.split(real).join(alias);
+    for (const [real, alias] of this.byScope) out = out.split(real).join(alias);
     return out;
   }
 }
@@ -223,6 +261,7 @@ export class ManagerAliases {
  */
 export const REDACTION_RULES: readonly string[] = [
   'Sleeper user ids and display names are replaced with stable support-local aliases (manager-1, Manager 1).',
+  'The Sleeper league id, the draft id and the league’s name are replaced too (league-1, draft-1) — the league id is enough on its own to look every manager’s username up through Sleeper’s public API.',
   'Newsletter excerpts and context summaries are excluded; only the numeric tallies derived from them travel.',
   'Cookies, session tokens, request headers, provider API keys and passphrases are excluded, and a snapshot containing one is refused rather than emitted.',
   'Email addresses are excluded, including the app’s own newsletter address.',

@@ -61,7 +61,7 @@ import { DRAFT_ENGINE_VERSION } from '../draft/version.ts';
 import { buildRosterShape, startablePositions } from '../sleeper/scoring.ts';
 import { scoringKey, type ProjectionScoring } from '../startWho/scoring.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
-import { ManagerAliases, REDACTION_RULES, findRedactionViolations } from './redaction.ts';
+import { SnapshotAliases, REDACTION_RULES, findRedactionViolations } from './redaction.ts';
 import {
   SUPPORT_SNAPSHOT_SCHEMA,
   type DraftBoardInputs,
@@ -160,8 +160,15 @@ export async function captureDraftSnapshot(
   });
 
   const seen = recorder.seen();
-  const aliases = new ManagerAliases();
+  const aliases = new SnapshotAliases();
   const inputs = distilInputs(seen, board, aliases);
+  /*
+   * The request names the aliased draft, because that is the draft in the file.
+   *
+   * Replay looks the draft up by the id in `request`, so leaving the real one
+   * here would both leak it and fail to find anything.
+   */
+  const aliasedRequest = { ...request, draftId: inputs.draft.id };
   const detailRows = Math.max(0, options.detailRows ?? SNAPSHOT_DETAIL_ROWS);
 
   const snapshot: SupportSnapshot<DraftBoardPayload> = {
@@ -176,13 +183,14 @@ export async function captureDraftSnapshot(
       replaced: {
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
+        'league or draft id': aliases.counts.scopes,
         'raw sleeper pick payload': seen.picks.length,
       },
       rules: [...REDACTION_RULES],
     },
     decision: {
       kind: 'draft-board',
-      request,
+      request: aliasedRequest,
       context: contextOf(board, seen),
       freshness: {
         dog: board.dogState,
@@ -369,7 +377,7 @@ export function recordDraftBoardSources(inner: DraftBoardSources): {
 
 // ----------------------------------------------------------- distillation
 
-function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: ManagerAliases): DraftBoardInputs {
+function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: SnapshotAliases): DraftBoardInputs {
   const draft = seen.draft;
   const league = seen.league;
   if (!draft || !league) throw new Error('cannot capture a snapshot: the board built without a draft or a league');
@@ -384,6 +392,15 @@ function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: Mana
   for (const roster of seen.rosters) aliases.id(roster.ownerId);
   for (const pick of seen.picks) aliases.id(pick.pickedBy);
   for (const roster of seen.rosters) aliases.name(roster.ownerName, roster.ownerId);
+  /*
+   * And the two ids that are identities in disguise.
+   *
+   * `league.id` is the Sleeper league id, and one public URL turns it back into
+   * every manager's username — which would undo every alias allocated above.
+   * See the note on `SnapshotAliases`.
+   */
+  const leagueAlias = aliases.scope('league', league.id)!;
+  const draftAlias = aliases.scope('draft', draft.id)!;
 
   const platformValues = seen.platformSnapshotId == null ? null : seen.adpValues.get(seen.platformSnapshotId) ?? null;
   const dogValues = seen.underdogSnapshotId == null ? null : seen.adpValues.get(seen.underdogSnapshotId) ?? null;
@@ -398,8 +415,8 @@ function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: Mana
   return {
     now: (seen.now ?? new Date(0)).toISOString(),
     draft: {
-      id: draft.id,
-      leagueId: draft.leagueId,
+      id: draftAlias,
+      leagueId: leagueAlias,
       status: draft.status,
       type: draft.type,
       season: draft.season,
@@ -408,26 +425,34 @@ function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: Mana
       slotToRosterId: draft.slotToRosterId,
       settings: draft.settings,
       adpSnapshotId: draft.adpSnapshotId,
-      sleeperDraftId: draft.sleeperDraftId,
+      // Set to the alias rather than dropped, so the rehydrated record is
+      // structurally whole and says plainly that the real one is not here.
+      sleeperDraftId: draftAlias,
       lastSyncedAt: draft.lastSyncedAt,
     },
     league: {
-      id: league.id,
-      sleeperLeagueId: league.sleeperLeagueId,
-      name: league.name,
+      id: leagueAlias,
+      sleeperLeagueId: leagueAlias,
+      /*
+       * The name is the commissioner's own words and frequently somebody's
+       * name in them. Nothing in the ranking reads it — the board only echoes
+       * it back for a header — so there is nothing to weigh against removing
+       * it, and the person who captured the file knows which league it is.
+       */
+      name: leagueAlias,
       season: league.season,
       totalRosters: league.totalRosters,
       scoringSettings: league.scoringSettings,
       rosterPositions: league.rosterPositions,
       leagueSettings: league.leagueSettings,
-      draftId: league.draftId,
+      draftId: league.draftId == null ? null : draftAlias,
       status: league.status ?? null,
       localTeams: league.localTeams ?? [],
       lastSyncedAt: league.lastSyncedAt,
     },
     rosters: seen.rosters.map(
       (roster): SnapshotRoster => ({
-        leagueId: roster.leagueId,
+        leagueId: leagueAlias,
         rosterId: roster.rosterId,
         ownerId: aliases.id(roster.ownerId),
         ownerName: aliases.name(roster.ownerName, roster.ownerId),
@@ -440,7 +465,7 @@ function distilInputs(seen: RecordedReads, board: DraftBoardState, aliases: Mana
     ),
     picks: seen.picks.map(
       (pick): SnapshotPick => ({
-        draftId: pick.draftId,
+        draftId: draftAlias,
         pickNo: pick.pickNo,
         round: pick.round,
         pickInRound: pick.pickInRound,
@@ -592,7 +617,7 @@ function reduceRawPick(raw: string | null | undefined): string {
  */
 function aliasTendencies(
   tendencies: Record<string, unknown>,
-  aliases: ManagerAliases,
+  aliases: SnapshotAliases,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...tendencies };
   if (typeof out['userId'] === 'string') out['userId'] = aliases.id(out['userId'] as string);

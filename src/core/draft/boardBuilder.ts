@@ -497,6 +497,8 @@ export interface DraftBoardState {
     } | null;
     marketOnly: boolean;
     degraded: string[];
+    /** What drew every random sample. Same board, same seed, same numbers. */
+    seed: number;
     elapsedMs: number;
     cached: boolean;
   };
@@ -570,7 +572,21 @@ export function simulationEligible(
 export async function buildDraftBoard(
   sources: DraftBoardSources,
   draftId: string,
-  opts: { limit?: number; position?: string | null; queuedOnly?: boolean } = {},
+  opts: {
+    limit?: number;
+    position?: string | null;
+    queuedOnly?: boolean;
+    /**
+     * The `Next%` simulation seed, supplied rather than derived.
+     *
+     * For replaying a support snapshot and for nothing else. The draft id is
+     * hashed into the seed, so a snapshot that aliases it — as one must, since
+     * a Sleeper draft id is one public URL away from every manager's username —
+     * would otherwise draw different samples and disagree with the board it was
+     * captured from. See `nextpick/simulate.ts`.
+     */
+    nextPickSeed?: number;
+  } = {},
 ): Promise<DraftBoardState> {
   const draft = await sources.leagues.getDraft(draftId);
   if (!draft) throw new Error(`draft ${draftId} not found`);
@@ -1021,6 +1037,7 @@ export async function buildDraftBoard(
   const nextPick = estimateNextPickAvailability({
     managerPrior,
     draftId,
+    ...(opts.nextPickSeed === undefined ? {} : { seed: opts.nextPickSeed }),
     currentPick,
     targetPick: horizon?.pickNo ?? null,
     mySlot,
@@ -1405,6 +1422,17 @@ export async function buildDraftBoard(
       // are the ADP model's rather than the simulation's.
       marketOnly: nextPick.marketOnly,
       degraded: nextPick.degraded,
+      /*
+       * The seed, so the determinism claim is checkable from the response.
+       *
+       * `Next%` is a Monte Carlo estimate that must not move when nothing has
+       * moved, and it is seeded from the board state for exactly that reason.
+       * Two polls of an unchanged board reporting the same seed is what makes
+       * "the same numbers, forever" something a reader can verify rather than
+       * take on trust — and it is what lets a support snapshot reproduce the
+       * draws without carrying the draft id that produced them.
+       */
+      seed: nextPick.seed,
       elapsedMs: nextPick.elapsedMs,
       cached: nextPick.cached,
     },

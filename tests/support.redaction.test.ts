@@ -20,7 +20,7 @@ import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
 import { findScenario } from '../src/core/demo/registry.ts';
 import { captureDraftSnapshot, SnapshotRedactionError } from '../src/core/support/draftSnapshot.ts';
 import { readSnapshot, replayDraftSnapshot, SnapshotRejected } from '../src/core/support/replay.ts';
-import { ManagerAliases, findRedactionViolations } from '../src/core/support/redaction.ts';
+import { SnapshotAliases, findRedactionViolations } from '../src/core/support/redaction.ts';
 import type { DraftBoardSources } from '../src/core/draft/boardBuilder.ts';
 
 /**
@@ -119,6 +119,38 @@ describe('a snapshot carries no identity a person could be found by', () => {
     }
   });
 
+  /**
+   * The Sleeper league id is an identity in disguise, and the worst kind.
+   *
+   * `GET /v1/league/<id>/users` is public, needs no key, and returns every
+   * manager's username and display name. A snapshot that replaced eleven user
+   * ids with `manager-N` and then printed the league id would have handed all
+   * eleven back to anybody who typed one URL — which is not a redaction, it is
+   * a redaction-shaped object. The draft id is the same story through
+   * `/v1/draft/<id>/picks`.
+   */
+  it('emits no Sleeper league id or draft id either', async () => {
+    const scenario = findScenario('draft-mid')!;
+    const data = buildDraftScenario(scenario);
+    const { sources } = await realisticSources();
+    const snapshot = await captureDraftSnapshot(sources, { draftId: data.draft!.id, gitSha: 'deadbeef' });
+    const text = JSON.stringify(snapshot);
+
+    expect(text, 'the Sleeper league id survived capture').not.toContain(data.league.id);
+    expect(text, 'the Sleeper league id survived capture').not.toContain(data.league.sleeperLeagueId);
+    expect(text, 'the draft id survived capture').not.toContain(data.draft!.id);
+    expect(text, 'the draft id survived capture').not.toContain(data.draft!.sleeperDraftId);
+    expect(text, 'the league’s own name survived capture').not.toContain(data.league.name);
+
+    // Aliased, consistently, and the replay still finds its way around.
+    expect(snapshot.decision.inputs.league.id).toBe('league-1');
+    expect(snapshot.decision.inputs.draft.id).toBe('draft-1');
+    expect(snapshot.decision.inputs.draft.leagueId).toBe('league-1');
+    expect(snapshot.decision.request.draftId).toBe('draft-1');
+    for (const roster of snapshot.decision.inputs.rosters) expect(roster.leagueId).toBe('league-1');
+    for (const pick of snapshot.decision.inputs.picks) expect(pick.draftId).toBe('draft-1');
+  });
+
   it('says what it redacted, without saying what it redacted it from', async () => {
     const { sources, draftId } = await realisticSources();
     const snapshot = await captureDraftSnapshot(sources, { draftId, gitSha: 'deadbeef' });
@@ -212,7 +244,7 @@ describe('the scanner refuses what must not be in one', () => {
 
 describe('aliases are stable and one-way', () => {
   it('gives the same person the same name every time, and different people different ones', () => {
-    const aliases = new ManagerAliases();
+    const aliases = new SnapshotAliases();
     expect(aliases.id('467803924117221376')).toBe('manager-1');
     expect(aliases.id('331590301295116288')).toBe('manager-2');
     expect(aliases.id('467803924117221376')).toBe('manager-1');
@@ -220,15 +252,24 @@ describe('aliases are stable and one-way', () => {
     expect(aliases.name('Dave (commish)', '331590301295116288')).toBe('Manager 2');
   });
 
+  it('numbers leagues and drafts apart, and keeps each stable', () => {
+    const aliases = new SnapshotAliases();
+    expect(aliases.scope('league', '1124839283047628800')).toBe('league-1');
+    expect(aliases.scope('draft', '1124839283047628801')).toBe('draft-1');
+    expect(aliases.scope('league', '1124839283047628800')).toBe('league-1');
+    expect(aliases.scope('league', '999')).toBe('league-2');
+    expect(aliases.scope('draft', null)).toBeNull();
+  });
+
   it('leaves an unowned roster unowned rather than inventing a manager for it', () => {
-    const aliases = new ManagerAliases();
+    const aliases = new SnapshotAliases();
     expect(aliases.id(null)).toBeNull();
     expect(aliases.id('')).toBeNull();
     expect(aliases.name(null)).toBeNull();
   });
 
   it('scrubs an identity that reached a free-text note', () => {
-    const aliases = new ManagerAliases();
+    const aliases = new SnapshotAliases();
     aliases.id('467803924117221376');
     aliases.name('juncaj93', '467803924117221376');
     expect(aliases.scrub('juncaj93 takes backs early (467803924117221376)')).toBe(
