@@ -82,8 +82,14 @@ is wrong with it. Read, in this order:
    actually contributed. This is where a wrong recommendation becomes a wrong
    *number*, and then a wrong input.
 5. **`decision.inputs`** — the number's source. `flags` is the user's own ♥ and
-   ★; `signals` is the newsletter tally; `adp.values` is the market; `injuryStates`
-   is availability.
+   ★; `signals` is the newsletter tally; `adp.values` is the market;
+   `injuryStates` is availability; `managerTendencies` is what the managers
+   ahead have done in previous seasons.
+
+Each row also carries `nextPick` — what the market alone said about his
+survival, what historical manager behaviour moved it by, and the drivers found.
+That is the place to start when a `Next%` is the complaint, because it is the
+only per-player evidence that a manager prior applied at all.
 
 That maps onto the categories worth separating: **stale or missing data**
 (freshness, an empty market, an absent projection), **mapping** (a player who
@@ -185,6 +191,14 @@ argued about is very often the one that was hearted and did not move. The
 
 Two mechanisms, doing different jobs.
 
+**Aliasing** runs over the output as well as the inputs, and that catch is worth
+naming: `nextPickModel.managerHistory` writes managers into sentences —
+`slot 4 (juncaj93): RB demand ×1.2 from 3 historical draft(s)` — so a snapshot
+that aliased the inputs and copied the output verbatim would have been a
+redaction that removed nothing. `displayName` gets the same alias the roster
+got, resolved slot → roster → owner so `Manager 3` is one person everywhere in
+the file.
+
 **Aliasing** covers identifiers the engine genuinely needs. A Sleeper user id is
 not decoration — the board follows slot → roster → owner to attach manager
 history to a seat — so each real id becomes a stable `manager-N`, consistently
@@ -228,7 +242,17 @@ Every term is compared exactly. No numeric tolerance anywhere.
 4. reasons, counterpoints and warnings, as sets of sentences — same sentences,
    any assembly order, and a changed word is a difference;
 5. the favourite's level, normalised score and the contribution it spent;
-6. degraded flags and the freshness states behind them.
+6. degraded flags and the freshness states behind them;
+7. the lines no component score stands behind — `injuryLine`, `tierContext`,
+   `marketHeadline`, `preseasonPoints` and the `Next%` model per player.
+
+Term 7 is the one that is easy to leave out. Everything above it is the ranking
+or an input to it, so a matching set of components is very strong evidence that
+the rest matched too. Those five are not: `injuryStates` reaches the board
+through `injuryLine` and nothing else, and no score reads it — so without the
+term a snapshot could reproduce every number on the board while silently losing
+the availability line under a player's name, which is exactly the kind of
+report this feature exists to answer.
 
 Two fields are not in the snapshot at all rather than excluded at comparison:
 `nextPickModel.elapsedMs` and `nextPickModel.cached` measure the machine, not

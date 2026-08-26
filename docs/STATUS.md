@@ -2697,11 +2697,22 @@ looks safe. The scan runs again at replay, since the copy being replayed is not
 necessarily the copy that was emitted. The rules travel inside every snapshot,
 so the person holding the file can read what was taken out of it.
 
-**Reproduced means six terms, compared exactly, with no numeric tolerance.**
+**Reproduced means seven terms, compared exactly, with no numeric tolerance.**
 Every ranked id in order; every component's score, weight, contribution,
 `unknown` and display string; the composite and the 0–100 score; reasons,
 counterpoints and warnings as sets of sentences; the favourite's level and what
-it spent; degraded and freshness states. `elapsedMs` and `cached` measure the
+it spent; degraded and freshness states; and the `Next%` seed, so the samples
+match by construction rather than by luck.
+
+The seventh is the one that was easy to leave out and is the reason the list is
+not six: **the lines no component score stands behind.** Everything else is the
+ranking or an input to it, so matching components are strong evidence the rest
+matched too — but `injuryStates` reaches the board through `injuryLine` and
+nothing else, and no score reads it. Without that term a snapshot could
+reproduce every number on the board while silently losing the availability line
+under a player's name, which is precisely the kind of report this exists to
+answer. `tierContext`, `marketHeadline`, `preseasonPoints` and the per-player
+`Next%` model travel and are compared for the same reason. `elapsedMs` and `cached` measure the
 machine rather than the board and are not in the file at all — a field that
 cannot be compared should not be in a document whose purpose is comparison. One
 concession, and it is not numeric: JSON cannot express `-0`.
