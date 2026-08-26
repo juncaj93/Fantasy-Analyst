@@ -129,6 +129,13 @@ and no second Deploy run was ever created. So the recovery is:
 1. Re-run CI and confirm it is green for that revision.
 2. Run **Rollback** with that SHA.
 
+And a `startup_failure` often cannot be re-run at all — the API answers `403
+This workflow run cannot be retried`, because there is no run to retry. When
+that happens the only way to get a verdict for that revision is a new commit,
+which brings its own CI and its own deploy. Never push an empty commit to
+manufacture one: if the revision is already known good, Rollback deploys it by
+name without needing CI to run again.
+
 Rollback is not only for bad releases; it is the supported way to deploy any
 explicit revision, through the same build, stamp, deploy and smoke as a normal
 release. That is why `deploy.yml`'s stand-down message names it.
