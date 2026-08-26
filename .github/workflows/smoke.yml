@@ -114,9 +114,23 @@ jobs:
       # With no revision given — a hand-started run against an arbitrary URL —
       # there is nothing to compare, so it prints what production says it is and
       # moves on.
+      #
+      # `set -eu`, not `set -euo pipefail`, and that is not a preference.
+      #
+      # This job runs inside the Playwright container, where the runner picks
+      # `sh -e {0}` rather than bash — so `set -o pipefail`, which is a bashism,
+      # is rejected by dash before the first command runs:
+      #
+      #     /__w/_temp/….sh: 1: set: Illegal option -o pipefail
+      #
+      # It cost a red smoke run on an otherwise perfect release: the deploy had
+      # already verified the revision from the runner, where bash *is* the
+      # shell, so the same script passed there and this failed in zero seconds.
+      # Nothing here is piped, so nothing is lost. Every other step in this job
+      # is POSIX for the same reason, and a test now enforces it.
       - name: Check production is the revision that was released
         run: |
-          set -euo pipefail
+          set -eu
           if [ -z "$EXPECTED_RELEASE_SHA" ]; then
             echo "No expected revision given; reporting on whatever is live at $PRODUCTION_URL."
             node .release-tools/scripts/check-release-sha.mjs "$PRODUCTION_URL"
