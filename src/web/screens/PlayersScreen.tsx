@@ -36,7 +36,7 @@ import { pageScrollTop } from '../overlay.ts';
 import { unwindOne } from '../tabReset.ts';
 
 /** An unflagged player, so the control renders the same shape either way. */
-const EMPTY_MY_GUY: MyGuyFlag = { level: 0, label: '', stars: '', score: 0 };
+const EMPTY_MY_GUY: MyGuyFlag = { level: 0, label: '', marks: '', score: 0 };
 
 interface PlayerListItem {
   id: string;

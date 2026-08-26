@@ -386,7 +386,7 @@ export interface AvoidTag {
 export interface MyGuyFlag {
   level: 0 | 1 | 2 | 3;
   label: string;
-  stars: string;
+  marks: string;
   score: number;
 }
 

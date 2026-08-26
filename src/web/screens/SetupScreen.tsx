@@ -269,6 +269,7 @@ export function SetupScreen({
           onClick={() => setOpen('review')}
         />
         <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
+        <SupportSnapshotRow leagues={leagues} />
       </ListGroup>
 
       {/*
@@ -284,6 +285,106 @@ export function SetupScreen({
       </Suspense>
     </>
   );
+}
+
+/**
+ * One row, one action: the state behind the Draft board, in a file.
+ *
+ * The whole user-facing surface of Support Snapshot, and it is deliberately
+ * this small. Somebody who thinks a Draft recommendation is wrong should be
+ * able to send the exact state that produced it to whoever can look at it, and
+ * that is a tap — not a diagnostics console, not a dashboard, not an upload.
+ * Nothing here transmits anything: the snapshot reaches the clipboard or the
+ * Files app, and where it goes next is the reader's decision.
+ *
+ * ## Why it says something different when there is nothing to capture
+ *
+ * A snapshot of no draft is a file that looks like a bug report and contains
+ * nothing — the worst possible outcome, because somebody would send it and wait.
+ * So the row says so before it is tapped, and the tap is disabled: a league
+ * with no draft, or no league at all, has no board to explain.
+ *
+ * ## Copy, or download
+ *
+ * A real board's state runs to a couple of hundred kilobytes, which most
+ * clipboards take and some refuse — and iOS will refuse `navigator.clipboard`
+ * outright outside a secure context. Rather than guess, it tries the clipboard
+ * and falls back to a download, and the row says which happened. A reader who
+ * has just tapped "copy" and received a file needs to be told, or they will
+ * paste nothing into a chat window and conclude the button is broken.
+ */
+function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
+  const [state, setState] = useState<'idle' | 'working' | 'copied' | 'downloaded' | 'failed'>('idle');
+  const [detail, setDetail] = useState<string | null>(null);
+
+  const draftId = (leagues.find((l) => l.isSelected) ?? null)?.draftId ?? null;
+
+  const capture = async () => {
+    if (!draftId) return;
+    setState('working');
+    setDetail(null);
+    try {
+      /*
+       * `fresh` so this is the board as it stands, not the board the session
+       * cache last saw. A snapshot is a claim about a moment, and answering it
+       * from a cache would date the claim by however long the reader had been
+       * on another screen.
+       */
+      const snapshot = await api.get<{ capturedAt: string; decision: { output: { order: string[] } } }>(
+        `/api/drafts/${encodeURIComponent(draftId)}/support-snapshot`,
+        { fresh: true },
+      );
+      const text = JSON.stringify(snapshot, null, 2);
+      const size = `${Math.round(text.length / 1024)} KB · ${snapshot.decision.output.order.length} ranked players`;
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setState('copied');
+        setDetail(`${size}. Paste it to your AI assistant and ask why the board says what it says.`);
+      } catch {
+        downloadJson(`junculator-draft-snapshot-${snapshot.capturedAt.slice(0, 19).replace(/[:T]/g, '')}.json`, text);
+        setState('downloaded');
+        setDetail(`${size}. Too large for this browser’s clipboard, so it was saved as a file instead.`);
+      }
+    } catch (err) {
+      setState('failed');
+      setDetail(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const detailFor = (): string => {
+    if (detail) return detail;
+    if (!draftId) return 'No draft is loaded, so there is nothing to explain yet.';
+    return 'The exact state behind the Draft board, to send to an AI assistant. Nothing is uploaded.';
+  };
+
+  return (
+    <ListRow
+      testId="setup-support-snapshot"
+      dataState={state}
+      state={<StateMark state={state === 'failed' ? 'warn' : draftId ? 'ok' : 'todo'} />}
+      label="Copy Draft support snapshot"
+      detail={detailFor()}
+      value={state === 'working' ? 'Copying…' : state === 'copied' ? 'Copied' : state === 'downloaded' ? 'Saved' : undefined}
+      {...(draftId ? { onClick: () => void capture() } : {})}
+    />
+  );
+}
+
+/**
+ * Hand the reader a file, without a server round trip to fetch it back.
+ *
+ * A blob URL and a synthetic click: the only way a browser saves something it
+ * already has in memory. Revoked on the next frame rather than immediately,
+ * because Safari has not finished reading the URL when `click()` returns.
+ */
+function downloadJson(filename: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /**

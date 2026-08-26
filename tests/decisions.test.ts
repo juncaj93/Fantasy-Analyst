@@ -64,10 +64,20 @@ describe('My Guy', () => {
     expect(myGuy(3).score).toBeLessThanOrEqual(1);
   });
 
-  it('renders the stars and the name the UI shows', () => {
-    expect(myGuy(2).stars).toBe('★★');
+  /*
+   * Hearts, because the control is a heart.
+   *
+   * This asserted `★★`, which is the *other* mark in this product — the draft
+   * queue, which deliberately changes no ranking. A board crediting a boost to
+   * the mark that has no boost is how somebody taps the star and waits for a
+   * board that will never move. See `MyGuyFlag.marks`.
+   */
+  it('renders the mark the control draws, and the name the UI shows', () => {
+    expect(myGuy(2).marks).toBe('♥♥');
     expect(myGuy(3).label).toBe('Must-Have');
-    expect(myGuy(0).stars).toBe('');
+    expect(myGuy(0).marks).toBe('');
+    // Never the queue's glyph, at any level.
+    for (const level of [1, 2, 3] as const) expect(myGuy(level).marks).not.toContain('★');
   });
 
   it('treats anything unexpected as unflagged', () => {

@@ -49,8 +49,8 @@ export const DECISION_THRESHOLDS = {
      * Normalised scores per star level, before the component weight.
      *
      * Calibrated against the engine's own note that a point of ADP is worth
-     * roughly 0.05 of contribution: ★ moves a player about two picks (a real
-     * tiebreak), ★★ about five, ★★★ about ten — a modest reach, and nowhere
+     * roughly 0.05 of contribution: ♥ moves a player about two picks (a real
+     * tiebreak), ♥♥ about five, ♥♥♥ about ten — a modest reach, and nowhere
      * near enough to beat the 1.0 a thirty-pick faller scores on market value
      * alone. Wanting a player is allowed to matter; it is not allowed to
      * overrule the board.
@@ -130,17 +130,35 @@ export type MyGuyLevel = 0 | 1 | 2 | 3;
 export interface MyGuyFlag {
   level: MyGuyLevel;
   label: string;
-  stars: string;
+  /**
+   * The mark itself — `♥♥` — for a sentence that wants to show it.
+   *
+   * **Hearts, and it matters that they are not stars.** This field held
+   * `'★'.repeat(level)` and every explanation the engine writes printed it, so
+   * a board that had just moved a player up five places said *you marked him
+   * ★★ Strong My Guy* about a control that draws hearts. Both marks exist in
+   * this product, on the same rows, and the other one — the ★ queue — is a
+   * bookmark that deliberately changes no ranking at all. So the card was
+   * crediting the boost to the mark that has no boost, and a reader who
+   * believed it would tap the star and wait for a board that was never going to
+   * move.
+   *
+   * Named `marks` rather than `stars` for the same reason. A field called
+   * `stars` holding hearts is the next person's version of this bug.
+   */
+  marks: string;
   score: number;
 }
 
 /** The user's own preference, kept deliberately separate from the news tally. */
 export function myGuy(level: MyGuyLevel): MyGuyFlag {
-  if (level <= 0) return { level: 0, label: '', stars: '', score: 0 };
+  if (level <= 0) return { level: 0, label: '', marks: '', score: 0 };
   return {
     level,
     label: DECISION_THRESHOLDS.myGuy.label[level] ?? 'My Guy',
-    stars: '★'.repeat(level),
+    // The glyph `MyGuyControl` draws, so the sentence names the control the
+    // reader actually tapped. See the note on `marks` above.
+    marks: '♥'.repeat(level),
     score: DECISION_THRESHOLDS.myGuy.score[level] ?? 0,
   };
 }

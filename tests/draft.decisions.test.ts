@@ -72,7 +72,7 @@ describe('My Guy moves the board', () => {
   it('breaks a tie between two otherwise identical players', () => {
     const ranked = twin({ b: { myGuyLevel: 1 } });
     expect(ranked[0]!.playerId).toBe(WR_B!.id);
-    expect(ranked[0]!.myGuy.stars).toBe('★');
+    expect(ranked[0]!.myGuy.marks).toBe('♥');
   });
 
   it('is worth more at each level', () => {
@@ -114,7 +114,7 @@ describe('My Guy moves the board', () => {
 
   it('says in the reasons that the boost was the user’s own', () => {
     const rec = twin({ b: { myGuyLevel: 2 } }).find((r) => r.playerId === WR_B!.id)!;
-    expect(rec.reasons.join(' ')).toContain('you marked him ★★ Strong My Guy');
+    expect(rec.reasons.join(' ')).toContain('you marked him ♥♥ Strong My Guy');
   });
 });
 

@@ -25,6 +25,7 @@
  */
 
 import { buildDraftBoard } from '../../draft/boardBuilder.ts';
+import { captureDraftSnapshot } from '../../support/draftSnapshot.ts';
 /* The one player matcher, so Demo Mode searches exactly as the product does. */
 import { rankByNormalized } from '../../search/players.ts';
 import { buildMatchupResponse } from '../../matchup/build.ts';
@@ -158,6 +159,34 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
     return ok(
       await buildDraftBoard(draftBoardSourcesFrom(data), decodeURIComponent(board[1]!), {
         limit: Number(params.get('limit') ?? 40) || 40,
+        position: params.get('position'),
+        queuedOnly: params.get('queued') === '1',
+      }),
+    );
+  }
+
+  /*
+   * A support snapshot of the rehearsed board.
+   *
+   * Served here for the same reason every other route is: there is one capture,
+   * and it reads a `DraftBoardSources`. A demo satisfies that interface from
+   * fixtures, so the file a scenario produces is the file the live app produces
+   * — same schema, same redaction, same replay — and somebody learning the
+   * support workflow can run it end to end without a live draft.
+   *
+   * `gitSha` is `demo` rather than the deployment's revision, and deliberately
+   * so: a snapshot of a rehearsal must never be mistakable for a snapshot of
+   * production, and a fixture built from one must not claim a revision it does
+   * not describe.
+   */
+  const snapshot = /^\/api\/drafts\/([^/]+)\/support-snapshot$/.exec(path);
+  if (snapshot) {
+    if (!data.draft) return fail('no draft in this scenario', 404);
+    if (data.freshness.sleeper === 'unavailable') return fail('network request failed', 503);
+    return ok(
+      await captureDraftSnapshot(draftBoardSourcesFrom(data), {
+        draftId: decodeURIComponent(snapshot[1]!),
+        gitSha: 'demo',
         position: params.get('position'),
         queuedOnly: params.get('queued') === '1',
       }),
