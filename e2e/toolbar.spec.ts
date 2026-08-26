@@ -3,10 +3,16 @@
  *
  * The bottom bar stopped being a full-width band welded to the edge of the
  * screen and became a compact pill floating clear of it. That is a presentation
- * change and nothing else — the same six destinations, the same taps, the same
+ * change and nothing else — the same destinations, the same taps, the same
  * screens — so most of what is asserted here is that nothing moved: every
  * destination is still reachable, still named the same thing, still lights up
  * for the screen that is actually showing.
+ *
+ * Review is not among them, and that is the one thing here that *did* move. It
+ * is maintenance and it now lives in Settings, so what this file has to say
+ * about it is that it is absent from the bar, that nothing was promoted into
+ * the slot it left, and that Settings stays lit while its queue is open — no
+ * destination goes dark, and none lights up for a screen that is not showing.
  *
  * The rest is the set of ways a floating bar goes wrong, which is a specific
  * and short list: it covers the last row of a long page, it wraps its labels on
@@ -21,8 +27,9 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openReview } from './helpers.ts';
 
-const DESTINATIONS = ['draft', 'team', 'trades', 'players', 'review', 'setup'] as const;
+const DESTINATIONS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 
 /** The screen each destination is supposed to be showing, once it is tapped. */
 const SCREEN_OF: Record<(typeof DESTINATIONS)[number], string> = {
@@ -30,7 +37,6 @@ const SCREEN_OF: Record<(typeof DESTINATIONS)[number], string> = {
   team: 'league-card',
   trades: 'trades-nav',
   players: 'players-nav',
-  review: 'review-nav',
   setup: 'setup-step-sleeper',
 };
 
@@ -66,7 +72,7 @@ async function toolbar(page: Page) {
 }
 
 test.describe('the destinations', () => {
-  test('all six are there, named what they were, and reach their screen', async ({ page }) => {
+  test('all five are there, named what they were, and reach their screen', async ({ page }) => {
     await page.goto('/');
     for (const tab of DESTINATIONS) {
       await open(page, tab);
@@ -77,11 +83,11 @@ test.describe('the destinations', () => {
   /**
    * Read from the label's own text node, not from the button's rendered text.
    *
-   * A destination is a glyph, a word, and sometimes a badge or a lock mark, and
-   * the two engines do not agree about what `innerText` makes of that: Chromium
-   * puts the absolutely-positioned badge on a line of its own and WebKit runs it
-   * straight on, so Review reads as `Review` in one and `Review7` in the other.
-   * The word is a text node either way, and that is what this is about.
+   * A destination is a glyph, a word, and sometimes a small mark, and the two
+   * engines do not agree about what `innerText` makes of that: an absolutely
+   * positioned mark lands on a line of its own in one engine and runs straight
+   * on in the other. The word is a text node either way, and that is what this
+   * is about.
    */
   test('the labels are still words, not glyphs alone', async ({ page }) => {
     await page.goto('/');
@@ -94,7 +100,7 @@ test.describe('the destinations', () => {
           .join(''),
       ),
     );
-    expect(labels).toEqual(['Draft', 'Team', 'Trades', 'Players', 'Review', 'Setup']);
+    expect(labels).toEqual(['Draft', 'Team', 'Trades', 'Players', 'Setup']);
   });
 
   /**
@@ -709,7 +715,7 @@ test.describe('the keyboard', () => {
 test.describe('modal layering', () => {
   test('the toolbar is behind the sheet and takes no taps through it', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('tab-review').click();
+    await openReview(page);
     await page.getByTestId('scoring-key-open').click();
     await expect(page.getByTestId('scoring-key')).toBeVisible();
 
@@ -732,15 +738,16 @@ test.describe('modal layering', () => {
     });
     expect(covered, 'a tap where a destination is would reach the toolbar').toBe(true);
 
-    // The sheet is still the thing on screen, and Review is still current.
+    // The sheet is still the thing on screen, and Settings — which is where
+    // Review is — is still the current destination.
     await expect(page.getByTestId('scoring-key')).toBeVisible();
-    await expect(page.getByTestId('tab-review')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
     await page.getByTestId('sheet-close').click();
   });
 
   test('no navigation is duplicated inside the sheet', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('tab-review').click();
+    await openReview(page);
     await page.getByTestId('scoring-key-open').click();
     await expect(page.getByTestId('scoring-key')).toBeVisible();
     await expect(page.getByTestId('scoring-key').locator('.tabbar')).toHaveCount(0);
@@ -777,14 +784,14 @@ test.describe('Draft, once the regular season starts', () => {
   test('is in the bar before the season starts', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByTestId('tab-draft')).toBeVisible();
-    expect(await page.locator('.tabbar button').count()).toBe(6);
+    expect(await page.locator('.tabbar button').count()).toBe(5);
   });
 
   /**
    * Draft leaves and Waivers arrives in the same slot.
    *
-   * The count is unchanged at six, deliberately: the seasonal slot is one slot,
-   * and a bar that briefly carried both would be seven destinations on a 360px
+   * The count is unchanged at five, deliberately: the seasonal slot is one slot,
+   * and a bar that briefly carried both would be six destinations on a 360px
    * phone. Where Waivers sits is asserted in `waivers.spec.ts`.
    */
   test('leaves the bar once the season is under way', async ({ page }) => {
@@ -793,9 +800,9 @@ test.describe('Draft, once the regular season starts', () => {
     await expect(page.getByTestId('tab-team')).toBeVisible();
     await expect(page.getByTestId('tab-draft')).toHaveCount(0);
     await expect(page.getByTestId('tab-waivers')).toBeVisible();
-    expect(await page.locator('.tabbar button').count()).toBe(6);
-    // The other five are all still there, named what they were.
-    for (const tab of ['team', 'trades', 'players', 'review', 'setup'] as const) {
+    expect(await page.locator('.tabbar button').count()).toBe(5);
+    // The other four are all still there, named what they were.
+    for (const tab of ['team', 'trades', 'players', 'setup'] as const) {
       await expect(page.getByTestId(`tab-${tab}`)).toBeVisible();
     }
   });
@@ -803,7 +810,7 @@ test.describe('Draft, once the regular season starts', () => {
   /**
    * The bar repacks; it does not leave a hole where Draft was.
    *
-   * Measured the same way the six-destination bar is: the pill is as wide as
+   * Measured the same way the five-destination bar is: the pill is as wide as
    * what is in it, with no slack, and it is still centred and still clear of
    * the edges. A bar that kept an empty slot would be wider than its contents.
    */
@@ -911,18 +918,17 @@ test.describe('reduced motion', () => {
 /**
  * Matchup, once the draft is finished.
  *
- * The third seasonal destination, and the one that takes the bar to seven.
+ * The third seasonal destination, and the one that takes the bar to its widest.
  *
  * All three seasonal slots settle on the same event. Draft leaves at the final
  * pick — the board exists to help make picks and the picks are made — Waivers
  * takes the slot it shares with it, and Matchup arrives because there is at
- * last a team to project. Six becomes seven and stays there.
+ * last a team to project. Five becomes six and stays there.
  *
- * Seven is the number this bar was explicitly built not to wrap at, so the two
- * things asserted here are the ones that would break: no label goes to a second
- * line, and no destination shrinks below a fingertip. Both are checked at
- * whichever width the project is running, which is the point of running the
- * suite at four of them.
+ * Six is the most this bar ever carries, so the two things asserted here are
+ * the ones that would break: no label goes to a second line, and no destination
+ * shrinks below a fingertip. Both are checked at whichever width the project is
+ * running, which is the point of running the suite at four of them.
  */
 test.describe('Matchup, once the draft is finished', () => {
   /**
@@ -968,7 +974,7 @@ test.describe('Matchup, once the draft is finished', () => {
     await postDraft(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
-    expect(await page.locator('.tabbar button').count()).toBe(7);
+    expect(await page.locator('.tabbar button').count()).toBe(6);
 
     const labels = await page.evaluate(() =>
       [...document.querySelectorAll('.tabbar button')].map((b) =>
@@ -980,19 +986,20 @@ test.describe('Matchup, once the draft is finished', () => {
     );
     /*
      * Three things happen on the final pick and this is all of them: Draft
-     * leaves, Waivers takes its slot, and Matchup arrives. The bar still carries
-     * seven, which is why the layout assertions below are unchanged.
+     * leaves, Waivers takes its slot, and Matchup arrives. The bar carries six,
+     * which is the most it ever carries and why the layout assertions below are
+     * the widest case there is.
      */
-    expect(labels).toEqual(['Team', 'Matchup', 'Waivers', 'Trades', 'Players', 'Review', 'Setup']);
+    expect(labels).toEqual(['Team', 'Matchup', 'Waivers', 'Trades', 'Players', 'Setup']);
     await expect(page.getByTestId('tab-draft')).toHaveCount(0);
   });
 
-  test('carries seven without wrapping a label or shrinking a target', async ({ page }) => {
+  test('carries six without wrapping a label or shrinking a target', async ({ page }) => {
     await postDraft(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
 
-    for (const tab of ['team', 'matchup', 'waivers', 'trades', 'players', 'review', 'setup'] as const) {
+    for (const tab of ['team', 'matchup', 'waivers', 'trades', 'players', 'setup'] as const) {
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} is ${box.height}px tall`).toBeGreaterThanOrEqual(44);
       expect(box.width, `${tab} is ${box.width}px wide`).toBeGreaterThanOrEqual(44);
@@ -1014,36 +1021,34 @@ test.describe('Matchup, once the draft is finished', () => {
   });
 
   /**
-   * …and the seventh destination costs the bar height, on purpose, once.
+   * …and the widest bar costs nothing, at any supported width.
    *
-   * At 374px and under, a seven-destination bar takes two points off the pill's
-   * own padding — `--toolbar-pad` goes to 3 — so the bar is 52 rather than 56.
-   * That is a deliberate trade with its reasoning written at the rule: the
-   * targets are untouched and the bar keeps its gutter from both screen edges.
+   * This used to assert the opposite. A seventh destination did not fit at
+   * 374px and under, so the stylesheet took two points off the pill's own
+   * padding to make the last of it fit and the bar came out 52 rather than 56 —
+   * a deliberate trade, written at the rule, that nothing local was watching
+   * until the live league grew its seventh destination and only the production
+   * smoke suite noticed.
    *
-   * It is asserted here because nothing local was watching it. The number is
-   * real and intended, and the only thing that noticed when the live league
-   * gained its seventh destination was the production smoke suite, which was
-   * still holding the six-destination floor. A number this deliberate should
-   * fail on a laptop rather than after a deploy.
-   *
-   * The fingertip floor is checked above and is not what gives here.
+   * Review moving into Settings gave that slot back. Six is now the widest the
+   * bar ever gets and six fit at their full width on the narrowest phone this
+   * app supports, so there is no trade left to make: the pill is the same height
+   * everywhere, out of the same padding, with the targets untouched. That is a
+   * number worth failing on for exactly the reason the old one was.
    */
-  test('spends the seventh destination out of the pill rather than the targets', async ({ page }) => {
+  test('is the same height at every width, having nothing left to trade', async ({ page }) => {
     await postDraft(page);
     await page.goto('/');
     await expect(page.getByTestId('tab-matchup')).toBeVisible();
 
     const bar = await toolbar(page);
     const count = await page.locator('.tabbar button').count();
-    expect(count).toBe(7);
+    expect(count).toBe(6);
 
-    const expected = bar.viewportWidth <= 374 ? 52 : 56;
-    expect(bar.height, `a seven-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(expected);
+    expect(bar.height, `a six-destination bar is ${bar.height}px at ${bar.viewportWidth}px`).toBe(56);
 
-    // The padding is where it came from, and the target is not. Sampled at both
-    // ends of the bar and in the middle, which is where a seventh destination
-    // would show up if it were being paid for out of the targets.
+    // Sampled at both ends of the bar and in the middle, which is where a
+    // destination being paid for out of the targets would show up.
     for (const tab of ['team', 'matchup', 'setup'] as const) {
       const box = (await page.getByTestId(`tab-${tab}`).boundingBox())!;
       expect(box.height, `${tab} gave up a fingertip`).toBeGreaterThanOrEqual(44);
@@ -1054,7 +1059,7 @@ test.describe('Matchup, once the draft is finished', () => {
    * The glyph is a drawing, not a word in a ring.
    *
    * Matchup used to be `VS` inside a circle, and it was the only mark in the
-   * bar that was either of those things: the other seven are open outlines, and
+   * bar that was either of those things: the other five are open outlines, and
    * a coin with a wordmark stamped on it reads as a badge dropped into the row.
    * It is now two brackets facing each other across a centre line.
    *

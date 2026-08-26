@@ -15,6 +15,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openReview } from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -314,7 +315,7 @@ test.describe('the back gesture in a browser tab', () => {
 test.describe('sheets', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('tab-review').click();
+    await openReview(page);
     await page.getByTestId('scoring-key-open').click();
     await expect(page.getByTestId('scoring-key')).toBeVisible();
     /*
@@ -447,7 +448,7 @@ test.describe('sheets', () => {
 test.describe('the browser’s own navigation', () => {
   test('every tab still navigates in place, with no page load', async ({ page }) => {
     await page.goto('/');
-    for (const tab of ['team', 'trades', 'players', 'review', 'setup', 'draft'] as const) {
+    for (const tab of ['team', 'trades', 'players', 'setup', 'draft'] as const) {
       await page.getByTestId(`tab-${tab}`).click();
       await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-current', 'page');
       expect(new URL(page.url()).pathname).toBe('/');

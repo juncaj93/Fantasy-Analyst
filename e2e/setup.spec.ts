@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openReview } from './helpers.ts';
 
 async function openSetup(page: Page) {
   await page.goto('/');
@@ -584,7 +585,7 @@ test.describe('review actions added for setup', () => {
     });
 
     await page.goto('/');
-    await page.getByTestId('tab-review').click();
+    await openReview(page);
     // Earlier specs may have queued their own items, so assert on the change
     // this test causes rather than on the whole queue.
     const reyesCards = page.getByTestId('review-card').filter({ hasText: 'Julian Reyes' });
@@ -605,7 +606,7 @@ test.describe('review actions added for setup', () => {
 
   test('keeps already-applied items inspectable', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('tab-review').click();
+    await openReview(page);
     await page.getByRole('button', { name: /Already applied/ }).click();
     await expect(page.getByTestId('applied-card').first()).toBeVisible();
     await expect(page.getByTestId('applied-card').first()).toContainText('Why:');

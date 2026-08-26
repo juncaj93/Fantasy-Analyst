@@ -968,7 +968,7 @@ body,
  * change is for — no destination moved, was renamed, or does anything new.
  *
  * Sized by its contents rather than by a column count. Each destination is
- * `--tab-w` wide, so the pill is however many destinations there are; a seventh
+ * `--tab-w` wide, so the pill is however many destinations there are; one more
  * would widen the bar until it hit the clamp, and never wrap onto a second row.
  * Centred with a translate rather than `margin: auto`, because it is fixed and
  * has no line box to be centred in.
@@ -1006,10 +1006,10 @@ body,
    * not know a decoration from a focus ring. Nothing else here depends on it.
    * `backdrop-filter` and the border both round to `--radius-toolbar` on their
    * own; the destinations sit inside the pill's padding with a radius of their
-   * own, so a pressed wash cannot reach a corner; the badge and the lock are
-   * inside their destination's box; and the bar is sized by its contents, so
-   * there is never more in it than fits — seven targets at their 44px floor
-   * plus the pill's padding is 314px inside the 336px a 360px phone leaves.
+   * own, so a pressed wash cannot reach a corner; the attention dot and the lock
+   * are inside their destination's box; and the bar is sized by its contents, so
+   * there is never more in it than fits — six targets at 48px plus the pill's
+   * padding is 298px inside the 336px a 360px phone leaves.
    */
   /*
    * Out of the way while the keyboard is up.
@@ -1174,9 +1174,9 @@ body,
 /*
  * "You are reading, not editing" — where editing is unlocked.
  *
- * A ring rather than a count, so it cannot be mistaken for the review badge,
- * and the button carries the sentence in its accessible name so the mark is
- * never the only carrier.
+ * A ring rather than a count, so it cannot be mistaken for a quantity, and the
+ * button carries the sentence in its accessible name so the mark is never the
+ * only carrier.
  */
 .tab-lock {
   position: absolute;
@@ -1189,20 +1189,42 @@ body,
   border: 1.5px solid var(--text-faint);
 }
 
-.tab-badge {
+/*
+ * Review has work waiting, and Review is inside Settings.
+ *
+ * A filled dot, in the accent rather than the negative colour, and no numeral:
+ * unresolved review items are not an error and they are not urgent, they are a
+ * job to get to. The count itself is one tap away in words, on the row that
+ * leads to the queue — which is the only place it is announced.
+ *
+ * Deliberately the same size and the same corner as the lock ring, because they
+ * are the same *kind* of mark: a small state, attached to a destination, that
+ * the accessible name spells out. Filled against outlined is what tells them
+ * apart, and colour is not carrying that difference alone.
+ */
+.tab-attention {
   position: absolute;
-  top: 2px;
+  top: 4px;
   left: 50%;
-  transform: translateX(6px);
-  background: var(--neg);
-  color: #fff;
+  transform: translateX(8px);
+  width: 7px;
+  height: 7px;
   border-radius: var(--radius-pill);
-  font-size: 0.6rem;
-  line-height: 1.5;
-  padding: 0 4px;
-  font-weight: 700;
-  min-width: 16px;
-  text-align: center;
+  background: var(--accent);
+}
+
+/*
+ * Both marks at once: view-only, with review work waiting.
+ *
+ * Two states of one destination, and they are independent — a reader who has
+ * not unlocked this phone still gets to see that something is queued. They are
+ * drawn in the same corner, so when both are present the ring steps aside to
+ * the dot's left rather than sitting under it. The order is the DOM's: the dot
+ * is rendered first and keeps its position, which is what stops the mark that
+ * comes and goes from moving the mark that does not.
+ */
+.tab-attention ~ .tab-lock {
+  transform: translateX(-4px);
 }
 
 /* ================================================================ surfaces */
@@ -7925,40 +7947,21 @@ div.matchup-result {
 }
 
 /*
- * The seventh destination.
+ * There is no rule for a seventh destination, because there is no seventh.
  *
- * For the stretch between a draft finishing and week one, the bar carries
- * Draft, Team, Matchup, Trades, Players, Review and Setup. Seven at 360px needs
- * a narrower destination than six does, and CSS cannot count them — the bar
- * publishes `data-count`, and this is the only rule that reads it.
+ * There used to be. For the stretch between a draft finishing and week one the
+ * bar carried Draft, Team, Matchup, Trades, Players, Review and Setup, and seven
+ * at 360px did not fit at the destination width six fits at — so this file had
+ * two `data-count='7'` rules narrowing the destination to its 44px floor and
+ * then taking two points off the pill's own padding to make the last of it fit.
  *
- * The floor is 44px and it is a hard floor: a destination narrower than a
- * fingertip is not a destination, and `toolbar.spec.ts` asserts it in both
- * directions. Seven at 44 plus the pill's own padding is 318px, which fits
- * inside the 336px a 360px phone leaves — so the count works out without ever
- * spending the target to get there.
+ * Review moved into Settings and took the seventh slot with it. The widest the
+ * bar now gets is six, which fits at its full width on the narrowest phone this
+ * app supports, so those rules could never match again and are gone rather than
+ * left to be read as a state that is still reachable. `--tab-w` at the widths
+ * above is the whole answer now, and the 44px floor is untouched: nothing here
+ * ever bought space out of a target, and there is no longer anything to buy.
  */
-@media (max-width: 400px) {
-  .tabbar[data-count='7'] {
-    --tab-w: 45px;
-  }
-}
-
-@media (max-width: 374px) {
-  .tabbar[data-count='7'] {
-    --tab-w: 44px;
-    /*
-     * The pill's own inset, not the destination's.
-     *
-     * At the floor the seven targets are exactly 308px and the bar has to stay
-     * a compact object with a real gutter either side of it on a 360px screen.
-     * Two pixels of the pill's padding is the only thing left that is not a
-     * thumb's problem — the targets are untouched, and the bar keeps its
-     * clearance from both edges.
-     */
-    --toolbar-pad: 3px;
-  }
-}
 
 /*
  * The foot of a paged list: either the control that fetches more, or the line

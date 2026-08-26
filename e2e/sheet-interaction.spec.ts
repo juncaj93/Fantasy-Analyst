@@ -25,6 +25,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openReview } from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -74,7 +75,7 @@ async function drag(
  */
 async function openScoringKey(page: Page) {
   await page.goto('/');
-  await page.getByTestId('tab-review').click();
+  await openReview(page);
   await page.getByTestId('scoring-key-open').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('scoring-key')).toBeVisible();

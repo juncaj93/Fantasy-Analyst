@@ -2451,3 +2451,60 @@ the idiom of an NFL roster and belong to nobody, because the fixtures are full o
 claims — a role falling apart, a hamstring, a manager who overpays — and
 attaching an invented claim to a real professional is the one kind of realism a
 fixture must not buy.
+
+## Milestone — Review moves into Settings (done)
+
+**Review is not a destination any more.** The bottom bar carried six
+destinations and one of them was a queue of housekeeping: newsletter items the
+classifier could not settle, and names the matcher could not place. Real work,
+and worth doing — but done occasionally, by the one person who owns the league,
+at no particular moment. It was spending a sixth of the most valuable strip of
+glass in the app beside the five destinations somebody opens this app on a
+Sunday morning to *decide* something with.
+
+It is now a row in Setup, under *This app*, opening the same screen it always
+did as a pushed panel with its own title, its own Back control and the same edge
+gesture every other settings panel has. Nothing about the queue changed: the
+three segments, the four actions on an evidence card, the identity workflow and
+the "Wrong player?" search are all exactly as they were, and a correction is
+still authoritative and still survives reprocessing.
+
+**Visibility was the whole risk, so it is said twice and announced once.** The
+row prints the count in words — `3 items need attention`, or `Nothing waiting
+for you` — and the Setup destination carries a 7px accent dot for as long as
+anything is waiting. The dot is `aria-hidden` and the count is spelled out in
+that destination's accessible name instead, so a screen reader is told once
+rather than reading a bare numeral and then a sentence about it. At zero there
+is no dot and nothing in the accessible name: an indicator that never clears is
+an indicator nobody looks at. Both numbers come from one addition of
+`pendingEvidence + pendingIdentity` in `App`, passed down, so the bar and the row
+cannot disagree.
+
+**Nothing was promoted into the slot.** The bar is sized by its contents, so it
+is simply one destination narrower and still packed, still centred, still 44px a
+target. The widest it now gets is six — the stretch between a draft completing
+and week one, when Matchup has arrived and Draft has not left — and six fit at
+their full width on a 360px phone. That retired the two `data-count='7'` rules
+that used to narrow a destination and spend two points of the pill's own padding
+to make a seventh fit; the bar is 56px at every supported width again, which
+both `toolbar.spec.ts` and the production smoke suite now assert as one number
+instead of two.
+
+**Demo Mode tells the truth about it.** The scenarios ship no review fixtures,
+and the overview was publishing the count of unresolved *aliases* as
+`pendingIdentity` — a different ledger, belonging to Help my scores. That was
+survivable as a numeral on a destination and is not survivable as a sentence on
+the row that opens the queue, so both counts are now `0` and the unresolved names
+are shown only where they are actually about.
+
+**Asserted in** `e2e/review-in-settings.spec.ts`: Review absent from the bar and
+the remaining destinations unchanged; the bar repacked with no gap and no
+restyle; the row present, 44px, a real control, and its count equal to the
+overview's own; one item counted as one item; the two queues added; no mark and
+no announcement at zero; the mark and exactly one announcement above it; the
+attention dot and the view-only ring coexisting without overlapping; the screen
+itself with its segments and its reference sheet; Back returning one step to the
+Settings root with no history entry; Settings staying current and alone while the
+queue is open; a retap closing it and deciding nothing; and any saved path
+opening the app with Review still one step away and its own reads still
+answering.

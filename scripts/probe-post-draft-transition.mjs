@@ -66,7 +66,8 @@ const main = async () => {
   show('lifecycle.matchupVisible', ov.lifecycle?.matchupVisible);
   show('lifecycle.draftLive', ov.lifecycle?.draftLive);
   show('lifecycle.reason', ov.lifecycle?.reason);
-  const tabs = ['team', 'trades', 'players', 'review', 'setup'];
+  // Review is not a destination: it lives in Settings. See `SetupScreen`.
+  const tabs = ['team', 'trades', 'players', 'setup'];
   if (ov.season?.draftVisible) tabs.unshift('draft');
   else tabs.splice(1, 0, 'waivers');
   if (ov.lifecycle?.matchupVisible) tabs.splice(ov.season?.draftVisible ? 2 : 1, 0, 'matchup');

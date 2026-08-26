@@ -186,15 +186,16 @@ export function MatchupIcon({ size = 24, className }: IconProps) {
   );
 }
 
-/** Review: a queue of decisions, ticked off. */
-export function ReviewIcon({ size = 24, className }: IconProps) {
-  return (
-    <svg {...svgProps(size)} className={className}>
-      <path d="M3.75 6.5h7M3.75 12h7M3.75 17.5h5.5" />
-      <path d="m14 12.6 2.6 2.6 4.4-5" />
-    </svg>
-  );
-}
+/*
+ * There is no Review glyph, because there is no Review destination.
+ *
+ * It was a list with a tick beside it and it was drawn for one place: the
+ * toolbar. Review is maintenance and lives in Settings now, as a row whose
+ * leading mark is the shared state glyph every other settings row uses — so the
+ * queue is still one tap from the bar and nothing in this file draws it. Every
+ * icon here is on screen somewhere, which is the only reason a file of hand-set
+ * paths stays worth reading.
+ */
 
 /** Setup: the settings gear, drawn as a simple cog. */
 export function GearIcon({ size = 24, className }: IconProps) {

@@ -48,8 +48,8 @@ test.describe('entering and leaving', () => {
     await page.goto('/');
     await expect(page.getByTestId('demo-bar')).toHaveCount(0);
 
-    // §4: no permanent bottom-nav tab. The bar carries six destinations.
-    await expect(page.locator('.tabbar button')).toHaveCount(6);
+    // §4: no permanent bottom-nav tab. The bar carries five destinations.
+    await expect(page.locator('.tabbar button')).toHaveCount(5);
     await expect(page.getByTestId('tab-demo')).toHaveCount(0);
 
     await tab(page, 'setup');

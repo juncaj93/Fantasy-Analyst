@@ -53,6 +53,21 @@ export async function exploreMarket(page: Page): Promise<void> {
 }
 
 /**
+ * Open Review, which lives in Settings.
+ *
+ * It is not a destination on the toolbar and deliberately is not: it is
+ * maintenance, reached from the Settings row that says how much of it is
+ * waiting. One helper rather than two lines in every spec that needs the queue,
+ * because where Review lives is a product decision and a suite that spelled it
+ * out a dozen times would be a dozen places to edit when it moves again.
+ */
+export async function openReview(page: Page): Promise<void> {
+  await page.getByTestId('tab-setup').click();
+  await page.getByTestId('setup-review').click();
+  await page.getByTestId('setup-detail-review').waitFor();
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one

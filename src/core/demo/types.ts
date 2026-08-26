@@ -30,9 +30,9 @@ export const FIXTURE_VERSION = '2026.09.1';
 /**
  * The production surfaces a scenario can speak to.
  *
- * Named after the destinations in the toolbar plus the two shared sheets, so
- * "which screens is this scenario about" is answerable without knowing anything
- * about routes.
+ * Named after the app's screens — the destinations in the toolbar, Review and
+ * Setup, which share one of them, and the two shared sheets — so "which screens
+ * is this scenario about" is answerable without knowing anything about routes.
  */
 export type DemoSurface =
   | 'draft'

@@ -415,7 +415,12 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
   tallies are real and computed; the timeline says there is nothing to show, and
   the expanded card's takeaway is `null` rather than templated.
 - **Review and newsletter queues are empty** in every scenario, for the same
-  reason.
+  reason — and the overview's `pendingEvidence` and `pendingIdentity` are `0` to
+  match. They have to be: Review's row in Settings prints the sum of those two
+  as a sentence and the Setup destination carries a dot when it is above zero,
+  so a borrowed count would be a scenario saying "2 items need attention" above
+  a queue with nothing in it. The unresolved names a messy scenario does model
+  are a different ledger and are shown where they belong, on **Help my scores**.
 - **No portrait, ever.** A fixture player id is not a Sleeper player id, so
   `playerHeadshotUrl` returns null for every one of them and the focused view
   draws its deterministic initials instead. That is the intended state and not a
