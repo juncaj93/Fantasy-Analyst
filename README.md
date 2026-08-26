@@ -181,9 +181,12 @@ and the exact board that was complained about becomes a regression test.
 
 Nothing is uploaded. There is no support backend, no telemetry and no
 collection: the file goes where you send it. Sleeper usernames and user ids
-become `manager-1`; cookies, tokens, provider keys, your passphrase, email
-addresses and newsletter text are refused outright rather than trimmed, and
-each snapshot carries the list of what was taken out of it. See
+become `manager-1`, and so do the league and draft ids — a league id is one
+public Sleeper URL away from every manager's username, so aliasing the people
+and printing the league would be a redaction that removed nothing. Cookies,
+tokens, provider keys, your passphrase, email addresses and newsletter text are
+refused outright rather than trimmed, and every snapshot carries the list of
+what was taken out of it. See
 [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md).
 
 **Setup** — the whole configuration experience in plain language: connect
