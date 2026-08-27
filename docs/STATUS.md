@@ -3121,3 +3121,68 @@ No budget raised. Measured against `51d068c`: app JavaScript **130.6 kB**
 against a 140.0 kB ceiling (−0.3 kB, the removed listener), CSS **14.3 kB**
 against 20.0 kB, everything the browser must fetch **146.4 kB** against 160.0
 kB, Demo Mode's lazy chunks **149.0 kB** against 150.0 kB — unchanged.
+
+## Milestone — the draft card carries the insight (done)
+
+A wording pass and a hierarchy pass on the same object, and both are about what
+a card spends its lines on.
+
+**Three labels, shorter.** `Newsletter takeaway` is `Insight`; the provider's
+`2026 Season Outlook` is `2026 outlook`; `Read the full outlook` is `Full
+outlook`. And the attribution that ran after every takeaway — `— Demo FF
+Newsletter` — is no longer printed. This app has one newsletter, so it was the
+same four words under every player, spending the end of the one line the section
+exists for; `LatestNews` under it has withheld a source that never varies for
+exactly that reason since it was written. Nothing is lost: the name is on the
+element's title, in its accessible text, and on every row of the evidence
+timeline, which is the surface that exists to answer where something came from.
+The heading is now built from the season rather than trimmed out of the
+provider's title, because trimming a provider's words is how a heading starts
+saying something the provider did not — the attribution that *is* a quotation,
+`— Rotowire, via Sleeper`, still runs inside the paragraph.
+
+**The draft card spends two of its lines differently.** It rested at the working
+behind the row's own market deltas — `Sleeper ADP 6.4 · DOG ADP 7.7 · Pick 1 ·
+Val -5.4` — and its last-season band opened with a preseason figure the row
+already prints as `PTS`. Both are gone from the card and neither is gone from
+the screen: the row prints the deltas and carries the raw market and the pick in
+the title of the metric that shows them, and `PTS` is on the row itself. The one
+thing genuinely retired is the `Val` column, which the compact row stopped
+printing in an earlier pass and which nothing else draws.
+
+What took their place is the one thing a collapsed row cannot say: `Insight`,
+and under it `Latest news` — one item at rest, three when the card is opened in
+full, so the card's existing single control does the expanding rather than a new
+one. The reading is now Insight → Latest news → 2026 outlook → 2025 GP and rank,
+with the named `Full outlook` in the slot `.detail-foot` was built for: last
+season on the left, the way in on the right, one line for both. That control is
+new only in being *named* — the blurb has expanded itself since the card was cut
+down, which is the right affordance inside a paragraph that visibly runs out of
+room and a poor one as the only way in, because nothing on the card said it was
+there. It is drawn only where there is something behind it.
+
+**The height guard moved, deliberately, and it moved to the units it is about.**
+It was a ratio against the board's own collapsed rows, ceiling three, which was
+right while a card's content was roughly proportional to its row's. The insight
+broke that: a player with a busy ledger and no market line has the shortest
+collapsed row on the board and the most to say underneath it — Silas Mbeki's row
+is 59px and his card is 176px, a ratio of four and a perfectly reasonable card.
+So the rule the rationale actually states, *opening a player must not cost you
+the board you opened him from*, is asserted directly: the disclosed part of the
+card against the height of the phone, under 40%. Measured at 390×844 on the demo
+board, worst case of each: 21% of the viewport and 4.0 collapsed rows. The
+article this guard was written to catch was eight to nine rows and most of the
+screen, and it still fails on that.
+
+**Coverage.** `draft-card.spec.ts` gained the hierarchy — both branches of it,
+because which of `Insight` and `Latest news` a player carries depends on his
+ledger and the pair is the point — plus the named control and the two removals,
+and its band assertion now names `Market - ` among the spellings it refuses.
+`draft-market-delta.spec.ts` asserts the working where it now lives, on the
+title of the delta that was made from it.
+
+No budget raised: app JavaScript 130.6 kB against 140.0 kB, CSS 14.3 kB against
+20.0 kB, first paint 146.5 kB against 160.0 kB, Demo Mode 149.0 kB against
+150.0 kB. The Draft card's second request — the ledger, for the news under the
+insight — is made only when a card is opened, so a board of forty rows still
+costs nothing until one of them is tapped.

@@ -127,17 +127,28 @@ test.describe('the newsletter takeaway on an expanded card', () => {
     await expect(takeaway, 'a player with applied newsletter evidence carried no takeaway').toBeVisible();
 
     /*
-     * The sentence, without the attribution the card prints after it.
+     * The sentence, without the provenance travelling with it.
      *
-     * `— Demo FF Newsletter` is the card naming its source and is not part of
-     * what the newsletter said, so it is removed before the text is compared
-     * against what the API stores.
+     * `— Demo FF Newsletter` used to run after the sentence and no longer does:
+     * this app has one newsletter, so it was the same four words under every
+     * player, spending the end of the one line the section exists for. It is
+     * kept where it costs nothing — the element's title and its accessible
+     * text — and both are removed here, because what is being compared against
+     * the API is what the newsletter said.
      */
     const sentence = await takeaway.evaluate((el) => {
       const clone = el.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll('.faint').forEach((n) => n.remove());
+      clone.querySelectorAll('.faint, .sr-only').forEach((n) => n.remove());
       return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
     });
+    // The label reads INSIGHT, and the source is not printed beside the words.
+    await expect(page.getByTestId('player-page-snapshot')).toContainText('Insight');
+    const painted = await takeaway.evaluate((el) => {
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('.sr-only').forEach((n) => n.remove());
+      return (clone.textContent ?? '').trim();
+    });
+    expect(painted, 'the source name is printed beside the sentence again').not.toContain('Newsletter');
 
     const file = await page.evaluate(async () => (await fetch('/api/players/1001')).json());
     const stored: string[] = file.evidence

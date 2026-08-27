@@ -14,10 +14,12 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   InjuryDetail,
   LastSeasonLine,
+  LatestNews,
   NewsletterTakeaway,
   ProfileFlags,
   SeasonOutlook,
   usePlayerDetail,
+  usePlayerLedger,
 } from '../components/playerDetail.tsx';
 import {
   api,
@@ -1665,60 +1667,6 @@ function marketLineTitle(rec: DraftRecommendation): string | undefined {
 }
 
 /**
- * The raw numbers the compact row's deltas were made from — one line.
- *
- * The row says `ADP +6` because it is answering "what does taking him here cost
- * me against this market", which is the decision. This is the working: both
- * markets' own positions, the pick they were measured against, and the value
- * column the row no longer prints. A reader who wants to check the arithmetic
- * can, and a reader who wants the raw market position — to compare against
- * somewhere else, or because they think in ADP — still has it.
- *
- * It sits in the expanded card's resting state, above the disclosure, because
- * it is the working for a number the reader has just tapped and one line is
- * what it costs. The rest of the market — what the points are made of, who
- * priced them — is provenance rather than working, and lives behind the card's
- * one control.
- *
- * Nothing is computed here; every number is one the board already sent.
- */
-function MarketRaw({
-  rec,
-  currentPick,
-}: {
-  rec: DraftRecommendation;
-  /** The pick the row's deltas were measured against, printed as the working. */
-  currentPick: number | null;
-}) {
-  if (rec.adp == null && rec.dogAdp == null) return null;
-  return (
-    <div className="market-raw" data-testid="market-raw">
-      <span className="metric">
-        Sleeper ADP <strong>{rec.adp == null ? <Unknown what="Sleeper ADP" /> : rec.adp}</strong>
-      </span>
-      {rec.dogAdp == null ? null : (
-        <span className="metric" data-testid="market-raw-dog">
-          DOG ADP <strong>{rec.dogAdp}</strong>
-        </span>
-      )}
-      {currentPick == null ? null : (
-        <span className="metric">
-          Pick <strong>{currentPick}</strong>
-        </span>
-      )}
-      <span className="metric">
-        Val{' '}
-        <strong
-          className={rec.adpValue == null ? '' : rec.adpValue > 0 ? 'sig-pos' : rec.adpValue < 0 ? 'sig-neg' : ''}
-        >
-          {rec.adpValue == null ? <Unknown what="value" /> : `${rec.adpValue > 0 ? '+' : ''}${rec.adpValue}`}
-        </strong>
-      </span>
-    </div>
-  );
-}
-
-/**
  * Where the `MKT` line's numbers came from.
  *
  * The card has room for the quantities and not for their provenance, so the
@@ -2244,7 +2192,7 @@ function RecommendationRow({
         and never forty.
       */}
       <Disclose open={expanded}>
-        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} currentPick={currentPick} />
+        <DraftPlayerDetail rec={rec} marketSource={marketSource} scoringLabel={scoringLabel} />
       </Disclose>
     </div>
   );
@@ -2262,16 +2210,25 @@ function RecommendationRow({
  * off a phone. Opening a player should not cost you the board you opened him
  * from.
  *
- * So the card now rests at four things — where his position is breaking, the
- * raw markets behind the row's deltas, two lines of outlook, and last season on
- * one line — and everything else is behind a single control. One control, not
- * one per section: a card with three "more" links is a card the reader has to
- * shop in, and the whole point is that a draft pick is a thirty-second
- * decision.
+ * A fourth pass then changed *what* the short card spends its rows on, rather
+ * than how many it has. It rests at five things now — where his position is
+ * breaking, the newsletter insight, the news items behind it, two lines of
+ * outlook, and last season on one line — and everything else is behind a single
+ * control. One control, not one per section: a card with three "more" links is
+ * a card the reader has to shop in, and the whole point is that a draft pick is
+ * a thirty-second decision.
  *
- * What that control reveals is not new and not summarised — it is the same
- * newsletter takeaway, market provenance, injury detail and profile flags this
- * card has always drawn, plus the outlook at full length, all from
+ * Two lines paid for the insight, and both were the card repeating the row
+ * above it. `Sleeper ADP 6.4 · DOG ADP 7.7 · Pick 1 · Val -5.4` was the working
+ * behind deltas the row already prints, and which it also carries raw in its
+ * own title; the preseason `Market — 292 Pts` that led the last-season band is
+ * the `PTS` metric on the row, from the same snapshot. What went in their place
+ * is the one thing a collapsed row genuinely cannot say: the sentence explaining
+ * why the tally beside his name reads the way it does.
+ *
+ * What the control reveals is not new and not summarised — it is the same
+ * market provenance, injury detail and profile flags this card has always
+ * drawn, plus the outlook at full length, all from
  * `components/playerDetail.tsx`, which every other screen also uses. Nothing
  * was deleted to make the card short; it was moved one tap further in.
  *
@@ -2283,21 +2240,41 @@ function DraftPlayerDetail({
   rec,
   marketSource,
   scoringLabel,
-  currentPick,
 }: {
   rec: DraftRecommendation;
   marketSource: DraftBoard['marketSource'];
   scoringLabel: string | null;
-  /** The pick the compact row's market deltas were measured against. */
-  currentPick: number | null;
 }) {
   const { detail, failed } = usePlayerDetail(rec.playerId);
+  /*
+   * The ledger, for the news under the insight.
+   *
+   * A second request when a card opens, and only when one does — the board
+   * itself reads none of this, so forty rows still cost nothing until one is
+   * tapped, and a ledger the network could not deliver costs this one block.
+   */
+  const news = usePlayerLedger(rec.playerId);
   /*
    * Resets itself, because `Disclose` unmounts this component a moment after
    * the row closes. A player reopened is a player looked at afresh, and a card
    * that remembered being fully open would reopen at nine rows tall.
    */
   const [everything, setEverything] = useState(false);
+
+  /*
+   * Whether the card is holding anything back, which is what the control at the
+   * bottom is allowed to promise.
+   *
+   * Asked rather than assumed, because a `Full outlook` under a player with no
+   * outlook, no injury and no flags is a control that opens nothing — and a
+   * reader who taps one of those once stops trusting the next.
+   */
+  const more =
+    (detail?.outlook?.summarised ?? false) ||
+    detail?.injury != null ||
+    detail?.injuryContext != null ||
+    (detail?.profile.flags.length ?? 0) > 0 ||
+    (rec.marketProps?.components.length ?? 0) > 0;
 
   return (
     <div className="explain explain-compact" data-testid="player-detail" data-everything={everything ? 'yes' : 'no'}>
@@ -2315,20 +2292,51 @@ function DraftPlayerDetail({
       ) : null}
 
       {/*
-        The working for the deltas on the row above, one line, always shown.
-        The provenance behind it is a different question and waits below.
+        The insight, at the top of the card and no longer behind the control.
+
+        This is the one thing on the card the collapsed row underneath cannot
+        say. The row carries the tally as a signed number; the sentence saying
+        *why* it reads that way was three taps of scrolling and one disclosure
+        away, which on a thirty-second draft decision is the same as absent.
+
+        What paid for it is the line that used to sit here: `Sleeper ADP 6.4 ·
+        DOG ADP 7.7 · Pick 1 · Val -5.4`, the working behind the row's own
+        deltas. The row prints those deltas and carries the raw markets and the
+        pick in its title, so the working is a subtraction the reader can watch
+        being done rather than a fact only this card held — see `MarketDelta`.
+        The rest of the market, including what those numbers were made of, is
+        still one tap in under `Market`.
       */}
-      <MarketRaw rec={rec} currentPick={currentPick} />
+      <NewsletterTakeaway detail={detail} />
+
+      {/*
+        And the items behind it, newest first, minus whatever the insight above
+        already quoted.
+
+        **One at rest, three when the card is opened in full**, which is the
+        card's existing control doing the expanding rather than a new one. This
+        is a draft board and the card is measured against the board it covers:
+        two items cost a player with a busy ledger a whole extra collapsed row,
+        and the reader who wants the second one has already told the card so by
+        opening it. `LatestNews` says how many are left rather than truncating
+        in silence, and draws nothing at all — heading included — for the many
+        players nobody has written about.
+      */}
+      <LatestNews
+        items={news}
+        quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []}
+        limit={everything ? 3 : 1}
+      />
+
       {/*
         Two lines by default, and the text is its own control.
 
         Clamped in the stylesheet rather than cut here, so the paragraph in the
         DOM is the one the provider wrote and the ellipsis is the browser's.
-        What changed is what expands it: there was a `Full detail` link under
-        the card, and the reader had to find a second target to read a sentence
-        they were already looking at. Tapping the prose expands the prose. That
-        is the affordance every truncated block on a phone has, it needs no
-        label, and it gives the card its last row back.
+        Tapping the prose expands the prose: that is the affordance every
+        truncated block on a phone has, it needs no label, and the labelled
+        control at the foot of the card does the same thing for anyone who wants
+        to be told.
 
         `stopPropagation`, because the row beneath is a toggle and reading more
         of a blurb is not "collapse this player".
@@ -2356,12 +2364,6 @@ function DraftPlayerDetail({
 
       {everything ? (
         <>
-          {/*
-            Why the tally reads the way it does. Below the outlook now rather
-            than above it: at rest the card is a snapshot, and once the reader
-            has asked for everything the order is the reading order.
-          */}
-          <NewsletterTakeaway detail={detail} />
           <MarketProvenance rec={rec} source={marketSource} scoringLabel={scoringLabel} />
           <InjuryDetail detail={detail} />
           <ProfileFlags detail={detail} />
@@ -2369,18 +2371,46 @@ function DraftPlayerDetail({
       ) : null}
 
       {/*
-        The market and last season, on the card's last line and alone on it.
+        Last season, on the card's last line and alone on it.
 
-        The `Full detail` link that used to share this row is gone: the blurb
-        above expands itself now, which is one fewer control and one fewer thing
-        to explain. What used to be a second line under it — the preseason
-        figure with its source, its capture date and the league's scoring
-        profile spelled out beside it — is one metric in the same band now. See
-        `LastSeasonLine`: nothing about the number changed, and the provenance
-        travels with it in the title and the accessible text.
+        The preseason market figure that used to lead this band is gone from
+        *this* card and from nowhere else: the compact row two lines up prints
+        `PTS` from the same snapshot, so the band was answering a question the
+        card had already answered. See `LastSeasonLine`, whose `market` prop is
+        false only here.
       */}
       <div className="detail-foot">
-        <LastSeasonLine detail={detail} failed={failed} position={rec.position} />
+        <LastSeasonLine detail={detail} failed={failed} position={rec.position} market={false} />
+        {/*
+          The same control the prose above is, with a name on it.
+
+          The blurb has been its own control since the card was cut down, and an
+          unlabelled affordance is the right trade inside a paragraph that
+          visibly runs out of room — but it was the *only* way in, and nothing
+          on the card said so. This is the named one, back in the slot
+          `.detail-foot` was built for: last season on the left, the way in on
+          the right, one line for both, so saying it costs no height at all. The
+          chevron is the same one every disclosure in the app uses.
+
+          Drawn only when there is something behind it. A `Full outlook` under a
+          player with no outlook, no injury and no flags is a control that opens
+          nothing, and a reader who taps one of those once stops trusting the
+          next.
+        */}
+        {more ? (
+          <button
+            type="button"
+            className="link-button detail-more"
+            data-testid="draft-outlook-toggle"
+            aria-expanded={everything}
+            onClick={(e) => {
+              e.stopPropagation();
+              setEverything((v) => !v);
+            }}
+          >
+            {everything ? 'Short version' : 'Full outlook'}
+          </button>
+        ) : null}
       </div>
     </div>
   );

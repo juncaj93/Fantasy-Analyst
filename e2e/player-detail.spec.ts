@@ -311,7 +311,16 @@ test.describe('the expanded player, opened from Players', () => {
     // card that duplicates nothing, and the pass that removed four blocks is
     // exactly the pass that would take it by accident.
     await expect(page.getByTestId('outlook')).toContainText('via Sleeper');
-    await expect(page.getByTestId('player-page-snapshot')).toContainText(/20\d\d Season Outlook/);
+    /*
+     * The heading is the season and one word.
+     *
+     * It was the provider's own title, `2026 Season Outlook`, which spent a
+     * third of the line on a noun the paragraph beneath it already is. The
+     * attribution that *is* a quotation — `— Rotowire, via Sleeper` — is
+     * asserted on the line above and did not move.
+     */
+    await expect(page.getByTestId('player-page-snapshot')).toContainText(/20\d\d outlook/i);
+    await expect(page.getByTestId('player-page-snapshot')).not.toContainText(/Season Outlook/i);
 
     await expectNotAConsole(page);
 

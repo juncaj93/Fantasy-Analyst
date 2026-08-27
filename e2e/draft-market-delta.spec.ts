@@ -211,11 +211,18 @@ test.describe('the compact row shows market consequence', () => {
   });
 
   /**
-   * A delta a reader cannot check is a number taken on faith, so the expanded
-   * card still carries both raw markets and the pick they were measured
-   * against — answer on the row, working underneath it.
+   * A delta a reader cannot check is a number taken on faith — so the raw
+   * market and the pick it was measured against travel with the delta itself.
+   *
+   * They used to be printed on the expanded card as well, as `Sleeper ADP 6.4 ·
+   * DOG ADP 7.7 · Pick 1 · Val -5.4`. That line was the working for a number
+   * one line above it, on a card budgeted in rows, and its place went to the
+   * newsletter insight — the one thing the collapsed row genuinely cannot say.
+   * Nothing about checking the arithmetic changed: the subtraction is named in
+   * full on the metric that shows the answer, where a reader who wants it does
+   * not have to open the card at all.
    */
-  test('keeps the raw markets and the pick on the expanded card', async ({ page }) => {
+  test('keeps the raw market and the pick on the delta that was made from them', async ({ page }) => {
     await openDraft(page);
     const board = await boardJson(page);
     const priced = board.recommendations.find((r) => r.adp != null)!;
@@ -223,14 +230,14 @@ test.describe('the compact row shows market consequence', () => {
 
     const row = page.locator(`[data-testid="recommendation-row"][data-player-id="${priced.playerId}"]`);
     await row.scrollIntoViewIfNeeded();
-    await row.click();
 
-    const raw = row.getByTestId('market-raw');
-    await expect(raw).toBeVisible();
-    await expect(raw).toContainText(`${priced.adp}`);
-    await expect(raw).toContainText(`${board.currentPick}`);
-    // …and the value column the compact row stopped printing is here.
-    await expect(raw).toContainText('Val');
+    const spoken = (await row.getByTestId('adp-metric').locator('strong').getAttribute('title')) ?? '';
+    expect(spoken, 'the delta does not name the market it was measured against').toContain(`${priced.adp}`);
+    expect(spoken, 'the delta does not name the pick it was measured against').toContain(`${board.currentPick}`);
+
+    // And the card underneath no longer repeats it.
+    await row.click();
+    await expect(row.getByTestId('market-raw')).toHaveCount(0);
   });
 });
 

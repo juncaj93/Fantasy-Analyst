@@ -781,12 +781,19 @@ test.describe('draft room', () => {
     expect(shown).toBe(stored.outlook.fullText);
     expect(shown.length).toBeGreaterThan(300);
 
-    // The provider's own title is part of "everything", not part of the
-    // snapshot: a heading over two clamped lines names prose that already names
-    // itself.
-    await expect(withOutlook.getByText(/season outlook/i)).toHaveCount(0);
+    /*
+     * The heading is part of "everything", not part of the snapshot: a heading
+     * over two clamped lines names prose that already names itself.
+     *
+     * `2026 outlook` rather than the provider's `2026 Season Outlook`, which
+     * spent a third of the line on a noun the paragraph under it already is.
+     * The attribution that is a quotation — `— demo, via Sleeper` — is asserted
+     * inside the paragraph above and did not move.
+     */
+    await expect(withOutlook.getByText(/20\d\d outlook/i)).toHaveCount(0);
     await withOutlook.getByTestId('outlook-expand').click();
-    await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
+    await expect(withOutlook.getByText(/20\d\d outlook/i)).toBeVisible();
+    await expect(withOutlook.getByText(/Season Outlook/i), 'the provider title is back').toHaveCount(0);
     await withOutlook.locator('.row-button').click();
 
     const without = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();

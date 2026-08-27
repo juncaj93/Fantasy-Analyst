@@ -217,11 +217,11 @@ test.describe('what the line is made of', () => {
     /*
      * The provenance sits behind the compact card's one control.
      *
-     * What the expanded row rests at is the *working* — `market-raw`, the two
-     * raw markets and the pick they were measured against, which is one line.
-     * Which books priced which component, and what this app added together, is
-     * a different question and a much longer answer, so it waits until it is
-     * asked for. `draft-market-delta.spec.ts` owns the resting line.
+     * What the expanded row rests at is the player — the newsletter insight,
+     * the news behind it and two lines of outlook. Which books priced which
+     * component, and what this app added together, is a different question and
+     * a much longer answer, so it waits until it is asked for.
+     * `draft-market-delta.spec.ts` owns where the raw markets live now.
      */
     await row.getByTestId('outlook-expand').click();
 

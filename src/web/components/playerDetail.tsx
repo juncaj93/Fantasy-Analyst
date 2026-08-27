@@ -56,6 +56,54 @@ export function usePlayerDetail(playerId: string): { detail: PlayerDetail | null
   return { detail, failed };
 }
 
+/** One item of the ledger, as the browser receives it. */
+export interface PlayerNewsItem {
+  id: string;
+  sourceName: string;
+  sourceDate: string;
+  excerpt: string;
+  contextSummary: string | null;
+  ruleId?: string | null;
+  polarity: string;
+  userOverride: { polarity?: string; note?: string } | null;
+}
+
+/**
+ * The newsletter ledger for one player, fetched when a card opens.
+ *
+ * The same request `usePlayerRecord` makes on the player page and in the sheet,
+ * asked for on its own by the one surface that wants the ledger and nothing
+ * else around it: Draft's expanded row, which needs {@link LatestNews} under
+ * its insight and has no use for the signal windows, the prop table or the
+ * heart. No screen runs both hooks, so this is a second caller of an endpoint
+ * rather than a second request for it.
+ *
+ * Like {@link usePlayerDetail} it fetches only once a card is actually open, so
+ * a board of forty rows costs nothing until one of them is tapped, and a
+ * failure costs this one block rather than the card.
+ */
+export function usePlayerLedger(playerId: string): PlayerNewsItem[] | null {
+  const [items, setItems] = useState<PlayerNewsItem[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    api
+      .get<{ evidence: PlayerNewsItem[] }>(`/api/players/${playerId}`)
+      .then((file) => {
+        if (!cancelled) setItems(file.evidence);
+      })
+      .catch(() => {
+        /* The section draws its skeleton and then nothing; the card is intact. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
+
+  return items;
+}
+
 /**
  * One sentence saying why the tally reads the way it does.
  *
@@ -76,16 +124,35 @@ export function usePlayerDetail(playerId: string): { detail: PlayerDetail | null
 export function NewsletterTakeaway({ detail }: { detail: PlayerDetail | null }) {
   const takeaway = detail?.newsletterTakeaway;
   if (!takeaway) return null;
+  /*
+   * Who said it, and how many of them — kept, and no longer printed.
+   *
+   * It used to run as ` — Demo FF Newsletter` after the sentence, on every card
+   * that had one. This app has exactly one newsletter, so it was the same four
+   * words under every player: a name that never varies qualifies nothing, and
+   * `LatestNews` two blocks down already withholds a source for that exact
+   * reason. What it cost was the end of the one line the section exists for.
+   *
+   * Nothing is lost. It is on the element's title for a pointer and in the
+   * accessible text for a screen reader, `data-corroboration` still carries the
+   * count, and the rows it was chosen from are in the evidence timeline with
+   * their own sources beside them — which is the surface that exists to answer
+   * "where did this come from".
+   */
+  const provenance =
+    `From ${takeaway.sourceName}` +
+    (takeaway.corroboration > 1 ? `, and ${takeaway.corroboration - 1} more saying the same thing` : '');
   return (
     <>
-      <DetailLabel>Newsletter takeaway</DetailLabel>
-      <div className="takeaway" data-testid="newsletter-takeaway" data-corroboration={takeaway.corroboration}>
+      <DetailLabel>Insight</DetailLabel>
+      <div
+        className="takeaway"
+        data-testid="newsletter-takeaway"
+        data-corroboration={takeaway.corroboration}
+        title={provenance}
+      >
         {takeaway.text}
-        <span className="faint">
-          {' '}
-          — {takeaway.sourceName}
-          {takeaway.corroboration > 1 ? `, and ${takeaway.corroboration - 1} more` : ''}
-        </span>
+        <span className="sr-only"> ({provenance})</span>
       </div>
     </>
   );
@@ -137,6 +204,25 @@ function formatHeight(inches: number): string {
 }
 
 /**
+ * `2026 outlook` — the heading over the provider's paragraph.
+ *
+ * The season and one word. It was the provider's own title, which reads `2026
+ * Season Outlook` and spent a third of the line on a noun the paragraph under
+ * it already is. The title is not lost and was never a quotation the reader
+ * needed: the attribution that *is* a quotation — `— Rotowire, via Sleeper` —
+ * still runs inside the paragraph, and the whole title is still on the payload.
+ *
+ * Built from the season rather than trimmed out of the title, because trimming
+ * a provider's words is how a heading starts saying something the provider did
+ * not. When there is no outlook to head, the season the app would have looked
+ * for is the honest label for the absence.
+ */
+function outlookHeading(detail: PlayerDetail | null): string {
+  const season = detail?.outlook?.season;
+  return season ? `${season} outlook` : 'Season outlook';
+}
+
+/**
  * What is expected of him this season, in the words of whoever wrote it.
  *
  * Sleeper serves this through a public endpoint, and it is editorial writing
@@ -178,7 +264,7 @@ export function SeasonOutlook({
   if (!detail) {
     return (
       <>
-        {heading ? <DetailLabel>Season outlook</DetailLabel> : null}
+        {heading ? <DetailLabel>{outlookHeading(detail)}</DetailLabel> : null}
         <div className="muted" data-testid="outlook-pending">
           Looking it up…
         </div>
@@ -188,7 +274,7 @@ export function SeasonOutlook({
   if (!detail.outlook) {
     return (
       <>
-        {heading ? <DetailLabel>Season outlook</DetailLabel> : null}
+        {heading ? <DetailLabel>{outlookHeading(detail)}</DetailLabel> : null}
         <div className="muted" data-testid="outlook-none">
           {detail.outlookNote ?? 'No outlook published for him.'}
         </div>
@@ -213,7 +299,7 @@ function OutlookBody({
 
   return (
     <>
-      {heading ? <DetailLabel>{outlook.title}</DetailLabel> : null}
+      {heading ? <DetailLabel>{`${outlook.season} outlook`}</DetailLabel> : null}
       <div
         className="outlook"
         data-testid="outlook"
@@ -235,7 +321,7 @@ function OutlookBody({
             setOwn((v) => !v);
           }}
         >
-          {whole ? 'Show the short version' : 'Read the full outlook'}
+          {whole ? 'Short version' : 'Full outlook'}
         </button>
       ) : null}
     </>
@@ -269,16 +355,28 @@ export function LastSeasonLine({
   detail,
   failed,
   position,
+  market = true,
 }: {
   detail: PlayerDetail | null;
   failed: boolean;
   position: string | null;
+  /**
+   * Whether to lead the band with the preseason market reading.
+   *
+   * On everywhere the surface has not already said it. Draft turns it off: its
+   * compact row prints `PTS` two lines up — the same figure, from the same
+   * snapshot — so the band underneath was the card answering a question it had
+   * just answered, in a place budgeted in rows. The number is not withheld from
+   * anybody, it is withheld from being said twice; every other surface that
+   * draws this band has no `PTS` of its own and keeps it.
+   */
+  market?: boolean;
 }) {
   if (failed || !detail) return null;
   const season = detail.lastSeason?.season;
   const games = detail.lastSeason?.gamesPlayed;
   const rank = detail.lastSeason?.positionRank;
-  const projection = detail.preseasonProjection ?? null;
+  const projection = market ? (detail.preseasonProjection ?? null) : null;
   if (!season && !projection) return null;
   return (
     <div className="season-line" data-testid="last-season">
@@ -552,7 +650,7 @@ export function LatestNews({
   limit,
 }: {
   /** The whole ledger for this player, or null while it is being read. */
-  items: { id: string; sourceName: string; sourceDate: string; excerpt: string; contextSummary: string | null; ruleId?: string | null; polarity: string; userOverride: { polarity?: string; note?: string } | null }[] | null;
+  items: PlayerNewsItem[] | null;
   /** Items the takeaway above already quoted, and which this must not repeat. */
   quotedEvidenceIds: string[];
   /** How many of the newest to show before saying how many are left. */

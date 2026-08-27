@@ -848,7 +848,7 @@ is `unknown` and the flag stays silent.
 height and weight out at the boundary rather than trusting the browser to hide
 them: a number shown is a number the reader will weigh.
 
-### Newsletter takeaway (`core/evidence/takeaway.ts`)
+### Newsletter takeaway — `Insight` on screen (`core/evidence/takeaway.ts`)
 
 One sentence explaining what the signed tally already said. It is **selected,
 never written**: the sentence comes from evidence already in the ledger, and the
@@ -873,6 +873,15 @@ It is explanation only. The evidence under it has already been counted once by
 the tally, so the returned object carries `scoreDelta: 0` and no consumer adds
 it to anything. `tests/takeaway.test.ts` pins the headline appearing while the
 aggregate signal is byte-identical before and after.
+
+It is headed `Insight` on every card. The label used to name its provenance —
+`Newsletter takeaway` — and so did the line under it, which ran `— Demo FF
+Newsletter` after the sentence on every player. This app has one newsletter, so
+that was the same four words under everybody, spending the end of the one line
+the section exists for; `LatestNews` beneath it has withheld a source that never
+varies for the same reason since it was written. The name is kept where it costs
+nothing — the element's title, its accessible text, and the evidence timeline,
+where each row carries its own source.
 
 Every screen renders it through `src/web/components/playerDetail.tsx`, which is
 also where the season outlook, the last-season line and the injury sections now
