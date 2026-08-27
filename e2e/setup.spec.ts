@@ -355,6 +355,40 @@ test.describe('newsletter setup', () => {
     await expect(page.getByTestId('panel-newsletter')).toBeVisible();
   });
 
+  /**
+   * Deliver one issue this test owns, and come back to the panel showing it.
+   *
+   * Two things make a shared id unusable here. The history shows the fifteen
+   * most recent, and four browser projects on one dev server put more than
+   * fifteen through it — so a seeded id is present at the first width and gone
+   * by the third. And the database survives between runs, so a fixed id is
+   * `duplicate` the second time it is ever used. Both are answered by an id
+   * that is unique to this project and this moment.
+   */
+  async function deliver(
+    page: Page,
+    issue: { subject: string; html: string },
+  ): Promise<string> {
+    const messageId = `e2e-issue-${test.info().project.name}-${Date.now()}`;
+    const received = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId,
+        from: 'editor@demo.newsletter',
+        subject: `${issue.subject} ${messageId}`,
+        date: new Date().toISOString(),
+        html: `<p>${messageId}</p>${issue.html}`,
+        force: true,
+      },
+    });
+    expect(received.status()).toBe(200);
+
+    // Back in through Setup: a reload would land on Draft and close the panel.
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    await expect(page.getByTestId('panel-newsletter')).toBeVisible();
+    return messageId;
+  }
+
   test('shows the dedicated address and how to use it', async ({ page }) => {
     await expect(page.getByTestId('newsletter-address')).toHaveText('fantasy-news@demo.example');
     await expect(page.getByTestId('panel-newsletter')).toContainText('Subscribe your FF Newsletter to this address');
@@ -437,12 +471,20 @@ test.describe('newsletter setup', () => {
    * card on the football in an issue. Arrival makes no such judgment now, so
    * what is left is the question arrival can honestly answer: did the email
    * decode into readable text, and how much of it is there to hand over.
+   *
+   * The issue is this test's own. The history shows the fifteen most recent,
+   * and four browser projects sharing one dev server put more than fifteen
+   * through it — so a test pinned to a seeded message id passes at the first
+   * width and then quietly loses its subject off the bottom of the list.
    */
   test('shows how much readable text came out of each email', async ({ page }) => {
-    const message = page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]');
+    const id = await deliver(page, {
+      subject: 'Readable text',
+      html: '<p>Marcus Vance took every first-team rep this week.</p>',
+    });
+
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${id}"]`);
     await expect(message).toBeVisible();
-    // The list grows as earlier tests add mail, so the row can sit below the
-    // fold; scroll it in before clicking rather than relying on auto-scroll.
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();
@@ -452,14 +494,42 @@ test.describe('newsletter setup', () => {
     await expect(message).not.toContainText('Turned into a signal');
   });
 
-  /** The seeded world always has one scored issue and one still waiting. */
+  /**
+   * An issue says which it is, and changes when it is scored.
+   *
+   * Asserted as a transition on one issue this test owns rather than as two
+   * facts about the seeded pair: it is the same claim, it does not depend on
+   * anything else in the suite, and it proves the state actually moves rather
+   * than that a fixture was set up correctly.
+   */
   test('says which issues have been scored and which are waiting', async ({ page }) => {
-    await expect(
-      page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]'),
-    ).toHaveAttribute('data-tally-state', 'applied');
-    await expect(
-      page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-2"]'),
-    ).toContainText('waiting to be scored');
+    const id = await deliver(page, {
+      subject: 'Waiting then scored',
+      html: '<p>Owen Fitzgerald worked with the starters throughout Tuesday.</p>',
+    });
+
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${id}"]`);
+    await expect(message).toHaveAttribute('data-tally-state', 'awaiting');
+    await expect(message).toContainText('waiting to be scored');
+
+    const applied = await page.request.post(
+      `/api/newsletter/messages/${encodeURIComponent(id)}/ai-tally/apply`,
+      {
+        data: {
+          text: [
+            'NEWSLETTER_TALLY_V1',
+            `Owen Fitzgerald | +1 | Ran with the starters (${id})`,
+            'END_NEWSLETTER_TALLY',
+          ].join('\n'),
+        },
+      },
+    );
+    expect(applied.status()).toBe(200);
+
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    await expect(message).toHaveAttribute('data-tally-state', 'applied');
+    await expect(message).toContainText('scored');
   });
 
   /**
@@ -502,7 +572,16 @@ test.describe('newsletter setup', () => {
       },
     });
     expect(received.status()).toBe(200);
-    await page.reload();
+    /*
+     * Back through Setup rather than `page.reload()`.
+     *
+     * A reload lands on Draft, which is where the app opens — so reloading to
+     * pick up the new issue closed the very panel this test is standing in.
+     * Re-entering is what a person would do, and it re-reads the list on the
+     * way.
+     */
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
     await expect(page.getByTestId('panel-newsletter')).toBeVisible();
 
     const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${issueId}"]`);
