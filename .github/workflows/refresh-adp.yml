@@ -71,7 +71,11 @@ jobs:
           curl -s -b /tmp/cookies.txt "$URL/api/adp/snapshots" | node -e "
             let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
               const r = JSON.parse(s);
-              for (const snap of (r.snapshots ?? []).slice(0, 8)) console.log(JSON.stringify(snap));
+              const all = r.snapshots ?? [];
+              console.log('snapshots in total:', all.length);
+              for (const snap of all.filter((x) => String(x.source).startsWith('beatadp'))) {
+                console.log(snap.source, '|', snap.label, '| captured', snap.capturedAt, '| matched', snap.matchedCount);
+              }
             })"
 
       - name: Fetch the ADP
