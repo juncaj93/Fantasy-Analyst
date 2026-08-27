@@ -30,17 +30,48 @@ export const parseState = (body) => {
   const empty = { failing: {} };
   if (typeof body !== 'string') return empty;
   const start = body.indexOf(OPEN);
-  if (start === -1) return empty;
+  if (start === -1) return fromTable(body);
   const end = body.indexOf(CLOSE, start + OPEN.length);
-  if (end === -1) return empty;
+  if (end === -1) return fromTable(body);
   try {
     const parsed = JSON.parse(body.slice(start + OPEN.length, end));
     const failing = parsed && typeof parsed === 'object' ? parsed.failing : null;
-    if (!failing || typeof failing !== 'object') return empty;
+    if (!failing || typeof failing !== 'object') return fromTable(body);
     return { failing: { ...failing } };
   } catch {
-    return empty;
+    return fromTable(body);
   }
+};
+
+/**
+ * The same state, read back out of the table a human reads.
+ *
+ * The marker is the store; this is what happens when it is not there — an
+ * issue somebody edited, or a renderer somewhere that strips HTML comments.
+ * Without it a lost marker would silently reset every count to one and leave
+ * the issue open forever, because nothing would remember what it was tracking.
+ *
+ * Everything the table prints comes back; the seconds do not, and nothing
+ * depends on them.
+ */
+const fromTable = (body) => {
+  const failing = {};
+  //   | job | 2026-08-16 11:45 UTC (11 days) | 12 | [run 16](url) — 2026-08-27 11:45 UTC |
+  const row =
+    /^\|\s*([^|]+?)\s*\|\s*(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) UTC[^|]*\|\s*(\d+)\s*\|\s*(?:\[run ([^\]]*)\]\(([^)]*)\)|run ([^—|]*?))\s*—\s*(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) UTC\s*\|$/;
+  for (const line of body.split('\n')) {
+    const match = row.exec(line.trim());
+    if (!match) continue;
+    const [, workflow, sinceDay, sinceTime, count, runNumber, runUrl, plainRun, atDay, atTime] = match;
+    failing[workflow] = {
+      since: `${sinceDay}T${sinceTime}:00Z`,
+      count: Number(count),
+      at: `${atDay}T${atTime}:00Z`,
+      runUrl: runUrl ?? '',
+      runNumber: (runNumber ?? plainRun ?? '').trim(),
+    };
+  }
+  return { failing };
 };
 
 /**

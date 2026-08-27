@@ -144,6 +144,33 @@ describe('what the issue remembers', () => {
     expect(parseState(undefined)).toEqual({ failing: {} });
   });
 
+  /*
+   * The hidden marker is the store, and the table is what a person reads — but
+   * an issue somebody has edited, or a client that strips HTML comments, would
+   * leave the marker gone. Losing it silently would reset every count to one
+   * and leave the issue open after the fix, so the table is read as a fallback.
+   */
+  it('reads the table back when the hidden marker is gone', () => {
+    let state: State = empty();
+    ({ state } = nextState(state, event()));
+    ({ state } = nextState(state, event({ at: '2026-08-27T11:45:00Z', runNumber: '16' })));
+
+    const body = renderIssueBody(state);
+    const withoutMarker = body.slice(0, body.indexOf('<!-- scheduled-job-alert:state'));
+    expect(withoutMarker).not.toContain('scheduled-job-alert:state');
+
+    const recovered = parseState(withoutMarker).failing['Refresh draft order'];
+    expect(recovered['count']).toBe(2);
+    expect(recovered['since']).toBe('2026-08-16T11:45:00Z');
+    expect(recovered['at']).toBe('2026-08-27T11:45:00Z');
+    expect(recovered['runNumber']).toBe('16');
+    expect(recovered['runUrl']).toBe('https://github.com/o/r/actions/runs/1');
+
+    // And a job counted from the table still recovers, rather than being stuck.
+    const { state: after } = nextState(parseState(withoutMarker), event({ result: 'success' }));
+    expect(shouldBeOpen(after)).toBe(false);
+  });
+
   it('counts repeated failures against one entry, keeping the day it started', () => {
     let state: State = empty();
     for (let day = 16; day <= 27; day++) {
