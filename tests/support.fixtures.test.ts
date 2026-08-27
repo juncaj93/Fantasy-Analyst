@@ -145,6 +145,30 @@ describe('committed support fixtures', () => {
       it('is canonical on disk, so a re-write is an empty diff', () => {
         expect(raw).toBe(canonicalSnapshotJson(snapshot));
       });
+
+      /**
+       * A fixture earns its place when its inputs cannot be regenerated.
+       *
+       * A snapshot captured from a *demo scenario* is the opposite: the
+       * scenarios are deterministic and their fixtures are already committed, so
+       * such a file is byte-for-byte regenerable from code in this same
+       * repository, and its only non-duplicated content is an assertion that the
+       * engine produced that answer on the day it was written. This repository
+       * pins invariants rather than outputs.
+       *
+       * The check is `release.gitSha`, because a demo capture says `demo` there
+       * precisely so a rehearsal can never be mistaken for a deployment — which
+       * makes it the one field that tells the two apart. It is here rather than
+       * in a review checklist because a `--write` in a test run has already
+       * leaked one into a commit once, and a rule nothing enforces is a rule
+       * that holds until somebody is in a hurry.
+       */
+      it('came from a deployment rather than from a rehearsal', () => {
+        expect(
+          snapshot.release.gitSha,
+          `${name} was captured from Demo Mode, and a demo scenario is regenerable from this repository`,
+        ).not.toBe('demo');
+      });
     });
   }
 });
