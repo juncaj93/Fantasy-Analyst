@@ -216,6 +216,21 @@ async function openMock(page: Page) {
   await page.getByTestId('draft-board-open').click();
   await page.getByTestId('go-mock-draft').click();
   await expect(page.getByTestId('mock-draft')).toBeVisible();
+  /*
+   * Open means "the room has answered", not "the layer is on screen".
+   *
+   * The layer paints immediately, in `loading`, while the first board request
+   * is still in the air — so a test that acted the moment it appeared was
+   * racing that request. On a slower runner the race is lost: WebKit at 360
+   * swapped in a 409 route before the opening `start` had been served, the
+   * rehearsal was voided by its own first request, no rows were ever drawn, and
+   * the click that followed waited for a row that was never coming.
+   *
+   * Waiting on the phase rather than on a row is deliberate: it is the same
+   * precondition for a board with players on it, a finished rehearsal with none,
+   * and a voided one, so every test below gets it without knowing which it is.
+   */
+  await expect(page.getByTestId('mock-draft')).not.toHaveAttribute('data-phase', 'loading');
 }
 
 test.describe('the ▦ leads to three places, and costs the header nothing', () => {
@@ -393,6 +408,17 @@ test.describe('a mock draft', () => {
     await openMock(page);
 
     /*
+     * A rehearsal genuinely under way, before the world changes under it.
+     *
+     * Named rather than left to `openMock`'s own wait, because it is this
+     * test's whole premise: the reader is mid-mock with players on the board,
+     * and *then* the real draft starts. A voided-on-arrival rehearsal would
+     * pass the assertions below while testing nothing.
+     */
+    const row = page.locator('[data-testid^="mock-row-"]').first();
+    await expect(row).toBeVisible();
+
+    /*
      * The draft starts underneath. The server refuses the next mock request
      * with a 409 and the screen says so — it does not retry, because there is
      * nothing a retry could reach.
@@ -406,7 +432,7 @@ test.describe('a mock draft', () => {
       }),
     );
 
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await row.getByRole('button').first().click();
     await expect(page.getByTestId('mock-voided')).toContainText('no longer exists');
     expect(
       await page.evaluate(() => Object.keys(window.localStorage).filter((k) => k.startsWith('fa.mock.'))),
