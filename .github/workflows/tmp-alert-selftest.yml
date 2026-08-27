@@ -1,0 +1,26 @@
+name: TEMP alert self-test
+
+# Temporary. Proves the alarm fires by failing on purpose, on this branch only,
+# and is removed before merge.
+
+on:
+  push:
+    branches: [claude/new-session-smbrgq]
+
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail on purpose
+        run: exit 1
+
+  alert:
+    needs: work
+    if: always()
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: TEMP alert self-test
+      result: ${{ needs.work.result }}
