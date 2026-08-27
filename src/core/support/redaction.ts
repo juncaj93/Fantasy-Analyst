@@ -276,8 +276,34 @@ export class SnapshotAliases {
    * word character, so a name wrapped in punctuation is still replaced.
    */
   scrub(text: string): string {
+    return this.replaceIn(text, [this.byId, this.byName, this.byScope, this.byLabel]);
+  }
+
+  /**
+   * The same, over identifiers only — never over a display name.
+   *
+   * A Sleeper user id, a league id and a league name are high-entropy strings
+   * that appear in prose only because something composed them into it. A
+   * *display name* is whatever a manager typed, and short common words are
+   * ordinary: this app's own seeded league has a manager called `You`, so
+   * replacing display names in prose turned `You are sending Ike Sandoval` into
+   * `Manager 9 are sending Ike Sandoval` — a redaction corrupting the sentence
+   * it was protecting, in a way no amount of boundary-matching can fix, because
+   * the collision is the word itself.
+   *
+   * The in-season adapters therefore do not scrub names at all. They alias the
+   * rosters *before* the assembly runs, so the engine composes its sentences out
+   * of `Manager 3` in the first place and there is nothing to replace
+   * afterwards. This method is what is left: the identifiers, which cannot
+   * collide with English.
+   */
+  scrubIdentifiers(text: string): string {
+    return this.replaceIn(text, [this.byId, this.byScope, this.byLabel]);
+  }
+
+  private replaceIn(text: string, sources: ReadonlyMap<string, string>[]): string {
     let out = text;
-    for (const source of [this.byId, this.byName, this.byScope, this.byLabel]) {
+    for (const source of sources) {
       for (const [real, alias] of source) out = out.replace(boundedPattern(real), alias);
     }
     return out;

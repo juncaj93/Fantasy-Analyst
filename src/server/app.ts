@@ -23,6 +23,7 @@ import { recommendLineup } from '../core/startsit/lineup.ts';
 import { assembleLineup } from '../core/startsit/assemble.ts';
 import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
 import { SnapshotLossyError } from '../core/support/lossless.ts';
+import { SnapshotUnavailable } from '../core/support/emit.ts';
 import {
   IN_SEASON_KINDS,
   captureSupportSnapshot,
@@ -1394,6 +1395,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       );
     } catch (err) {
       if (err instanceof NoDecision) return errorResponse(err.message, err.status);
+      /*
+       * "There is nothing to capture" is an answer, not a failure — a league
+       * with no matchup this week, or one that starts no defence, has no
+       * decision for the file to be about. The sentence the screen would have
+       * shown is a better response than an empty snapshot.
+       */
+      if (err instanceof SnapshotUnavailable) return errorResponse(err.message, err.status);
       if (err instanceof SnapshotRedactionError || err instanceof SnapshotLossyError) {
         return errorResponse(err.message, 500);
       }

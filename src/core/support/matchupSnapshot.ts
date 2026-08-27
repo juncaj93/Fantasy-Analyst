@@ -44,7 +44,7 @@ import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../sleeper/type
 import type { NflState } from '../sleeper/phase.ts';
 import { buildRosterShape, buildScoringProfile } from '../sleeper/scoring.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
-import { sealSnapshot } from './emit.ts';
+import { sealSnapshot, SnapshotUnavailable } from './emit.ts';
 import { scrubAliases } from './scrub.ts';
 import {
   captureLeague,
@@ -87,7 +87,10 @@ export interface RecordedMatchupReads {
  * context, and each starter's lock — and a capture whose readings straddled a
  * millisecond boundary would record one instant and have been built against two.
  */
-export function recordMatchupSources(inner: MatchupSources): {
+export function recordMatchupSources(
+  inner: MatchupSources,
+  aliases: SnapshotAliases,
+): {
   sources: MatchupSources;
   seen(): RecordedMatchupReads;
 } {
@@ -106,8 +109,38 @@ export function recordMatchupSources(inner: MatchupSources): {
 
   const sources: MatchupSources = {
     leagues: {
-      getLeague: async (id) => (seen.league = await inner.leagues.getLeague(id)),
-      listRosters: async (id) => (seen.rosters = await inner.leagues.listRosters(id)),
+      /*
+       * The real id, and an aliased name.
+       *
+       * The id has to stay real: it is hashed into the fingerprint that seeds
+       * the simulation, so aliasing it here would draw a different afternoon
+       * than the one the user saw. The *name* is not hashed into anything and is
+       * echoed straight back in the response header, so it is replaced before
+       * the assembly ever sees it.
+       */
+      getLeague: async (id) => {
+        const league = await inner.leagues.getLeague(id);
+        seen.league = league;
+        if (league == null) return null;
+        aliases.label(league.name, aliases.scope('league', league.id) ?? 'league-1');
+        return { ...league, name: aliases.scrubIdentifiers(league.name) };
+      },
+      /*
+       * And aliased rosters, before the assembly composes a name into anything.
+       *
+       * A matchup names both managers on its header and in several of its
+       * insight sentences. Aliasing afterwards would mean replacing a display
+       * name inside prose, which cannot be made safe — see `scrub.ts`.
+       */
+      listRosters: async (id) => {
+        const rosters = await inner.leagues.listRosters(id);
+        seen.rosters = rosters;
+        return rosters.map((roster) => ({
+          ...roster,
+          ownerId: aliases.id(roster.ownerId),
+          ownerName: aliases.name(roster.ownerName, roster.ownerId),
+        }));
+      },
     },
     matchups: async (league, week) => (seen.matchups = await inner.matchups(league, week)),
     nflState: async () => (seen.nflState = await inner.nflState()),
@@ -146,14 +179,27 @@ export async function captureMatchupSnapshot(
   sources: MatchupSources,
   options: MatchupCaptureOptions,
 ): Promise<SupportSnapshot<MatchupPayload>> {
-  const recorder = recordMatchupSources(sources);
+  const aliases = new SnapshotAliases();
+  const recorder = recordMatchupSources(sources, aliases);
   const response = await buildMatchupResponse(recorder.sources, options.leagueId, {
     week: options.week ?? null,
   });
   const seen = recorder.seen();
-  if (!seen.league) throw new Error('league not found');
+  if (!seen.league) throw new SnapshotUnavailable('league not found', 404);
+  /*
+   * No matchup, no snapshot.
+   *
+   * `found: false` is a real and common state — a week Sleeper has not scheduled
+   * yet, a roster not in this week's schedule — and the assembly says which in
+   * `reason`. Capturing it anyway would emit a file with no lineups, no
+   * distributions and no forecast in it: a bug report that contains nothing,
+   * which somebody would send and then wait on. The sentence the screen would
+   * have shown is a better answer than a file.
+   */
+  if (!response.found) {
+    throw new SnapshotUnavailable(response.reason ?? 'There is no matchup to capture for this week.');
+  }
 
-  const aliases = new SnapshotAliases();
   const league = captureLeague(seen.league, aliases);
   const rosters = captureRosters(seen.rosters, aliases, league.id);
   const capturedAt = (seen.now ?? new Date(0)).toISOString();

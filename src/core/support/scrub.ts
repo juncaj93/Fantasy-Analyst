@@ -16,6 +16,14 @@
  * roster's transaction profile — and a map whose *keys* are Sleeper user ids is
  * the same leak one level down.
  *
+ * It replaces **identifiers only** — user ids, league and draft ids, and the
+ * league's own name. Display names are not scrubbed and must not be: a manager
+ * called `You` turns `You are sending Ike Sandoval` into `Manager 9 are sending
+ * Ike Sandoval`, and no boundary rule fixes that, because the collision is the
+ * word itself. The in-season adapters alias the rosters *before* the assembly
+ * runs instead, so the engine composes `Manager 3` into its sentences in the
+ * first place and there is nothing left here to replace.
+ *
  * Run **after** every alias has been allocated, so it can only ever replace and
  * never invent one. A string containing no identity comes back unchanged, which
  * is almost every string in the file.
@@ -33,13 +41,14 @@ import type { SnapshotAliases } from './redaction.ts';
  * returned unchanged.
  */
 export function scrubAliases(value: unknown, aliases: SnapshotAliases): unknown {
-  if (typeof value === 'string') return aliases.scrub(value);
-  if (Array.isArray(value)) return value.map((item) => scrubAliases(item, aliases));
-  if (value == null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
-      aliases.scrub(key),
-      scrubAliases(child, aliases),
-    ]),
-  );
+  const replace = (text: string): string => aliases.scrubIdentifiers(text);
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'string') return replace(node);
+    if (Array.isArray(node)) return node.map(walk);
+    if (node == null || typeof node !== 'object') return node;
+    return Object.fromEntries(
+      Object.entries(node as Record<string, unknown>).map(([key, child]) => [replace(key), walk(child)]),
+    );
+  };
+  return walk(value);
 }

@@ -51,6 +51,7 @@ import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
 import { scrubAliases } from './scrub.ts';
 import {
+  aliasManagerProfile,
   captureLeague,
   captureLeagueRules,
   captureRosters,
@@ -89,42 +90,10 @@ export async function captureWaiverSnapshot(
   const recorder = input.request.dstSources == null ? null : recordDstSources(input.request.dstSources);
   const players = distilPlayers(input.players, input.request);
 
-  /*
-   * Built with the *whole* player table, not the distilled one.
-   *
-   * The file records the reduced list, because that is all the competition read
-   * can reach — but the decision in `output` has to be the decision production
-   * made, and production had every row. Capturing the reduced answer would make
-   * the snapshot agree with its own replay by construction and prove nothing.
-   *
-   * So the two are allowed to disagree, and `tests/support.waiver.test.ts`
-   * asserts that they do not: a capture whose distillation moved the board is a
-   * replay that reports an `output_difference`, loudly, rather than a bound that
-   * quietly passed as a match.
-   */
-  const decision = await assembleWaiverPlan({
-    ...input.request,
-    players: [...input.players],
-    dstSources: recorder?.sources ?? null,
-    now: input.now,
-    generatedAt: input.now.toISOString(),
-  });
-
   const aliases = new SnapshotAliases();
   const league = captureLeague(input.league, aliases);
   const rosters = captureRosters(input.rosters, aliases, league.id);
   const capturedAt = input.now.toISOString();
-
-  /*
-   * The decision, with every identity that reached it replaced.
-   *
-   * The inputs are aliased above; this is the other half, and it is the half
-   * that has caught this app twice. An engine that composes a league id or a
-   * manager's name into a string produces an output that a verbatim copy would
-   * carry straight past every alias in the file. Run after every alias has been
-   * allocated, so it can only ever replace. See `scrub.ts`.
-   */
-  const output = scrubAliases(decision, aliases) as typeof decision;
 
   /*
    * The wallet, with its owner names aliased.
@@ -150,6 +119,72 @@ export async function captureWaiverSnapshot(
           })),
         };
   const budgets = aliasBudget(input.request.budgets);
+
+  /*
+   * And what the ledger says about each rival, with the identity inside it
+   * replaced. The profile carries its own `userId` and `displayName`, and the
+   * pressure column composes both into sentences.
+   */
+  const history =
+    input.request.history == null
+      ? undefined
+      : {
+          ...input.request.history,
+          profiles: new Map(
+            [...input.request.history.profiles.entries()].map(([rosterId, profile]) => [
+              rosterId,
+              aliasManagerProfile(profile, aliases),
+            ]),
+          ),
+        };
+  const strategy =
+    input.request.strategy == null
+      ? null
+      : { ...input.request.strategy, budget: aliasBudget(input.request.strategy.budget)! };
+
+  /*
+   * Built with the *whole* player table, not the distilled one.
+   *
+   * The file records the reduced list, because that is all the competition read
+   * can reach — but the decision in `output` has to be the decision production
+   * made, and production had every row. Capturing the reduced answer would make
+   * the snapshot agree with its own replay by construction and prove nothing.
+   *
+   * So the two are allowed to disagree, and `tests/support.lanes.test.ts`
+   * asserts that they do not: a capture whose distillation moved the board is a
+   * replay that reports an `output_difference`, loudly, rather than a bound that
+   * quietly passed as a match.
+   *
+   * The competition read runs over the *aliased* rosters and the aliased wallet.
+   * `waiverLeagueIntel` names the rivals who are short at a position and can
+   * afford the player — `Low competition — 1 likely bidder · rival_manager` —
+   * and those sentences end up inside a claim's own reasons. An assembly given
+   * real names would have to be scrubbed afterwards, and scrubbing a display
+   * name out of prose cannot be made safe; see `scrub.ts`. Aliasing first means
+   * the engine writes `Manager 2` in the first place.
+   */
+  const decision = await assembleWaiverPlan({
+    ...input.request,
+    players: [...input.players],
+    rosters: rosters.map((roster) => ({
+      rosterId: roster.rosterId,
+      ownerName: roster.ownerName,
+      isMine: roster.isMine,
+      playerIds: roster.playerIds,
+    })),
+    strategy,
+    budgets,
+    history,
+    dstSources: recorder?.sources ?? null,
+    now: input.now,
+    generatedAt: capturedAt,
+  });
+
+  /*
+   * And the identifiers, which cannot be aliased ahead of the assembly.
+   * Identifiers only — never a display name. See `scrub.ts`.
+   */
+  const output = scrubAliases(decision, aliases) as typeof decision;
 
   return sealSnapshot<WaiverPlanPayload>({
     schema: SUPPORT_SNAPSHOT_SCHEMA,
@@ -205,25 +240,18 @@ export async function captureWaiverSnapshot(
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
-        strategy:
-          input.request.strategy == null
-            ? null
-            : {
-                ...input.request.strategy,
-                budget: aliasBudget(input.request.strategy.budget)!,
-                trending: [...input.request.strategy.trending.entries()],
-              },
+        strategy: strategy == null ? null : { ...strategy, trending: [...strategy.trending.entries()] },
         budgets,
         prices: input.request.prices,
         observations: input.request.observations,
         history:
-          input.request.history == null
+          history == null
             ? null
             : {
-                profiles: [...input.request.history.profiles.entries()],
-                baseline: input.request.history.baseline,
-                week: input.request.history.week,
-                finalWeek: input.request.history.finalWeek,
+                profiles: [...history.profiles.entries()],
+                baseline: history.baseline,
+                week: history.week,
+                finalWeek: history.finalWeek,
               },
         dst: recorder?.seen() ?? null,
         bestBall: input.request.bestBall,

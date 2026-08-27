@@ -25,6 +25,7 @@ import { useState } from 'react';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { PlayerIdentity } from './common.tsx';
 import { Sheet } from './native.tsx';
+import { rememberSupportContext } from '../supportContext.ts';
 
 /** The tone each decision reads in. Calm by default — this is not urgent news. */
 const TONE: Record<DstPlan['decision'], string> = {
@@ -72,7 +73,19 @@ export function DstLine({ plan }: { plan: DstPlan | null | undefined }) {
         data-testid="dst-line"
         data-decision={plan.decision}
         aria-label={`Defence: ${plan.headline}. Tap for why.`}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          /*
+           * The defence is a decision without a screen.
+           *
+           * It is one line on Team and one above the Waivers board, so the tab
+           * cannot say that this is what the reader is looking at. Opening the
+           * sheet can, and it is the moment somebody who disagrees with a
+           * `Stream` is actually disagreeing with it — so Setup's support button
+           * offers the defence rather than the screen it was sitting on.
+           */
+          rememberSupportContext('dst-plan');
+          setOpen(true);
+        }}
       >
         <PlayerIdentity position="DEF" team={badge} />
         <span className="dst-line-text" data-testid="dst-headline">

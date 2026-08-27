@@ -38,6 +38,7 @@ import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
 import { scrubAliases } from './scrub.ts';
 import {
+  aliasManagerProfile,
   captureLeague,
   captureLeagueRules,
   captureRosters,
@@ -65,22 +66,6 @@ export interface TradeCaptureInput {
 }
 
 export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<TradeOfferPayload> {
-  const decision = assembleSmartTrades({
-    leagueSettings: input.league.leagueSettings,
-    shape: input.request.shape,
-    profile: input.request.profile,
-    rosters: input.rosters.map((roster) => ({
-      rosterId: roster.rosterId,
-      ownerId: roster.ownerId,
-      ownerName: roster.ownerName,
-      playerIds: roster.playerIds,
-      isMine: roster.isMine,
-    })),
-    inputs: input.request.inputs,
-    history: input.request.history,
-    limit: input.request.limit,
-  });
-
   const aliases = new SnapshotAliases();
   const league = captureLeague(input.league, aliases);
   const rosters = captureRosters(input.rosters, aliases, league.id);
@@ -98,7 +83,8 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
   const history = {
     measured: input.request.history.measured,
     tendencies: [...input.request.history.tendencies.entries()].map(
-      ([userId, tendencies]) => [aliases.id(userId) ?? userId, tendencies] as [string, ManagerTradeTendencies],
+      ([userId, tendencies]) =>
+        [aliases.id(userId) ?? userId, aliasManagerProfile(tendencies, aliases)] as [string, ManagerTradeTendencies],
     ),
     seasonsByUser: [...input.request.history.seasonsByUser.entries()].map(
       ([userId, seasons]) => [aliases.id(userId) ?? userId, seasons] as [string, { observed: number; complete: boolean }],
@@ -110,14 +96,45 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
   };
 
   /*
-   * The offers, with every identity in them aliased.
+   * The search runs over the aliased rosters, not over the real ones.
    *
-   * `TradePartnerView.displayName` is a Sleeper username where the roster has
-   * one, and it is written into the offer *and* into the sentences `managerFit`
-   * composes. The Draft lane learned this the expensive way — a snapshot that
-   * aliased the inputs and copied the output verbatim is a redaction that
-   * removed nothing — so the output is scrubbed with the same allocator, after
-   * every alias has been handed out and therefore only ever replacing.
+   * `managerFit` puts a counterparty's display name on every offer and composes
+   * it into the reasons and caveats — `You are sending Ike Sandoval` sits beside
+   * `Manager 3 has been quiet since week 4` — so an assembly given real names
+   * would have to be scrubbed afterwards. Scrubbing a *display name* out of
+   * prose cannot be made safe: this app's own seeded league has a manager called
+   * `You`, and no boundary rule separates the name from the pronoun. Aliasing
+   * first means the engine writes `Manager 3` in the first place, and the
+   * finished output needs no surgery at all.
+   *
+   * Nothing about the search changes. Owner ids are compared for equality and
+   * never hashed, so `manager-3` resolves exactly as the real id did — and the
+   * history above is keyed to match.
+   */
+  const decision = assembleSmartTrades({
+    leagueSettings: input.league.leagueSettings,
+    shape: input.request.shape,
+    profile: input.request.profile,
+    rosters: rosters.map((roster) => ({
+      rosterId: roster.rosterId,
+      ownerId: roster.ownerId,
+      ownerName: roster.ownerName,
+      playerIds: roster.playerIds,
+      isMine: roster.isMine,
+    })),
+    inputs: input.request.inputs,
+    history: {
+      ...input.request.history,
+      tendencies: new Map(history.tendencies),
+      seasonsByUser: new Map(history.seasonsByUser),
+    },
+    limit: input.request.limit,
+  });
+
+  /*
+   * And the identifiers, which cannot be aliased ahead of the assembly.
+   *
+   * Identifiers only — never a display name. See `scrub.ts`.
    */
   const output = scrubAliases(decision, aliases) as typeof decision;
 

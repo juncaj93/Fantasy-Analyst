@@ -33,31 +33,21 @@ import { captureMatchupSnapshot } from '../../core/support/matchupSnapshot.ts';
 import { captureWaiverSnapshot } from '../../core/support/waiverSnapshot.ts';
 import { captureDstSnapshot } from '../../core/support/dstSnapshot.ts';
 import { captureTradeSnapshot } from '../../core/support/tradeSnapshot.ts';
+import { SnapshotUnavailable } from '../../core/support/emit.ts';
 import { normalizeMode } from '../../core/startsit/mode.ts';
 import { waiverLineup } from '../../core/waivers/assemble.ts';
 import { DEFENCE_POSITION } from '../../core/startsit/engine.ts';
-import { IMPLEMENTED_KINDS } from '../../core/support/schema.ts';
-import type { DecisionKind, DecisionPayload, SupportSnapshot } from '../../core/support/schema.ts';
+/*
+ * Re-exported so `app.ts` keeps the one import it has.
+ *
+ * The words themselves live in `core/support/contexts.ts`, because Demo Mode
+ * serves the same endpoint and must accept exactly the same set.
+ */
+export { IN_SEASON_KINDS, isInSeasonKind, type InSeasonKind } from '../../core/support/contexts.ts';
+import type { InSeasonKind } from '../../core/support/contexts.ts';
+import type { DecisionPayload, SupportSnapshot } from '../../core/support/schema.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { Database } from '../db.ts';
-
-/** The five in-season contexts. Draft has its own route and is unchanged. */
-export type InSeasonKind = Exclude<DecisionKind, 'draft-board'>;
-
-/**
- * The five, as a value the route can validate a query parameter against.
- *
- * Derived from `IMPLEMENTED_KINDS` rather than written out again, so a seventh
- * decision cannot become capturable without becoming requestable — the mismatch
- * would be a support button that names a context the server refuses.
- */
-export const IN_SEASON_KINDS: readonly InSeasonKind[] = IMPLEMENTED_KINDS.filter(
-  (kind): kind is InSeasonKind => kind !== 'draft-board',
-);
-
-export function isInSeasonKind(value: string | null): value is InSeasonKind {
-  return value != null && (IN_SEASON_KINDS as readonly string[]).includes(value);
-}
 
 export interface SupportCaptureOptions {
   db: Database;
@@ -148,9 +138,8 @@ export async function captureSupportSnapshot(
       const gathered = await gatherWaiverInputs(db, sleeper, leagueId);
       const { request } = gathered;
       if (request.dstSources == null) {
-        throw new NoDecision(
+        throw new SnapshotUnavailable(
           `This league starts no ${DEFENCE_POSITION}, so there is no defence decision to capture.`,
-          409,
         );
       }
       /*

@@ -36,3 +36,27 @@ export function sealSnapshot<P extends DecisionPayload>(snapshot: SupportSnapsho
 
   return snapshot;
 }
+
+/**
+ * Raised when there is no decision to capture.
+ *
+ * Not an error in the code and not a malformed request: a league with no
+ * matchup scheduled this week, or a league that starts no defence, has nothing
+ * for the snapshot to be *about*. The alternative is a file that looks exactly
+ * like a bug report and contains nothing, which somebody would send and then
+ * wait on — the same reason the Draft row refuses a capture when no draft is
+ * loaded.
+ *
+ * The message is the sentence the screen itself would have shown, so a reader
+ * who taps the button gets an answer rather than a status code.
+ */
+export class SnapshotUnavailable extends Error {
+  /* A plain field, so type-stripping alone can run this — see the CLI. */
+  readonly status: number;
+
+  constructor(message: string, status = 409) {
+    super(message);
+    this.name = 'SnapshotUnavailable';
+    this.status = status;
+  }
+}

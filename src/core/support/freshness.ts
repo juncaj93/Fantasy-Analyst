@@ -19,6 +19,7 @@
  * given", which is the first fork of every diagnosis.
  */
 
+import { normalizeDesignation } from '../injury/model.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import type { InSeasonFreshness } from './payloads.ts';
@@ -60,15 +61,24 @@ export function summariseFreshness(sources: FreshnessSources): InSeasonFreshness
       if (input.game == null) withoutGame += 1;
 
       /*
-       * Availability, counted as three states rather than two.
+       * Availability, counted as three states rather than two, and read the way
+       * the engine reads it.
        *
        * `unknown` is a designation the injury model produces on purpose — see
        * `injury/model.ts` — and it means nobody has published anything about
        * this player, which is different from a published clean bill of health.
        * Collapsing the two here would be the flattening this module refuses.
+       *
+       * The bare Sleeper status counts too, because the engine counts it: a
+       * caller without the injury layer passes `injuryStatus` alone and
+       * `evaluatePlayer` normalises it into the same shape. Reading only the
+       * richer field would have reported a roster of Questionable players as
+       * an availability nobody had measured.
        */
       const injury = input.injury ?? null;
-      if (injury == null || injury.designation === 'unknown') unknown += 1;
+      const designation =
+        injury?.designation ?? normalizeDesignation(input.injuryStatus ?? null).designation;
+      if (designation === 'unknown') unknown += 1;
       else known += 1;
       if (injury?.conflict === true) conflicting += 1;
       if (injury != null) {

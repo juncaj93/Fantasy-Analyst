@@ -259,3 +259,27 @@ export function rehydrateLeagueRules(rules: SnapshotLeagueRules): { shape: Roste
     profile: buildScoringProfile(rules.scoringSettings, rules.rosterPositions),
   };
 }
+
+/**
+ * A manager profile, with the identity inside it replaced.
+ *
+ * Both the trade and the transaction profiles carry `userId` and `displayName`
+ * of their own, beside the roster's — and the engines read *those* when they
+ * compose a sentence about a manager. Re-keying the map alone left the real id
+ * and the real username sitting one level down, which is a redaction that
+ * removed the label and kept the thing.
+ *
+ * Applied before the assembly runs, so the engine writes the alias in the first
+ * place. See `scrub.ts` for why the alternative — replacing it in the finished
+ * prose — cannot be made safe for a display name.
+ */
+export function aliasManagerProfile<T extends { userId: string; displayName: string | null }>(
+  profile: T,
+  aliases: SnapshotAliases,
+): T {
+  return {
+    ...profile,
+    userId: aliases.id(profile.userId) ?? profile.userId,
+    displayName: aliases.name(profile.displayName, profile.userId),
+  };
+}

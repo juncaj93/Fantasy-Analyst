@@ -43,35 +43,34 @@ import { recommendLineup } from '../../startsit/lineup.ts';
 import { assembleLineup } from '../../startsit/assemble.ts';
 import { assembleWaiverPlan } from '../../waivers/assemble.ts';
 import { normalizeMode } from '../../startsit/mode.ts';
-import { collectBids } from '../../faab/bids.ts';
 import { demoManagerHistory } from './history.ts';
 import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../managers/draftProfile.ts';
-import { LEDGER_WEEKS } from '../fixtures/ledger.ts';
-import { playoffContextFor } from '../../league/planning.ts';
-import { detectBestBall } from '../../sleeper/bestBall.ts';
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
-import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
+import { FREE_AGENTS_PER_POSITION } from '../../roster/freeAgents.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
 import { assembleSmartTrades } from '../../trades/assemble.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../../sleeper/eligibility.ts';
-import {
-  buildRosterShape,
-  buildScoringProfile,
-  leagueFitNotes,
-  startablePositions,
-} from '../../sleeper/scoring.ts';
+import { leagueFitNotes } from '../../sleeper/scoring.ts';
 import { resolveSeasonPhase } from '../../sleeper/phase.ts';
 import { resolveLifecycle } from '../../season/lifecycle.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 import {
   draftBoardSourcesFrom,
-  dstPlanSourcesFrom,
   matchupSourcesFrom,
   startSitInputsFrom,
   tradeCandidatesFrom,
 } from './sources.ts';
 import { buildDemoPlayerDetail, buildDemoRollover, buildDemoSetupStatus } from './setup.ts';
+import { captureDemoSnapshot } from './support.ts';
+import { IN_SEASON_KINDS, isInSeasonKind } from '../../support/contexts.ts';
+import {
+  demoCandidateIds,
+  demoLeagueContext,
+  demoLineupInputs,
+  demoTradeRequest,
+  demoWaiverRequest,
+} from './decisions.ts';
 
 export interface DemoRequest {
   method: string;
@@ -88,16 +87,6 @@ export interface DemoResponse {
 
 const ok = (body: unknown): DemoResponse => ({ status: 200, body });
 const fail = (message: string, status = 400): DemoResponse => ({ status, body: { error: message } });
-
-/** The pieces every league-shaped answer starts from. */
-function leagueContext(data: ScenarioData) {
-  const profile = buildScoringProfile(data.league.scoringSettings, data.league.rosterPositions);
-  const shape = buildRosterShape(data.league.rosterPositions);
-  const mine = data.rosters.find((r) => r.isMine) ?? null;
-  const rosteredIds = new Set<string>();
-  for (const roster of data.rosters) for (const id of roster.playerIds) rosteredIds.add(id);
-  return { profile, shape, mine, rosteredIds };
-}
 
 /** How fresh the market is, in the shape every screen already prints. */
 function freshness(data: ScenarioData) {
@@ -187,6 +176,28 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
         queuedOnly: params.get('queued') === '1',
       }),
     );
+  }
+
+  /*
+   * A support snapshot of any of the five in-season decisions.
+   *
+   * The same route the deployment serves, over the same capture adapters, from
+   * the same gatherers the demo screens read — so the file a scenario produces
+   * is the file the live app produces: same schema, same redaction, same replay.
+   * Somebody learning the support workflow can run it end to end without a
+   * league, and a scenario's own week is a perfectly good bug report.
+   *
+   * `gitSha` is `demo` rather than a revision, and deliberately so: a snapshot
+   * of a rehearsal must never be mistakable for a snapshot of production.
+   */
+  const leagueSnapshot = /^\/api\/leagues\/([^/]+)\/support-snapshot$/.exec(path);
+  if (leagueSnapshot) {
+    if (decodeURIComponent(leagueSnapshot[1]!) !== data.league.id) return fail('league not found', 404);
+    const context = params.get('context');
+    if (!isInSeasonKind(context)) {
+      return fail(`context must be one of ${IN_SEASON_KINDS.join(', ')}; got ${JSON.stringify(context)}`, 400);
+    }
+    return captureDemoSnapshot(data, context, params);
   }
 
   // --------------------------------------------------------------- a league
@@ -294,7 +305,7 @@ function overview(data: ScenarioData) {
 }
 
 function leagueSummary(data: ScenarioData) {
-  const { profile, shape } = leagueContext(data);
+  const { profile, shape } = demoLeagueContext(data);
   return {
     id: data.league.id,
     name: data.league.name,
@@ -309,7 +320,7 @@ function leagueSummary(data: ScenarioData) {
 }
 
 function roster(data: ScenarioData) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   const byId = new Map(data.players.map((p) => [p.id, p]));
   const signals = data.signals;
 
@@ -378,7 +389,7 @@ function roster(data: ScenarioData) {
 }
 
 function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) {
     return {
       league: { id: data.league.id, name: data.league.name },
@@ -386,7 +397,7 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
       error: 'Your team was not found in this league.',
     };
   }
-  const inputs = startSitInputsFrom(data, mine.playerIds, { mode });
+  const { inputs } = demoLineupInputs(data, mine, mode);
 
   /*
    * The whole decision, through the one function the live handler calls.
@@ -435,53 +446,7 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
  * reasoning stands on its own.
  */
 function smartTrades(data: ScenarioData, limit: number) {
-  const { profile, shape } = leagueContext(data);
-  const history = demoManagerHistory(data);
-
-  /*
-   * Observed seasons, per manager, keyed by every owner in the room.
-   *
-   * Not by the managers who have a trade *profile*, which is a different and
-   * much smaller set: the live service derives this from the ledger's roster
-   * identities, so a manager who has been in the league for two read seasons
-   * and never traded is measured with zero trades — not unknown. Keying it off
-   * the profiles would call most of the room unknown and quietly demonstrate
-   * the wrong branch of `activityClassFor`.
-   *
-   * The scenario's ledger covers every roster over the same seasons, so the
-   * per-manager answer is the league-wide one here.
-   */
-  const seasonsByUser = new Map(
-    data.rosters
-      .map((roster) => roster.ownerId)
-      .filter((userId): userId is string => !!userId)
-      .map((userId) => [userId, { observed: history.seasons.length, complete: history.seasons.length > 0 }]),
-  );
-
-  const decision = assembleSmartTrades({
-    leagueSettings: data.league.leagueSettings,
-    shape,
-    profile,
-    rosters: data.rosters.map((r) => ({
-      rosterId: r.rosterId,
-      ownerId: r.ownerId,
-      ownerName: r.ownerName,
-      playerIds: r.playerIds,
-      isMine: r.isMine,
-    })),
-    inputs: startSitInputsFrom(data, [...new Set(data.rosters.flatMap((r) => r.playerIds))]),
-    history: {
-      measured: true,
-      tendencies: history.tradeTendencies,
-      seasonsByUser,
-      seasonsComplete: history.seasons,
-      profiles: [...history.tradeTendencies.values()].filter((t) => t.usable).length,
-      complete: history.seasons.length > 0,
-      leagueRate: history.tradeBaseline?.tradesPerManagerSeason ?? null,
-    },
-    limit,
-  });
-
+  const decision = assembleSmartTrades({ ...demoTradeRequest(data), limit });
   const { rejections: _rejections, ...board } = decision;
   return {
     league: { id: data.league.id, name: data.league.name },
@@ -490,18 +455,9 @@ function smartTrades(data: ScenarioData, limit: number) {
   };
 }
 
-/** The bounded wire, ordered exactly as the live scan orders it. */
-function candidateIdsFor(data: ScenarioData): string[] {
-  const { shape, rosteredIds } = leagueContext(data);
-  return boundedFreeAgentIds(data.players, {
-    rosteredIds,
-    startable: startablePositions(shape),
-    ranks: data.adpValues,
-  });
-}
 
 async function waivers(data: ScenarioData) {
-  const { profile, shape, mine, rosteredIds } = leagueContext(data);
+  const { profile, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) {
     return {
       league: { id: data.league.id, name: data.league.name },
@@ -513,75 +469,11 @@ async function waivers(data: ScenarioData) {
     };
   }
 
-  const candidateIds = candidateIdsFor(data);
-  const rosterInputs = startSitInputsFrom(data, mine.playerIds);
-  const candidateInputs = startSitInputsFrom(data, candidateIds);
+  const gathered = demoWaiverRequest(data, mine);
+  const { candidateIds, strategy } = gathered;
 
-  /*
-   * The same three suppliers the live handler passes, from the same ledger.
-   *
-   * `observations` is every bid the league has published — which is what turns
-   * "somebody else needs a tight end" into a named rival with a price on him —
-   * and `history` is what the manager-intelligence pass concluded about the
-   * people holding those rosters. Both are absent in a scenario with no ledger,
-   * and the columns then report exactly what they report for a league nobody
-   * has backfilled: not known.
-   */
-  const strategy = data.strategy;
-  const history = demoManagerHistory(data);
-  const bidHistory = collectBids(data.transactions, LEDGER_WEEKS);
-  const playoff = playoffContextFor({
-    leagueSettings: data.league.leagueSettings,
-    rosters: data.rosters,
-    mine,
-    totalRosters: data.league.totalRosters,
-    currentWeek: data.nflState?.week ?? 1,
-  });
-
-  /*
-   * The whole decision, through the one function the live handler calls.
-   *
-   * This used to be the live route's pipeline written out a second time, with a
-   * comment saying it mirrored `app.ts` line for line. It did — and a pipeline
-   * that is correct because two files agree is one careless edit from two
-   * different waiver boards in one app. See `core/waivers/assemble.ts`.
-   *
-   * The clock is the scenario's rather than the device's, which is the whole
-   * reason Demo Mode can be on a Tuesday, and it is what makes a demo plan
-   * reproducible.
-   */
   const decision = await assembleWaiverPlan({
-    shape,
-    profile,
-    rosterInputs,
-    candidateInputs,
-    rosteredIds,
-    currentStarterIds: mine.starterIds,
-    reserveIds: mine.reserveIds,
-    rosters: data.rosters,
-    players: data.players,
-    week: data.nflState?.week ?? 1,
-    season: data.league.season,
-    strategy: strategy ?? null,
-    budgets: strategy?.budget ?? null,
-    prices: strategy?.prices ?? null,
-    observations: bidHistory.observations,
-    history: history.transactionBaseline
-      ? {
-          profiles: history.profilesByRoster,
-          baseline: history.transactionBaseline,
-          week: data.nflState?.week ?? 1,
-          finalWeek: history.finalWeek,
-        }
-      : undefined,
-    dstSources: dstPlanSourcesFrom(data),
-    bestBall: detectBestBall({
-      leagueSettings: data.league.leagueSettings,
-      draftSettings: data.draft?.settings ?? null,
-    }).bestBall,
-    /* Post-draft is a fact about the draft, never about the calendar. */
-    draftComplete: (data.draft?.status ?? '') === 'complete',
-    playoff: { weeks: playoff.weeks, emphasis: playoff.emphasis },
+    ...gathered.request,
     now: data.clock.now(),
     generatedAt: data.clock.iso(),
   });
@@ -610,11 +502,11 @@ async function waivers(data: ScenarioData) {
 }
 
 function bench(data: ScenarioData) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) return { found: false, dropCandidates: [], ranked: [], notes: [] };
 
   const rosterInputs = startSitInputsFrom(data, mine.playerIds);
-  const candidateInputs = startSitInputsFrom(data, candidateIdsFor(data));
+  const candidateInputs = startSitInputsFrom(data, demoCandidateIds(data));
   const currentLineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
 
   return {
@@ -828,7 +720,7 @@ function compare(data: ScenarioData, body: unknown): DemoResponse {
   if (new Set(requested).size !== requested.length) return fail('the same player was sent twice');
   if (requested.length > MAX_COMPARE) return fail(`at most ${MAX_COMPARE} players can be compared at once`);
 
-  const { profile, shape } = leagueContext(data);
+  const { profile, shape } = demoLeagueContext(data);
   const mode = normalizeMode(input.mode ?? null);
   const inputs = startSitInputsFrom(data, requested, { mode });
   if (inputs.length !== requested.length) return fail('player not found', 404);
