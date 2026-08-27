@@ -146,3 +146,16 @@ Sharded and parallel, always: four widths × three shards in CI, three widths in
 smoke. Never a serial sweep, never a raised timeout to cover a slow one, never a
 Playwright run piped through `tail` or `grep` — a pipe reports the exit code of
 the last command in it, which turns a failing suite into a green tick.
+
+**Locally, that means targeted rather than comprehensive.** CI already runs the
+whole suite at every width, so a local run that walks one width end to end is
+re-running a third of one CI job, serially, on a fallback engine — an hour spent
+to learn less than the matrix will tell you in eight minutes. Run the specs the
+lane actually touches, across the widths its layout moves at, and let the twelve
+WebKit shards be the gate. That is narrowing the *sample*, not the coverage:
+nothing is skipped, it is checked where it is checked properly.
+
+`playwright install webkit` fails in some sandboxes. That is what the
+`chromium-*` projects are for, and it makes the local run a smoke rather than a
+verdict — say so when reporting it, rather than letting a green Chromium run
+stand in for a WebKit gate that has not run.
