@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Succeed this time
-        run: exit 1
+        run: exit 0
 
   alert:
     needs: work
