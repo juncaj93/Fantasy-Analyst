@@ -227,12 +227,29 @@ recommendation actually moved — never when a refresh found the same numbers.
 Nothing here submits a transaction; every request it makes to Sleeper is a read.
 See [docs/LEAGUE_INTELLIGENCE.md](docs/LEAGUE_INTELLIGENCE.md).
 
-## Newsletter, automatically
+## Newsletter, delivered automatically and scored deliberately
 
 The FF Newsletter is subscribed directly to an address owned by the app
 (`fantasy-news@<your-domain>`), delivered by Cloudflare Email Routing straight
 into the Worker. No personal inbox is ever accessed and nothing is forwarded by
 hand. Mail from any other sender is quarantined, never parsed.
+
+**An issue arriving creates work waiting for you, not fantasy opinions.** The
+app cannot read editorial analysis and judge what it means for a player's value,
+and it does not pretend to: the newsletter is received, repaired, stored, and
+Setup marks itself as having something to do. Everything after that is one
+minute of your time:
+
+    an issue arrives → Setup shows a mark → Copy for ChatGPT →
+    paste its tally back → see exactly what would change → approve →
+    applied once → the mark clears
+
+The two controls sit directly under the Newsletter row on Setup while an issue
+is waiting, and disappear when it has been scored. The judgment stays where a
+person can check it, and the app keeps every part of the job it can do
+deterministically: take delivery, clean the text, hand it over, parse a strict
+answer back, resolve the names against Sleeper, show the deltas, and write them
+to the ledger exactly once.
 
 See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 
@@ -244,7 +261,12 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 - Canonical player identity is resolved by a strict ladder; ambiguity goes to
   review and is never guessed.
 - The evidence ledger keeps every news item; tallies are derived from it.
-- Ambiguous or mixed newsletter classifications never auto-apply.
+- A newsletter never scores itself. Player tallies move only through a ChatGPT
+  tally that has been previewed and approved, applied exactly once, and an
+  approved tally is the whole reading of its issue — so nothing the retired
+  automatic classifier wrote can count beside it.
+- A name that does not resolve to exactly one player goes to review and is never
+  guessed at; a score is carried at the size it was written.
 - Vegas access is behind a provider abstraction, cached aggressively, and
   degrades to the last snapshot marked stale.
 - Unknown data is shown as unknown. No value is invented to fill a gap. A

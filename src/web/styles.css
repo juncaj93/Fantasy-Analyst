@@ -1445,6 +1445,38 @@ body,
 }
 
 /*
+ * Work attached to the row above it, inside the same grouped surface.
+ *
+ * Not a row and not a card: a row leads somewhere and a card would be a second
+ * box under the list. This is the tail of one row — it inherits the group's
+ * separator from `.list-group > * + *`, so it reads as part of the thing it
+ * hangs off rather than as a new thing beneath it.
+ *
+ * It exists for exactly one case: an unscored newsletter, which is temporary by
+ * definition. Nothing permanent belongs here.
+ */
+.list-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
+/*
+ * Two controls that share the width and are sized for a thumb.
+ *
+ * `.btn` is 36px, which is right for a control among several in a panel and
+ * short of the 44px target for the only two controls on a settings screen. They
+ * split the row rather than sitting left-aligned, so at 360 they are still two
+ * halves of a phone wide instead of two small buttons and a gap — and `flex-wrap`
+ * from `.btn-row` still stacks them if a longer label ever needs it.
+ */
+.btn-row-workflow > .btn {
+  flex: 1 1 44%;
+  min-height: var(--tap);
+}
+
+/*
  * A list row that opens in place rather than leading somewhere.
  *
  * A native `<details>`, so it needs no state and keeps working with a keyboard

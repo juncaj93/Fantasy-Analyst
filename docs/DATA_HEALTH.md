@@ -101,6 +101,18 @@ opposite. `usage`, `schedule`, `nflverse`, `players` and `manager-intel` are
 measured by attempt; `injuries`, `vegas`, `season-markets`,
 `published-projections`, `nfl-state`, `trending` and `newsletter` by data.
 
+### Delivery, not the work attached to it
+
+`newsletter` measures one thing: when an issue last arrived. Whether anybody has
+scored it with ChatGPT yet is a different question with a different answer, it
+is normal for days at a time, and it is not a fault in anything — so it changes
+no state here and is carried as a technical note rather than a headline. Calling
+a healthy feed with a job attached "degraded" is how a reader learns to ignore
+the word on the day something has genuinely stopped arriving.
+
+The mark that asks for that work is the attention dot on the Setup destination,
+which is a different mechanism on a different screen, deliberately.
+
 ---
 
 ## The run ledger

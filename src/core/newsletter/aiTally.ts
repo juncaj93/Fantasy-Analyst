@@ -125,11 +125,65 @@ export function buildNewsletterSource(input: {
     `Received: ${input.receivedAt}`,
     `Message-ID: ${input.messageId}`,
     '',
+    ...TALLY_INSTRUCTIONS,
+    '',
     body,
     SOURCE_END,
     '',
   ].join('\n');
 }
+
+/**
+ * What the app is asking for, carried with what it is asking about.
+ *
+ * The block used to be the article alone, which worked because it was pasted
+ * into a thread that already knew the job. That is a standing instruction living
+ * in one conversation on one device: a new thread, a cleared history or a
+ * different phone and the answer comes back in a shape the importer refuses —
+ * or worse, in a shape it accepts and means something else.
+ *
+ * So the rules travel with the material. Every one of them is a rule the app
+ * already enforces or already assumes, written where the reader of the block can
+ * act on it:
+ *
+ *   - the four allowed scores, because `parseAiTally` rejects anything else and
+ *     a rejected line is a player silently missing from a week;
+ *   - one row per player, because two rows for one player is a contradiction the
+ *     importer will not settle and sends to review instead;
+ *   - the net of an issue rather than a sentence count, because the ledger holds
+ *     one item per player per newsletter and a sentence tally would be counting
+ *     how often somebody was mentioned;
+ *   - omit the ones that cancel, because a row that nets to nothing is a
+ *     decision that looks like one and contributes none;
+ *   - a reason in football words, because that reason is what a player's card
+ *     shows — see `evidence/provenance.ts` for what happens when it is not;
+ *   - full names, because the identity ladder resolves a name to exactly one
+ *     player or to nobody, and never guesses.
+ *
+ * Written with no URLs and no markup, like the body beneath it: what is handed
+ * over is the article and the job, not the delivery.
+ */
+const TALLY_INSTRUCTIONS = [
+  'Read the newsletter below and score the players it has an opinion about.',
+  '',
+  'Answer with nothing but this block:',
+  '',
+  TALLY_PROTOCOL,
+  'Player Full Name | score | one-line football reason',
+  TALLY_END,
+  '',
+  'Rules:',
+  `- score is one of ${ALLOWED_SCORES.map((n) => (n > 0 ? `+${n}` : String(n))).join(', ')}. Nothing else is accepted.`,
+  '  Use 2 for something that changes how you would draft or start him, 1 for ordinary news.',
+  '- One row per player, for this issue only: the net of what it says about him.',
+  '  Not one row per sentence, and not a running total from earlier issues.',
+  '- Leave a player out entirely when the good and bad in this issue roughly cancel,',
+  '  and when he is only named in passing or in a leaderboard with no argument attached.',
+  '- Statistics count when they support an argument about his value now.',
+  '- The reason is the football, in your own words, short enough to read on a phone.',
+  '  It is shown on his card, so it should say what happened rather than that you scored him.',
+  '- Use full names as the newsletter writes them. A surname alone may not resolve.',
+];
 
 // ------------------------------------------------------------------ parsing --
 
@@ -229,6 +283,11 @@ export interface AiTallyImportResult {
   rejected: RejectedLine[];
   /** Set when the paste could not be read at all. */
   error: string | null;
+  /**
+   * This tally's identity, for exactly-once. Null when nothing was readable —
+   * an unreadable paste is not a tally and has nothing to be idempotent about.
+   */
+  payloadFingerprint: string | null;
   detail: string;
 }
 
@@ -237,6 +296,33 @@ export interface AiTallyImportOptions {
   sourceMessageId: string;
   sourceDate: string;
   sourceName?: string;
+}
+
+/**
+ * The identity of one pasted tally, as a whole.
+ *
+ * Exactly-once needs a name for "this tally, again". The ledger's per-row
+ * dedupe keys already stop a repeat from *counting* twice, and this is what
+ * lets the server *recognise* the repeat: a second apply of the same tally is
+ * answered with what the first one did rather than with a truthful but useless
+ * report that nothing was applied.
+ *
+ * Computed from the rows the parser read, not from the raw paste. A chat reply
+ * arrives wrapped in explanation, a code fence and whatever else the model felt
+ * like saying, and none of that is the tally — so a second paste of the same
+ * scores with a different preamble is the same tally, and is treated as one.
+ * The rows are sorted for the same reason: their order is presentational.
+ *
+ * A block with no rows has an identity too, and it is a stable one. That is
+ * deliberate: "this issue had nothing worth scoring" is a real answer, and
+ * approving it twice must still complete the newsletter exactly once.
+ */
+export function tallyPayloadFingerprint(rows: AiTallyRow[]): string {
+  const canonical = rows
+    .map((r) => [canonicalText(r.name), String(r.score), canonicalText(r.reason)].join('|'))
+    .sort()
+    .join('\n');
+  return stableHash([TALLY_PROTOCOL, canonical].join('|'));
 }
 
 /** The dedupe identity of one imported row. */
@@ -284,6 +370,7 @@ export function importAiTally(
       conflicts: [],
       rejected: parsed.rejected,
       error: parsed.error,
+      payloadFingerprint: null,
       detail: parsed.error,
     };
   }
@@ -401,6 +488,7 @@ export function importAiTally(
     conflicts,
     rejected: parsed.rejected,
     error: null,
+    payloadFingerprint: tallyPayloadFingerprint(parsed.rows),
     detail: parts.join(' '),
   };
 }

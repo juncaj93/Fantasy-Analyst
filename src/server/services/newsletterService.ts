@@ -1,13 +1,23 @@
 /**
- * Newsletter ingestion orchestration: validate -> process -> persist -> refresh
- * signal cache -> route ambiguity to review.
+ * Two jobs, and the whole design is in the gap between them.
  *
- * The dedicated inbound address is the production path, so this service is the
- * single gate between "an email arrived" and "evidence exists". Mail from an
- * unexpected sender is recorded and quarantined, never parsed into evidence.
+ * **Taking delivery** — validate the sender, decode and repair the body, store
+ * it, and mark it as awaiting a tally. That is `ingest`, and it writes no
+ * evidence at all. An issue arriving creates work waiting for a person, not
+ * fantasy opinions: judging what a paragraph of editorial analysis means for a
+ * player's value is a semantic question, and the honest ways to answer it are a
+ * paid model at runtime or somebody who reads it. This app has ruled out the
+ * first, so the second is the only path a score reaches the ledger by.
  *
- * Idempotent by construction: a message already seen (by id or by content
- * fingerprint) is skipped, and evidence inserts are deduped independently.
+ * **Scoring it** — hand the cleaned article over in one tap, parse a strict
+ * answer back, resolve the names against Sleeper, show exactly what would
+ * change, and write it once. That is `chatSource`, `previewAiTally` and
+ * `applyAiTally`, and it is the single authoritative scoring path in the app.
+ *
+ * Idempotent at three levels: a message already seen (by id or by content
+ * fingerprint) is never handled twice, an application of one tally is claimed
+ * durably before it runs, and every evidence insert is deduped on the row's own
+ * identity. See `applyAiTally` for why all three are needed.
  */
 
 import { effectiveEvidence } from '../../core/evidence/aggregate.ts';
@@ -36,89 +46,58 @@ import { DEFAULT_NEWSLETTER_SOURCES, type EmailSource } from '../../core/newslet
 import { importTally, type TallyImportResult } from '../../core/newsletter/tally.ts';
 import { nowIso, type Database } from '../db.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
-import { NewsletterRepo, type MessageRecord } from '../repos/newsletter.ts';
+import { NewsletterRepo, type MessageRecord, type TallyState } from '../repos/newsletter.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 
-export type IngestStatus =
-  | 'processed'
-  | 'duplicate'
-  | 'quarantined'
-  | 'rejected'
-  | 'no_players'
-  | 'error';
+/**
+ * `no_players` is gone, and its absence is the point.
+ *
+ * It meant "read, understood, and it said nothing about anybody" — a verdict on
+ * the football in an issue, reached by the app on arrival. Arrival no longer
+ * reaches a verdict about anything: a qualifying newsletter is `processed`,
+ * which now means received and stored, and whether it says anything about a
+ * player is a question only the approved tally answers.
+ */
+export type IngestStatus = 'processed' | 'duplicate' | 'quarantined' | 'rejected' | 'error';
 
 export interface IngestOutcome {
   messageId: string;
   status: IngestStatus;
+  /**
+   * Always zero for an inbound newsletter, and kept so callers that report it
+   * keep compiling. Arrival writes no evidence; the approved tally does.
+   */
   evidenceInserted: number;
   evidencePending: number;
   identityReviews: number;
   playersTouched: number;
+  /** True when this issue is now waiting for its ChatGPT tally. */
+  awaitingTally?: boolean;
   /** One plain-language sentence, safe to show in the UI as-is. */
   detail: string;
   coverage?: CoverageReport;
   result?: NewsletterProcessResult;
 }
 
-/** A stored item the current rules would classify differently. */
-export interface ReprocessDisagreement {
-  playerId: string;
-  excerpt: string;
-  storedPolarity: string;
-  storedMagnitude: number;
-  newPolarity: string;
-  newMagnitude: number;
-  ruleId: string | null;
-}
-
-export interface ReprocessPreview {
-  messageId: string;
-  /** Items the current rules find that are not stored yet. */
-  wouldAdd: number;
-  alreadyStored: number;
-  /**
-   * Stored items that came from a body that could not be read, and that the
-   * repaired parse replaces. Zero unless the email needed decoding repairs.
-   */
-  wouldRetire: ReprocessDisagreement[];
-  /** Decoding repairs the stored body needs before it can be read at all. */
-  repairs: string[];
-  /** Stored items the rules now disagree with. Reprocessing will NOT change these. */
-  stale: ReprocessDisagreement[];
-  /** Disagreements on items a user has corrected. These are never touched. */
-  protectedByUser: ReprocessDisagreement[];
-  playersAffected: number;
-  tallyDelta: { playerId: string; net: number }[];
-  coverage: CoverageReport;
-  detail: string;
-}
-
-function describePreview(
-  added: number,
-  stale: number,
-  protectedCount: number,
-  retired: number,
-  repaired: boolean,
-): string {
-  const parts: string[] = [];
-  if (repaired) {
-    parts.push('This email was stored before it could be decoded properly; re-reading it repairs the text first.');
-  }
-  parts.push(added === 0 ? 'Nothing new would be added.' : `${added} new item(s) would be added.`);
-  if (retired > 0) {
-    parts.push(`${retired} item(s) read from the unreadable text would be retired, so nothing is counted twice.`);
-  }
-  if (stale > 0) {
-    parts.push(
-      `${stale} stored item(s) are now read differently by the rules, but reprocessing leaves them as they are.`,
-    );
-  }
-  if (protectedCount > 0) {
-    parts.push(`${protectedCount} item(s) you corrected are protected and stay as you set them.`);
-  }
-  return parts.join(' ');
-}
+/**
+ * Re-running the classifier over a stored newsletter is gone, and so are its
+ * preview and its two endpoints.
+ *
+ * It was the last live path by which the sentence classifier could put a score
+ * into a player's tally, and §8 of this lane allows exactly one: the approved
+ * ChatGPT tally. The distinction that used to make reprocessing safe — it only
+ * ever *added* what the rules now found — is precisely what made it unsafe
+ * here, because what it added was automatic scoring evidence, filed against an
+ * issue whose approved tally is the only reading that is supposed to count.
+ *
+ * The decoding repair it also carried is not lost, and did not need it: the
+ * repair happens on the way *out* now. `chatSource` runs `recoverBody` over the
+ * stored email every time it is copied, so an issue kept with an undecoded MIME
+ * body still hands ChatGPT clean readable text — and since arrival writes no
+ * evidence at all, there is no longer a ledger row derived from garbage for a
+ * repair to have to retire.
+ */
 
 export interface TallyImportOutcome {
   rowsParsed: number;
@@ -184,6 +163,15 @@ export interface AiTallyPreview {
   messageId: string;
   protocolOk: boolean;
   error: string | null;
+  /**
+   * When this exact tally has already been applied to this newsletter.
+   *
+   * Not an error and not a refusal — the preview still describes the tally in
+   * full. It is here so the screen can say "this was applied on the 20th" and
+   * so the apply, when it is pressed anyway, is a recognised replay rather than
+   * a write that finds nothing to do.
+   */
+  alreadyAppliedAt: string | null;
   rowsParsed: number;
   /** Rows ready to apply. */
   ready: AiTallyPreviewRow[];
@@ -238,6 +226,17 @@ export interface AiTallyApplyOutcome {
   /** Parser rows parked for a human because they point the other way. */
   parserNeedsReview: number;
   playersTouched: number;
+  /**
+   * True once this newsletter has an approved tally and stops asking for
+   * attention. False only when the paste could not be read at all.
+   */
+  completed: boolean;
+  /**
+   * True when this exact tally had already been applied and this call wrote
+   * nothing. Reported rather than hidden: "nothing was added" and "nothing was
+   * added *again*" are different answers, and only one of them is a problem.
+   */
+  replayed: boolean;
   detail: string;
 }
 
@@ -368,47 +367,54 @@ export class NewsletterService {
       };
     }
 
-    // --- process -------------------------------------------------------------
+    // --- store, and wait for a person ---------------------------------------
+    /*
+     * The whole point of this lane, in one block.
+     *
+     * A newsletter arriving used to be read by the sentence classifier and
+     * written straight into the evidence ledger — "found news on 5 players, 2
+     * applied automatically, 3 waiting for your review". That was the app
+     * forming a fantasy opinion about editorial prose, which is the one
+     * judgment it cannot make and has decided not to fake. So the issue is
+     * received, repaired, stored and marked as awaiting its reviewed ChatGPT
+     * tally, and **not one row reaches the ledger here**.
+     *
+     * `processNewsletter` still runs, and still writes nothing: what is kept
+     * from it is the coverage report — the decoding repairs the body needed,
+     * how much text came out of it, and which name-like spans the player
+     * dictionary does not know. Those are diagnostics about *delivery*, they
+     * are what Settings shows when an issue arrives unreadable, and none of
+     * them is an opinion about a player. Its classifications are discarded.
+     */
     try {
       const index = await this.players.buildIndex();
       const result = processNewsletter(message, index, {
         sourceName: source?.label ?? message.from,
       });
 
-      const { inserted } = await this.evidence.insertProposed(result.evidence);
-      const identityReviews = await this.messages.insertIdentityReviews(result.identityReview);
-
-      const touched = [...new Set(result.evidence.map((e) => e.playerId))];
-      const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
-      for (const playerId of touched) {
-        await this.evidence.refreshSignal(playerId, { seasonStart });
-      }
-
-      const autoApplied = result.evidence.filter((e) => e.reviewStatus === 'auto_applied').length;
-      const detail =
-        result.evidence.length === 0
-          ? 'Processed, but no player news was found in this issue.'
-          : `Found news on ${touched.length} player${touched.length === 1 ? '' : 's'}: ` +
-            `${autoApplied} applied automatically, ${result.stats.pendingReview} waiting for your review.`;
+      // Only a body that was kept can be copied for ChatGPT, so only that can
+      // be tallied. Anything else is stored and asks for nothing.
+      const readable = (message.html ?? message.text ?? '').trim().length > 0;
+      const detail = readable
+        ? 'Received and stored. Score it with ChatGPT to move any player tallies.'
+        : 'Received, but it arrived with no readable text, so there is nothing to score.';
 
       await this.log(message, fingerprint, {
         status: 'processed',
         sourceId: source?.id ?? 'manual',
-        evidenceCount: result.evidence.length,
-        pendingCount: result.stats.pendingReview,
-        autoAppliedCount: autoApplied,
-        identityReviewCount: identityReviews,
         coverage: result.coverage as unknown as Record<string, unknown>,
         detail,
+        tallyState: readable ? 'awaiting' : 'not_applicable',
       });
 
       return {
         messageId: message.messageId,
-        status: result.evidence.length === 0 ? 'no_players' : 'processed',
-        evidenceInserted: inserted,
-        evidencePending: result.stats.pendingReview,
-        identityReviews,
-        playersTouched: touched.length,
+        status: 'processed',
+        evidenceInserted: 0,
+        evidencePending: 0,
+        identityReviews: 0,
+        playersTouched: 0,
+        awaitingTally: readable,
         detail,
         coverage: result.coverage,
         result,
@@ -436,7 +442,7 @@ export class NewsletterService {
   private async log(
     message: EmailMessage,
     fingerprint: string,
-    fields: Partial<MessageRecord> & { status: string; sourceId: string },
+    fields: Partial<MessageRecord> & { status: string; sourceId: string; tallyState?: TallyState },
   ): Promise<void> {
     await this.messages.recordMessage({
       messageId: message.messageId,
@@ -460,6 +466,10 @@ export class NewsletterService {
       // storing its contents is not.
       bodyHtml: fields.status === 'processed' ? message.html ?? null : null,
       bodyText: fields.status === 'processed' ? message.text ?? null : null,
+      // Only a stored, readable newsletter can be worked on. Everything else —
+      // quarantined, oversized, unreadable — is recorded and asks for nothing.
+      tallyState: fields.tallyState ?? 'not_applicable',
+      talliedAt: null,
     });
   }
 
@@ -563,110 +573,32 @@ export class NewsletterService {
     };
   }
 
+  // ------------------------------------------------------- ChatGPT tally ---
+
   /**
-   * Work out what reprocessing a stored message would do, without doing it.
+   * The newsletter the workflow is about right now, and how many are behind it.
    *
-   * This exists because reprocessing is insert-only: it adds evidence the rules
-   * now find and never touches what is already stored. That is the right
-   * behaviour — a user's correction must survive a rule change — but it means
-   * an improved rule can silently disagree with a stored row and leave it
-   * alone. Tuning rules blind to that is guesswork, so the preview reports it
-   * explicitly as `stale` rather than hiding it among the skips.
-   *
-   * Writes nothing.
+   * One at a time, oldest first — see `NewsletterRepo.nextAwaitingTally`. Setup
+   * uses this to decide whether to show the two workflow controls at all, and
+   * which issue they act on, so the reader never has to pick a newsletter when
+   * there is only one thing to do.
    */
-  async previewReprocess(message: EmailMessage): Promise<ReprocessPreview> {
-    const index = await this.players.buildIndex();
-    const result = processNewsletter(message, index);
-    const existing = await this.evidence.listByDedupeKeys(result.evidence.map((e) => e.dedupeKey));
-
-    const added: ProposedEvidence[] = [];
-    const unchanged: ProposedEvidence[] = [];
-    const stale: ReprocessDisagreement[] = [];
-    const protectedByUser: ReprocessDisagreement[] = [];
-
-    for (const proposed of result.evidence) {
-      const stored = existing.get(proposed.dedupeKey);
-      if (!stored) {
-        added.push(proposed);
-        continue;
-      }
-      const differs =
-        stored.polarity !== proposed.polarity ||
-        stored.magnitude !== proposed.magnitude ||
-        stored.category !== proposed.category;
-      if (!differs) {
-        unchanged.push(proposed);
-        continue;
-      }
-      const disagreement: ReprocessDisagreement = {
-        playerId: proposed.playerId,
-        excerpt: proposed.excerpt,
-        storedPolarity: stored.polarity,
-        storedMagnitude: stored.magnitude,
-        newPolarity: proposed.polarity,
-        newMagnitude: proposed.magnitude,
-        ruleId: proposed.ruleId,
-      };
-      // A user decision outranks any rule, so this one is not even a candidate
-      // for change — it is reported so the disagreement stays visible.
-      if (stored.userOverride) protectedByUser.push(disagreement);
-      else stale.push(disagreement);
-    }
-
-    // Only genuinely new items would move a tally, so that is all the delta
-    // counts. Promising more than reprocessing delivers would be a lie.
-    const tallyDelta = new Map<string, number>();
-    for (const e of added) {
-      if (e.reviewStatus !== 'auto_applied') continue;
-      const signed = e.polarity === 'positive' ? e.magnitude : e.polarity === 'negative' ? -e.magnitude : 0;
-      tallyDelta.set(e.playerId, (tallyDelta.get(e.playerId) ?? 0) + signed);
-    }
-
-    // What the repair would retire. Only a message whose body could not be read
-    // has anything here: its stored rows were derived from garbage, so the
-    // repaired parse replaces rather than joins them.
-    const repairs = result.coverage.repairs;
-    const keep = new Set(result.evidence.map((e) => e.dedupeKey));
-    const wouldRetire: ReprocessDisagreement[] = repairs.length
-      ? (await this.evidence.listLiveBySourceMessage(message.messageId))
-          .filter((row) => !keep.has(row.dedupeKey) && !row.userOverride)
-          .map((row) => ({
-            playerId: row.playerId,
-            excerpt: row.excerpt,
-            storedPolarity: row.polarity,
-            storedMagnitude: row.magnitude,
-            newPolarity: 'retired',
-            newMagnitude: 0,
-            ruleId: row.ruleId,
-          }))
-      : [];
-
+  async pendingTally(): Promise<{
+    messageId: string;
+    subject: string;
+    receivedAt: string;
+    /** Including this one. */
+    waiting: number;
+  } | null> {
+    const next = await this.messages.nextAwaitingTally();
+    if (!next) return null;
     return {
-      messageId: message.messageId,
-      wouldAdd: added.length,
-      alreadyStored: unchanged.length,
-      wouldRetire,
-      repairs,
-      stale,
-      protectedByUser,
-      playersAffected: new Set(added.map((e) => e.playerId)).size,
-      tallyDelta: [...tallyDelta.entries()]
-        .filter(([, net]) => net !== 0)
-        .map(([playerId, net]) => ({ playerId, net }))
-        .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)),
-      coverage: result.coverage,
-      detail: describePreview(
-        added.length,
-        stale.length,
-        protectedByUser.length,
-        wouldRetire.length,
-        repairs.length > 0,
-      ),
+      messageId: next.messageId,
+      subject: next.subject,
+      receivedAt: next.receivedAt,
+      waiting: await this.messages.awaitingTallyCount(),
     };
   }
-
-  // ------------------------------------------------------- ChatGPT tally ---
 
   /**
    * The newsletter as one block of text, ready to paste into a chat.
@@ -689,40 +621,63 @@ export class NewsletterService {
   }
 
   /**
-   * Decide what an imported tally does to the parser's own rows.
+   * Decide what an approved tally does to the classifier's own rows.
    *
-   * A newsletter that has been scored by hand has one semantic reading, and it
-   * is the imported one — so the parser's reading of the same player in the
-   * same issue must stop counting rather than stacking underneath it. Nothing
-   * is deleted: the parser's finding, its rule and its excerpt stay in the
-   * ledger for audit, they simply stop contributing.
+   * The approved tally is the newsletter's reading. Not its reading of the
+   * players it happens to name — its reading of the *issue*, whole. A player
+   * the tally omits was omitted on purpose: the tally protocol says so
+   * explicitly, "omit players whose meaningful signals roughly cancel". So the
+   * classifier's rows for that newsletter stop counting, whether or not the
+   * tally scores the same player.
    *
-   * The split is by direction, because that is what separates the two real
-   * cases. Pointing the same way, the two are the same assessment and the
-   * import supersedes it. Pointing opposite ways, whether they were ever the
-   * same claim is a genuine question — the parser may have read a different
-   * sentence — and the honest answer is neither to count both nor to discard
-   * one, so it stops counting and waits for a person.
+   * That scope is the correction. It used to displace only the players the
+   * tally named, which left the rest of the classifier's automatic reading of
+   * the same issue stacked underneath the approved one — the exact double-count
+   * this lane exists to close.
+   *
+   * Nothing is deleted: the classifier's finding, its rule and its excerpt stay
+   * in the ledger for audit, they simply stop contributing.
+   *
+   * Three dispositions, and the split is by what a person has already said:
+   *
+   *   `protected` — the user ruled on this row. Nothing an import does may
+   *     touch that, and it keeps counting exactly as they left it.
+   *   `needs_review` — the tally scores this player the *other* way. Whether
+   *     the two were ever the same claim is a genuine question, so the row
+   *     stops counting and waits for a person rather than being counted or
+   *     discarded by default.
+   *   `superseded` — everything else. Retired, because the issue has been read.
    *
    * Shared by preview and apply so the two cannot describe different outcomes.
    */
-  private planParserDisplacement(
+  private async planParserDisplacement(
     live: EvidenceItem[],
     proposed: ProposedEvidence[],
-  ): Map<string, ParserRowDisposition[]> {
+  ): Promise<Map<string, ParserRowDisposition[]>> {
     const byPlayer = new Map<string, ParserRowDisposition[]>();
     const scored = new Map<string, ProposedEvidence>();
     for (const item of proposed) scored.set(item.playerId, item);
 
+    /*
+     * Who has been ruled on, asked of the ledger's own decision record.
+     *
+     * Not read off `review_status`: `accepted` is a status an import is also
+     * allowed to write — the identity-repair path writes it for every row it
+     * recovers, because the user confirmed *who* somebody is rather than what
+     * the news said about them. `user_reviews` is written by a person pressing
+     * a button in Review and by nothing else.
+     */
+    const ruled = await this.evidence.idsWithUserDecision(live.map((row) => Number(row.id)));
+
     for (const row of live) {
       if (row.ruleId === AI_TALLY_RULE_ID) continue;
       const mine = scored.get(row.playerId);
-      if (!mine) continue;
-      const disposition: ParserRowDisposition['disposition'] = row.userOverride
-        ? 'protected'
-        : row.polarity === mine.polarity
-          ? 'superseded'
-          : 'needs_review';
+      const disposition: ParserRowDisposition['disposition'] =
+        row.userOverride != null || ruled.has(Number(row.id))
+          ? 'protected'
+          : mine && row.polarity !== mine.polarity
+            ? 'needs_review'
+            : 'superseded';
       const list = byPlayer.get(row.playerId) ?? [];
       list.push({
         id: row.id,
@@ -762,6 +717,7 @@ export class NewsletterService {
         messageId: message.messageId,
         protocolOk: false,
         error: result.error,
+        alreadyAppliedAt: null,
         rowsParsed: 0,
         ready: [],
         reinstated: [],
@@ -780,13 +736,26 @@ export class NewsletterService {
       };
     }
 
+    /*
+     * Applied *and still standing*.
+     *
+     * A tally that was applied and then corrected by a later one is on the
+     * record but is no longer what this newsletter says, so pasting it again is
+     * a revision back to it — a real change, previewed as one. Only the tally
+     * currently standing makes a repeat inert.
+     */
+    const previous = result.payloadFingerprint
+      ? await this.messages.findTallyApplication(message.messageId, result.payloadFingerprint)
+      : null;
+    const applied = previous?.standing && previous.completed ? previous : null;
+
     const keys = result.evidence.map((e) => e.dedupeKey);
     const stored = await this.evidence.listByDedupeKeys(keys);
     const live = await this.evidence.listLiveBySourceMessage(message.messageId);
     // Rows an earlier revision of this tally retired, that this one asks for again.
     const retiredEarlier = await this.evidence.listRetiredImports(keys, AI_TALLY_SUPERSEDED_NOTE);
     // What the parser found for these same players, and what happens to it.
-    const displaced = this.planParserDisplacement(live, result.evidence);
+    const displaced = await this.planParserDisplacement(live, result.evidence);
 
     const ready: AiTallyPreviewRow[] = [];
     const duplicates: AiTallyPreviewRow[] = [];
@@ -909,11 +878,15 @@ export class NewsletterService {
     ) {
       parts.push('Nothing would change.');
     }
+    if (applied) {
+      parts.push(`This exact tally was already applied on ${applied.appliedAt.slice(0, 10)}; applying it again does nothing.`);
+    }
 
     return {
       messageId: message.messageId,
       protocolOk: true,
       error: null,
+      alreadyAppliedAt: applied?.appliedAt ?? null,
       rowsParsed: result.rowsParsed,
       ready,
       reinstated,
@@ -940,11 +913,25 @@ export class NewsletterService {
   }
 
   /**
-   * Write what the preview described.
+   * Write what the preview described, exactly once.
    *
-   * Inserts are deduped on the row's own identity, so pasting the same block
-   * twice inserts nothing the second time. A revised block retires the rows it
-   * replaces — never the parser's, and never one the user has ruled on.
+   * Three independent guards, because this is the one operation whose failure
+   * mode is a player's score silently doubling:
+   *
+   *   1. **The claim.** `claimTallyApplication` inserts one row for
+   *      (this newsletter, this tally) and returns whether it won. The insert
+   *      *is* the decision, so two requests racing on a double tap cannot both
+   *      conclude they are first — the loser writes nothing and answers with
+   *      what the winner did. A reload, a retry after a timeout, and a repeated
+   *      paste all land here.
+   *   2. **The row keys.** Every insert is deduped on the row's own identity, so
+   *      even a revised tally that repeats a row adds nothing for it.
+   *   3. **The displacement.** Applying makes the tally this issue's reading, so
+   *      the classifier's rows for the same issue stop counting rather than
+   *      stacking underneath — never one the user has ruled on.
+   *
+   * Nothing here relies on a disabled button or on anything the client
+   * remembers.
    */
   async applyAiTally(message: EmailMessage, pasted: string): Promise<AiTallyApplyOutcome> {
     const index = await this.players.buildIndex();
@@ -956,20 +943,36 @@ export class NewsletterService {
       sourceName: source?.label ?? message.from,
     });
 
-    if (result.error) {
-      return {
-        messageId: message.messageId,
-        inserted: 0,
-        reinstated: 0,
-        alreadyPresent: 0,
-        identityReviews: 0,
-        retired: 0,
-        protectedByUser: 0,
-        parserSuperseded: 0,
-        parserNeedsReview: 0,
-        playersTouched: 0,
-        detail: result.error,
-      };
+    const nothing = (detail: string, over: Partial<AiTallyApplyOutcome> = {}): AiTallyApplyOutcome => ({
+      messageId: message.messageId,
+      inserted: 0,
+      reinstated: 0,
+      alreadyPresent: 0,
+      identityReviews: 0,
+      retired: 0,
+      protectedByUser: 0,
+      parserSuperseded: 0,
+      parserNeedsReview: 0,
+      playersTouched: 0,
+      completed: false,
+      replayed: false,
+      detail,
+      ...over,
+    });
+
+    // An unreadable paste is not a tally: it completes nothing and is not
+    // recorded as an application, so the newsletter stays where it was.
+    if (result.error || !result.payloadFingerprint) return nothing(result.error ?? 'That paste could not be read.');
+
+    const now = nowIso();
+    const won = await this.messages.claimTallyApplication(message.messageId, result.payloadFingerprint, now);
+    if (!won) {
+      const previous = await this.messages.findTallyApplication(message.messageId, result.payloadFingerprint);
+      return nothing(
+        `This tally was already applied on ${(previous?.appliedAt ?? now).slice(0, 10)}. ` +
+          'Nothing was added a second time.',
+        { completed: true, replayed: true },
+      );
     }
 
     const { inserted, skipped } = await this.evidence.insertProposed(result.evidence);
@@ -1000,7 +1003,7 @@ export class NewsletterService {
      * see `planParserDisplacement` for why the two directions differ.
      */
     const live = await this.evidence.listLiveBySourceMessage(message.messageId);
-    const displaced = [...this.planParserDisplacement(live, result.evidence).values()].flat();
+    const displaced = [...(await this.planParserDisplacement(live, result.evidence)).values()].flat();
     const retireIds = displaced.filter((r) => r.disposition === 'superseded').map((r) => Number(r.id));
     const reviewIds = displaced.filter((r) => r.disposition === 'needs_review').map((r) => Number(r.id));
 
@@ -1052,7 +1055,19 @@ export class NewsletterService {
     }
     if (identityReviews) parts.push(`${identityReviews} name(s) are waiting in Review.`);
 
-    return {
+    /*
+     * The issue is done, and that is a decision about the workflow rather than
+     * about how much moved.
+     *
+     * An approved tally with no rows in it — "nothing in this issue was worth
+     * scoring" — is a real answer, and the commonest one for a quiet week. If
+     * completion depended on something changing, that answer would leave the
+     * newsletter asking for attention it can never be given, for ever. What
+     * completes it is that a person read the preview and approved it.
+     */
+    await this.messages.markTallied(message.messageId, now);
+
+    const outcome = {
       messageId: message.messageId,
       inserted,
       reinstated: reinstated.length,
@@ -1066,76 +1081,14 @@ export class NewsletterService {
       parserSuperseded: retiredParser.changed.length,
       parserNeedsReview: reviewParser.changed.length,
       playersTouched: touched.size,
+      completed: true,
+      replayed: false,
       detail: parts.join(' '),
     };
-  }
 
-  /**
-   * Re-run the classifier over a stored message.
-   *
-   * Normally insert-only: existing rows are never updated, only new dedupe keys
-   * are inserted, so a user's correction survives any rule change.
-   *
-   * The one exception is a message whose stored body could not be read — an
-   * email kept before its MIME was decoded correctly. There, insert-only would
-   * double count. The rows already stored were derived from fragments of
-   * undecoded text; the repaired parse produces the same news spelled properly,
-   * which is a different excerpt and therefore a different dedupe key. Both
-   * would then sit in the ledger describing one event. So when — and only
-   * when — a repair was needed, the rows this message owns that the repaired
-   * parse does not reproduce are retired, exactly as a tally re-import retires
-   * the revision it replaces. Rows the user has ruled on are still never
-   * touched, and a signal the repaired parse finds again keeps its own row
-   * rather than gaining a second one.
-   */
-  async reprocess(message: EmailMessage): Promise<IngestOutcome> {
-    const index = await this.players.buildIndex();
-    const result = processNewsletter(message, index);
-    const { inserted } = await this.evidence.insertProposed(result.evidence);
-
-    let superseded: { playerId: string }[] = [];
-    let keptForUserOverride: { playerId: string }[] = [];
-    if (result.coverage.repairs.length > 0) {
-      const outcome = await this.evidence.supersedeStaleImports(
-        message.messageId,
-        result.evidence.map((e) => e.dedupeKey),
-        'superseded-by-decoding-repair',
-      );
-      superseded = outcome.superseded;
-      keptForUserOverride = outcome.keptForUserOverride;
-    }
-
-    const seasonStart = await this.settings.get<string | null>(SETTING_KEYS.seasonStart, null);
-    const touched = new Set([
-      ...result.evidence.map((e) => e.playerId),
-      ...superseded.map((e) => e.playerId),
-    ]);
-    for (const playerId of touched) {
-      await this.evidence.refreshSignal(playerId, { seasonStart });
-    }
-
-    const detail =
-      (result.coverage.repairs.length
-        ? 'The stored email had to be decoded before it could be read. '
-        : '') +
-      `Reprocessed: ${inserted} new item(s).` +
-      (superseded.length
-        ? ` ${superseded.length} item(s) read from the unreadable text were retired, so nothing is counted twice.`
-        : '') +
-      (keptForUserOverride.length
-        ? ` ${keptForUserOverride.length} item(s) you had corrected were left exactly as you set them.`
-        : ' Your existing corrections were left untouched.');
-
-    return {
-      messageId: message.messageId,
-      status: 'processed',
-      evidenceInserted: inserted,
-      evidencePending: result.stats.pendingReview,
-      identityReviews: 0,
-      playersTouched: touched.size,
-      detail,
-      coverage: result.coverage,
-      result,
-    };
+    // Kept so a replay can answer with what this run actually did, rather than
+    // with a truthful but useless report that nothing happened.
+    await this.messages.recordTallyOutcome(message.messageId, result.payloadFingerprint, { ...outcome });
+    return outcome;
   }
 }

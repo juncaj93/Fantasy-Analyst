@@ -304,6 +304,10 @@ function overview(data: ScenarioData) {
      */
     pendingEvidence: 0,
     pendingIdentity: 0,
+    // And no newsletter is waiting to be scored either, for the same reason:
+    // a scenario ships a ledger that is already settled, so there is no issue
+    // sitting in it half-processed.
+    pendingNewsletters: 0,
     vegas: {
       ...freshness(data),
       provider: 'demo fixtures',

@@ -1854,9 +1854,20 @@ test.describe('review queue', () => {
   // projects, so each test ingests its own newsletter first. The mixed sentence
   // is guaranteed to land in review rather than auto-apply.
   test.beforeEach(async ({ page }, testInfo) => {
-    const res = await page.request.post('/api/newsletter/ingest', {
+    /*
+     * An issue, and an approved tally that contradicts itself.
+     *
+     * Reviewing consumes queue items and the dev server is shared across
+     * projects, so each test makes its own. Receiving a newsletter no longer
+     * puts anything in the queue — that was the automatic classifier, and it is
+     * retired — so the item comes from where review items come from now: a
+     * tally that scores one player twice, which the importer refuses to settle
+     * by preferring one and sends to a person instead.
+     */
+    const messageId = `e2e-${testInfo.project.name}-${testInfo.title}`;
+    const received = await page.request.post('/api/newsletter/ingest', {
       data: {
-        messageId: `e2e-${testInfo.project.name}-${testInfo.title}`,
+        messageId,
         from: 'editor@demo.newsletter',
         subject: 'Camp Report',
         date: new Date().toISOString(),
@@ -1868,7 +1879,22 @@ test.describe('review queue', () => {
         force: true,
       },
     });
-    expect(res.status()).toBe(200);
+    expect(received.status()).toBe(200);
+
+    const applied = await page.request.post(
+      `/api/newsletter/messages/${encodeURIComponent(messageId)}/ai-tally/apply`,
+      {
+        data: {
+          text: [
+            'NEWSLETTER_TALLY_V1',
+            `Julian Reyes | +1 | Back at practice (${messageId})`,
+            `Julian Reyes | -1 | Splitting the backfield (${messageId})`,
+            'END_NEWSLETTER_TALLY',
+          ].join('\n'),
+        },
+      },
+    );
+    expect(applied.status()).toBe(200);
 
     await login(page);
     await openReview(page);

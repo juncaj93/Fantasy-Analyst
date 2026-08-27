@@ -6,7 +6,7 @@
  * here; this screen only shows what the user can do from their phone.
  */
 
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -17,7 +17,6 @@ import {
   type AiTallyPreview,
   type ProjectionImportResult,
   type ProjectionStatus,
-  type ReprocessPreview,
   type SetupStatus,
 } from '../api.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
@@ -128,6 +127,15 @@ export function SetupScreen({
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [open, setOpen] = useState<Panel>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * What scoring the last newsletter did, kept here rather than in the controls.
+   *
+   * The controls are drawn only while an issue is waiting, so they are gone the
+   * instant one stops waiting — and a confirmation rendered inside them would
+   * disappear in the same frame as the thing it was confirming. This outlives
+   * that, and is cleared when the reader leaves Setup or another issue arrives.
+   */
+  const [scored, setScored] = useState<string | null>(null);
 
   /*
    * Tapping Setup while already on Setup.
@@ -142,6 +150,7 @@ export function SetupScreen({
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
       { when: error != null, undo: () => setError(null) },
+      { when: scored != null, undo: () => setScored(null) },
     ]);
   }, [resetNonce]);
 
@@ -242,21 +251,53 @@ export function SetupScreen({
 
       <ListGroup header="Your league">
         {status.steps.map((step) => (
-          <ListRow
-            key={step.id}
-            testId={`setup-step-${step.id}`}
-            dataState={step.state}
-            state={<StateMark state={step.state} />}
-            label={step.title}
-            detail={
-              <>
-                {step.summary}
-                {step.action ? <div>{step.action}</div> : null}
-              </>
-            }
-            chevron
-            onClick={() => setOpen(step.id as Panel)}
-          />
+          <Fragment key={step.id}>
+            <ListRow
+              testId={`setup-step-${step.id}`}
+              dataState={step.state}
+              state={<StateMark state={step.state} />}
+              label={step.title}
+              detail={
+                <>
+                  {step.summary}
+                  {step.action ? <div>{step.action}</div> : null}
+                </>
+              }
+              chevron
+              onClick={() => setOpen(step.id as Panel)}
+            />
+            {/*
+              The week's one job, where the week's one job is announced.
+
+              Copying an issue for ChatGPT and pasting the tally back used to be
+              four taps in — Setup, Newsletter, the issue, Copy — which is a lot
+              of navigation for the only thing anybody does with a newsletter.
+              So while an issue is waiting, the two controls are drawn directly
+              under the row that says it is waiting, and the Newsletter panel
+              stays exactly where it is for everything else.
+
+              They are workflow, not furniture: they exist only while there is
+              an unscored issue and they are gone the moment it is scored. If
+              this ever becomes a permanent pair of buttons on Setup, something
+              has gone wrong with the state behind it rather than with the
+              layout. Never in the taskbar — §16.
+            */}
+            {step.id === 'newsletter' && status.newsletter.pendingTally ? (
+              <PendingTallyRow
+                pending={status.newsletter.pendingTally}
+                unlocked={unlocked}
+                onDone={(detail) => {
+                  setScored(detail);
+                  refreshAll();
+                }}
+              />
+            ) : null}
+            {step.id === 'newsletter' && scored ? (
+              <div className="list-row-actions" data-testid="setup-tally-applied">
+                <Notice tone="ok">{scored}</Notice>
+              </div>
+            ) : null}
+          </Fragment>
         ))}
       </ListGroup>
 
@@ -1565,9 +1606,22 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
             </td>
           </tr>
           <tr>
-            <td>Last newsletter read</td>
+            <td>Last newsletter received</td>
             <td>{status.lastProcessedAt ? formatAge(status.lastProcessedAt) : 'none yet'}</td>
           </tr>
+          {/*
+            The one row that is work rather than history.
+
+            Drawn only when there is some, so the table does not spend a line
+            saying nothing is waiting — the Newsletter row on Setup already says
+            that, in the place somebody is standing when they need to know.
+          */}
+          {status.pendingTally ? (
+            <tr>
+              <td>Waiting to be scored</td>
+              <td data-testid="newsletter-waiting-count">{status.pendingTally.waiting}</td>
+            </tr>
+          ) : null}
           <tr>
             <td>News items found</td>
             <td>{status.totals.evidenceItems}</td>
@@ -1615,12 +1669,18 @@ function NewsletterHistory() {
   const [messages, setMessages] = useState<NewsletterMessage[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      const res = await api.get<{ messages: NewsletterMessage[] }>('/api/newsletter/messages');
-      setMessages(res.messages);
-    })();
+  const load = useCallback(async () => {
+    const res = await api.get<{ messages: NewsletterMessage[] }>('/api/newsletter/messages', { fresh: true });
+    setMessages(res.messages);
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Scoring an issue from here changes what this list says about it, so the
+  // list re-reads rather than keeping a row that still calls itself unscored.
+  const onScored = () => void load();
 
   if (!messages) return null;
 
@@ -1632,12 +1692,16 @@ function NewsletterHistory() {
       ) : (
         messages.map((m) => {
           const c = m.coverage ?? {};
-          const understood = c.classifiedSentences ?? 0;
-          const missed = c.unclassifiedSentences ?? 0;
           return (
             // The row header is the button; the detail is a sibling, because a
             // button may not contain the buttons the reprocess panel needs.
-            <div key={m.messageId} data-testid="newsletter-message" data-status={m.status}>
+            <div
+              key={m.messageId}
+              data-testid="newsletter-message"
+              data-message-id={m.messageId}
+              data-status={m.status}
+              data-tally-state={m.tallyState ?? 'unknown'}
+            >
               <button
                 className="player-row"
                 data-testid="newsletter-message-toggle"
@@ -1648,12 +1712,27 @@ function NewsletterHistory() {
                   <span className="player-name">{m.subject || '(no subject)'}</span>
                   <span className="row-action">{formatDate(m.receivedAt)}</span>
                 </div>
+                {/*
+                  What happened to this issue, in the vocabulary of the workflow
+                  that now owns it.
+
+                  It used to print "N news item(s)" and "N to review", which were
+                  the classifier's own counts: how many sentences it scored by
+                  itself and how many it wanted a verdict on. Neither is a thing
+                  that happens on arrival any more, and leaving them would have
+                  the history describe a pipeline the app no longer runs.
+                */}
                 <div className="player-row-metrics">
                   <Badge tone={m.status === 'processed' ? 'pos' : m.status === 'quarantined' ? 'warn' : 'neg'}>
-                    {m.status === 'processed' ? 'read' : m.status === 'quarantined' ? 'ignored' : m.status}
+                    {m.status === 'processed' ? 'received' : m.status === 'quarantined' ? 'ignored' : m.status}
                   </Badge>
-                  <span className="metric">{m.evidenceCount} news item(s)</span>
-                  {m.pendingCount > 0 ? <span className="metric">{m.pendingCount} to review</span> : null}
+                  {m.tallyState === 'awaiting' ? (
+                    <span className="metric" data-testid="newsletter-awaiting">
+                      waiting to be scored
+                    </span>
+                  ) : m.tallyState === 'applied' ? (
+                    <span className="metric">scored</span>
+                  ) : null}
                 </div>
               </button>
               {open === m.messageId ? (
@@ -1664,51 +1743,36 @@ function NewsletterHistory() {
                     <>
                       {(c.repairs ?? []).length > 0 ? (
                         <Notice tone="warn">
-                          This email had to be repaired before it could be read — it was stored
-                          before its encoding was decoded properly. Re-read it below to rebuild
-                          its news from the corrected text.
+                          This email arrived with its text encoded oddly and had to be repaired
+                          before it could be read. That repair is done every time it is copied, so
+                          Copy for ChatGPT still hands over clean readable text — nothing here
+                          needs fixing.
                         </Notice>
                       ) : null}
+                      {/*
+                        How much text came out of the email, and nothing about
+                        what it means.
+
+                        This table used to be the classifier's report card —
+                        "turned into a signal", "read but no rule matched",
+                        "unclear which player" — which was a set of claims about
+                        the football in the issue, made by a path that has been
+                        retired. What is left is the one thing arrival can
+                        honestly answer: whether the email decoded into readable
+                        text, and how much of it there is to hand to ChatGPT.
+                      */}
                       <table className="compact" style={{ marginTop: 6 }}>
                         <tbody>
                           <tr>
-                            <td>Sentences found</td>
+                            <td>Readable sentences</td>
                             <td>{c.sentences ?? 0}</td>
                           </tr>
                           <tr>
-                            <td>Sentences about your players</td>
+                            <td>Sentences naming a player you have</td>
                             <td>{c.sentencesWithPlayers ?? 0}</td>
-                          </tr>
-                          <tr>
-                            <td>Turned into a signal</td>
-                            <td>{understood}</td>
-                          </tr>
-                          <tr>
-                            <td>Read but no rule matched</td>
-                            <td>{missed}</td>
-                          </tr>
-                          <tr>
-                            <td>Unclear which player</td>
-                            <td>{c.ambiguousIdentitySentences ?? 0}</td>
                           </tr>
                         </tbody>
                       </table>
-                      {(c.samples ?? []).length > 0 ? (
-                        <>
-                          <div className="section-title">Sentences no rule matched</div>
-                          <ul style={{ paddingLeft: 16, margin: 0 }}>
-                            {(c.samples ?? []).map((sample, i) => (
-                              <li key={i} className="faint" style={{ marginBottom: 4 }}>
-                                “{sample.excerpt}” — {sample.players.join(', ')}
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="faint" style={{ marginTop: 4 }}>
-                            These are usually ordinary sentences with no news in them. If you spot real
-                            news here, it means a rule is missing.
-                          </div>
-                        </>
-                      ) : null}
                       {(c.unknownNames ?? []).length > 0 ? (
                         <>
                           <div className="section-title">Names not in the player list</div>
@@ -1719,8 +1783,7 @@ function NewsletterHistory() {
                           </div>
                         </>
                       ) : null}
-                      {m.bodyRetained ? <ChatTallyPanel messageId={m.messageId} /> : null}
-                      {m.bodyRetained ? <ReprocessPanel messageId={m.messageId} /> : null}
+                      {m.bodyRetained ? <ChatTallyPanel messageId={m.messageId} onApplied={onScored} /> : null}
                     </>
                   ) : null}
                 </div>
@@ -1730,6 +1793,44 @@ function NewsletterHistory() {
         })
       )}
     </>
+  );
+}
+
+/**
+ * The two workflow controls, directly under the Newsletter row on Setup.
+ *
+ * Drawn only while an issue is waiting to be scored, and gone the moment one
+ * is. That is the whole contract: this is the week's outstanding job made
+ * visible where the job is announced, not a permanent pair of buttons on a
+ * settings screen. It names the issue it acts on, because the reader should
+ * never be asked to pick a newsletter when there is only one thing to do — and
+ * says how many are behind it when there are, since the app works them one at
+ * a time, oldest first.
+ */
+function PendingTallyRow({
+  pending,
+  unlocked,
+  onDone,
+}: {
+  pending: NonNullable<NewsletterStatus['pendingTally']>;
+  unlocked: boolean;
+  onDone: (detail: string) => void;
+}) {
+  const behind = pending.waiting - 1;
+  return (
+    <div className="list-row-actions" data-testid="setup-pending-tally">
+      <div className="list-row-detail" data-testid="setup-pending-tally-subject">
+        {pending.subject || 'Latest issue'} · {formatDate(pending.receivedAt)}
+        {behind > 0 ? ` · ${behind} more after this one` : ''}
+      </div>
+      {unlocked ? (
+        <ChatTallyPanel messageId={pending.messageId} heading={null} onApplied={onDone} />
+      ) : (
+        // Applying a tally is a change, and changes need the passphrase. Saying
+        // so here beats a button that fails at the last step.
+        <div className="faint">Unlock above to score this issue.</div>
+      )}
+    </div>
   );
 }
 
@@ -1744,8 +1845,29 @@ function NewsletterHistory() {
  * Two controls, in the order they are used. Nothing applies on paste — the
  * preview is the point, because the app is importing somebody else's judgment
  * and the reader is the only one who can check it.
+ *
+ * Drawn in two places from one component, so the pair cannot drift: under the
+ * Newsletter row on Setup while an issue is waiting, and inside the newsletter
+ * history for any stored issue. `heading` is what differs — on Setup the row
+ * above has already said what this is.
  */
-function ChatTallyPanel({ messageId }: { messageId: string }) {
+function ChatTallyPanel({
+  messageId,
+  heading = 'Score this issue with ChatGPT',
+  onApplied,
+}: {
+  messageId: string;
+  heading?: string | null;
+  /**
+   * Called after a successful apply, with what it did.
+   *
+   * The detail is handed over rather than only shown here because on Setup this
+   * whole component disappears the moment the issue is scored — which is the
+   * point of it, and would take the confirmation with it. The caller outlives
+   * the work and is where the sentence belongs.
+   */
+  onApplied?: (detail: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
   const [pasted, setPasted] = useState('');
@@ -1797,6 +1919,10 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
       setPreview(null);
       setPasted('');
       setOpen(false);
+      // Setup re-reads and this whole area disappears, which is the visible
+      // half of "the issue is done". Called after the sheet closes so the
+      // reader sees the outcome rather than a component vanishing under them.
+      if (result.completed) onApplied?.(result.detail);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1821,21 +1947,43 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
     (preview?.wouldRetire.length ?? 0) > 0 ||
     (preview?.parserSuperseded.length ?? 0) > 0 ||
     (preview?.parserNeedsReview.length ?? 0) > 0;
+  /*
+   * What the primary action does, and why "nothing changes" is still a thing
+   * to press.
+   *
+   * A tally that scores nobody is a real answer — the commonest one for a quiet
+   * week — and approving it is what finishes the issue. If the button needed a
+   * ledger change to be pressable, that answer would leave the newsletter
+   * asking for attention nobody could ever clear.
+   *
+   * The one state that is genuinely inert is a replay: this exact tally has
+   * been applied already, the server would recognise it and write nothing, and
+   * saying so is more use than a button that reports doing nothing.
+   */
+  const replay = preview?.alreadyAppliedAt != null;
+  const canApply = preview != null && preview.protocolOk && !replay;
+  const applyLabel = !preview?.protocolOk
+    ? 'Not a tally'
+    : replay
+      ? 'Already applied'
+      : changes
+        ? `Process tally${ready.length > 0 ? ` (${ready.length})` : ''}`
+        : 'Nothing to add — mark this issue done';
   const needsReview =
     (preview?.pending.length ?? 0) + (preview?.ambiguous.length ?? 0) + (preview?.unmatched.length ?? 0);
 
   return (
-    <div style={{ marginTop: 8 }} data-testid="chat-tally-panel">
-      <div className="section-title">Score this issue with ChatGPT</div>
+    <div style={{ marginTop: heading ? 8 : 0 }} data-testid="chat-tally-panel">
+      {heading ? <div className="section-title">{heading}</div> : null}
       {done ? <Notice tone="ok">{done}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      <div className="btn-row">
-        <button className="btn btn-sm" onClick={copy} disabled={busy} data-testid="copy-for-chatgpt">
+      <div className="btn-row btn-row-workflow">
+        <button className="btn" onClick={copy} disabled={busy} data-testid="copy-for-chatgpt">
           {copied ? 'Copied for ChatGPT' : 'Copy for ChatGPT'}
         </button>
-        <button className="btn btn-sm" onClick={() => setOpen(true)} data-testid="open-paste-tally">
-          Paste AI Tally
+        <button className="btn" onClick={() => setOpen(true)} data-testid="open-paste-tally">
+          Paste AI tally
         </button>
       </div>
       <div className="faint" style={{ marginTop: 4 }}>
@@ -1880,6 +2028,12 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
           {preview ? (
             <div className="explain" style={{ marginTop: 8 }} data-testid="paste-tally-preview">
               {preview.error ? <Notice tone="error">{preview.error}</Notice> : null}
+              {preview.alreadyAppliedAt ? (
+                <Notice tone="ok">
+                  This exact tally was already applied on {formatDate(preview.alreadyAppliedAt)}. Nothing
+                  would be added a second time.
+                </Notice>
+              ) : null}
               <div className="muted">{preview.detail}</div>
 
               {ready.length > 0 ? (
@@ -1980,147 +2134,41 @@ function ChatTallyPanel({ messageId }: { messageId: string }) {
                 </>
               ) : null}
 
+              {/*
+                The gate, and the way back out of it.
+
+                Primary says what pressing it does in the app's own words —
+                process this tally — rather than naming the machinery behind it.
+                Cancel is beside it because a reader who has just read the list
+                and does not like it needs an action that plainly changes
+                nothing, not a close control in the corner of a sheet.
+              */}
               <div className="btn-row" style={{ marginTop: 8 }}>
                 <button
-                  className="btn btn-sm btn-primary"
+                  className="btn btn-primary"
                   onClick={apply}
-                  disabled={busy || !changes}
+                  disabled={busy || !canApply}
                   data-testid="paste-tally-apply"
                 >
-                  {!changes ? 'Nothing to apply' : `Apply ${ready.length} matched signal(s)`}
+                  {applyLabel}
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setPreview(null);
+                    setPasted('');
+                    setOpen(false);
+                  }}
+                  disabled={busy}
+                  data-testid="paste-tally-cancel"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
           ) : null}
         </Sheet>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * Re-run the current rules over one stored newsletter.
- *
- * Always previewed first. The preview is careful about one thing in
- * particular: reprocessing only ever *adds* what the rules now find, so a
- * stored item the rules would now read differently stays exactly as it is.
- * Saying that plainly matters more than making the button look powerful.
- */
-function ReprocessPanel({ messageId }: { messageId: string }) {
-  const [preview, setPreview] = useState<ReprocessPreview | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setPreview(await api.get<ReprocessPreview>(`/api/newsletter/messages/${encodeURIComponent(messageId)}/preview`));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const apply = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.post<{ evidenceInserted: number; detail?: string }>(
-        `/api/newsletter/messages/${encodeURIComponent(messageId)}/reprocess`,
-      );
-      // The server's own sentence covers the cases this one cannot know about —
-      // chiefly that repairing an unreadable email retires what it replaces.
-      setDone(
-        result.detail ??
-          `Added ${result.evidenceInserted} new item(s). Your corrections were left as they are.`,
-      );
-      setPreview(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ marginTop: 8 }} data-testid="reprocess-panel">
-      <div className="section-title">Re-read this email</div>
-      {done ? <Notice tone="ok">{done}</Notice> : null}
-      {error ? <Notice tone="error">{error}</Notice> : null}
-
-      {!preview ? (
-        <>
-          <button className="btn btn-sm" onClick={load} disabled={busy} data-testid="reprocess-preview">
-            {busy ? 'Checking…' : 'Check what would change'}
-          </button>
-          <div className="faint" style={{ marginTop: 4 }}>
-            Nothing changes until you say so.
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="muted">{preview.detail}</div>
-
-          {preview.tallyDelta.length > 0 ? (
-            <table className="compact" style={{ marginTop: 6 }}>
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th>Tally change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.tallyDelta.map((d) => (
-                  <tr key={d.playerId}>
-                    <td>{d.playerId}</td>
-                    <td>{d.net > 0 ? `+${d.net}` : d.net}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : null}
-
-          {preview.stale.length > 0 ? (
-            <>
-              <div className="section-title">Read differently now, but left alone</div>
-              <ul style={{ paddingLeft: 16, margin: 0 }}>
-                {preview.stale.map((s, i) => (
-                  <li key={i} className="faint" style={{ marginBottom: 4 }}>
-                    “{s.excerpt}” — stored as {s.storedPolarity} {s.storedMagnitude}, now read as {s.newPolarity}{' '}
-                    {s.newMagnitude}
-                  </li>
-                ))}
-              </ul>
-              <div className="faint" style={{ marginTop: 4 }}>
-                Re-reading only adds news it did not have before. To change one of these, edit it in Review.
-              </div>
-            </>
-          ) : null}
-
-          {preview.protectedByUser.length > 0 ? (
-            <div className="faint" style={{ marginTop: 6 }}>
-              {preview.protectedByUser.length} item(s) you corrected stay exactly as you set them.
-            </div>
-          ) : null}
-
-          <div style={{ marginTop: 8 }}>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={apply}
-              disabled={busy || preview.wouldAdd === 0}
-              data-testid="reprocess-apply"
-            >
-              {preview.wouldAdd === 0 ? 'Nothing to add' : `Add ${preview.wouldAdd} item(s)`}
-            </button>
-            <button className="btn btn-sm" onClick={() => setPreview(null)} disabled={busy}>
-              Cancel
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

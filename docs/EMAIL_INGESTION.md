@@ -10,13 +10,46 @@ FF Newsletter
   -> fantasy-news@<your-domain>          (Cloudflare Email Routing)
   -> Worker email() handler              (src/worker/index.ts)
   -> sender validation + idempotency     (NewsletterService.ingest)
-  -> sanitize, de-boilerplate, segment   (core/newsletter/html.ts)
-  -> player detection                    (core/newsletter/mentions.ts)
-  -> deterministic classification        (core/newsletter/classify.ts + rules.ts)
-  -> evidence ledger                     (evidence_items)
-  -> derived player tallies              (player_signal_cache)
-  -> review queue when uncertain
+  -> decode, sanitize, de-boilerplate    (core/newsletter/mime.ts + html.ts)
+  -> stored, and marked as awaiting a tally
+  -> Setup shows a mark; nothing is scored
 ```
+
+...and then, when you have a minute:
+
+```
+Copy for ChatGPT                         (NewsletterService.chatSource)
+     the article, plus the rules the answer will be held to
+  -> your weekly ChatGPT thread
+  -> Paste AI tally                      (core/newsletter/aiTally.ts)
+  -> names resolved against Sleeper      (core/identity)
+  -> preview: exactly what would change  (previewAiTally — writes nothing)
+  -> you approve
+  -> evidence ledger, once               (applyAiTally)
+  -> derived player tallies              (player_signal_cache)
+  -> review queue for a name that did not resolve
+```
+
+The copied block carries the job as well as the material: the exact protocol to
+answer in, the four scores the importer accepts, one row per player for this
+issue only, omit the players whose signals cancel, a reason in football words —
+because that reason is what a player's card shows — and full names, because the
+identity ladder resolves a name to one player or to nobody and never guesses.
+Every one of those is a rule the importer already enforces or already assumes;
+sending them with the article is what makes a fresh chat thread, or a different
+phone, produce an answer the app can actually read.
+
+**Arrival scores nothing.** Reading editorial analysis and judging what it means
+for a player's value is a semantic question, and the honest ways to answer it are
+a paid model at runtime or a person. This app has ruled out the first, so the
+judgment lives in a conversation you already have — and every deterministic part
+of the job around it stays in the app.
+
+The sentence-level classifier (`core/newsletter/classify.ts` + `rules.ts`) still
+runs on arrival, and its verdicts are **discarded**. What is kept from it is the
+coverage report: whether the body decoded into readable text, how much of it
+there is, and which name-like spans the player dictionary does not know. Those
+are facts about the *delivery*. None of them is an opinion about a player.
 
 Why a dedicated address rather than Gmail access:
 
@@ -42,7 +75,11 @@ unnecessary for this workflow.
    looks like a broken subscription.
 4. **Size-checked.** Bodies over 2 MB are rejected rather than parsed.
 5. **Decoded.** See below — this is a layer in its own right, not a detail.
-6. **Processed** through the deterministic pipeline.
+6. **Stored, and marked `awaiting`** — the durable state on
+   `newsletter_messages.tally_state` that puts the attention dot on Setup and
+   draws the two workflow controls under the Newsletter row. Mail nobody could
+   tally — quarantined, oversized, or with no readable body — is
+   `not_applicable` and asks for nothing.
 7. **Never fatal.** A parse failure is stored with a plain-language message and
    changes nothing. `email()` never throws, so mail is never bounced or retried
    in a loop.
@@ -108,26 +145,48 @@ to the `fantasy-analyst` Worker.
 
 No `send_email` binding is required — the app only receives.
 
-## Idempotency guarantees
+## Exactly once
 
-- A message id already seen (in any outcome) returns `duplicate`.
-- Content already processed returns `duplicate`.
-- Evidence rows are inserted `ON CONFLICT DO NOTHING` on a dedupe key derived
-  from (message id, player, normalised excerpt, rule id).
-- Rows carrying a user override are never modified by reprocessing.
+There is one authoritative scoring path — an approved ChatGPT tally — and three
+independent guards on it, because a double count is silent, permanent, and lands
+in the ledger every recommendation in this app reads.
 
-`NewsletterService.reprocess()` re-runs an updated rule set over a stored
-message: it inserts only genuinely new items and leaves corrections intact.
+- **Delivery.** A message id already seen (in any outcome) returns `duplicate`.
+  Content already processed returns `duplicate`.
+- **The application claim.** `newsletter_tally_applications` holds one row per
+  (newsletter, exact tally). The insert *is* the decision, so a double tap, a
+  reload, or a retry after a timeout cannot both conclude they are first — the
+  loser writes nothing and answers with what the winner did. A pair is a replay
+  only while it is the newest application on record: pasting tally A, then a
+  corrected B, then A again is three real decisions, and the third is a revision
+  back to A rather than a repeat of it.
+- **The row keys.** Evidence rows are inserted `ON CONFLICT DO NOTHING` on a
+  dedupe key derived from (message id, player, score, normalised reason), so
+  even a revised tally that repeats a row adds nothing for it.
 
-There is exactly one exception, and it exists to *protect* that guarantee. When
-a stored body could not be read and had to be repaired (`coverage.repairs` is
-non-empty), insert-only would double count: the rows already stored were derived
-from fragments of undecoded text, and the repaired parse describes the same news
-in clean prose — a different excerpt, so a different dedupe key. Both would then
-sit in the ledger describing one event. So in that case, and only in that case,
-the rows this message owns that the repaired parse does not reproduce are
-retired to `ignored` — never deleted, and never if the user has ruled on them.
-Reprocessing the same message again is then a no-op.
+**An approved tally is the reading of its whole issue.** Applying one retires
+whatever the classifier wrote for that newsletter — for every player, not only
+the ones the tally names, because the protocol says to omit players whose
+signals cancel and so silence about a player is a verdict rather than an
+absence of one. Nothing is deleted: `ignored` stops a row counting while it
+stays in the ledger with a note saying why, reversible from Review like any
+other item. A row the user has ruled on is never touched, and a row the tally
+scores the *other* way stops counting and waits for a person rather than being
+counted or discarded by default.
+
+Migration `0034_newsletter_awaits_a_tally.sql` does the same reconciliation
+once, for issues that arrived before this existed and are still awaiting a
+tally. It is scoped by provenance — classifier rows only, never
+`ai-tally-import` or `tally-backfill`, never a row with an override or any
+history in `user_reviews` — and re-running its two `UPDATE`s changes nothing.
+
+**Reprocessing is gone.** `NewsletterService.reprocess()` and its preview
+endpoint were the last live path by which the classifier could put a score in a
+player's tally, and one authoritative path means one. The decoding repair they
+also carried happens on the way *out* now: `chatSource` runs `recoverBody` over
+the stored email every time it is copied, so an issue kept with an undecoded
+MIME body still hands ChatGPT clean readable text — and since arrival writes no
+evidence, there is no longer a row derived from garbage for a repair to retire.
 
 ## Coverage reporting
 
@@ -137,17 +196,20 @@ Every processed newsletter stores a small report, shown in the app under
 - how many sentences were extracted at all
 - whether the body needed decoding repairs before it could be read
 - sentences that mentioned one of your players
-- how many produced a signal
-- how many matched no rule
-- how many had an unclear player
-- examples of the sentences no rule matched
 - name-like words that are not in the player dictionary
 
-Unmatched content is **not an error** — most sentences in a newsletter carry no
-news. The report exists so the rule dictionary can be improved deliberately,
-without an LLM.
+All four are facts about the *delivery*: did the email decode, and is there text
+in it to hand over. The classifier's own counts — how many sentences produced a
+signal, how many matched no rule — are still computed and are no longer shown,
+because they were a report card on the football in an issue, produced by a path
+that no longer scores anything.
 
 ## Tuning the rules
+
+**Nothing live reads these any more.** The rule dictionary and the classifier
+around it are kept because they explain every row in the ledger that predates
+the tally workflow, and because the coverage report still uses the extractor
+they sit behind. Editing a rule changes no player's tally.
 
 `src/core/newsletter/rules.ts` is data. Add a phrase family by appending an
 object with `id`, `category`, `polarity`, `magnitude`, `pattern` and an optional

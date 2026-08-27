@@ -53,7 +53,24 @@ async function withPending(page: Page, evidence: number, identity: number) {
   await page.route('**/api/overview', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    await route.fulfill({ json: { ...body, pendingEvidence: evidence, pendingIdentity: identity } });
+    await route.fulfill({
+      json: {
+        ...body,
+        pendingEvidence: evidence,
+        pendingIdentity: identity,
+        /*
+         * The third queue, pinned to nothing.
+         *
+         * An unscored newsletter also marks Settings, and the seeded world
+         * always has one — so a fixture that moved only the two review counts
+         * would be asserting the dot against a number it did not control, and
+         * "nothing waiting draws no mark" could never be true. This file is
+         * about the review queues; the newsletter's own mark is asserted in
+         * setup.spec.ts, where the work it leads to lives.
+         */
+        pendingNewsletters: 0,
+      },
+    });
   });
 }
 

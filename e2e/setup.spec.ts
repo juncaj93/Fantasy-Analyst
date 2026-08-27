@@ -48,6 +48,109 @@ test.describe('setup overview', () => {
 });
 
 /**
+ * The week's one job, on the screen that announces it.
+ *
+ * The flow this replaces was Setup → Newsletter → the issue → Copy, which is
+ * four taps of navigation for the only thing anybody does with a newsletter. So
+ * while an issue is waiting the two controls are drawn directly under the row
+ * that says it is waiting, and they name the issue they act on.
+ *
+ * The three things that can go wrong with a temporary control are all here: it
+ * has to appear when there is work, it has to say which work, and it must not
+ * become furniture — which is checked by it not being anywhere else, the
+ * taskbar included (§4, §16).
+ */
+test.describe('the newsletter waiting to be scored', () => {
+  test.beforeEach(async ({ page }) => openSetup(page));
+
+  test('offers both controls directly under the Newsletter row', async ({ page }) => {
+    const row = page.getByTestId('setup-step-newsletter');
+    await expect(row).toHaveAttribute('data-state', 'warn');
+    await expect(row).toContainText('waiting to be scored');
+
+    const actions = page.getByTestId('setup-pending-tally');
+    await expect(actions).toBeVisible();
+    await expect(actions.getByTestId('copy-for-chatgpt')).toBeVisible();
+    await expect(actions.getByTestId('open-paste-tally')).toBeVisible();
+    // It names the issue, so nobody has to go and find which one is meant.
+    await expect(actions.getByTestId('setup-pending-tally-subject')).toContainText('Camp Report: Week 2');
+
+    // Immediately after the row it belongs to, and inside the same group.
+    const order = await page.evaluate(() => {
+      const rowEl = document.querySelector('[data-testid="setup-step-newsletter"]')!;
+      const next = rowEl.nextElementSibling;
+      return {
+        isActions: next?.getAttribute('data-testid') === 'setup-pending-tally',
+        sameGroup: next?.parentElement === rowEl.parentElement,
+      };
+    });
+    expect(order).toEqual({ isActions: true, sameGroup: true });
+  });
+
+  test('is reachable without opening the Newsletter panel at all', async ({ page }) => {
+    // The panel is a pushed screen; if it were open this would be showing.
+    await expect(page.getByTestId('panel-newsletter')).toHaveCount(0);
+    await expect(page.getByTestId('setup-pending-tally').getByTestId('copy-for-chatgpt')).toBeVisible();
+  });
+
+  test('is easy to tap and does not push the page sideways', async ({ page }) => {
+    for (const id of ['copy-for-chatgpt', 'open-paste-tally']) {
+      const box = await page.getByTestId('setup-pending-tally').getByTestId(id).boundingBox();
+      expect(box!.height, `${id} is a tap target`).toBeGreaterThanOrEqual(44);
+    }
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('stays out of the taskbar', async ({ page }) => {
+    const bar = await page.locator('.tabbar').innerText();
+    expect(bar.toLowerCase()).not.toContain('chatgpt');
+    expect(bar.toLowerCase()).not.toContain('tally');
+    expect(bar.toLowerCase()).not.toContain('newsletter');
+  });
+
+  /**
+   * The approval gate, opened from Setup rather than from four taps in.
+   *
+   * Deliberately stops at the preview: applying would score the one unfinished
+   * issue on a dev server four browser projects share, and take this whole
+   * describe away from whichever of them ran second. That the preview writes
+   * nothing is precisely what makes stopping here safe — and it is asserted, by
+   * the controls still being on screen afterwards.
+   */
+  test('previews what would change without writing anything', async ({ page }) => {
+    await page.getByTestId('setup-pending-tally').getByTestId('open-paste-tally').click();
+    const sheet = page.getByTestId('paste-tally-sheet');
+    await expect(sheet).toBeVisible();
+
+    await sheet
+      .getByTestId('paste-tally-input')
+      .fill(
+        [
+          'NEWSLETTER_TALLY_V1',
+          'Owen Fitzgerald | +2 | Ran with the starters all week.',
+          'END_NEWSLETTER_TALLY',
+        ].join('\n'),
+      );
+    await sheet.getByTestId('paste-tally-check').click();
+
+    const preview = sheet.getByTestId('paste-tally-preview');
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText('Owen Fitzgerald');
+    await expect(preview).toContainText('Ready to apply');
+    // The primary action says what it does, and there is a way back out.
+    await expect(sheet.getByTestId('paste-tally-apply')).toContainText('Process tally');
+    await sheet.getByTestId('paste-tally-cancel').click();
+
+    await expect(sheet).toHaveCount(0);
+    // Nothing was written, so the work is still waiting.
+    await expect(page.getByTestId('setup-pending-tally')).toBeVisible();
+  });
+});
+
+/**
  * Setup does not scroll sideways *with the newsletter panel populated either*.
  *
  * The test above checks the overview, where every panel is closed, and it
@@ -252,6 +355,40 @@ test.describe('newsletter setup', () => {
     await expect(page.getByTestId('panel-newsletter')).toBeVisible();
   });
 
+  /**
+   * Deliver one issue this test owns, and come back to the panel showing it.
+   *
+   * Two things make a shared id unusable here. The history shows the fifteen
+   * most recent, and four browser projects on one dev server put more than
+   * fifteen through it — so a seeded id is present at the first width and gone
+   * by the third. And the database survives between runs, so a fixed id is
+   * `duplicate` the second time it is ever used. Both are answered by an id
+   * that is unique to this project and this moment.
+   */
+  async function deliver(
+    page: Page,
+    issue: { subject: string; html: string },
+  ): Promise<string> {
+    const messageId = `e2e-issue-${test.info().project.name}-${Date.now()}`;
+    const received = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId,
+        from: 'editor@demo.newsletter',
+        subject: `${issue.subject} ${messageId}`,
+        date: new Date().toISOString(),
+        html: `<p>${messageId}</p>${issue.html}`,
+        force: true,
+      },
+    });
+    expect(received.status()).toBe(200);
+
+    // Back in through Setup: a reload would land on Draft and close the panel.
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    await expect(page.getByTestId('panel-newsletter')).toBeVisible();
+    return messageId;
+  }
+
   test('shows the dedicated address and how to use it', async ({ page }) => {
     await expect(page.getByTestId('newsletter-address')).toHaveText('fantasy-news@demo.example');
     await expect(page.getByTestId('panel-newsletter')).toContainText('Subscribe your FF Newsletter to this address');
@@ -323,42 +460,76 @@ test.describe('newsletter setup', () => {
     const activity = page.getByTestId('newsletter-activity');
     await expect(activity).toContainText('Last email received');
     await expect(activity).toContainText('Waiting for your review');
+    // The demo world always has an issue that has not been scored yet.
+    await expect(activity).toContainText('Waiting to be scored');
   });
 
-  test('shows what the parser understood in each email', async ({ page }) => {
-    // Explicitly a processed message: ignored mail has no coverage to show, and
-    // other tests add ignored mail to this shared server.
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+  /**
+   * How much text came out of the email, and nothing about what it means.
+   *
+   * This used to check for "Read but no rule matched" — the classifier's report
+   * card on the football in an issue. Arrival makes no such judgment now, so
+   * what is left is the question arrival can honestly answer: did the email
+   * decode into readable text, and how much of it is there to hand over.
+   *
+   * The issue is this test's own. The history shows the fifteen most recent,
+   * and four browser projects sharing one dev server put more than fifteen
+   * through it — so a test pinned to a seeded message id passes at the first
+   * width and then quietly loses its subject off the bottom of the list.
+   */
+  test('shows how much readable text came out of each email', async ({ page }) => {
+    const id = await deliver(page, {
+      subject: 'Readable text',
+      html: '<p>Marcus Vance took every first-team rep this week.</p>',
+    });
+
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${id}"]`);
     await expect(message).toBeVisible();
-    // The list grows as earlier tests add mail, so the row can sit below the
-    // fold; scroll it in before clicking rather than relying on auto-scroll.
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();
-    await expect(message).toContainText('Sentences about your players');
-    await expect(message).toContainText('Read but no rule matched');
+    await expect(message).toContainText('Readable sentences');
+    await expect(message).toContainText('Sentences naming a player you have');
+    await expect(message).not.toContainText('Read but no rule matched');
+    await expect(message).not.toContainText('Turned into a signal');
   });
 
-  test('previews a re-read before changing anything, and is honest about what it will not change', async ({
-    page,
-  }) => {
-    // Only processed mail has a body kept, so only it can be re-read.
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
-    const toggle = message.getByTestId('newsletter-message-toggle');
-    await toggle.scrollIntoViewIfNeeded();
-    await toggle.click();
+  /**
+   * An issue says which it is, and changes when it is scored.
+   *
+   * Asserted as a transition on one issue this test owns rather than as two
+   * facts about the seeded pair: it is the same claim, it does not depend on
+   * anything else in the suite, and it proves the state actually moves rather
+   * than that a fixture was set up correctly.
+   */
+  test('says which issues have been scored and which are waiting', async ({ page }) => {
+    const id = await deliver(page, {
+      subject: 'Waiting then scored',
+      html: '<p>Owen Fitzgerald worked with the starters throughout Tuesday.</p>',
+    });
 
-    const panel = message.getByTestId('reprocess-panel');
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText('Nothing changes until you say so');
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${id}"]`);
+    await expect(message).toHaveAttribute('data-tally-state', 'awaiting');
+    await expect(message).toContainText('waiting to be scored');
 
-    await panel.getByTestId('reprocess-preview').click();
+    const applied = await page.request.post(
+      `/api/newsletter/messages/${encodeURIComponent(id)}/ai-tally/apply`,
+      {
+        data: {
+          text: [
+            'NEWSLETTER_TALLY_V1',
+            `Owen Fitzgerald | +1 | Ran with the starters (${id})`,
+            'END_NEWSLETTER_TALLY',
+          ].join('\n'),
+        },
+      },
+    );
+    expect(applied.status()).toBe(200);
 
-    // The same newsletter, unchanged rules: there is genuinely nothing to add,
-    // and the button must say so rather than inviting a pointless write.
-    await expect(panel).toContainText('Nothing new would be added');
-    await expect(panel.getByTestId('reprocess-apply')).toBeDisabled();
-    await expect(panel.getByTestId('reprocess-apply')).toContainText('Nothing to add');
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    await expect(message).toHaveAttribute('data-tally-state', 'applied');
+    await expect(message).toContainText('scored');
   });
 
   /**
@@ -373,14 +544,47 @@ test.describe('newsletter setup', () => {
     page,
   }, testInfo) => {
     /*
-     * A row's identity includes its reason, and the dev database is shared
-     * across projects and survives between runs — so a fixed reason would come
-     * back "already imported" the second time this ever ran, and the first half
-     * of this test would be asserting nothing. Varying it per project AND per
-     * run keeps the first paste genuinely new, which is the thing under test.
+     * This test brings its own newsletter, and that is not fastidiousness.
+     *
+     * Four browser projects share one dev server and its database survives
+     * between runs, so a test that scores a *seeded* issue is a test that
+     * rewrites the world the specs after it read. The seeded ledger is what
+     * Trades and the draft board have opinions about, and the seeded unscored
+     * issue is the whole subject of the describe above this one — consuming
+     * either would break whichever project ran second, in a spec that never
+     * mentions newsletters.
+     *
+     * A row's identity also includes its reason, so the reason varies per
+     * project and per run: a fixed one would come back "already imported" the
+     * second time this ever ran, and the first half of this test would be
+     * asserting nothing.
      */
-    const reason = `Full command of the backfield (${testInfo.project.name} ${Date.now()})`;
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+    const issueId = `e2e-tally-${testInfo.project.name}-${Date.now()}`;
+    const reason = `Full command of the backfield (${issueId})`;
+    const received = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId: issueId,
+        from: 'editor@demo.newsletter',
+        subject: `Weekly notes ${issueId}`,
+        date: new Date().toISOString(),
+        html: `<p>${issueId}: Marcus Vance took every first-team rep this week.</p>`,
+        force: true,
+      },
+    });
+    expect(received.status()).toBe(200);
+    /*
+     * Back through Setup rather than `page.reload()`.
+     *
+     * A reload lands on Draft, which is where the app opens — so reloading to
+     * pick up the new issue closed the very panel this test is standing in.
+     * Re-entering is what a person would do, and it re-reads the list on the
+     * way.
+     */
+    await openSetup(page);
+    await page.getByTestId('setup-step-newsletter').click();
+    await expect(page.getByTestId('panel-newsletter')).toBeVisible();
+
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${issueId}"]`);
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();
@@ -570,10 +774,18 @@ test.describe('vegas', () => {
 
 test.describe('review actions added for setup', () => {
   test('can reassign an item to the right player', async ({ page }, testInfo) => {
-    // Give this project its own reviewable item.
+    /*
+     * Give this project its own reviewable item, from where they come from now.
+     *
+     * Receiving a newsletter creates no review work — that was the automatic
+     * classifier, and it is retired. What does is an approved tally that scores
+     * the same player twice: a contradiction the importer will not settle by
+     * preferring one, so both halves wait for a person.
+     */
+    const messageId = `e2e-wrong-player-${testInfo.project.name}-${Date.now()}`;
     await page.request.post('/api/newsletter/ingest', {
       data: {
-        messageId: `e2e-wrong-player-${testInfo.project.name}`,
+        messageId,
         from: 'editor@demo.newsletter',
         subject: 'Camp Report',
         date: new Date().toISOString(),
@@ -583,6 +795,20 @@ test.describe('review actions added for setup', () => {
         force: true,
       },
     });
+    const applied = await page.request.post(
+      `/api/newsletter/messages/${encodeURIComponent(messageId)}/ai-tally/apply`,
+      {
+        data: {
+          text: [
+            'NEWSLETTER_TALLY_V1',
+            `Julian Reyes | +1 | Back at practice (${messageId})`,
+            `Julian Reyes | -1 | Splitting the backfield (${messageId})`,
+            'END_NEWSLETTER_TALLY',
+          ].join('\n'),
+        },
+      },
+    );
+    expect(applied.status()).toBe(200);
 
     await page.goto('/');
     await openReview(page);

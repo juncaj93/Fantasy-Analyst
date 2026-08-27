@@ -11,7 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AI_TALLY_RULE_ID, TALLY_PROTOCOL } from '../src/core/newsletter/aiTally.ts';
+import { AI_TALLY_RULE_ID, ALLOWED_SCORES, TALLY_PROTOCOL } from '../src/core/newsletter/aiTally.ts';
 import { toEmailMessage } from '../src/core/newsletter/source.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { EvidenceRepo } from '../src/server/repos/evidence.ts';
@@ -21,6 +21,7 @@ import { NewsletterService } from '../src/server/services/newsletterService.ts';
 import { createTestDb } from './helpers/db.ts';
 import { TEST_PLAYERS } from './helpers/players.ts';
 import { CLEAN_NEWSLETTER } from './fixtures/newsletters.ts';
+import { LEGACY_ROWS, seedLegacyClassifierRows } from './helpers/newsletter.ts';
 
 const SENDER = 'editor@ffnewsletter.example';
 const SOURCES = [
@@ -52,6 +53,17 @@ describe('the ChatGPT tally import', () => {
     evidence = new EvidenceRepo(db);
     await service.setSources(SOURCES);
     await service.ingest(inbound());
+    /*
+     * The issue arrives with the old path's rows already on it.
+     *
+     * Arrival writes nothing now, so a fixture built from ingestion alone would
+     * have no classifier rows in it — and the reconciliation that stops those
+     * rows counting beside the approved tally is the single most important
+     * thing this file tests. It is exactly the production newsletter's shape:
+     * three automatic signals, filed against this message id, that the tally
+     * has to displace rather than stack on.
+     */
+    await seedLegacyClassifierRows(evidence, MESSAGE_ID, LEGACY_ROWS);
   });
 
   const stored = async () => (await service.storedMessage(MESSAGE_ID))!;
@@ -66,6 +78,38 @@ describe('the ChatGPT tally import', () => {
     expect(source).not.toMatch(/https?:|Unsubscribe|Privacy Policy|=E2=80|<[a-z]/i);
   });
 
+  /**
+   * ...and hands over the job with it.
+   *
+   * The block used to be the article alone, which worked only because it was
+   * pasted into a thread that already knew what to do with it. That is a
+   * standing instruction living in one conversation on one device, and a new
+   * thread — or a different phone — gets an answer in a shape the importer
+   * refuses. Every rule here is one the importer already enforces, so the
+   * constants are read from the module rather than restated.
+   */
+  it('carries the rules the importer will hold the answer to', async () => {
+    const source = await service.chatSource(await stored());
+
+    // The exact protocol, so the answer comes back parseable.
+    expect(source).toContain(TALLY_PROTOCOL);
+    expect(source).toContain('END_NEWSLETTER_TALLY');
+    expect(source).toContain('| score |');
+
+    // The four scores it accepts, and nothing implying an open range.
+    for (const score of ALLOWED_SCORES) {
+      expect(source).toContain(score > 0 ? `+${score}` : String(score));
+    }
+
+    // The three semantics the ledger assumes and cannot check for itself.
+    expect(source).toMatch(/one row per player/i);
+    expect(source).toMatch(/leave a player out/i);
+    expect(source).toMatch(/full names/i);
+
+    // Instructions are not delivery either: no links, no markup.
+    expect(source).not.toMatch(/https?:|<[a-z]/i);
+  });
+
   // -------------------------------------------------------------- preview ---
   it('previews without writing anything', async () => {
     const before = await evidence.countAll();
@@ -76,12 +120,24 @@ describe('the ChatGPT tally import', () => {
     expect(preview.ready).toHaveLength(1);
     expect(preview.ready[0]).toMatchObject({ playerName: 'Jordan Love', score: 2 });
     /*
-     * +2 arriving, and the parser's own +1 for the same player in the same
-     * issue stopping — so the honest move is +1, not +2. Advertising the
-     * arrival alone would promise a number the ledger will not show.
+     * Everything the approved tally moves, including what it stops.
+     *
+     * +2 arrives for Love and the classifier's own +1 for him stops, so his
+     * honest move is +1 rather than +2. The other two moves are the rest of the
+     * classifier's reading of this issue coming off: the tally is the reading
+     * of the *newsletter*, so a player it omits was omitted deliberately and an
+     * automatic score for him cannot survive underneath it.
+     *
+     * Advertising only the arrival would promise a number the ledger will not
+     * show — and leaving the other two counting is the double-hit this lane
+     * exists to close.
      */
-    expect(preview.tallyDelta).toEqual([{ playerId: '9', playerName: 'Jordan Love', net: 1 }]);
-    expect(preview.parserSuperseded).toHaveLength(1);
+    expect(preview.tallyDelta).toEqual([
+      { playerId: '9', playerName: 'Jordan Love', net: 1 },
+      { playerId: '10', playerName: 'Bijan Robinson', net: -1 },
+      { playerId: '11', playerName: 'Puka Nacua', net: 1 },
+    ]);
+    expect(preview.parserSuperseded).toHaveLength(3);
     expect(await evidence.countAll()).toBe(before);
   });
 
@@ -154,10 +210,20 @@ describe('the ChatGPT tally import', () => {
     const before = await evidence.countAll();
     const signalBefore = (await evidence.refreshSignal('9', {})).raw.net;
 
+    /*
+     * Recognised as a replay, not merely survived as one.
+     *
+     * The server holds a durable record of which tally is standing for this
+     * newsletter, so the second call writes nothing at all and says which day
+     * the first one landed — rather than doing the whole import again and
+     * truthfully reporting that it changed nothing. Nothing here depends on a
+     * disabled button or on anything the browser remembers.
+     */
     const second = await service.applyAiTally(await stored(), paste);
+    expect(second.replayed).toBe(true);
     expect(second.inserted).toBe(0);
-    expect(second.alreadyPresent).toBe(2);
     expect(second.retired).toBe(0);
+    expect(second.detail).toContain('already applied');
     expect(await evidence.countAll()).toBe(before);
     expect((await evidence.refreshSignal('9', {})).raw.net).toBe(signalBefore);
   });
@@ -195,26 +261,27 @@ describe('the ChatGPT tally import', () => {
   /**
    * The revision sweep is scoped to this import's own rows.
    *
-   * A newsletter's message id is shared with whatever the deterministic parser
-   * found in it. Displacing the parser's reading of a player the tally scores
-   * is deliberate; sweeping away its reading of everyone else would be the
-   * import discarding evidence it never claimed to own.
+   * Two different sweeps run when a tally is applied and they must not be
+   * confused. The *revision* sweep retires rows an earlier paste of this same
+   * tally wrote and this one no longer asks for — scoped by `rule_id` to the
+   * import's own rows. The *displacement* below retires what the classifier
+   * wrote for this issue, once, because the approved tally has replaced it.
+   *
+   * The property here is that revising a tally is not a second displacement:
+   * the classifier's rows are already retired after the first apply, and the
+   * second must not re-report them as though it had retired them again.
    */
-  it('a revised import leaves the parser rows it does not score alone', async () => {
-    // Marvin Harrison Jr. is in the dictionary but not in this newsletter, so
-    // nothing the parser wrote here is the tally's to displace.
-    const parserRows = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
-      (e) => e.ruleId !== AI_TALLY_RULE_ID,
-    );
-    expect(parserRows.length).toBeGreaterThan(0);
+  it('a revised import does not re-retire what the first one already displaced', async () => {
+    const first = await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +2 | First reading'));
+    expect(first.parserSuperseded).toBe(LEGACY_ROWS.length);
 
-    await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +2 | First reading'));
-    await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +1 | Revised down'));
+    const second = await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +1 | Revised down'));
+    expect(second.parserSuperseded).toBe(0);
+    expect(second.retired).toBe(1);
 
-    const after = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
-      (e) => e.ruleId !== AI_TALLY_RULE_ID,
-    );
-    expect(after.map((e) => e.dedupeKey).sort()).toEqual(parserRows.map((e) => e.dedupeKey).sort());
+    // Retired, not deleted: every one of them is still in the ledger.
+    const all = await evidence.listForPlayer('10');
+    expect(all.filter((e) => e.sourceMessageId === MESSAGE_ID)).toHaveLength(1);
   });
 
   it('never overrules a correction the user made', async () => {
@@ -262,7 +329,9 @@ describe('the ChatGPT tally import', () => {
     expect(promised).toBe(2 - parser.magnitude);
 
     const outcome = await service.applyAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
-    expect(outcome.parserSuperseded).toBe(1);
+    // All three of the classifier's rows for this issue, not just this player's:
+    // the approved tally is the reading of the newsletter, whole.
+    expect(outcome.parserSuperseded).toBe(LEGACY_ROWS.length);
 
     const rows = (await evidence.listForPlayer(parser.playerId)).filter(
       (e) => e.sourceMessageId === MESSAGE_ID,
@@ -296,7 +365,11 @@ describe('the ChatGPT tally import', () => {
 
     const preview = await service.previewAiTally(await stored(), block(`${name} | -1 | The other way`));
     expect(preview.parserNeedsReview.map((r) => r.id)).toContain(parser.id);
-    expect(preview.parserSuperseded).toHaveLength(0);
+    // The contradicted row waits for a person; the rest of the classifier's
+    // reading of the issue is simply retired, which is a different disposition
+    // and has to stay one.
+    expect(preview.parserSuperseded.map((r) => r.id)).not.toContain(parser.id);
+    expect(preview.parserSuperseded).toHaveLength(LEGACY_ROWS.length - 1);
     expect(preview.detail).toContain('point the other way');
 
     const outcome = await service.applyAiTally(await stored(), block(`${name} | -1 | The other way`));
@@ -321,7 +394,10 @@ describe('the ChatGPT tally import', () => {
 
     const preview = await service.previewAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
     expect(preview.ready[0]?.parserRows.map((r) => r.disposition)).toContain('protected');
-    expect(preview.parserSuperseded).toHaveLength(0);
+    // Protected means untouched, not "nothing else happens": the classifier's
+    // other rows for this issue still stop counting.
+    expect(preview.parserSuperseded.map((r) => r.id)).not.toContain(parser.id);
+    expect(preview.parserSuperseded).toHaveLength(LEGACY_ROWS.length - 1);
 
     await service.applyAiTally(await stored(), block(`${name} | +2 | The tally's reading`));
     const after = (await evidence.listByDedupeKeys([parser.dedupeKey])).get(parser.dedupeKey)!;
@@ -329,16 +405,31 @@ describe('the ChatGPT tally import', () => {
     expect(after.userOverride?.magnitude).toBe(3);
   });
 
-  it('leaves alone a player the tally does not score', async () => {
-    const untouched = (await evidence.listLiveBySourceMessage(MESSAGE_ID)).filter(
-      (e) => e.ruleId !== AI_TALLY_RULE_ID,
-    );
-    // Marvin Harrison Jr. is in the dictionary but not in this newsletter.
+  /**
+   * A player the tally omits was omitted on purpose.
+   *
+   * This used to assert the opposite — that the classifier's reading of a player
+   * the tally does not name survived — and that was the double-hit. The tally
+   * protocol says explicitly to omit players whose meaningful signals cancel, so
+   * silence about a player is a verdict of nothing rather than an absence of
+   * one, and an automatic score for him cannot go on counting underneath it.
+   *
+   * Rows filed against *other* newsletters are untouched, which is what keeps
+   * this scoped to one issue rather than to the ledger.
+   */
+  it('stops the classifier counting for a player the tally does not score', async () => {
+    await seedLegacyClassifierRows(evidence, 'another-issue', [
+      { playerId: '5', polarity: 'positive', magnitude: 2, excerpt: 'From a different week entirely.' },
+    ]);
+
     await service.applyAiTally(await stored(), block('Marvin Harrison Jr. | +2 | Unrelated to this issue'));
-    const after = await evidence.listLiveBySourceMessage(MESSAGE_ID);
-    for (const row of untouched) {
-      expect(after.find((e) => e.id === row.id)?.reviewStatus).toBe(row.reviewStatus);
-    }
+
+    const mine = await evidence.listLiveBySourceMessage(MESSAGE_ID);
+    expect(mine.filter((e) => e.ruleId !== AI_TALLY_RULE_ID)).toHaveLength(0);
+
+    const elsewhere = await evidence.listLiveBySourceMessage('another-issue');
+    expect(elsewhere).toHaveLength(1);
+    expect(elsewhere[0]?.reviewStatus).toBe('auto_applied');
   });
 
   it('displacing is idempotent — running it again changes nothing', async () => {
@@ -413,8 +504,17 @@ describe('the ChatGPT tally import', () => {
       expect(preview.ready.map((r) => r.playerId).sort()).toEqual(['10', '5', '6', '9']);
       // The earlier +1 for St. Brown and the -2 for Swift, who the revision drops.
       expect(preview.wouldRetire.map((r) => r.playerId).sort()).toEqual(['3', '5']);
-      // The parser's reading of Robinson stops counting; the user's correction does not.
-      expect(preview.parserSuperseded.map((r) => r.id)).toEqual([parser.id]);
+      /*
+       * Robinson's classifier row stopped counting on the FIRST paste, not this
+       * one — the approved tally speaks for the whole issue, so displacement
+       * happens once, when the issue is first scored. By the time a revision
+       * arrives there is nothing left to displace except the row the user
+       * corrected, which nothing here may touch.
+       */
+      expect((await evidence.listByDedupeKeys([parser.dedupeKey])).get(parser.dedupeKey)?.reviewStatus).toBe(
+        'ignored',
+      );
+      expect(preview.parserSuperseded).toHaveLength(0);
       expect(preview.protectedByUser).toHaveLength(0);
       expect(
         preview.ready.find((r) => r.playerId === '9')?.parserRows.map((p) => p.disposition),
@@ -424,7 +524,7 @@ describe('the ChatGPT tally import', () => {
       expect(outcome.inserted).toBe(4);
       expect(outcome.alreadyPresent).toBe(1);
       expect(outcome.retired).toBe(2);
-      expect(outcome.parserSuperseded).toBe(1);
+      expect(outcome.parserSuperseded).toBe(0);
 
       // Every number the preview promised is the number the ledger moved by.
       const promised = new Map(preview.tallyDelta.map((d) => [d.playerId, d.net]));

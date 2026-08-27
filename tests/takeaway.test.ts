@@ -200,3 +200,76 @@ describe('newsletter takeaway (§15)', () => {
     expect(after.raw.net).toBe(4);
   });
 });
+
+/**
+ * What a card says about a player, and what it must stop saying about itself.
+ *
+ * A backfilled tally row carries two pieces of text: the drivers that justified
+ * the score, and a template describing how the row got into the database —
+ * "Carried over from a running tally covering several earlier issues (net
+ * +11)". The template used to win, because the ladder prefers a stored summary
+ * to an excerpt, so a card somebody opened to find out about a wide receiver led
+ * with a sentence about the app's own bookkeeping.
+ *
+ * It is skipped by provenance rather than by matching the sentence, because a
+ * string test would go stale the moment the wording changed and would quietly
+ * start showing bookkeeping again — which is the failure being fixed.
+ */
+describe('ingestion bookkeeping is not a player-facing sentence', () => {
+  const CARRIED = 'Carried over from a running tally covering several earlier issues (net +11).';
+  const FOOTBALL =
+    'R1–R3 breakout/coverage numbers. R4: #2 FPG excl. injury weeks, #2 YPRR vs. two-high.';
+
+  const backfilled = (over: Partial<EvidenceItem> = {}) =>
+    item({
+      ruleId: 'tally-backfill',
+      magnitude: 11,
+      contextSummary: CARRIED,
+      excerpt: FOOTBALL,
+      category: 'performance',
+      ...over,
+    });
+
+  it('shows the football the row was carrying, not how the row arrived', () => {
+    const takeaway = selectTakeaway([backfilled()], { playerId: 'maye', now: NOW });
+    expect(takeaway?.text).toBe(FOOTBALL);
+    expect(takeaway?.text).not.toContain('Carried over');
+    expect(takeaway?.text).not.toContain('running tally');
+  });
+
+  it('still prefers a rule-composed summary, which is about the player', () => {
+    const summary = 'Named the starter, taking first-team reps.';
+    const takeaway = selectTakeaway([item({ contextSummary: summary })], { playerId: 'maye', now: NOW });
+    expect(takeaway?.text).toBe(summary);
+  });
+
+  it('still lets the user’s own correction win over everything', () => {
+    const note = 'He is the starter, whatever the tally says.';
+    const takeaway = selectTakeaway([backfilled({ userOverride: { note } })], {
+      playerId: 'maye',
+      now: NOW,
+    });
+    expect(takeaway?.text).toBe(note);
+  });
+
+  /**
+   * Nothing is invented for a row that carries only bookkeeping. It offers no
+   * sentence at all, and a better-supported item wins — which is the graceful
+   * minimal representation rather than the app writing football it never read.
+   */
+  it('declines rather than inventing analysis for a row with no football in it', () => {
+    const bookkeepingOnly = backfilled({ excerpt: 'Jaxon Smith-Njigba: +11' });
+    const real = item({ magnitude: 2, excerpt: 'Ran a route on 92% of dropbacks in Week 4.' });
+    const takeaway = selectTakeaway([bookkeepingOnly, real], { playerId: 'maye', now: NOW });
+    expect(takeaway?.text).toBe('Ran a route on 92% of dropbacks in Week 4.');
+  });
+
+  /** And the tally itself is untouched: this is presentation, not data. */
+  it('changes no number anywhere', () => {
+    const items = [backfilled()];
+    const before = aggregatePlayerSignal('maye', items, { now: NOW });
+    selectTakeaway(items, { playerId: 'maye', now: NOW });
+    expect(aggregatePlayerSignal('maye', items, { now: NOW })).toEqual(before);
+    expect(before.raw.net).toBe(11);
+  });
+});

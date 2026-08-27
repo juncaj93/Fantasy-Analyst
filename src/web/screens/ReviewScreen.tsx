@@ -24,8 +24,20 @@ import { PushScreen, SegmentedControl, Sheet, SkeletonRows } from '../components
 
 const POLARITIES = ['positive', 'negative', 'neutral', 'mixed'] as const;
 
-/** Plain-language explanation of why an item is here, from the rule that fired. */
+/**
+ * Plain-language explanation of why an item is here.
+ *
+ * The queue now holds two kinds of thing and they arrived for opposite reasons.
+ * A row from an approved ChatGPT tally is here because the tally *contradicted
+ * itself* — the same player scored twice, which the importer refuses to settle
+ * by preferring one — and telling the reader it "matched a news rule" would
+ * send them looking for a rule that was never involved. Everything else is a
+ * classifier row from before that path was retired.
+ */
 function reasonFor(item: EvidenceItem): string {
+  if (item.ruleId === 'ai-tally-import') {
+    return 'Your ChatGPT tally scored this player twice, so neither score was applied.';
+  }
   if (item.contextSummary) return item.contextSummary;
   if (item.polarity === 'mixed') return 'This says both a good and a bad thing.';
   return 'Matched a news rule but was not clear enough to apply on its own.';
@@ -90,7 +102,18 @@ export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onB
   };
 
   const acceptAllHighConfidence = async () => {
-    const targets = evidence.filter((e) => e.confidenceScore >= 0.6 && e.polarity !== 'mixed');
+    /*
+     * A contradiction is never bulk-accepted, whatever its confidence.
+     *
+     * A row held back because the tally scored the same player twice is here
+     * *because* the two halves disagree, and accepting the batch would count
+     * both of them — turning a refusal to guess into a guess that both were
+     * right. It is exactly the case a person has to look at, so it is exactly
+     * the case a bulk action must skip.
+     */
+    const targets = evidence.filter(
+      (e) => e.confidenceScore >= 0.6 && e.polarity !== 'mixed' && e.ruleId !== 'ai-tally-import',
+    );
     for (const item of targets) await act(item.id, 'accept');
   };
 

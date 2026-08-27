@@ -131,8 +131,10 @@ describe('inbound newsletter service', () => {
   it('accepts mail from the configured sender', async () => {
     const outcome = await service.ingest(inbound());
     expect(outcome.status).toBe('processed');
-    expect(outcome.evidenceInserted).toBeGreaterThan(0);
-    expect(outcome.detail).toMatch(/Found news on/);
+    // Accepted, stored, and waiting for a person — not scored.
+    expect(outcome.awaitingTally).toBe(true);
+    expect(outcome.evidenceInserted).toBe(0);
+    expect(outcome.detail).toMatch(/Received and stored/);
   });
 
   it('quarantines an unexpected sender and creates no evidence', async () => {
@@ -181,8 +183,18 @@ describe('inbound newsletter service', () => {
     const outcome = await service.ingest(
       inbound({ messageId: 'empty', html: '<p>The league announced a new kickoff rule.</p>' }),
     );
-    expect(outcome.status).toBe('no_players');
-    expect(outcome.detail).toContain('no player news');
+    /*
+     * There is no "no players" outcome any more, and there should not be.
+     *
+     * It was the app reading an issue and reporting that it said nothing about
+     * anybody — a verdict about the football, reached on arrival, by the path
+     * this lane retired. An issue with no names in it is stored and waits for a
+     * tally exactly like any other, and the tally is where "nothing in this one"
+     * gets said, by a person.
+     */
+    expect(outcome.status).toBe('processed');
+    expect(outcome.awaitingTally).toBe(true);
+    expect(outcome.evidenceInserted).toBe(0);
   });
 
   /**

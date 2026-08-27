@@ -272,6 +272,16 @@ export function App() {
    * Settings destination.
    */
   const reviewPending = overview ? overview.pendingEvidence + overview.pendingIdentity : 0;
+  /**
+   * Newsletters received and not yet scored.
+   *
+   * Kept apart from `reviewPending` all the way to the toolbar rather than
+   * added to it, because the two lead to different places: the review queue is
+   * behind the Review row, an unscored issue is behind the two controls under
+   * the Newsletter row. One dot on the destination, two sentences in its name —
+   * see `TabBar`.
+   */
+  const newslettersPending = overview?.pendingNewsletters ?? 0;
 
   return (
     <div className="app">
@@ -371,6 +381,7 @@ export function App() {
           else setTab(id);
         }}
         reviewPending={reviewPending}
+        newslettersPending={newslettersPending}
         viewOnly={viewOnly}
       />
     </div>
@@ -399,6 +410,7 @@ function FloatingToolbar({
   active,
   onSelect,
   reviewPending,
+  newslettersPending,
   viewOnly,
 }: {
   tabs: typeof TABS;
@@ -406,6 +418,8 @@ function FloatingToolbar({
   onSelect: (id: Tab) => void;
   /** Unresolved review work, which now lives one level inside Setup. */
   reviewPending: number;
+  /** Newsletters received and not yet scored, which also live inside Setup. */
+  newslettersPending: number;
   viewOnly: boolean;
 }) {
   const measure = useToolbarHeight();
@@ -445,7 +459,7 @@ function FloatingToolbar({
          * competing with the decisions the bar is for. It is the count that
          * decides whether the dot is drawn, so zero draws nothing at all.
          */
-        const attention = t.id === 'setup' && reviewPending > 0;
+        const attention = t.id === 'setup' && reviewPending + newslettersPending > 0;
         // Where unlocking happens is where "you cannot change anything yet"
         // belongs. A dot, not a word, because it is a state and not a task.
         const locked = t.id === 'setup' && viewOnly;
@@ -458,7 +472,21 @@ function FloatingToolbar({
          * is reached; this is the only announcement on the bar.
          */
         const notes = [
-          attention ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} review` : null,
+          attention && reviewPending > 0
+            ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} review`
+            : null,
+          /*
+           * Two kinds of work, two clauses, one dot.
+           *
+           * An unscored newsletter and a queued review item are both "Setup has
+           * something for you", which is all a dot can say — but they are not
+           * the same errand, and a name that called an unread issue a review
+           * item would send the reader to the wrong row. So the count that is
+           * actually waiting is the one that is said.
+           */
+          attention && newslettersPending > 0
+            ? `${newslettersPending} ${newslettersPending === 1 ? 'newsletter needs' : 'newsletters need'} scoring`
+            : null,
           locked ? 'view only, unlock to make changes' : null,
         ].filter((note): note is string => note != null);
         return (

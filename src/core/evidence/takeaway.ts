@@ -32,6 +32,7 @@
 
 import type { EvidenceItem } from './types.ts';
 import { effectiveEvidence } from './aggregate.ts';
+import { summaryIsIngestionBookkeeping } from './provenance.ts';
 
 export interface TakeawayCandidate {
   itemId: string;
@@ -214,6 +215,9 @@ export function selectTakeaway(items: EvidenceItem[], opts: TakeawayOptions): Ne
         sourceDate: newest.sourceDate,
         score,
         corroboration: distinct,
+        // `templated` means the words came from a deterministic template rather
+        // than out of the newsletter. A bookkeeping summary is never the text
+        // any more, so this can only be true of a rule-composed one.
         derivation: (newest.contextSummary && newest.contextSummary === group.text ? 'templated' : 'extracted') as
           | 'extracted'
           | 'templated',
@@ -255,12 +259,21 @@ export function selectTakeaway(items: EvidenceItem[], opts: TakeawayOptions): Ne
  * ledger a human wrote on purpose about this player. After that the
  * deterministic template, then the stored excerpt. The excerpt is used verbatim
  * or not at all: trimming a sentence is the cheapest way to change what it says.
+ *
+ * With one exception, and it is the reason this comment is longer than the
+ * function. A backfilled tally row's stored template is about *ingestion* —
+ * "Carried over from a running tally covering several earlier issues (net
+ * +11)" — so preferring it put a sentence about the app's own bookkeeping at
+ * the top of a card somebody opened to find out about a wide receiver, in front
+ * of the football the same row was carrying in its excerpt. Those rows skip
+ * straight to the excerpt. Nothing is invented for a row that has only
+ * bookkeeping: it simply offers nothing, and a better-supported item wins.
  */
 export function sentenceOf(item: EvidenceItem): string | null {
   const note = item.userOverride?.note?.trim();
   if (note) return tidy(note);
 
-  const summary = item.contextSummary?.trim();
+  const summary = summaryIsIngestionBookkeeping(item.ruleId) ? null : item.contextSummary?.trim();
   if (summary) return tidy(summary);
 
   const excerpt = item.excerpt?.trim();

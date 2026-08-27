@@ -18,8 +18,9 @@ import { PlayerRepo } from '../src/server/repos/players.ts';
 import { NewsletterService } from '../src/server/services/newsletterService.ts';
 import { SleeperSyncService } from '../src/server/services/sleeperSync.ts';
 import { createTestDb } from './helpers/db.ts';
+import { DEFAULT_TALLY, ingestAndScore, tallyBlock } from './helpers/newsletter.ts';
 import { TEST_PLAYERS, player } from './helpers/players.ts';
-import { CLEAN_NEWSLETTER, SURNAME_COLLISION } from './fixtures/newsletters.ts';
+import { CLEAN_NEWSLETTER } from './fixtures/newsletters.ts';
 
 const SOURCES = [
   { id: 'ff', label: 'FF Newsletter', fromPatterns: ['@ffnewsletter.example'], subjectPatterns: [], enabled: true },
@@ -351,11 +352,22 @@ describe('NewsletterService', () => {
     await service.setSources(SOURCES);
   });
 
-  it('ingests a qualifying newsletter and stores evidence', async () => {
+  it('stores a qualifying newsletter and scores nothing on its own', async () => {
     const outcome = await service.ingest(newsletterMessage());
     expect(outcome.status).toBe('processed');
-    expect(outcome.evidenceInserted).toBeGreaterThan(0);
-    expect(await new EvidenceRepo(db).countAll()).toBe(outcome.evidenceInserted);
+    expect(outcome.awaitingTally).toBe(true);
+    // The whole point of the lane: arrival is storage, not a fantasy opinion.
+    expect(outcome.evidenceInserted).toBe(0);
+    expect(await new EvidenceRepo(db).countAll()).toBe(0);
+    expect((await new NewsletterRepo(db).nextAwaitingTally())?.messageId).toBe('msg-1');
+  });
+
+  it('creates evidence only once an approved tally is applied', async () => {
+    const outcome = await ingestAndScore(service);
+    expect(outcome.inserted).toBeGreaterThan(0);
+    expect(await new EvidenceRepo(db).countAll()).toBe(outcome.inserted);
+    // ...and the issue stops asking for attention.
+    expect(await new NewsletterRepo(db).awaitingTallyCount()).toBe(0);
   });
 
   it('quarantines a non-qualifying sender without creating evidence', async () => {
@@ -393,12 +405,15 @@ describe('NewsletterService', () => {
     expect((await new NewsletterRepo(db).lastReceived())?.status).toBe('rejected');
   });
 
-  it('records a plain-language outcome and coverage for a processed newsletter', async () => {
+  it('records a plain-language outcome and coverage for a stored newsletter', async () => {
     await service.ingest(newsletterMessage());
     const last = await new NewsletterRepo(db).lastProcessed();
     expect(last?.status).toBe('processed');
-    expect(last?.detail).toMatch(/Found news on \d+ player/);
-    expect(last?.autoAppliedCount).toBeGreaterThanOrEqual(0);
+    expect(last?.detail).toMatch(/Received and stored/);
+    expect(last?.tallyState).toBe('awaiting');
+    expect(last?.talliedAt).toBeNull();
+    // Coverage survives, because it is about the *delivery* — whether the email
+    // decoded into readable text — and never about the football in it.
     expect(last?.coverage).toBeTruthy();
     expect(Number((last?.coverage as Record<string, number>)['sentencesWithPlayers'])).toBeGreaterThan(0);
   });
@@ -423,41 +438,43 @@ describe('NewsletterService', () => {
     expect(second.detail).toContain('already read');
   });
 
-  it('does not duplicate evidence when reprocessing', async () => {
-    await service.ingest(newsletterMessage());
+  it('does not duplicate evidence when the same tally is applied again', async () => {
+    await ingestAndScore(service);
     const before = await new EvidenceRepo(db).countAll();
-    const result = await service.reprocess(newsletterMessage());
-    expect(result.evidenceInserted).toBe(0);
+    const stored = (await service.storedMessage('msg-1'))!;
+    const again = await service.applyAiTally(stored, DEFAULT_TALLY);
+    expect(again.replayed).toBe(true);
+    expect(again.inserted).toBe(0);
     expect(await new EvidenceRepo(db).countAll()).toBe(before);
   });
 
-  it('preserves a user override through reprocessing', async () => {
-    await service.ingest(newsletterMessage());
+  it('preserves a user correction through a later revision of the tally', async () => {
+    await ingestAndScore(service);
     const repo = new EvidenceRepo(db);
-    const pending = await repo.listPending();
-    const target = pending[0]!;
+    const target = (await repo.listApplied()).find((e) => e.playerId === '10')!;
     await repo.applyReview(Number(target.id), 'correct', { polarity: 'negative', magnitude: 3 });
 
-    await service.reprocess(newsletterMessage());
+    const stored = (await service.storedMessage('msg-1'))!;
+    await service.applyAiTally(stored, tallyBlock('Bijan Robinson | +1 | Revised, smaller.'));
 
     const after = await repo.getById(Number(target.id));
     expect(after?.userOverride).toEqual({ polarity: 'negative', magnitude: 3 });
     expect(after?.reviewStatus).toBe('corrected');
   });
 
-  it('routes ambiguous identities to the review queue', async () => {
-    await service.ingest(newsletterMessage(SURNAME_COLLISION, 'msg-collision'));
+  it('routes a name that is two players to the review queue', async () => {
+    await ingestAndScore(service);
     const reviews = await new NewsletterRepo(db).listIdentityReviews();
     expect(reviews.length).toBeGreaterThan(0);
     expect(reviews[0]?.candidates.length).toBeGreaterThan(1);
   });
 
-  it('does not duplicate identity reviews on re-ingestion', async () => {
-    await service.ingest(newsletterMessage(SURNAME_COLLISION, 'msg-c1'));
-    const first = (await new NewsletterRepo(db).listIdentityReviews()).length;
-    await service.reprocess(newsletterMessage(SURNAME_COLLISION, 'msg-c1'));
+  it('does not duplicate identity reviews when the same tally is pasted again', async () => {
+    await ingestAndScore(service);
     const repo = new NewsletterRepo(db);
-    await repo.insertIdentityReviews([]);
+    const first = (await repo.listIdentityReviews()).length;
+    const stored = (await service.storedMessage('msg-1'))!;
+    await service.applyAiTally(stored, DEFAULT_TALLY);
     expect((await repo.listIdentityReviews()).length).toBe(first);
   });
 });
@@ -471,7 +488,16 @@ describe('EvidenceRepo review flow', () => {
     await new PlayerRepo(db).upsertMany(TEST_PLAYERS);
     const service = new NewsletterService(db);
     await service.setSources(SOURCES);
-    await service.ingest(newsletterMessage());
+    // A ledger only exists once an issue has been scored, so the fixture scores
+    // one — including a contested row, which is what puts something in pending.
+    await ingestAndScore(service, {
+      tally: tallyBlock(
+        'Bijan Robinson | +2 | Named the starter and taking every first-team rep.',
+        'Puka Nacua | -1 | Missed Wednesday with a hamstring.',
+        'Jordan Love | +1 | Scored twice in one block, so it waits for a person.',
+        'Jordan Love | -1 | The other half of that contradiction.',
+      ),
+    });
     repo = new EvidenceRepo(db);
   });
 
@@ -487,7 +513,40 @@ describe('EvidenceRepo review flow', () => {
     expect(after.pendingCount).toBe(before.pendingCount - 1);
   });
 
+  /*
+   * Written into the ledger directly, and that is not laziness.
+   *
+   * `mixed` is a polarity the *classifier* could produce — a sentence saying a
+   * good and a bad thing at once — and the tally protocol has no such score:
+   * ±1 and ±2 are the only four it accepts. So there is no longer a product
+   * path that creates one, and there are still `mixed` rows in the ledger from
+   * before there wasn't. This is about what the aggregation does with such a
+   * row, which is a fact about `EvidenceRepo` and nothing to do with how it
+   * arrived.
+   */
   it('accepting a mixed item counts it without moving the net', async () => {
+    await repo.insertProposed([
+      {
+        dedupeKey: 'legacy-mixed',
+        playerId: '10',
+        playerName: 'Bijan Robinson',
+        sourceType: 'newsletter',
+        sourceName: 'FF Newsletter',
+        sourceMessageId: 'msg-1',
+        sourceDate: '2026-08-13T12:00:00.000Z',
+        excerpt: 'Back at practice, but still splitting the backfield.',
+        contextSummary: null,
+        category: null,
+        polarity: 'mixed',
+        magnitude: 1,
+        confidence: 'medium',
+        confidenceScore: 0.5,
+        ruleId: 'legacy-classifier',
+        reviewStatus: 'pending',
+        notes: [],
+        blockIndex: 0,
+      },
+    ]);
     const mixed = (await repo.listPending()).find((p) => p.polarity === 'mixed')!;
     const before = await repo.refreshSignal(mixed.playerId);
     await repo.applyReview(Number(mixed.id), 'accept', null);

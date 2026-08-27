@@ -60,6 +60,22 @@ export interface NewsletterStatus {
   lastProcessedAt: string | null;
   lastProcessedDetail: string | null;
   lastError: string | null;
+  /**
+   * The issue waiting for its approved ChatGPT tally, or null when there is
+   * none.
+   *
+   * This is what puts the two workflow controls on Setup and the attention dot
+   * on the destination, so it names the newsletter they act on: the reader
+   * should never have to pick one when there is only one thing to do. `waiting`
+   * counts every issue still to be scored, this one included, so a backlog is
+   * stated rather than implied.
+   */
+  pendingTally: {
+    messageId: string;
+    subject: string;
+    receivedAt: string;
+    waiting: number;
+  } | null;
   totals: {
     emailsReceived: number;
     newslettersProcessed: number;
@@ -360,17 +376,27 @@ export class SetupService {
   }
 
   async newsletterStatus(): Promise<NewsletterStatus> {
-    const [address, sources, senderConfigured, lastReceived, lastProcessed, lastFailure, counts, evidenceSummary] =
-      await Promise.all([
-        this.inboundAddress(),
-        this.newsletter.getSources(),
-        this.newsletter.isSenderConfigured(),
-        this.messages.lastReceived(),
-        this.messages.lastProcessed(),
-        this.messages.lastFailure(),
-        this.messageCounts(),
-        this.evidence.summary(),
-      ]);
+    const [
+      address,
+      sources,
+      senderConfigured,
+      lastReceived,
+      lastProcessed,
+      lastFailure,
+      counts,
+      evidenceSummary,
+      pendingTally,
+    ] = await Promise.all([
+      this.inboundAddress(),
+      this.newsletter.getSources(),
+      this.newsletter.isSenderConfigured(),
+      this.messages.lastReceived(),
+      this.messages.lastProcessed(),
+      this.messages.lastFailure(),
+      this.messageCounts(),
+      this.evidence.summary(),
+      this.newsletter.pendingTally(),
+    ]);
 
     const active = sources.filter((s) => s.enabled !== false);
     return {
@@ -387,6 +413,7 @@ export class SetupService {
       lastProcessedAt: lastProcessed?.receivedAt ?? null,
       lastProcessedDetail: lastProcessed?.detail ?? null,
       lastError: lastFailure?.rejectReason ?? null,
+      pendingTally,
       totals: {
         emailsReceived: counts.total,
         newslettersProcessed: counts.processed,
@@ -503,7 +530,16 @@ function describeAge(hours: number): string {
   return `${Math.round(hours / 24)} day(s) ago`;
 }
 
+/**
+ * An issue waiting to be scored is the loudest thing this step can say.
+ *
+ * It is checked before "is the sender configured?" and before "has anything
+ * arrived?" because it is the only one of the three that is *work* rather than
+ * a state of the plumbing — and because a newsletter cannot be sitting there
+ * awaiting a tally unless the plumbing already worked.
+ */
 function newsletterState(status: NewsletterStatus): StepState {
+  if (status.pendingTally) return 'warn';
   if (!status.addressConfigured) return 'todo';
   if (!status.senderConfigured) return 'warn';
   if (status.totals.newslettersProcessed > 0) return 'ok';
@@ -511,10 +547,18 @@ function newsletterState(status: NewsletterStatus): StepState {
 }
 
 function newsletterSummary(status: NewsletterStatus): string {
+  const pending = status.pendingTally;
+  if (pending) {
+    const behind = pending.waiting - 1;
+    return (
+      `“${pending.subject || 'Latest issue'}” is waiting to be scored` +
+      (behind > 0 ? `, and ${behind} more behind it` : '')
+    );
+  }
   if (!status.addressConfigured) return 'Email address not set up yet';
   if (!status.senderConfigured) return `Address ready (${status.address}) — sender not set yet`;
   if (status.totals.newslettersProcessed > 0) {
-    return `${status.totals.newslettersProcessed} newsletter${status.totals.newslettersProcessed === 1 ? '' : 's'} processed`;
+    return `${status.totals.newslettersProcessed} newsletter${status.totals.newslettersProcessed === 1 ? '' : 's'} received, all scored`;
   }
   if (status.totals.emailsReceived > 0) {
     return `${status.totals.emailsReceived} email(s) arrived, none matched your newsletter sender yet`;
@@ -523,10 +567,14 @@ function newsletterSummary(status: NewsletterStatus): string {
 }
 
 function newsletterAction(status: NewsletterStatus): string | null {
+  // The step's own action stays a sentence. What to *do* about a pending issue
+  // is the pair of controls Setup draws directly beneath this row — saying it
+  // twice, once as prose and once as buttons, is one time too many.
+  if (status.pendingTally) return null;
   if (!status.addressConfigured) return 'Finish the one-time email setup, then this address appears here.';
   if (!status.senderConfigured) return 'Tell Fantasy Analyst which sender your newsletter comes from.';
   if (status.totals.newslettersProcessed === 0) {
-    return `Subscribe your FF Newsletter to ${status.address}. The next issue will process automatically.`;
+    return `Subscribe your FF Newsletter to ${status.address}. The next issue arrives here for scoring.`;
   }
   return null;
 }
