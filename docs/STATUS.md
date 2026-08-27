@@ -3334,7 +3334,11 @@ opens as a 311 px stub and grows past the screen, and for that second there is
 genuinely nothing under the finger to move, which the draft card never suffers
 because its expansion sits inside a board that is already scrolling.
 
-No budget raised, and the change is a net deletion: app JavaScript **130.4 kB**
-against a 140.0 kB ceiling (−0.2 kB against `9b271a4`), CSS **14.3 kB** against
-20.0 kB, everything the browser must fetch **146.2 kB** against 160.0 kB, Demo
-Mode's lazy chunks **149.0 kB** against 150.0 kB — unchanged.
+No budget raised, and the change is a net deletion. Measured on the merged head
+against `46b8098`, which is the base this landed on: app JavaScript **134.7 kB**
+against a 140.0 kB ceiling (−0.2 kB), everything the browser must fetch
+**150.7 kB** against 160.0 kB (−0.3 kB), CSS **14.4 kB** against 20.0 kB and
+Demo Mode's lazy chunks **149.0 kB** against 150.0 kB, both unchanged. (Before
+the merge, against `9b271a4`, the same deletion read 130.4 kB of app JavaScript
+and 146.2 kB of first paint; Mock Draft is the difference between the two
+baselines, not this change.)
