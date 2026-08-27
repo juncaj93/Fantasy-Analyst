@@ -133,18 +133,6 @@ async function requireDraftBoard(page: Page): Promise<void> {
 
 
 /**
- * Wait for a list to answer before deciding it is empty.
- *
- * These tests skip themselves when a deployment has no league connected, which
- * is honest — but a fixed pause plus a bare `count()` cannot tell "nothing to
- * show" from "not back yet", and production is a real database behind a cold
- * worker. On one run that difference silently skipped four of the assertions
- * that matter most, and a skipped test reads exactly like a passing one.
- *
- * So the wait is for an outcome rather than for a duration: rows, or the empty
- * state that means there genuinely are none.
- */
-/**
  * The board's rows, once they have stopped changing.
  *
  * A fixed `waitForTimeout` is not enough against a deployed site. Changing the
@@ -179,7 +167,7 @@ async function settledIds(page: Page): Promise<string[]> {
  * rows are not rendered while it is shut, so a spec that reads a `trade-row`
  * has to ask for it. Deliberately tolerant, like everything else in this file:
  * a deployment with no board draws no control, and that is a skip rather than
- * a failure — the caller's own `settled` count decides.
+ * a failure — the caller's own `present` count decides.
  */
 async function exploreMarket(page: Page): Promise<void> {
   const toggle = page.getByTestId('market-fold-toggle');
@@ -187,19 +175,93 @@ async function exploreMarket(page: Page): Promise<void> {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-async function settled(page: Page, rowTestId: string): Promise<number> {
+/** How long to wait for a list nobody has established anything about yet. */
+const FIRST_LOOK = 20_000;
+
+/**
+ * How long to wait for a list this run has already watched come back empty.
+ *
+ * Long enough to notice that it has since filled — a board that arrives while
+ * the suite is running is still a board this suite should be checking — and
+ * short enough that the emptiness is not paid for again at every gate.
+ */
+const SECOND_LOOK = 2_000;
+
+/**
+ * Wait for a list to answer before deciding it is empty.
+ *
+ * These tests skip themselves when a deployment has no league connected, which
+ * is honest — but a fixed pause plus a bare `count()` cannot tell "nothing to
+ * show" from "not back yet", and production is a real database behind a cold
+ * worker. On one run that difference silently skipped four of the assertions
+ * that matter most, and a skipped test reads exactly like a passing one.
+ *
+ * So the wait is for an outcome rather than for a duration: rows, or the empty
+ * state that means there genuinely are none.
+ *
+ * The budget is the caller's, because the two questions this file asks of a
+ * list cost differently: waiting for a list this deployment is known to have is
+ * always worth the full `FIRST_LOOK`, and re-establishing an emptiness that has
+ * already been established at length is not. See `present`.
+ */
+async function settled(page: Page, rowTestId: string, budget = FIRST_LOOK): Promise<number> {
   const rows = page.getByTestId(rowTestId);
   await Promise.race([
-    rows.first().waitFor({ state: 'visible', timeout: 20_000 }),
-    page.locator('.empty, .spinner').first().waitFor({ state: 'visible', timeout: 20_000 }),
+    rows.first().waitFor({ state: 'visible', timeout: budget }),
+    page.locator('.empty, .spinner').first().waitFor({ state: 'visible', timeout: budget }),
   ]).catch(() => {
     /* Neither arrived; the count below reports what is actually there. */
   });
   // A skeleton is still "not back yet", so give the fetch behind it a moment.
   if ((await rows.count()) === 0 && (await page.getByTestId('draft-skeleton').count()) > 0) {
-    await rows.first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+    await rows.first().waitFor({ state: 'visible', timeout: budget }).catch(() => {});
   }
   return rows.count();
+}
+
+/** What each width has established about each list, keyed by both. */
+const established = new Map<string, 'rows' | 'empty'>();
+
+/**
+ * Whether this deployment has a list to show at all — asked properly once.
+ *
+ * Nearly every check below opens a screen and then declines to run when the
+ * list it is about is empty, which is honest: production is a real league and a
+ * board with nothing on it is a fact about today rather than a defect. But the
+ * *question* was being asked from scratch each time, and asking it costs a full
+ * `settled()` wait whenever the answer is "nothing" — there are no rows to
+ * appear, so the race below runs to its timeout.
+ *
+ * That is the arithmetic that killed a production run. The board was
+ * legitimately empty for a few minutes — its refresh job had died, tracked
+ * separately — and the dozen gates in this file each spent twenty-odd seconds
+ * discovering it, three times over for the three widths: about thirteen minutes
+ * of pure waiting, through the step's twenty-minute ceiling, and the suite was
+ * cut off mid-run. The same suite passed in 15m36s once the board filled, so
+ * nothing here was broken except how many times it paid for one answer.
+ *
+ * So the answer is remembered for the width that established it. The first gate
+ * to ask about a list pays the full wait; the rest are told. The waiting that
+ * matters is kept: a list that has rows is still waited for at full length
+ * every time, because "not back yet" must never be read as "nothing to show" —
+ * that is the defect `settled()` itself was written for. And an empty verdict
+ * is not a sentence: each later gate still looks for `SECOND_LOOK`, so a board
+ * that fills halfway through the run is picked up and every gate after it goes
+ * back to the full wait.
+ *
+ * What this does *not* do is decide anything for a list a test has already
+ * reached and filtered — see the position loop in the Score-ordering test,
+ * which calls `settled()` directly. An empty *filtered* board says nothing
+ * about whether this deployment has a board.
+ */
+async function present(page: Page, rowTestId: string): Promise<number> {
+  // Per width: the same deployment, but each project is its own browser and
+  // its own run of every gate, and a verdict is only worth as much as the
+  // widths it was actually measured at.
+  const key = `${test.info().project.name} ${rowTestId}`;
+  const count = await settled(page, rowTestId, established.get(key) === 'empty' ? SECOND_LOOK : FIRST_LOOK);
+  established.set(key, count === 0 ? 'empty' : 'rows');
+  return count;
 }
 
 test.describe('the deployed app', () => {
@@ -392,7 +454,7 @@ test.describe('the deployed app', () => {
     const rows = page.getByTestId('recommendation-row');
     // A deployment with no league connected has an honest empty state instead,
     // and that is not a failure of this pass — but "not back yet" is not that.
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const metrics = await rows.first().locator('.player-row-metrics').innerText();
     expect(metrics).toMatch(/Score\s+\d{1,3}/);
@@ -434,7 +496,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const queueFilter = page.getByTestId('queue-filter');
     test.skip((await queueFilter.count()) === 0, 'no queue filter on this deployment');
@@ -494,7 +556,7 @@ test.describe('the deployed app', () => {
     await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
-    const count = await settled(page, 'recommendation-row');
+    const count = await present(page, 'recommendation-row');
     test.skip(count === 0, 'no draft board on this deployment');
 
     const viewport = page.viewportSize()!;
@@ -522,7 +584,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const warned = page
       .getByTestId('recommendation-row')
@@ -563,7 +625,7 @@ test.describe('the deployed app', () => {
     await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const first = rows.first();
     await first.click();
@@ -597,7 +659,7 @@ test.describe('the deployed app', () => {
       await page.goto('/');
       if (tab === 'draft') await requireDraftBoard(page);
       await open(page, tab);
-      test.skip((await settled(page, rowTestId)) === 0, `no ${screen} on this deployment`);
+      test.skip((await present(page, rowTestId)) === 0, `no ${screen} on this deployment`);
 
       const rows = await page.locator(`[data-testid="${rowTestId}"]`).evaluateAll(
         (all, { way, ctrl }) =>
@@ -817,7 +879,7 @@ test.describe('the deployed app', () => {
 
     await page.goto('/');
     await open(page, 'players');
-    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
+    test.skip((await present(page, 'player-search-row')) === 0, 'no player list on this deployment');
     await page.getByTestId('player-search-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await expect(page.getByTestId('player-page-metrics')).toBeVisible();
@@ -826,7 +888,7 @@ test.describe('the deployed app', () => {
 
     await open(page, 'trades');
     await exploreMarket(page);
-    if ((await settled(page, 'trade-row')) === 0) return; // no board today; Players proved the card
+    if ((await present(page, 'trade-row')) === 0) return; // no board today; Players proved the card
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await expect(page.getByTestId('player-page-metrics')).toBeVisible();
@@ -859,7 +921,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'trades');
     await exploreMarket(page);
-    test.skip((await settled(page, 'trade-row')) === 0, 'no trade board on this deployment');
+    test.skip((await present(page, 'trade-row')) === 0, 'no trade board on this deployment');
 
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
@@ -1003,7 +1065,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
-    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
+    test.skip((await present(page, 'player-search-row')) === 0, 'no player list on this deployment');
 
     const before = await rows.count();
     await rows.first().click();
@@ -1060,7 +1122,7 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'players');
     const rows = page.getByTestId('player-search-row');
-    test.skip((await settled(page, 'player-search-row')) === 0, 'no player list on this deployment');
+    test.skip((await present(page, 'player-search-row')) === 0, 'no player list on this deployment');
 
     const full = (await rows.first().locator('.player-name').innerText()).trim();
     const surname = full.split(/\s+/).pop() ?? '';
@@ -1126,7 +1188,7 @@ test.describe('the deployed app', () => {
     await open(page, 'draft');
 
     const rows = page.getByTestId('recommendation-row');
-    const before = await settled(page, 'recommendation-row');
+    const before = await present(page, 'recommendation-row');
     test.skip(before === 0, 'no draft board on this deployment');
     const name = (await rows.first().locator('.player-name').innerText()).split(' ').pop()!;
 
@@ -1174,7 +1236,7 @@ test.describe('the deployed app', () => {
     await requireDraftBoard(page);
     await open(page, 'draft');
     const rows = page.getByTestId('recommendation-row');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const ids = (await rows.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-player-id'))))
       .filter((id): id is string => !!id)
@@ -1287,7 +1349,7 @@ test.describe('the season features', () => {
     test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board to filter');
 
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
     test.skip((await page.getByTestId('flx-filter').count()) === 0, 'this league starts none of RB, WR or TE');
 
     await page.getByTestId('flx-filter').click();
@@ -1336,7 +1398,7 @@ test.describe('the season features', () => {
       return;
     }
 
-    test.skip((await settled(page, 'starter-row')) === 0, 'no roster on this deployment');
+    test.skip((await present(page, 'starter-row')) === 0, 'no roster on this deployment');
 
     // Every slot drawn is a slot this league actually starts, and every filled
     // one carries its position tint plus the word.
@@ -1884,7 +1946,7 @@ test.describe('the decision intelligence', () => {
     // going there would skip itself on every run and report nothing.
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const dog = await page.evaluate(async () => {
       const overview = await (await fetch('/api/overview')).json();
@@ -1941,7 +2003,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const control = page.getByTestId('draft-sort');
     await expect(control).toBeVisible();
@@ -2007,7 +2069,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const board = await page.evaluate(async () => {
       const overview = await (await fetch('/api/overview')).json();
@@ -2144,7 +2206,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const summary: string[] = [];
     const violations: string[] = [];
@@ -2157,6 +2219,9 @@ test.describe('the decision intelligence', () => {
       }
       await chip.click();
       await expect(page.getByTestId('board-list')).toBeVisible();
+      // The board this deployment has was established by the gate above; this
+      // is waiting for one *position* of it, which may legitimately be empty
+      // and must not be remembered as though the board were.
       await settled(page, 'recommendation-row');
 
       /*
@@ -2216,7 +2281,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     await requireDraftBoard(page);
     await open(page, 'draft');
-    test.skip((await settled(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
+    test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
     const board = await page.evaluate(async () => {
       const { leagues = [] } = await (await fetch('/api/leagues')).json();
