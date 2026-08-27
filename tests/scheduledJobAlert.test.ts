@@ -93,11 +93,11 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
 
   /*
    * A concurrency group was tried here — one issue, read-modify-written, is
-   * exactly what a group is for — and measured doing the thing an alarm must
-   * never do: a called workflow sat `pending` on an empty group for over half
-   * an hour, and GitHub's rule for a group without `cancel-in-progress` is that
-   * a newly queued run cancels the pending one. A lost update costs one row the
-   * next run puts back; a cancelled alert costs the alarm.
+   * exactly what a group is for — and taken out again. `cancel-in-progress:
+   * false` protects the run that is *in flight*; a run already waiting in the
+   * group is cancelled, silently, when a newer one queues behind it. A lost
+   * update costs one row the next run puts back; a cancelled alert costs the
+   * alarm.
    */
   it('the alert is never queued behind, or cancelled by, another alert', () => {
     const { yaml } = readWorkflow('alert-on-failure.yml');

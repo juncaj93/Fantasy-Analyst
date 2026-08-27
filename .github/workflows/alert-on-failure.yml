@@ -49,15 +49,16 @@ permissions:
   issues: write
 
 # Deliberately no `concurrency` group. One was tried, for the obvious reason —
-# this is a read-modify-write on a single issue — and it was measured doing the
-# thing an alarm must never do. A called workflow in a group sat `pending` for
-# over half an hour with the group empty, and GitHub's own rule for a group
-# without `cancel-in-progress` is that a newly queued run *cancels* the one
-# already pending. Either way the report does not arrive.
+# this is a read-modify-write on a single issue — and taken out again, because
+# of what a group does to a *pending* member: with `cancel-in-progress: false`
+# an in-flight run is protected, but a run already waiting in the group is
+# cancelled when a newer one is queued behind it. Cancelling an alert is the one
+# thing an alarm must never do, and it is silent when it happens.
 #
-# The race it would have prevented needs two scheduled jobs to finish inside the
-# few seconds this takes; the two here are an hour apart. A lost update costs
-# one row, which the next run puts back. A cancelled alert costs the alarm.
+# The race a group would have prevented needs two scheduled jobs to finish
+# inside the few seconds this takes; the two here run an hour apart. A lost
+# update costs one row, which the next run puts back. A cancelled alert costs
+# the alarm.
 
 jobs:
   alert:
