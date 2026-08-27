@@ -125,3 +125,16 @@ jobs:
             ].join('\n'));
           "
           [ "$code" = "200" ] || exit 1
+
+  # Nobody was told when this failed twelve mornings in a row. Now something is.
+  # `always()` so a failure reports, and so does the success that resolves it.
+  alert:
+    needs: refresh
+    if: always()
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Refresh draft order
+      result: ${{ needs.refresh.result }}

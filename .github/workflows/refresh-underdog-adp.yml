@@ -163,3 +163,17 @@ jobs:
             }
           "
           [ "$code" = "200" ] || exit 1
+
+  # See alert-on-failure.yml. A source being unreachable is not a failure here —
+  # the fetch step stands down deliberately — so this fires on the failures that
+  # are real ones: the login, the import, or a file that matched nobody.
+  alert:
+    needs: refresh
+    if: always()
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Refresh Underdog ADP
+      result: ${{ needs.refresh.result }}
