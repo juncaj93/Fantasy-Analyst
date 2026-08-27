@@ -1,12 +1,15 @@
 /**
- * Check that beatadp.com is still a source we can trust, and that we know how
- * to ask it for this league's format.
+ * Check that beatadp.com is still a source we can trust, and that it still
+ * publishes the slice this league drafts in.
  *
  * Two questions, both of which have burned this project before:
  *
- *   1. Do the filter parameters work? A page that silently ignores
- *      `scoringFormat=HALF_PPR` and serves full PPR looks identical to one that
- *      honoured it — unless you read back the filters it says it applied.
+ *   1. Is the slice there, and how fresh is it? The page ships every
+ *      platform/format combination it holds and keys each player's ADPs by
+ *      slice, so the check is whether `SLEEPER|HALF_PPR|REDRAFT|1QB` is among
+ *      them — and what date the page says those numbers were recorded on. A
+ *      page that quietly stopped publishing a slice looks identical to one that
+ *      never held it.
  *   2. Is the ordering sane past the top dozen? Sleeper's `search_rank` looked
  *      like ADP for twelve players and then put a retired running back in the
  *      third round. The tail is where a ranking source proves itself.
@@ -14,53 +17,36 @@
  * Prints only; changes nothing.
  */
 
-import { parseBeatAdpPage, toAdpImportFile } from '../src/core/adp/beatadp.ts';
+import { findSlice, parseBeatAdpPage, sliceKey, toAdpImportFile } from '../src/core/adp/beatadp.ts';
 
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 
-async function load(params) {
-  const url = new URL('https://www.beatadp.com/platform-adp');
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, { headers: { 'user-agent': UA } });
-  const page = parseBeatAdpPage(await res.text());
-  return { url: url.search || '(no params)', status: res.status, page };
+const WANTED = { platform: 'SLEEPER', scoringFormat: 'HALF_PPR', draftType: 'REDRAFT', qbType: '1QB' };
+
+const url = new URL('https://www.beatadp.com/platform-adp');
+url.searchParams.set('scoringFormat', WANTED.scoringFormat);
+url.searchParams.set('draftType', WANTED.draftType);
+url.searchParams.set('qbType', WANTED.qbType);
+
+const res = await fetch(url, { headers: { 'user-agent': UA } });
+const page = parseBeatAdpPage(await res.text());
+console.log(`${res.status} ${url.search}`);
+
+// ------------------------------------------------------- 1. the slices -------
+console.log(`\n=== slices the page publishes (${page.slices.length}) ===`);
+for (const slice of page.slices) {
+  console.log(`  ${sliceKey(slice).padEnd(34)} recorded ${slice.recordedAt ?? 'unstated'}  ${slice.playerCount ?? '?'} players`);
 }
 
-// ---------------------------------------------------- 1. filter parameters ---
-// The prop names the page renders with are the first candidates, but a Next.js
-// page often names its search params differently from its props.
-const CANDIDATES = [
-  {},
-  { scoringFormat: 'HALF_PPR', draftType: 'REDRAFT', qbType: '1QB' },
-  { scoringFormat: 'HALF', draftType: 'REDRAFT', qbType: '1QB' },
-  { scoring: 'HALF_PPR', draft: 'REDRAFT', qb: '1QB' },
-  { scoringFormat: 'half-ppr', draftType: 'redraft', qbType: '1qb' },
-  { format: 'HALF_PPR' },
-];
-
-console.log('=== which parameters change the applied filters? ===');
-let working = null;
-for (const params of CANDIDATES) {
-  try {
-    const { url, status, page } = await load(params);
-    const f = page.filters;
-    console.log(
-      `  ${status}  ${url}\n      applied: ${f?.scoringFormat} / ${f?.draftType} / ${f?.qbType}  (${page.rows.length} rows)`,
-    );
-    if (!working && f?.scoringFormat && f.scoringFormat !== 'PPR') working = { params, page };
-  } catch (err) {
-    console.log(`  failed: ${err.message}`);
-  }
-}
+const wanted = findSlice(page.slices, WANTED);
+const key = sliceKey(WANTED);
+console.log(`\n${key}: ${wanted ? `published, recorded ${wanted.recordedAt ?? 'unstated'}` : 'NOT PUBLISHED — the refresh would refuse to import'}`);
+if (!wanted) process.exit(0);
 
 // ------------------------------------------------------- 2. data sanity ------
-const { page } = working ?? (await load({}));
-if (working) console.log('\nusing half-PPR parameters:', JSON.stringify(working.params));
-else console.log('\nno parameter spelling changed the format — falling back to the default page');
-
-const rows = JSON.parse(toAdpImportFile(page.rows, 'SLEEPER'));
-console.log(`\n=== Sleeper ADP: ${rows.length} ranked of ${page.rows.length} rows ===`);
+const rows = JSON.parse(toAdpImportFile(page.rows, key));
+console.log(`\n=== ${key}: ${rows.length} ranked of ${page.rows.length} players on the page ===`);
 
 const show = (r) => `${String(r.rank).padStart(4)}  ${String(r.adp).padStart(6)}  ${r.position ?? '??'} ${r.name} (${r.team})`;
 console.log('--- top 15 ---');

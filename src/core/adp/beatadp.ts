@@ -9,36 +9,49 @@
  *
  * The page is a Next.js App Router render, so the table is not fetched from an
  * API: the server streams it into the HTML as RSC "flight" chunks pushed into
- * `self.__next_f`. Decoding those chunks yields the rows verbatim, along with
- * the filters the server actually applied — which is the part that matters,
- * because it lets a caller *verify* it received half-PPR data rather than
- * assume it.
+ * `self.__next_f`. Decoding those chunks yields the players verbatim, along
+ * with the list of *slices* the page publishes — every combination of platform,
+ * scoring format, draft type and QB count it holds ADP for.
+ *
+ * Every slice ships in one payload and each player's ADPs are keyed by slice
+ * (`SLEEPER|HALF_PPR|REDRAFT|1QB`), so the caller does not ask the page to
+ * filter and then hope it did: it names the slice it wants and takes the
+ * numbers stored under that name. A slice the page does not publish is missing
+ * rather than quietly substituted, which is the property that matters — a
+ * half-PPR board built from full-PPR numbers looks perfectly correct.
  *
  * Nothing here runs at request time. A workflow fetches the page, converts it
  * with these functions, and imports the result as a frozen ADP snapshot, so the
  * app's draft board never depends on a third-party site being up mid-draft.
  */
 
-/** The three filters that decide whether an ADP number applies to a league. */
-export interface BeatAdpFilters {
+/** One combination of platform and league format the page holds ADP for. */
+export interface BeatAdpSlice {
+  /** e.g. `SLEEPER`, `ESPN`, `YAHOO`, `FANTASYPROS`. */
+  platform: string;
   /** e.g. `PPR`, `HALF_PPR`, `STANDARD`. */
-  scoringFormat: string | null;
+  scoringFormat: string;
   /** e.g. `REDRAFT`, `DYNASTY`. */
-  draftType: string | null;
-  /** e.g. `1QB`, `SUPERFLEX`. */
-  qbType: string | null;
+  draftType: string;
+  /** e.g. `1QB`, `2QB`. */
+  qbType: string;
+  /** The day the page says these numbers were recorded, `YYYY-MM-DD`. */
+  recordedAt: string | null;
+  /** How many players the page says this slice ranks. */
+  playerCount: number | null;
 }
 
 export interface BeatAdpRow {
   name: string;
   position: string | null;
   team: string | null;
-  /** ADP by platform, keyed as the page keys it (`SLEEPER`, `ESPN`, ...). */
+  /** ADP by slice, keyed as the page keys it (`SLEEPER|HALF_PPR|REDRAFT|1QB`). */
   adps: Record<string, number>;
 }
 
 export interface BeatAdpPage {
-  filters: BeatAdpFilters | null;
+  /** Every slice the page publishes, in the order it lists them. */
+  slices: BeatAdpSlice[];
   rows: BeatAdpRow[];
 }
 
@@ -128,66 +141,117 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
+function num(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 /**
- * Parse a fetched platform-ADP page into filters and rows.
+ * The name a slice's ADP numbers are stored under, on the page and here.
  *
- * The filters are returned as the page reported them, not as they were
- * requested. A caller that wants half PPR must check.
+ * Building it from the four parts rather than pasting a string together at each
+ * call site is the whole point: the key *is* the format check, so there is one
+ * place that decides how it is spelled.
+ */
+export function sliceKey(slice: {
+  platform: string;
+  scoringFormat: string;
+  draftType: string;
+  qbType: string;
+}): string {
+  return [slice.platform, slice.scoringFormat, slice.draftType, slice.qbType]
+    .map((part) => part.trim().toUpperCase())
+    .join('|');
+}
+
+/**
+ * The published slice matching the one asked for, or null when the page does
+ * not publish it. Null is an answer, not a failure to look: a caller must not
+ * fall back to a neighbouring format.
+ */
+export function findSlice(
+  slices: readonly BeatAdpSlice[],
+  wanted: { platform: string; scoringFormat: string; draftType: string; qbType: string },
+): BeatAdpSlice | null {
+  const key = sliceKey(wanted);
+  return slices.find((slice) => sliceKey(slice) === key) ?? null;
+}
+
+/**
+ * Parse a fetched platform-ADP page into the slices it publishes and its rows.
+ *
+ * Both come back as the page states them. Nothing here decides which slice
+ * applies to a league — that is `findSlice` and the caller's business — and a
+ * page whose payload has changed shape again yields no slices and no rows
+ * rather than a plausible-looking half of one.
  */
 export function parseBeatAdpPage(html: string): BeatAdpPage {
   const flight = decodeFlight(html);
 
-  const rawFilters = parseAt(flight, 'filters') as Record<string, unknown> | null;
-  const filters: BeatAdpFilters | null = rawFilters
-    ? {
-        scoringFormat: str(rawFilters['scoringFormat']),
-        draftType: str(rawFilters['draftType']),
-        qbType: str(rawFilters['qbType']),
-      }
-    : null;
-
-  const rawRows = parseAt(flight, 'rows');
-  const rows: BeatAdpRow[] = [];
-  if (Array.isArray(rawRows)) {
-    for (const entry of rawRows) {
+  const rawSlices = parseAt(flight, 'slices');
+  const slices: BeatAdpSlice[] = [];
+  if (Array.isArray(rawSlices)) {
+    for (const entry of rawSlices) {
       const rec = entry as Record<string, unknown> | null;
-      const player = (rec?.['player'] ?? null) as Record<string, unknown> | null;
-      const name = str(player?.['fullName']);
+      const platform = str(rec?.['platform']);
+      const scoringFormat = str(rec?.['scoringFormat']);
+      const draftType = str(rec?.['draftType']);
+      const qbType = str(rec?.['qbType']);
+      // All four name the slice. One missing makes it unidentifiable, and an
+      // unidentifiable slice is worse than no slice.
+      if (!platform || !scoringFormat || !draftType || !qbType) continue;
+      slices.push({
+        platform,
+        scoringFormat,
+        draftType,
+        qbType,
+        recordedAt: str(rec?.['recordedAt']),
+        playerCount: num(rec?.['playerCount']),
+      });
+    }
+  }
+
+  const rawPlayers = parseAt(flight, 'players');
+  const rows: BeatAdpRow[] = [];
+  if (Array.isArray(rawPlayers)) {
+    for (const entry of rawPlayers) {
+      const rec = entry as Record<string, unknown> | null;
+      const name = str(rec?.['fullName']);
       if (!name) continue;
 
       const adps: Record<string, number> = {};
       const rawAdps = (rec?.['adps'] ?? null) as Record<string, unknown> | null;
-      for (const [platform, value] of Object.entries(rawAdps ?? {})) {
+      for (const [key, value] of Object.entries(rawAdps ?? {})) {
         if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-          adps[platform.toUpperCase()] = value;
+          adps[key.toUpperCase()] = value;
         }
       }
 
       rows.push({
         name,
-        position: str(player?.['position']),
-        team: str(player?.['teamId']),
+        position: str(rec?.['position']),
+        team: str(rec?.['teamId']),
         adps,
       });
     }
   }
 
-  return { filters, rows };
+  return { slices, rows };
 }
 
 /**
  * Convert parsed rows into the JSON the ADP importer already understands.
  *
- * Only players the chosen platform actually ranks are included. A player the
- * platform has no ADP for is not a player with a bad ADP — it is a player with
- * no ADP, and inventing one (by falling back to a different platform, or to the
- * consensus) would silently mix sources inside a single snapshot.
+ * `key` names one slice — `SLEEPER|HALF_PPR|REDRAFT|1QB` — and only the numbers
+ * stored under it are read. Only players that slice actually ranks are
+ * included: a player it has no ADP for is not a player with a bad ADP, and
+ * inventing one (from another platform, another format, or the consensus) would
+ * silently mix sources inside a single snapshot.
  *
  * `rank` is derived from the ADP ordering rather than taken from the page,
  * because the page's row order follows whichever column the reader sorted by.
  */
-export function toAdpImportFile(rows: BeatAdpRow[], platform = SLEEPER_PLATFORM): string {
-  const key = platform.toUpperCase();
+export function toAdpImportFile(rows: BeatAdpRow[], sliceName: string): string {
+  const key = sliceName.trim().toUpperCase();
   const ranked = rows
     .filter((row) => typeof row.adps[key] === 'number')
     .sort((a, b) => a.adps[key]! - b.adps[key]!)
