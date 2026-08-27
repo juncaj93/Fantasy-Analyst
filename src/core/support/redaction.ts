@@ -268,3 +268,26 @@ export const REDACTION_RULES: readonly string[] = [
   'Raw Sleeper pick payloads are reduced to the four player-name fields the board reads as a fallback.',
   'Players are identified by canonical player id; nothing outside the league’s own rosters is included.',
 ];
+
+/** Raised when a capture would have emitted something it must not. */
+export class SnapshotRedactionError extends Error {
+  /*
+   * A plain field rather than a constructor parameter property.
+   *
+   * Parameter properties are a TypeScript *transform*, not a type annotation,
+   * and Node's `--experimental-strip-types` refuses them. The replay CLI runs
+   * the shipped modules through exactly that loader — see
+   * `scripts/support-fixture.ts` — so anything on this path stays inside what
+   * type-stripping alone can erase.
+   */
+  readonly violations: { path: string; reason: string }[];
+
+  constructor(violations: { path: string; reason: string }[]) {
+    super(
+      `refusing to emit a support snapshot: ${violations.length} field${violations.length === 1 ? '' : 's'} must not be in one — ` +
+        violations.map((v) => `${v.path} (${v.reason})`).join('; '),
+    );
+    this.name = 'SnapshotRedactionError';
+    this.violations = violations;
+  }
+}

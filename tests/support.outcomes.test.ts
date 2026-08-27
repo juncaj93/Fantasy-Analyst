@@ -59,16 +59,26 @@ describe('a file this build cannot read is refused, not diagnosed', () => {
     }
   });
 
+  /**
+   * All six kinds are implemented, so this is a kind that does not exist.
+   *
+   * It used to be `waiver-plan`, which was the honest test while Draft was the
+   * only lane. The guarantee it holds has not changed and is the reason a
+   * snapshot names its kind at all: a build handed a decision it has never heard
+   * of says so, and says which ones it does read, rather than crashing somewhere
+   * inside an adapter that was never written.
+   */
   it('rejects a decision kind it cannot replay as schema_unsupported', async () => {
     const snapshot = await mutated((s) => {
-      (s.decision as { kind: string }).kind = 'waiver-plan';
+      (s.decision as { kind: string }).kind = 'roster-move';
     });
     try {
       readSnapshot(snapshot);
       expect.unreachable('an unimplemented kind must be refused');
     } catch (err) {
       expect((err as SnapshotRejected).outcome).toBe('schema_unsupported');
-      expect((err as Error).message).toContain('waiver-plan');
+      expect((err as Error).message).toContain('roster-move');
+      expect((err as Error).message).toContain('draft-board');
     }
   });
 
@@ -195,8 +205,10 @@ describe('reproduced means every term held', () => {
 
     expect(report.outcome).toBe('reproduced');
     expect(report.differences).toEqual([]);
-    expect(report.compared.order).toBe(report.board!.recommendations.length);
-    expect(report.compared.detailRows).toBeGreaterThan(0);
+    expect(report.compared.find((c) => c.what === 'ranked players')?.count).toBe(
+      report.board!.recommendations.length,
+    );
+    expect(report.compared.find((c) => c.what === 'arguments in full')!.count).toBeGreaterThan(0);
     expect(report.summary).toMatch(/^Reproduced: \d+ ranked players/);
   });
 });
