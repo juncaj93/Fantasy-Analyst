@@ -172,7 +172,53 @@ export function SetupScreen({
     onChanged();
   };
 
-  if (!status) return error ? <Notice tone="error">{error}</Notice> : <Loading what="your setup" />;
+  /*
+   * The bar stays up while the status is being read, and a failed read is
+   * recoverable from where it happened.
+   *
+   * This returned the spinner — or, when the read failed, a bare line of error
+   * text — *in place of the whole screen*: no title, no navigation bar, and
+   * nothing to press. Every other screen keeps its chrome while it loads and
+   * swaps only the content under it (`DraftScreen`, `TradesScreen`,
+   * `ReviewScreen` and `DataHealthScreen` all do), and Setup was the one
+   * exception.
+   *
+   * Production smoke reads that difference as "setup has no navigation bar":
+   * a cold Worker still answering `/api/setup/status` leaves the reader on a
+   * screen with no bar on it, which is the same defect whether a test or a
+   * person is looking at it. The failed case was the worse half — `load` runs
+   * once, on mount, so a single failed read left Settings dead for the rest of
+   * the session with no way back but the destination it was already on. That is
+   * the case `App` already answers with a retry, and it is answered here now
+   * too.
+   */
+  if (!status) {
+    return (
+      <>
+        <NavBar title="Setup" subtitle={error ? 'Could not read your setup' : 'Reading your setup…'} />
+        {error ? (
+          <Notice tone="error" data-testid="setup-error">
+            <div>{error}</div>
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                data-testid="setup-error-retry"
+                onClick={() => {
+                  setError(null);
+                  void load();
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          </Notice>
+        ) : (
+          <Loading what="your setup" />
+        )}
+      </>
+    );
+  }
 
   /*
    * A settings row leads to a screen, and that screen is pushed.
