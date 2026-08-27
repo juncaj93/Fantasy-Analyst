@@ -1,0 +1,77 @@
+name: Alert on failure
+
+# The alarm for scheduled jobs.
+#
+# Every workflow in this repository that runs on a `schedule` calls this as its
+# last job, with `if: always()`, and hands over its own name and the result of
+# the job that did the work. On a failure this opens — or updates, or reopens —
+# one issue titled "Scheduled job failures"; on a success it takes that job's
+# row away and closes the issue once no rows are left.
+#
+# It exists because the default did not work. `Refresh draft order` failed on
+# every scheduled run from 2026-08-16 to 2026-08-27 and nobody was told. What
+# GitHub emails, to whom, and whether that address reads it are all outside this
+# repository — so the alert lives inside it instead, where it can be read,
+# tested and fixed like anything else here.
+#
+# Nothing new is bought or connected: this is the repository's own issue list,
+# written with the token every workflow already has.
+#
+# By hand, to check the mechanism is still alive without breaking anything:
+#   Actions -> Alert on failure -> Run workflow -> workflow: "Smoke test",
+#   result: failure   (then run it again with result: success, which closes it)
+
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: 'The name of the workflow whose outcome this is'
+        required: true
+        type: string
+      result:
+        description: "The work job's result: success, failure, cancelled or skipped"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: 'Name to record the outcome against (use a made-up one to test)'
+        required: true
+        default: 'Alert self-test'
+      result:
+        description: 'success or failure'
+        required: true
+        default: 'failure'
+
+# The one permission this needs, and it is the only workflow here that needs it.
+permissions:
+  contents: read
+  issues: write
+
+# One issue, read-modify-written. Two jobs finishing together would otherwise
+# each write the state they read before the other's update.
+concurrency:
+  group: scheduled-job-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No `npm ci`: the script depends on nothing, so the alarm still works on
+      # a day when the install is what is broken.
+      - name: Record the outcome
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALERT_WORKFLOW: ${{ inputs.workflow }}
+          ALERT_RESULT: ${{ inputs.result }}
+          # A called workflow runs inside the caller's run, so these point at
+          # the run whose log actually holds the failure.
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_RUN_NUMBER: ${{ github.run_number }}
+        run: node scripts/scheduled-job-alert.mjs
