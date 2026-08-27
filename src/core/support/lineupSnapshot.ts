@@ -54,6 +54,7 @@ import {
   classifyOutcome,
   compareStructural,
   describeDifference,
+  describeMoved,
   exact,
   type ReplayReport,
 } from './contract.ts';
@@ -180,7 +181,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
 export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): ReplayReport {
   const { inputs, output } = snapshot.decision;
 
-  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
+  const { shape, profile, derivation } = rehydrateLeagueRules(inputs.rules);
   const replayed = assembleLineup({
     inputs: rehydrateStartSitInputs(inputs.startSit),
     shape,
@@ -221,14 +222,20 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
   exact('recommendedPoints', 'the lineup total', output.recommendedPoints, replayed.recommendedPoints, differences);
 
   const engineMatches = snapshot.release.engineVersion === LINEUP_ENGINE_VERSION;
-  const outcome = classifyOutcome(differences, engineMatches);
+  /*
+   * Two things explain a difference, and either one suppresses
+   * `output_difference`. See `describeMoved`.
+   */
+  const outcome = classifyOutcome(differences, engineMatches && derivation.matches);
+  const engine = { captured: snapshot.release.engineVersion, current: LINEUP_ENGINE_VERSION, matches: engineMatches };
 
   return {
     outcome,
-    summary: summarise(outcome, differences, snapshot),
+    summary: summarise(outcome, differences, snapshot, { engine, derivation }),
     kind: 'lineup',
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
-    engine: { captured: snapshot.release.engineVersion, current: LINEUP_ENGINE_VERSION, matches: engineMatches },
+    engine,
+    derivation,
     release: { capturedSha: snapshot.release.gitSha },
     compared: [
       { what: 'starting slots', count: output.slots.length },
@@ -244,6 +251,7 @@ function summarise(
   outcome: ReplayReport['outcome'],
   differences: ReplayReport['differences'],
   snapshot: SupportSnapshot<LineupPayload>,
+  moved: Pick<ReplayReport, 'engine' | 'derivation'>,
 ): string {
   const { output, context } = snapshot.decision;
   const swaps = output.swaps.length;
@@ -251,7 +259,7 @@ function summarise(
     case 'reproduced':
       return `Reproduced: the same ${output.slots.length} starting slots at ${output.recommendedPoints} points, ${swaps === 0 ? 'with no change to the lineup already set' : `with the same ${swaps} recommended change${swaps === 1 ? '' : 's'}`} — week ${context.week}, ${output.mode}.`;
     case 'engine_version_mismatch':
-      return `The weekly engine has moved since capture (${snapshot.release.engineVersion} → ${LINEUP_ENGINE_VERSION}) and the lineup came out differently in ${differences.length} place${differences.length === 1 ? '' : 's'}. Expected; compare against a snapshot captured on this engine before treating it as a regression.`;
+      return describeMoved('weekly engine', 'lineup', { ...moved, differences });
     case 'freshness_difference':
       return `Every lineup term matched; only the age of the data behind it read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:

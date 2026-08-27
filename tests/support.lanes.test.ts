@@ -771,3 +771,62 @@ describe('the dispatcher sends each file to its own adapter', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- derivation
+
+/**
+ * A build that reads league rules differently from the one that wrote the file.
+ *
+ * The snapshot carries what the league *published* rather than the derived shape
+ * and profile — see `SnapshotLeagueRules` — so a change to `buildScoringProfile`
+ * re-derives an old file under rules it was never made under. The fingerprint is
+ * what lets a replay say so instead of blaming a lane's own engine.
+ *
+ * Simulated by tampering with the captured fingerprint, which is the same thing
+ * from the replay's point of view and does not require a second build.
+ */
+describe('a moved derivation is reported as the explanation, not as a regression', () => {
+  it('is named ahead of the difference it caused', () => {
+    const snapshot = lineupSnapshot();
+    snapshot.decision.inputs.rules.derivation = 'deadbeef';
+    snapshot.decision.output.recommendedPoints += 1;
+
+    const report = replayLineupSnapshot(snapshot);
+    expect(report.outcome, report.summary).toBe('engine_version_mismatch');
+    expect(report.derivation).toEqual({ captured: 'deadbeef', current: expect.any(String), matches: false });
+    /*
+     * And the sentence names the derivation rather than the weekly engine, which
+     * has not moved. Sending a reader to the lineup optimiser for a scoring
+     * table somebody widened is the whole failure this is here to prevent.
+     */
+    expect(report.summary).toContain('does not read league rules');
+    expect(report.summary).not.toContain('weekly engine has moved');
+  });
+
+  it('does not turn an identical replay into a failure', () => {
+    /*
+     * A derivation that moved without changing this decision is worth *saying*
+     * and is not worth failing. Same precedence the engine version already has:
+     * nothing differed, so the file reproduced.
+     */
+    const snapshot = lineupSnapshot();
+    snapshot.decision.inputs.rules.derivation = 'deadbeef';
+
+    const report = replayLineupSnapshot(snapshot);
+    expect(report.outcome, report.summary).toBe('reproduced');
+    expect(report.derivation?.matches).toBe(false);
+  });
+
+  it('agrees with itself on an untouched capture, in every lane', async () => {
+    const reports = [
+      replayLineupSnapshot(lineupSnapshot()),
+      await replayWaiverSnapshot(await waiverSnapshot()),
+      await replayDstSnapshot(await dstSnapshot()),
+      replayTradeSnapshot(tradeSnapshot()),
+    ];
+    for (const report of reports) {
+      expect(report.derivation?.matches, `${report.kind}: ${report.summary}`).toBe(true);
+      expect(report.derivation?.captured).toBe(report.derivation?.current);
+    }
+  });
+});

@@ -47,7 +47,14 @@ import {
   rehydrateStartSitInputs,
 } from './inseason.ts';
 import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
-import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
+import {
+  classifyOutcome,
+  compareStructural,
+  describeDifference,
+  describeMoved,
+  exact,
+  type ReplayReport,
+} from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { TradeOfferPayload } from './payloads.ts';
 
@@ -207,7 +214,7 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
     leagueRate: inputs.history.leagueRate,
   };
 
-  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
+  const { shape, profile, derivation } = rehydrateLeagueRules(inputs.rules);
   const replayed = assembleSmartTrades({
     leagueSettings: inputs.leagueSettings,
     shape,
@@ -238,14 +245,20 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
   exact('offers', 'GIVE / GET / counterparty', offerLines(output), offerLines(replayed), differences);
 
   const engineMatches = snapshot.release.engineVersion === TRADE_ENGINE_VERSION;
-  const outcome = classifyOutcome(differences, engineMatches);
+  /*
+   * Two things explain a difference, and either one suppresses
+   * `output_difference`. See `describeMoved`.
+   */
+  const outcome = classifyOutcome(differences, engineMatches && derivation.matches);
+  const engine = { captured: snapshot.release.engineVersion, current: TRADE_ENGINE_VERSION, matches: engineMatches };
 
   return {
     outcome,
-    summary: summarise(outcome, differences, snapshot),
+    summary: summarise(outcome, differences, snapshot, { engine, derivation }),
     kind: 'trade-offer',
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
-    engine: { captured: snapshot.release.engineVersion, current: TRADE_ENGINE_VERSION, matches: engineMatches },
+    engine,
+    derivation,
     release: { capturedSha: snapshot.release.gitSha },
     compared: [
       { what: 'surfaced offers', count: output.offers.length },
@@ -273,6 +286,7 @@ function summarise(
   outcome: ReplayReport['outcome'],
   differences: ReplayReport['differences'],
   snapshot: SupportSnapshot<TradeOfferPayload>,
+  moved: Pick<ReplayReport, 'engine' | 'derivation'>,
 ): string {
   const { output, context } = snapshot.decision;
   switch (outcome) {
@@ -281,7 +295,7 @@ function summarise(
         ? `Reproduced: no offer worth sending, from the same ${context.partners} partner${context.partners === 1 ? '' : 's'} — ${output.notes[0] ?? 'nothing cleared the bar'}.`
         : `Reproduced: the same ${output.offers.length} offer${output.offers.length === 1 ? '' : 's'}, the same GIVE and GET on each, from the same ${context.partners} partners.`;
     case 'engine_version_mismatch':
-      return `The trade engine has moved since capture (${snapshot.release.engineVersion} → ${TRADE_ENGINE_VERSION}) and the offers came out differently in ${differences.length} place${differences.length === 1 ? '' : 's'}. Expected; compare against a snapshot captured on this engine before treating it as a regression.`;
+      return describeMoved('trade engine', 'offers', { ...moved, differences });
     case 'freshness_difference':
       return `Every offer term matched; only the age of the data behind it read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:

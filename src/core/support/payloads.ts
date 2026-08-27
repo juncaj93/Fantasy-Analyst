@@ -167,6 +167,8 @@ export interface MatchupPayload {
 export interface MatchupInputs {
   now: string;
   league: SnapshotLeague;
+  /** The league's published rules, and how the capturing build derived them. */
+  rules: SnapshotLeagueRules;
   rosters: SnapshotRoster[];
   /**
    * Sleeper's own matchup rows for the week. The scoreboard, never recomputed.

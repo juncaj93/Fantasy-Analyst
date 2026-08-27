@@ -86,6 +86,18 @@ export interface ReplayReport {
   kind: DecisionKind;
   schema: { expected: string; found: string; supported: boolean };
   engine: { captured: string; current: string; matches: boolean };
+  /**
+   * How this build derives a league's shape and scoring, against how the
+   * capturing build did.
+   *
+   * Absent on the Draft report, which reads a draft rather than a league week,
+   * and on any lane replaying a file captured before fingerprints existed —
+   * `captured: null` there, and `matches: true`, because an absent claim is not
+   * a disagreement. A mismatch folds into the same precedence a moved engine
+   * gets, for the same reason: it explains a difference, so it is named ahead of
+   * it. See `derivation.ts`.
+   */
+  derivation?: { captured: string | null; current: string; matches: boolean };
   release: { capturedSha: string };
   compared: ComparedCount[];
   differences: ReplayDifference[];
@@ -104,10 +116,28 @@ export class SnapshotRejected extends Error {
   /** Plain fields, so type-stripping alone can run this — see the CLI. */
   readonly outcome: Extract<ReplayOutcome, 'schema_unsupported' | 'data_mismatch'>;
 
-  constructor(outcome: Extract<ReplayOutcome, 'schema_unsupported' | 'data_mismatch'>, message: string) {
+  /**
+   * The same refusal in the app's own words, when there is a version of it a
+   * person should see.
+   *
+   * Set for exactly one refusal: a snapshot with nothing in it to rebuild. That
+   * one is not a bug — a league with no decision to make produces it honestly —
+   * and `sealSnapshot` uses this field to turn the refusal into the sentence the
+   * screen would have shown rather than a stack trace. Every other refusal is a
+   * malformed file or a broken build, and leaves this `null` so it surfaces as
+   * the programming error it is. See `emit.ts`.
+   */
+  readonly reader: string | null;
+
+  constructor(
+    outcome: Extract<ReplayOutcome, 'schema_unsupported' | 'data_mismatch'>,
+    message: string,
+    reader: string | null = null,
+  ) {
     super(message);
     this.name = 'SnapshotRejected';
     this.outcome = outcome;
+    this.reader = reader;
   }
 }
 
@@ -155,7 +185,7 @@ export function readSnapshot(value: unknown): SupportSnapshot {
   }
 
   const empty = emptinessOf(decision as DecisionPayload);
-  if (empty != null) throw new SnapshotRejected('data_mismatch', empty);
+  if (empty != null) throw new SnapshotRejected('data_mismatch', empty.agent, empty.reader);
   if (typeof snapshot.capturedAt !== 'string' || Number.isNaN(Date.parse(snapshot.capturedAt))) {
     throw new SnapshotRejected('data_mismatch', 'capturedAt is not an ISO-8601 instant, so the clock cannot be fixed');
   }
@@ -188,34 +218,44 @@ export function readSnapshot(value: unknown): SupportSnapshot {
  * file and got nothing" and "this file has nothing in it", which are two very
  * different messages to send somebody who is waiting on an answer.
  *
+ * Two sentences per case, because the refusal is read by two people. `agent`
+ * names the field, which is what somebody debugging a file wants; `reader` says
+ * what happened in the app's own words, and travels on the thrown
+ * `SnapshotRejected` so that `sealSnapshot` — which refuses a *capture* through
+ * this same gate — can show it to the person holding the phone instead of a
+ * path. See `emit.ts`.
+ *
  * One clause per kind, and the compiler requires all six.
  */
-function emptinessOf(decision: DecisionPayload): string | null {
+function emptinessOf(decision: DecisionPayload): { agent: string; reader: string } | null {
   switch (decision.kind) {
     case 'draft-board':
       return Array.isArray(decision.inputs.players) && decision.inputs.players.length > 0
         ? null
-        : 'decision.inputs.players is empty, so there is no board to rebuild';
+        : { agent: 'decision.inputs.players is empty, so there is no board to rebuild', reader: 'No draft board could be built, so there is nothing to explain yet.' };
     case 'lineup':
       return (decision.inputs.startSit?.inputs?.length ?? 0) > 0
         ? null
-        : 'decision.inputs.startSit is empty, so there is no lineup to rebuild';
+        : { agent: 'decision.inputs.startSit is empty, so there is no lineup to rebuild', reader: 'No player on this roster could be read, so there is no lineup to explain yet.' };
     case 'matchup':
       return (decision.inputs.startSit?.inputs?.length ?? 0) > 0
         ? null
-        : 'decision.inputs.startSit is empty, so there is no forecast to rebuild';
+        : { agent: 'decision.inputs.startSit is empty, so there is no forecast to rebuild', reader: 'No player in this matchup could be read, so there is no forecast to explain yet.' };
     case 'waiver-plan':
       return (decision.inputs.roster?.inputs?.length ?? 0) > 0
         ? null
-        : 'decision.inputs.roster is empty, so there is no waiver plan to rebuild';
+        : { agent: 'decision.inputs.roster is empty, so there is no waiver plan to rebuild', reader: 'No player on this roster could be read, so there is no waiver plan to explain yet.' };
     case 'dst-plan':
       return (decision.inputs.roster?.inputs?.length ?? 0) + (decision.inputs.candidates?.inputs?.length ?? 0) > 0
         ? null
-        : 'decision.inputs holds no defences at all, so there is no plan to rebuild';
+        : {
+            agent: 'decision.inputs holds no defences at all, so there is no plan to rebuild',
+            reader: 'No defence could be read for this league, so there is no defence plan to explain yet.',
+          };
     case 'trade-offer':
       return (decision.inputs.pool?.inputs?.length ?? 0) > 0
         ? null
-        : 'decision.inputs.pool is empty, so there is no offer to rebuild';
+        : { agent: 'decision.inputs.pool is empty, so there is no offer to rebuild', reader: 'No player on any roster in this league could be read, so there is no trade to explain yet.' };
     default:
       return null;
   }
@@ -431,6 +471,31 @@ export function classifyOutcome(differences: ReplayDifference[], engineMatches: 
  */
 function isFreshnessTerm(term: string): boolean {
   return term.startsWith('freshness.') || term.includes('.freshness.') || term.endsWith('.freshness');
+}
+
+/**
+ * The `engine_version_mismatch` sentence, which has two causes and must not
+ * name the wrong one.
+ *
+ * A replay reaches this outcome either because the lane's own engine has moved
+ * or because this build derives a league's rules differently from the build that
+ * captured the file — and those send a reader to two completely different
+ * places. A single sentence naming the engine would, on a scoring-derivation
+ * change, point at a lane that did not change and hide the thing that did.
+ *
+ * Derivation is named first when both have moved, because it is the one that
+ * explains differences in every lane at once.
+ */
+export function describeMoved(
+  engineName: string,
+  thing: string,
+  report: Pick<ReplayReport, 'engine' | 'derivation' | 'differences'>,
+): string {
+  const places = `${report.differences.length} place${report.differences.length === 1 ? '' : 's'}`;
+  if (report.derivation != null && !report.derivation.matches) {
+    return `This build does not read league rules the way the build that captured this file did (derivation ${report.derivation.captured} → ${report.derivation.current}), and the ${thing} came out differently in ${places}. Expected after a change to how roster shape or scoring is derived; re-capture on this build before treating it as a regression.`;
+  }
+  return `The ${engineName} has moved since capture (${report.engine.captured} → ${report.engine.current}) and the ${thing} came out differently in ${places}. Expected; compare against a snapshot captured on this engine before treating it as a regression.`;
 }
 
 export function describeDifference(difference: ReplayDifference): string {

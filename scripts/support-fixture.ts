@@ -88,6 +88,21 @@ function printHuman(report: ReplayReport, file: string): void {
   console.log(
     `  engine         ${report.engine.captured}${report.engine.matches ? ' (unchanged)' : ` → ${report.engine.current} — MOVED`}`,
   );
+  /*
+   * Printed only when the file makes the claim, and only in the two states that
+   * mean something.
+   *
+   * A line reading `derivation (unchanged)` on every healthy replay is noise a
+   * reader learns to skip, which is how the one that says MOVED gets skipped
+   * too. See `derivation.ts`.
+   */
+  if (report.derivation != null && report.derivation.captured != null) {
+    console.log(
+      `  derivation     ${report.derivation.captured}${
+        report.derivation.matches ? ' (league rules read the same)' : ` → ${report.derivation.current} — MOVED`
+      }`,
+    );
+  }
   console.log(`  captured from  ${report.release.capturedSha}`);
   console.log(`  compared       ${report.compared.map(describeCount).join(', ')}`);
 

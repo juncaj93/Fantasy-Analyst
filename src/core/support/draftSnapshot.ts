@@ -61,7 +61,8 @@ import { DRAFT_ENGINE_VERSION } from '../draft/version.ts';
 import { buildRosterShape, startablePositions } from '../sleeper/scoring.ts';
 import { scoringKey, type ProjectionScoring } from '../startWho/scoring.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
-import { SnapshotAliases, SnapshotRedactionError, REDACTION_RULES, findRedactionViolations } from './redaction.ts';
+import { SnapshotAliases, SnapshotRedactionError, REDACTION_RULES } from './redaction.ts';
+import { sealSnapshot } from './emit.ts';
 
 /*
  * Re-exported so every existing caller keeps the import it has.
@@ -190,9 +191,16 @@ export async function captureDraftSnapshot(
     },
   };
 
-  const violations = findRedactionViolations(snapshot);
-  if (violations.length > 0) throw new SnapshotRedactionError(violations);
-  return snapshot;
+  /*
+   * The same seal the five in-season lanes pass through.
+   *
+   * Draft checked its own redaction here for as long as it was the only lane.
+   * It no longer is, and a guarantee that holds for five surfaces and not the
+   * sixth is a guarantee nobody can state — so the shared function owns it, and
+   * Draft gets the two checks it never had: nothing the wire would silently
+   * change, and nothing `readSnapshot` would refuse.
+   */
+  return sealSnapshot<DraftBoardPayload>(snapshot);
 }
 
 // ------------------------------------------------------------- the recorder

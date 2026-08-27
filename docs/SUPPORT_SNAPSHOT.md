@@ -139,6 +139,7 @@ And for the five in-season decisions:
 | `inputs.startSit` / `inputs.roster` | anything about one player. Every field the engine had about him is there — the props, the previous props, the tally, the injury state, the usage weeks, the game, home or away |
 | `output.claimPlan.claims[].why` | a claim. Each line is one sentence of the argument, in the order the plan makes it |
 | `output.forecast.decision.note` | a Hold. It says *which* hold: everything locked, nobody legal for the slot, or nothing better |
+| `inputs.rules.derivation` | a replay that says `engine_version_mismatch` while naming no engine. The build reading the file derives roster shape or scoring differently from the build that wrote it — the answer is in `sleeper/scoring.ts`, not in the lane |
 
 That maps onto the categories worth separating: **stale or missing data**
 (freshness, an empty market, an absent projection), **mapping** (a player who
@@ -181,13 +182,14 @@ Fast path first. Never a one-worker multi-hour sweep, and never a skipped gate.
 # 1. the adapters and the schema — the whole lane, and it is seconds
 npx vitest run tests/support.snapshot.test.ts tests/support.redaction.test.ts \
   tests/support.lanes.test.ts tests/support.inSeason.test.ts tests/support.isolation.test.ts
-npx vitest run tests/support.fixtures.test.ts tests/support.cli.test.ts   # 2. the fixtures and the command
-npx vitest run tests/lineup.test.ts tests/waivers.test.ts tests/dst.planner.test.ts  # 3. the affected domain
-npx playwright test --project=webkit-iphone-390 e2e/support-snapshot.spec.ts     # 4. one representative width
+npx vitest run tests/support.symmetry.test.ts tests/support.derivation.test.ts   # 2. the two gates
+npx vitest run tests/support.fixtures.test.ts tests/support.cli.test.ts   # 3. the fixtures and the command
+npx vitest run tests/lineup.test.ts tests/waivers.test.ts tests/dst.planner.test.ts  # 4. the affected domain
+npx playwright test --project=webkit-iphone-390 e2e/support-snapshot.spec.ts     # 5. one representative width
 npx playwright test --project=webkit-small-360 --project=webkit-iphone-430 \
-  e2e/support-snapshot.spec.ts                                                   # 5. only if layout changed
-# 6. the authoritative sharded CI, on the exact head — see .github/workflows/ci.yml
-# 7. production smoke after deploy — see docs/RELEASE.md
+  e2e/support-snapshot.spec.ts                                                   # 6. only if layout changed
+# 7. the authoritative sharded CI, on the exact head — see .github/workflows/ci.yml
+# 8. production smoke after deploy — see docs/RELEASE.md
 ```
 
 Never a one-worker multi-hour sweep, and never a skipped gate. Step 1 is the one
@@ -455,6 +457,49 @@ silently. The payloads now carry the league's own published `scoring_settings`
 and `roster_positions` and rebuild the profile, which is what the Draft payload
 always did.
 
+### The derivation fingerprint, which is the price of *that*
+
+Carrying the published rules instead of the derived profile moves one risk
+rather than removing it. `buildRosterShape` and `buildScoringProfile` sit
+underneath every engine, so a change to either is a change to how the whole app
+reads a league — and a snapshot taken before such a change and replayed after it
+is being interpreted under rules it was never made under. The replay would report
+the difference honestly and attribute it to the lane's own engine, and somebody
+would go hunting for a bug in the lineup optimiser that is really a scoring table
+somebody widened.
+
+So the derivation is fingerprinted. `derivation.ts` runs the two functions over
+the league's published rules and hashes the result — with keys sorted at every
+depth, and with `Infinity` written as itself, because a hash taken through
+`JSON.stringify` would be blind to exactly the shape that started all this. The
+eight hex digits travel in `inputs.rules.derivation`, every lane's replay
+re-derives and compares, and a mismatch is reported with the same precedence a
+moved engine version gets: it *explains* a difference, so it is named ahead of
+it.
+
+Nothing is bumped by hand — the hash is of the behaviour, not of a number
+maintained beside it. A file with no fingerprint at all, captured before this
+existed, is not compared and is not refused: an absent claim is not a
+disagreement.
+
+### One gate, run twice
+
+The worst failure this feature can produce is not a wrong number. It is **Copy
+support snapshot succeeding and `npm run support:fixture` then refusing the
+file** — the person has spent their goodwill and the answer they get is about our
+tooling rather than about their problem.
+
+That can only happen when the writer's checks and the reader's checks are two
+lists maintained in two places, so they are not. `sealSnapshot` serialises the
+finished snapshot and hands it to `readSnapshot`: every capture, all six kinds.
+A gate added to the reader tomorrow is a gate the writer starts enforcing in the
+same commit. The one refusal that is not a bug — a league with nothing to decide
+about, which produces an honestly empty capture — carries a second sentence
+written for a person, and the route turns it into a 409 rather than a stack
+trace. `tests/support.symmetry.test.ts` states the property, and half its
+mutations are derived from the snapshot's own shape rather than named, so it
+keeps covering checks nobody has written yet.
+
 ### Redaction: alias before the engine speaks
 
 The Draft lane aliases its inputs and scrubs its output, because
@@ -551,6 +596,8 @@ demo snapshot replay at all.
 | [`src/core/support/dstSnapshot.ts`](../src/core/support/dstSnapshot.ts) | Defence: the three reads, capture and replay |
 | [`src/core/support/tradeSnapshot.ts`](../src/core/support/tradeSnapshot.ts) | Smart Trades: capture and replay |
 | [`src/core/support/contract.ts`](../src/core/support/contract.ts) | `readSnapshot`, the structural walk, the six outcome words |
+| [`src/core/support/emit.ts`](../src/core/support/emit.ts) | the three checks a capture passes, including the reader's own |
+| [`src/core/support/derivation.ts`](../src/core/support/derivation.ts) | the fingerprint of *how this build reads a league's rules* |
 | [`src/core/support/dispatch.ts`](../src/core/support/dispatch.ts) | one snapshot in, one verdict out |
 | [`src/core/support/replay.ts`](../src/core/support/replay.ts) | the Draft contract, term by term |
 | [`src/core/support/fixture.ts`](../src/core/support/fixture.ts) | canonical JSON, and where a fixture lives |

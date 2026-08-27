@@ -62,7 +62,14 @@ import {
 import { capturePlayer, rehydratePlayer } from './players.ts';
 import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import { recordDstSources, snapshotDstSources } from './dstSnapshot.ts';
-import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
+import {
+  classifyOutcome,
+  compareStructural,
+  describeDifference,
+  describeMoved,
+  exact,
+  type ReplayReport,
+} from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { WaiverPlanPayload } from './payloads.ts';
 
@@ -302,7 +309,7 @@ export async function replayWaiverSnapshot(
   const roster: StartSitInput[] = rehydrateStartSitInputs(inputs.roster);
   const candidates: StartSitInput[] = rehydrateStartSitInputs(inputs.candidates);
 
-  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
+  const { shape, profile, derivation } = rehydrateLeagueRules(inputs.rules);
   const replayed = await assembleWaiverPlan({
     shape,
     profile,
@@ -369,14 +376,20 @@ export async function replayWaiverSnapshot(
   );
 
   const engineMatches = snapshot.release.engineVersion === WAIVER_ENGINE_VERSION;
-  const outcome = classifyOutcome(differences, engineMatches);
+  /*
+   * Two things explain a difference, and either one suppresses
+   * `output_difference`. See `describeMoved`.
+   */
+  const outcome = classifyOutcome(differences, engineMatches && derivation.matches);
+  const engine = { captured: snapshot.release.engineVersion, current: WAIVER_ENGINE_VERSION, matches: engineMatches };
 
   return {
     outcome,
-    summary: summarise(outcome, differences, snapshot),
+    summary: summarise(outcome, differences, snapshot, { engine, derivation }),
     kind: 'waiver-plan',
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
-    engine: { captured: snapshot.release.engineVersion, current: WAIVER_ENGINE_VERSION, matches: engineMatches },
+    engine,
+    derivation,
     release: { capturedSha: snapshot.release.gitSha },
     compared: [
       { what: 'claims', count: output.claimPlan?.claims.length ?? 0 },
@@ -412,6 +425,7 @@ function summarise(
   outcome: ReplayReport['outcome'],
   differences: ReplayReport['differences'],
   snapshot: SupportSnapshot<WaiverPlanPayload>,
+  moved: Pick<ReplayReport, 'engine' | 'derivation'>,
 ): string {
   const { output, context } = snapshot.decision;
   const claims = output.claimPlan?.claims.length ?? 0;
@@ -419,7 +433,7 @@ function summarise(
     case 'reproduced':
       return `Reproduced: the same ${claims === 0 ? 'empty plan' : `${claims} claim${claims === 1 ? '' : 's'}, in the same order, with the same bids and drops`} over the same ${context.pool.scanned}-player wire — week ${context.week}.`;
     case 'engine_version_mismatch':
-      return `The waiver engine has moved since capture (${snapshot.release.engineVersion} → ${WAIVER_ENGINE_VERSION}) and the plan came out differently in ${differences.length} place${differences.length === 1 ? '' : 's'}. Expected; compare against a snapshot captured on this engine before treating it as a regression.`;
+      return describeMoved('waiver engine', 'plan', { ...moved, differences });
     case 'freshness_difference':
       return `Every claim term matched; only the age of the data behind it read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:

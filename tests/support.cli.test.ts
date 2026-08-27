@@ -161,6 +161,29 @@ describe('npm run support:fixture', () => {
     expect(result.stderr).toContain('refusing to write a fixture');
   }, 120_000);
 
+  it('reports a moved league-rules derivation ahead of the difference it caused', async () => {
+    /*
+     * The other thing that explains a difference, and the one a reader would
+     * never guess: this build derives a league's shape and scoring differently
+     * from the build that captured the file. Reported like a moved engine, and
+     * named separately, because it points at `sleeper/scoring.ts` rather than at
+     * the lane. See `derivation.ts`.
+     */
+    const path = tampered('lineup', 'moved-derivation', (snapshot) => {
+      const decision = snapshot as unknown as {
+        decision: { inputs: { rules: { derivation: string } }; output: { recommendedPoints: number } };
+      };
+      decision.decision.inputs.rules.derivation = 'deadbeef';
+      decision.decision.output.recommendedPoints += 1;
+    });
+
+    const result = await cli([path]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('outcome        engine_version_mismatch');
+    expect(result.stdout).toMatch(/derivation {5}deadbeef → [0-9a-f]{8} — MOVED/);
+    expect(result.stdout).toContain('does not read league rules');
+  }, 120_000);
+
   it('reports a moved engine ahead of the difference it caused', async () => {
     /*
      * The precedence that stops Tuesday's calibration commit reading as a

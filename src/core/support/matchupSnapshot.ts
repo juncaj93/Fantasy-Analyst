@@ -48,13 +48,22 @@ import { sealSnapshot, SnapshotUnavailable } from './emit.ts';
 import { scrubAliases } from './scrub.ts';
 import {
   captureLeague,
+  captureLeagueRules,
   captureRosters,
   captureStartSitInputs,
   rehydrateRosters,
   rehydrateStartSitInputs,
 } from './inseason.ts';
+import { checkDerivation } from './derivation.ts';
 import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
-import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
+import {
+  classifyOutcome,
+  compareStructural,
+  describeDifference,
+  describeMoved,
+  exact,
+  type ReplayReport,
+} from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { MatchupPayload } from './payloads.ts';
 
@@ -267,6 +276,16 @@ export async function captureMatchupSnapshot(
       inputs: {
         now: capturedAt,
         league,
+        /*
+         * The published rules again, beside the league that carries them.
+         *
+         * This lane rebuilds through `buildMatchupSources` rather than through
+         * `rehydrateLeagueRules`, so it never derives a shape or a profile of
+         * its own — but it is read *under* the same two functions as the other
+         * four, and the fingerprint is how a replay says so. Same field, same
+         * meaning, in all five payloads.
+         */
+        rules: captureLeagueRules(seen.league),
         rosters,
         matchups: seen.matchups,
         nflState: seen.nflState,
@@ -413,14 +432,21 @@ export async function replayMatchupSnapshot(snapshot: SupportSnapshot<MatchupPay
   exact('seed', 'the simulation', output.forecast?.seed ?? null, replayed.forecast?.seed ?? null, differences);
 
   const engineMatches = snapshot.release.engineVersion === MATCHUP_ENGINE_VERSION;
-  const outcome = classifyOutcome(differences, engineMatches);
+  /*
+   * Two things explain a difference, and either one suppresses
+   * `output_difference`. See `describeMoved`.
+   */
+  const derivation = checkDerivation(snapshot.decision.inputs.rules);
+  const outcome = classifyOutcome(differences, engineMatches && derivation.matches);
+  const engine = { captured: snapshot.release.engineVersion, current: MATCHUP_ENGINE_VERSION, matches: engineMatches };
 
   return {
     outcome,
-    summary: summarise(outcome, differences, snapshot),
+    summary: summarise(outcome, differences, snapshot, { engine, derivation }),
     kind: 'matchup',
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
-    engine: { captured: snapshot.release.engineVersion, current: MATCHUP_ENGINE_VERSION, matches: engineMatches },
+    engine,
+    derivation,
     release: { capturedSha: snapshot.release.gitSha },
     compared: [
       { what: 'starting slots', count: output.forecast?.slots.length ?? 0 },
@@ -462,6 +488,7 @@ function summarise(
   outcome: ReplayReport['outcome'],
   differences: ReplayReport['differences'],
   snapshot: SupportSnapshot<MatchupPayload>,
+  moved: Pick<ReplayReport, 'engine' | 'derivation'>,
 ): string {
   const { output, context } = snapshot.decision;
   const verdict = verdictOf(output);
@@ -469,7 +496,7 @@ function summarise(
     case 'reproduced':
       return `Reproduced: week ${context.week}, the same projected final and win probability, and the same Best Move verdict (${verdict}).`;
     case 'engine_version_mismatch':
-      return `The matchup engine has moved since capture (${snapshot.release.engineVersion} → ${MATCHUP_ENGINE_VERSION}) and the forecast came out differently in ${differences.length} place${differences.length === 1 ? '' : 's'}. Expected; compare against a snapshot captured on this engine before treating it as a regression.`;
+      return describeMoved('matchup engine', 'forecast', { ...moved, differences });
     case 'freshness_difference':
       return `Every forecast term matched; only the age of the data behind it read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:

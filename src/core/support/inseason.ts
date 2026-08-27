@@ -53,6 +53,7 @@ import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import { buildRosterShape, buildScoringProfile } from '../sleeper/scoring.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import type { SnapshotAliases } from './redaction.ts';
+import { checkDerivation, derivationFingerprint, type DerivationCheck } from './derivation.ts';
 
 // --------------------------------------------------------- start/sit inputs
 
@@ -238,25 +239,43 @@ export function rehydrateRosters(rosters: readonly SnapshotRoster[]): RosterReco
  * done — `SnapshotLeague` carries the settings and `buildDraftBoard` derives the
  * rest — so the six lanes now agree.
  *
- * The exposure this leaves is real and is worth naming: a change to
- * `buildScoringProfile` re-derives an old snapshot under new rules. That is a
- * change to how *every* screen reads the league rather than a change to an
- * engine, and it will show up as an honest `output_difference` on any snapshot
- * old enough to have been read the other way.
+ * The exposure that leaves — a change to `buildScoringProfile` re-deriving an
+ * old snapshot under new rules — is why `derivation` is here. It is a
+ * fingerprint of the two functions' *behaviour* on this league's published
+ * rules, so a replay can say "this build does not read leagues the way the build
+ * that captured me did" rather than reporting the consequence as an engine
+ * difference. See `derivation.ts`; it is compared by every lane's replay and it
+ * is not a number anybody maintains by hand.
  */
 export interface SnapshotLeagueRules {
   rosterPositions: string[];
   scoringSettings: Record<string, number>;
+  /**
+   * How the capturing build derived the shape and the profile from the two
+   * fields above. Optional: a file captured before this existed carries no
+   * claim, and an absent claim is not a disagreement.
+   */
+  derivation?: string;
 }
 
 export function captureLeagueRules(league: Pick<LeagueRecord, 'rosterPositions' | 'scoringSettings'>): SnapshotLeagueRules {
-  return { rosterPositions: league.rosterPositions, scoringSettings: league.scoringSettings };
+  const rules = { rosterPositions: league.rosterPositions, scoringSettings: league.scoringSettings };
+  return { ...rules, derivation: derivationFingerprint(rules) };
 }
 
-export function rehydrateLeagueRules(rules: SnapshotLeagueRules): { shape: RosterShape; profile: ScoringProfile } {
+export function rehydrateLeagueRules(rules: SnapshotLeagueRules): {
+  shape: RosterShape;
+  profile: ScoringProfile;
+  derivation: DerivationCheck;
+} {
   return {
     shape: buildRosterShape(rules.rosterPositions),
     profile: buildScoringProfile(rules.scoringSettings, rules.rosterPositions),
+    /*
+     * Derived beside the values it describes, so a lane cannot rehydrate the
+     * rules and forget to ask the question.
+     */
+    derivation: checkDerivation(rules),
   };
 }
 
