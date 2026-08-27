@@ -3317,9 +3317,13 @@ same grammar the offer sheet's own lines already use — a negotiation card that
 invented a second way to draw a label and a reading would have been a second
 thing to keep aligned.
 
-**Budgets.** App JavaScript 131.8 kB against 140.0 kB (+1.2 kB: the fold, the
-rung formatter and the sample gate — no engine crossed into the render path).
-CSS 14.3 kB, unchanged. First paint 147.6 kB against 160.0 kB. Demo Mode 150.8 kB
+**Budgets.** Measured after merging the near-duplicate lane above, so these are
+the numbers as the branch actually stands rather than as it stood alone: app
+JavaScript 132.4 kB against 140.0 kB, CSS 14.3 kB unchanged, first paint 148.2 kB
+against 160.0 kB. This lane's own share of the render path is +1.2 kB — the fold,
+the rung formatter and the sample gate — measured against its own base before the
+merge; no engine crossed into the entry chunk, because every number the card
+draws arrives on the wire already computed. Demo Mode 150.8 kB
 against a ceiling **raised from 150 kB to 156 kB in this commit**, deliberately
 and with the reason recorded in `perf-budgets.json`: the demo route pulls
 `core/trades/ladder.ts`, `ladderInputs.ts` and the consolidation read into that
