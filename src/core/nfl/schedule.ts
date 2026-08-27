@@ -2,7 +2,7 @@
  * The season's fixture list, which is the one fact this app kept re-deriving.
  *
  *     https://github.com/nflverse/nflverse-data/releases/download/schedules/
- *       schedules.csv
+ *       games.csv
  *
  * A public GitHub release asset like the roster, the injury report and the snap
  * counts: no key, no account, no quota, and a conditional GET that costs a round
@@ -54,9 +54,24 @@
 
 import { extractFields, headerIndex, int, text } from '../source/csv.ts';
 
-/** Where the file lives. One file for every season, not one per season. */
+/**
+ * Where the file lives. One file for every season, not one per season.
+ *
+ * The asset in the `schedules` release is called **`games.csv`**, and the name
+ * is the whole of a bug this shipped with: it pointed at `schedules.csv` — the
+ * name of the release, not of the file in it — which is a 404 with a nine-byte
+ * body. A 404 is read as `not_published`, which is a *fact about the calendar*
+ * rather than a fault, so the ingest recorded a healthy "nothing to say" every
+ * morning, moved `checked_at`, wrote no rows, and never once stored a fixture.
+ * The screen then said the schedule was missing and the pipeline said it was
+ * fine, and both were reporting exactly what they saw.
+ *
+ * `tests/schedule.test.ts` pins the file name and not merely the release path,
+ * because asserting the part that was right is what let the part that was wrong
+ * through.
+ */
 export const SCHEDULE_URL =
-  'https://github.com/nflverse/nflverse-data/releases/download/schedules/schedules.csv';
+  'https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv';
 
 /** One team's week, which is how the schedule is stored and read. */
 export interface ScheduleTeamWeek {
