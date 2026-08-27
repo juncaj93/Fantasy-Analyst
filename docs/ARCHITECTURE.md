@@ -893,6 +893,19 @@ in, where it is marked `quoted above` because that surface exists to show the
 whole ledger. Draft and Players had grown byte-identical copies of all three; two copies
 is how six start.
 
+And nor is one fact printed twice in different words. `selectLatestNews` — the
+selection half of `LatestNews`, separated from the drawing so the rule can be
+asserted directly — runs `core/evidence/nearDuplicate.ts` over the list and
+keeps the most recent telling of each distinct claim, having first dropped
+anything that rewords the takeaway above. Two lines are one claim reworded when
+they share at least 0.6 of their content tokens over at least three of them,
+*and* do not carry disjoint numbers: different numbers are always different
+facts, which is what keeps two weeks of the same statistic as two lines. It is
+display selection over a ledger that still holds everything — no row is
+deleted, no sentence is composed from two, the suppressed rewording is still
+inside the `N older items on his full profile` count, and the evidence timeline
+one tap in still prints every row.
+
 ## Live matchup (`core/matchup/`)
 
 The post-draft head-to-head. One rule shapes the whole module: **Sleeper owns

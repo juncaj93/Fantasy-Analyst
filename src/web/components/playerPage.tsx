@@ -603,6 +603,12 @@ export function PlayerDossier({
           <LatestNews
             items={file ? file.evidence : null}
             quotedEvidenceIds={detail?.newsletterTakeaway?.evidenceItemIds ?? []}
+            /*
+              The takeaway's own rows are excluded by id above; this excludes a
+              different row saying the takeaway's fact in different words, which
+              on this card was costing one of the two lines it has.
+            */
+            quotedText={detail?.newsletterTakeaway?.text ?? null}
             limit={2}
           />
         </div>
