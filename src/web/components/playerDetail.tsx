@@ -21,6 +21,8 @@ import { api, type PlayerDetail } from '../api.ts';
 /* What Sleeper says about a player's availability right now. Never a ranking input. */
 import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { summaryIsIngestionBookkeeping } from '../../core/evidence/provenance.ts';
+/* Two rows that are one fact reworded, and which of them to show. Selection only. */
+import { distinctByFact, isNearDuplicate } from '../../core/evidence/nearDuplicate.ts';
 import { DetailLabel, Unknown, formatDate } from './common.tsx';
 import { SkeletonRows } from './native.tsx';
 
@@ -604,6 +606,51 @@ function tidy(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Which of the ledger's lines `Latest news` actually shows.
+ *
+ * Separated from the component that draws them because it is the whole of the
+ * decision and none of the drawing: what is left out, why, and how much of the
+ * ledger is not on screen. A rule about *which facts a reader is shown* is
+ * worth asserting directly rather than through a rendered tree.
+ *
+ * Three exclusions, in order, and every one of them is a display choice over a
+ * ledger that still holds everything:
+ *
+ *   1. the rows the takeaway above was built from, by id;
+ *   2. a row saying the takeaway's fact in different words — the same
+ *      repetition the id check exists to prevent, one rewording deeper;
+ *   3. rows that repeat *each other*, collapsed to the most recent telling.
+ *
+ * `withheld` is counted against everything the section could have drawn rather
+ * than against the deduplicated list, because a suppressed rewording is always
+ * the older of its pair and really is on his full profile. The reader is told
+ * how many rows are not on screen; they are never quietly dropped from a count.
+ */
+export function selectLatestNews(
+  items: PlayerNewsItem[],
+  opts: { quotedEvidenceIds: string[]; quotedText?: string | null; limit: number },
+): { shown: PlayerNewsItem[]; withheld: number; varies: boolean } {
+  const quoted = new Set(opts.quotedEvidenceIds);
+  const said = opts.quotedText?.trim();
+  const rest = items.filter(
+    (item) => !quoted.has(item.id) && !(said ? isNearDuplicate(said, newsSentence(item).text) : false),
+  );
+  const distinct = distinctByFact(rest, (item) => ({
+    text: newsSentence(item).text,
+    sourceDate: item.sourceDate,
+  }));
+  const shown = distinct.slice(0, opts.limit);
+  return {
+    shown,
+    withheld: rest.length - shown.length,
+    // One name on every line is not provenance, it is a repeated word. Measured
+    // across the whole ledger rather than the two on screen, so the answer does
+    // not change as the list is scrolled or the limit is raised.
+    varies: new Set(distinct.map((i) => i.sourceName)).size > 1,
+  };
+}
+
 /** How a polarity reads when it is not being read as a colour. */
 const POLARITY_WORD: Record<string, string> = {
   positive: 'Positive',
@@ -643,22 +690,44 @@ const POLARITY_WORD: Record<string, string> = {
  * player's own page, and still in the Evidence timeline where it is marked
  * `quoted above` — that surface exists to show the whole ledger and is the one
  * place the repetition is the point.
+ *
+ * **And nor is the same fact said twice in different words.** Matching on the
+ * item id only catches the row quoted above; it does not catch two rows that
+ * are one fact reworded, which is how Bijan Robinson's card came to spend both
+ * its lines on "elite receiving efficiency/target rate" and 2,298 scrimmage
+ * yards, once as `paired with an NFL-leading` and once as `and led the NFL
+ * with`. Selection now runs {@link distinctByFact} over the list and keeps the
+ * most recent telling of each distinct fact. It is a display decision and only
+ * that: nothing is deleted, nothing is merged into a new sentence, the
+ * suppressed row is still counted by the tally and still printed whole on his
+ * Evidence timeline, and two genuinely different things from the same day
+ * still take two lines — see `core/evidence/nearDuplicate.ts` for where that
+ * line is drawn and why.
  */
 export function LatestNews({
   items,
   quotedEvidenceIds,
+  quotedText,
   limit,
 }: {
   /** The whole ledger for this player, or null while it is being read. */
   items: PlayerNewsItem[] | null;
   /** Items the takeaway above already quoted, and which this must not repeat. */
   quotedEvidenceIds: string[];
+  /**
+   * The sentence the takeaway above printed, when the caller renders one.
+   *
+   * The id list catches the exact rows it was built from; this catches a
+   * *different* row saying the takeaway's fact in different words, which is the
+   * same repetition one layer down. Optional, because a surface that prints no
+   * takeaway has nothing for this list to avoid repeating.
+   */
+  quotedText?: string | null;
   /** How many of the newest to show before saying how many are left. */
   limit: number;
 }) {
   if (items == null) return <SkeletonRows rows={2} testId="player-news-skeleton" />;
-  const quoted = new Set(quotedEvidenceIds);
-  const rest = items.filter((item) => !quoted.has(item.id));
+  const { shown, withheld, varies } = selectLatestNews(items, { quotedEvidenceIds, quotedText, limit });
   /*
    * An empty ledger draws nothing at all, heading included — and so does one
    * whose every item is already the takeaway above.
@@ -668,13 +737,7 @@ export function LatestNews({
    * have never been written about — that is the ordinary case in August, not a
    * state worth announcing.
    */
-  if (rest.length === 0) return null;
-  const shown = rest.slice(0, limit);
-  const withheld = rest.length - shown.length;
-  // One name on every line is not provenance, it is a repeated word. Measured
-  // across the whole ledger rather than the two on screen, so the answer does
-  // not change as the list is scrolled or the limit is raised.
-  const varies = new Set(rest.map((i) => i.sourceName)).size > 1;
+  if (shown.length === 0) return null;
 
   return (
     <>
