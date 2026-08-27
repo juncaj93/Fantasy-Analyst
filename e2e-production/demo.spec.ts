@@ -47,9 +47,28 @@ const REPRESENTATIVE = [
   { id: 'matchup-live-close', tab: 'matchup', rows: 'matchup-row', label: 'Matchup · one point in it' },
 ] as const;
 
+/**
+ * Tap a destination, and wait for the screen behind it rather than for a clock.
+ *
+ * The same outcome-based wait `smoke.spec.ts` uses, and for the same reason: a
+ * fixed 400ms is a race this suite's `retries: 2` would quietly cover for. The
+ * destination becomes current, its screen draws its navigation bar, and that
+ * screen's first read is back — the skeletons and the spinner are what say it
+ * is not. Tolerant of a screen that is still loading after twenty seconds,
+ * which the caller's own assertions then report.
+ */
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
-  await page.waitForTimeout(400);
+  await expect(page.getByTestId(`tab-${tab}`), `${tab} did not become the current destination`).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.locator('.nav-bar').first(), `${tab} drew no screen`).toBeVisible();
+  await expect(page.locator('.app-main .skeleton, .app-main .spinner'))
+    .toHaveCount(0, { timeout: 20_000 })
+    .catch(() => {
+      /* Still loading; the caller's own assertions decide what that means. */
+    });
 }
 
 /** Enter a named scenario through the audit hook, and wait for it to be live. */

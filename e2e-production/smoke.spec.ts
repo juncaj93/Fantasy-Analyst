@@ -78,9 +78,108 @@ const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'setup'] as const;
 
 type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 
+/**
+ * Tap a destination, and wait for the screen behind it rather than for a clock.
+ *
+ * This was `click()` and a flat `waitForTimeout(400)` — the pattern `settled`
+ * and `settledIds` below were written to retire, kept here because the app is
+ * quick and 400ms usually covers it. Usually is the problem: production smoke
+ * runs with `retries: 2`, so an assertion that lost the race on the real first
+ * attempt and won it on the retry was reported as green with a `flaky` note
+ * nobody reads. Three assertions were doing exactly that.
+ *
+ * The outcome is three facts. The destination is the current one; the screen it
+ * leads to has drawn its own navigation bar — every screen draws one in its
+ * loading state as well as its loaded one; and that screen's first read has
+ * come back, which is what the skeletons and the spinner say while it has not.
+ *
+ * The third is not decoration. Waiting only for the bar returns *sooner* than
+ * the 400ms this replaced, and a dozen gates in this file ask a bare `count()`
+ * immediately afterwards — `market-fold-toggle`, `flx-filter` — so an earlier
+ * return turns a screen that is merely still loading into "this deployment
+ * hasn't got one", which is a silent skip: the exact failure this file's own
+ * `settled` was written against. Tolerant on purpose: a screen still loading
+ * after twenty seconds is reported by the test's own gate, in that gate's own
+ * words, rather than as a timeout in here.
+ */
 async function open(page: Page, tab: Tab) {
   await page.getByTestId(`tab-${tab}`).click();
-  await page.waitForTimeout(400);
+  await expect(page.getByTestId(`tab-${tab}`), `${tab} did not become the current destination`).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.locator('.nav-bar').first(), `${tab} drew no screen`).toBeVisible();
+  await expect(page.locator('.app-main .skeleton, .app-main .spinner'))
+    .toHaveCount(0, { timeout: 20_000 })
+    .catch(() => {
+      /* Still loading; the caller's own gate decides what that means. */
+    });
+}
+
+/**
+ * Read one of the deployed site's own JSON endpoints.
+ *
+ * Deliberately `page.request` rather than a `fetch` inside `page.evaluate`,
+ * which is how every one of these reads was written.
+ *
+ * These are assertions about the *API*, and running them inside the document
+ * bought nothing and cost the suite its first-attempt honesty: a relative URL
+ * is resolved against the document, and on the run that prompted this work five
+ * of them came back `SyntaxError: The string did not match the expected
+ * pattern.` — WebKit's message for a URL it cannot resolve — from evaluates
+ * whose first statement is `fetch('/api/overview')`, a literal path with
+ * nothing in it to mistype. Each one passed on the retry, so the run reported
+ * green. `page.request` shares the browser context's cookies and resolves
+ * against the configured `baseURL` instead of against whatever document is
+ * current, so there is no such window to lose.
+ *
+ * Not `ok()` is `null` rather than a throw, which is what the `fetch` version
+ * did with a refusal: every caller below already decides for itself whether an
+ * absent answer is a skip or a failure.
+ */
+async function apiJson<T>(page: Page, path: string): Promise<T | null> {
+  const res = await page.request.get(path, { failOnStatusCode: false });
+  return res.ok() ? ((await res.json()) as T) : null;
+}
+
+/**
+ * The selected league's id, or null where this deployment has none.
+ *
+ * Five reads below start with this exact pair of lines; it is one fact about
+ * the deployment and is asked for once.
+ */
+async function selectedLeagueId(page: Page): Promise<string | null> {
+  const overview = await apiJson<{ selectedLeague?: { id?: string } }>(page, '/api/overview');
+  return overview?.selectedLeague?.id ?? null;
+}
+
+/**
+ * Whether a draft is running on this deployment, asked of the roster.
+ *
+ * `null` where no league is selected, which is a skip rather than an answer.
+ * Three tests below branch on this, each for the reason written at its own call
+ * site: mid-draft Team is a different screen, not a broken one.
+ */
+async function midDraft(page: Page): Promise<boolean | null> {
+  const id = await selectedLeagueId(page);
+  if (!id) return null;
+  const roster = await apiJson<{ live?: boolean }>(page, `/api/leagues/${id}/roster`);
+  return roster?.live === true;
+}
+
+/**
+ * The draft this deployment has a board for, or null.
+ *
+ * The id lives on the league listing rather than on the overview — the screen
+ * reaches it the same way — and the selected league's own draft is preferred
+ * over whichever other league happens to carry one.
+ */
+async function draftId(page: Page): Promise<string | null> {
+  const selected = await selectedLeagueId(page);
+  const listing = await apiJson<{ leagues?: { id: string; draftId: string | null }[] }>(page, '/api/leagues');
+  const leagues = listing?.leagues ?? [];
+  const league = leagues.find((l) => l.id === selected && l.draftId) ?? leagues.find((l) => l.draftId);
+  return league?.draftId ?? null;
 }
 
 /**
@@ -93,15 +192,10 @@ async function open(page: Page, tab: Tab) {
  * field says nothing, and the app keeps Draft, so that is the fallback.
  */
 async function expectedTabs(page: Page): Promise<readonly Tab[]> {
-  const overview = await page.evaluate(async () => {
-    const res = await fetch('/api/overview');
-    return res.ok
-      ? ((await res.json()) as {
-          season?: { draftVisible?: boolean };
-          lifecycle?: { matchupVisible?: boolean };
-        })
-      : null;
-  });
+  const overview = await apiJson<{
+    season?: { draftVisible?: boolean };
+    lifecycle?: { matchupVisible?: boolean };
+  }>(page, '/api/overview');
   const base = overview?.season?.draftVisible === false ? IN_SEASON : TABS;
   // Matchup sits immediately after Team, which is the screen it belongs beside.
   // A deployment that predates the field says nothing and gets no Matchup tab,
@@ -1385,13 +1479,7 @@ test.describe('the season features', () => {
      * *and* the drafted roster is there, and only a deployment with neither is
      * genuinely nothing to check.
      */
-    const drafting = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
-      return roster?.live === true;
-    });
+    const drafting = await midDraft(page);
     if (drafting) {
       await expect(page.getByTestId('starter-row')).toHaveCount(0);
       await expect(page.getByTestId('drafted-line').first()).toBeVisible();
@@ -1402,15 +1490,13 @@ test.describe('the season features', () => {
 
     // Every slot drawn is a slot this league actually starts, and every filled
     // one carries its position tint plus the word.
-    const lineup = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      return (await (await fetch(`/api/leagues/${id}/lineup`)).json()) as {
-        found: boolean;
-        slots: { slot: string; playerId: string | null }[];
-      };
-    });
+    const id = await selectedLeagueId(page);
+    const lineup = id
+      ? await apiJson<{ found: boolean; slots: { slot: string; playerId: string | null }[] }>(
+          page,
+          `/api/leagues/${id}/lineup`,
+        )
+      : null;
     test.skip(!lineup?.found, 'no roster on this deployment');
 
     const drawn = await page
@@ -1505,13 +1591,7 @@ test.describe('the season features', () => {
      * API which screen this is has no such window, and it is what the Start/Sit
      * test above already does.
      */
-    const drafting = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
-      return roster?.live === true;
-    });
+    const drafting = await midDraft(page);
     test.skip(drafting === null, 'no league on this deployment');
     if (drafting) {
       // The intended state, asserted rather than skipped past.
@@ -1554,26 +1634,27 @@ test.describe('the season features', () => {
     await page.goto('/');
     await open(page, 'team');
 
-    const data = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const [waivers, roster] = await Promise.all([
-        (await fetch(`/api/leagues/${id}/waivers`)).json(),
-        (await fetch(`/api/leagues/${id}/roster`)).json(),
-      ]);
-      return { waivers, roster } as {
-        waivers: { found: boolean; upgrades: { candidates: { playerId: string }[] }[]; considered: number };
-        roster: { starters: { playerId: string }[]; bench: { playerId: string }[] };
-      };
-    });
-    test.skip(!data?.waivers?.found, 'no roster on this deployment');
+    const id = await selectedLeagueId(page);
+    const data = id
+      ? {
+          waivers: await apiJson<{
+            found: boolean;
+            upgrades: { candidates: { playerId: string }[] }[];
+            considered: number;
+          }>(page, `/api/leagues/${id}/waivers`),
+          roster: await apiJson<{ starters: { playerId: string }[]; bench: { playerId: string }[] }>(
+            page,
+            `/api/leagues/${id}/roster`,
+          ),
+        }
+      : null;
+    test.skip(!data?.waivers?.found || !data.roster, 'no roster on this deployment');
 
     const mine = new Set([
-      ...data!.roster.starters.map((p) => p.playerId),
-      ...data!.roster.bench.map((p) => p.playerId),
+      ...data!.roster!.starters.map((p) => p.playerId),
+      ...data!.roster!.bench.map((p) => p.playerId),
     ]);
-    for (const upgrade of data!.waivers.upgrades) {
+    for (const upgrade of data!.waivers!.upgrades) {
       for (const candidate of upgrade.candidates) {
         expect(mine.has(candidate.playerId), 'a player already on the roster was offered as an add').toBe(false);
       }
@@ -1628,31 +1709,34 @@ test.describe('the season features', () => {
     await page.goto('/');
     await open(page, 'team');
 
-    const data = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const [waivers, roster] = await Promise.all([
-        (await fetch(`/api/leagues/${id}/waivers`)).json(),
-        (await fetch(`/api/leagues/${id}/roster`)).json(),
-      ]);
-      return { waivers, roster } as {
-        waivers: {
-          found: boolean;
-          claimPlan: {
-            claims: { rank: number; addName: string; addPosition: string; dropPlayerId: string | null; bid: number | null }[];
-          } | null;
-        };
-        roster: { starters: { playerId: string }[]; bench: { playerId: string }[] };
-      };
-    });
-    test.skip(!data?.waivers?.found, 'no roster on this deployment');
-    test.skip(!data!.waivers.claimPlan, 'this deployment produced no plan');
+    const id = await selectedLeagueId(page);
+    const data = id
+      ? {
+          waivers: await apiJson<{
+            found: boolean;
+            claimPlan: {
+              claims: {
+                rank: number;
+                addName: string;
+                addPosition: string;
+                dropPlayerId: string | null;
+                bid: number | null;
+              }[];
+            } | null;
+          }>(page, `/api/leagues/${id}/waivers`),
+          roster: await apiJson<{ starters: { playerId: string }[]; bench: { playerId: string }[] }>(
+            page,
+            `/api/leagues/${id}/roster`,
+          ),
+        }
+      : null;
+    test.skip(!data?.waivers?.found || !data.roster, 'no roster on this deployment');
+    test.skip(!data!.waivers!.claimPlan, 'this deployment produced no plan');
 
-    const plan = data!.waivers.claimPlan!;
+    const plan = data!.waivers!.claimPlan!;
     const mine = new Set([
-      ...data!.roster.starters.map((p) => p.playerId),
-      ...data!.roster.bench.map((p) => p.playerId),
+      ...data!.roster!.starters.map((p) => p.playerId),
+      ...data!.roster!.bench.map((p) => p.playerId),
     ]);
 
     for (const [index, claim] of plan.claims.entries()) {
@@ -1728,30 +1812,25 @@ test.describe('the decision intelligence', () => {
     const expected = await expectedTabs(page);
     test.skip(!expected.includes('draft'), 'the season has started, so there is no draft board');
 
-    const board = await page.evaluate(async () => {
-      /*
-       * The draft id comes from the league listing, which is where it lives.
-       *
-       * `/api/overview` reports the selected league as id, name and season and
-       * has never carried a draft id, so reading one from it returned undefined
-       * every time and skipped this test on every run since it was written --
-       * green, and checking nothing. The screen itself reads `/api/leagues`.
-       */
-      const overview = await (await fetch('/api/overview')).json();
-      const selected = overview?.selectedLeague?.id;
-      const { leagues = [] } = await (await fetch('/api/leagues')).json();
-      const league =
-        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
-        leagues.find((l: { draftId: string | null }) => l.draftId);
-      if (!league?.draftId) return null;
-      return (await fetch(`/api/drafts/${league.draftId}/board?limit=25`)).json() as Promise<{
-        recommendations: {
-          components: { key: string; contribution: number }[];
-          opportunity?: { score: number };
-          concentration?: { score: number };
-        }[];
-      }>;
-    });
+    /*
+     * The draft id comes from the league listing, which is where it lives.
+     *
+     * `/api/overview` reports the selected league as id, name and season and
+     * has never carried a draft id, so reading one from it returned undefined
+     * every time and skipped this test on every run since it was written --
+     * green, and checking nothing. The screen itself reads `/api/leagues`, and
+     * so does `draftId` above.
+     */
+    const draft = await draftId(page);
+    const board = draft
+      ? await apiJson<{
+          recommendations: {
+            components: { key: string; contribution: number }[];
+            opportunity?: { score: number };
+            concentration?: { score: number };
+          }[];
+        }>(page, `/api/drafts/${draft}/board?limit=25`)
+      : null;
     test.skip(!board || board.recommendations.length === 0, 'no draft board on this deployment');
 
     for (const rec of board!.recommendations) {
@@ -1782,13 +1861,7 @@ test.describe('the decision intelligence', () => {
     await page.goto('/');
     await open(page, 'team');
 
-    const drafting = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const roster = await (await fetch(`/api/leagues/${id}/roster`)).json();
-      return roster?.live === true;
-    });
+    const drafting = await midDraft(page);
     test.skip(drafting === null, 'no league selected on this deployment');
     if (drafting) {
       // The intended state, asserted rather than skipped past: during a draft
@@ -1806,16 +1879,13 @@ test.describe('the decision intelligence', () => {
     await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'true');
 
     // The mode is a question asked of the server, not a client-side sort.
-    const answered = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      const [floor, ceiling] = await Promise.all([
-        (await fetch(`/api/leagues/${id}/lineup?mode=floor`)).json(),
-        (await fetch(`/api/leagues/${id}/lineup?mode=ceiling`)).json(),
-      ]);
-      return { floor: floor?.mode, ceiling: ceiling?.mode };
-    });
+    const id = await selectedLeagueId(page);
+    const answered = id
+      ? {
+          floor: (await apiJson<{ mode?: string }>(page, `/api/leagues/${id}/lineup?mode=floor`))?.mode,
+          ceiling: (await apiJson<{ mode?: string }>(page, `/api/leagues/${id}/lineup?mode=ceiling`))?.mode,
+        }
+      : null;
     test.skip(!answered, 'no league selected on this deployment');
     expect(answered!.floor).toBe('floor');
     expect(answered!.ceiling).toBe('ceiling');
@@ -1905,15 +1975,13 @@ test.describe('the decision intelligence', () => {
 
   test('every Start/Sit component the deployed engine emits is one it can explain', async ({ page }) => {
     await page.goto('/');
-    const lineup = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const id = overview?.selectedLeague?.id;
-      if (!id) return null;
-      return (await fetch(`/api/leagues/${id}/lineup`)).json() as Promise<{
-        found: boolean;
-        bench: { components: { key: string; label: string; display: string }[]; drivers?: string[] }[];
-      }>;
-    });
+    const id = await selectedLeagueId(page);
+    const lineup = id
+      ? await apiJson<{
+          found: boolean;
+          bench: { components: { key: string; label: string; display: string }[]; drivers?: string[] }[];
+        }>(page, `/api/leagues/${id}/lineup`)
+      : null;
     test.skip(!lineup?.found || (lineup?.bench ?? []).length === 0, 'no scorable roster on this deployment');
 
     for (const evaluation of lineup!.bench) {
@@ -1948,23 +2016,29 @@ test.describe('the decision intelligence', () => {
     await open(page, 'draft');
     test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
-    const dog = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const selected = overview?.selectedLeague?.id;
-      // The draft id lives on the league listing rather than on the overview,
-      // so the board is reached the same way the screen reaches it.
-      const { leagues = [] } = await (await fetch('/api/leagues')).json();
-      const league =
-        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
-        leagues.find((l: { draftId: string | null }) => l.draftId);
-      if (!league?.draftId) return null;
-      const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=60`)).json();
-      return {
-        state: board?.dogState ?? null,
-        format: board?.marketFormat ?? null,
-        withDog: (board?.recommendations ?? []).filter((r: { dogAdp: number | null }) => r.dogAdp != null).length,
-      };
-    });
+    // The draft id lives on the league listing rather than on the overview, so
+    // the board is reached the same way the screen reaches it.
+    const draft = await draftId(page);
+    const board = draft
+      ? await apiJson<{
+          dogState: {
+            available?: boolean;
+            reason?: string;
+            sourceType?: string;
+            provider?: string;
+            freshness?: string;
+          } | null;
+          marketFormat: { bestBall?: boolean; weights?: Record<string, number> } | null;
+          recommendations?: { dogAdp: number | null }[];
+        }>(page, `/api/drafts/${draft}/board?limit=60`)
+      : null;
+    const dog = board
+      ? {
+          state: board.dogState ?? null,
+          format: board.marketFormat ?? null,
+          withDog: (board.recommendations ?? []).filter((r) => r.dogAdp != null).length,
+        }
+      : null;
     test.skip(!dog, 'no league selected on this deployment');
 
     if (!dog!.state?.available) {
@@ -2071,35 +2145,35 @@ test.describe('the decision intelligence', () => {
     await open(page, 'draft');
     test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
-    const board = await page.evaluate(async () => {
-      const overview = await (await fetch('/api/overview')).json();
-      const selected = overview?.selectedLeague?.id;
-      const { leagues = [] } = await (await fetch('/api/leagues')).json();
-      const league =
-        leagues.find((l: { id: string; draftId: string | null }) => l.id === selected && l.draftId) ??
-        leagues.find((l: { draftId: string | null }) => l.draftId);
-      if (!league?.draftId) return null;
-      const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
-      return {
-        scoringLabel: data.league?.scoringLabel ?? null,
-        // Whether the deployment holds a season-market snapshot at all, which
-        // is a different fact from a board whose players went unmatched.
-        marketSource: data.marketSource ?? null,
-        // …and how much is *in* that snapshot, which is a third fact again. A
-        // provider can run, store a snapshot, and have published nothing.
-        snapshot: await (async () => {
-          const res = await fetch('/api/vegas/season');
-          if (!res.ok) return null;
-          const status = await res.json();
-          return { quotes: status?.quotes ?? null, players: status?.players ?? null, reason: status?.reason ?? null };
-        })(),
-        rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
-          position: r['position'],
-          marketProps: r['marketProps'],
-          marketBaseline: r['marketBaseline'],
-        })),
-      };
-    });
+    const draft = await draftId(page);
+    const data = draft
+      ? await apiJson<{
+          league?: { scoringLabel?: string };
+          marketSource?: { provider: string; season: number; fetchedAt: string } | null;
+          recommendations?: Record<string, unknown>[];
+        }>(page, `/api/drafts/${draft}/board?limit=250`)
+      : null;
+    // …and how much is *in* the season-market snapshot, which is a third fact
+    // again. A provider can run, store a snapshot, and have published nothing.
+    const status = data
+      ? await apiJson<{ quotes?: number; players?: number; reason?: string }>(page, '/api/vegas/season')
+      : null;
+    const board = data
+      ? {
+          scoringLabel: data.league?.scoringLabel ?? null,
+          // Whether the deployment holds a season-market snapshot at all, which
+          // is a different fact from a board whose players went unmatched.
+          marketSource: data.marketSource ?? null,
+          snapshot: status
+            ? { quotes: status.quotes ?? null, players: status.players ?? null, reason: status.reason ?? null }
+            : null,
+          rows: (data.recommendations ?? []).map((r) => ({
+            position: r['position'],
+            marketProps: r['marketProps'],
+            marketBaseline: r['marketBaseline'],
+          })),
+        }
+      : null;
     test.skip(!board || board.rows.length === 0, 'no league selected on this deployment');
 
     type Row = {
@@ -2283,19 +2357,38 @@ test.describe('the decision intelligence', () => {
     await open(page, 'draft');
     test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
-    const board = await page.evaluate(async () => {
-      const { leagues = [] } = await (await fetch('/api/leagues')).json();
-      const league = leagues.find((l: { draftId: string | null }) => l.draftId);
-      if (!league?.draftId) return null;
-      const data = await (await fetch(`/api/drafts/${league.draftId}/board?limit=250`)).json();
-      return {
-        currentPick: data.currentPick ?? null,
-        rows: (data.recommendations ?? []).map((r: Record<string, unknown>) => ({
-          adp: r['adp'],
-          survival: r['survivalProbability'],
-        })),
-      };
-    });
+    /*
+     * The narrow lookup this test has always used, kept deliberately — and it
+     * is not the one `draftId` does.
+     *
+     * `draftId` prefers the *selected* league's draft. Pointing this test at
+     * that board instead is a change of subject rather than a change of
+     * plumbing, and it is not this lane's to make: on the smoke run of this
+     * branch (33120122127) it made this assertion run for the first time in
+     * the runs on record — every prior run skipped it silently — and fail at
+     * every width with `pick 1; 235 priced, 136 at ADP 100+; max late 1.000`.
+     * At the first pick of a draft every player a hundred picks away *is*
+     * safe, so that reads as an unsound premise rather than as the calibration
+     * bug this was written for, and deciding between the two means reading the
+     * hazard model. Left exactly as it was, and written up for the owner.
+     */
+    const listing = await apiJson<{ leagues?: { draftId: string | null }[] }>(page, '/api/leagues');
+    const draft = (listing?.leagues ?? []).find((l) => l.draftId)?.draftId ?? null;
+    const data = draft
+      ? await apiJson<{ currentPick?: number; recommendations?: Record<string, unknown>[] }>(
+          page,
+          `/api/drafts/${draft}/board?limit=250`,
+        )
+      : null;
+    const board = data
+      ? {
+          currentPick: data.currentPick ?? null,
+          rows: (data.recommendations ?? []).map((r) => ({
+            adp: r['adp'],
+            survival: r['survivalProbability'],
+          })),
+        }
+      : null;
     test.skip(!board || board.rows.length === 0, 'no league selected on this deployment');
 
     const priced = (board!.rows as { adp: number | null; survival: number | null }[]).filter(

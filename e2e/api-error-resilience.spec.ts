@@ -112,6 +112,49 @@ test.describe('an API that answers with a page', () => {
     await assertNothingRawOnScreen(page);
   });
 
+  /**
+   * Settings keeps its chrome while it is reading, and its failure is escapable.
+   *
+   * Setup used to return the spinner — or, when the read failed, a bare line of
+   * error text — in place of the entire screen, which is how production smoke
+   * came to report "setup has no navigation bar" at 360px on a cold Worker and
+   * then pass on the retry. Both halves are asserted here because the second is
+   * the worse one: the status is read once, on mount, so before the retry
+   * existed a single failed read left Settings dead for the rest of the session.
+   */
+  test('Setup keeps its navigation bar while its status is in flight, and offers a way back', async ({ page }) => {
+    let answer: 'hold' | 'fail' | 'live' = 'hold';
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/setup/status', async (route) => {
+      if (answer === 'hold') await held;
+      if (answer === 'live') return route.continue();
+      await route.fulfill({ status: 502, contentType: 'text/html; charset=utf-8', body: CLOUDFLARE_HTML });
+    });
+
+    await page.goto('/');
+    await page.getByTestId('tab-setup').click();
+
+    // In flight: the screen is there, with its bar, saying what it is doing.
+    await expect(page.locator('.nav-bar').first()).toBeVisible();
+    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+
+    answer = 'fail';
+    release();
+
+    // Failed: still a screen, and the way back is on it.
+    await expect(page.getByTestId('setup-error')).toBeVisible();
+    await expect(page.locator('.nav-bar').first()).toBeVisible();
+    await assertNothingRawOnScreen(page);
+
+    answer = 'live';
+    await page.getByTestId('setup-error-retry').click();
+    await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
+    await expect(page.getByTestId('setup-error')).toHaveCount(0);
+  });
+
   test('keeps the last good board on screen when a refresh comes back as a page', async ({ page }) => {
     /*
      * Good data first, then a page where the revalidation's answer should be.
