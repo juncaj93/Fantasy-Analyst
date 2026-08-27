@@ -267,6 +267,7 @@ async function board(options: { withDefences: boolean; position?: string }) {
   ].join('\n');
   const { snapshot } = await new AdpRepo(db).save(
     importAdpSnapshot(`${csv}\n`, index, { label: 'covers defences', source: 'test' }),
+    '2026',
   );
   await leagues.setDraftSnapshot('def-draft', snapshot.id);
 

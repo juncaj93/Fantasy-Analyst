@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { fileHash, importAdpSnapshot, parseAdpFile, parseCsv } from '../src/core/adp/import.ts';
-import { TEST_INDEX } from './helpers/players.ts';
+import { AdpRepo } from '../src/server/repos/adp.ts';
+import { PlayerRepo } from '../src/server/repos/players.ts';
+import { TEST_INDEX, TEST_PLAYERS } from './helpers/players.ts';
+import { createTestDb } from './helpers/db.ts';
 
 const CSV = `name,position,team,adp,rank
 Bijan Robinson,RB,ATL,2.4,1
@@ -136,5 +139,45 @@ describe('fileHash', () => {
   it('differs for different content and matches for identical content', () => {
     expect(fileHash('a')).toBe(fileHash('a'));
     expect(fileHash('a')).not.toBe(fileHash('b'));
+  });
+});
+
+describe('AdpRepo.latest is scoped to a season', () => {
+  /**
+   * The exact bug this whole change exists to close: an ADP snapshot imported
+   * for a season that has already ended must not be handed back as "current"
+   * just because it is the newest row in the table. Before `season` was
+   * stamped on write and read back here, `latest()` knew only "newest of
+   * anything" — so a 2026 import, still sitting in the table untouched, would
+   * keep being served as the 2027 board all the way through the 2027 draft.
+   */
+  it('does not return a snapshot from a past season as the current one', async () => {
+    const db = await createTestDb();
+    await new PlayerRepo(db).upsertMany(TEST_PLAYERS);
+    const repo = new AdpRepo(db);
+
+    const stale = importAdpSnapshot(CSV, TEST_INDEX, { capturedAt: '2026-08-13T09:00:00.000Z', source: 'test' });
+    await repo.save(stale, '2026');
+
+    // Nothing has been imported for 2027 yet — the exact gap the guess used
+    // to paper over by handing back last year's snapshot instead.
+    expect(await repo.latest('2027')).toBeNull();
+
+    // Once a 2027 snapshot exists, that — and only that — is "latest".
+    // Different content, not just a different date — the file hash is what
+    // idempotency keys on, and identical bytes would make this "the same
+    // import twice" instead of a new season's snapshot.
+    const fresh = importAdpSnapshot(`${CSV}\nBijan Robinson,RB,ATL,2.5,1\n`, TEST_INDEX, {
+      capturedAt: '2027-08-20T09:00:00.000Z',
+      source: 'test',
+    });
+    const { snapshot: freshSnapshot } = await repo.save(fresh, '2027');
+    const latest2027 = await repo.latest('2027');
+    expect(latest2027?.id).toBe(freshSnapshot.id);
+    expect(latest2027?.season).toBe('2027');
+
+    // And the 2026 snapshot is still there for anyone who asks for 2026 —
+    // scoping is a filter, not a deletion.
+    expect((await repo.latest('2026'))?.season).toBe('2026');
   });
 });

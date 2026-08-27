@@ -344,6 +344,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ---------------------------------------------------------------- overview
   router.get('/api/overview', async (ctx) => {
     const db = ctx.env.db;
+    const adpSeason = await currentSeason(db);
     const [players, leagues, evidence, identity, newsletters, props, adp] = await Promise.all([
       new PlayerRepo(db).count(),
       new LeagueRepo(db).listLeagues(),
@@ -351,7 +352,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       new NewsletterRepo(db).pendingIdentityCount(),
       new NewsletterRepo(db).awaitingTallyCount(),
       new PropsRepo(db).freshness(),
-      new AdpRepo(db).latest(),
+      new AdpRepo(db).latest(adpSeason),
     ]);
     const selected = leagues.find((l) => l.isSelected) ?? null;
 
@@ -1565,7 +1566,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     }
 
     const repo = new AdpRepo(ctx.env.db);
-    const { snapshot, created } = await repo.save(result, {
+    const season = await currentSeason(ctx.env.db);
+    const { snapshot, created } = await repo.save(result, season, {
       provider: body.provider ?? null,
       sourceType: 'raw_adp',
       snapshotAt: body.snapshotAt ?? null,

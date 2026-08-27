@@ -114,6 +114,7 @@ async function seed(db: Database): Promise<void> {
     .join('\n');
   const { snapshot } = await new AdpRepo(db).save(
     importAdpSnapshot(`${csv}\n`, index, { label: 'test', source: 'test' }),
+    '2026',
   );
   await leagues.setDraftSnapshot('dr', snapshot.id);
 }
