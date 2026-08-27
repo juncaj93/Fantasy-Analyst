@@ -88,11 +88,19 @@ type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
  * attempt and won it on the retry was reported as green with a `flaky` note
  * nobody reads. Three assertions were doing exactly that.
  *
- * The outcome is two facts, both of which the app itself asserts elsewhere: the
- * destination is the current one, and the screen it leads to has drawn its own
- * navigation bar. Every screen draws one in its loading state as well as its
- * loaded one, so this waits for the screen to *exist*, not for its data — each
- * test still waits for its own subject with `settled`, `expect` or a response.
+ * The outcome is three facts. The destination is the current one; the screen it
+ * leads to has drawn its own navigation bar — every screen draws one in its
+ * loading state as well as its loaded one; and that screen's first read has
+ * come back, which is what the skeletons and the spinner say while it has not.
+ *
+ * The third is not decoration. Waiting only for the bar returns *sooner* than
+ * the 400ms this replaced, and a dozen gates in this file ask a bare `count()`
+ * immediately afterwards — `market-fold-toggle`, `flx-filter` — so an earlier
+ * return turns a screen that is merely still loading into "this deployment
+ * hasn't got one", which is a silent skip: the exact failure this file's own
+ * `settled` was written against. Tolerant on purpose: a screen still loading
+ * after twenty seconds is reported by the test's own gate, in that gate's own
+ * words, rather than as a timeout in here.
  */
 async function open(page: Page, tab: Tab) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -101,6 +109,11 @@ async function open(page: Page, tab: Tab) {
     'page',
   );
   await expect(page.locator('.nav-bar').first(), `${tab} drew no screen`).toBeVisible();
+  await expect(page.locator('.app-main .skeleton, .app-main .spinner'))
+    .toHaveCount(0, { timeout: 20_000 })
+    .catch(() => {
+      /* Still loading; the caller's own gate decides what that means. */
+    });
 }
 
 /**
