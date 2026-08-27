@@ -118,6 +118,12 @@ export const PUBLIC_PATHS = new Set([
   '/api/demo/enter',
   '/api/demo/exit',
   '/api/demo/status',
+  // A mock draft's marker, on the same reasoning: it changes nothing but
+  // whether a rehearsal is running, and *leaving* one must never be able to
+  // fail for want of a passphrase.
+  '/api/mock/enter',
+  '/api/mock/exit',
+  '/api/mock/status',
 ]);
 
 // ------------------------------------------------------------- demo mode
@@ -154,8 +160,46 @@ export function clearDemoCookie(env: AuthEnv): string {
 }
 
 export function isDemoRequest(request: Request): boolean {
+  return hasFlagCookie(request, DEMO_COOKIE);
+}
+
+// ------------------------------------------------------------- mock draft
+
+/**
+ * The marker that says a browser is running a practice draft.
+ *
+ * The same device as `fa_demo`, for the same reason and with the same limits.
+ * A mock draft's state lives in the browser and reaches the server only as the
+ * body of a read, so ordinarily nothing that could write arrives here at all
+ * while one is running. This cookie is how the server hears anyway — and it
+ * exists for the request this app's own code did not make.
+ *
+ * It is not a security boundary and is not pretending to be one. Whoever set it
+ * can clear it, and clearing it is exactly what leaving a mock draft does. It
+ * is a safety interlock for the session that started the rehearsal, on the one
+ * afternoon of the year when a stray write to the real pick stream would be
+ * most expensive.
+ */
+const MOCK_COOKIE = 'fa_mock';
+
+/** Session-scoped: no `Max-Age`, so closing the browser ends the rehearsal. */
+export function createMockCookie(env: AuthEnv): string {
+  const secure = env.insecureCookies ? '' : ' Secure;';
+  return `${MOCK_COOKIE}=1;${secure} SameSite=Lax; Path=/`;
+}
+
+export function clearMockCookie(env: AuthEnv): string {
+  const secure = env.insecureCookies ? '' : ' Secure;';
+  return `${MOCK_COOKIE}=;${secure} SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+export function isMockRequest(request: Request): boolean {
+  return hasFlagCookie(request, MOCK_COOKIE);
+}
+
+function hasFlagCookie(request: Request, name: string): boolean {
   const cookie = request.headers.get('cookie') ?? '';
-  return cookie.split(/;\s*/).some((c) => c === `${DEMO_COOKIE}=1`);
+  return cookie.split(/;\s*/).some((c) => c === `${name}=1`);
 }
 
 /**

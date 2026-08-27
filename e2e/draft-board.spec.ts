@@ -135,8 +135,17 @@ async function openDraft(page: Page) {
   await expect(page.getByTestId('board-list')).toBeVisible();
 }
 
+/**
+ * Two taps now, not one.
+ *
+ * The ▦ leads to three destinations rather than straight to the board — see
+ * `web/components/draftDestinations.tsx` — so every test that wants the board
+ * goes through the menu. The helper is what keeps that one change rather than
+ * fourteen.
+ */
 async function openBoard(page: Page) {
   await page.getByTestId('draft-board-open').click();
+  await page.getByTestId('go-draft-board').click();
   await expect(page.getByTestId('draft-board')).toBeVisible();
 }
 
@@ -162,7 +171,13 @@ test.describe('draft board overlay', () => {
 
     const button = page.getByTestId('draft-board-open');
     await expect(button).toBeVisible();
-    await expect(button).toHaveAccessibleName('Open draft board');
+    /*
+     * The glyph now leads to three destinations rather than one, so it is named
+     * for what it opens. Everything else about it — its size, its place on the
+     * title's own line, and the height it costs the header — is unchanged, and
+     * is what the rest of this test is still about.
+     */
+    await expect(button).toHaveAccessibleName('Draft destinations');
 
     const nav = (await page.getByTestId('draft-nav').boundingBox())!;
     const box = (await button.boundingBox())!;

@@ -81,6 +81,7 @@ import {
   type SnapshotPlayer,
   type SnapshotDataHealth,
   type SnapshotRecommendation,
+  type SnapshotRehearsal,
   type SnapshotRoster,
   type SupportSnapshot,
 } from './schema.ts';
@@ -130,6 +131,15 @@ export interface CaptureOptions {
   queuedOnly?: boolean;
   /** Override for tests and for a support conversation that needs more depth. */
   detailRows?: number;
+  /**
+   * Set when the board being captured is a practice draft.
+   *
+   * Passed in rather than inferred, because from inside this function a mock is
+   * indistinguishable from a real draft by construction — the pick stream is
+   * substituted at `DraftBoardSources`, which is the whole design. Only the
+   * caller that chose the mock sources knows, so only the caller can say.
+   */
+  rehearsal?: SnapshotRehearsal | null;
 }
 
 /**
@@ -179,6 +189,7 @@ export async function captureDraftSnapshot(
       engineVersion: DRAFT_ENGINE_VERSION,
     },
     ...(options.dataHealth ? { dataHealth: options.dataHealth } : {}),
+    ...(options.rehearsal ? { rehearsal: options.rehearsal } : {}),
     redaction: {
       replaced: {
         'manager id': aliases.counts.ids,

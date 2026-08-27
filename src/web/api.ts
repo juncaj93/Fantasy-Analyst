@@ -14,6 +14,8 @@ import type { WaiverClaimPlan } from '../core/waivers/claimPlan.ts';
  */
 import { ApiError, networkFailure, readJson } from './apiResponse.ts';
 import { demoSession } from './demo/session.ts';
+import { assertMockAllows } from './mock/session.ts';
+import type { MockDraftState } from '../core/draft/mockDraft.ts';
 import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts';
 /*
  * Which data source is in force, as part of the identity of a cached response.
@@ -50,6 +52,22 @@ export type { ApiFailure, FailureKind, ResponseKind } from './apiResponse.ts';
  */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET';
+  /*
+   * A rehearsal is read-only, and this is where that is enforced.
+   *
+   * The same seam, one line above the demo substitution, and for the same
+   * reason it is here rather than in a screen: every request in this app goes
+   * through this function, so a control somebody forgets to disable, an
+   * endpoint added next year and a call typed into a console are all refused
+   * without anybody having to remember that Mock Draft exists. It is a no-op
+   * — one null check — whenever no mock is running, which is almost always.
+   *
+   * Unlike the demo, this does not redirect anything: a mock's board is served
+   * by the server at its own path, and every other read during a rehearsal is
+   * the reader's own live data, which is the point of practising against the
+   * real league. See `web/mock/session.ts`.
+   */
+  assertMockAllows(method, path);
   const session = demoSession();
   if (session) {
     const res = await session.runtime.request(method, path, parseBody(init.body));
@@ -537,6 +555,30 @@ export interface RosterAlert {
   message: string;
   detail: string;
   positions: string[];
+}
+
+/**
+ * One turn of a practice draft.
+ *
+ * The board in here is a `DraftBoard`, produced by the same assembly and the
+ * same engines as the live one, over a substituted pick stream — so every
+ * component that draws a real board draws a mock one with no change. What is
+ * wrapped around it is the rehearsal's own state, which the browser stores and
+ * posts back, and whose turn it is.
+ *
+ * See `core/draft/mockBoard.ts`. Nothing about a mock is kept on the server.
+ */
+export interface MockBoardResponse {
+  state: MockDraftState;
+  board: DraftBoard;
+  /** The seat on the clock, or null once the rehearsal is over. */
+  onTheClock: number | null;
+  yourTurn: boolean;
+  complete: boolean;
+  made: { pickNo: number; slot: number; playerId: string; by: 'you' | 'bot' }[];
+  /** Why a pick was not accepted, or null. Shown to the reader as written. */
+  refused: string | null;
+  notes: string[];
 }
 
 export interface DraftBoard {

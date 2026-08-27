@@ -47,6 +47,7 @@ import {
   type DecisionPayload,
   type PayloadFor,
   type ReplayOutcome,
+  type SnapshotRehearsal,
   type SupportSnapshot,
 } from './schema.ts';
 
@@ -99,6 +100,16 @@ export interface ReplayReport {
    */
   derivation?: { captured: string | null; current: string; matches: boolean };
   release: { capturedSha: string };
+  /**
+   * Present only when the file says it was captured in a rehearsal.
+   *
+   * Carried through to the report rather than left in the envelope for a reader
+   * to notice, because the whole risk a mock snapshot creates is that it
+   * reproduces perfectly and is then read as evidence about a real draft. The
+   * one line the CLI prints for it is the difference between a diagnosis and a
+   * wrong diagnosis nobody can see is wrong.
+   */
+  rehearsal?: SnapshotRehearsal;
   compared: ComparedCount[];
   differences: ReplayDifference[];
   /**
