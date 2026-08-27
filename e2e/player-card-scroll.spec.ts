@@ -102,8 +102,36 @@ async function bodyState(page: Page) {
   });
 }
 
-/** Turn the wheel over the middle of the card, the way a scroll actually lands. */
+/**
+ * Wait until the sheet has stopped moving — two readings in the same place.
+ *
+ * A sheet rises into position on open, and a wheel delivered while it is still
+ * travelling lands on wherever the body was a frame ago, which is not
+ * necessarily the body. The two engines animate on different clocks, so this is
+ * not something a fixed pause gets right for both: it failed only on WebKit at
+ * 430, on the *reopen*, where the animation is the whole of what is different.
+ */
+async function settled(page: Page, tries = 20): Promise<void> {
+  const body = page.locator('.sheet-body');
+  let previous = '';
+  for (let i = 0; i < tries; i++) {
+    const box = await body.boundingBox();
+    const here = box ? `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.height)}` : '';
+    if (here && here === previous) return;
+    previous = here;
+    await page.waitForTimeout(50);
+  }
+}
+
+/**
+ * Turn the wheel over the middle of the card, the way a scroll actually lands.
+ *
+ * Settles first, so the wheel is delivered to a body that is where it is going
+ * to be. Nothing here retries the *assertion* a caller makes about the result —
+ * only the aim.
+ */
 async function wheelOverBody(page: Page, dy: number): Promise<void> {
+  await settled(page);
   const box = (await page.locator('.sheet-body').boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, dy);
@@ -399,8 +427,24 @@ test.describe('scrolling an expanded player card', () => {
     await openPlayer(page, target!);
     await expect(page.getByTestId('outlook')).toBeVisible();
     await expect.poll(async () => (await bodyState(page)).scrollable, { message: 'the reopened card would not scroll' }).toBe('true');
-    await wheelOverBody(page, 400);
-    expect((await bodyState(page)).scrollTop, 'the reopened card did not move under a scroll').toBeGreaterThan(0);
+    /*
+     * Polled rather than read once after a single wheel.
+     *
+     * The claim is that the reopened card moves under a scroll, and that claim
+     * is unchanged; what is retried is the wheel, because a wheel that arrives
+     * while the sheet is still rising is not a fair test of it. A card that is
+     * genuinely stuck — the defect this step exists for — never moves however
+     * many times it is asked.
+     */
+    await expect
+      .poll(
+        async () => {
+          await wheelOverBody(page, 400);
+          return (await bodyState(page)).scrollTop;
+        },
+        { message: 'the reopened card did not move under a scroll' },
+      )
+      .toBeGreaterThan(0);
   });
 
   /**
