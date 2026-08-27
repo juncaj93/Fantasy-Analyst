@@ -92,14 +92,17 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
   });
 
   /*
-   * Two scheduled jobs an hour apart today, but they share one issue, and a
-   * read-modify-write on one document from two runners loses whichever update
-   * landed second.
+   * A concurrency group was tried here — one issue, read-modify-written, is
+   * exactly what a group is for — and measured doing the thing an alarm must
+   * never do: a called workflow sat `pending` on an empty group for over half
+   * an hour, and GitHub's rule for a group without `cancel-in-progress` is that
+   * a newly queued run cancels the pending one. A lost update costs one row the
+   * next run puts back; a cancelled alert costs the alarm.
    */
-  it('the alert never runs twice at once', () => {
+  it('the alert is never queued behind, or cancelled by, another alert', () => {
     const { yaml } = readWorkflow('alert-on-failure.yml');
-    expect(asMap(yaml['concurrency'])['group']).toBe('scheduled-job-alert');
-    expect(asMap(yaml['concurrency'])['cancel-in-progress']).toBe(false);
+    expect(yaml['concurrency']).toBeUndefined();
+    expect(Object.keys(asMap(jobs(yaml)['alert']))).not.toContain('concurrency');
   });
 
   /*

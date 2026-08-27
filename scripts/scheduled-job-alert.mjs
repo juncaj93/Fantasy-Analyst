@@ -184,8 +184,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     token: process.env['GITHUB_TOKEN'],
     repository: process.env['GITHUB_REPOSITORY'],
   });
+  // Three tries, re-reading the issue each time. The whole operation is a read
+  // and a write, so repeating it is the same as doing it once — and a rate
+  // limit or a five-second 502 is not a reason for a failure to go unreported.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   try {
-    await recordOutcome({ api, event, log: (line) => console.log(line) });
+    let last;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await recordOutcome({ api, event, log: (line) => console.log(line) });
+        last = null;
+        break;
+      } catch (err) {
+        last = err;
+        console.log(`attempt ${attempt} failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (attempt < 3) await sleep(attempt * 5000);
+      }
+    }
+    if (last) throw last;
   } catch (err) {
     // This job is the thing that notices; it must not be the thing that goes
     // unnoticed. A red tick here says the alerting itself is broken.

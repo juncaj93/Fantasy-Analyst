@@ -48,11 +48,16 @@ permissions:
   contents: read
   issues: write
 
-# One issue, read-modify-written. Two jobs finishing together would otherwise
-# each write the state they read before the other's update.
-concurrency:
-  group: scheduled-job-alert
-  cancel-in-progress: false
+# Deliberately no `concurrency` group. One was tried, for the obvious reason —
+# this is a read-modify-write on a single issue — and it was measured doing the
+# thing an alarm must never do. A called workflow in a group sat `pending` for
+# over half an hour with the group empty, and GitHub's own rule for a group
+# without `cancel-in-progress` is that a newly queued run *cancels* the one
+# already pending. Either way the report does not arrive.
+#
+# The race it would have prevented needs two scheduled jobs to finish inside the
+# few seconds this takes; the two here are an hour apart. A lost update costs
+# one row, which the next run puts back. A cancelled alert costs the alarm.
 
 jobs:
   alert:
