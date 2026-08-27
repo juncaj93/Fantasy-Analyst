@@ -238,15 +238,54 @@ test.describe('scrolling an expanded player card', () => {
     await page.getByTestId('tab-players').click();
 
     /*
-     * A player far enough down the list that the page behind has an offset
-     * worth losing. Read off the pin rather than measured beforehand: opening a
-     * row scrolls it into view first, so a reading taken before the tap is a
-     * reading of somewhere the reader never was.
+     * The list, scrolled, and then a player opened from where the reader
+     * actually is — so the page behind has an offset worth losing.
+     *
+     * Both halves of that are load-bearing and each was got wrong once. A
+     * reading taken *before* the tap is a reading of somewhere the reader never
+     * was, because `scrollIntoViewIfNeeded` moves the page first; and a row
+     * chosen by id is a row that may already be on screen at one width and not
+     * at another, which made this pass at 390 and fail at 375. So: scroll
+     * deliberately, then pick whichever row is under the middle of the viewport
+     * at that offset, which is in view by construction at every width.
      */
-    await openPlayer(page, '1012');
+    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo({ top: 240, behavior: 'auto' }));
+    await expect
+      .poll(async () => page.evaluate(() => Math.round(window.scrollY)), {
+        message: 'the players list did not scroll, so putting the reader back proves nothing',
+      })
+      .toBeGreaterThan(0);
+    const behind = await page.evaluate(() => Math.round(window.scrollY));
+
+    const midRow = page.locator('[data-testid="player-search-row"]').filter({
+      has: page.locator('.player-name'),
+    });
+    const target = await midRow.evaluateAll((rows) => {
+      const middle = window.innerHeight / 2;
+      const inView = rows.filter((row) => {
+        const r = row.getBoundingClientRect();
+        return r.top > 8 && r.bottom < window.innerHeight - 8;
+      });
+      const nearest = inView.sort(
+        (a, b) =>
+          Math.abs(a.getBoundingClientRect().top - middle) - Math.abs(b.getBoundingClientRect().top - middle),
+      )[0];
+      return nearest ? (nearest as HTMLElement).dataset['playerId'] ?? null : null;
+    });
+    expect(target, 'no player row is fully in view at this width').not.toBeNull();
+
+    await page.locator(`[data-testid="player-search-row"][data-player-id="${target}"]`).click();
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(page.getByTestId('player-page-metrics')).toBeVisible();
     await expect(page.getByTestId('outlook')).toBeVisible();
-    const behind = await page.evaluate(() => Math.abs(parseInt(document.body.style.top || '0', 10)));
-    expect(behind, 'the list was at its top, so putting the reader back proves nothing').toBeGreaterThan(0);
+
+    // Pinned exactly where the reader was, which is what the restore is checked
+    // against at the end.
+    expect(
+      await page.evaluate(() => Math.abs(parseInt(document.body.style.top || '0', 10))),
+      'the page behind was not pinned at the offset the reader was at',
+    ).toBe(behind);
 
     // 1. It opens with something to scroll, and says so to the browser.
     await expect
@@ -269,30 +308,51 @@ test.describe('scrolling an expanded player card', () => {
      * A dispatched `touchmove` is the closest a headless browser gets to
      * asking that question directly; where the engine will not build one, the
      * declarations above and the wheel below are what is left.
+     *
+     * **Both halves of the construction are engine-specific, and both are
+     * inside the guard.** The two engines disagree twice over: Chromium takes
+     * `new Touch({...})` and a plain array of them, and WebKit takes neither —
+     * it builds a touch through `document.createTouch` and demands a real
+     * `TouchList` in the event's initialiser, throwing `TypeError` on an array.
+     * An earlier version of this guarded only the `Touch` and let the
+     * `TouchEvent` throw, which failed the WebKit shard on a detail of the test
+     * rather than anything about the app. `null` means "this engine would not
+     * build the event", and the assertion is skipped rather than faked.
      */
     const prevented = await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
       const rect = body.getBoundingClientRect();
       const point = { x: rect.left + rect.width / 2, y: rect.top + 20 };
-      let touch: Touch | null = null;
+      const legacy = document as unknown as {
+        createTouch?: (w: Window, t: EventTarget, id: number, x: number, y: number, sx: number, sy: number) => Touch;
+        createTouchList?: (...touches: Touch[]) => TouchList;
+      };
       try {
-        touch = new Touch({ identifier: 1, target: body, clientX: point.x, clientY: point.y });
+        let touch: Touch;
+        try {
+          touch = new Touch({ identifier: 1, target: body, clientX: point.x, clientY: point.y });
+        } catch {
+          if (!legacy.createTouch) return null;
+          touch = legacy.createTouch(window, body, 1, point.x, point.y, point.x, point.y);
+        }
+        // WebKit wants a TouchList here and rejects an array; Chromium takes
+        // the array and has no `createTouchList` to offer.
+        // `TouchEventInit` is typed as taking `Touch[]`, which is Chromium's
+        // reading of it; the cast is what lets WebKit's `TouchList` through the
+        // same call rather than forking the construction in two.
+        const list = (legacy.createTouchList ? legacy.createTouchList(touch) : [touch]) as unknown as Touch[];
+        const event = new TouchEvent('touchmove', {
+          cancelable: true,
+          bubbles: true,
+          touches: list,
+          targetTouches: list,
+          changedTouches: list,
+        });
+        body.dispatchEvent(event);
+        return event.defaultPrevented;
       } catch {
-        const legacy = document as unknown as {
-          createTouch?: (w: Window, t: EventTarget, id: number, x: number, y: number, sx: number, sy: number) => Touch;
-        };
-        if (legacy.createTouch) touch = legacy.createTouch(window, body, 1, point.x, point.y, point.x, point.y);
+        return null;
       }
-      if (!touch) return null;
-      const event = new TouchEvent('touchmove', {
-        cancelable: true,
-        bubbles: true,
-        touches: [touch],
-        targetTouches: [touch],
-        changedTouches: [touch],
-      });
-      body.dispatchEvent(event);
-      return event.defaultPrevented;
     });
     if (prevented !== null) {
       expect(prevented, 'something in the sheet cancelled a touchmove, which costs WebKit the whole scroll').toBe(false);
@@ -336,7 +396,7 @@ test.describe('scrolling an expanded player card', () => {
     ).toBeLessThan(4);
 
     // 7. Opened again, it is a scrolling card again rather than a stuck one.
-    await openPlayer(page, '1012');
+    await openPlayer(page, target!);
     await expect(page.getByTestId('outlook')).toBeVisible();
     await expect.poll(async () => (await bodyState(page)).scrollable, { message: 'the reopened card would not scroll' }).toBe('true');
     await wheelOverBody(page, 400);
