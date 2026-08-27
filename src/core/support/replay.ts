@@ -304,6 +304,7 @@ export async function replayDraftSnapshot(value: SupportSnapshot): Promise<Draft
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
     engine: { captured: snapshot.release.engineVersion, current: DRAFT_ENGINE_VERSION, matches: engineMatches },
     release: { capturedSha: snapshot.release.gitSha },
+    ...(snapshot.rehearsal ? { rehearsal: snapshot.rehearsal } : {}),
     compared: [
       { what: 'ranked players', count: output.order.length },
       { what: 'arguments in full', count: output.detailRows },

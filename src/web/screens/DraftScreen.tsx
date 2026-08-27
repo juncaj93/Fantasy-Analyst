@@ -10,7 +10,7 @@
  * only, and never touches Sleeper.
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import {
   InjuryDetail,
   LastSeasonLine,
@@ -116,7 +116,19 @@ import { QueueControl } from '../components/decisions.tsx';
  * much as its scroll position.
  */
 import { DraftBoardOverlay } from '../components/draftBoard.tsx';
+/*
+ * The ▦ leads to three places now, not one.
+ *
+ * The menu and the draft-order view are ordinary components and travel in the
+ * main bundle; the mock draft is loaded only when somebody opens one. A
+ * rehearsal is a thing almost nobody does on almost every page load, and the
+ * screen behind it, the board it draws and the state it keeps have no business
+ * being downloaded by a reader who never taps it.
+ */
+import { DraftDestinationsSheet, DraftOrderSheet, type DraftDestination } from '../components/draftDestinations.tsx';
 import { GridIcon } from '../components/icons.tsx';
+import { forgetMock } from '../mock/session.ts';
+
 import { unwindOne } from '../tabReset.ts';
 /*
  * Staying level with Sleeper without being asked.
@@ -170,6 +182,19 @@ const ALL_FILTER = 'ALL';
  * doing the truncating.
  */
 const BOARD_ROWS = 400;
+
+/**
+ * A practice draft, downloaded only by somebody who opens one.
+ *
+ * Everything behind this import — the mock screen, its board, its session and
+ * the guard it consults — is unreachable from a page load, so it is `lazy` for
+ * the same reason Demo Mode's runtime is dynamic: the reader on a bad
+ * connection during a live draft should not pay a byte for a rehearsal they are
+ * not having.
+ */
+const MockDraftScreen = lazy(() =>
+  import('../components/mockDraft.tsx').then((m) => ({ default: m.MockDraftScreen })),
+);
 
 export function DraftScreen({
   leagues,
@@ -240,14 +265,26 @@ export function DraftScreen({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
   /**
-   * Whether the draft board is over the screen.
+   * Which of the ▦'s destinations is over the screen, if any.
    *
-   * One boolean, and deliberately nothing else. Everything this screen holds —
+   * One value, and deliberately nothing else. Everything this screen holds —
    * the filter, the query, the fold, the expanded card, the queue, the scroll —
-   * is untouched while the board is open, which is what makes closing it return
-   * the reader exactly where they were rather than to a rebuilt Draft page.
+   * is untouched while any of them is open, which is what makes closing one
+   * return the reader exactly where they were rather than to a rebuilt Draft
+   * page. It was a boolean while the glyph did one thing; it is the same idea
+   * with three more values in it.
    */
-  const [boardOpen, setBoardOpen] = useState(false);
+  const [destination, setDestination] = useState<DraftDestination>('none');
+  const boardOpen = destination === 'board';
+  /**
+   * Whether a rehearsal is up, where something outside React's render cycle can
+   * read it.
+   *
+   * The refresh controller is created once and keeps the closures it was given,
+   * so `isVisible` cannot close over a piece of state; the ref is what it reads.
+   * See the effect below, which is what tells the controller the answer moved.
+   */
+  const mockOpenRef = useRef(false);
 
   /** Manual refresh state: in-flight spinner, last success, last complaint. */
   const [refreshing, setRefreshing] = useState(false);
@@ -281,6 +318,19 @@ export function DraftScreen({
   positionRef.current = position;
   const controllerRef = useRef<DraftRefreshController | null>(null);
 
+  /*
+   * Opening or closing a mock is the same event as a tab being hidden or shown.
+   *
+   * The controller already knows how to park a loop and how to resume one with
+   * a single coalesced request; this hands it the one signal it does not get
+   * from the browser. Nothing else about the loop changes, which is the point —
+   * a rehearsal must not need a second lifecycle.
+   */
+  useEffect(() => {
+    mockOpenRef.current = destination === 'mock';
+    controllerRef.current?.visibilityChanged();
+  }, [destination]);
+
   /**
    * Put a board on screen.
    *
@@ -302,6 +352,23 @@ export function DraftScreen({
        */
       boardRef.current = next;
       setBoard(next);
+      /*
+       * The first real pick deletes this draft's rehearsal, outright.
+       *
+       * Here rather than anywhere else because this is the one function that
+       * sees every board this screen ever holds — the visit, the cached paint,
+       * the quiet poll that found the pick — so the rehearsal cannot survive a
+       * path somebody forgot about. Not hidden, not flagged: the row is
+       * removed, per the brief's §3, and it is removed whether or not the
+       * reader has the mock open. The server refuses to build a mock board for
+       * a started draft as well; neither is a backstop for the other.
+       *
+       * Keyed by this draft and no other, so a mock for a league whose draft
+       * has not started is untouched by a league whose has. That is migration
+       * `0029`'s lesson, applied to the second thing in this app that belongs
+       * to a draft rather than to an installation.
+       */
+      if (draftId && next.picksMade > 0) forgetMock(draftId);
       /*
        * The server's order is now the current one.
        *
@@ -611,7 +678,18 @@ export function DraftScreen({
        */
       applyChange: () => loadRef.current(positionRef.current, { quiet: true }),
       isOnClock: () => boardRef.current?.onTheClock ?? false,
-      isVisible: () => document.visibilityState !== 'hidden',
+      /*
+       * Parked while a rehearsal is up.
+       *
+       * The same mechanism a backgrounded tab uses, and for a version of the
+       * same reason: the reader is not looking at the live board, and every
+       * request this loop makes — a `POST /sync` among them — is one the mock
+       * guard would refuse for as long as the mock is open. Reading the ref
+       * rather than the state keeps this honest between renders; the controller
+       * is told to re-check by `visibilityChanged` when the mock opens or
+       * closes.
+       */
+      isVisible: () => document.visibilityState !== 'hidden' && !mockOpenRef.current,
       isOnline: () => navigator.onLine !== false,
       onState: setRefreshState,
       onError: (err, reason) => {
@@ -650,6 +728,7 @@ export function DraftScreen({
       visible: document.visibilityState !== 'hidden',
       online: navigator.onLine !== false,
       onClock: boardRef.current?.onTheClock ?? false,
+      mockOpen: mockOpenRef.current,
     }));
 
     return () => {
@@ -846,7 +925,26 @@ export function DraftScreen({
         handed `board` and nothing else: no fetcher, no controller, no way to
         ask Sleeper anything.
       */}
-      {boardOpen ? <DraftBoardOverlay board={board} onClose={() => setBoardOpen(false)} /> : null}
+      {boardOpen ? <DraftBoardOverlay board={board} onClose={() => setDestination('none')} /> : null}
+      {destination === 'menu' ? (
+        <DraftDestinationsSheet board={board} onGo={setDestination} onClose={() => setDestination('none')} />
+      ) : null}
+      {destination === 'order' ? <DraftOrderSheet board={board} onClose={() => setDestination('none')} /> : null}
+      {/*
+        The rehearsal, and the loop parked behind it.
+
+        `MockDraft` is `lazy`, so the engine-facing half of this feature costs a
+        reader who never opens one nothing at all. While it is up the live sync
+        is parked through `isVisible` — the same mechanism a backgrounded tab
+        uses — because a rehearsal is not a moment to be polling Sleeper, and
+        because every write that loop makes is one the mock guard would refuse
+        anyway.
+      */}
+      {destination === 'mock' && draftId ? (
+        <Suspense fallback={null}>
+          <MockDraftScreen draftId={draftId} onClose={() => setDestination('none')} />
+        </Suspense>
+      ) : null}
 
       {/*
         The live state, in the bar that does not scroll away.
@@ -932,10 +1030,10 @@ export function DraftScreen({
               type="button"
               className="icon-btn"
               data-testid="draft-board-open"
-              aria-label="Open draft board"
+              aria-label="Draft destinations"
               aria-haspopup="dialog"
-              aria-expanded={boardOpen}
-              onClick={() => setBoardOpen(true)}
+              aria-expanded={destination !== 'none'}
+              onClick={() => setDestination('menu')}
             >
               <GridIcon size={19} />
             </button>
