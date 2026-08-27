@@ -367,38 +367,46 @@ test.describe('sheets', () => {
    * `.drag-handle` warned it would.
    *
    * What is asserted is therefore the declaration rather than the outcome: the
-   * sheet's chrome claims every gesture, and its scrolling body narrows to
-   * `pan-up` at the top so a downward drag from there reaches the handler.
+   * chrome that takes the drag claims every gesture on it, the body that
+   * scrolls hands every gesture to the browser, and no ancestor of the body
+   * claims anything — a `none` above a scroller is propagated straight through
+   * it by WebKit before Safari 17, and the sheet has no reason to find out
+   * which version the reader is on.
    */
   test('lets the browser scroll the body, and keeps the drag for itself', async ({ page }) => {
     const claimed = await page.evaluate(() => {
-      const sheet = document.querySelector('.sheet') as HTMLElement;
+      const read = (selector: string) => {
+        const el = document.querySelector(selector) as HTMLElement;
+        return getComputedStyle(el).touchAction;
+      };
       const body = document.querySelector('.sheet-body') as HTMLElement;
       return {
-        sheet: getComputedStyle(sheet).touchAction,
+        sheet: read('.sheet'),
+        grip: read('.sheet-grip'),
+        header: read('.sheet-header'),
+        body: read('.sheet-body'),
         scrollable: body.dataset['scrollable'],
-        body: getComputedStyle(body).touchAction,
       };
     });
 
     // The chrome — grip, header — claims every gesture that lands on it.
-    expect(claimed.sheet, 'the browser will take the drag before the sheet sees it').toBe('none');
+    expect(claimed.grip, 'the browser will take a drag on the grip before the sheet sees it').toBe('none');
+    expect(claimed.header, 'the browser will take a drag on the header before the sheet sees it').toBe('none');
 
     /*
-     * And the body takes exactly what its own content justifies.
+     * And the body's permission is unconditional, for the whole life of the
+     * sheet.
      *
-     * Asserted as the mapping rather than as one value, because both branches
-     * are real and which one this sheet is in depends on how much it is holding.
-     * An earlier version of this pinned the expectation to `pan-up`, which
-     * Chromium honoured and WebKit discarded — the declaration was invalid
-     * there, the mechanism was inert, and only CI could see it. Hence the last
-     * assertion: nothing here may depend on a value one engine does not
-     * implement.
+     * It used to depend on `data-scrollable`, measured from the content — which
+     * is a promise the app cannot keep, because a card opens before its two
+     * requests have answered and the engine reads this once, when the finger
+     * lands. A body that says `none` while its content is still arriving costs
+     * the reader that entire gesture. There is nothing to measure now, so the
+     * attribute must be gone as well as the branch.
      */
-    expect(claimed.scrollable, 'the sheet body did not report whether it can scroll').toMatch(/^(true|false)$/);
-    expect(claimed.body, `a body reporting scrollable=${claimed.scrollable} claimed ${claimed.body}`).toBe(
-      claimed.scrollable === 'true' ? 'pan-y' : 'none',
-    );
+    expect(claimed.body, 'the body did not hand the scroll to the browser').toBe('pan-y');
+    expect(claimed.scrollable, 'the body is measuring itself again').toBeUndefined();
+    expect(claimed.sheet, 'an ancestor of the scroller claims the gesture').not.toBe('none');
     expect(
       ['pan-up', 'pan-down', 'pan-left', 'pan-right'],
       'a directional touch-action is silently ignored by WebKit',

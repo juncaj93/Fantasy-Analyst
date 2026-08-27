@@ -456,11 +456,10 @@ export function SearchFilterRow({
 /**
  * A modal sheet.
  *
- * Rises from the bottom, dims what is behind it, and can be pulled back down —
- * from the grip, from the header, and from its content whenever that content is
- * already at its top, which is the rule every native sheet follows. Escape and
- * the backdrop close it too, because a gesture must never be the only way out
- * of anything.
+ * Rises from the bottom, dims what is behind it, and can be pulled back down by
+ * its chrome — the grip and the header. Its body is the browser's, so that a
+ * card can always be scrolled; Escape, the backdrop and Done close it too,
+ * because a gesture must never be the only way out of anything.
  *
  * Everything a covering layer owes the app — the page behind held still, the
  * app behind taken out of the reading order, focus in and focus back, Escape
@@ -557,28 +556,17 @@ export function Sheet({
             Done
           </button>
         </div>
+        {/*
+          The body, and nothing measuring it.
+
+          It used to be wrapped in a bare block so a `ResizeObserver` could
+          watch the content grow and keep `touch-action` up to date as the card
+          filled in. Nothing asks that question any more — the body declares
+          `pan-y` for its whole life — so the wrapper, the observer and the
+          scroll listener are gone with it. See `useSheetDrag`, rule 1.
+        */}
         <div className="sheet-body" ref={drag.bodyRef}>
-          {/*
-            One element around the children, whose only job is to have a
-            height.
-
-            `useSheetDrag` decides whether the body may be touch-scrolled from
-            "is the content taller than the box", and it has to keep answering
-            as the card fills in — a player's card opens before either of its
-            two requests has come back. A `ResizeObserver` on the body alone
-            cannot do that: the sheet is capped at `88dvh`, so once it reaches
-            the cap the body's box stops changing while the content is still
-            arriving, and the observer goes quiet with the answer stuck at
-            "nothing to scroll" — which puts `touch-action: none` on a card
-            holding a screen and a half of content and gives the reader no way
-            to open it again. This element grows when the content does, so the
-            question is answered from the thing it is actually about.
-
-            It is a bare block with no styling of its own, so the body's
-            padding, the children's margins and their collapsing behaviour are
-            exactly what they were.
-          */}
-          <div className="sheet-content">{children}</div>
+          {children}
         </div>
       </div>
     </>,
