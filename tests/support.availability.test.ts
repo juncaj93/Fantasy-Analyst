@@ -24,6 +24,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildDraftScenario } from '../src/core/demo/fixtures/draft.ts';
 import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
 import { findScenario } from '../src/core/demo/registry.ts';
@@ -210,5 +212,35 @@ describe('the rest of what no component stands behind', () => {
     expect(withModel.length).toBeGreaterThan(0);
     expect(withModel.some((row) => row.nextPick!.drivers.length > 0)).toBe(true);
     expect(withModel.every((row) => typeof row.nextPick!.confidence === 'string')).toBe(true);
+  });
+});
+
+/**
+ * The label the reader is told to look for, in the three places that name it.
+ *
+ * `e2e-production/` runs only against the deployed site, so CI never executes
+ * it — which means a rename of this row is invisible until production smoke
+ * fails, after the deploy. That is precisely how it failed once: the button
+ * became one context-aware action, the local suite was updated, and the
+ * production suite kept asserting `Copy Draft support snapshot` until a release
+ * had already gone out.
+ *
+ * Comparing the strings here is not elegant and is the right size. Importing a
+ * shared constant into `e2e-production/` would couple the production suite to
+ * `src/`, which it deliberately does not do — it is checked out from the
+ * released revision so an older UI is judged by the assertions it shipped with.
+ * A read of three files in a unit test costs nothing and closes the same gap.
+ */
+describe('the support row is called the same thing everywhere', () => {
+  const read = (path: string) => readFileSync(join(import.meta.dirname, '..', path), 'utf8');
+
+  it('is asserted by both suites under the name the screen actually ships', () => {
+    const screen = read('src/web/screens/SetupScreen.tsx');
+    const row = /testId="setup-support-snapshot"[\s\S]{0,400}?label="([^"]+)"/.exec(screen);
+    expect(row, 'the support row no longer has a literal label — update this test with it').not.toBeNull();
+
+    const label = row![1]!;
+    expect(read('e2e/support-snapshot.spec.ts'), `the local suite does not assert "${label}"`).toContain(label);
+    expect(read('e2e-production/smoke.spec.ts'), `production smoke does not assert "${label}"`).toContain(label);
   });
 });
