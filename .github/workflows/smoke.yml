@@ -52,6 +52,9 @@ concurrency:
 
 jobs:
   smoke:
+    # Which third of the suite, because that is what a red tick has to answer
+    # first. GitHub would otherwise label these `smoke (1)`.
+    name: smoke (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     # The browser and its system libraries arrive with the image, rather than
     # being installed onto a runner that is busy installing something else.
@@ -76,6 +79,29 @@ jobs:
     # Wall clock for the checks themselves, with the real budget on the step
     # below that can actually hang. No longer paying for an apt run first.
     timeout-minutes: 45
+    strategy:
+      # One shard failing is a fact about those specs, and the other two still
+      # have to say whether they agree — exactly as in `ci.yml`.
+      fail-fast: false
+      matrix:
+        # The same split `ci.yml` gives `e2e/`, for the same reason and by the
+        # same mechanism: `--shard=n/3`, Playwright's own, so nothing here
+        # enumerates which specs go where.
+        #
+        # The suite had run on one runner, all three widths in series, and it
+        # took 15m36s of a twenty-minute step — no headroom at all for a
+        # deployment answering slowly, and none for the next spec file either.
+        # It ran out for real once: with the board briefly empty, the gates in
+        # `smoke.spec.ts` spent about thirteen minutes discovering that (fixed
+        # in the suite itself — see `present` there), and the step was cut off
+        # mid-run. The ceiling is not what was wrong, so the ceiling is not what
+        # changed.
+        #
+        # With `fullyParallel: false` the unit of splitting is a whole file per
+        # project, and this suite's weight is one file across three widths — so
+        # three shards is one width each, which is both the natural split and
+        # the one that reads best when a tick goes red.
+        shard: [1, 2, 3]
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
@@ -156,31 +182,51 @@ jobs:
       - name: Check the live site on an iPhone
         # The one step that can hang: twenty minutes of checking a live site is
         # a stuck browser or a site that stopped answering, whichever apt did.
+        #
+        # Every width is still named here — the shard splits the same three
+        # projects across three runners rather than giving each runner a
+        # different list — so this number now covers a third of the work it used
+        # to, and it means "stuck" again rather than "big".
         timeout-minutes: 20
         run: |
           npx playwright test --config playwright.production.config.ts \
-            --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360
+            --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360 \
+            --shard=${{ matrix.shard }}/3
 
       # Screenshots of every screen at 390, in both themes, so a visual
       # regression can be looked at rather than argued about.
+      #
+      # Once per run, not once per shard: it photographs the deployed site,
+      # which is the same site from all three runners, and three copies would
+      # race for one artifact name and cost three crawls of production to no
+      # end.
       - name: Photograph every screen
-        if: always()
+        if: ${{ always() && matrix.shard == 1 }}
         run: node scripts/screenshot-production.mjs "$PRODUCTION_URL" screenshots
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && matrix.shard == 1 }}
         with:
           name: production-screenshots
-          path: |
-            screenshots/
-            test-results/
+          path: screenshots/
+          retention-days: 14
+
+      # Traces and failure screenshots, per shard — artifact names have to be
+      # unique across a matrix or the jobs race to write one and all but the
+      # first fail on upload.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: production-test-results-shard-${{ matrix.shard }}-of-3
+          path: test-results/
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Write the summary
         if: always()
         run: |
           {
-            echo "## Production smoke test"
+            echo "## Production smoke test — shard ${{ matrix.shard }}/3"
             echo
             echo "**Site:** $PRODUCTION_URL"
             echo
@@ -190,6 +236,6 @@ jobs:
               echo "**Revision checked:** whatever was live (no revision given)"
             fi
             echo
-            echo "Screens photographed in Light and Dark are attached as the"
-            echo "\`production-screenshots\` artifact."
+            echo "Screens photographed in Light and Dark are attached to shard 1"
+            echo "as the \`production-screenshots\` artifact."
           } >> "$GITHUB_STEP_SUMMARY"
