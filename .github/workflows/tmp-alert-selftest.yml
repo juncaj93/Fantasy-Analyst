@@ -11,7 +11,7 @@ jobs:
   work:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail on purpose
+      - name: Succeed this time
         run: exit 1
 
   alert:
