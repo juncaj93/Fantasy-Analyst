@@ -57,6 +57,23 @@ jobs:
               \`scoring=\${f.scoringFormat}\ndraft=\${f.draftType}\nqb=\${f.qbType}\n\`);
           "
 
+      # TEMPORARY — measuring how stale the board actually got while the refresh
+      # was failing. Removed before this branch is merged.
+      - name: What is stored right now
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          curl -s -o /dev/null -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/cookies.txt
+          curl -s -b /tmp/cookies.txt "$URL/api/adp/snapshots" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const r = JSON.parse(s);
+              for (const snap of (r.snapshots ?? []).slice(0, 8)) console.log(JSON.stringify(snap));
+            })"
+
       - name: Fetch the ADP
         env:
           SCORING: ${{ steps.format.outputs.scoring }}
