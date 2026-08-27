@@ -474,24 +474,38 @@ test.describe('newsletter setup', () => {
     page,
   }, testInfo) => {
     /*
-     * A row's identity includes its reason, and the dev database is shared
-     * across projects and survives between runs — so a fixed reason would come
-     * back "already imported" the second time this ever ran, and the first half
-     * of this test would be asserting nothing. Varying it per project AND per
-     * run keeps the first paste genuinely new, which is the thing under test.
-     */
-    const reason = `Full command of the backfield (${testInfo.project.name} ${Date.now()})`;
-    /*
-     * The issue that has already been scored, named rather than picked by
-     * position.
+     * This test brings its own newsletter, and that is not fastidiousness.
      *
-     * Four browser projects share one dev server, and the *unscored* issue is
-     * the one the Setup workflow controls are drawn for. Consuming it here
-     * would take that state away from whichever project runs second, so this
-     * revises the tally on an issue that is already complete — which is a real
-     * flow of its own and leaves the pending one alone.
+     * Four browser projects share one dev server and its database survives
+     * between runs, so a test that scores a *seeded* issue is a test that
+     * rewrites the world the specs after it read. The seeded ledger is what
+     * Trades and the draft board have opinions about, and the seeded unscored
+     * issue is the whole subject of the describe above this one — consuming
+     * either would break whichever project ran second, in a spec that never
+     * mentions newsletters.
+     *
+     * A row's identity also includes its reason, so the reason varies per
+     * project and per run: a fixed one would come back "already imported" the
+     * second time this ever ran, and the first half of this test would be
+     * asserting nothing.
      */
-    const message = page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]');
+    const issueId = `e2e-tally-${testInfo.project.name}-${Date.now()}`;
+    const reason = `Full command of the backfield (${issueId})`;
+    const received = await page.request.post('/api/newsletter/ingest', {
+      data: {
+        messageId: issueId,
+        from: 'editor@demo.newsletter',
+        subject: `Weekly notes ${issueId}`,
+        date: new Date().toISOString(),
+        html: `<p>${issueId}: Marcus Vance took every first-team rep this week.</p>`,
+        force: true,
+      },
+    });
+    expect(received.status()).toBe(200);
+    await page.reload();
+    await expect(page.getByTestId('panel-newsletter')).toBeVisible();
+
+    const message = page.locator(`[data-testid="newsletter-message"][data-message-id="${issueId}"]`);
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();

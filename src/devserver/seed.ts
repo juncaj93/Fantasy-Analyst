@@ -208,18 +208,19 @@ export const DEMO_NEWSLETTER = `<html><body>
  * size it was decided, and the football reason in the words that justified it —
  * not a restatement of the sentence the app could already read.
  *
- * Two rows are deliberately awkward. `Chris Johnson` is a name two demo players
- * share, so it resolves to neither and lands in Review as a name to confirm —
- * which is what gives the review queue something real in it. `Silas Mbeki` is
- * scored twice with different numbers, which is a contradiction the importer
- * refuses to settle, so both go to Review as well.
+ * Two rows are deliberately awkward, because both failures are real and both
+ * have to be demonstrable. `Chris Johnson` is nobody in this league, so the
+ * importer refuses to guess and files the name for a person to confirm — which
+ * is what puts something in the identity queue. `Silas Mbeki` is scored twice
+ * with opposite numbers, which is a contradiction it also refuses to settle, so
+ * both halves are held back rather than one being preferred.
  */
 export const DEMO_TALLY = [
   'NEWSLETTER_TALLY_V1',
   'Marcus Vance | +2 | Named the starter: first-team reps all week and the goal-line back.',
   'Devin Okafor | -1 | Missed Wednesday with a hamstring; the beat writers expect a limited camp.',
   'Kai Brennan | +1 | Running with the ones in three-receiver sets, which is new.',
-  'Chris Johnson | +1 | Two demo players share this name, so it waits for a person.',
+  'Chris Johnson | +1 | Nobody in this league has this name, so it waits for a person.',
   'Silas Mbeki | +1 | Goal-line work is his again.',
   'Silas Mbeki | -1 | Same block, opposite call — a contradiction, not a decision.',
   'END_NEWSLETTER_TALLY',

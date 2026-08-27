@@ -1743,9 +1743,10 @@ function NewsletterHistory() {
                     <>
                       {(c.repairs ?? []).length > 0 ? (
                         <Notice tone="warn">
-                          This email had to be repaired before it could be read — it was stored
-                          before its encoding was decoded properly. Re-read it below to rebuild
-                          its news from the corrected text.
+                          This email arrived with its text encoded oddly and had to be repaired
+                          before it could be read. That repair is done every time it is copied, so
+                          Copy for ChatGPT still hands over clean readable text — nothing here
+                          needs fixing.
                         </Notice>
                       ) : null}
                       {/*
@@ -1961,11 +1962,13 @@ function ChatTallyPanel({
    */
   const replay = preview?.alreadyAppliedAt != null;
   const canApply = preview != null && preview.protocolOk && !replay;
-  const applyLabel = replay
-    ? 'Already applied'
-    : changes
-      ? `Process tally${ready.length > 0 ? ` (${ready.length})` : ''}`
-      : 'Nothing to add — mark this issue done';
+  const applyLabel = !preview?.protocolOk
+    ? 'Not a tally'
+    : replay
+      ? 'Already applied'
+      : changes
+        ? `Process tally${ready.length > 0 ? ` (${ready.length})` : ''}`
+        : 'Nothing to add — mark this issue done';
   const needsReview =
     (preview?.pending.length ?? 0) + (preview?.ambiguous.length ?? 0) + (preview?.unmatched.length ?? 0);
 
