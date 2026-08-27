@@ -611,10 +611,29 @@ if (leagueId) {
   // the correct answer for a league nothing has been synced for.
   const plan = await get(`/api/leagues/${encodeURIComponent(leagueId)}/plan`);
   check('/plan responds', plan.status === 200, `HTTP ${plan.status}`);
+  /*
+   * Byes, which are a fact read out of a stored fixture list.
+   *
+   * This asserted `available === false` — "bye planning names the input it does
+   * not have" — and that was the honest state for as long as it lasted: the
+   * ingest fetched a URL naming the release rather than the file inside it, so
+   * the 404 read as `not_published` and a fixture list was never once stored.
+   *
+   * With the ingest working the old assertion says the opposite of what it
+   * means, and would report a failure exactly when production is right. It is
+   * inverted here rather than widened to accept both states: a check that
+   * passes either way is worth nothing, and an assertion aimed at the half that
+   * was already correct is how the original fault survived a green suite.
+   *
+   * The note is matched too, not just the flag. They are written at the same
+   * place from the same row count, so a flag that says yes beside a note that
+   * says nothing has been ingested is a contradiction worth catching.
+   */
+  const byes = plan.json?.byes ?? {};
   check(
-    'bye planning names the input it does not have',
-    plan.json?.byes?.available === false && typeof plan.json?.byes?.note === 'string',
-    plan.json?.byes?.note ?? 'no note',
+    'bye planning is derived from the stored fixture list',
+    byes.available === true && typeof byes.note === 'string' && byes.note.includes('fixture list'),
+    byes.note ?? 'no note',
   );
   /*
    * Playoff weeks, and which of the two answers this is.
