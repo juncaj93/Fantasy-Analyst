@@ -437,10 +437,19 @@ The e2e specs run at 430, 390, 375 and 360, on WebKit in CI.
   `buildTransactionProfiles`, `buildTradeTendencies` and `readManagerTendencies`
   state the tendencies. Two seasons is a real sample and a thin one, which is
   why several readings on screen say so out loud rather than rounding up.
-- **`/api/leagues/:id/bench` and `/trades/ladder`** are served by the runtime
-  but are not yet consumed by any screen, so no scenario demonstrates them
-  visually. `/managers` is served with real profiles now, and is likewise not on
-  a screen.
+- **`/api/leagues/:id/trades/ladder`** is now both served and drawn. The runtime
+  route calls `buildLadderFor` and `buildLadder` — the same two functions the
+  deployed handler calls — over the scenario's own rosters, and the Trades
+  screen reaches it from a fold on the offer sheet and on a board row's trade
+  case. `partner.profile` is null there, deliberately and for the same reason
+  `/managers` answers `trade: null`: that field is the roster-keyed cached
+  profile a nightly backfill writes, a demo runs no backfill, and inventing one
+  would put a tendency on a manager nobody has measured. So the scenario shows
+  the thin-sample branch of the card, which is an honest demonstration rather
+  than a missing one.
+- **`/api/leagues/:id/bench`** is served by the runtime but is not yet consumed
+  by any screen, so no scenario demonstrates it visually. `/managers` is served
+  with real profiles now, and is likewise not on a screen.
 - **Demo fixtures are one league**: 12-team, half-PPR, 1QB, single flex. A
   superflex or best-ball scenario would need a second world; the format is
   already declared per scenario, so adding one is a fixture, not a change here.

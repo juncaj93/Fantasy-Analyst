@@ -22,6 +22,7 @@ import type { OfferEvaluation } from '../api.ts';
 import { DetailLabel } from './common.tsx';
 import { ReasonList, withoutRepeats } from './decisions.tsx';
 import { Sheet } from './native.tsx';
+import { TradeLadderFold } from './tradeLadder.tsx';
 
 /**
  * One idea, collapsed.
@@ -89,9 +90,28 @@ export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpe
  * opinion about which gesture wins. Nothing here is destructive, which is the
  * standing rule for what may live in one.
  */
-export function SmartTradeSheet({ offer, onClose }: { offer: OfferEvaluation; onClose: () => void }) {
+export function SmartTradeSheet({
+  offer,
+  leagueId,
+  onClose,
+}: {
+  offer: OfferEvaluation;
+  /** Null when no league is resolved, which is the one case with no ladder. */
+  leagueId: string | null;
+  onClose: () => void;
+}) {
   const reasons = withoutRepeats(offer.reasons);
   const caveats = withoutRepeats(offer.caveats, reasons);
+  /*
+   * The one player this offer is actually chasing, when there is exactly one.
+   *
+   * A ladder prices a named target against two rosters, so a package coming
+   * back the other way has no single answer to give it — and rather than
+   * pricing the first name and calling it the deal, a multi-player return
+   * simply has no price band. `offer.get` is what the user receives, which is
+   * the side a price is paid for.
+   */
+  const target = offer.get.length === 1 ? offer.get[0]! : null;
 
   return (
     <Sheet
@@ -186,6 +206,20 @@ export function SmartTradeSheet({ offer, onClose }: { offer: OfferEvaluation; on
         <div className="faint" style={{ marginTop: 8 }} data-testid="smart-trade-evidence">
           {evidenceLine(offer)}
         </div>
+
+        {/*
+          And where to open, settle and stop on the player being chased.
+
+          The offer above says a deal exists and is worth both sides' while; it
+          does not say what to lead with, and "make this exact swap" is not how
+          a trade conversation goes. The band comes from the same optimiser the
+          gains above do — see `components/tradeLadder.tsx` — and it is closed,
+          because it costs a second request and most readers of this sheet want
+          the case rather than the negotiation.
+        */}
+        {leagueId && target ? (
+          <TradeLadderFold leagueId={leagueId} playerId={target.playerId} testId="smart-trade-ladder" />
+        ) : null}
       </div>
     </Sheet>
   );
