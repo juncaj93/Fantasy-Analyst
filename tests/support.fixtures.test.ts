@@ -37,7 +37,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURE_DIR, FIXTURE_SUFFIX, canonicalSnapshotJson, fixturePath } from '../src/core/support/fixture.ts';
-import { readSnapshot, replayDraftSnapshot } from '../src/core/support/replay.ts';
+import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
 import { captureDraftSnapshot } from '../src/core/support/draftSnapshot.ts';
 import { buildDraftScenario } from '../src/core/demo/fixtures/draft.ts';
 import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
@@ -83,7 +83,7 @@ describe('the fixture converter', () => {
      * replay would skip exactly that.
      */
     const snapshot = readSnapshot(JSON.parse(raw));
-    const report = await replayDraftSnapshot(snapshot);
+    const report = await replaySnapshot(snapshot);
 
     expect(report.differences).toEqual([]);
     expect(report.outcome).toBe('reproduced');
@@ -127,9 +127,18 @@ describe('committed support fixtures', () => {
       const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
       const snapshot = readSnapshot(JSON.parse(raw));
 
-      it('replays to the board it was captured from', async () => {
-        const report = await replayDraftSnapshot(snapshot);
-        expect(report.differences).toEqual([]);
+      /*
+       * Through the dispatcher, not through one surface's adapter.
+       *
+       * A committed fixture is whatever somebody sent in, and by now that can be
+       * any of the six decisions — so the suite reads the kind off the file the
+       * way the CLI does. That is the whole of "there is no test to edit and
+       * nothing to register": a waiver plan dropped into this directory is
+       * replayed by the waiver adapter without a line changing here.
+       */
+      it('replays to the decision it was captured from', async () => {
+        const report = await replaySnapshot(snapshot);
+        expect(report.differences, report.summary).toEqual([]);
         expect(report.outcome).toBe('reproduced');
       });
 

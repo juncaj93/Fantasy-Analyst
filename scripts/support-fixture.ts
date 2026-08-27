@@ -30,7 +30,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { canonicalSnapshotJson, fixturePath } from '../src/core/support/fixture.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
-import { SnapshotRejected, type ReplayReport } from '../src/core/support/contract.ts';
+import { describeCount, SnapshotRejected, type ReplayReport } from '../src/core/support/contract.ts';
 import { DECISION_LABELS } from '../src/core/support/schema.ts';
 
 interface Args {
@@ -89,7 +89,7 @@ function printHuman(report: ReplayReport, file: string): void {
     `  engine         ${report.engine.captured}${report.engine.matches ? ' (unchanged)' : ` → ${report.engine.current} — MOVED`}`,
   );
   console.log(`  captured from  ${report.release.capturedSha}`);
-  console.log(`  compared       ${report.compared.map((c) => `${c.count} ${c.what}`).join(', ')}`);
+  console.log(`  compared       ${report.compared.map(describeCount).join(', ')}`);
 
   if (report.distillation.length > 0) {
     console.log('');

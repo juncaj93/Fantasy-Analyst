@@ -60,10 +60,23 @@ export interface ReplayDifference {
   replayed: unknown;
 }
 
-/** How much was compared, in the units of the surface being replayed. */
+/**
+ * How much was compared, in the units of the surface being replayed.
+ *
+ * `what` is the **plural** noun — `starting slots`, `claims`, `surfaced offers`
+ * — and a reader printing it drops the trailing `s` at a count of one. Every
+ * label used here pluralises regularly, which is a property of the labels rather
+ * than of English, and is the reason a three-line rule is enough.
+ */
 export interface ComparedCount {
   what: string;
   count: number;
+}
+
+/** `3 claims`, `1 claim`. */
+export function describeCount(entry: ComparedCount): string {
+  const noun = entry.count === 1 && entry.what.endsWith('s') ? entry.what.slice(0, -1) : entry.what;
+  return `${entry.count} ${noun}`;
 }
 
 export interface ReplayReport {

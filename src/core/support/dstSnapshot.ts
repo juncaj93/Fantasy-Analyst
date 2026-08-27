@@ -297,9 +297,15 @@ export async function replayDstSnapshot(snapshot: SupportSnapshot<DstPlanPayload
     engine: { captured: snapshot.release.engineVersion, current: DST_ENGINE_VERSION, matches: engineMatches },
     release: { capturedSha: snapshot.release.gitSha },
     compared: [
-      { what: 'rostered defences', count: inputs.roster.inputs.length },
-      { what: 'available defences', count: inputs.candidates.inputs.length },
-      { what: 'scheduled weeks read', count: inputs.reads.scheduleForTeams.reduce((n, e) => n + e.rows.length, 0) },
+      /*
+       * The roster and the wire as the planner received them, which is not the
+       * same as "the defences in them": the planner is handed the whole roster
+       * and the whole scan and does its own filtering, and a count that named
+       * only the defences would be describing a different input.
+       */
+      { what: 'roster players', count: inputs.roster.inputs.length },
+      { what: 'wire players', count: inputs.candidates.inputs.length },
+      { what: 'scheduled weeks', count: inputs.reads.scheduleForTeams.reduce((n, e) => n + e.rows.length, 0) },
     ],
     differences,
     distillation: [],
