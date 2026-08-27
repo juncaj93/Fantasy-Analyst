@@ -373,6 +373,80 @@ identical requests produce an identical board.
 
 ---
 
+## The ladder: what one named player costs
+
+The board answers *who is worth pursuing*. That is discovery, and it stops one
+question short of a conversation — nobody opens a trade by naming a player and
+saying nothing about the price.
+
+`GET /api/leagues/:id/trades/ladder?playerId=` is the second question, and
+`core/trades/ladder.ts` is the model behind it: where to open, the band inside
+which the deal is fair to both rosters, and the point past which winning the
+argument means losing the trade. It is a **separate request on purpose**. It
+runs the lineup optimiser four times — my roster with and without him, his
+owner's with and without him — and nobody wants that computed for sixty players
+they are not pursuing.
+
+### Where it is drawn
+
+Two places, and both of them are closed until asked:
+
+| surface | reached from | target |
+| --- | --- | --- |
+| the offer sheet | tapping a trade idea | the single player the offer receives |
+| the trade case | tapping a board row, in the market fold | that row's player |
+
+`components/tradeLadder.tsx` owns both, as one self-fetching fold. The request
+goes out on the first open and never on a screen's first paint, which is checked
+by counting it in `e2e/trade-ladder.spec.ts` rather than assumed.
+
+The fold is absent entirely where a ladder cannot exist: your own player has no
+partner to negotiate with, and a free agent is an add rather than a trade — the
+endpoint says so itself instead of 404ing, and the screen respects that by not
+drawing a control whose answer is already known. An offer whose return is a
+*package* also gets none: a ladder prices a named target, and pricing the first
+name in a package and calling it the deal would be a fabrication.
+
+### What it may say about the partner, and what it may not
+
+The rule of [§2 above](#2-unknown-is-never-inactivity), in the form a UI is
+likeliest to break it. `partnerRead` in `tradeLadder.tsx` is the gate, and it is
+a pure function with a test for exactly that reason:
+
+- **the name is a fact** and is printed whenever Sleeper has named the seat.
+  Never a stand-in like `Roster 4`;
+- **below `MIN_TRADE_SAMPLE` nothing is claimed.** No headline, no notes. What
+  the reader gets instead is one sentence about the *evidence* — no profile has
+  been built, or no completed trade is on record, or the count is too thin —
+  which is a fact rather than a read;
+- **above it the sentences are the profile's own**, unedited.
+  `core/managers/tradeProfile.ts` already decides which are supportable and
+  already ends them with the sample they rest on; a second opinion here would be
+  a second thing to keep honest.
+
+This is the case a league is in **on the night its draft ends**, which is when
+the feature has to be correct rather than merely available: rosters are set, the
+ladder prices perfectly well, and there is not one completed trade in the room.
+Every manager is unmeasured rather than inactive, and the card says so.
+
+The engine applies the same rule to its own reasons. `buildLadder` widens the
+opening discount only for a partner whose negotiation style is *known*, and
+`prefersConsolidation` is false until the profile is confident — so a thin
+sample changes no number, not just no sentence.
+
+### Units
+
+Weekly starting-lineup points, from the same optimiser the Team screen draws and
+the same one the offers above are scored in. There is no separate trade currency
+to keep in step with anything, and the card names the unit rather than printing
+bare figures — §15's rule about unexplained numbers applies to a price band as
+much as to a composite.
+
+Nothing on this surface sends a trade, opens a chat, or names a price to anybody
+but the reader. `advisory: 'never auto-sent'` is a field on the response.
+
+---
+
 ## Activation: nothing switches this on
 
 There is no Smart Trades activation step, and that is a design decision rather

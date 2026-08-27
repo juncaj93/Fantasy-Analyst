@@ -804,7 +804,12 @@ position. Starters and reserve-slot players are never offered as drops.
 do-not-exceed, anchored between what the player costs his current owner and what
 he is worth to you. `ladderIsOrdered` is the invariant, and a trade that creates
 no surplus is reported as blocked rather than dressed up with a band a
-millimetre wide.
+millimetre wide. It reaches the reader through `web/components/tradeLadder.tsx`,
+a self-fetching fold on the offer sheet and on a board row's trade case — closed
+by default, because the endpoint runs the lineup optimiser four times and
+nothing on a screen's first paint may pay for that. The sample gate on what the
+card may say about the partner is `partnerRead` in the same file; see
+`SMART_TRADES.md`.
 
 `core/trades/consolidation.ts` deliberately has no house view. It measures
 startable depth, existing fragility, the lineup gain and how late it is, and

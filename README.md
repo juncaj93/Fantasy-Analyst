@@ -253,7 +253,12 @@ for exactly that number.
 
 Beyond the waiver row: bilateral **trade fits** — deals scored separately for
 what you gain, what the partner gains and whether that manager plausibly says
-yes, because a deal that is fair and implausible is a deal nobody sends.
+yes, because a deal that is fair and implausible is a deal nobody sends. Behind
+one tap on any of them, a **price band** for the player being chased: where to
+open, the zone inside which both rosters gain, and the point past which you have
+paid more than he is worth to you — with whatever this league's own history
+supports saying about the manager holding him, and nothing at all when it
+supports nothing.
 **Bye and playoff planning**, which stays silent until a bye actually leaves a
 slot short and gives December schedules no weight until the season says the team
 is heading there. And a **decision feed** that reports something only when a

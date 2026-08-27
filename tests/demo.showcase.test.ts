@@ -278,8 +278,8 @@ interface SmartTradesBody {
   found: boolean;
   offers: {
     partner: { displayName: string; userId: string | null };
-    give: { name: string; position: string }[];
-    get: { name: string; position: string }[];
+    give: { playerId: string; name: string; position: string }[];
+    get: { playerId: string; name: string; position: string }[];
     fairness: { label: string };
     headline: string;
     reasons: string[];
@@ -324,7 +324,69 @@ describe('the trade showcase', () => {
     /* The wider board still exists — it is what `Explore the market` opens. */
     expect(market.suggestions.length).toBeGreaterThan(10);
   });
+
+  /**
+   * And what the player an offer is chasing would actually cost.
+   *
+   * The ladder is a second request behind a fold on the offer's own sheet, and
+   * Demo Mode answers it through the same two functions the deployment calls —
+   * four lineup passes and then `buildLadder`. What is asserted is the
+   * relationship the engine guarantees, not a figure: a fixture restated is a
+   * test that passes with the engine removed.
+   */
+  it('prices the player an offer is chasing, through the real ladder', async () => {
+    const board = await get<SmartTradesBody>('trade-window', '/api/trades/smart');
+    const target = board.offers[0]!.get[0]!;
+    const body = await get<LadderBody>('trade-window', `${LEAGUE}/trades/ladder?playerId=${target.playerId}`);
+
+    expect(body.found).toBe(true);
+    expect(body.target.playerId).toBe(target.playerId);
+    expect(body.partner.rosterId).toBeGreaterThan(0);
+    expect(body.ladder.advisory).toBe('never auto-sent');
+    if (!body.ladder.blocked) {
+      expect(body.ladder.opening).toBeLessThanOrEqual(body.ladder.fair.low);
+      expect(body.ladder.fair.low).toBeLessThanOrEqual(body.ladder.fair.high);
+      expect(body.ladder.fair.high).toBeLessThanOrEqual(body.ladder.doNotExceed);
+    }
+  });
+
+  /**
+   * And it claims nothing about the partner it cannot back.
+   *
+   * `profile` here is the *roster-keyed cached profile* a nightly backfill
+   * writes; a demo runs no backfill and stores nothing, so it is null — the same
+   * answer, for the same reason, that `/api/leagues/:id/managers` already gives.
+   * The card above it prints the manager's name and says the sample is missing,
+   * rather than describing a manager nobody has measured.
+   */
+  it('offers no cached tendency for a manager no backfill has read', async () => {
+    const board = await get<SmartTradesBody>('trade-window', '/api/trades/smart');
+    const target = board.offers[0]!.get[0]!;
+    const body = await get<LadderBody>('trade-window', `${LEAGUE}/trades/ladder?playerId=${target.playerId}`);
+    expect(body.partner.profile).toBeNull();
+  });
+
+  /** A player nobody rosters is an add, and saying so beats a 404. */
+  it('calls an unrostered player an add rather than failing the request', async () => {
+    const body = await get<LadderBody>('trade-window', `${LEAGUE}/trades/ladder?playerId=nobody-holds-him`);
+    expect(body.found).toBe(false);
+    expect(body.reason).toContain('an add, not a trade');
+  });
 });
+
+interface LadderBody {
+  found: boolean;
+  reason?: string;
+  partner: { rosterId: number; ownerName: string | null; profile: unknown };
+  target: { playerId: string; name: string };
+  ladder: {
+    opening: number;
+    fair: { low: number; high: number };
+    doNotExceed: number;
+    blocked: string | null;
+    advisory: string;
+  };
+}
 
 describe('the player showcase', () => {
   it('asks for no portrait anywhere in a demo, and falls back deterministically', async () => {

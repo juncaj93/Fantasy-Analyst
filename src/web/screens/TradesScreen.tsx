@@ -33,6 +33,7 @@ import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
+import { TradeLadderFold } from '../components/tradeLadder.tsx';
 import { unwindOne } from '../tabReset.ts';
 
 export function TradesScreen({ resetNonce }: { resetNonce: number }) {
@@ -178,7 +179,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}
         backLabel="Trades"
         onBack={() => setFull(false)}
-        context={<TradeCase suggestion={open} />}
+        context={<TradeCase suggestion={open} leagueId={board.league?.id ?? null} />}
       />
     );
   }
@@ -395,14 +396,20 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         would be two competing drag targets, which is exactly the arbitration
         this screen must not regress.
       */}
-      {offer ? <SmartTradeSheet offer={offer} onClose={() => setOpenOffer(null)} /> : null}
+      {offer ? (
+        <SmartTradeSheet
+          offer={offer}
+          leagueId={smart?.league?.id ?? board.league?.id ?? null}
+          onClose={() => setOpenOffer(null)}
+        />
+      ) : null}
 
       {open && !full ? (
         <PlayerSheet
           player={{ id: open.playerId, name: open.name, position: open.position, team: open.team }}
           onClose={() => setOpenId(null)}
           onOpenFull={() => setFull(true)}
-          context={<TradeCase suggestion={open} />}
+          context={<TradeCase suggestion={open} leagueId={board.league?.id ?? null} />}
         />
       ) : null}
 
@@ -542,8 +549,14 @@ function holderOf(suggestion: TradeSuggestion): string {
  * a reader who tapped the row is already looking — and nothing is lost on the
  * way: the reasons, the counterpoints, what this league paid for him, and how
  * much evidence is behind all of it.
+ *
+ * And, at the bottom and closed, what he would actually cost. The board answers
+ * *who is worth pursuing* and stops there; the price band, the manager holding
+ * him and whether a package suits this roster are the next question, they are
+ * an extra request that prices four lineups, and a reader who is only skimming
+ * the case should not pay for them. See `components/tradeLadder.tsx`.
  */
-function TradeCase({ suggestion }: { suggestion: TradeSuggestion }) {
+function TradeCase({ suggestion, leagueId }: { suggestion: TradeSuggestion; leagueId: string | null }) {
   const w = suggestion.windows;
   const reasons = withoutRepeats(suggestion.reasons);
   const counterpoints = withoutRepeats(suggestion.counterpoints, reasons);
@@ -589,6 +602,18 @@ function TradeCase({ suggestion }: { suggestion: TradeSuggestion }) {
       <div className="faint" style={{ marginTop: 8 }}>
         {w.itemsLifetime} news item{w.itemsLifetime === 1 ? '' : 's'} in total, {w.items30} in the last 30 days.
       </div>
+
+      {/*
+        Only for a player somebody else actually holds.
+
+        A ladder needs two rosters. Your own player has no partner to negotiate
+        with and a free agent is an add rather than a trade — the endpoint says
+        so itself rather than 404ing, and the honest place to respect that is
+        here, by not drawing a control whose answer is already known.
+      */}
+      {leagueId && suggestion.ownership === 'other' ? (
+        <TradeLadderFold leagueId={leagueId} playerId={suggestion.playerId} />
+      ) : null}
     </div>
   );
 }

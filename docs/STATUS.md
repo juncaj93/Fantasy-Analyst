@@ -886,6 +886,8 @@ drawn anywhere — Trades is still a discovery list, and a negotiation surface i
 its own design problem. Manager profiles are served and cached but likewise
 unrendered; the ladder consumes them internally to set its opening discount.
 Both are complete, tested and reachable, and both are honestly one screen short.
+*(Superseded — see **The negotiation surface, drawn** at the end of this file.
+Both are on screen now, behind a fold on the offer sheet and on the trade case.)*
 
 Checks at this milestone: 1,814 unit/integration tests (92 new) and 801 browser
 checks after integrating the draft-board work from main, typecheck and build all
@@ -3246,6 +3248,90 @@ on the app JavaScript chunk, 130.6 kB to 131.2 kB against 140.0 kB. CSS 14.3 kB
 against 20.0 kB, first paint 147.0 kB against 160.0 kB, Demo Mode unchanged at
 149.0 kB against 150.0 kB.
 
+## The negotiation surface, drawn
+
+**What this lane is, and what it is not.** `GET
+/api/leagues/:id/trades/ladder?playerId=` and the manager profiles behind it
+have been complete, tested and reachable since the milestone above, and nothing
+drew them — the paragraph a few hundred lines up called them "honestly one
+screen short". This is that screen. **No scoring model changed.** Not the
+ladder, not the consolidation read, not the trade board, not manager fit. Every
+number the card prints arrives on the wire already computed; the diff to
+`core/` is one route in the Demo Mode router.
+
+**Two ways in, and both closed.** The endpoint runs the lineup optimiser four
+times — your roster with and without him, his owner's with and without him — so
+it is not something a screen may fetch while a reader is skimming. It is a fold
+that fetches on its first open and never again, reachable from the offer sheet
+(for the single player an offer receives) and from the trade case on a board row
+in the market fold. That the request does not go out before the tap is *counted*
+in `e2e/trade-ladder.spec.ts`, not assumed.
+
+The fold is absent where a ladder cannot exist: your own player has no partner,
+a free agent is an add rather than a trade, and an offer whose return is a
+package has no single named target to price. Pricing the first name in a package
+and calling it the deal would have been a fabrication.
+
+**The rungs are the engine's numbers, at the screen's precision.** Open at, the
+fair band, stop at — read off `opening`, `fair` and `doNotExceed` rather than off
+the response's flattened `rungs` array, whose fair entry is its lower bound with
+the upper one written into a sentence. A card that read the band back out of
+prose would be a screen parsing its own server. A *blocked* ladder draws no rungs
+at all: `blockedLadder` returns zeros in every numeric field precisely because
+none of them mean anything, and `Open at 0 pts` over a player who is not for sale
+is worse than the sentence saying why.
+
+**The part that had to be right: silence.** This is a screen the owner wants live
+the moment his draft ends, and a league whose draft ended last night has no
+completed trade in it. Every manager in it is *unmeasured*, not *inactive* — the
+distinction §10 calls the standing principle, and the one a UI is likeliest to
+collapse by printing "rarely trades" over an empty sample.
+
+So the gate is a pure function, `partnerRead`, with a test rather than three
+conditionals inside a component. The manager's *name* is printed whenever Sleeper
+has it, because that is a fact and it is the fact the whole screen exists for —
+a trade is a conversation with a person. Below `MIN_TRADE_SAMPLE` nothing else is
+said: no headline, no notes, and in their place one sentence about the evidence
+(no profile built, no completed trade on record, or a count too thin to describe
+a tendency). Above it the sentences are `tradeProfile.ts`'s own, unedited,
+because that module already decides which are supportable and already ends them
+with the sample they rest on.
+
+`tests/trades.ladderView.test.ts` walks every sample size below the threshold and
+asserts the output contains none of `usually`, `rarely`, `often`, `prefers`,
+`history of`, `buying`, `selling`, `trades about` — the vocabulary rather than a
+string, so a future edit that decides a helpful hint is worth it at three trades
+fails here. The browser suite makes the same claim from the reader's side at
+samples of zero and three.
+
+**Demo Mode answers it for real.** `runtime/handlers.ts` calls `buildLadderFor`
+and `buildLadder`, the same two functions the deployed handler calls, over the
+scenario's own rosters. `partner.profile` is null there — the same answer, for
+the same reason, that `/api/leagues/:id/managers` already gives: that field is
+the roster-keyed cached profile a nightly backfill writes, a demo runs no
+backfill, and a fabricated one would put a tendency on a manager nobody has
+measured. Which means the demo happens to show the thin-sample branch, honestly.
+
+**Zero new CSS.** The rungs reuse `.weekly-lines` / `.weekly-line`, which is the
+same grammar the offer sheet's own lines already use — a negotiation card that
+invented a second way to draw a label and a reading would have been a second
+thing to keep aligned.
+
+**Budgets.** Measured after merging the near-duplicate lane above, so these are
+the numbers as the branch actually stands rather than as it stood alone: app
+JavaScript 132.4 kB against 140.0 kB, CSS 14.3 kB unchanged, first paint 148.2 kB
+against 160.0 kB. This lane's own share of the render path is +1.2 kB — the fold,
+the rung formatter and the sample gate — measured against its own base before the
+merge; no engine crossed into the entry chunk, because every number the card
+draws arrives on the wire already computed. Demo Mode 150.8 kB
+against a ceiling **raised from 150 kB to 156 kB in this commit**, deliberately
+and with the reason recorded in `perf-budgets.json`: the demo route pulls
+`core/trades/ladder.ts`, `ladderInputs.ts` and the consolidation read into that
+chunk for ~1.8 kB, and at 150 kB it had 1.0 kB of headroom left — a ceiling the
+next unrelated commit would have failed against. The alternative was a Demo Mode
+whose new fold answers with an error, or a second ladder written for the demo,
+and this repository does not keep two of a model honest.
+
 ## Milestone — the card's body stops answering a question it cannot answer in time (done)
 
 The expanded player card still would not scroll on the owner's iPhone after the
@@ -3335,10 +3421,9 @@ genuinely nothing under the finger to move, which the draft card never suffers
 because its expansion sits inside a board that is already scrolling.
 
 No budget raised, and the change is a net deletion. Measured on the merged head
-against `46b8098`, which is the base this landed on: app JavaScript **134.7 kB**
-against a 140.0 kB ceiling (−0.2 kB), everything the browser must fetch
-**150.7 kB** against 160.0 kB (−0.3 kB), CSS **14.4 kB** against 20.0 kB and
-Demo Mode's lazy chunks **149.0 kB** against 150.0 kB, both unchanged. (Before
-the merge, against `9b271a4`, the same deletion read 130.4 kB of app JavaScript
-and 146.2 kB of first paint; Mock Draft is the difference between the two
-baselines, not this change.)
+against `1ec8618`, the base it landed on: app JavaScript **135.9 kB** against a
+140.0 kB ceiling (−0.2 kB), everything the browser must fetch **151.9 kB**
+against 160.0 kB (−0.2 kB), CSS **14.4 kB** against 20.0 kB and Demo Mode's lazy
+chunks **150.9 kB** against 156.0 kB, both unchanged. The same deletion measured
+0.2 kB against `9b271a4` and against `46b8098` as well; Mock Draft and the trade
+ladder are the difference between those baselines, not this change.
