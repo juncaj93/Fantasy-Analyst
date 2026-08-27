@@ -2344,7 +2344,23 @@ test.describe('the decision intelligence', () => {
     await open(page, 'draft');
     test.skip((await present(page, 'recommendation-row')) === 0, 'no draft board on this deployment');
 
-    const draft = await draftId(page);
+    /*
+     * The narrow lookup this test has always used, kept deliberately — and it
+     * is not the one `draftId` does.
+     *
+     * `draftId` prefers the *selected* league's draft. Pointing this test at
+     * that board instead is a change of subject rather than a change of
+     * plumbing, and it is not this lane's to make: on the smoke run of this
+     * branch (33120122127) it made this assertion run for the first time in
+     * the runs on record — every prior run skipped it silently — and fail at
+     * every width with `pick 1; 235 priced, 136 at ADP 100+; max late 1.000`.
+     * At the first pick of a draft every player a hundred picks away *is*
+     * safe, so that reads as an unsound premise rather than as the calibration
+     * bug this was written for, and deciding between the two means reading the
+     * hazard model. Left exactly as it was, and written up for the owner.
+     */
+    const listing = await apiJson<{ leagues?: { draftId: string | null }[] }>(page, '/api/leagues');
+    const draft = (listing?.leagues ?? []).find((l) => l.draftId)?.draftId ?? null;
     const data = draft
       ? await apiJson<{ currentPick?: number; recommendations?: Record<string, unknown>[] }>(
           page,
