@@ -49,7 +49,7 @@ import {
   rehydrateLeagueRules,
   rehydrateStartSitInputs,
 } from './inseason.ts';
-import { countPositions, summariseFreshness } from './freshness.ts';
+import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import {
   classifyOutcome,
   compareStructural,
@@ -201,6 +201,7 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
 
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
+  compareFreshness(snapshot.decision.freshness, [rehydrateStartSitInputs(inputs.startSit)], differences);
   /*
    * The two claims worth naming separately, on top of the structural walk.
    *

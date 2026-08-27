@@ -53,13 +53,26 @@ beforeAll(async () => {
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** `npm run support:fixture -- …`, without npm in the way. */
-async function cli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+const SCRIPT = join(ROOT, 'scripts', 'support-fixture.ts');
+
+/**
+ * `npm run support:fixture -- …`, without npm in the way.
+ *
+ * `cwd` defaults to a scratch directory rather than the repository, and that is
+ * not a detail. `--write` resolves `tests/fixtures/support/` against the working
+ * directory by design — there is one place a committed case lives and the CLI
+ * does not take a second — so a test run from the repository root writes into
+ * the *tracked* directory, where `support.fixtures.test.ts` is reading in
+ * parallel. That is a flake and it is also how a 380kB demo capture once reached
+ * a commit. Snapshots are read by absolute path, so the working directory
+ * changes nothing else.
+ */
+async function cli(args: string[], cwd = scratch): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await run(
       process.execPath,
-      ['--experimental-transform-types', '--no-warnings', 'scripts/support-fixture.ts', ...args],
-      { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 },
+      ['--experimental-transform-types', '--no-warnings', SCRIPT, ...args],
+      { cwd, maxBuffer: 64 * 1024 * 1024 },
     );
     return { code: 0, stdout, stderr };
   } catch (err) {
@@ -102,32 +115,24 @@ describe('npm run support:fixture', () => {
     expect(result.stderr).toContain('schema_unsupported');
   }, 120_000);
 
-  it('writes a fixture that the fixture suite then reads without being told about it', async () => {
-    /*
-     * Into the repository's own fixture directory, and removed again.
-     *
-     * `--write` resolves against `FIXTURE_DIR` by design — there is one place a
-     * committed case lives and the CLI does not take a second — so the honest
-     * way to exercise it is to write there and clean up. The file is
-     * demo-derived and must never be committed; see the policy note in
-     * `core/support/fixture.ts`.
-     */
-    const name = 'cli-round-trip-scratch';
-    const written = join(ROOT, 'tests', 'fixtures', 'support', `${name}${FIXTURE_SUFFIX}`);
-    try {
-      const result = await cli([files.get('dst-plan')!, '--write', name]);
-      expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain(`wrote tests/fixtures/support/${name}${FIXTURE_SUFFIX}`);
+  it('writes a canonical fixture that replays as the fixture suite would replay it', async () => {
+    const name = 'cli-round-trip';
+    const result = await cli([files.get('dst-plan')!, '--write', name]);
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain(`wrote tests/fixtures/support/${name}${FIXTURE_SUFFIX}`);
 
-      const raw = readFileSync(written, 'utf8');
-      expect(raw.endsWith('\n'), 'a fixture is canonical on disk').toBe(true);
-      /* And it replays, which is what the committed-fixture suite would do. */
-      const replayed = await cli([written]);
-      expect(replayed.code).toBe(0);
-      expect(replayed.stdout).toContain('outcome        reproduced');
-    } finally {
-      rmSync(written, { force: true });
-    }
+    const written = join(scratch, 'tests', 'fixtures', 'support', `${name}${FIXTURE_SUFFIX}`);
+    const raw = readFileSync(written, 'utf8');
+    expect(raw.endsWith('\n'), 'a fixture is canonical on disk').toBe(true);
+    /*
+     * And it replays *after* canonicalisation, which sorts keys at every depth.
+     * That is not a formality: a comparison that serialised both sides would
+     * report every canonical fixture as a difference, because `JSON.stringify`
+     * depends on key insertion order. This is the test that found it.
+     */
+    const replayed = await cli([written]);
+    expect(replayed.code, `${replayed.stdout}\n${replayed.stderr}`).toBe(0);
+    expect(replayed.stdout).toContain('outcome        reproduced');
   }, 180_000);
 
   /** A copy of a snapshot with one value changed, written to the scratch dir. */

@@ -20,6 +20,7 @@
  */
 
 import { normalizeDesignation } from '../injury/model.ts';
+import { compareStructural, type ReplayDifference } from './contract.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import type { InSeasonFreshness } from './payloads.ts';
@@ -120,4 +121,60 @@ export function countPositions(inputs: readonly StartSitInput[]): Record<string,
     counts[position] = (counts[position] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * The freshness block, re-derived from the rehydrated inputs and compared.
+ *
+ * Without this the section is decorative: it is written at capture and read by a
+ * human, and nothing ever checks that it still describes the inputs beside it.
+ * That matters because the three counts it derives — priced, availability,
+ * players with no game — are the ones a diagnosis leans on *before* reading a
+ * single number, and they are derived from fields no score touches. A round trip
+ * that lost every injury state would produce an identical lineup and a freshness
+ * block claiming a roster nobody had published on. This is the term that catches
+ * it.
+ *
+ * The measured halves — the market's own age, Sleeper's published week, the
+ * count of unresolved roster spots — are taken from the captured block rather
+ * than re-measured, because they are facts about a database the replay cannot
+ * reach. Comparing those against themselves would be theatre; the derived counts
+ * are the claim.
+ */
+export function compareFreshness(
+  captured: InSeasonFreshness,
+  inputs: readonly (readonly StartSitInput[])[],
+  into: ReplayDifference[],
+): void {
+  const replayed = summariseFreshness({
+    inputs,
+    props: captured.props,
+    nflState:
+      captured.nflState == null
+        ? null
+        : ({
+            season: captured.nflState.season,
+            week: captured.nflState.week,
+            seasonType: captured.nflState.seasonType,
+          } as NflState),
+    unknownPlayers: captured.unknownPlayers,
+  });
+
+  /*
+   * Compared by path rather than by serialising both sides.
+   *
+   * `JSON.stringify` on an object depends on key insertion order, and a
+   * committed fixture has been through `canonicalSnapshotJson`, which sorts keys
+   * at every depth. A string comparison therefore reported every canonicalised
+   * fixture as a freshness difference while the counts were identical — and it
+   * did so on the one path where a false alarm is most expensive, because a
+   * fixture that stops reproducing reads as a regression.
+   */
+  for (const [term, a, b] of [
+    ['freshness.priced', captured.priced, replayed.priced],
+    ['freshness.injury', captured.injury, replayed.injury],
+    ['freshness.withoutGame', captured.withoutGame, replayed.withoutGame],
+  ] as const) {
+    compareStructural(term, a, b, into);
+  }
 }

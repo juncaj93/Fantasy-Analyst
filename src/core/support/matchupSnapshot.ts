@@ -53,7 +53,7 @@ import {
   rehydrateRosters,
   rehydrateStartSitInputs,
 } from './inseason.ts';
-import { countPositions, summariseFreshness } from './freshness.ts';
+import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { MatchupPayload } from './payloads.ts';
@@ -375,6 +375,7 @@ export async function replayMatchupSnapshot(snapshot: SupportSnapshot<MatchupPay
 
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
+  compareFreshness(snapshot.decision.freshness, [rehydrateStartSitInputs(snapshot.decision.inputs.startSit)], differences);
 
   /*
    * The four claims the Matchup lane exists to hold, named separately.

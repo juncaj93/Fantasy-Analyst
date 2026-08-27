@@ -60,7 +60,7 @@ import {
   rehydrateStartSitInputs,
 } from './inseason.ts';
 import { capturePlayer, rehydratePlayer } from './players.ts';
-import { countPositions, summariseFreshness } from './freshness.ts';
+import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import { recordDstSources, snapshotDstSources } from './dstSnapshot.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
@@ -342,6 +342,7 @@ export async function replayWaiverSnapshot(
 
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
+  compareFreshness(snapshot.decision.freshness, [roster, candidates], differences);
 
   /*
    * The claims, named as claims.

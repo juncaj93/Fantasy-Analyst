@@ -50,7 +50,7 @@ import {
   rehydrateLeagueRules,
   rehydrateStartSitInputs,
 } from './inseason.ts';
-import { countPositions, summariseFreshness } from './freshness.ts';
+import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { DstPlanPayload, DstReads } from './payloads.ts';
@@ -280,8 +280,11 @@ export async function replayDstSnapshot(snapshot: SupportSnapshot<DstPlanPayload
     now: new Date(Date.parse(snapshot.capturedAt)),
   });
 
+  const roster = rehydrateStartSitInputs(inputs.roster);
+  const candidates = rehydrateStartSitInputs(inputs.candidates);
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
+  compareFreshness(snapshot.decision.freshness, [roster, candidates], differences);
   exact('decision', 'the defence', output?.decision ?? null, replayed?.decision ?? null, differences);
   exact('target', 'the defence', output?.target?.team ?? null, replayed?.target?.team ?? null, differences);
   exact('surface', 'the defence', output?.surface ?? null, replayed?.surface ?? null, differences);

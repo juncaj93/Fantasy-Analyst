@@ -46,7 +46,7 @@ import {
   rehydrateLeagueRules,
   rehydrateStartSitInputs,
 } from './inseason.ts';
-import { countPositions, summariseFreshness } from './freshness.ts';
+import { compareFreshness, countPositions, summariseFreshness } from './freshness.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
 import type { TradeOfferPayload } from './payloads.ts';
@@ -226,6 +226,7 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
 
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
+  compareFreshness(snapshot.decision.freshness, [rehydrateStartSitInputs(inputs.pool)], differences);
 
   /*
    * The offers, named as offers.
