@@ -1,0 +1,69 @@
+name: Refresh derived tallies
+
+# Rebuild `player_signal_cache` from the evidence ledger.
+#
+# The cache is derived, and the app rewrites it whenever a player's evidence
+# changes *through the app*. It does not cover a change made underneath — a
+# migration that retires rows by provenance, which is what
+# `0034_newsletter_awaits_a_tally.sql` does. Those rows stop counting in the
+# ledger immediately, and a quiet player keeps a lifetime total that still
+# includes them until something else touches him, which could be never.
+#
+# So this is the one required step after that migration, and it is written to be
+# safe at any other time: it reads the ledger and rewrites what is derived from
+# it. Running it twice gives the same numbers as running it once, and running it
+# on a healthy database changes nothing at all.
+#
+# Recomputing the cache inside the migration was the alternative, and it would
+# have put a second copy of the aggregation rules in SQL — the day the two
+# disagreed, nobody could say which was right.
+#
+# By hand only. There is no schedule: this answers a question that only arises
+# after a migration has moved the ledger.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: One line, for the run summary
+        required: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://fantasy-analyst.juncaj93.workers.dev
+    steps:
+      - name: What is live, before
+        run: |
+          set -uo pipefail
+          curl -s "$URL/api/health" -o /tmp/health.json
+          node -e "
+            const h = JSON.parse(require('fs').readFileSync('/tmp/health.json','utf8'));
+            console.log('production revision:', h.release?.gitSha ?? 'unknown');
+          "
+
+      - name: Refresh
+        env:
+          PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          set -uo pipefail
+          login=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/api/auth/login" \
+            -H 'content-type: application/json' \
+            --data-binary @<(node -e 'process.stdout.write(JSON.stringify({passphrase: process.env.PASSPHRASE}))') \
+            -c /tmp/c.txt)
+          [ "$login" = "200" ] || { echo "::error::could not unlock ($login)"; exit 1; }
+
+          code=$(curl -s -o /tmp/r.json -w '%{http_code}' \
+            -X POST "$URL/api/maintenance/refresh-signals" -b /tmp/c.txt)
+          [ "$code" = "200" ] || { echo "::error::refresh failed ($code)"; cat /tmp/r.json; exit 1; }
+
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('/tmp/r.json','utf8'));
+            if (r.error) { console.log('::error::' + r.error); process.exit(1); }
+            console.log(r.detail);
+            const summary = require('fs');
+            summary.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              ['### Derived tallies rebuilt', '', r.detail, '',
+               '_Reason:_ ${{ inputs.reason }}', ''].join('\n'));
+          "
