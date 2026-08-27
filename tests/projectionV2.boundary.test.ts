@@ -157,6 +157,17 @@ describe('no live surface can render a Projection v2 number', () => {
         'server/services/projectionV2Service.ts',
         'server/services/nflverseService.ts',
         'server/repos/nflverse.ts',
+        /*
+         * Data Health, which reads `NflverseService.health()` and nothing else.
+         *
+         * The rule being guarded is that no live surface renders a Projection
+         * v2 number. `health()` returns row counts, week numbers and ingest
+         * outcomes — how much of the three nflverse feeds landed and when — and
+         * carries no projection, no player and no score. The Data Health row it
+         * feeds says `Snaps and depth charts — Current · 6h ago`, which is a
+         * statement about a pipeline rather than about football.
+         */
+        'server/services/dataHealthService.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );
     const offenders = sourceFiles(ROOT).filter((file) => {

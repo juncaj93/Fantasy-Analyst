@@ -2843,3 +2843,96 @@ App JavaScript +0.5 kB gzipped, CSS byte-identical, Demo Mode's lazy chunk
 +5.6 kB with 4.2 kB of headroom left. No budget raised, and the replay machinery
 reaches no browser chunk at all.
 
+
+## Milestone — whether what it knew was healthy and current (done)
+
+Support Snapshot made a decision reproducible. It could not say whether the state
+it captured was any good — and that is the other half of every diagnosis. A
+lineup built on Wednesday's betting line, an injury report that has not published
+for this week, and a manager ledger that yielded its subrequests to the injury
+check all produce the same complaint and need three different answers. Getting
+those answers meant opening Cloudflare's tail, the Actions tab and D1.
+
+**One row, one screen.** Setup → This app → **Data health**, directly above Copy
+support snapshot, saying `Healthy · refreshed 18 min ago` or `2 inputs need
+attention`. Behind it: the overall state, what needs attention when anything
+does, twelve compact input rows, and what the last scheduled refresh actually
+did. Exact instants, outcome codes and subrequest counters live behind
+**Technical details**, folded. Never in the taskbar.
+
+**`not_published` is not a failure, and this is where that stops being a
+convention.** The ingests have recorded `ok | not_published | failed` for a long
+time, and until now nothing read the middle word: a preseason 404 and a dead
+pipeline reached a screen the same way. A source with nothing to say is `Waiting
+on source`, is not counted as needing attention, and takes the neutral mark
+rather than the warning one.
+
+**Last attempt and last success, kept apart for every source alike.** The state a
+single "updated N ago" hides is a five-minute check running happily while four
+consecutive ingests have died — and its mirror image, data that is fine today
+only because it was fetched before the pipeline stopped. Both are reported, and
+neither is inferred from the other.
+
+**Nothing recorded the scheduler.** `scheduled()` wrote its outcome to
+`console.log`, which lives in Cloudflare's tail for as long as somebody is
+watching. `cron_run_state` is **one row per cron expression, overwritten in
+place** — three rows, for ever, because §14 asks for a current view and not a
+monitoring history. The five-minute injury tick is deliberately not written
+there: `injury_source_state.checked_at` already says whether it ran, and a second
+copy could only ever disagree with the first.
+
+**The cron was not rearranged to get it.** Every feed was already in its own
+`try`/`catch` so one dead provider could not take down the ten under it;
+`CronRunRecorder.step` *is* that catch with the outcome kept instead of
+discarded. Order, priority and the separate-catch rule are unchanged — this lane
+observes the schedule rather than redesigning it, and four structural tests that
+used to read the inline `try {` now read the recorded step.
+
+**Deferral is an outcome, not a failure.** `Manager tendencies — Deferred ·
+background`, with `Refresh budget reserved for higher-priority data (48/48
+already spent)` beneath it. An allowance-bound batch counts too: it advanced as
+far as its slice of the pool allowed and stopped with checkpoints intact, which
+is the steady state of a backfill's first few days, and calling it a success
+would hide from somebody reading a thin `Next%` that there is more to come. The
+budget numbers are the transport's own — retries and redirect hops included — and
+the two weekend clocks report `null` rather than three zeroes, because a clock
+with no ceiling has no counter to invent.
+
+**No stale constant reached a component.** Nearly every window is imported from
+the module that already owns it — the injury layer's own `FRESHNESS_HOURS.fresh`,
+Setup's `VEGAS_STALE_HOURS`, the season market's `SEASON_TTL_MINUTES`, the season
+resolver's `STATE_STALE_AFTER_DAYS` — so the screen and the engine it describes
+cannot disagree. Two thresholds are genuinely new, and both answer a question no
+existing rule answers: *has the pipeline stopped running*, as opposed to *is the
+data old*. Both are boundary-tested, inclusive on the window.
+
+**And a source's freshness is measured by the right clock.** A finished week's
+snap counts never change again, so ageing them against the wall clock would
+report every October Tuesday as five days stale for ever; what matters there is
+whether it is still being asked. A betting line is the exact opposite.
+
+**A small health block now travels in every support snapshot** — on the envelope,
+outside `decision`, so no replay compares it. About a kilobyte, under 5% of a
+file, capped by a test at 2KB: enough for an agent to tell stale injury data from
+a legitimate `not_published` from a missing provider key from a deferred backfill
+that has nothing to do with the complaint, and not enough to bury the decision it
+travels with.
+
+**Read-only, structurally.** `DataHealthService` has no write method, no
+`refresh` and no `fetch`. The isolation test snapshots every row of every table
+before and after, watches every statement the endpoint prepares, and hands it
+transports that throw. `GET /api/data-health` is its own route: `/api/health`
+answers three things, the third is what the release gate compares, and growing it
+is how that check starts failing for reasons unrelated to the deploy.
+
+**Demo Mode demonstrates the same screen with no network and no second engine.**
+The rows are built by the production assembler from the production policy table,
+and the overall word, the attention count and the Setup sentence come from the
+production functions. What a scenario supplies is the state, which is what a
+scenario is. Healthy, legitimately waiting, stale and deferred are all reachable,
+a degraded scenario cannot report itself healthy, and the same scenario produces
+byte-identical health twice.
+
+App JavaScript +2.1 kB gzipped, CSS byte-identical, Demo Mode's lazy chunk
++2.0 kB. No budget raised — and the demo chunk is now within 1.0 kB of its
+ceiling, which is the next thing that will need a deliberate decision.

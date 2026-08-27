@@ -125,11 +125,24 @@ describe('the calibration ledger is actually reached', () => {
     expect(WORKER.slice(start, end)).not.toContain('refreshMatchupCalibration');
   });
 
+  /**
+   * The catch moved out of this function and into the step that calls it.
+   *
+   * It used to hold its own `try`/`catch`. It is now called through
+   * `CronRunRecorder.step`, which catches, logs and records exactly as the
+   * inline catch did — and additionally writes down *that* it failed, which is
+   * the whole point of the run ledger. The guarantee is unchanged and is
+   * asserted where it now lives: at both call sites, and behaviourally in
+   * `tests/cronRunRecord.test.ts`, which throws from one step and checks the
+   * ones after it still ran.
+   */
   it('cannot take the lineup feeds down with it', () => {
-    const source = WORKER.slice(WORKER.indexOf('async function refreshMatchupCalibration'));
-    const body = source.slice(0, source.indexOf('\n}\n'));
-    expect(body).toContain('try {');
-    expect(body, 'a grading job must never be the reason an injury check does not run').toContain('} catch');
+    for (const branch of [dailyBranch(), weekendBranch()]) {
+      expect(
+        branch,
+        'a grading job must never be the reason an injury check does not run, so it runs inside a recorded step',
+      ).toMatch(/step\('matchup-calibration'[\s\S]*?refreshMatchupCalibration\(/);
+    }
   });
 
   /** A cap that reports nothing reads as "there was nothing left". */

@@ -51,14 +51,17 @@ describe('the season market refresh is actually reached', () => {
   });
 
   it('cannot take the lineup feeds down with it', () => {
-    // The call sits inside its own try/catch, like every other optional feed on
-    // this clock. A draft-time nicety must not stop an injury check.
-    const branch = dailyBranch();
-    const at = branch.indexOf('new SeasonMarketService(');
-    const before = branch.slice(0, at);
-    const after = branch.slice(at);
-    expect(before.lastIndexOf('try {')).toBeGreaterThan(before.lastIndexOf('} catch'));
-    expect(after.indexOf('} catch')).toBeGreaterThan(-1);
+    /*
+     * The call sits inside its own recorded step, like every other optional
+     * feed on this clock. A draft-time nicety must not stop an injury check.
+     *
+     * That used to be an inline `try`/`catch`; `CronRunRecorder.step` is the
+     * same catch with the outcome kept instead of discarded, so this asserts
+     * the same containment against the mechanism that now provides it. The
+     * behavioural half — a step that throws does not stop the steps after it —
+     * is `tests/cronRunRecord.test.ts`.
+     */
+    expect(dailyBranch()).toMatch(/step\('season-markets'[\s\S]*?new SeasonMarketService\(/);
   });
 
   it('is cheap enough to sit on a daily clock', () => {

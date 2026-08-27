@@ -79,6 +79,7 @@ import {
   type DraftBoardPayload,
   type SnapshotPick,
   type SnapshotPlayer,
+  type SnapshotDataHealth,
   type SnapshotRecommendation,
   type SnapshotRoster,
   type SupportSnapshot,
@@ -114,6 +115,17 @@ export interface CaptureOptions {
   draftId: string;
   /** The deployed revision, from the same plumbing `/api/health` reports. */
   gitSha: string;
+  /**
+   * Whether the inputs behind this decision were healthy and current.
+   *
+   * Optional and passed in rather than measured here: it is a fact about the
+   * deployment, read by `DataHealthService` from state the pipelines already
+   * keep, and a capture adapter has no business asking a second time. Omitted
+   * where the health view could not be read, which is honest — a snapshot with
+   * no health section says nothing about health, where an empty one would
+   * claim everything was fine.
+   */
+  dataHealth?: SnapshotDataHealth | null;
   position?: string | null;
   queuedOnly?: boolean;
   /** Override for tests and for a support conversation that needs more depth. */
@@ -166,6 +178,7 @@ export async function captureDraftSnapshot(
       surface: 'draft-board',
       engineVersion: DRAFT_ENGINE_VERSION,
     },
+    ...(options.dataHealth ? { dataHealth: options.dataHealth } : {}),
     redaction: {
       replaced: {
         'manager id': aliases.counts.ids,

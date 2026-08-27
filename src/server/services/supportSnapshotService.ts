@@ -45,7 +45,7 @@ import { DEFENCE_POSITION } from '../../core/startsit/engine.ts';
  */
 export { IN_SEASON_KINDS, isInSeasonKind, type InSeasonKind } from '../../core/support/contexts.ts';
 import type { InSeasonKind } from '../../core/support/contexts.ts';
-import type { DecisionPayload, SupportSnapshot } from '../../core/support/schema.ts';
+import type { DecisionPayload, SnapshotDataHealth, SupportSnapshot } from '../../core/support/schema.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { Database } from '../db.ts';
 
@@ -62,6 +62,15 @@ export interface SupportCaptureOptions {
   week?: number | null;
   /** Injected so a test can pin the clock. */
   now?: () => Date;
+  /**
+   * Whether the inputs behind the decision were healthy and current.
+   *
+   * Passed in by the route rather than read here, for the same reason `gitSha`
+   * is: it is a fact about the deployment, it is measured by one service, and
+   * a capture that went and measured it a second time would be able to
+   * disagree with the screen the user is looking at.
+   */
+  dataHealth?: SnapshotDataHealth | null;
 }
 
 export async function captureSupportSnapshot(
@@ -69,12 +78,14 @@ export async function captureSupportSnapshot(
 ): Promise<SupportSnapshot<DecisionPayload>> {
   const now = options.now?.() ?? new Date();
   const { db, sleeper, leagueId, gitSha } = options;
+  const dataHealth = options.dataHealth ?? null;
 
   switch (options.context) {
     case 'lineup': {
       const gathered = await gatherLineupInputs(db, sleeper, leagueId, normalizeMode(options.mode ?? null));
       return captureLineupSnapshot({
         gitSha,
+        dataHealth,
         league: gathered.league,
         rosters: gathered.rosters,
         mine: gathered.mine,
@@ -95,6 +106,7 @@ export async function captureSupportSnapshot(
       const service = new MatchupService(db, { sleeper, now: () => now });
       return captureMatchupSnapshot(service.supportSources(), {
         gitSha,
+        dataHealth,
         leagueId: league.id,
         week: options.week ?? null,
         /*
@@ -111,6 +123,7 @@ export async function captureSupportSnapshot(
       const gathered = await gatherWaiverInputs(db, sleeper, leagueId);
       return captureWaiverSnapshot({
         gitSha,
+        dataHealth,
         league: gathered.league,
         mine: gathered.mine,
         rosters: gathered.rosters,
@@ -150,6 +163,7 @@ export async function captureSupportSnapshot(
       const lineup = waiverLineup({ ...request, now });
       return captureDstSnapshot({
         gitSha,
+        dataHealth,
         league: gathered.league,
         mine: gathered.mine,
         sources: request.dstSources,
@@ -178,6 +192,7 @@ export async function captureSupportSnapshot(
       const nflState = await new SettingsRepo(db).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
       return captureTradeSnapshot({
         gitSha,
+        dataHealth,
         league: gathered.league,
         rosters: gathered.rosterRecords ?? [],
         request: {

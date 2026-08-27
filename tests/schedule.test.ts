@@ -377,16 +377,22 @@ describe('the free-tier promises, as facts about the wiring', () => {
     expect(crons).toContain('0 9 * * *');
   });
 
-  it('is called from the daily tick, inside a try/catch of its own', () => {
+  /**
+   * The catch is the recorded step now, and it is the same catch.
+   *
+   * This used to read the inline `try`/`catch` around the call. That block
+   * became `run.step('schedule', ...)`, which catches, logs and additionally
+   * writes down that the step failed — so the guarantee it was asserting is
+   * intact and the run ledger can now say which feed it was. The behavioural
+   * half lives in `tests/cronRunRecord.test.ts`, where a step that throws is
+   * checked not to stop the steps after it.
+   */
+  it('is called from the daily tick, inside a recorded step of its own', () => {
     const daily = worker.slice(worker.indexOf("event.cron.startsWith('0 9')"));
-    const call = daily.indexOf('new ScheduleService(env.DB, { fetch: meteredRedirectingFetch })');
-    expect(call).toBeGreaterThan(-1);
-
-    // The refresh and its own catch, so a fixture list that fails to refresh
-    // cannot take down the feeds a lineup depends on.
-    const around = daily.slice(Math.max(0, call - 200), call + 300);
-    expect(around).toContain('try {');
-    expect(around).toContain('catch');
+    expect(
+      daily,
+      'a fixture list that fails to refresh must not take down the feeds a lineup depends on',
+    ).toMatch(/step\('schedule'[\s\S]*?new ScheduleService\(env\.DB, \{ fetch: meteredRedirectingFetch \}\)/);
   });
 
   it('is never reached from a read path', () => {

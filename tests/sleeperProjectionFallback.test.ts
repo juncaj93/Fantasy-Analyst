@@ -617,6 +617,18 @@ describe('no recommendation engine can reach the fallback', () => {
          * optimiser before the map is touched.
          */
         'server/services/decisionInputs.ts',
+        /*
+         * Data Health, which reads the feed's *freshness* and never its numbers.
+         *
+         * `SleeperProjectionsRepo.freshness` returns a count, an instant and a
+         * publisher name — how much of a week is stored and how old it is — and
+         * that is the whole of what this service asks for. No projection value
+         * crosses into it, and it produces a read-only report rather than an
+         * input to anything: the rule this list guards is that Rotowire's
+         * number never enters a recommendation, and a timestamp is not a
+         * number about a player.
+         */
+        'server/services/dataHealthService.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );

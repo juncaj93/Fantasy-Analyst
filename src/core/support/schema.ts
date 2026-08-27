@@ -165,7 +165,74 @@ export interface SupportSnapshot<Payload extends DecisionPayload = DecisionPaylo
    * identifier without guessing at the shape of a Sleeper user id.
    */
   redaction: RedactionReport;
+  /**
+   * Whether the state below was healthy and current, at `capturedAt`.
+   *
+   * Optional, and outside `decision` on purpose. This file already says exactly
+   * what the app knew; this says whether what it knew was any good — which is a
+   * fact about the deployment rather than about the decision, is measured by a
+   * different subsystem, and must not be compared on replay. A snapshot
+   * captured on a Tuesday and replayed in March would fail every freshness term
+   * in it, for no reason anybody cares about.
+   *
+   * Absent where the health view could not be read, and absent in every
+   * snapshot written before this existed — which is why it is optional rather
+   * than required, and why the schema identity did not move. See
+   * {@link SnapshotDataHealth}.
+   */
+  dataHealth?: SnapshotDataHealth;
   decision: Payload;
+}
+
+/**
+ * The health of the inputs behind one decision, small enough to carry.
+ *
+ * The four distinctions an agent has to be able to draw, and the whole reason
+ * this block is here rather than left to a second file:
+ *
+ *   - **an exact replay standing on stale injury data** — `injuries` is
+ *     `stale`, with its age;
+ *   - **a legitimate `not_published`** — `waiting`, which is never a fault;
+ *   - **missing or fallback data** — `missing` or `degraded`;
+ *   - **deferred background work that does not matter here** — `deferred`, with
+ *     `severity: 'background'` beside it saying so.
+ *
+ * Deliberately not the whole `DataHealthView`. No cadence sentences, no impact
+ * prose, no technical block, no per-step run detail — a snapshot is already a
+ * couple of hundred kilobytes and the point of this section is that it can be
+ * read in ten seconds before anything else in the file. Twelve rows of five
+ * short fields is about a kilobyte.
+ */
+export interface SnapshotDataHealth {
+  /** `healthy`, `waiting`, `stale`, `degraded`, `problem`, `unknown`. */
+  state: string;
+  /** The newest successful update across every source, at capture. */
+  refreshedAt: string | null;
+  sources: {
+    id: string;
+    label: string;
+    /** The canonical source state word. Never a colour and never a boolean. */
+    state: string;
+    /** `critical`, `important`, `background` — how much this one can cost. */
+    severity: string;
+    /** Age of whatever this source measures, in minutes. Null when unknown. */
+    ageMinutes: number | null;
+  }[];
+  /**
+   * The last scheduled run, in one line plus the work it deliberately yielded.
+   *
+   * `deferred` is named rather than folded into the outcome because "manager
+   * intelligence yielded its budget" is the single most misdiagnosable state
+   * this app has: everything looks fine, one number is thin, and nothing
+   * anywhere says why.
+   */
+  lastRun: {
+    label: string;
+    startedAt: string;
+    outcome: string;
+    deferred: string[];
+    failed: string[];
+  } | null;
 }
 
 /**

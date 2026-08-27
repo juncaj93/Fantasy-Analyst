@@ -42,6 +42,8 @@ import { normalizeMode } from '../../startsit/mode.ts';
 import { DEFENCE_POSITION } from '../../startsit/engine.ts';
 import { demoLeagueContext, demoLineupInputs, demoTradeRequest, demoWaiverRequest } from './decisions.ts';
 import { matchupSourcesFrom } from './sources.ts';
+import { buildDemoDataHealth } from './health.ts';
+import { toSnapshotHealth } from '../../health/snapshot.ts';
 import type { InSeasonKind } from '../../support/contexts.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 
@@ -87,6 +89,15 @@ async function capture(
   const { mine, shape } = demoLeagueContext(data);
   const now = data.clock.now();
   const gitSha = 'demo';
+  /*
+   * And the same health section a live capture carries.
+   *
+   * From the same reducer over the scenario's own view, so a support file
+   * produced in a rehearsal is the file the live app produces — health block
+   * included. That is what makes the support workflow learnable end to end
+   * without a live league behind it.
+   */
+  const dataHealth = toSnapshotHealth(buildDemoDataHealth(data));
 
   if (!mine) throw new SnapshotUnavailable('Your team was not found in this scenario.');
 
@@ -98,6 +109,7 @@ async function capture(
         status: 200,
         body: captureLineupSnapshot({
           gitSha,
+          dataHealth,
           league: data.league,
           rosters: data.rosters,
           mine,
@@ -119,6 +131,7 @@ async function capture(
         status: 200,
         body: await captureMatchupSnapshot(matchupSourcesFrom(data), {
           gitSha,
+          dataHealth,
           leagueId: data.league.id,
           week: params.get('week') == null ? null : Number(params.get('week')),
           props: props(data),
@@ -132,6 +145,7 @@ async function capture(
         status: 200,
         body: await captureWaiverSnapshot({
           gitSha,
+          dataHealth,
           league: data.league,
           mine,
           rosters: data.rosters,
@@ -159,6 +173,7 @@ async function capture(
         status: 200,
         body: await captureDstSnapshot({
           gitSha,
+          dataHealth,
           league: data.league,
           mine,
           sources: request.dstSources,
@@ -193,6 +208,7 @@ async function capture(
         status: 200,
         body: captureTradeSnapshot({
           gitSha,
+          dataHealth,
           league: data.league,
           rosters: data.rosters,
           request: {

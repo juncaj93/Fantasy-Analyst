@@ -24,6 +24,7 @@ import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../compone
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
+import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
 
 import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
@@ -54,7 +55,7 @@ import {
  */
 const DemoPanel = lazy(() => import('../demo/DemoPanel.tsx'));
 
-type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | 'review' | null;
+type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | 'review' | 'data-health' | null;
 
 /**
  * The state of a step, drawn rather than typed.
@@ -95,6 +96,7 @@ const PANEL_TITLES: Record<Exclude<Panel, null>, string> = {
   vegas: 'Vegas lines',
   repair: 'Help my scores',
   review: 'Review',
+  'data-health': 'Data health',
 };
 
 export function SetupScreen({
@@ -190,6 +192,19 @@ export function SetupScreen({
     return <ReviewScreen onChanged={refreshAll} onBack={() => setOpen(null)} />;
   }
 
+  /*
+   * Data health draws its own pushed screen, for the reason Review does.
+   *
+   * It has a subtitle that states the overall word and when anything was last
+   * refreshed, and it reads from an endpoint of its own rather than from the
+   * setup status this screen already holds — so wrapping it in the generic
+   * `PushScreen` below would mean passing a subtitle up through a component
+   * that has no business knowing what data health is.
+   */
+  if (open === 'data-health') {
+    return <DataHealthScreen onBack={() => setOpen(null)} />;
+  }
+
   if (open) {
     return (
       <PushScreen title={PANEL_TITLES[open]} backLabel="Setup" onBack={() => setOpen(null)} testId={`setup-detail-${open}`}>
@@ -276,6 +291,15 @@ export function SetupScreen({
           onClick={() => setOpen('review')}
         />
         <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
+        {/*
+          Data health, immediately above the support tools it exists beside.
+
+          The pair is the support loop: this row says whether what the app knew
+          was healthy and current, and the row under it captures exactly what it
+          knew. Somebody diagnosing a questionable recommendation reads them in
+          that order, so they are drawn in it. Never in the taskbar — §9.
+        */}
+        <DataHealthRow onOpen={() => setOpen('data-health')} />
         <SupportSnapshotRow leagues={leagues} />
       </ListGroup>
 

@@ -70,11 +70,26 @@ import {
   exact,
   type ReplayReport,
 } from './contract.ts';
-import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
+import {
+  SUPPORT_SNAPSHOT_SCHEMA,
+  type SnapshotDataHealth,
+  type SupportSnapshot,
+} from './schema.ts';
 import type { WaiverPlanPayload } from './payloads.ts';
 
 export interface WaiverCaptureInput {
   gitSha: string;
+  /**
+   * Whether the inputs behind this decision were healthy and current.
+   *
+   * Optional and passed in rather than measured here: it is a fact about the
+   * deployment, read by `DataHealthService` from state the pipelines already
+   * keep, and a capture adapter has no business asking a second time. Omitted
+   * where the health view could not be read, which is honest — a snapshot with
+   * no health section says nothing about health, where an empty one would
+   * claim everything was fine.
+   */
+  dataHealth?: SnapshotDataHealth | null;
   league: LeagueRecord;
   mine: RosterRecord;
   rosters: RosterRecord[];
@@ -197,6 +212,7 @@ export async function captureWaiverSnapshot(
     schema: SUPPORT_SNAPSHOT_SCHEMA,
     capturedAt,
     release: { gitSha: input.gitSha, surface: 'waiver-plan', engineVersion: WAIVER_ENGINE_VERSION },
+    ...(input.dataHealth ? { dataHealth: input.dataHealth } : {}),
     redaction: {
       replaced: {
         'manager id': aliases.counts.ids,

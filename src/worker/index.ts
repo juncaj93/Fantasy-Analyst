@@ -39,6 +39,9 @@ import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
+import { CronRunRecorder } from '../server/repos/cronRuns.ts';
+import { stepOutcomeFrom, type StepOutcome } from '../core/health/model.ts';
+import { CRON_LABELS } from '../core/health/policy.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { ManagerIntelService } from '../server/services/managerIntelService.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
@@ -46,6 +49,17 @@ import { SleeperProjectionService } from '../server/services/sleeperProjectionSe
 import { MatchupService } from '../server/services/matchupService.ts';
 import { resolveWeek } from '../core/matchup/build.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
+
+/**
+ * What one step of a scheduled run reports about itself.
+ *
+ * The shape `CronRunRecorder.step` accepts, named here because the two shared
+ * refresh helpers below return it. Each feed decides its own outcome, because
+ * only the feed knows whether "nothing was written" means it succeeded, is
+ * waiting on a source that has not published, or deferred — the three states
+ * §3 refuses to collapse into one.
+ */
+type StepResult = { outcome: StepOutcome; items?: number | null; note?: string | null };
 
 export interface WorkerEnv {
   DB: Database;
@@ -254,6 +268,26 @@ export default {
       const cronEnv = toAppEnv(env, meteredFetch);
       let intelNote = 'not reached';
 
+      /*
+       * What this tick did, written down rather than logged and lost.
+       *
+       * A recorder, not a rearrangement. Every feed below was already wrapped in
+       * its own `try`/`catch` — the invariant being that one dead provider must
+       * never take down the ten under it — and `run.step` *is* that try/catch
+       * with the outcome kept instead of discarded. The order, the priorities
+       * and the separate-catch rule are exactly as they were: §8 asks this lane
+       * to observe the schedule, not to redesign it.
+       *
+       * Nothing is written to D1 until `finish()` at the bottom, so a run that
+       * dies half way through costs one missing update rather than a row
+       * claiming eleven steps ran.
+       */
+      const run = new CronRunRecorder(env.DB, {
+        cron: event.cron,
+        label: CRON_LABELS[event.cron] ?? event.cron,
+        releaseSha: env.RELEASE_SHA ?? null,
+      });
+
       const sleeperSync = new SleeperSyncService(env.DB, cronEnv.sleeper);
       /*
        * The player dictionary, and separately caught like everything else here.
@@ -271,11 +305,10 @@ export default {
        * cost of a skipped sync is that a player who signed overnight is unknown
        * for one more day.
        */
-      try {
-        await sleeperSync.syncPlayers();
-      } catch (err) {
-        console.error('player dictionary sync failed', err);
-      }
+      await run.step('players', 'Player list', async () => {
+        const { written } = await sleeperSync.syncPlayers();
+        return { outcome: 'succeeded', items: written };
+      });
       /*
        * Where the season is, once a day.
        *
@@ -285,7 +318,19 @@ export default {
        * through week one — so it rides the nightly clock as well. It swallows
        * its own failures, and not knowing keeps the tab.
        */
-      await sleeperSync.syncNflState();
+      await run.step('nfl-state', 'NFL week', async () => {
+        /*
+         * It swallows its own failures and returns null, which is the honest
+         * thing for the caller to record: not a crash, and not a refresh
+         * either. `not_published` is the vocabulary's word for "asked, nothing
+         * came back", and Sleeper being unreachable for one morning is exactly
+         * that from this tick's point of view.
+         */
+        const state = await sleeperSync.syncNflState();
+        return state == null
+          ? { outcome: 'not_published' as const, note: 'Sleeper did not return a week' }
+          : { outcome: 'succeeded' as const };
+      });
       /*
        * Last season's line, on the same clock and deliberately after the
        * dictionary: the statistics are matched against the players this app
@@ -296,11 +341,10 @@ export default {
        * taking the player sync down with it — the cards fall back to saying
        * nothing, which is what they said before this existed.
        */
-      try {
+      await run.step('season-stats', "Last season's statistics", async () => {
         await new PlayerDetailService(env.DB, { sleeper: cronEnv.sleeper }).refreshSeasonStats();
-      } catch (err) {
-        console.error('season stats refresh failed', err);
-      }
+        return { outcome: 'succeeded' };
+      });
       /*
        * One injury check on this clock too, after the dictionary.
        *
@@ -314,11 +358,14 @@ export default {
        * injury check that does not depend on the five-minute cron still being
        * scheduled — a floor under the freshest thing this app has.
        */
-      try {
-        await new InjuryService(env.DB, { fetch: meteredRedirectingFetch }).refresh();
-      } catch (err) {
-        console.error('injury report refresh failed', err);
-      }
+      await run.step('injuries', 'Injuries', async () => {
+        const injury = await new InjuryService(env.DB, { fetch: meteredRedirectingFetch }).refresh();
+        return {
+          outcome: stepOutcomeFrom(injury.outcome),
+          items: injury.rowsReturned,
+          note: injury.note,
+        };
+      });
       /*
        * Per-game usage, and this is the honest home for it.
        *
@@ -340,15 +387,18 @@ export default {
        * matched against the players this app knows. Separately caught: usage is
        * a nudge in a close call, and it must never take down the player sync.
        */
-      try {
+      await run.step('usage', 'Usage', async () => {
         const usage = new UsageService(env.DB, { fetch: meteredRedirectingFetch });
-        const run = await usage.refresh();
+        const report = await usage.refresh();
         // And one week of any gap an outage left behind, but never on the same
         // tick as a real ingest — a catch-up week is history and can wait a day.
-        if (run.rowsWritten === 0) await usage.catchUpOneWeek();
-      } catch (err) {
-        console.error('usage refresh failed', err);
-      }
+        if (report.rowsWritten === 0) await usage.catchUpOneWeek();
+        return {
+          outcome: stepOutcomeFrom(report.outcome),
+          items: report.rowsWritten,
+          note: report.note,
+        };
+      });
 
       /*
        * The season-long market lines the draft board prices players against.
@@ -371,12 +421,21 @@ export default {
        * Separately caught: a draft-time nicety must never take down the feeds
        * a lineup depends on.
        */
-      try {
+      await run.step('season-markets', 'Season market lines', async () => {
         const result = await new SeasonMarketService(env.DB, cronEnv.vegas).refresh();
         if (result.error) console.error('season market refresh failed', result.error);
-      } catch (err) {
-        console.error('season market refresh failed', err);
-      }
+        /*
+         * The service's own three answers, kept apart.
+         *
+         * It gates itself: a provider with no season support or no key returns
+         * a reason without fetching, and a snapshot younger than the TTL is
+         * served rather than re-bought. Neither of those is a failure and
+         * neither is a refresh, so the run says `succeeded` and carries the
+         * service's own sentence — which is the same sentence Setup prints.
+         */
+        if (result.error) return { outcome: 'failed' as const, note: result.reason };
+        return { outcome: 'succeeded' as const, items: result.quotes, note: result.reason };
+      });
 
       /*
        * The fixture list, on the clock it costs nothing to be on.
@@ -400,12 +459,15 @@ export default {
        * at today, and it must never take down a feed a lineup depends on. A
        * failure leaves the stored schedule exactly where it is.
        */
-      try {
+      await run.step('schedule', 'NFL schedule', async () => {
         const schedule = await new ScheduleService(env.DB, { fetch: meteredRedirectingFetch }).refresh(usageSeason());
         if (schedule.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
-      } catch (err) {
-        console.error('schedule refresh failed', err);
-      }
+        return {
+          outcome: stepOutcomeFrom(schedule.outcome),
+          items: schedule.rowsWritten ?? null,
+          note: schedule.note,
+        };
+      });
 
       /*
        * The trending capture, which nothing else can reconstruct.
@@ -427,14 +489,15 @@ export default {
        * Separately caught — this is the layer above lineups, and it must never
        * take a lineup feed down.
        */
-      try {
-        await new LeagueStrategyService(env.DB, { sleeper: cronEnv.sleeper }).captureTrending();
-      } catch (err) {
-        console.error('trending capture failed', err);
-      }
+      await run.step('trending', 'Trending adds', async () => {
+        const captured = await new LeagueStrategyService(env.DB, { sleeper: cronEnv.sleeper }).captureTrending();
+        return { outcome: 'succeeded', items: captured.captured };
+      });
 
-      await refreshMatchupCalibration(env, cronEnv);
-      await refreshPublishedProjections(env, cronEnv);
+      await run.step('matchup-calibration', 'Matchup calibration', () => refreshMatchupCalibration(env, cronEnv));
+      await run.step('published-projections', 'Published projections', () =>
+        refreshPublishedProjections(env, cronEnv),
+      );
 
       /*
        * The three nflverse feeds Projection v2 reads — **last of the live
@@ -470,11 +533,23 @@ export default {
        * failure of all three feeds costs an evaluation report and no
        * recommendation anywhere in the app.
        */
-      try {
-        await new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll();
-      } catch (err) {
-        console.error('nflverse refresh failed', err);
-      }
+      await run.step('nflverse', 'Snaps and depth charts', async () => {
+        const runs = await new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll();
+        /*
+         * Three feeds under one step, because they are one dependency chain and
+         * `refreshAll` already catches each of them separately. Reported as a
+         * whole: all three failing is a failure, some of them failing is a
+         * failure of this step, and none of them failing is a success. The
+         * per-feed detail stays where it already lives, in
+         * `nflverse_source_runs`, rather than being copied into the run record.
+         */
+        const failed = runs.filter((r) => r.outcome === 'failed');
+        if (runs.length === 0) return { outcome: 'failed' as const, note: 'no nflverse feed completed' };
+        if (failed.length > 0) {
+          return { outcome: 'failed' as const, items: runs.length - failed.length, note: `${failed.length} of ${runs.length} feeds did not complete` };
+        }
+        return { outcome: 'succeeded' as const, items: runs.length };
+      });
 
       /*
        * One bounded batch of manager history — **last on this tick, and last is
@@ -520,16 +595,32 @@ export default {
        * Separately caught, like every other feed here: a history that fails to
        * advance costs a small `Next%` adjustment and nothing else.
        */
-      try {
+      await run.step('manager-intel', 'Manager tendencies', async () => {
         const selected = await new LeagueRepo(env.DB).getSelectedLeague();
         if (!selected) {
           intelNote = 'no league selected';
-        } else {
+          return { outcome: 'skipped' as const, note: 'no league selected' };
+        }
+        {
           const allowance = Math.min(MAX_SLEEPER_SUBREQUESTS_PER_BATCH, budget.remaining);
           if (allowance <= 0) {
             intelNote = 'skipped: no budget left after the feeds above';
             console.log(`manager intelligence skipped: ${budget.used}/${budget.limit} subrequests already spent`);
-          } else {
+            /*
+             * `deferred`, not `failed`, and this is the §7 sentence the whole
+             * lane exists to be able to say. The batch yielded because the
+             * feeds a lineup depends on had already spent the invocation's
+             * budget, which is the strategy working exactly as designed. A run
+             * record calling it a failure would send somebody diagnosing a
+             * healthy system, and a run record staying silent about it would
+             * leave a thin `Next%` unexplained.
+             */
+            return {
+              outcome: 'deferred' as const,
+              note: `refresh budget reserved for higher-priority data (${budget.used}/${budget.limit} already spent)`,
+            };
+          }
+          {
             const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
             const report = await new ManagerIntelService(env.DB, { sleeper: cronEnv.sleeper }).advance({
               leagueId: selected.id,
@@ -548,18 +639,31 @@ export default {
                */
               budget: budget.allowance(allowance),
             });
+            const allowanceBound = report.requestsUsed >= allowance;
             intelNote =
               `allowance ${allowance}, used ${report.requestsUsed}` +
-              (report.requestsUsed < allowance ? ' (finished what it had to do)' : ' (allowance bound)');
+              (allowanceBound ? ' (allowance bound)' : ' (finished what it had to do)');
             if (report.errors.length > 0) {
               console.error('manager intelligence batch had failures', report.errors);
             }
+            /*
+             * An allowance-bound batch is deferred too, and for the same reason.
+             *
+             * It advanced as far as its slice of the pool allowed and stopped
+             * with checkpoints intact — the steady state of a backfill's first
+             * few days. Calling that a success would hide from somebody reading
+             * a thin `Next%` that there is more history still to come.
+             */
+            return {
+              outcome: allowanceBound ? ('deferred' as const) : ('succeeded' as const),
+              items: report.requestsUsed,
+              note: allowanceBound
+                ? `advanced as far as this run's allowance of ${allowance} reached; more history arrives tomorrow`
+                : null,
+            };
           }
         }
-      } catch (err) {
-        intelNote = `failed: ${err instanceof Error ? err.message : String(err)}`;
-        console.error('manager intelligence batch failed', err);
-      }
+      });
 
       /*
        * What the invocation actually cost, once per tick.
@@ -577,10 +681,60 @@ export default {
         `cron 09:00 subrequests ${spent.used}/${spent.limit} (ceiling 50, ${spent.remaining} unspent); ` +
           `manager intelligence: ${intelNote}`,
       );
+
+      /*
+       * And the same three numbers where a phone can read them.
+       *
+       * Separately caught, and it has to be: a health record that failed to
+       * save is worth a log line and is never worth taking down the tick it was
+       * describing. The budget view is the transport's own counter, which
+       * counts retries and redirect hops — so `used/limit` is what actually
+       * went out on the wire rather than what was expected to. See §7: this is
+       * the only budget number in this app that can be reported honestly, and
+       * nothing here invents one.
+       */
+      try {
+        await run.finish({ limit: spent.limit, used: spent.used, remaining: spent.remaining });
+      } catch (err) {
+        console.error('cron run record failed', err);
+      }
       return;
     }
 
-    await refreshVegas(appEnv);
+    /*
+     * The two weekend clocks, recorded on the same terms as the daily one.
+     *
+     * No budget: they make four external calls between them and pass the
+     * unmetered transport, so there is no ceiling to defend and none to report.
+     * A zeroed budget here would read as "spent nothing" rather than as "this
+     * clock does not have one", which is the distinction §7 asks for.
+     */
+    const weekend = new CronRunRecorder(env.DB, {
+      cron: event.cron,
+      label: CRON_LABELS[event.cron] ?? event.cron,
+      releaseSha: env.RELEASE_SHA ?? null,
+    });
+
+    await weekend.step('vegas', 'Vegas lines', async () => {
+      const report = await refreshVegas(appEnv);
+      if (report.fetched === 0 && report.blocked.length > 0) {
+        return { outcome: 'skipped' as const, items: 0, note: report.blocked[0] ?? report.note };
+      }
+      if (report.fetched === 0 && report.errors.length > 0) {
+        /*
+         * The category, never the provider's own words.
+         *
+         * `report.errors` carries whatever the odds provider said about a
+         * request this app made, which can include the URL it was made to — and
+         * this row is read by a support screen and copied into a snapshot. The
+         * text stays in the log, where an operator can see it and a user
+         * cannot.
+         */
+        console.error('vegas refresh failed', report.errors);
+        return { outcome: 'failed' as const, items: 0, note: 'the odds provider did not answer' };
+      }
+      return { outcome: 'succeeded' as const, items: report.fetched, note: report.note };
+    });
     /*
      * And, on the two weekend ticks, the published fallback beside the market.
      *
@@ -591,7 +745,9 @@ export default {
      * runs on all three clocks (both of these and the nightly one above) and
      * declines cheaply when what it holds is young; see `MAX_AGE_HOURS`.
      */
-    await refreshPublishedProjections(env, appEnv);
+    await weekend.step('published-projections', 'Published projections', () =>
+      refreshPublishedProjections(env, appEnv),
+    );
     /*
      * And the calibration ledger, on the two clocks that bracket a Sunday.
      *
@@ -602,7 +758,15 @@ export default {
      * these two add is a *late* pregame reading, made after Friday's injury
      * report rather than before it.
      */
-    await refreshMatchupCalibration(env, appEnv);
+    await weekend.step('matchup-calibration', 'Matchup calibration', () =>
+      refreshMatchupCalibration(env, appEnv),
+    );
+
+    try {
+      await weekend.finish(null);
+    } catch (err) {
+      console.error('cron run record failed', err);
+    }
   },
 
   /**
@@ -733,28 +897,44 @@ export function parseRawEmail(raw: string): {
  * hands it; the two weekend clocks pass the unmetered one, which is right —
  * they run four external calls between them and have no ceiling to defend.
  */
-async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promise<void> {
-  try {
-    const league = await new LeagueRepo(env.DB).getSelectedLeague();
-    if (!league) return;
-    const service = new MatchupService(env.DB, { sleeper: appEnv.sleeper });
+async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promise<StepResult> {
+  const league = await new LeagueRepo(env.DB).getSelectedLeague();
+  if (!league) return { outcome: 'skipped', note: 'no league selected' };
+  const service = new MatchupService(env.DB, { sleeper: appEnv.sleeper });
 
-    const closed = await service.settleFinishedWeeks(league.id);
-    for (const week of closed.settled) {
-      console.log(`matchup calibration settled ${week.season} week ${week.week}: ${week.rosters} rosters`);
-    }
-    // Never silent about a cap: "nothing logged" has to mean "nothing left".
-    if (closed.pending > 0) {
-      console.log(`matchup calibration: ${closed.pending} finished weeks still unsettled, for the next run`);
-    }
-
-    const captured = await service.captureCalibration(league.id);
-    if (!captured.recorded) {
-      console.log(`matchup calibration: nothing to record for week ${captured.week ?? '?'}`);
-    }
-  } catch (err) {
-    console.error('matchup calibration refresh failed', err);
+  const closed = await service.settleFinishedWeeks(league.id);
+  for (const week of closed.settled) {
+    console.log(`matchup calibration settled ${week.season} week ${week.week}: ${week.rosters} rosters`);
   }
+  // Never silent about a cap: "nothing logged" has to mean "nothing left".
+  if (closed.pending > 0) {
+    console.log(`matchup calibration: ${closed.pending} finished weeks still unsettled, for the next run`);
+  }
+
+  const captured = await service.captureCalibration(league.id);
+  if (!captured.recorded) {
+    console.log(`matchup calibration: nothing to record for week ${captured.week ?? '?'}`);
+  }
+  /*
+   * A week with nothing to record is not a failure and not a refresh.
+   *
+   * `settleFinishedWeeks` capped at `SETTLE_WEEKS_PER_RUN` leaves the rest for
+   * the next run, which is a deferral in the same sense the manager backfill's
+   * is — deliberate, bounded and resumed — so it is reported as one rather than
+   * as a clean success that hides unsettled weeks.
+   */
+  if (closed.pending > 0) {
+    return {
+      outcome: 'deferred',
+      items: closed.settled.length,
+      note: `${closed.pending} finished week(s) still to settle on the next run`,
+    };
+  }
+  return {
+    outcome: captured.recorded ? 'succeeded' : 'not_published',
+    items: closed.settled.length,
+    note: captured.recorded ? null : `nothing to record for week ${captured.week ?? '?'}`,
+  };
 }
 
 /**
@@ -786,19 +966,31 @@ async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promis
  * week one for a preseason state — and the service then finds nothing published
  * and says so, at the cost of one request a day.
  */
-async function refreshPublishedProjections(env: WorkerEnv, appEnv: AppEnv): Promise<void> {
-  try {
-    const league = await new LeagueRepo(env.DB).getSelectedLeague();
-    if (!league) return;
-    const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
-    const report = await new SleeperProjectionService(env.DB, appEnv.sleeper).refresh(league.season, week);
-    if (report.outcome === 'unavailable') {
-      console.log(`published projections ${report.season} week ${report.week}: ${report.detail ?? 'unavailable'}`);
-    }
-  } catch (err) {
-    console.error('published projection refresh failed', err);
+async function refreshPublishedProjections(env: WorkerEnv, appEnv: AppEnv): Promise<StepResult> {
+  const league = await new LeagueRepo(env.DB).getSelectedLeague();
+  if (!league) return { outcome: 'skipped', note: 'no league selected' };
+  const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
+  const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+  const report = await new SleeperProjectionService(env.DB, appEnv.sleeper).refresh(league.season, week);
+  if (report.outcome === 'unavailable') {
+    console.log(`published projections ${report.season} week ${report.week}: ${report.detail ?? 'unavailable'}`);
   }
+  /*
+   * Three outcomes, and `unavailable` is the one that must not read as a fault.
+   *
+   * The feed publishes a week when it publishes it, and out of the regular
+   * season it publishes nothing at all — `resolveWeek` hands back week one for
+   * a preseason state and the service correctly finds nothing. That is a source
+   * with nothing to say, which is `not_published` and never `failed`.
+   */
+  if (report.outcome === 'unavailable') {
+    return { outcome: 'not_published', items: 0, note: report.detail ?? 'nothing published for this week yet' };
+  }
+  return {
+    outcome: report.outcome === 'current' ? 'skipped' : 'succeeded',
+    items: report.rows,
+    note: report.detail,
+  };
 }
 
 async function recomputeForChangedPlayers(env: WorkerEnv, changedPlayerIds: string[]): Promise<void> {

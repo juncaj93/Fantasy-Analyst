@@ -417,7 +417,7 @@ export class SetupService {
 }
 
 /** How stale a stored snapshot has to be before Setup stops calling it current. */
-const VEGAS_STALE_HOURS = 36;
+export const VEGAS_STALE_HOURS = 36;
 
 /**
  * What Setup says about the odds provider, in the six states it can be in.
