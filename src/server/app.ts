@@ -20,8 +20,9 @@ import { computeNeed } from '../core/draft/need.ts';
 import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
+import { assembleLineup } from '../core/startsit/assemble.ts';
+import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
 import { normalizeMode } from '../core/startsit/mode.ts';
-import { weeklyProjection, type ProjectableEvaluation, type ProjectionSource } from '../core/startsit/projection.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
 import { normalizeName } from '../core/identity/normalize.ts';
@@ -34,16 +35,12 @@ import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
 import { resolveLifecycle } from '../core/season/lifecycle.ts';
 import { buildRolloverReport } from './services/rolloverService.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
-import { recommendWaiverUpgrades } from '../core/startsit/waivers.ts';
 /*
  * The pricing, bench, ladder and free-agent assembly used to live in this file.
  * It moved into `core` unchanged when Demo Mode needed to run the same
  * arithmetic without a database behind it — one implementation, so a rehearsed
  * bid and a live one can never be two different numbers.
  */
-import { priceWaiverUpgrades } from '../core/waivers/pricing.ts';
-import { buildWaiverClaimPlan } from '../core/waivers/claimPlan.ts';
-import { waiverLeagueIntel, withCompetition } from '../core/waivers/intel.ts';
 /* Still used directly by handlers in this file. */
 import { evaluatePlayer } from '../core/startsit/engine.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
@@ -53,7 +50,6 @@ import type { CanonicalPlayer } from '../core/identity/types.ts';
 import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
 import { evaluateBench } from '../core/roster/bench.ts';
 import { buildLadder } from '../core/trades/ladder.ts';
-import { waiverMultiWeekFor, weeklyIntelligence } from '../core/contracts/integration.ts';
 import { DEFAULT_FINAL_WEEK, LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
 import { ManagerIntelService } from './services/managerIntelService.ts';
 import { ManagerLedgerRepo } from './repos/managerLedger.ts';
@@ -111,7 +107,7 @@ import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
 import { buildStartSitContext, startSitInputsFor } from './services/startSitInputs.ts';
 /* And the one assembly of everything the defence planner reads. */
-import { buildDstPlan, playoffContextFor } from './services/dstPlanService.ts';
+import { dstPlanSourcesFrom, playoffContextFor } from './services/dstPlanService.ts';
 import { NflScheduleRepo } from './repos/nflSchedule.ts';
 import { detectBestBall } from '../core/sleeper/bestBall.ts';
 import { isDraftComplete } from '../core/sleeper/phase.ts';
@@ -727,100 +723,35 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       published = new Map();
     }
 
-    const recommendation = recommendLineup(inputs, shape, profile, {
+    /*
+     * The whole decision, in one call.
+     *
+     * The optimiser, the weekly intelligence pass, the projection fallback and
+     * the three sentences that explain an empty column, layered in `core` where
+     * Demo Mode and the support replay reach the same function. See
+     * `core/startsit/assemble.ts` for why the layering had to stop being spelled
+     * out at each call site.
+     *
+     * `rosterShape` travels with it because the Team screen orders its
+     * recommended starters by the league's own slots rather than by score, so a
+     * backup quarterback never sits above a starting flex player on a
+     * cross-position ranking that answers no question anybody asked.
+     */
+    const decision = assembleLineup({
+      inputs,
+      shape,
+      profile,
       currentStarterIds: mine.starterIds,
       mode,
       published,
+      unknownPlayers: mine.playerIds.length - inputs.length,
     });
 
-    /*
-     * The two slots the weekly card has been carrying empty.
-     *
-     * Expected points for everybody who has stored usage, and — only for a slot
-     * whose gap to the best legal alternative is genuinely close — the
-     * conditions that would change the recommendation. Both are attached to the
-     * evaluations that already travel in this response, so the card the Team
-     * screen builds from them lights up without a second request and without
-     * that file changing.
-     */
-    const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
-    /*
-     * The intelligence pass, and the projection.
-     *
-     * `score` stays exactly what it was — the comparable number the optimiser
-     * ranked with. `projection` is the weekly forecast, which exists only when a
-     * market does; the bench rows on the Team screen read it, and they read the
-     * same function the starters' slots and the Matchup screen read. See
-     * `core/startsit/projection.ts` for why printing the score instead was
-     * showing Jalen Hurts at 3.15 points.
-     */
-    const withIntelligence = <T extends { playerId: string } & ProjectableEvaluation>(
-      evaluations: T[],
-    ): (T & { projection: number | null; projectionSource: ProjectionSource | null })[] =>
-      evaluations.map((evaluation) => {
-        const extra = intelligence.get(evaluation.playerId);
-        const projected = weeklyProjection(evaluation, published.get(evaluation.playerId) ?? null);
-        return {
-          ...evaluation,
-          ...(extra ?? {}),
-          projection: projected.points,
-          projectionSource: projected.source,
-        };
-      });
-
-    const unknownPlayers = mine.playerIds.length - inputs.length;
-    /*
-     * A column of dashes should say why it is a column of dashes.
-     *
-     * The projections go blank exactly when no betting market has been read for
-     * anybody *and* nothing has been published for them either — a deployment
-     * with no odds provider configured, or a week neither source has reached.
-     * Without a sentence the screen reads as broken; with one it reads as
-     * honest, which is what it is. Said only when *nothing* is projectable,
-     * because a note beside a mostly-full column would be noise.
-     */
-    const filledSlots = recommendation.slots.filter((s) => s.playerId);
-    const projectable = filledSlots.filter((s) => s.projection != null);
-    const notes = [...recommendation.notes];
-    if (filledSlots.length > 0 && projectable.length === 0) {
-      notes.push(
-        'No betting market has been read for these players yet, so there is no projection to show — the lineup below is still ranked on everything else that is known.',
-      );
-    }
-    /*
-     * And when the column *is* full of somebody else's numbers, it says whose.
-     *
-     * A screen quoting Rotowire under a heading this app owns is the failure the
-     * whole provenance chain exists to prevent, and the row-level marks are
-     * deliberately subtle. This is the one place the claim is made in a
-     * sentence — said only when a fallback is actually on screen.
-     */
-    const borrowed = filledSlots.filter((s) => s.projectionSource === 'sleeper').length;
-    if (borrowed > 0) {
-      notes.push(
-        `${borrowed} projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.`,
-      );
-    }
-    if (unknownPlayers > 0) {
-      notes.push(`${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`);
-    }
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: freshness,
-      /*
-       * The slots the league actually starts, sent alongside the assignment.
-       *
-       * The Team screen orders its recommended starters by this rather than by
-       * score, so a backup quarterback never sits above a starting flex player
-       * on a cross-position ranking that answers no question anybody asked.
-       */
-      rosterShape: shape,
-      ...recommendation,
-      starters: withIntelligence(recommendation.starters),
-      bench: withIntelligence(recommendation.bench),
-      undecidable: withIntelligence(recommendation.undecidable),
-      notes,
+      ...decision,
     });
   });
 
@@ -891,120 +822,28 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       new PropsRepo(db).freshness(),
     ]);
 
-    const lineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
-    const advice = recommendWaiverUpgrades({
-      roster: rosterInputs,
-      candidates: candidateInputs,
-      shape,
-      profile,
-      rosteredPlayerIds: rosteredIds,
-      currentStarterIds: mine.starterIds,
-      lineup,
-    });
-
     /*
-     * What each upgrade would cost, and what paying it would cost you.
+     * What the ledger and the league's own transactions know, read before the
+     * decision rather than inside it.
      *
-     * Bolted onto the existing advice rather than folded into it: the waiver
-     * engine answers "would he improve the lineup", which is true whether or
-     * not the league bids for players at all. The price is a second question
-     * with its own failure modes — an unpublished budget, a priority league, no
-     * bid history — and every one of them degrades to a sentence rather than
-     * taking the upgrade list with it.
+     * Both are reads of stored rows and never a fetch: the manager-history
+     * backfill fills them on the daily clock, and a waiver board that triggered
+     * ingestion would turn a page load into a walk of the previous-league
+     * chain. Absent for a league nobody has backfilled yet, which the pressure
+     * column reads as "not known" and never as "quiet".
      */
-    const nflState = waiverState;
-
-    /*
-     * What each recommended add is worth past this Sunday.
-     *
-     * The board has carried a `multi-week value` column since it was built and
-     * has been reporting it as having no supplier; this is the supplier. Scoped
-     * to the players who actually made the board — a valuation for the other
-     * forty in the scanned pool is work nobody will read.
-     *
-     * It changes no ordering. `compareRows` sorts on strength and gain, and a
-     * level attached here is a sentence on a row that had already earned its
-     * place.
-     */
-    const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
-    const multiWeek = waiverMultiWeekFor({
-      playerIds: boardIds,
-      inputs: candidateInputs,
-      scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
-      profile,
-      currentWeek: nflState?.week ?? 1,
-    });
-    const upgradesWithValue = advice.upgrades.map((upgrade) => ({
-      ...upgrade,
-      candidates: upgrade.candidates.map((candidate) => {
-        const value = multiWeek.get(candidate.playerId);
-        return value ? { ...candidate, multiWeek: value } : candidate;
-      }),
-    }));
-
     const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
-      .context(league.id, { week: nflState?.week ?? 1, season: league.season })
+      .context(league.id, { week: waiverWeek, season: league.season })
       .catch(() => null);
+    const waiverHistory = await new ManagerIntelService(db)
+      .waiverHistory({
+        leagueId: league.id,
+        rosters,
+        week: waiverWeek,
+        finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
+      })
+      .catch(() => undefined);
 
-    /*
-     * Who else needs the position, and can afford him.
-     *
-     * The last of `WaiverLeagueIntel`'s three columns without a supplier: the
-     * price comes from `core/faab` and multi-week value from the pass directly
-     * above. Answered from rosters already loaded — no extra query and no
-     * lineup scoring — and the same count goes into the price model, which asks
-     * for exactly this number and has been estimating it league-wide.
-     */
-    const intel = waiverLeagueIntel({
-      advice,
-      rosters,
-      players: allPlayers,
-      shape,
-      budgets: strategy?.budget ?? null,
-      prices: strategy?.prices ?? null,
-      /*
-       * The league's published bids, for the named-rival pass.
-       *
-       * Already gathered by the strategy context — this is the same
-       * `collectBids` output the price summary was built from, not a second
-       * read, so the names and the price cannot be looking at different weeks.
-       */
-      observations: strategy?.bidHistory.observations ?? [],
-      /*
-       * And what the ledger knows about the people who need him.
-       *
-       * A read of two tables, never a fetch: the manager-history backfill fills
-       * them on the daily clock, and a waiver board that triggered ingestion
-       * would turn a page load into a walk of the previous-league chain. Absent
-       * for a league nobody has backfilled yet, which the pressure column reads
-       * as "not known" and never as "quiet".
-       */
-      history: await new ManagerIntelService(db)
-        .waiverHistory({
-          leagueId: league.id,
-          rosters,
-          week: nflState?.week ?? 1,
-          finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
-        })
-        .catch(() => undefined),
-    });
-
-    const budgets = strategy
-      ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
-      : [];
-
-    /*
-     * The defence, decided in one place and drawn in two.
-     *
-     * Team and Waivers both read this response, so the DST recommendation is
-     * computed once here rather than on each screen — which is the only way
-     * `Stream NYJ over BUF` and `Hold BUF` can never be on screen at the same
-     * time in the same app.
-     *
-     * A failure is swallowed to null. Every other column on this page is a
-     * complete answer to a different question, and a schedule read that fell
-     * over is not a reason to take the waiver board down.
-     */
     const draft = league.draftId ? await leagueRepo.getDraft(league.draftId).catch(() => null) : null;
     const format = detectBestBall({
       leagueSettings: league.leagueSettings,
@@ -1017,86 +856,66 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       totalRosters: league.totalRosters,
       currentWeek: waiverWeek,
     });
-    const dst = startsDefence
-      ? await buildDstPlan(db, {
-          season: league.season,
-          week: waiverWeek,
-          shape,
-          profile,
-          bestBall: format.confident && format.bestBall,
-          /*
-           * Post-draft is a fact about the draft, never about the calendar.
-           *
-           * A league whose draft has not finished has no weekly acquisition
-           * pressure, whatever the date says — and a league that drafts in
-           * week 2 is not behind, it is a league that drafts in week 2.
-           */
-          draftComplete: isDraftComplete(draft?.status ?? league.status ?? null),
-          rosterInputs,
-          candidateInputs,
-          lineup,
-          reserveIds: mine.reserveIds,
-          playoff: { weeks: playoffs.weeks, emphasis: playoffs.emphasis },
-        }).catch(() => null)
-      : null;
 
     /*
-     * One owner for the DEF row, and it is the planner.
+     * The whole decision, in one call.
      *
-     * The generic waiver scan already refuses a DEF-over-DEF swap — that guard
-     * is the foundation lane's and it stays. What it does still offer is a
-     * defence for an *empty* DEF slot, which is the ordinary answer to an
-     * ordinary hole and was right while nothing modelled the alternative. Now
-     * something does, and it can say `Wait — no DST needed yet` about the same
-     * empty slot, so the two would contradict each other on the same screen.
-     *
-     * The planner wins wherever it has an opinion; the generic row survives
-     * only when it could not be computed at all, which is a deployment with no
-     * schedule stored rather than a normal week.
+     * The lineup, the wire scan, multi-week value, the competition read, the
+     * pricing, the defence, the board and the claims — layered in `core` where
+     * Demo Mode and the support replay reach the same function. It used to be
+     * spelled out here and again in `core/demo/runtime/handlers.ts`, and the
+     * comment beside that second copy said it mirrored this one "line for
+     * line". See `core/waivers/assemble.ts` for the order and why it is that
+     * order.
      */
-    const upgrades = withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure).filter(
-      (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
-    );
+    const decision = await assembleWaiverPlan({
+      shape,
+      profile,
+      rosterInputs,
+      candidateInputs,
+      rosteredIds,
+      currentStarterIds: mine.starterIds,
+      reserveIds: mine.reserveIds,
+      rosters,
+      players: allPlayers,
+      week: waiverWeek,
+      season: league.season,
+      strategy,
+      budgets: strategy?.budget ?? null,
+      prices: strategy?.prices ?? null,
+      /*
+       * The league's published bids, for the named-rival pass.
+       *
+       * Already gathered by the strategy context — the same `collectBids`
+       * output the price summary was built from, not a second read, so the
+       * names and the price cannot be looking at different weeks.
+       */
+      observations: strategy?.bidHistory.observations ?? [],
+      history: waiverHistory,
+      /*
+       * A league that starts no defence does not have its schedule read to be
+       * told so — see `WaiverAssemblyRequest.dstSources`.
+       */
+      dstSources: startsDefence ? dstPlanSourcesFrom(db) : null,
+      bestBall: format.confident && format.bestBall,
+      /*
+       * Post-draft is a fact about the draft, never about the calendar.
+       *
+       * A league whose draft has not finished has no weekly acquisition
+       * pressure, whatever the date says — and a league that drafts in week 2
+       * is not behind, it is a league that drafts in week 2.
+       */
+      draftComplete: isDraftComplete(draft?.status ?? league.status ?? null),
+      playoff: { weeks: playoffs.weeks, emphasis: playoffs.emphasis },
+      now: new Date(),
+    });
 
-    /*
-     * And the claims themselves: who to add, what to bid, who to drop, in what
-     * order to enter them.
-     *
-     * Built from what this handler is already holding rather than from a second
-     * read of anything — the roster inputs, the wire inputs, the board that is
-     * about to be sent, the priced bids on it, the IR slots and the wallet. No
-     * provider is touched, no player is rescored, and no price is recomputed;
-     * see `core/waivers/claimPlan.ts`, which is the whole of the seam.
-     *
-     * A failure is swallowed to an unsurfaced plan, on the same principle as the
-     * defence above: the board is a complete answer to a different question, and
-     * a planner that fell over is not a reason to take the page down.
-     */
-    const claimPlan = (() => {
-      try {
-        return buildWaiverClaimPlan({
-          roster: rosterInputs,
-          candidates: candidateInputs,
-          advice: { ...advice, upgrades, dst, faab: { bids: budgets } },
-          shape,
-          profile,
-          reserveIds: mine.reserveIds,
-          budget: strategy?.budget ?? null,
-        });
-      } catch {
-        return null;
-      }
-    })();
-
+    const { lineup: _lineup, bids, ...board } = decision;
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: freshness,
-      ...advice,
-      dst,
-      upgrades,
-      /** The claims to enter, in order. Advisory — nothing here transacts. */
-      claimPlan,
+      ...board,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
       faab: strategy
@@ -1106,7 +925,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
             rosters: strategy.budget.rosters,
             prices: strategy.prices,
             losingBids: strategy.losingBids,
-            bids: budgets,
+            bids,
             notes: strategy.notes,
             trendingCapturedAt: strategy.trendingCapturedAt,
           }

@@ -487,13 +487,22 @@ describe('no recommendation engine can reach the fallback', () => {
     });
   }
 
-  /** The three places a display value is legitimately assembled. */
+  /**
+   * The places a display value is legitimately assembled.
+   *
+   * `core/startsit/assemble.ts` is here because the Team screen's display
+   * layering moved into it: the lineup route used to spell out the projection
+   * pass itself, and it now shares one function with Demo Mode and with the
+   * support replay so the three cannot drift. The wall is unchanged in meaning —
+   * that file assembles what is *shown*, and nothing in it decides a lineup.
+   * `recommendLineup` runs to completion before the pass is applied.
+   */
   const DISPLAY_OWNERS = new Set(
     [
       'core/startsit/lineup.ts',
       'core/startsit/weekCard.ts',
       'core/startsit/projection.ts',
-      'server/app.ts',
+      'core/startsit/assemble.ts',
       'web/screens/TeamScreen.tsx',
     ].map((p) => path.join(ROOT, ...p.split('/'))),
   );
