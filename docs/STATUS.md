@@ -3420,6 +3420,17 @@ opens as a 311 px stub and grows past the screen, and for that second there is
 genuinely nothing under the finger to move, which the draft card never suffers
 because its expansion sits inside a board that is already scrolling.
 
+**One test was missed, and production said so.** `e2e-production/smoke.spec.ts`
+keeps its own copy of the dismissal — *a card swiped away on Trades takes the
+board with it, not the network* — and it dragged the card's content, like the
+three in `e2e/sheet-vs-pull.spec.ts` that were moved to the grip. It was not
+moved with them, so the release went out, deployed, and the post-deploy smoke
+went red on it at 390 and 375: the card stayed open, which is the new rule
+working exactly as intended against the live site. Fixed forward by dragging the
+grip, with the same note as its siblings about why the arbitration it tests is
+unchanged by the move. Worth recording as the shape of the mistake rather than
+the size of it: the behaviour was changed in one suite and asserted in two.
+
 No budget raised, and the change is a net deletion. Measured on the merged head
 against `1ec8618`, the base it landed on: app JavaScript **135.9 kB** against a
 140.0 kB ceiling (−0.2 kB), everything the browser must fetch **151.9 kB**

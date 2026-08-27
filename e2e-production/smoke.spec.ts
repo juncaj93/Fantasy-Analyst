@@ -1046,9 +1046,25 @@ test.describe('the deployed app', () => {
       requestAnimationFrame(tick);
     });
 
-    const body = (await page.locator('[data-testid="player-sheet"] .sheet-body').boundingBox())!;
-    const x = body.x + body.width / 2;
-    const y = body.y + 24;
+    /*
+     * From the grip, which is where a dismissal starts.
+     *
+     * This dragged the card's *content* until #207, and passed — with a mouse.
+     * A finger there never dismissed anything: the body declares `touch-action:
+     * pan-y` for the whole life of the sheet so that a card is always
+     * scrollable, and a drag that begins in it is a scroll. The grip, the
+     * header, the backdrop, Done and Escape are what close a sheet.
+     *
+     * The arbitration this test exists for is untouched by the move. The grip
+     * is inside the sheet, the sheet is rendered inside the Trades pull
+     * surface, and every pointer it receives still propagates to
+     * `usePullToRefresh` through the portal exactly as one from the body did —
+     * which is the whole of what "the board must not arm, move or fetch"
+     * depends on.
+     */
+    const grip = (await page.locator('[data-testid="player-sheet"] .sheet-grip').boundingBox())!;
+    const x = grip.x + grip.width / 2;
+    const y = grip.y + 4;
     await page.mouse.move(x, y);
     await page.mouse.down();
     for (let i = 1; i <= 14; i++) await page.mouse.move(x, y + (420 * i) / 14);
