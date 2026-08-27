@@ -170,14 +170,15 @@ the database, and it is refused twice: in the browser and again at the server.
 It lives under **Settings → Demo Mode**, never in the bottom bar. See
 [docs/DEMO_MODE.md](docs/DEMO_MODE.md).
 
-**Support Snapshot** — when a Draft recommendation looks wrong, **Setup → This
-app → Copy Draft support snapshot** puts the exact state behind it on the
-clipboard: the scoring, the roster, the picks made, the market numbers used,
-your own ♥ and ★ marks, and every component of every score at the top of the
-board. Send it to ChatGPT or Claude and ask why. On the other end one command
+**Support Snapshot** — when a recommendation looks wrong, **Setup → This app →
+Copy support snapshot** puts the exact state behind it on the clipboard. It
+captures whichever decision you were last looking at — the row says which, and
+`Change` is beside it — and it covers all six: the Draft board, your lineup, the
+matchup and its Best Move, the waiver claim plan, the defence, and a Smart Trade
+offer. Send it to ChatGPT or Claude and ask why. On the other end one command
 replays it — deterministically, through the real engine, with the network
-unplugged — so the case is reproduced rather than reconstructed from memory,
-and the exact board that was complained about becomes a regression test.
+unplugged — so the case is reproduced rather than reconstructed from memory, and
+the exact decision that was complained about becomes a regression test.
 
 Nothing is uploaded. There is no support backend, no telemetry and no
 collection: the file goes where you send it. Sleeper usernames and user ids

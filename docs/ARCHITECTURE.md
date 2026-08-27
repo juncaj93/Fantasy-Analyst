@@ -48,8 +48,17 @@ Demo Mode fills from fixtures, and a support snapshot fills from a file — a
 capture can be a *recording proxy* around that interface rather than a
 hand-maintained list of "the inputs", and a replay can be the same board
 assembly over `Map`s. Completeness is then structural: a source the board calls
-is a source the snapshot has. See
-[SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md).
+is a source the snapshot has.
+
+The in-season surfaces are captured the same way where they have an interface —
+`MatchupSources`, `DstPlanSources` — and through their normalised input where
+they do not. The lineup, the wire and the trade search are handed a
+`StartSitInput[]` that one service assembles, so *that value* is the seam, and
+capturing it captures every field rather than the calls one request happened to
+make. Each then replays through the same assembly its screen calls, which is why
+`assembleLineup`, `assembleWaiverPlan` and `assembleSmartTrades` were extracted
+out of the routes and out of Demo Mode's handlers: one pipeline per decision,
+three callers of it. See [SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md).
 
 ## Runtime portability
 

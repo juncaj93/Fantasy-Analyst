@@ -10,14 +10,26 @@ the engine read them, the output exactly as it produced them, and the clock it
 was standing at. Handed to an agent it replays deterministically, with no
 network, through the real engine.
 
-Phase 1 covers **Draft**. The foundation is surface-independent and the
-extension contract for the in-season lanes is at the bottom of this file.
+All six decisions are covered: the **Draft** board, your **lineup**, the
+**matchup** and its Best Move, the **waiver** claim plan, the **defence**, and a
+**Smart Trade** offer.
 
 ---
 
 ## For the user: one tap
 
-**Setup → This app → Copy Draft support snapshot.**
+**Setup → This app → Copy support snapshot.**
+
+Above it, one line saying what is about to be captured:
+
+> **Current context** · Waivers
+> **Copy support snapshot**
+
+The app remembers which recommendation you were last looking at, so the button
+captures the thing you are complaining about without your having to say which it
+is. Tap the context row to change it — for a cold start straight into Settings,
+where there is nothing to infer from, or when you have moved on since the thing
+you meant to report.
 
 It copies a JSON file to the clipboard, or saves it if the clipboard refuses —
 the row says which, and how big it was. Send it to ChatGPT or Claude with the
@@ -25,8 +37,9 @@ question in plain English: *why is Junculator recommending this?*
 
 Nothing is uploaded. There is no support backend, no telemetry, no dashboard and
 no background collection: the file goes where you send it and nowhere else. If
-no draft is loaded the row says so rather than handing you a file that looks
-like a bug report and contains nothing.
+there is nothing to capture — no draft loaded, no matchup this week, no defence
+in this league's slots — the row says so rather than handing you a file that
+looks like a bug report and contains nothing.
 
 **What is in it, and what is not.** Player ids, your scoring and roster shape,
 the picks made, the market numbers used, your own ♥ and ★ marks, every component
@@ -55,9 +68,21 @@ npx vitest run tests/support.fixtures.test.ts
 
 The command prints one of six, and they are checked in this order:
 
+The command reads any of the six and says which it is holding, so there is
+nothing to select and nothing to configure:
+
+```
+  outcome        reproduced
+  Reproduced: the same 3 claims, in the same order, with the same bids and drops
+  over the same 50-player wire — week 7.
+
+  decision       Waivers (waiver-plan)
+  engine         waiver@1+dst@1+lineup@1+startsit@1 (unchanged)
+```
+
 | outcome | means | do this |
 |---|---|---|
-| `schema_unsupported` | this build cannot read the file | the app is newer or older than the checkout — match the revision in `release.gitSha` |
+| `schema_unsupported` | this build cannot read the file, or the decision in it | the app is newer or older than the checkout — match the revision in `release.gitSha` |
 | `data_mismatch` | malformed, or carrying a field a snapshot must never contain | do not "clean" it; ask for a fresh capture |
 | `engine_version_mismatch` | the reasoning has moved since capture | expected after a deliberate calibration change; a difference is not yet a regression |
 | `freshness_difference` | every ranking term matched, only the market's age read differently | the clock was not pinned; a replay bug, not a product one |
@@ -67,7 +92,15 @@ The command prints one of six, and they are checked in this order:
 ### Step 2 — classify the report
 
 Replaying tells you whether you are holding the case. It does not tell you what
-is wrong with it. Read, in this order:
+is wrong with it. Read, in this order.
+
+The order is the same for all six, and the first two are where most reports end:
+**`decision.warnings`** is what the engine already knew was wrong about itself,
+and **`decision.freshness`** is how old, how thin and how borrowed its inputs
+were. Then **`decision.context`** to confirm you are looking at the right league
+and the right week, then the output, then the input the output came from.
+
+For a Draft board that reads:
 
 1. **`decision.warnings`** — what the board already knew was wrong about itself.
    A degraded market or an unidentified roster explains a lot of reports before
@@ -91,12 +124,28 @@ survival, what historical manager behaviour moved it by, and the drivers found.
 That is the place to start when a `Next%` is the complaint, because it is the
 only per-player evidence that a manager prior applied at all.
 
+And for the five in-season decisions:
+
+| read this | when the complaint is |
+|---|---|
+| `freshness.priced` | a projection is blank, or a player is ranked below somebody obviously worse — he has no market, and the file says so rather than scoring him zero |
+| `freshness.injury` | an availability call. `unknown` is nobody having published anything, which is not the same as healthy |
+| `freshness.withoutGame` | a whole slate reading oddly — the fixture list has not been ingested |
+| `freshness.borrowedProjections` | a number under a name that is not this app's. Rotowire's, by way of Sleeper, shown because no market priced him |
+| `freshness.degraded` (matchup) | a confident-looking Hold. A degraded forecast offers nothing and must never read as one that considered the alternatives |
+| `freshness.anchors` (defence) | *why is it telling me to stream him.* `line` is a priced game, `form` is the opponent's season average standing in, `unknown` is a week the planner refused to value |
+| `freshness.faab`, `freshness.managerProfiles` | a bid. A league with no published bids prices from a prior and says the confidence is `none` |
+| `freshness.history.measured` (trades) | an offer's manager fit. `false` means the ledger was never read, and every count beside it is meaningless |
+| `inputs.startSit` / `inputs.roster` | anything about one player. Every field the engine had about him is there — the props, the previous props, the tally, the injury state, the usage weeks, the game, home or away |
+| `output.claimPlan.claims[].why` | a claim. Each line is one sentence of the argument, in the order the plan makes it |
+| `output.forecast.decision.note` | a Hold. It says *which* hold: everything locked, nobody legal for the slot, or nothing better |
+
 That maps onto the categories worth separating: **stale or missing data**
 (freshness, an empty market, an absent projection), **mapping** (a player who
 resolved to the wrong id, or to none), **configuration** (scoring, roster shape,
 a pinned ADP snapshot), **calibration** (the numbers are all correct and the
-answer is still disliked — a weights conversation, with a real board in front of
-it), **UI refresh or persistence** (the file is right and the screen was not),
+answer is still disliked — a weights conversation, with a real decision in front
+of it), **UI refresh or persistence** (the file is right and the screen was not),
 and **a bug**.
 
 ### Step 3 — fix it, then pin it
@@ -129,14 +178,36 @@ tested against a fixture written to a temporary directory instead.
 Fast path first. Never a one-worker multi-hour sweep, and never a skipped gate.
 
 ```bash
-npx vitest run tests/support.snapshot.test.ts tests/support.redaction.test.ts   # 1. schema, capture, redaction
-npx vitest run tests/support.fixtures.test.ts                                   # 2. the committed cases
-npx vitest run tests/draft.myGuy.test.ts tests/draft.test.ts tests/draftPool.test.ts  # 3. affected Draft domain
-npx playwright test --project=webkit-iphone-390 e2e/draft-card.spec.ts          # 4. one representative width
-npx playwright test --project=webkit-small-360 --project=webkit-iphone-430      # 5. only if layout changed
+# 1. the adapters and the schema — the whole lane, and it is seconds
+npx vitest run tests/support.snapshot.test.ts tests/support.redaction.test.ts \
+  tests/support.lanes.test.ts tests/support.inSeason.test.ts tests/support.isolation.test.ts
+npx vitest run tests/support.fixtures.test.ts tests/support.cli.test.ts   # 2. the fixtures and the command
+npx vitest run tests/lineup.test.ts tests/waivers.test.ts tests/dst.planner.test.ts  # 3. the affected domain
+npx playwright test --project=webkit-iphone-390 e2e/support-snapshot.spec.ts     # 4. one representative width
+npx playwright test --project=webkit-small-360 --project=webkit-iphone-430 \
+  e2e/support-snapshot.spec.ts                                                   # 5. only if layout changed
 # 6. the authoritative sharded CI, on the exact head — see .github/workflows/ci.yml
 # 7. production smoke after deploy — see docs/RELEASE.md
 ```
+
+Never a one-worker multi-hour sweep, and never a skipped gate. Step 1 is the one
+that catches almost everything: it captures and replays all five decisions
+against a real database and asserts the redaction, the fixed clock and the
+absence of writes, and it runs in under ten seconds.
+
+### The loop, in one line
+
+That is the whole lane, and it is meant to be run in an afternoon:
+
+> a questionable decision → **Copy support snapshot** → `npm run support:fixture`
+> → read the outcome word, the warnings and the freshness → classify it (source
+> data · stale state · mapping · scoring · calibration · engine · UI refresh) →
+> a surgical fix → a minimal regression case → the targeted tests above → one
+> focused WebKit width → the authoritative sharded CI on the exact head → an
+> exact-SHA deploy → `/api/health` reports that SHA → production smoke.
+
+Nothing in it is optional and nothing in it takes hours. The step that used to
+take a week — working out what the app was actually looking at — is the file.
 
 ### Step 5 — release
 
@@ -149,7 +220,11 @@ empty commits, no loosened revision checks. Roll back to a known-good SHA with
 
 ---
 
-## How it works
+## How it works — Draft
+
+The lane the architecture was proved on, and the one every section below is
+about. The five in-season lanes reuse all of it and differ in two places; both
+are under [The five in-season lanes](#the-five-in-season-lanes).
 
 ### The capture is a recording proxy, not an inventory
 
@@ -311,61 +386,152 @@ reports `engine_version_mismatch` rather than looking like a regression. See
 
 ---
 
-## Phase 2: the in-season lanes
+## The five in-season lanes
 
-Everything above is surface-independent — schema identity, the release and
-engine versions, the fixed clock, redaction and aliasing, the replay harness,
-the fixture converter, the CLI and this runbook. The Draft-specific part is
-entirely inside `decision`, and `decision.kind` is already the union of all six
-surfaces.
+Everything above is surface-independent — schema identity, the release and engine
+versions, the fixed clock, redaction and aliasing, the replay harness, the
+fixture converter, the CLI and this runbook — and adding the five cost no change
+to any of it. The schema is still `@1`: an older build handed a `lineup` snapshot
+reports `schema_unsupported`, which is the answer that outcome word exists for.
 
-Adding a lane is three things and no new format:
+### The seam is different in two ways, and both are on purpose
 
-1. **a payload type** in `schema.ts` beside `DraftBoardPayload`, with the same
-   four sections: `request`, `context`, `freshness`, `inputs`, `output`;
-2. **a recorder** over that surface's own sources interface, in the shape of
-   `recordDraftBoardSources`;
-3. **a replay adapter** that rebuilds those sources from the recorded reads and
-   calls the surface's real assembly function — never a reimplementation of it.
+Draft is one engine reading one interface, so its capture is a **recording
+proxy** around `DraftBoardSources`. Two in-season surfaces are shaped the same
+way and are captured the same way: **Matchup** wraps `MatchupSources`, and
+**Defence** wraps `DstPlanSources`.
 
-The pattern only works where a surface receives its facts through an interface,
-which is how the rest of the app is already built. What each lane would capture:
+The other three are not. The lineup, the wire and the trade search are handed a
+`StartSitInput[]` that `server/services/startSitInputs.ts` has already assembled
+out of eight repositories — so the seam *is* that value, and `inseason.ts`
+captures it whole. That is a stronger completeness guarantee than a proxy's, not
+a weaker one: a proxy records the calls a particular request happened to make,
+and this records every field, including the ones no component reads today.
 
-**Team / lineup** (`lineup`) — `StartSitInput[]` as the engine reads them:
-starters and bench with slots, this app's own projections and the components
-behind them, availability states, locked games, the scoring profile, the
-Start/Sit reasons and mode (Balanced / Floor / Ceiling), and source freshness.
-Output is the recommended lineup, the bench verdict and every reason.
+Each lane then replays through the same assembly its screen calls —
+`assembleLineup`, `buildMatchupResponse`, `assembleWaiverPlan`, `assembleDstPlan`,
+`assembleSmartTrades` — which is why those five were extracted out of the routes
+and out of Demo Mode's handlers. There is one pipeline per decision and three
+callers of it.
 
-**Matchup / Best Move** (`matchup`) — `MatchupSources`: both lineups and slots,
-Sleeper's settled points (truth, never re-simulated), the distribution inputs
-per starter, which games are over, availability, the simulation seed and count,
-and freshness. Output is the projected final, the win probability, the insight
-card in force and the Best Move with its win-probability delta.
+| lane | inputs | output |
+|---|---|---|
+| `lineup` | `StartSitInput[]`, the league's published rules, the current starters, the mode, the published fallback figures | the lineup: slots, starters, bench, undecidable, swaps, totals, confidence, late-swap risks, notes |
+| `matchup` | Sleeper's matchup rows, `StartSitInput[]` in the order asked for, NFL state, the previous forecast, the published fallback | the whole response: the forecast, both teams, every slot, the insights, the leverage, the Best Move, the cards |
+| `waiver-plan` | roster and wire inputs, the rostered set, the distilled player table, the wallet, the observed bids, the ledger's profiles, and the defence planner's three reads | the board, the priced bids, the defence plan, and the ordered claims with their contingency structure |
+| `dst-plan` | the rostered and available defences, the lineup the bench cost is measured against, and the planner's three reads | the plan: stream / hold / stash / wait, the target, the outlook and the bar it had to clear |
+| `trade-offer` | every roster, one shared evaluated pool, and what the ledger knows about each manager | the surfaced offers with GIVE, GET, counterparty, value components and fit — and no acceptance probability, because there is not one |
 
-**Waivers** (`waiver-plan`) — roster utility inputs, the bounded wire candidate
-pool, the pricing pass's observed bid distribution, FAAB budgets from the
-league's own settings (never assumed), manager pressure and competition counts,
-and the exact add/drop pairs with their contingency structure. Output is the
-ordered claim plan and the whole *See why* argument.
+### The output is the engine's own object
 
-**DST** (`dst-plan`) — the rostered defence, available defences, opponent and
-schedule, the market anchor and its fallback, the activation window and the
-outlook. Output is stream / hold / stash with reasons.
+The Draft payload hand-writes its output, because a three-hundred-player board
+copied whole is a file nobody can paste anywhere. The in-season outputs are small
+enough to carry as they are, and carrying them whole buys something a
+hand-written list cannot: a flattened output is the fields somebody remembered,
+and the field they forgot is not compared at all. That is how the Draft lane
+nearly lost `injuryLine`.
 
-**Smart Trades** (`trade-offer`) — both rosters, the candidate offers, objective
-value per side, manager fit with the sample behind it, the bounded history
-influence, and the capability check. Output is the ranked offers, their verdicts
-and reasons.
+So the in-season contract is a **structural walk** — every leaf of the captured
+output against the same leaf of the replayed one, exactly, by path, with no
+tolerance and the same signed-zero concession. A field added next year is
+compared the day it is added.
 
-**Players** — not a lane of its own. Player signal and tally state are captured
-where they are needed to explain *another* recommendation, which is what
-`inputs.signals` already does for Draft.
+### `lossless.ts`, which is the price of that
 
-Two rules that carry over unchanged. Bound every unbounded read and count what
-was dropped — do not let a distillation pass silently as a match. And alias
-identities rather than deleting them wherever the engine follows them, which for
-the in-season lanes means the same manager chain plus roster ids.
+`JSON.stringify` does not round-trip everything, and a value it changes would
+compare equal on both sides while carrying nothing — a snapshot that replays a
+*different decision* and looks like the right one. So a capture containing one is
+refused, and four real ones are hoisted into entry arrays instead:
+
+- `DefenseTendencyIndex`, the opponent table attached to every `StartSitInput`;
+- `impliedTotals`, the defence planner's fallback anchor;
+- the transaction profiles behind the waiver pressure column;
+- the trending map behind a bid.
+
+The fifth was not a `Map` at all. A league's points-allowed table ends at
+`to: Infinity`, because the top band is "and above", and `JSON.stringify(Infinity)`
+is `null` — so every defence in the league replayed a fraction of a point out,
+silently. The payloads now carry the league's own published `scoring_settings`
+and `roster_positions` and rebuild the profile, which is what the Draft payload
+always did.
+
+### Redaction: alias before the engine speaks
+
+The Draft lane aliases its inputs and scrubs its output, because
+`nextPickModel.managerHistory` writes a manager into a sentence. That works for
+an identifier and cannot work for a **display name**: this app's own seeded
+league has a manager called `You`, and replacing names in prose turned
+`You are sending Ike Sandoval` into `Manager 9 are sending Ike Sandoval` — a
+redaction corrupting the sentence it was protecting, in a way no boundary rule
+fixes, because the collision is the word.
+
+So the in-season adapters alias the rosters, the wallet and the manager profiles
+**before the assembly runs**. The engines compose `Manager 3` into their own
+sentences and there is nothing left to replace; the scrub that remains handles
+identifiers only. Aliasing the profile *bodies* rather than only their map keys
+is the other half — both profile types carry their own `userId` and
+`displayName`.
+
+One identifier cannot be aliased ahead of the assembly, and it is the same catch
+the Draft lane made through the draft id: the **matchup fingerprint** hashes the
+league id, and it seeds the simulation. A replay from an aliased fingerprint
+draws a different afternoon and disagrees with its own capture by a point of win
+probability — indistinguishable, from the outside, from a regression. So
+`MatchupForecast.seed` reports the 32-bit number actually drawn with, the
+snapshot carries it, and the replay hands it back: the draws reproduce without
+the identity that produced them.
+
+### Freshness
+
+Every lane carries the same block, and every field in it is a *count of a state
+the inputs are already in* rather than a second measurement — so it cannot
+disagree with what the replay compares. Players with a market and without one;
+availability as known, unknown and conflicting, with the injury layer's own
+freshness buckets; players with no game on the slate; roster spots the player
+table could not resolve. Plus what only that lane can see: how many shown
+projections are Rotowire's, how many of my starters' games are settled, whether
+the forecast is degraded, which anchor each planned defence week got, and whether
+the ledger was read at all.
+
+**Unknown is never zero.** A player with no market is counted as unpriced rather
+than folded into a mean of zero; a player nobody has published on is `unknown`
+rather than healthy; an unrated defence week is left unrated. Each of those is
+the difference between "the engine is wrong" and "the engine was right about what
+it was given", which is the first fork of every diagnosis.
+
+### Read-only
+
+Every read on a capture path is a read the corresponding screen already makes,
+through the same module — `server/services/decisionInputs.ts` live, and
+`core/demo/runtime/decisions.ts` in a demo. `tests/support.isolation.test.ts`
+watches every statement prepared during a capture of each of the five and asserts
+none of them mutates, and snapshots the whole database before and after.
+
+There is exactly one call that leaves the process: Sleeper's matchup scoreboard,
+which is the identical request the Matchup screen makes every time it is opened.
+Sleeper owns the score and this app never recomputes it, so a snapshot that
+invented the scoreboard would be a snapshot of a different game. Nothing is
+written or ingested as a result, and the test asserts every other lane reaches
+Sleeper not at all.
+
+The matchup capture also answers `cached()` with null and `remember()` with
+nothing. A memoised response would record this request's inputs beside an earlier
+request's forecast, and writing the recomputation back would let a diagnostic
+decide what the next screen load was served.
+
+### Players
+
+Still not a lane of its own. Player signal and tally state are captured where
+they explain *another* recommendation, which is what `inputs.signals` does for
+Draft and what `StartSitInput.signal` does for all five in-season lanes.
+
+### Demo Mode
+
+The same route, the same adapters, the same gatherers the demo screens read — so
+a scenario produces the file the live app produces, and the workflow can be
+learned end to end without a league. `gitSha` is `demo`, so a rehearsal cannot be
+mistaken for a deployment, and the clock is the scenario's, which is what makes a
+demo snapshot replay at all.
 
 ---
 
@@ -373,11 +539,23 @@ the in-season lanes means the same manager chain plus roster ids.
 
 | file | what it is |
 |---|---|
-| [`src/core/support/schema.ts`](../src/core/support/schema.ts) | the schema, `decision.kind`, and what every field is for |
+| [`src/core/support/schema.ts`](../src/core/support/schema.ts) | the envelope, `decision.kind`, and the Draft payload |
+| [`src/core/support/payloads.ts`](../src/core/support/payloads.ts) | the five in-season payloads, and why their outputs are the engines' own types |
 | [`src/core/support/redaction.ts`](../src/core/support/redaction.ts) | the forbidden fields, the scanner, the alias allocator |
-| [`src/core/support/draftSnapshot.ts`](../src/core/support/draftSnapshot.ts) | the recording proxy and the distillation |
-| [`src/core/support/replay.ts`](../src/core/support/replay.ts) | snapshot → sources → the real board → the contract |
+| [`src/core/support/lossless.ts`](../src/core/support/lossless.ts) | what the wire would change, and the refusal |
+| [`src/core/support/inseason.ts`](../src/core/support/inseason.ts) | the `StartSitInput[]` seam, the league rules, the hoisted `Map`s |
+| [`src/core/support/draftSnapshot.ts`](../src/core/support/draftSnapshot.ts) | the Draft recording proxy and the distillation |
+| [`src/core/support/lineupSnapshot.ts`](../src/core/support/lineupSnapshot.ts) | Team / Start-Sit: capture and replay |
+| [`src/core/support/matchupSnapshot.ts`](../src/core/support/matchupSnapshot.ts) | Matchup / Best Move: the proxy, the seed, capture and replay |
+| [`src/core/support/waiverSnapshot.ts`](../src/core/support/waiverSnapshot.ts) | Waivers: the claim plan, the distillation, capture and replay |
+| [`src/core/support/dstSnapshot.ts`](../src/core/support/dstSnapshot.ts) | Defence: the three reads, capture and replay |
+| [`src/core/support/tradeSnapshot.ts`](../src/core/support/tradeSnapshot.ts) | Smart Trades: capture and replay |
+| [`src/core/support/contract.ts`](../src/core/support/contract.ts) | `readSnapshot`, the structural walk, the six outcome words |
+| [`src/core/support/dispatch.ts`](../src/core/support/dispatch.ts) | one snapshot in, one verdict out |
+| [`src/core/support/replay.ts`](../src/core/support/replay.ts) | the Draft contract, term by term |
 | [`src/core/support/fixture.ts`](../src/core/support/fixture.ts) | canonical JSON, and where a fixture lives |
 | [`scripts/support-fixture.ts`](../scripts/support-fixture.ts) | the CLI |
+| [`src/core/engineVersion.ts`](../src/core/engineVersion.ts) | how a surface's version is composed from the engines under it |
 | [`src/core/draft/version.ts`](../src/core/draft/version.ts) | `DRAFT_ENGINE_VERSION`, and when to bump it |
-| `tests/support.*.test.ts` | round trip, redaction, the route, the committed fixtures |
+| [`src/web/supportContext.ts`](../src/web/supportContext.ts) | which decision the reader was looking at |
+| `tests/support.*.test.ts` | round trip, redaction, isolation, the routes, the CLI, the committed fixtures |
