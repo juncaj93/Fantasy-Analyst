@@ -2936,3 +2936,98 @@ byte-identical health twice.
 App JavaScript +2.1 kB gzipped, CSS byte-identical, Demo Mode's lazy chunk
 +2.0 kB. No budget raised — and the demo chunk is now within 1.0 kB of its
 ceiling, which is the next thing that will need a deliberate decision.
+
+## Milestone — a newsletter creates work, not opinions (done)
+
+**The app was forming fantasy opinions it had no way to form.** An issue arriving
+at the inbound address was read by a sentence-level classifier and written
+straight into the evidence ledger: *found news on 5 players, 2 applied
+automatically, 3 waiting for your review*. Those were guesses about editorial
+analysis, made on delivery, that moved player tallies, the draft board, Trades
+and Start/Sit — and the review queue they produced asked the reader to work
+through classifier output sentence by sentence before the newsletter was any use.
+
+The workflow that actually happens is different, and it is now the only one:
+
+    an issue arrives → Setup shows a mark → Copy for ChatGPT →
+    paste its tally back → see exactly what would change → approve →
+    applied once → the mark clears
+
+**Arrival writes nothing.** Not an evidence row, not a review item, not a
+signal. The issue is decoded, repaired, stored, and marked `awaiting` on
+`newsletter_messages.tally_state` — durable state, so the work survives a
+reload, a different phone and a Worker restart. The classifier still runs and
+its verdicts are discarded; what is kept is the coverage report, which is about
+the *delivery* — did the email decode, how much text is there to hand over,
+which name-like spans the dictionary does not know. None of those is an opinion
+about a player.
+
+**The two controls are where the work is announced.** Copy for ChatGPT and
+Paste AI tally are drawn directly beneath the Newsletter row on Setup, without
+opening the panel, and they name the issue they act on. They are workflow rather
+than furniture: they exist only while an issue is unscored, and they are gone
+the moment one is scored. The Setup destination's mark composes the newsletter's
+pending work with the two review queues and says which is which in its
+accessible name. A backlog is worked oldest first, one issue at a time, and
+nothing anywhere combines two.
+
+**Exactly once, three ways, because a double count is silent and permanent.**
+`newsletter_tally_applications` claims one application per (newsletter, exact
+tally): the insert *is* the decision, so a double tap, a reload or a retry after
+a timeout cannot both conclude they are first. Evidence rows are keyed as they
+always were. And an approved tally is the reading of its *whole issue*, so
+applying one retires whatever the classifier wrote for that newsletter — for
+every player, not only the ones the tally names, because the protocol says to
+omit players whose signals cancel and silence about a player is therefore a
+verdict rather than an absence of one. That last scope was the bug: displacing
+only the scored players left the rest of the automatic reading stacked
+underneath the approved one.
+
+Three cases are kept apart by what a person has already said, and `accepted` is
+not enough to say it: the identity-repair path writes `accepted` for every row
+it recovers, so the question is asked of `user_reviews`, which is written when
+somebody presses a button in Review and by nothing else. A row they ruled on is
+untouched; a row the tally scores the *other* way stops counting and waits for
+them; everything else is retired. Nothing is deleted, ever — `ignored` stops a
+row counting while it stays in the ledger with a note saying why, reversible
+like any other item.
+
+**The issue already in production is reconciled by provenance, once.** Migration
+0034 stops classifier rows counting for newsletters still awaiting a tally, and
+is narrow on purpose: classifier rows only, never `ai-tally-import` or
+`tally-backfill` — the lifetime `+11` from the hand-imported running tally is
+somebody's own work and is never touched — never a row with an override, never
+one with any history in `user_reviews`. Its two `UPDATE`s change nothing when
+run again, and that is tested against a database built migration by migration
+into the shape the deployed one is in.
+
+**Reprocessing is gone, and that is what makes "one scoring path" true.**
+`NewsletterService.reprocess()` and its preview were the last live route by
+which the classifier could put a number in a player's tally. The decoding repair
+they also carried moved to the way *out*: `chatSource` runs `recoverBody` every
+time an issue is copied, so a body stored as undecoded MIME still hands ChatGPT
+clean text — and with arrival writing no evidence there is no longer a row
+derived from garbage for a repair to retire. The one-off ops script and workflow
+built on those endpoints went with them.
+
+**Player cards stopped explaining the app to the reader.** A backfilled tally
+row carries the drivers that justified the score *and* a template describing how
+it got into the database — "Carried over from a running tally covering several
+earlier issues (net +11)" — and the template won, because the sentence ladder
+prefers a stored summary to an excerpt. So a card somebody opened to find out
+about a wide receiver led with the app talking about itself. Skipped by
+provenance rather than by matching the sentence, in both places that walk the
+ladder, and nothing is invented for a row that carries only bookkeeping: it
+offers no sentence and a better-supported item wins. The ledger is unchanged and
+the timeline still prints it, which is where an explanation of how data arrived
+belongs.
+
+**Data Health tells delivery apart from work.** An issue received on Sunday and
+unscored on Monday is a healthy feed with a job attached. Freshness is measured
+on delivery, as it was; the pending count is a diagnostic, and the mark that
+asks for the work is the Setup dot — a different mechanism on a different
+screen, deliberately.
+
+No budget raised, and none needed: app JavaScript −0.2 kB gzipped, CSS +0.1 kB,
+and Demo Mode's lazy chunk byte-identical at 149.0 kB against its 150.0 kB
+ceiling. Retiring the reprocess panel paid for the two Setup controls.

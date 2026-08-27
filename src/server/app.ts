@@ -344,11 +344,12 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ---------------------------------------------------------------- overview
   router.get('/api/overview', async (ctx) => {
     const db = ctx.env.db;
-    const [players, leagues, evidence, identity, props, adp] = await Promise.all([
+    const [players, leagues, evidence, identity, newsletters, props, adp] = await Promise.all([
       new PlayerRepo(db).count(),
       new LeagueRepo(db).listLeagues(),
       new EvidenceRepo(db).pendingCount(),
       new NewsletterRepo(db).pendingIdentityCount(),
+      new NewsletterRepo(db).awaitingTallyCount(),
       new PropsRepo(db).freshness(),
       new AdpRepo(db).latest(),
     ]);
@@ -387,6 +388,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       selectedLeague: selected ? { id: selected.id, name: selected.name, season: selected.season } : null,
       pendingEvidence: evidence,
       pendingIdentity: identity,
+      /*
+       * Newsletters received and not yet scored.
+       *
+       * Counted here, beside the two review queues, because it is the third
+       * kind of unfinished work the Setup destination carries — and because
+       * counting all three from one read is what stops the mark on the bar and
+       * the rows behind it from disagreeing. It is deliberately its own number
+       * rather than folded into `pendingEvidence`: a newsletter awaiting a
+       * tally is not an evidence item, and adding it to that count would make
+       * the Review row claim work it does not hold.
+       */
+      pendingNewsletters: newsletters,
       vegas: { ...props, provider: ctx.env.vegas.name, configured: ctx.env.vegas.isConfigured() },
       adpSnapshot: adp,
       season,
@@ -2004,32 +2017,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   /**
-   * What would re-running the current rules over a stored newsletter do?
-   * A read: it computes a difference and writes nothing.
-   */
-  router.get('/api/newsletter/messages/:id/preview', async (ctx) => {
-    const service = new NewsletterService(ctx.env.db);
-    const message = await service.storedMessage(ctx.params['id']!);
-    if (!message) {
-      return errorResponse(
-        'That email was not kept, so its rules cannot be re-run. Only newsletters processed since body retention was added can be reprocessed.',
-        404,
-      );
-    }
-    return jsonResponse(await service.previewReprocess(message));
-  });
-
-  /** Apply what the preview described. Existing corrections are untouched. */
-  router.post('/api/newsletter/messages/:id/reprocess', async (ctx) => {
-    const service = new NewsletterService(ctx.env.db);
-    const message = await service.storedMessage(ctx.params['id']!);
-    if (!message) {
-      return errorResponse('That email was not kept, so its rules cannot be re-run.', 404);
-    }
-    return jsonResponse(await service.reprocess(message));
-  });
-
-  /**
    * The newsletter as one block of text, ready to paste into a chat.
    *
    * A read, but not a public one. Everything else about a stored newsletter is
@@ -2341,6 +2328,36 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     } catch (err) {
       return errorResponse(err instanceof Error ? err.message : String(err), 400);
     }
+  });
+
+  /**
+   * Rebuild the derived signal cache from the ledger.
+   *
+   * `player_signal_cache` is derived and is written whenever a player's
+   * evidence changes, which covers everything the app itself does. It does not
+   * cover a change made *underneath* the app — a migration that retires rows by
+   * provenance, which is exactly what `0034_newsletter_awaits_a_tally.sql`
+   * does. Those rows stop counting in the ledger immediately and the cached
+   * lifetime totals keep including them until each player is next touched,
+   * which for a quiet player could be never.
+   *
+   * So this exists to be run once after that migration, and it is written to be
+   * safe to run at any other time: it reads the ledger and rewrites what is
+   * derived from it, so running it twice produces the same numbers as running
+   * it once, and running it on a healthy database changes nothing at all. One
+   * pass over the players who actually have evidence — not the whole roster,
+   * because a player nobody has written about has nothing to recompute.
+   *
+   * A POST, so it needs the passphrase: it writes, even though everything it
+   * writes is a restatement of something already true.
+   */
+  router.post('/api/maintenance/refresh-signals', async (ctx) => {
+    const seasonStart = await new SettingsRepo(ctx.env.db).get<string | null>(SETTING_KEYS.seasonStart, null);
+    const players = await new EvidenceRepo(ctx.env.db).refreshAllSignals({ seasonStart });
+    return jsonResponse({
+      players,
+      detail: `Rebuilt the derived tallies for ${players} player(s) from the evidence ledger.`,
+    });
   });
 
   // --------------------------------------------------------------- nicknames

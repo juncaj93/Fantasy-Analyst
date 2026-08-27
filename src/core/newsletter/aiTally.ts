@@ -229,6 +229,11 @@ export interface AiTallyImportResult {
   rejected: RejectedLine[];
   /** Set when the paste could not be read at all. */
   error: string | null;
+  /**
+   * This tally's identity, for exactly-once. Null when nothing was readable —
+   * an unreadable paste is not a tally and has nothing to be idempotent about.
+   */
+  payloadFingerprint: string | null;
   detail: string;
 }
 
@@ -237,6 +242,33 @@ export interface AiTallyImportOptions {
   sourceMessageId: string;
   sourceDate: string;
   sourceName?: string;
+}
+
+/**
+ * The identity of one pasted tally, as a whole.
+ *
+ * Exactly-once needs a name for "this tally, again". The ledger's per-row
+ * dedupe keys already stop a repeat from *counting* twice, and this is what
+ * lets the server *recognise* the repeat: a second apply of the same tally is
+ * answered with what the first one did rather than with a truthful but useless
+ * report that nothing was applied.
+ *
+ * Computed from the rows the parser read, not from the raw paste. A chat reply
+ * arrives wrapped in explanation, a code fence and whatever else the model felt
+ * like saying, and none of that is the tally — so a second paste of the same
+ * scores with a different preamble is the same tally, and is treated as one.
+ * The rows are sorted for the same reason: their order is presentational.
+ *
+ * A block with no rows has an identity too, and it is a stable one. That is
+ * deliberate: "this issue had nothing worth scoring" is a real answer, and
+ * approving it twice must still complete the newsletter exactly once.
+ */
+export function tallyPayloadFingerprint(rows: AiTallyRow[]): string {
+  const canonical = rows
+    .map((r) => [canonicalText(r.name), String(r.score), canonicalText(r.reason)].join('|'))
+    .sort()
+    .join('\n');
+  return stableHash([TALLY_PROTOCOL, canonical].join('|'));
 }
 
 /** The dedupe identity of one imported row. */
@@ -284,6 +316,7 @@ export function importAiTally(
       conflicts: [],
       rejected: parsed.rejected,
       error: parsed.error,
+      payloadFingerprint: null,
       detail: parsed.error,
     };
   }
@@ -401,6 +434,7 @@ export function importAiTally(
     conflicts,
     rejected: parsed.rejected,
     error: null,
+    payloadFingerprint: tallyPayloadFingerprint(parsed.rows),
     detail: parts.join(' '),
   };
 }

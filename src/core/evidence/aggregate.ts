@@ -9,6 +9,7 @@
  *  - old evidence is never deleted; recency is expressed via windows
  */
 
+import { isCarriedOverTally } from './provenance.ts';
 import type {
   EffectiveEvidence,
   EvidenceItem,
@@ -20,17 +21,11 @@ import type {
 const COUNTED_STATUSES = new Set(['auto_applied', 'accepted', 'corrected']);
 
 /**
- * Origins whose rows describe a period rather than a moment.
+ * Rows that carry a period rather than a moment.
  *
- * `rule_id` is already how the ledger records where a row came from, so this
- * needs no new column on `evidence_items` — see `newsletter/aiTally.ts`, which
- * names the convention.
- *
- * Only the backfill importer qualifies. A weekly tally row is one issue's
- * reading of one player and its date is exactly when that news happened; the
- * deterministic parser's rows are single sentences from a dated newsletter.
- * The backfill importer is the one path that deliberately compresses "several
- * earlier issues" into a single item, and it says so on every row it writes.
+ * Re-exported from `provenance.ts`, which is where the ledger's "where did this
+ * row come from?" questions now live — the same answer decides whether a row's
+ * stored summary is fit to show a reader, and two copies of it would drift.
  *
  * Known gap, stated rather than hidden: an identity repair re-files an existing
  * row under `user_identity_repair` and keeps its magnitude, so a repaired
@@ -38,7 +33,7 @@ const COUNTED_STATUSES = new Set(['auto_applied', 'accepted', 'corrected']);
  * means changing what the repair path records, which is a ledger rule and not
  * this module's to change.
  */
-export const CARRIED_OVER_RULE_IDS: ReadonlySet<string> = new Set(['tally-backfill']);
+export { CARRIED_OVER_RULE_IDS } from './provenance.ts';
 
 /**
  * Recent-evidence windows, in days.
@@ -64,7 +59,7 @@ export function effectiveEvidence(item: EvidenceItem): EffectiveEvidence {
     sourceDate: item.sourceDate,
     delta: counted ? sign * magnitude : 0,
     counted,
-    spansPriorIssues: item.ruleId !== null && CARRIED_OVER_RULE_IDS.has(item.ruleId),
+    spansPriorIssues: isCarriedOverTally(item.ruleId),
   };
 }
 

@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { api, type PlayerDetail } from '../api.ts';
 /* What Sleeper says about a player's availability right now. Never a ranking input. */
 import { injuryStatusTag } from '../../core/draft/injury.ts';
+import { summaryIsIngestionBookkeeping } from '../../core/evidence/provenance.ts';
 import { DetailLabel, Unknown, formatDate } from './common.tsx';
 import { SkeletonRows } from './native.tsx';
 
@@ -474,7 +475,16 @@ export function headerStatus(
  * actually wrote about this player, and anything else would be this file making
  * a claim up. It is written out here rather than imported because the wire type
  * the browser receives is a projection of the ledger row and carries none of
- * the storage fields that function's signature requires.
+ * the storage fields that function's signature requires. The one thing it does
+ * import is the provenance test below, because a second copy of *that* is how
+ * the two surfaces start disagreeing about what a reader is shown.
+ *
+ * A backfilled tally row's stored summary is bookkeeping — "Carried over from a
+ * running tally covering several earlier issues (net +11)" — so it is skipped
+ * and the row's own drivers are quoted instead. That is a presentation
+ * decision, not a data one: the summary is untouched in the ledger and is still
+ * printed in the evidence timeline, which is the surface that exists to explain
+ * how something got in.
  *
  * The excerpt is quoted rather than paraphrased and is never cut to fit:
  * trimming a sentence is the cheapest way to change what it says.
@@ -482,11 +492,12 @@ export function headerStatus(
 export function newsSentence(item: {
   excerpt: string;
   contextSummary: string | null;
+  ruleId?: string | null;
   userOverride: { note?: string } | null;
 }): { text: string; quoted: boolean } {
   const note = item.userOverride?.note?.trim();
   if (note) return { text: tidy(note), quoted: false };
-  const summary = item.contextSummary?.trim();
+  const summary = summaryIsIngestionBookkeeping(item.ruleId) ? null : item.contextSummary?.trim();
   if (summary) return { text: tidy(summary), quoted: false };
   return { text: tidy(item.excerpt ?? ''), quoted: true };
 }
@@ -531,7 +542,7 @@ export function LatestNews({
   limit,
 }: {
   /** The whole ledger for this player, or null while it is being read. */
-  items: { id: string; sourceName: string; sourceDate: string; excerpt: string; contextSummary: string | null; polarity: string; userOverride: { polarity?: string; note?: string } | null }[] | null;
+  items: { id: string; sourceName: string; sourceDate: string; excerpt: string; contextSummary: string | null; ruleId?: string | null; polarity: string; userOverride: { polarity?: string; note?: string } | null }[] | null;
   /** Items the takeaway above already quoted, marked rather than hidden. */
   quotedEvidenceIds: string[];
   /** How many of the newest to show before saying how many are left. */

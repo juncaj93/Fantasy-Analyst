@@ -179,9 +179,10 @@ export class EvidenceRepo {
         .bind(...batch)
         .all<EvidenceRow>();
 
+      const ruled = await this.idsWithUserDecision(rows.results.map((r) => r.id));
       for (const row of rows.results) {
         const item = toItem(row);
-        if (item.userOverride) {
+        if (item.userOverride || ruled.has(row.id)) {
           keptForUserOverride.push(item);
           continue;
         }
@@ -200,6 +201,39 @@ export class EvidenceRepo {
     }
 
     return { changed, keptForUserOverride };
+  }
+
+  /**
+   * Which of these rows a person has actually ruled on.
+   *
+   * Not the same question as "is it `accepted`?", and the difference is what
+   * makes this a query rather than a field test. `accepted` is a review status
+   * an import is also allowed to write — the identity-repair path writes it for
+   * every row it recovers, because the user confirmed *who* somebody is, not
+   * what the news said about them. Reading that as a verdict would freeze the
+   * ±1 stand-ins that path used to leave behind, and a re-import would then
+   * stack the real score on top of one it exists to replace.
+   *
+   * `user_reviews` is the ledger's own record that a person decided something,
+   * written by `applyReview` and by nothing else. That is the thing an import
+   * must never overrule, so that is what gets asked.
+   */
+  async idsWithUserDecision(ids: number[]): Promise<Set<number>> {
+    const found = new Set<number>();
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return found;
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT DISTINCT evidence_item_id AS id FROM user_reviews
+            WHERE evidence_item_id IN (${placeholders})`,
+        )
+        .bind(...batch)
+        .all<{ id: number }>();
+      for (const row of rows.results) found.add(Number(row.id));
+    }
+    return found;
   }
 
   async countAll(): Promise<number> {
@@ -337,10 +371,11 @@ export class EvidenceRepo {
     const keptForUserOverride: EvidenceItem[] = [];
     const now = nowIso();
 
+    const ruled = await this.idsWithUserDecision(rows.results.map((r) => r.id));
     for (const row of rows.results) {
       if (keep.has(row.dedupe_key)) continue;
       const item = toItem(row);
-      if (item.userOverride) {
+      if (item.userOverride || ruled.has(row.id)) {
         keptForUserOverride.push(item);
         continue;
       }

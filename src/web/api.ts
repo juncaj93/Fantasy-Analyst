@@ -145,6 +145,15 @@ export interface Overview {
   selectedLeague: { id: string; name: string; season: string } | null;
   pendingEvidence: number;
   pendingIdentity: number;
+  /**
+   * Newsletters received and not yet scored with an approved tally.
+   *
+   * Optional for the same reason `season` is: a client running against a
+   * deployment older than this one is handed nothing rather than `undefined`
+   * arithmetic, and a missing field means "none waiting" — the direction that
+   * shows a mark too seldom rather than one that never clears.
+   */
+  pendingNewsletters?: number;
   vegas: { provider: string; configured: boolean; fetchedAt: string | null; events: number };
   adpSnapshot: { id: number; label: string; capturedAt: string; matchedCount: number } | null;
   /**
@@ -703,6 +712,14 @@ export interface NewsletterStatus {
   lastProcessedAt: string | null;
   lastProcessedDetail: string | null;
   lastError: string | null;
+  /** The issue waiting for its approved ChatGPT tally, or null when there is none. */
+  pendingTally: {
+    messageId: string;
+    subject: string;
+    receivedAt: string;
+    /** Every issue still to be scored, this one included. */
+    waiting: number;
+  } | null;
   totals: {
     emailsReceived: number;
     newslettersProcessed: number;
@@ -738,31 +755,17 @@ export interface NewsletterMessage {
   rejectReason: string | null;
   detail: string | null;
   coverage: NewsletterCoverage | null;
-  /** True when the email itself was kept, so its rules can be re-run. */
+  /** True when the email itself was kept, so it can be copied for ChatGPT. */
   bodyRetained?: boolean;
-}
-
-export interface ReprocessDisagreement {
-  playerId: string;
-  excerpt: string;
-  storedPolarity: string;
-  storedMagnitude: number;
-  newPolarity: string;
-  newMagnitude: number;
-  ruleId: string | null;
-}
-
-export interface ReprocessPreview {
-  messageId: string;
-  wouldAdd: number;
-  alreadyStored: number;
-  wouldRetire: ReprocessDisagreement[];
-  repairs: string[];
-  stale: ReprocessDisagreement[];
-  protectedByUser: ReprocessDisagreement[];
-  playersAffected: number;
-  tallyDelta: { playerId: string; net: number }[];
-  detail: string;
+  /**
+   * Where this issue stands in the reviewed-tally workflow.
+   *
+   * Optional so a client running against an older deployment reads `undefined`
+   * rather than a wrong word, and shows the issue without claiming anything
+   * about whether it has been scored.
+   */
+  tallyState?: 'awaiting' | 'applied' | 'not_applicable';
+  talliedAt?: string | null;
 }
 
 export interface AiTallyPreviewRow {
@@ -790,6 +793,8 @@ export interface AiTallyPreview {
   messageId: string;
   protocolOk: boolean;
   error: string | null;
+  /** Set when this exact tally has already been applied to this newsletter. */
+  alreadyAppliedAt: string | null;
   rowsParsed: number;
   ready: AiTallyPreviewRow[];
   /** Already in the ledger, retired by a later paste, and asked for again. */
@@ -819,6 +824,10 @@ export interface AiTallyApplyOutcome {
   parserSuperseded: number;
   parserNeedsReview: number;
   playersTouched: number;
+  /** True once the newsletter has an approved tally and stops asking for attention. */
+  completed: boolean;
+  /** True when this exact tally had already been applied and this call wrote nothing. */
+  replayed: boolean;
   detail: string;
 }
 

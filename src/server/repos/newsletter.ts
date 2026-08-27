@@ -4,6 +4,17 @@ import type { IdentityReviewItem } from '../../core/newsletter/pipeline.ts';
 import { stableHash } from '../../core/newsletter/fingerprint.ts';
 import { nowIso, parseJson, toJson, type Database } from '../db.ts';
 
+/**
+ * Where one newsletter stands in the reviewed-tally workflow.
+ *
+ * `awaiting` is the only one that means work: the issue is stored and readable,
+ * and nobody has approved a tally for it yet. `not_applicable` covers everything
+ * a person could not tally even if they wanted to — mail that was quarantined or
+ * rejected, and issues stored before bodies were retained, which cannot be
+ * copied for ChatGPT at all.
+ */
+export type TallyState = 'awaiting' | 'applied' | 'not_applicable';
+
 /** Every email the dedicated address receives, processed or not. */
 export interface MessageRecord {
   messageId: string;
@@ -31,6 +42,17 @@ export interface MessageRecord {
    */
   bodyHtml?: string | null;
   bodyText?: string | null;
+  /**
+   * Whether this issue is still waiting for its approved ChatGPT tally.
+   *
+   * Durable, not derived. Setup asks it on every load to decide whether to show
+   * an attention dot and the two workflow controls, and the answer has to
+   * survive a reload, a different phone and a Worker restart — none of which a
+   * value inferred from the shape of the evidence ledger would.
+   */
+  tallyState: TallyState;
+  /** When the approved tally was applied. Null while one is still awaited. */
+  talliedAt: string | null;
 }
 
 export interface IdentityReviewRecord {
@@ -73,8 +95,8 @@ export class NewsletterRepo {
            message_id, source_id, from_address, subject, received_at, fingerprint,
            evidence_count, pending_count, auto_applied_count, identity_review_count,
            coverage_json, reject_reason, detail, processed_at, status,
-           body_html, body_text
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           body_html, body_text, tally_state, tallied_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(message_id) DO UPDATE SET
            evidence_count = excluded.evidence_count,
            pending_count = excluded.pending_count,
@@ -87,6 +109,10 @@ export class NewsletterRepo {
            status = excluded.status,
            body_html = excluded.body_html,
            body_text = excluded.body_text`,
+        // `tally_state` and `tallied_at` are deliberately absent from the
+        // update: re-recording a message must never walk an approved tally back
+        // to awaiting. Where the workflow stands is owned by `markTallied` and
+        // by the migration's one-time backfill, not by a re-delivery.
       )
       .bind(
         record.messageId,
@@ -106,7 +132,171 @@ export class NewsletterRepo {
         record.status,
         record.bodyHtml ?? null,
         record.bodyText ?? null,
+        record.tallyState,
+        record.talliedAt,
       )
+      .run();
+  }
+
+  // ------------------------------------------------------ the tally workflow
+
+  /**
+   * The newsletter the workflow is currently about, or null when there is none.
+   *
+   * **Oldest first, one at a time.** Issues are read in the order they arrive
+   * and a running tally is cumulative, so working the backlog newest-first
+   * would score a week before the week it follows. Nothing here ever combines
+   * two issues: `pendingTallyCount` says how many are behind this one, and each
+   * is copied, scored and approved on its own.
+   */
+  async nextAwaitingTally(): Promise<MessageRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM newsletter_messages
+          WHERE tally_state = 'awaiting'
+          ORDER BY received_at ASC, rowid ASC LIMIT 1`,
+      )
+      .first<Record<string, unknown>>();
+    return row ? toMessage(row) : null;
+  }
+
+  /** How many issues are waiting for an approved tally. */
+  async awaitingTallyCount(): Promise<number> {
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM newsletter_messages WHERE tally_state = 'awaiting'")
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  /**
+   * Record that an approved tally has been applied to this newsletter.
+   *
+   * Idempotent, and one-directional: a message already `applied` keeps its
+   * original `tallied_at`, so re-pasting a revised tally does not rewrite when
+   * the issue was first completed.
+   */
+  async markTallied(messageId: string, at: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE newsletter_messages
+            SET tally_state = 'applied', tallied_at = COALESCE(tallied_at, ?)
+          WHERE message_id = ?`,
+      )
+      .bind(at, messageId)
+      .run();
+  }
+
+  /**
+   * Has this exact tally already been applied to this newsletter?
+   *
+   * The durable, server-side half of exactly-once. The ledger's own dedupe keys
+   * already stop a repeated paste from counting twice; this is what lets the
+   * server *recognise* the repeat and answer with what the first apply did,
+   * rather than truthfully but uselessly reporting that nothing was applied.
+   *
+   * `standing` is the distinction that matters. A tally that has been applied
+   * and then corrected by a later one is on the record but is no longer what
+   * this newsletter says, so pasting it again is a revision back to it rather
+   * than a repeat of it — and has to be allowed to run.
+   */
+  async findTallyApplication(
+    messageId: string,
+    payloadHash: string,
+  ): Promise<{
+    appliedAt: string;
+    standing: boolean;
+    /** False while the apply that claimed this row has not reported back. */
+    completed: boolean;
+    outcome: Record<string, unknown>;
+  } | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT applied_at, sequence, outcome_json,
+                (SELECT MAX(sequence) FROM newsletter_tally_applications WHERE message_id = ?) AS newest
+           FROM newsletter_tally_applications
+          WHERE message_id = ? AND payload_hash = ?`,
+      )
+      .bind(messageId, messageId, payloadHash)
+      .first<{ applied_at: string; sequence: number; outcome_json: string; newest: number }>();
+    if (!row) return null;
+    const outcome = parseJson<Record<string, unknown>>(row.outcome_json, {});
+    return {
+      appliedAt: row.applied_at,
+      standing: Number(row.sequence) === Number(row.newest),
+      completed: Object.keys(outcome).length > 0,
+      outcome,
+    };
+  }
+
+  /**
+   * Claim this (newsletter, exact tally) pair for one application.
+   *
+   * Returns false only for a **replay**: this tally is the one already standing
+   * for this newsletter, so applying it again is a repeat rather than a change.
+   * That is the double tap, the reload, the retry after a timeout and the second
+   * paste of the same block — and the insert is the atomic decision, so two
+   * requests racing on a fresh payload cannot both conclude they are first.
+   *
+   * The distinction that matters, and the reason this is not a permanent lock
+   * on the pair: pasting tally A, then a corrected tally B, then A again is
+   * three real decisions. The third is a revision back to the first, it has to
+   * bring back what B retired, and a lock keyed on the pair alone would refuse
+   * it as "already applied" while the ledger still showed B. So a pair is a
+   * replay only while it is the newest application on record; behind a newer
+   * one it is a revision, and running it makes it the newest in turn.
+   *
+   * A claim whose apply never reported back is treated as unfinished rather
+   * than as a replay. Refusing it would be the worse failure of the two: an
+   * apply that died half-way would have taken the claim with it, and the retry
+   * — the one thing a person would obviously try — would be told the tally was
+   * already applied while the ledger held none of it. Letting it run again
+   * costs nothing, because every write underneath is keyed and idempotent.
+   */
+  async claimTallyApplication(messageId: string, payloadHash: string, at: string): Promise<boolean> {
+    const inserted = await this.db
+      .prepare(
+        `INSERT INTO newsletter_tally_applications (message_id, payload_hash, applied_at, sequence, outcome_json)
+         VALUES (
+           ?, ?, ?,
+           (SELECT COALESCE(MAX(sequence), 0) + 1 FROM newsletter_tally_applications WHERE message_id = ?),
+           '{}'
+         )
+         ON CONFLICT(message_id, payload_hash) DO NOTHING`,
+      )
+      .bind(messageId, payloadHash, at, messageId)
+      .run();
+    if ((inserted.meta?.changes ?? 0) > 0) return true;
+
+    const existing = await this.findTallyApplication(messageId, payloadHash);
+    if (!existing) return false;
+    if (existing.standing && existing.completed) return false;
+
+    await this.db
+      .prepare(
+        `UPDATE newsletter_tally_applications
+            SET applied_at = ?,
+                sequence = CASE
+                  WHEN ? THEN sequence
+                  ELSE (SELECT MAX(sequence) + 1 FROM newsletter_tally_applications WHERE message_id = ?)
+                END
+          WHERE message_id = ? AND payload_hash = ?`,
+      )
+      .bind(at, existing.standing ? 1 : 0, messageId, messageId, payloadHash)
+      .run();
+    return true;
+  }
+
+  /** Store what the winning application did, so a replay can answer with it. */
+  async recordTallyOutcome(
+    messageId: string,
+    payloadHash: string,
+    outcome: Record<string, unknown>,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        'UPDATE newsletter_tally_applications SET outcome_json = ? WHERE message_id = ? AND payload_hash = ?',
+      )
+      .bind(toJson(outcome), messageId, payloadHash)
       .run();
   }
 
@@ -298,5 +488,7 @@ function toMessage(row: Record<string, unknown>): MessageRecord {
     coverage: parseJson<Record<string, unknown>>(row['coverage_json'], {}),
     bodyHtml: (row['body_html'] as string | null) ?? null,
     bodyText: (row['body_text'] as string | null) ?? null,
+    tallyState: ((row['tally_state'] as string | null) ?? 'not_applicable') as TallyState,
+    talliedAt: (row['tallied_at'] as string | null) ?? null,
   };
 }

@@ -469,9 +469,34 @@ export class DataHealthService {
     };
   }
 
+  /**
+   * Delivery, and only delivery.
+   *
+   * The one thing this row must not do is confuse two questions that now have
+   * different answers. **Is the feed alive?** is about the last issue arriving,
+   * and it is what freshness is measured on. **Has a person scored it yet?** is
+   * work waiting for the reader, it is normal for days at a time, and it is not
+   * a fault in anything.
+   *
+   * So the pending work is stated in the note and changes no state at all. An
+   * issue received on Sunday and untallied on Monday is a healthy newsletter
+   * feed with a job attached, and calling that "degraded" would train the reader
+   * to ignore the word on the day something has actually stopped arriving. Where
+   * that job is announced is the Setup attention dot, which is a different
+   * mechanism on a different screen for exactly this reason.
+   */
   private async newsletter(): Promise<SourceReading> {
     const repo = new NewsletterRepo(this.db);
-    const [received, processed] = await Promise.all([repo.lastReceived(), repo.lastProcessed()]);
+    const [received, processed, awaiting] = await Promise.all([
+      repo.lastReceived(),
+      repo.lastProcessed(),
+      repo.awaitingTallyCount(),
+    ]);
+    const pending =
+      awaiting > 0
+        ? `${awaiting} issue${awaiting === 1 ? '' : 's'} waiting to be scored with ChatGPT. ` +
+          'That is work for you, not a problem with the feed.'
+        : null;
     return {
       id: 'newsletter',
       lastSuccessAt: processed?.receivedAt ?? null,
@@ -482,7 +507,7 @@ export class DataHealthService {
        * such thing as a late one — only one that has not come.
        */
       ...(processed == null ? { state: 'waiting' as const } : {}),
-      note: processed == null ? 'No newsletter has been processed yet.' : null,
+      note: processed == null ? 'No newsletter has been processed yet.' : pending,
       technical: { lastOutcome: received?.status ?? null },
     };
   }

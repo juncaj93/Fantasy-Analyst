@@ -591,8 +591,14 @@ describe('API with seeded data', () => {
     );
     expect(saved.aliases).toContain('MV');
 
-    // The nickname now resolves through the ordinary identity path.
-    const ingested = await json<{ evidenceInserted: number }>(
+    /*
+     * The nickname now resolves through the ordinary identity path.
+     *
+     * Asked of the tally import rather than of ingestion, because ingestion no
+     * longer resolves anything: an arriving newsletter is stored and waits for
+     * an approved tally, and the tally is where a name becomes a player.
+     */
+    await json(
       post(
         '/api/newsletter/ingest',
         {
@@ -606,7 +612,15 @@ describe('API with seeded data', () => {
         cookie,
       ),
     );
-    expect(ingested.evidenceInserted).toBeGreaterThan(0);
+    const applied = await json<{ inserted: number; completed: boolean }>(
+      post(
+        '/api/newsletter/messages/alias-check-1/ai-tally/apply',
+        { text: 'NEWSLETTER_TALLY_V1\nMV | +2 | Named the starter.\nEND_NEWSLETTER_TALLY' },
+        cookie,
+      ),
+    );
+    expect(applied.inserted).toBe(1);
+    expect(applied.completed).toBe(true);
   });
 
   it('refuses a nickname that already belongs to someone else', async () => {
@@ -695,7 +709,7 @@ describe('API with seeded data', () => {
   });
 
   it('explains, rather than crashes, when a newsletter body was not kept', async () => {
-    const res = await app(get('/api/newsletter/messages/never-seen/preview', cookie), env);
+    const res = await app(get('/api/newsletter/messages/never-seen/chat-source', cookie), env);
     expect(res.status).toBe(404);
     expect((await res.json() as { error: string }).error).toContain('not kept');
   });
@@ -840,7 +854,7 @@ describe('API with seeded data', () => {
   });
 
   it('ingests a newsletter through the HTTP endpoint', async () => {
-    const body = await json<{ status: string; evidenceInserted: number }>(
+    const body = await json<{ status: string; evidenceInserted: number; awaitingTally: boolean }>(
       post(
         '/api/newsletter/ingest',
         {
@@ -853,8 +867,17 @@ describe('API with seeded data', () => {
         cookie,
       ),
     );
+    /*
+     * Received and stored, and not one score written.
+     *
+     * The endpoint is the production path — this is what happens when the
+     * inbound address takes delivery — so this is the HTTP-level statement of
+     * the lane's whole promise: a newsletter arriving creates work waiting for
+     * a person, never a fantasy opinion.
+     */
     expect(body.status).toBe('processed');
-    expect(body.evidenceInserted).toBe(1);
+    expect(body.evidenceInserted).toBe(0);
+    expect(body.awaitingTally).toBe(true);
   });
 
   it('quarantines a newsletter from an unqualified sender', async () => {

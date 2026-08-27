@@ -111,9 +111,11 @@ can be rebuilt at any time from the ledger.
 
 - Every news item is stored with its original excerpt, matched rule, category,
   polarity, magnitude and confidence. Nothing is reduced to a bare tally.
-- `user_override` beats the classifier for every field it specifies, and
-  reprocessing never touches a row that already exists (inserts are
+- `user_override` beats anything an import decides for every field it specifies,
+  and an import never touches a row that already exists (inserts are
   `ON CONFLICT DO NOTHING` keyed on `dedupe_key`).
+- Player tallies move through exactly one path: a ChatGPT tally that has been
+  previewed and approved. A newsletter arriving writes nothing.
 - Only `auto_applied`, `accepted` and `corrected` rows count toward tallies.
   `pending`, `rejected` and `ignored` rows stay in the ledger and out of the
   numbers.

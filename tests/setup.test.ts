@@ -130,10 +130,38 @@ describe('setup status — configured deployment', () => {
 
   it('counts newsletter activity', async () => {
     const status = await service(db).status();
-    expect(status.newsletter.totals.newslettersProcessed).toBe(1);
+    // The demo world receives two issues: one scored, one still waiting.
+    expect(status.newsletter.totals.newslettersProcessed).toBe(2);
     expect(status.newsletter.totals.evidenceItems).toBeGreaterThan(0);
     expect(status.newsletter.lastProcessedAt).toBeTruthy();
-    expect(status.newsletter.lastProcessedDetail).toContain('Found news on');
+    expect(status.newsletter.lastProcessedDetail).toContain('Received and stored');
+  });
+
+  /**
+   * An unscored issue is work, and Setup says so where the work is.
+   *
+   * The step is marked, it names the issue rather than making the reader go and
+   * find it, and — because the two controls are drawn from this — it stops
+   * saying anything the moment the issue has been scored.
+   */
+  it('names the newsletter waiting to be scored, and stands down once it is', async () => {
+    const status = await service(db).status();
+    expect(step(status, 'newsletter').state).toBe('warn');
+    expect(status.newsletter.pendingTally?.messageId).toBe('demo-message-2');
+    expect(status.newsletter.pendingTally?.waiting).toBe(1);
+    expect(step(status, 'newsletter').summary).toContain('waiting to be scored');
+
+    const service_ = new NewsletterService(db);
+    const stored = (await service_.storedMessage('demo-message-2'))!;
+    await service_.applyAiTally(
+      stored,
+      'NEWSLETTER_TALLY_V1\nOwen Fitzgerald | +1 | Worked with the starters.\nEND_NEWSLETTER_TALLY',
+    );
+
+    const after = await service(db).status();
+    expect(after.newsletter.pendingTally).toBeNull();
+    expect(step(after, 'newsletter').state).toBe('ok');
+    expect(step(after, 'newsletter').summary).toContain('all scored');
   });
 
   it('warns when Sleeper is connected but the player list is empty', async () => {
@@ -267,7 +295,8 @@ describe('setup API', () => {
     ]);
     const { toEmailMessage } = await import('../src/core/newsletter/source.ts');
     const { CLEAN_NEWSLETTER } = await import('./fixtures/newsletters.ts');
-    await new NewsletterService(db).ingest(
+    const newsletter = new NewsletterService(db);
+    await newsletter.ingest(
       toEmailMessage({
         messageId: 'applied-1',
         from: 'editor@ffnewsletter.example',
@@ -275,6 +304,11 @@ describe('setup API', () => {
         date: '2026-08-13T12:00:00.000Z',
         html: CLEAN_NEWSLETTER,
       }),
+    );
+    // Applied evidence only exists once a tally has been approved, so approve one.
+    await newsletter.applyAiTally(
+      (await newsletter.storedMessage('applied-1'))!,
+      'NEWSLETTER_TALLY_V1\nBijan Robinson | +2 | Named the starter.\nEND_NEWSLETTER_TALLY',
     );
     const body = (await (await app(get('/api/review/applied'), env)).json()) as {
       evidence: { reviewStatus: string; playerName: string }[];

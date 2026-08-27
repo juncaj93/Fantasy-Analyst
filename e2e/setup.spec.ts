@@ -48,6 +48,109 @@ test.describe('setup overview', () => {
 });
 
 /**
+ * The week's one job, on the screen that announces it.
+ *
+ * The flow this replaces was Setup → Newsletter → the issue → Copy, which is
+ * four taps of navigation for the only thing anybody does with a newsletter. So
+ * while an issue is waiting the two controls are drawn directly under the row
+ * that says it is waiting, and they name the issue they act on.
+ *
+ * The three things that can go wrong with a temporary control are all here: it
+ * has to appear when there is work, it has to say which work, and it must not
+ * become furniture — which is checked by it not being anywhere else, the
+ * taskbar included (§4, §16).
+ */
+test.describe('the newsletter waiting to be scored', () => {
+  test.beforeEach(async ({ page }) => openSetup(page));
+
+  test('offers both controls directly under the Newsletter row', async ({ page }) => {
+    const row = page.getByTestId('setup-step-newsletter');
+    await expect(row).toHaveAttribute('data-state', 'warn');
+    await expect(row).toContainText('waiting to be scored');
+
+    const actions = page.getByTestId('setup-pending-tally');
+    await expect(actions).toBeVisible();
+    await expect(actions.getByTestId('copy-for-chatgpt')).toBeVisible();
+    await expect(actions.getByTestId('open-paste-tally')).toBeVisible();
+    // It names the issue, so nobody has to go and find which one is meant.
+    await expect(actions.getByTestId('setup-pending-tally-subject')).toContainText('Camp Report: Week 2');
+
+    // Immediately after the row it belongs to, and inside the same group.
+    const order = await page.evaluate(() => {
+      const rowEl = document.querySelector('[data-testid="setup-step-newsletter"]')!;
+      const next = rowEl.nextElementSibling;
+      return {
+        isActions: next?.getAttribute('data-testid') === 'setup-pending-tally',
+        sameGroup: next?.parentElement === rowEl.parentElement,
+      };
+    });
+    expect(order).toEqual({ isActions: true, sameGroup: true });
+  });
+
+  test('is reachable without opening the Newsletter panel at all', async ({ page }) => {
+    // The panel is a pushed screen; if it were open this would be showing.
+    await expect(page.getByTestId('panel-newsletter')).toHaveCount(0);
+    await expect(page.getByTestId('setup-pending-tally').getByTestId('copy-for-chatgpt')).toBeVisible();
+  });
+
+  test('is easy to tap and does not push the page sideways', async ({ page }) => {
+    for (const id of ['copy-for-chatgpt', 'open-paste-tally']) {
+      const box = await page.getByTestId('setup-pending-tally').getByTestId(id).boundingBox();
+      expect(box!.height, `${id} is a tap target`).toBeGreaterThanOrEqual(44);
+    }
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('stays out of the taskbar', async ({ page }) => {
+    const bar = await page.locator('.tabbar').innerText();
+    expect(bar.toLowerCase()).not.toContain('chatgpt');
+    expect(bar.toLowerCase()).not.toContain('tally');
+    expect(bar.toLowerCase()).not.toContain('newsletter');
+  });
+
+  /**
+   * The approval gate, opened from Setup rather than from four taps in.
+   *
+   * Deliberately stops at the preview: applying would score the one unfinished
+   * issue on a dev server four browser projects share, and take this whole
+   * describe away from whichever of them ran second. That the preview writes
+   * nothing is precisely what makes stopping here safe — and it is asserted, by
+   * the controls still being on screen afterwards.
+   */
+  test('previews what would change without writing anything', async ({ page }) => {
+    await page.getByTestId('setup-pending-tally').getByTestId('open-paste-tally').click();
+    const sheet = page.getByTestId('paste-tally-sheet');
+    await expect(sheet).toBeVisible();
+
+    await sheet
+      .getByTestId('paste-tally-input')
+      .fill(
+        [
+          'NEWSLETTER_TALLY_V1',
+          'Owen Fitzgerald | +2 | Ran with the starters all week.',
+          'END_NEWSLETTER_TALLY',
+        ].join('\n'),
+      );
+    await sheet.getByTestId('paste-tally-check').click();
+
+    const preview = sheet.getByTestId('paste-tally-preview');
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText('Owen Fitzgerald');
+    await expect(preview).toContainText('Ready to apply');
+    // The primary action says what it does, and there is a way back out.
+    await expect(sheet.getByTestId('paste-tally-apply')).toContainText('Process tally');
+    await sheet.getByTestId('paste-tally-cancel').click();
+
+    await expect(sheet).toHaveCount(0);
+    // Nothing was written, so the work is still waiting.
+    await expect(page.getByTestId('setup-pending-tally')).toBeVisible();
+  });
+});
+
+/**
  * Setup does not scroll sideways *with the newsletter panel populated either*.
  *
  * The test above checks the overview, where every panel is closed, and it
@@ -323,42 +426,40 @@ test.describe('newsletter setup', () => {
     const activity = page.getByTestId('newsletter-activity');
     await expect(activity).toContainText('Last email received');
     await expect(activity).toContainText('Waiting for your review');
+    // The demo world always has an issue that has not been scored yet.
+    await expect(activity).toContainText('Waiting to be scored');
   });
 
-  test('shows what the parser understood in each email', async ({ page }) => {
-    // Explicitly a processed message: ignored mail has no coverage to show, and
-    // other tests add ignored mail to this shared server.
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+  /**
+   * How much text came out of the email, and nothing about what it means.
+   *
+   * This used to check for "Read but no rule matched" — the classifier's report
+   * card on the football in an issue. Arrival makes no such judgment now, so
+   * what is left is the question arrival can honestly answer: did the email
+   * decode into readable text, and how much of it is there to hand over.
+   */
+  test('shows how much readable text came out of each email', async ({ page }) => {
+    const message = page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]');
     await expect(message).toBeVisible();
     // The list grows as earlier tests add mail, so the row can sit below the
     // fold; scroll it in before clicking rather than relying on auto-scroll.
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();
-    await expect(message).toContainText('Sentences about your players');
-    await expect(message).toContainText('Read but no rule matched');
+    await expect(message).toContainText('Readable sentences');
+    await expect(message).toContainText('Sentences naming a player you have');
+    await expect(message).not.toContainText('Read but no rule matched');
+    await expect(message).not.toContainText('Turned into a signal');
   });
 
-  test('previews a re-read before changing anything, and is honest about what it will not change', async ({
-    page,
-  }) => {
-    // Only processed mail has a body kept, so only it can be re-read.
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
-    const toggle = message.getByTestId('newsletter-message-toggle');
-    await toggle.scrollIntoViewIfNeeded();
-    await toggle.click();
-
-    const panel = message.getByTestId('reprocess-panel');
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText('Nothing changes until you say so');
-
-    await panel.getByTestId('reprocess-preview').click();
-
-    // The same newsletter, unchanged rules: there is genuinely nothing to add,
-    // and the button must say so rather than inviting a pointless write.
-    await expect(panel).toContainText('Nothing new would be added');
-    await expect(panel.getByTestId('reprocess-apply')).toBeDisabled();
-    await expect(panel.getByTestId('reprocess-apply')).toContainText('Nothing to add');
+  /** The seeded world always has one scored issue and one still waiting. */
+  test('says which issues have been scored and which are waiting', async ({ page }) => {
+    await expect(
+      page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]'),
+    ).toHaveAttribute('data-tally-state', 'applied');
+    await expect(
+      page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-2"]'),
+    ).toContainText('waiting to be scored');
   });
 
   /**
@@ -380,7 +481,17 @@ test.describe('newsletter setup', () => {
      * run keeps the first paste genuinely new, which is the thing under test.
      */
     const reason = `Full command of the backfield (${testInfo.project.name} ${Date.now()})`;
-    const message = page.locator('[data-testid="newsletter-message"][data-status="processed"]').first();
+    /*
+     * The issue that has already been scored, named rather than picked by
+     * position.
+     *
+     * Four browser projects share one dev server, and the *unscored* issue is
+     * the one the Setup workflow controls are drawn for. Consuming it here
+     * would take that state away from whichever project runs second, so this
+     * revises the tally on an issue that is already complete — which is a real
+     * flow of its own and leaves the pending one alone.
+     */
+    const message = page.locator('[data-testid="newsletter-message"][data-message-id="demo-message-1"]');
     const toggle = message.getByTestId('newsletter-message-toggle');
     await toggle.scrollIntoViewIfNeeded();
     await toggle.click();

@@ -201,6 +201,40 @@ export const DEMO_NEWSLETTER = `<html><body>
 <div>&copy; 2026 FF Newsletter, All rights reserved</div>
 </body></html>`;
 
+/**
+ * The approved ChatGPT tally for the issue above.
+ *
+ * Written the way a real one comes back: one row per player, the score at the
+ * size it was decided, and the football reason in the words that justified it —
+ * not a restatement of the sentence the app could already read.
+ *
+ * Two rows are deliberately awkward. `Chris Johnson` is a name two demo players
+ * share, so it resolves to neither and lands in Review as a name to confirm —
+ * which is what gives the review queue something real in it. `Silas Mbeki` is
+ * scored twice with different numbers, which is a contradiction the importer
+ * refuses to settle, so both go to Review as well.
+ */
+export const DEMO_TALLY = [
+  'NEWSLETTER_TALLY_V1',
+  'Marcus Vance | +2 | Named the starter: first-team reps all week and the goal-line back.',
+  'Devin Okafor | -1 | Missed Wednesday with a hamstring; the beat writers expect a limited camp.',
+  'Kai Brennan | +1 | Running with the ones in three-receiver sets, which is new.',
+  'Chris Johnson | +1 | Two demo players share this name, so it waits for a person.',
+  'Silas Mbeki | +1 | Goal-line work is his again.',
+  'Silas Mbeki | -1 | Same block, opposite call — a contradiction, not a decision.',
+  'END_NEWSLETTER_TALLY',
+].join('\n');
+
+/** A second issue, so there is always one waiting to be scored. */
+export const DEMO_NEWSLETTER_UNSCORED = `<html><body>
+<div>View this email in your browser</div>
+<h2>Camp Report: Week 2</h2>
+<p>Owen Fitzgerald worked with the starters throughout Tuesday's session.</p>
+<p>Bo Ashworth was held out again and the staff would not put a date on his return.</p>
+<p>Nate Kowalski drew praise for his blocking, which is not why anybody drafts him.</p>
+<div>Unsubscribe | Privacy Policy</div>
+</body></html>`;
+
 export const MOCK_GAMES: MockRoster[] = [
   {
     eventId: 'demo-game-1',
@@ -427,13 +461,46 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       enabled: true,
     },
   ]);
-  const outcome = await newsletter.ingest(
+  /*
+   * The whole workflow, run for real: an issue arrives, is scored by an
+   * approved tally, and a second issue arrives and is left waiting.
+   *
+   * Seeding the ledger directly would be quicker and would test nothing. The
+   * browser suite needs three states that only the real path produces — a
+   * settled ledger, a name that did not resolve and is sitting in Review, and
+   * an unscored newsletter with the two Setup controls under it — and every one
+   * of them is a consequence of how this ran rather than a fixture somebody
+   * wrote down.
+   */
+  await newsletter.ingest(
     toEmailMessage({
       messageId: 'demo-message-1',
       from: 'editor@demo.newsletter',
       subject: 'Camp Report: Week 1',
-      date: now,
+      // A day back, so the unscored issue below is the newer of the two and the
+      // seed never claims to have received mail from the future.
+      date: new Date(Date.parse(now) - 86_400_000).toISOString(),
       html: DEMO_NEWSLETTER,
+    }),
+  );
+  const scored = (await newsletter.storedMessage('demo-message-1'))!;
+  const outcome = await newsletter.applyAiTally(scored, DEMO_TALLY);
+
+  /*
+   * A second issue, deliberately left unscored.
+   *
+   * This is the state the corrective lane is about: Setup marks its
+   * destination, the Newsletter row says an issue is waiting, and Copy for
+   * ChatGPT / Paste AI tally are drawn directly under it. Without one of these
+   * in the seed there is nothing for that half of the suite to look at.
+   */
+  await newsletter.ingest(
+    toEmailMessage({
+      messageId: 'demo-message-2',
+      from: 'editor@demo.newsletter',
+      subject: 'Camp Report: Week 2',
+      date: now,
+      html: DEMO_NEWSLETTER_UNSCORED,
     }),
   );
 
@@ -506,7 +573,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     leagues: 1,
     drafts: 1,
     adpMatched: adpResult.matchedCount,
-    evidence: outcome.evidenceInserted,
+    evidence: outcome.inserted,
     props: propCount,
     seasonMarkets: seasonMarkets.quotes,
   };

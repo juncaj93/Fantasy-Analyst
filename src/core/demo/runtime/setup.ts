@@ -134,6 +134,9 @@ export function buildDemoSetupStatus(data: ScenarioData) {
       lastProcessedAt: lastMoved(data, freshness.newsletter, 20, 200),
       lastProcessedDetail: `${data.signals.size} players updated`,
       lastError: null,
+      // A scenario's newsletters have all been scored already: Demo Mode is a
+      // settled world, not a half-finished inbox.
+      pendingTally: null,
       totals: {
         emailsReceived: 24,
         newslettersProcessed: 24,

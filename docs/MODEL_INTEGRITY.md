@@ -338,7 +338,8 @@ should not have to rediscover it.
 | **Survival conditioning** | `S(next)/S(now)`, computed as a difference of logs so the tail does not become 0/0. The last pick of a draft returns `null`, not 100%. |
 | **Scoring format propagation** | Half/full/standard PPR, passing-TD value, TE premium and superflex all derive from the Sleeper payload and reach both the season baseline and the weekly expectation. TE premium is applied inside the per-reception rate rather than bolted on afterwards. |
 | **Tally integrity** | A row's net score becomes one item of that magnitude, never N fabricated items. Re-importing a document supersedes the rows it replaces via `supersedeStaleImports`, and a row the user has ruled on is never touched. |
-| **Idempotency** | Evidence insertion is `ON CONFLICT(dedupe_key) DO NOTHING`; reprocessing the same newsletter yields zero new rows. |
+| **Idempotency** | Three guards, because a double count is silent and permanent: `newsletter_tally_applications` claims one application per (newsletter, exact tally) so a double tap or a retry writes nothing; evidence insertion is `ON CONFLICT(dedupe_key) DO NOTHING`; and applying a tally retires whatever the retired classifier wrote for the same issue, so one newsletter cannot score through two paths. |
+| **One scoring path** | A newsletter arriving is stored and marked as awaiting a tally. It creates no evidence, no review items and no signals. Nothing but an approved ChatGPT tally moves a player's number. |
 | **Identity** | One ladder, no second matcher, no fuzzy fallback in the Vegas path. A name that does not resolve keeps a null id and goes to review rather than being guessed. |
 
 ---
