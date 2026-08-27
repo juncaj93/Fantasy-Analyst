@@ -695,10 +695,18 @@ test.describe('vegas', () => {
 
 test.describe('review actions added for setup', () => {
   test('can reassign an item to the right player', async ({ page }, testInfo) => {
-    // Give this project its own reviewable item.
+    /*
+     * Give this project its own reviewable item, from where they come from now.
+     *
+     * Receiving a newsletter creates no review work — that was the automatic
+     * classifier, and it is retired. What does is an approved tally that scores
+     * the same player twice: a contradiction the importer will not settle by
+     * preferring one, so both halves wait for a person.
+     */
+    const messageId = `e2e-wrong-player-${testInfo.project.name}-${Date.now()}`;
     await page.request.post('/api/newsletter/ingest', {
       data: {
-        messageId: `e2e-wrong-player-${testInfo.project.name}`,
+        messageId,
         from: 'editor@demo.newsletter',
         subject: 'Camp Report',
         date: new Date().toISOString(),
@@ -708,6 +716,20 @@ test.describe('review actions added for setup', () => {
         force: true,
       },
     });
+    const applied = await page.request.post(
+      `/api/newsletter/messages/${encodeURIComponent(messageId)}/ai-tally/apply`,
+      {
+        data: {
+          text: [
+            'NEWSLETTER_TALLY_V1',
+            `Julian Reyes | +1 | Back at practice (${messageId})`,
+            `Julian Reyes | -1 | Splitting the backfield (${messageId})`,
+            'END_NEWSLETTER_TALLY',
+          ].join('\n'),
+        },
+      },
+    );
+    expect(applied.status()).toBe(200);
 
     await page.goto('/');
     await openReview(page);
