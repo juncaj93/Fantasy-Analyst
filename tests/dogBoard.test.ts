@@ -148,7 +148,7 @@ describe('the DOG import route refuses anything that is not raw ADP', () => {
   });
 
   it('does not touch the Sleeper snapshot when an Underdog one lands', async () => {
-    const before = await new AdpRepo(db).latest();
+    const before = await new AdpRepo(db).latest('2026');
     const names = await seededNames(20);
     await app(
       post(
@@ -241,6 +241,7 @@ describe('the board reads the two markets separately', () => {
         unmatchedCount: 20,
         skipped: [],
       },
+      '2026',
       { provider: '4for4', sourceType: 'raw_adp', snapshotAt: new Date().toISOString() },
     );
 
@@ -310,6 +311,7 @@ describe('the board reads the two markets separately', () => {
         unmatchedCount: 0,
         skipped: [],
       },
+      '2026',
       { provider: '4for4', sourceType: 'raw_adp', snapshotAt: '2026-01-01T00:00:00.000Z' },
     );
 
@@ -375,7 +377,7 @@ describe('the platform market is never the Underdog one', () => {
       ambiguousCount: 0,
       unmatchedCount: 0,
       skipped: [],
-    });
+    }, '2026');
 
     const platform = await repo.latestPlatformSnapshot();
     expect(platform?.source).toBe('beatadp:sleeper');
@@ -387,7 +389,7 @@ describe('the platform market is never the Underdog one', () => {
     const repo = new AdpRepo(db);
     // The seed writes Sleeper first and Underdog second, so "newest of
     // anything" is already the Underdog one — the exact trap.
-    expect((await repo.latest())?.source).toBe(UNDERDOG_SOURCE);
+    expect((await repo.latest('2026'))?.source).toBe(UNDERDOG_SOURCE);
     expect((await repo.latestPlatformSnapshot())?.source).not.toBe(UNDERDOG_SOURCE);
   });
 

@@ -30,6 +30,16 @@ export interface AdpSnapshotMeta {
   rowCount: number;
   matchedCount: number;
   unmatchedCount: number;
+  /**
+   * The season this snapshot prices, e.g. `"2027"`.
+   *
+   * Stamped at import time from the app's own season (see `currentSeason` in
+   * `seasonService.ts`), never guessed from `capturedAt` by a reader — that
+   * guess is exactly the bug this column exists to retire. Rows written before
+   * this column existed carry a value backfilled from `capturedAt`; see
+   * migration 0035.
+   */
+  season: string;
   /** Which provider served it. Null for snapshots imported by hand. */
   provider: DogProvider | string | null;
   /**
@@ -89,16 +99,24 @@ export class AdpRepo {
   }
 
   /**
-   * The newest snapshot of any source.
+   * The newest snapshot of any source, for the given season.
    *
-   * Kept as-is for every existing caller, but note what it means now that two
-   * markets exist: "newest of anything", which is the Sleeper board only
-   * because Sleeper is the only source most databases hold. Anything that
-   * needs a specific market must say so — see `latestForSource`.
+   * Scoped by season because "newest row in the table" is not "the current
+   * board" the moment two seasons' worth of imports exist side by side — a
+   * stale prior-season snapshot sorts ahead of "nothing yet" for the new one,
+   * and would otherwise keep being served as current straight through the next
+   * draft. Callers pass the app's own season (`currentSeason(db)` in
+   * `seasonService.ts`) rather than this repo guessing at one.
+   *
+   * Still "newest of any source" within that season — the Sleeper board only,
+   * in practice, because Sleeper is the only source most databases hold for a
+   * given season. Anything that needs a specific market must say so — see
+   * `latestForSource`.
    */
-  async latest(): Promise<AdpSnapshotMeta | null> {
+  async latest(season: string): Promise<AdpSnapshotMeta | null> {
     const row = await this.db
-      .prepare('SELECT * FROM adp_snapshots ORDER BY captured_at DESC, id DESC LIMIT 1')
+      .prepare('SELECT * FROM adp_snapshots WHERE season = ? ORDER BY captured_at DESC, id DESC LIMIT 1')
+      .bind(season)
       .first<Record<string, unknown>>();
     return row ? toMeta(row) : null;
   }
@@ -152,9 +170,16 @@ export class AdpRepo {
    * the first one wrote rather than a duplicate with the same numbers in it.
    * The file hash is the identity, so an unchanged Underdog board is the same
    * snapshot however many times it is fetched.
+   *
+   * `season` is required rather than folded into the optional `provenance` bag
+   * because it is not provenance — it is the fact `latest()` filters on, and a
+   * caller that forgot to pass it is exactly the bug this whole change exists
+   * to close. Callers get it from `currentSeason(db)` (`seasonService.ts`) or
+   * an already-resolved `SeasonContext`, never by working it out themselves.
    */
   async save(
     result: AdpImportResult,
+    season: string,
     provenance: AdpProvenance = {},
   ): Promise<{ snapshot: AdpSnapshotMeta; created: boolean }> {
     const existing = await this.findByHash(result.source, result.fileHash);
@@ -164,8 +189,8 @@ export class AdpRepo {
       .prepare(
         `INSERT INTO adp_snapshots (
            source, label, captured_at, imported_at, raw_file_hash, row_count, matched_count, unmatched_count,
-           provider, source_type, snapshot_at, fetched_at, degraded_reason
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           provider, source_type, snapshot_at, fetched_at, degraded_reason, season
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .bind(
         result.source,
@@ -181,6 +206,7 @@ export class AdpRepo {
         provenance.snapshotAt ?? null,
         provenance.fetchedAt ?? null,
         provenance.degradedReason ?? null,
+        season,
       )
       .run();
 
@@ -343,5 +369,6 @@ function toMeta(row: Record<string, unknown>): AdpSnapshotMeta {
     snapshotAt: (row['snapshot_at'] as string | null) ?? null,
     fetchedAt: (row['fetched_at'] as string | null) ?? null,
     degradedReason: (row['degraded_reason'] as string | null) ?? null,
+    season: String(row['season'] ?? ''),
   };
 }
