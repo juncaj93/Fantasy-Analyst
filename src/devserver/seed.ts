@@ -429,7 +429,8 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
   const index = await playerRepo.buildIndex();
   const adpResult = importAdpSnapshot(DEMO_ADP_CSV, index, { label: 'Demo Sleeper ADP', source: SLEEPER_SOURCE });
   const adpRepo = new AdpRepo(db);
-  const { snapshot } = await adpRepo.save(adpResult);
+  // '2026' to match the demo draft above — a fixture, not a calendar guess.
+  const { snapshot } = await adpRepo.save(adpResult, '2026');
   await leagueRepo.setDraftSnapshot('demo-draft', snapshot.id);
 
   /*
@@ -443,7 +444,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
     label: 'Demo Underdog ADP',
     source: UNDERDOG_SOURCE,
   });
-  await adpRepo.save(dogResult, {
+  await adpRepo.save(dogResult, '2026', {
     provider: 'best_ball_team_builder',
     sourceType: 'raw_adp',
     snapshotAt: new Date().toISOString(),

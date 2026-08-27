@@ -111,6 +111,7 @@ async function boardAt(picksMade: number) {
     .join('\n');
   const { snapshot } = await new AdpRepo(db).save(
     importAdpSnapshot(`${csv}\n`, index, { label: 'test', source: 'test' }),
+    '2026',
   );
   await leagues.setDraftSnapshot('dr', snapshot.id);
 

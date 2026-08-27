@@ -192,7 +192,7 @@ describe('defences depend on the league, not on the app', () => {
       label: 'test ranking',
       source: 'test',
     });
-    const { snapshot } = await new AdpRepo(db).save(adpResult);
+    const { snapshot } = await new AdpRepo(db).save(adpResult, '2026');
     await leagues.setDraftSnapshot('tonys-draft', snapshot.id);
 
     const board = await new DraftBoardService(db).build('tonys-draft', { position: 'DEF' });

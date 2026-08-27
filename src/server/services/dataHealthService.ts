@@ -50,6 +50,7 @@ import {
   classifyAge,
   policyFor,
   sourceHealth,
+  vegasFreshWithinMinutes,
   type SourceId,
 } from '../../core/health/policy.ts';
 import { FRESHNESS_HOURS } from '../../core/injury/model.ts';
@@ -83,7 +84,17 @@ import { NflScheduleRepo, ScheduleSourceRepo } from '../repos/nflSchedule.ts';
  *
  *   - `FRESHNESS_HOURS.fresh` is the injury layer's own "this reading is
  *     current" boundary, the same one `injuryLine` prints against;
- *   - `VEGAS_STALE_HOURS` is what Setup has always called a stale market;
+ *   - `VEGAS_STALE_HOURS` is what Setup has always called a stale market, and
+ *     it is the *floor* under the Vegas window rather than the window itself.
+ *     The market refreshes on two weekend clocks and nothing touches it in
+ *     between, so a flat day-and-a-half window called a perfectly healthy
+ *     market stale for most of every week — and Vegas is `critical`, so it took
+ *     the headline with it. `vegasFreshWithinMinutes` stretches the window to
+ *     cover the gap the cadence itself creates and no further, which turns the
+ *     row's question from "how old are these lines" into "did the last
+ *     scheduled refresh land". Keeping Setup's number as a floor means this can
+ *     only be more patient than Setup, never less, so the two can never
+ *     contradict each other about a market Setup has called stale;
  *   - `SEASON_TTL_MINUTES` is the season-market refetch window, and is used
  *     here only through `SeasonMarketService.status()`'s own `stale` verdict;
  *   - `STATE_STALE_AFTER_DAYS` is the season resolver's own patience with a
@@ -96,9 +107,19 @@ import { NflScheduleRepo, ScheduleSourceRepo } from '../repos/nflSchedule.ts';
  * different question from when its numbers stop describing the week. It is
  * refreshed on all three clocks, so the daily window is the honest one.
  */
-const WINDOW_MINUTES: Record<SourceId, number | null> = {
+/**
+ * A window is a number of minutes, or — for a source whose own refresh cadence
+ * decides how old is too old — a function of the moment it is asked about.
+ *
+ * The function form exists for exactly one source and is deliberately still in
+ * this one table: §6's rule is that no screen decides how old is too old, not
+ * that every window has to be a constant.
+ */
+type Window = number | null | ((now: Date) => number);
+
+const WINDOW_MINUTES: Record<SourceId, Window> = {
   injuries: FRESHNESS_HOURS.fresh * 60,
-  vegas: VEGAS_STALE_HOURS * 60,
+  vegas: (now) => vegasFreshWithinMinutes(now, VEGAS_STALE_HOURS * 60),
   'nfl-state': STATE_STALE_AFTER_DAYS * 24 * 60,
   'published-projections': DAILY_ATTEMPT_STALE_MINUTES,
   usage: DAILY_ATTEMPT_STALE_MINUTES,
@@ -575,7 +596,8 @@ export class DataHealthService {
    */
   private toHealth(reading: SourceReading, now: Date): SourceHealth {
     const policy = policyFor(reading.id);
-    const window = WINDOW_MINUTES[reading.id];
+    const declared = WINDOW_MINUTES[reading.id];
+    const window = typeof declared === 'function' ? declared(now) : declared;
     const attemptWindow = ATTEMPT_STALE_MINUTES[reading.id];
     const technical: SourceHealth['technical'] = {
       lastOutcome: reading.technical?.lastOutcome ?? null,

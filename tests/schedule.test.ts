@@ -103,8 +103,20 @@ describe('parsing the fixture list', () => {
     expect(parseSchedule('nothing,useful\n1,2\n').rows).toEqual([]);
   });
 
-  it('points at the schedules release asset', () => {
-    expect(SCHEDULE_URL).toContain('nflverse-data/releases/download/schedules');
+  it('points at the schedules release asset, by its file name', () => {
+    /*
+     * The file name, not just the release path.
+     *
+     * This assertion used to stop at the directory, and the URL under it named
+     * the release rather than the asset in it — `schedules.csv`, which 404s.
+     * Every daily check then read as `not_published`, which is the word for a
+     * season that has not started, so a fixture list that was published in May
+     * looked like one the calendar had not reached. Pinning the name is what
+     * makes this test able to fail for the reason it exists.
+     */
+    expect(SCHEDULE_URL).toBe(
+      'https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv',
+    );
   });
 });
 
