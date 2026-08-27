@@ -948,8 +948,20 @@ test.describe('the deployed app', () => {
 
     const row = page.getByTestId('setup-support-snapshot');
     await expect(row).toBeVisible();
-    await expect(row).toContainText('Copy Draft support snapshot');
+    await expect(row).toContainText('Copy support snapshot');
     expect((await row.boundingBox())!.height, 'the row is under the 44px floor').toBeGreaterThanOrEqual(44);
+
+    /*
+     * And the row above it, which says *which* decision the tap will capture.
+     *
+     * There is one button for six decisions, so the label alone no longer tells
+     * a reader what they are about to send. Being told to tap something that
+     * captures the wrong screen is the same failure as the row not being there,
+     * one step later, so both are checked here.
+     */
+    const context = page.getByTestId('setup-support-context');
+    await expect(context).toBeVisible();
+    expect((await context.boundingBox())!.height, 'the row is under the 44px floor').toBeGreaterThanOrEqual(44);
   });
 
   test('the three appearances all apply, and none of them hides the text', async ({ page }) => {

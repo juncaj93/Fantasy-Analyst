@@ -2639,7 +2639,7 @@ on a Tuesday, on a phone — and none of that exists by the time anybody looks. 
 report became archaeology, and the fix became a guess with a test written after
 it to agree.
 
-**Setup → This app → Copy Draft support snapshot.** One row, one tap, and the
+**Setup → This app → Copy support snapshot.** One row, one tap, and the
 exact state behind the board is on the clipboard as
 `junculator/support-snapshot@1` — or in the Files app when the clipboard refuses,
 which the row says rather than leaving the reader to find out by pasting
