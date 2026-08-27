@@ -34,6 +34,8 @@ import {
   type TradeHistoryContext,
 } from '../../core/trades/assemble.ts';
 import type { BilateralReport } from '../../core/trades/bilateral.ts';
+import type { TradeAssemblyRequest } from '../../core/trades/assemble.ts';
+import type { LeagueRecord, RosterRecord } from '../../core/sleeper/types.ts';
 import { tradeCapabilityOf } from '../../core/trades/capability.ts';
 import type { ManagerTradeTendencies, LeagueTradeBaseline } from '../../core/managers/tradeTendencies.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
@@ -63,6 +65,16 @@ import type { StartSitInput } from '../../core/startsit/engine.ts';
  */
 export interface SmartTradeBoard extends Omit<TradeAssembly, 'rejections'> {
   league: { id: string; name: string } | null;
+}
+
+/** The reads, before the search. Shared by the board and by the snapshot. */
+export interface TradeGathering {
+  league: LeagueRecord | null;
+  request: TradeAssemblyRequest;
+  /** The rosters as stored, for a capture that has to alias their owners. */
+  rosterRecords?: RosterRecord[];
+  /** Set only in the no-league case, where the board's note is not the search's. */
+  noLeagueNote?: string;
 }
 
 export class SmartTradeService {
@@ -99,9 +111,15 @@ export class SmartTradeService {
     return this.assemble(opts);
   }
 
-  private async assemble(
-    opts: { leagueId?: string; limit?: number } = {},
-  ): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections'] }> {
+  /**
+   * Everything the search needs, read but not yet run.
+   *
+   * Split out of `assemble` so the support snapshot can capture the *same*
+   * reads and then run the same search over them — a snapshot gathered
+   * separately would describe a board this service never produced. Null league
+   * is the one genuinely unmeasured case; see the note below.
+   */
+  async gather(opts: { leagueId?: string; limit?: number } = {}): Promise<TradeGathering> {
     const warnings: string[] = [];
     const league = opts.leagueId
       ? await this.leagues.getLeague(opts.leagueId)
@@ -117,7 +135,7 @@ export class SmartTradeService {
        */
       return {
         league: null,
-        ...assembleSmartTrades({
+        request: {
           leagueSettings: {},
           shape: buildRosterShape([]),
           profile: buildScoringProfile({}, []),
@@ -125,8 +143,8 @@ export class SmartTradeService {
           inputs: [],
           history: NO_TRADE_HISTORY,
           warnings,
-        }),
-        notes: ['No league is selected, so there is nobody to trade with.'],
+        },
+        noLeagueNote: 'No league is selected, so there is nobody to trade with.',
       };
     }
 
@@ -173,8 +191,8 @@ export class SmartTradeService {
     });
 
     return {
-      league: { id: league.id, name: league.name },
-      ...assembleSmartTrades({
+      league,
+      request: {
         leagueSettings: league.leagueSettings,
         shape,
         profile,
@@ -189,7 +207,20 @@ export class SmartTradeService {
         history,
         limit: opts.limit,
         warnings,
-      }),
+      },
+      rosterRecords: rosters,
+    };
+  }
+
+  private async assemble(
+    opts: { leagueId?: string; limit?: number } = {},
+  ): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections'] }> {
+    const gathered = await this.gather(opts);
+    const board = assembleSmartTrades(gathered.request);
+    return {
+      league: gathered.league == null ? null : { id: gathered.league.id, name: gathered.league.name },
+      ...board,
+      ...(gathered.noLeagueNote ? { notes: [gathered.noLeagueNote] } : {}),
     };
   }
 

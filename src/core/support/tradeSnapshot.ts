@@ -36,7 +36,15 @@ import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
-import { captureLeague, captureRosters, captureStartSitInputs, rehydrateStartSitInputs } from './inseason.ts';
+import { scrubAliases } from './scrub.ts';
+import {
+  captureLeague,
+  captureLeagueRules,
+  captureRosters,
+  captureStartSitInputs,
+  rehydrateLeagueRules,
+  rehydrateStartSitInputs,
+} from './inseason.ts';
 import { countPositions, summariseFreshness } from './freshness.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
@@ -111,7 +119,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
    * removed nothing — so the output is scrubbed with the same allocator, after
    * every alias has been handed out and therefore only ever replacing.
    */
-  const output = scrub(decision, aliases) as typeof decision;
+  const output = scrubAliases(decision, aliases) as typeof decision;
 
   return sealSnapshot<TradeOfferPayload>({
     schema: SUPPORT_SNAPSHOT_SCHEMA,
@@ -122,6 +130,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
         'league or draft id': aliases.counts.scopes,
+        'league name': aliases.counts.labels,
       },
       rules: [...REDACTION_RULES],
     },
@@ -156,8 +165,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
       inputs: {
         now: capturedAt,
         leagueSettings: input.league.leagueSettings,
-        shape: input.request.shape,
-        profile: input.request.profile,
+        rules: captureLeagueRules(input.league),
         rosters,
         pool: captureStartSitInputs(input.request.inputs),
         limit: input.request.limit ?? null,
@@ -182,10 +190,11 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
     leagueRate: inputs.history.leagueRate,
   };
 
+  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
   const replayed = assembleSmartTrades({
     leagueSettings: inputs.leagueSettings,
-    shape: inputs.shape,
-    profile: inputs.profile,
+    shape,
+    profile,
     rosters: inputs.rosters.map((roster) => ({
       rosterId: roster.rosterId,
       ownerId: roster.ownerId,
@@ -240,24 +249,6 @@ function offerLines(assembly: {
         `${offer.give.map((p) => p.playerId).join(',')}→${offer.get.map((p) => p.playerId).join(',')}@${offer.partner.key}`,
     )
     .join(' | ');
-}
-
-/**
- * Replace every aliased identity anywhere in a finished value.
- *
- * A deep copy with `SnapshotAliases.scrub` applied to every string, which is the
- * one operation that can reach an identity composed into a *sentence*. It only
- * replaces — the allocator has already handed out every alias by the time this
- * runs — so it can never invent one, and a string containing no identity is
- * returned unchanged.
- */
-function scrub(value: unknown, aliases: SnapshotAliases): unknown {
-  if (typeof value === 'string') return aliases.scrub(value);
-  if (Array.isArray(value)) return value.map((item) => scrub(item, aliases));
-  if (value == null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, scrub(child, aliases)]),
-  );
 }
 
 function summarise(

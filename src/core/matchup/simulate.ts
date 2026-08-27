@@ -59,8 +59,20 @@ export const DEFAULT_DRAWS = 4000;
 export interface SimulationInput {
   players: MatchupPlayerInput[];
   distributions: PlayerDistribution[];
-  /** The matchup-state fingerprint. Same state in, same numbers out. */
-  seed: string;
+  /**
+   * The matchup-state fingerprint, or the 32-bit hash of one.
+   *
+   * A string is hashed here; a number is used as the hash directly. The second
+   * form exists for one caller and is worth the branch: a support snapshot
+   * aliases the league id, the league id is hashed into the fingerprint, and a
+   * replay seeded from the aliased fingerprint draws a *different afternoon* —
+   * disagreeing with its own capture by a point of win probability, which is
+   * indistinguishable from the outside from a regression. Carrying the hash
+   * reproduces the draws without carrying the identity that produced them. The
+   * Draft board solved the same problem the same way; see
+   * `core/draft/nextpick/index.ts`.
+   */
+  seed: string | number;
   draws?: number;
 }
 
@@ -165,7 +177,7 @@ export function simulateMatchup(input: SimulationInput): SimulationResult {
     };
   });
 
-  const random = mulberry32(hashString(input.seed));
+  const random = mulberry32(typeof input.seed === 'number' ? input.seed : hashString(input.seed));
   const normal = normalStream(random);
 
   const teamDraws = new Float64Array(Math.max(factors.teamFactors, 1));

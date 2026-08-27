@@ -47,7 +47,7 @@ import type { DstPlanRequest } from '../dst/assemble.ts';
 import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { TeamForm } from '../dst/outlook.ts';
 import type { StartSitMode } from '../startsit/mode.ts';
-import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
+import type { RosterShape } from '../sleeper/scoring.ts';
 import type { SleeperMatchup } from '../sleeper/types.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import type { ManagerTradeTendencies } from '../managers/tradeTendencies.ts';
@@ -55,7 +55,13 @@ import type { ManagerTransactionProfile, LeagueTransactionBaseline } from '../ma
 import type { LeagueBudgetState } from '../faab/budget.ts';
 import type { BidObservation, PriceSummary } from '../faab/bids.ts';
 import type { WaiverPricingContext } from '../waivers/pricing.ts';
-import type { SnapshotLeague, SnapshotRoster, SnapshotStartSitBundle } from './inseason.ts';
+import type { TrendingVelocity } from '../market/trending.ts';
+import type {
+  SnapshotLeague,
+  SnapshotLeagueRules,
+  SnapshotRoster,
+  SnapshotStartSitBundle,
+} from './inseason.ts';
 import type { SnapshotPlayer } from './schema.ts';
 
 /**
@@ -120,8 +126,12 @@ export interface LineupPayload {
 export interface LineupInputs {
   /** The instant the decision was made at. Replay pins to this. */
   now: string;
-  shape: RosterShape;
-  profile: ScoringProfile;
+  /**
+   * The league's own published rules, from which the shape and the scoring are
+   * derived at replay. See `SnapshotLeagueRules` for why the derived values are
+   * not carried instead.
+   */
+  rules: SnapshotLeagueRules;
   currentStarterIds: string[];
   mode: StartSitMode;
   startSit: SnapshotStartSitBundle;
@@ -204,8 +214,7 @@ export interface WaiverPlanPayload {
 export interface WaiverPlanInputs {
   now: string;
   generatedAt: string;
-  shape: RosterShape;
-  profile: ScoringProfile;
+  rules: SnapshotLeagueRules;
   season: string;
   week: number;
   /** The user's own players. */
@@ -230,7 +239,16 @@ export interface WaiverPlanInputs {
    */
   players: SnapshotPlayer[];
   playerCensus: { listed: number; captured: number; keptBecause: Record<string, number> };
-  strategy: WaiverPricingContext | null;
+  /**
+   * The pricing context, with its own `Map` hoisted.
+   *
+   * `WaiverPricingContext.trending` is how many managers added each player in
+   * the last capture window — a `Map`, and through the wire an empty object. A
+   * snapshot that carried it verbatim would replay every bid with the market's
+   * own attention removed, which is exactly the input somebody complaining
+   * about a price is complaining about.
+   */
+  strategy: (Omit<WaiverPricingContext, 'trending'> & { trending: [string, TrendingVelocity][] }) | null;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -294,8 +312,7 @@ export interface DstPlanPayload {
 
 export interface DstPlanInputs {
   now: string;
-  shape: RosterShape;
-  profile: ScoringProfile;
+  rules: SnapshotLeagueRules;
   season: string;
   week: number;
   bestBall: boolean;
@@ -345,8 +362,7 @@ export interface TradeOfferPayload {
 export interface TradeOfferInputs {
   now: string;
   leagueSettings: Record<string, unknown>;
-  shape: RosterShape;
-  profile: ScoringProfile;
+  rules: SnapshotLeagueRules;
   rosters: SnapshotRoster[];
   /** Every rostered player, evaluated once for the whole league. */
   pool: SnapshotStartSitBundle;

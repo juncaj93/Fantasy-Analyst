@@ -17,6 +17,10 @@
  *     a `Map` too, and it is attached to every single `StartSitInput`;
  *   - **a `Set` becomes `{}`** for the same reason;
  *   - **a function disappears**, taking the key with it;
+ *   - **a non-finite number becomes `null`** — `Infinity`, `-Infinity` and
+ *     `NaN` alike. This one is not hypothetical either: a league's
+ *     points-allowed table ends at `to: Infinity`, and through the wire every
+ *     defence in that league scores a fraction of a point differently;
  *   - **`undefined` disappears**, taking the key with it — which is fine and is
  *     not reported here, because absent and `undefined` mean the same thing
  *     everywhere in this codebase and the rehydrated value is identical.
@@ -64,6 +68,25 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
 
     if (typeof node === 'function') {
       found.push({ path: at, kind: 'function' });
+      return;
+    }
+    if (typeof node === 'number' && !Number.isFinite(node)) {
+      /*
+       * `Infinity`, `-Infinity` and `NaN` all serialise to `null`.
+       *
+       * The same silent corruption a `Map` suffers, in a shape nobody expects,
+       * and this app produces one: a league's points-allowed table ends at
+       * `to: Infinity`, because the top band is "and above". Through the wire it
+       * becomes `null`, the band stops matching, and every defence in the league
+       * replays a fraction of a point out — a snapshot that describes a decision
+       * nobody made, differing by too little to notice and enough to chase.
+       *
+       * Reported by its own name rather than as a generic failure, because the
+       * fix is never "encode it": it is to carry the value the engine derived it
+       * from. See `inseason.ts`, which carries a league's published settings and
+       * rebuilds the profile.
+       */
+      found.push({ path: at, kind: Number.isNaN(node) ? 'NaN' : 'Infinity' });
       return;
     }
     if (typeof node === 'bigint') {

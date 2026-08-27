@@ -135,13 +135,27 @@ export interface WaiverAssembly extends WaiverAdvice {
   lineup: LineupRecommendation;
 }
 
-export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promise<WaiverAssembly> {
-  const { shape, profile, rosterInputs, candidateInputs, rosteredIds } = request;
-
-  const lineup = recommendLineup(rosterInputs, shape, profile, {
+/**
+ * The lineup everything downstream is measured against.
+ *
+ * Exported because the defence planner's bench cost is measured against it and
+ * the support capture has to hand the DST adapter the *same* one — a lineup
+ * rebuilt at the call site from the same inputs is the same lineup right up
+ * until somebody changes one of the two.
+ */
+export function waiverLineup(
+  request: Pick<WaiverAssemblyRequest, 'rosterInputs' | 'shape' | 'profile' | 'currentStarterIds' | 'now'>,
+): LineupRecommendation {
+  return recommendLineup(request.rosterInputs, request.shape, request.profile, {
     currentStarterIds: request.currentStarterIds,
     now: request.now,
   });
+}
+
+export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promise<WaiverAssembly> {
+  const { shape, profile, rosterInputs, candidateInputs, rosteredIds } = request;
+
+  const lineup = waiverLineup(request);
 
   const advice = recommendWaiverUpgrades({
     roster: rosterInputs,

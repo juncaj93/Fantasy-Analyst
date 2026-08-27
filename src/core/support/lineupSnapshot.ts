@@ -40,7 +40,15 @@ import type { NflState } from '../sleeper/phase.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
-import { captureLeague, captureRosters, captureStartSitInputs, rehydrateStartSitInputs } from './inseason.ts';
+import { scrubAliases } from './scrub.ts';
+import {
+  captureLeague,
+  captureLeagueRules,
+  captureRosters,
+  captureStartSitInputs,
+  rehydrateLeagueRules,
+  rehydrateStartSitInputs,
+} from './inseason.ts';
 import { countPositions, summariseFreshness } from './freshness.ts';
 import {
   classifyOutcome,
@@ -98,7 +106,18 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
   const startSit = captureStartSitInputs(input.inputs);
   const capturedAt = input.now.toISOString();
 
-  const borrowed = decision.slots.filter((slot) => slot.projectionSource === 'sleeper').length;
+  /*
+   * The decision, with every identity that reached it replaced.
+   *
+   * The inputs are aliased above; this is the other half, and it is the half
+   * that has caught this app twice. An engine that composes a league id or a
+   * manager's name into a string produces an output that a verbatim copy would
+   * carry straight past every alias in the file. Run after every alias has been
+   * allocated, so it can only ever replace. See `scrub.ts`.
+   */
+  const output = scrubAliases(decision, aliases) as typeof decision;
+
+  const borrowed = output.slots.filter((slot) => slot.projectionSource === 'sleeper').length;
 
   return sealSnapshot<LineupPayload>({
     schema: SUPPORT_SNAPSHOT_SCHEMA,
@@ -109,6 +128,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
         'league or draft id': aliases.counts.scopes,
+        'league name': aliases.counts.labels,
       },
       rules: [...REDACTION_RULES],
     },
@@ -135,8 +155,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
       },
       inputs: {
         now: capturedAt,
-        shape: input.shape,
-        profile: input.profile,
+        rules: captureLeagueRules(input.league),
         currentStarterIds: input.mine.starterIds,
         mode: input.mode,
         startSit,
@@ -144,7 +163,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
         unknownPlayers: input.mine.playerIds.length - input.inputs.length,
         rosters,
       },
-      output: decision,
+      output,
       /*
        * What the lineup said about itself, lifted out of `output`.
        *
@@ -153,7 +172,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
        * lifting it is a convenience for a human and never a second source of
        * truth.
        */
-      warnings: decision.warnings,
+      warnings: output.warnings,
     },
   });
 }
@@ -161,10 +180,11 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
 export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): ReplayReport {
   const { inputs, output } = snapshot.decision;
 
+  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
   const replayed = assembleLineup({
     inputs: rehydrateStartSitInputs(inputs.startSit),
-    shape: inputs.shape,
-    profile: inputs.profile,
+    shape,
+    profile,
     currentStarterIds: inputs.currentStarterIds,
     mode: inputs.mode,
     published: new Map(Object.entries(inputs.published)),

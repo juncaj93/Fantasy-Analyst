@@ -42,7 +42,14 @@ import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
-import { captureLeague, captureStartSitInputs, rehydrateStartSitInputs } from './inseason.ts';
+import { scrubAliases } from './scrub.ts';
+import {
+  captureLeague,
+  captureLeagueRules,
+  captureStartSitInputs,
+  rehydrateLeagueRules,
+  rehydrateStartSitInputs,
+} from './inseason.ts';
 import { countPositions, summariseFreshness } from './freshness.ts';
 import { classifyOutcome, compareStructural, describeDifference, exact, type ReplayReport } from './contract.ts';
 import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
@@ -122,12 +129,23 @@ export interface DstCaptureInput {
 
 export async function captureDstSnapshot(input: DstCaptureInput): Promise<SupportSnapshot<DstPlanPayload>> {
   const recorder = recordDstSources(input.sources);
-  const plan = await assembleDstPlan(recorder.sources, { ...input.request, now: input.now });
+  const rawPlan = await assembleDstPlan(recorder.sources, { ...input.request, now: input.now });
   const reads = recorder.seen();
 
   const aliases = new SnapshotAliases();
   const league = captureLeague(input.league, aliases);
   const capturedAt = input.now.toISOString();
+
+  /*
+   * The decision, with every identity that reached it replaced.
+   *
+   * The inputs are aliased above; this is the other half, and it is the half
+   * that has caught this app twice. An engine that composes a league id or a
+   * manager's name into a string produces an output that a verbatim copy would
+   * carry straight past every alias in the file. Run after every alias has been
+   * allocated, so it can only ever replace. See `scrub.ts`.
+   */
+  const plan = scrubAliases(rawPlan, aliases) as typeof rawPlan;
   const { rosterInputs, candidateInputs, shape, profile } = input.request;
 
   return sealSnapshot<DstPlanPayload>({
@@ -139,6 +157,7 @@ export async function captureDstSnapshot(input: DstCaptureInput): Promise<Suppor
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
         'league or draft id': aliases.counts.scopes,
+        'league name': aliases.counts.labels,
       },
       rules: [...REDACTION_RULES],
     },
@@ -170,8 +189,7 @@ export async function captureDstSnapshot(input: DstCaptureInput): Promise<Suppor
       },
       inputs: {
         now: capturedAt,
-        shape,
-        profile,
+        rules: captureLeagueRules(input.league),
         season: input.request.season,
         week: input.request.week,
         bestBall: input.request.bestBall,
@@ -245,11 +263,12 @@ function warningsFor(plan: Awaited<ReturnType<typeof assembleDstPlan>>): string[
 export async function replayDstSnapshot(snapshot: SupportSnapshot<DstPlanPayload>): Promise<ReplayReport> {
   const { inputs, output } = snapshot.decision;
 
+  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
   const replayed = await assembleDstPlan(snapshotDstSources(inputs.reads), {
     season: inputs.season,
     week: inputs.week,
-    shape: inputs.shape,
-    profile: inputs.profile,
+    shape,
+    profile,
     bestBall: inputs.bestBall,
     draftComplete: inputs.draftComplete,
     rosterInputs: rehydrateStartSitInputs(inputs.roster),

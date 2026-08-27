@@ -50,6 +50,7 @@
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { DefenseTendency, DefenseTendencyIndex } from '../startsit/defense.ts';
 import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
+import { buildRosterShape, buildScoringProfile } from '../sleeper/scoring.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import type { SnapshotAliases } from './redaction.ts';
 
@@ -167,6 +168,14 @@ export interface SnapshotRoster {
 export function captureLeague(league: LeagueRecord, aliases: SnapshotAliases): SnapshotLeague {
   const leagueAlias = aliases.scope('league', league.id) ?? 'league-1';
   const draftAlias = league.draftId == null ? null : aliases.scope('draft', league.draftId);
+  /*
+   * The name, registered so the output scrub catches it too.
+   *
+   * It is replaced outright below, and several responses echo it back — so a
+   * capture that aliased the id and copied the header would have published the
+   * commissioner's own words, which are frequently somebody's name.
+   */
+  aliases.label(league.name, leagueAlias);
   return {
     id: leagueAlias,
     sleeperLeagueId: leagueAlias,
@@ -207,17 +216,46 @@ export function rehydrateRosters(rosters: readonly SnapshotRoster[]): RosterReco
 }
 
 /**
- * The league shape and the scoring, carried whole rather than rebuilt.
+ * The league's own published rules, and the two values every engine reads them
+ * through.
  *
- * Both are pure functions of `rosterPositions` and `scoringSettings`, so a
- * replay *could* derive them. It does not, and the reason is the same one that
- * put `nextPickModel.seed` in the Draft file: a value the engine actually used
- * is evidence, and a value the replay recomputed is an assumption. If
- * `buildRosterShape` changes its mind about what a SUPER_FLEX accepts, a
- * snapshot that carried the shape replays the decision that was made and a
- * snapshot that rebuilt it replays a different one, quietly.
+ * The instinct here was to carry the derived `RosterShape` and `ScoringProfile`
+ * whole — a value the engine actually used is evidence, and a value the replay
+ * recomputed is an assumption, which is the argument that put
+ * `nextPickModel.seed` in the Draft file.
+ *
+ * It does not survive contact with the wire. A league's points-allowed table
+ * ends at `to: Infinity`, because the top band is "and above", and
+ * `JSON.stringify(Infinity)` is `null`. A snapshot carrying the profile
+ * therefore replayed every defence in the league a fraction of a point out —
+ * silently, and by too little to notice. `lossless.ts` now refuses such a
+ * capture outright.
+ *
+ * So the file carries what the *league published*, which is plain JSON and is
+ * the true input in any case: `roster_positions` and `scoring_settings` exactly
+ * as Sleeper returned them. The replay derives the same two values with the same
+ * two functions the screen used. That is also what the Draft payload has always
+ * done — `SnapshotLeague` carries the settings and `buildDraftBoard` derives the
+ * rest — so the six lanes now agree.
+ *
+ * The exposure this leaves is real and is worth naming: a change to
+ * `buildScoringProfile` re-derives an old snapshot under new rules. That is a
+ * change to how *every* screen reads the league rather than a change to an
+ * engine, and it will show up as an honest `output_difference` on any snapshot
+ * old enough to have been read the other way.
  */
-export interface SnapshotLeagueShape {
-  shape: RosterShape;
-  profile: ScoringProfile;
+export interface SnapshotLeagueRules {
+  rosterPositions: string[];
+  scoringSettings: Record<string, number>;
+}
+
+export function captureLeagueRules(league: Pick<LeagueRecord, 'rosterPositions' | 'scoringSettings'>): SnapshotLeagueRules {
+  return { rosterPositions: league.rosterPositions, scoringSettings: league.scoringSettings };
+}
+
+export function rehydrateLeagueRules(rules: SnapshotLeagueRules): { shape: RosterShape; profile: ScoringProfile } {
+  return {
+    shape: buildRosterShape(rules.rosterPositions),
+    profile: buildScoringProfile(rules.scoringSettings, rules.rosterPositions),
+  };
 }

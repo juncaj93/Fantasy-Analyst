@@ -607,7 +607,16 @@ describe('no recommendation engine can reach the fallback', () => {
          * the other half of the same promise.
          */
         'server/services/projectionV2Service.ts',
-        'server/app.ts',
+        /*
+         * The lineup route's own gathering, which is where it always was.
+         *
+         * It used to be spelled out inside `server/app.ts`; it moved when the
+         * support snapshot needed the *same* reads the Team screen makes, and
+         * the rule is unchanged — the published figure fills a display column
+         * and reaches no ranking. `core/startsit/assemble.ts` runs the whole
+         * optimiser before the map is touched.
+         */
+        'server/services/decisionInputs.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );

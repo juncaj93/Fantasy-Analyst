@@ -333,9 +333,37 @@ describe('the read path has nothing to write with', () => {
       join(import.meta.dirname, '..', 'src', 'server', 'services', 'matchupService.ts'),
       'utf8',
     );
-    const forLeague = service.slice(service.indexOf('async forLeague('), service.indexOf('private sources()'));
+    /*
+     * The method itself, not everything between it and the next landmark.
+     *
+     * This used to slice to `private sources()`, which swept up whatever was
+     * declared in between — so adding a method there could fail the test for
+     * mentioning the word in a comment. The claim is about `forLeague`'s body,
+     * so the slice is `forLeague`'s body: up to the first brace in column two.
+     */
+    const from = service.indexOf('async forLeague(');
+    const forLeague = service.slice(from, service.indexOf('\n  }\n', from));
     expect(forLeague).toContain('buildMatchupResponse(this.sources(), leagueId, opts)');
     expect(forLeague, 'forLeague must not hand the assembly a ledger').not.toMatch(/ledger/i);
+  });
+
+  /**
+   * And neither does the support capture, which runs the same assembly.
+   *
+   * A snapshot is a diagnostic, and a diagnostic that wrote a calibration row
+   * would be changing the thing being diagnosed — the exact defect the ledger
+   * was moved out of the sources bag to end. Three arguments, and the recording
+   * proxy in between has no fourth to give.
+   */
+  it('the support capture asks for a matchup with no ledger either', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const capture = readFileSync(
+      join(import.meta.dirname, '..', 'src', 'core', 'support', 'matchupSnapshot.ts'),
+      'utf8',
+    );
+    expect(capture).toContain('buildMatchupResponse(recorder.sources, options.leagueId, {');
+    expect(capture, 'the capture must not hand the assembly a ledger').not.toMatch(/ledger/i);
   });
 
   /**

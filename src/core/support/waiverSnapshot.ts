@@ -49,7 +49,15 @@ import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import type { NflState } from '../sleeper/phase.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
-import { captureLeague, captureRosters, captureStartSitInputs, rehydrateStartSitInputs } from './inseason.ts';
+import { scrubAliases } from './scrub.ts';
+import {
+  captureLeague,
+  captureLeagueRules,
+  captureRosters,
+  captureStartSitInputs,
+  rehydrateLeagueRules,
+  rehydrateStartSitInputs,
+} from './inseason.ts';
 import { capturePlayer, rehydratePlayer } from './players.ts';
 import { countPositions, summariseFreshness } from './freshness.ts';
 import { recordDstSources, snapshotDstSources } from './dstSnapshot.ts';
@@ -107,6 +115,42 @@ export async function captureWaiverSnapshot(
   const rosters = captureRosters(input.rosters, aliases, league.id);
   const capturedAt = input.now.toISOString();
 
+  /*
+   * The decision, with every identity that reached it replaced.
+   *
+   * The inputs are aliased above; this is the other half, and it is the half
+   * that has caught this app twice. An engine that composes a league id or a
+   * manager's name into a string produces an output that a verbatim copy would
+   * carry straight past every alias in the file. Run after every alias has been
+   * allocated, so it can only ever replace. See `scrub.ts`.
+   */
+  const output = scrubAliases(decision, aliases) as typeof decision;
+
+  /*
+   * The wallet, with its owner names aliased.
+   *
+   * `LeagueBudgetState.rosters[]` carries a display name per seat, and it is the
+   * one place in this payload where an identity arrives outside the roster
+   * table — so a capture that aliased the rosters and copied the budget would
+   * have printed every manager's username in the FAAB block. Resolved through
+   * the roster's own owner id so `Manager 3` is the same person here as
+   * everywhere else in the file.
+   */
+  const ownerByRoster = new Map(input.rosters.map((roster) => [roster.rosterId, roster.ownerId]));
+  const aliasBudget = <T extends { rosters: { rosterId: number; ownerName: string | null }[] }>(
+    budget: T | null,
+  ): T | null =>
+    budget == null
+      ? null
+      : {
+          ...budget,
+          rosters: budget.rosters.map((entry) => ({
+            ...entry,
+            ownerName: aliases.name(entry.ownerName, ownerByRoster.get(entry.rosterId) ?? null),
+          })),
+        };
+  const budgets = aliasBudget(input.request.budgets);
+
   return sealSnapshot<WaiverPlanPayload>({
     schema: SUPPORT_SNAPSHOT_SCHEMA,
     capturedAt,
@@ -116,6 +160,7 @@ export async function captureWaiverSnapshot(
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
         'league or draft id': aliases.counts.scopes,
+        'league name': aliases.counts.labels,
       },
       rules: [...REDACTION_RULES],
     },
@@ -149,8 +194,7 @@ export async function captureWaiverSnapshot(
       inputs: {
         now: capturedAt,
         generatedAt: capturedAt,
-        shape: input.request.shape,
-        profile: input.request.profile,
+        rules: captureLeagueRules(input.league),
         season: input.request.season,
         week: input.request.week,
         roster: captureStartSitInputs(input.request.rosterInputs),
@@ -161,8 +205,15 @@ export async function captureWaiverSnapshot(
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
-        strategy: input.request.strategy,
-        budgets: input.request.budgets,
+        strategy:
+          input.request.strategy == null
+            ? null
+            : {
+                ...input.request.strategy,
+                budget: aliasBudget(input.request.strategy.budget)!,
+                trending: [...input.request.strategy.trending.entries()],
+              },
+        budgets,
         prices: input.request.prices,
         observations: input.request.observations,
         history:
@@ -179,8 +230,8 @@ export async function captureWaiverSnapshot(
         draftComplete: input.request.draftComplete,
         playoff: input.request.playoff,
       },
-      output: decision,
-      warnings: decision.notes,
+      output,
+      warnings: output.notes,
     },
   });
 }
@@ -223,9 +274,10 @@ export async function replayWaiverSnapshot(
   const roster: StartSitInput[] = rehydrateStartSitInputs(inputs.roster);
   const candidates: StartSitInput[] = rehydrateStartSitInputs(inputs.candidates);
 
+  const { shape, profile } = rehydrateLeagueRules(inputs.rules);
   const replayed = await assembleWaiverPlan({
-    shape: inputs.shape,
-    profile: inputs.profile,
+    shape,
+    profile,
     rosterInputs: roster,
     candidateInputs: candidates,
     rosteredIds: new Set(inputs.rosteredIds),
@@ -235,7 +287,8 @@ export async function replayWaiverSnapshot(
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,
     season: inputs.season,
-    strategy: inputs.strategy,
+    strategy:
+      inputs.strategy == null ? null : { ...inputs.strategy, trending: new Map(inputs.strategy.trending) },
     budgets: inputs.budgets,
     prices: inputs.prices,
     observations: inputs.observations,

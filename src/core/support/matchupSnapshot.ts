@@ -45,6 +45,7 @@ import type { NflState } from '../sleeper/phase.ts';
 import { buildRosterShape, buildScoringProfile } from '../sleeper/scoring.ts';
 import { SnapshotAliases, REDACTION_RULES } from './redaction.ts';
 import { sealSnapshot } from './emit.ts';
+import { scrubAliases } from './scrub.ts';
 import {
   captureLeague,
   captureRosters,
@@ -167,7 +168,18 @@ export async function captureMatchupSnapshot(
    * and a scoreboard — and a reader asking why the win probability "will not
    * move" is asking about this number.
    */
-  const settled = response.forecast?.slots.filter((slot) => slot.mine?.phase === 'final').length ?? 0;
+  /*
+   * The decision, with every identity that reached it replaced.
+   *
+   * The inputs are aliased above; this is the other half, and it is the half
+   * that has caught this app twice. An engine that composes a league id or a
+   * manager's name into a string produces an output that a verbatim copy would
+   * carry straight past every alias in the file. Run after every alias has been
+   * allocated, so it can only ever replace. See `scrub.ts`.
+   */
+  const output = scrubAliases(response, aliases) as typeof response;
+
+  const settled = output.forecast?.slots.filter((slot) => slot.mine?.phase === 'final').length ?? 0;
 
   return sealSnapshot<MatchupPayload>({
     schema: SUPPORT_SNAPSHOT_SCHEMA,
@@ -178,6 +190,7 @@ export async function captureMatchupSnapshot(
         'manager id': aliases.counts.ids,
         'manager name': aliases.counts.names,
         'league or draft id': aliases.counts.scopes,
+        'league name': aliases.counts.labels,
       },
       rules: [...REDACTION_RULES],
     },
@@ -186,13 +199,13 @@ export async function captureMatchupSnapshot(
       request: { leagueId: league.id, week: options.week ?? null },
       context: {
         league,
-        season: response.season,
-        week: response.week,
+        season: output.season,
+        week: output.week,
         scoringLabel: profile.label,
         rosterShape: buildRosterShape(seen.league.rosterPositions),
         myRosterId: mine?.rosterId ?? null,
         opponentRosterId:
-          response.forecast?.teams.theirs.rosterId ?? null,
+          output.forecast?.teams.theirs.rosterId ?? null,
         rosterCounts: countPositions(seen.startSitInputs),
       },
       freshness: {
@@ -202,7 +215,7 @@ export async function captureMatchupSnapshot(
           nflState: seen.nflState,
           unknownPlayers: seen.startSitRequested.length - seen.startSitInputs.length,
         }),
-        degraded: response.forecast?.degraded ?? true,
+        degraded: output.forecast?.degraded ?? true,
         settled,
       },
       inputs: {
@@ -217,7 +230,7 @@ export async function captureMatchupSnapshot(
         publishedAvailable: seen.publishedAvailable,
         previousForecast: seen.previousForecast,
       },
-      output: response,
+      output,
       /*
        * What the forecast said about itself.
        *
@@ -226,7 +239,7 @@ export async function captureMatchupSnapshot(
        * confident `Hold your lineup` — so it is lifted here where it is read
        * first, as well as compared inside `output`.
        */
-      warnings: response.forecast?.degraded
+      warnings: output.forecast?.degraded
         ? ['The forecast is degraded: no distribution could be built, so only the scoreboard stands.']
         : [],
     },
@@ -297,6 +310,21 @@ export async function replayMatchupSnapshot(snapshot: SupportSnapshot<MatchupPay
   const { request, output } = snapshot.decision;
   const replayed = await buildMatchupResponse(snapshotMatchupSources(snapshot), request.leagueId, {
     week: request.week,
+    /*
+     * The seed the live forecast drew with, handed back.
+     *
+     * The league id is hashed into the fingerprint that seeds the simulation,
+     * and the snapshot replaces that id with an alias — because a Sleeper league
+     * id is one public URL away from every manager's username. Without this the
+     * replay would draw a different afternoon and disagree with its own capture
+     * by a fraction of a point of win probability, with no way to tell that
+     * apart from a regression.
+     *
+     * Absent in a snapshot written before the seed travelled, which replays as
+     * it always did: the alias seeds it, and the difference shows up as an
+     * honest `output_difference` rather than as a silent one.
+     */
+    ...(output.forecast?.seed === undefined ? {} : { seed: output.forecast.seed }),
   });
 
   const differences: ReplayReport['differences'] = [];
@@ -327,6 +355,15 @@ export async function replayMatchupSnapshot(snapshot: SupportSnapshot<MatchupPay
     replayed.forecast?.degraded ?? null,
     differences,
   );
+  /*
+   * The seed is compared as well as supplied.
+   *
+   * It is what every number in the forecast was drawn from, so a replay whose
+   * seed differs is not reproducing the matchup even if the draws happen to land
+   * in the same place. Checking it turns "the samples matched" from a
+   * coincidence into a consequence.
+   */
+  exact('seed', 'the simulation', output.forecast?.seed ?? null, replayed.forecast?.seed ?? null, differences);
 
   const engineMatches = snapshot.release.engineVersion === MATCHUP_ENGINE_VERSION;
   const outcome = classifyOutcome(differences, engineMatches);

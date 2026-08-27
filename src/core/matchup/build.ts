@@ -176,7 +176,7 @@ export interface MatchupLedger {
 export async function buildMatchupResponse(
   sources: MatchupSources,
   leagueId: string,
-  opts: { week?: number | null } = {},
+  opts: { week?: number | null; seed?: number } = {},
   ledger?: MatchupLedger,
 ): Promise<MatchupResponse> {
   const now = sources.now();
@@ -317,7 +317,20 @@ export async function buildMatchupResponse(
     week,
     rosterId: mine.rosterId,
   });
-  const forecast = buildForecast({ ...forecastInput, previous });
+  const forecast = buildForecast({
+    ...forecastInput,
+    previous,
+    /*
+     * The seed a replay hands back, and nothing else ever sets.
+     *
+     * The fingerprint that normally seeds the simulation hashes the league id,
+     * and a support snapshot aliases that id — so a replay derives a different
+     * seed and draws a different afternoon. Carrying the number lets the file
+     * reproduce the draws without carrying the identity. See
+     * `MatchupForecast.seed`.
+     */
+    ...(opts.seed === undefined ? {} : { seed: opts.seed }),
+  });
 
   /*
    * The cards, from the same evaluations the forecast was built from.

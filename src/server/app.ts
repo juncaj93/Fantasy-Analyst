@@ -22,6 +22,18 @@ import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { assembleLineup } from '../core/startsit/assemble.ts';
 import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
+import { SnapshotLossyError } from '../core/support/lossless.ts';
+import {
+  IN_SEASON_KINDS,
+  captureSupportSnapshot,
+  isInSeasonKind,
+} from './services/supportSnapshotService.ts';
+import {
+  NoDecision,
+  boundedFreeAgents,
+  gatherLineupInputs,
+  gatherWaiverInputs,
+} from './services/decisionInputs.ts';
 import { normalizeMode } from '../core/startsit/mode.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../core/draft/playerOrder.ts';
 import { aggregatePlayerSignal } from '../core/evidence/aggregate.ts';
@@ -44,13 +56,11 @@ import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositio
 /* Still used directly by handlers in this file. */
 import { evaluatePlayer } from '../core/startsit/engine.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
-import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../core/roster/freeAgents.ts';
 import { buildLadderFor } from '../core/trades/ladderInputs.ts';
-import type { CanonicalPlayer } from '../core/identity/types.ts';
 import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
 import { evaluateBench } from '../core/roster/bench.ts';
 import { buildLadder } from '../core/trades/ladder.ts';
-import { DEFAULT_FINAL_WEEK, LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
+import { LeagueStrategyService, readFinalWeek } from './services/leagueStrategyService.ts';
 import { ManagerIntelService } from './services/managerIntelService.ts';
 import { ManagerLedgerRepo } from './repos/managerLedger.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
@@ -105,16 +115,11 @@ import { SleeperSyncService } from './services/sleeperSync.ts';
 import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
-import { buildStartSitContext, startSitInputsFor } from './services/startSitInputs.ts';
+import { startSitInputsFor } from './services/startSitInputs.ts';
 /* And the one assembly of everything the defence planner reads. */
-import { dstPlanSourcesFrom, playoffContextFor } from './services/dstPlanService.ts';
+import { playoffContextFor } from './services/dstPlanService.ts';
 import { NflScheduleRepo } from './repos/nflSchedule.ts';
-import { detectBestBall } from '../core/sleeper/bestBall.ts';
-import { isDraftComplete } from '../core/sleeper/phase.ts';
-import { DEFENCE_POSITION } from '../core/startsit/engine.ts';
 import { MatchupService } from './services/matchupService.ts';
-import { SleeperProjectionService } from './services/sleeperProjectionService.ts';
-import { resolveWeek } from '../core/matchup/build.ts';
 import { MatchupRepo, MIN_CALIBRATION_SAMPLE } from './repos/matchup.ts';
 import { MATCHUP_MODEL_VERSION } from '../core/matchup/types.ts';
 import { UsageService } from './services/usageService.ts';
@@ -661,21 +666,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * difference, it does not act on it.
    */
   router.get('/api/leagues/:id/lineup', async (ctx) => {
-    const db = ctx.env.db;
-    const leagueRepo = new LeagueRepo(db);
-    const league = await leagueRepo.getLeague(ctx.params['id']!);
-    if (!league) return errorResponse('league not found', 404);
-
-    const rosters = await leagueRepo.listRosters(league.id);
-    const mine = rosters.find((r) => r.isMine) ?? null;
-    if (!mine) {
-      return jsonResponse({
-        league: { id: league.id, name: league.name },
-        found: false,
-        error: 'Your team was not found in this league.',
-      });
-    }
-
     /*
      * Floor, Balanced or Ceiling, from the query string.
      *
@@ -686,42 +676,25 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const mode = normalizeMode(ctx.url.searchParams.get('mode'));
 
-    const [inputs, freshness, state] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds, { mode }),
-      new PropsRepo(db).freshness(),
-      new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
-    ]);
-
-    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
-    const shape = buildRosterShape(league.rosterPositions);
-
     /*
-     * Rotowire's published week, for the players this app could not price.
+     * The reads, from the one place that does them.
      *
-     * The week comes through the same two functions the Matchup screen uses, and
-     * that is the point: two screens that disagreed about which week it is would
-     * quote two different published figures for the same player on the same
-     * afternoon. Read from the database only — the fetch runs on the crons, so a
-     * lineup request never waits on Sleeper for a fallback.
-     *
-     * Failure is swallowed to an empty map. This fills a column that was blank
-     * before it existed, and a blank column is a state the screen already knows
-     * how to say out loud; taking the lineup down for it would be absurd.
+     * `services/decisionInputs.ts` is shared with the support snapshot, so the
+     * file somebody sends in describes the state this screen was drawn from
+     * rather than a second gathering that happens to look similar.
      */
-    const positions = new Map(inputs.map((i) => [i.player.id, i.player.position ?? null]));
-    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
-    let published: Map<string, number>;
+    let gathered;
     try {
-      published = await new SleeperProjectionService(db, ctx.env.sleeper).publishedFor({
-        season: league.season,
-        week,
-        playerIds: mine.playerIds,
-        profile,
-        positionOf: (id) => positions.get(id) ?? null,
-      });
-    } catch {
-      published = new Map();
+      gathered = await gatherLineupInputs(ctx.env.db, ctx.env.sleeper, ctx.params['id']!, mode);
+    } catch (err) {
+      if (err instanceof NoDecision) {
+        return err.status === 404
+          ? errorResponse(err.message, 404)
+          : jsonResponse({ league: { id: ctx.params['id']! }, found: false, error: err.message });
+      }
+      throw err;
     }
+    const { league, mine, shape, profile, inputs, published, unknownPlayers, props } = gathered;
 
     /*
      * The whole decision, in one call.
@@ -744,13 +717,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       currentStarterIds: mine.starterIds,
       mode,
       published,
-      unknownPlayers: mine.playerIds.length - inputs.length,
+      unknownPlayers,
     });
 
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
-      dataFreshness: freshness,
+      dataFreshness: props,
       ...decision,
     });
   });
@@ -766,158 +739,51 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * this app, and this endpoint is a GET that writes nothing.
    */
   router.get('/api/leagues/:id/waivers', async (ctx) => {
-    const db = ctx.env.db;
-    const leagueRepo = new LeagueRepo(db);
-    const league = await leagueRepo.getLeague(ctx.params['id']!);
-    if (!league) return errorResponse('league not found', 404);
-
-    const rosters = await leagueRepo.listRosters(league.id);
-    const mine = rosters.find((r) => r.isMine) ?? null;
-    if (!mine) {
-      return jsonResponse({
-        league: { id: league.id, name: league.name },
-        found: false,
-        upgrades: [],
-        headline: null,
-        notes: [],
-        considered: 0,
-      });
+    /*
+     * The reads, from the one place that does them.
+     *
+     * `services/decisionInputs.ts` is shared with the support snapshot, so a
+     * file somebody sends in describes the board this screen drew rather than a
+     * second gathering that happens to look similar.
+     */
+    let gathered;
+    try {
+      gathered = await gatherWaiverInputs(ctx.env.db, ctx.env.sleeper, ctx.params['id']!);
+    } catch (err) {
+      if (err instanceof NoDecision) {
+        return err.status === 404
+          ? errorResponse(err.message, 404)
+          : jsonResponse({
+              league: { id: ctx.params['id']! },
+              found: false,
+              upgrades: [],
+              headline: null,
+              notes: [],
+              considered: 0,
+            });
+      }
+      throw err;
     }
-
-    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
-    const shape = buildRosterShape(league.rosterPositions);
-
-    /*
-     * Sleeper decides who is available, and it decides it for the whole league.
-     *
-     * Every player on every roster — mine, and the eleven managers I am playing
-     * against — is off the table. This set is also handed to the engine, which
-     * checks it again: it is the one mistake this feature must never make.
-     */
-    const rosteredIds = new Set<string>();
-    for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
-
-    const startable = startablePositions(shape);
-    const allPlayers = await new PlayerRepo(db).listAll();
-    const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable, players: allPlayers });
-
-    /*
-     * The slate, the defences and the fixture list, built once for both scans.
-     *
-     * `startSitInputsFor` builds this itself when it is not given one, so the
-     * two calls below would otherwise assemble the same league-wide context
-     * twice on one request. Passing it also guarantees the roster and the wire
-     * are read against the *same* week — which now includes which teams are at
-     * home, the input the defence model's smallest residual has been waiting
-     * for.
-     */
-    const waiverContext = await buildStartSitContext(db);
-    const waiverState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const waiverWeek = waiverState?.week ?? 1;
-    const startsDefence = (shape.starters[DEFENCE_POSITION] ?? 0) > 0;
-
-    const [rosterInputs, candidateInputs, freshness] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds, { context: waiverContext }),
-      startSitInputsFor(db, candidateIds, { context: waiverContext }),
-      new PropsRepo(db).freshness(),
-    ]);
-
-    /*
-     * What the ledger and the league's own transactions know, read before the
-     * decision rather than inside it.
-     *
-     * Both are reads of stored rows and never a fetch: the manager-history
-     * backfill fills them on the daily clock, and a waiver board that triggered
-     * ingestion would turn a page load into a walk of the previous-league
-     * chain. Absent for a league nobody has backfilled yet, which the pressure
-     * column reads as "not known" and never as "quiet".
-     */
-    const strategy = await new LeagueStrategyService(db, { sleeper: ctx.env.sleeper })
-      .context(league.id, { week: waiverWeek, season: league.season })
-      .catch(() => null);
-    const waiverHistory = await new ManagerIntelService(db)
-      .waiverHistory({
-        leagueId: league.id,
-        rosters,
-        week: waiverWeek,
-        finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
-      })
-      .catch(() => undefined);
-
-    const draft = league.draftId ? await leagueRepo.getDraft(league.draftId).catch(() => null) : null;
-    const format = detectBestBall({
-      leagueSettings: league.leagueSettings,
-      draftSettings: draft?.settings ?? null,
-    });
-    const playoffs = playoffContextFor({
-      leagueSettings: league.leagueSettings,
-      rosters,
-      mine,
-      totalRosters: league.totalRosters,
-      currentWeek: waiverWeek,
-    });
+    const { league, profile, props, strategy, pool, request } = gathered;
 
     /*
      * The whole decision, in one call.
      *
      * The lineup, the wire scan, multi-week value, the competition read, the
      * pricing, the defence, the board and the claims — layered in `core` where
-     * Demo Mode and the support replay reach the same function. It used to be
-     * spelled out here and again in `core/demo/runtime/handlers.ts`, and the
-     * comment beside that second copy said it mirrored this one "line for
-     * line". See `core/waivers/assemble.ts` for the order and why it is that
-     * order.
+     * Demo Mode and the support replay reach the same function. See
+     * `core/waivers/assemble.ts` for the order and why it is that order.
      */
-    const decision = await assembleWaiverPlan({
-      shape,
-      profile,
-      rosterInputs,
-      candidateInputs,
-      rosteredIds,
-      currentStarterIds: mine.starterIds,
-      reserveIds: mine.reserveIds,
-      rosters,
-      players: allPlayers,
-      week: waiverWeek,
-      season: league.season,
-      strategy,
-      budgets: strategy?.budget ?? null,
-      prices: strategy?.prices ?? null,
-      /*
-       * The league's published bids, for the named-rival pass.
-       *
-       * Already gathered by the strategy context — the same `collectBids`
-       * output the price summary was built from, not a second read, so the
-       * names and the price cannot be looking at different weeks.
-       */
-      observations: strategy?.bidHistory.observations ?? [],
-      history: waiverHistory,
-      /*
-       * A league that starts no defence does not have its schedule read to be
-       * told so — see `WaiverAssemblyRequest.dstSources`.
-       */
-      dstSources: startsDefence ? dstPlanSourcesFrom(db) : null,
-      bestBall: format.confident && format.bestBall,
-      /*
-       * Post-draft is a fact about the draft, never about the calendar.
-       *
-       * A league whose draft has not finished has no weekly acquisition
-       * pressure, whatever the date says — and a league that drafts in week 2
-       * is not behind, it is a league that drafts in week 2.
-       */
-      draftComplete: isDraftComplete(draft?.status ?? league.status ?? null),
-      playoff: { weeks: playoffs.weeks, emphasis: playoffs.emphasis },
-      now: new Date(),
-    });
+    const decision = await assembleWaiverPlan({ ...request, now: new Date() });
 
     const { lineup: _lineup, bids, ...board } = decision;
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
-      dataFreshness: freshness,
+      dataFreshness: props,
       ...board,
       /** How the pool was bounded, so a thin answer is never a mystery. */
-      pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
+      pool,
       faab: strategy
         ? {
             rule: strategy.budget.rule,
@@ -1481,6 +1347,56 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       );
     } catch (err) {
       if (err instanceof SnapshotRedactionError) return errorResponse(err.message, 500);
+      throw err;
+    }
+  });
+
+  /**
+   * The same file, for whichever in-season decision the reader was looking at.
+   *
+   * One route rather than five, because the user has one button: Setup infers
+   * the decision from the screen they came from and names it here. The five
+   * kinds are the five in-season surfaces — `lineup`, `matchup`, `waiver-plan`,
+   * `dst-plan`, `trade-offer` — and Draft keeps the route above, unchanged,
+   * because it is keyed by a draft rather than by a league.
+   *
+   * **A GET, and everything about it is a read.** Every input comes through
+   * `services/decisionInputs.ts`, which is the same module the corresponding
+   * screen reads, so a capture cannot see a state the screen could not. It
+   * syncs nothing, refreshes nothing and writes nothing — a diagnostic that
+   * fetched fresher data would be changing the thing being diagnosed.
+   *
+   * A capture that would have contained something a snapshot must never carry —
+   * an identity, or a value the wire would silently alter — is refused with a
+   * 500 and the field named, rather than emitted with the offending value
+   * quietly dropped.
+   */
+  router.get('/api/leagues/:id/support-snapshot', async (ctx) => {
+    const context = ctx.url.searchParams.get('context');
+    if (!isInSeasonKind(context)) {
+      return errorResponse(
+        `context must be one of ${IN_SEASON_KINDS.join(', ')}; got ${JSON.stringify(context)}`,
+        400,
+      );
+    }
+    const week = ctx.url.searchParams.get('week');
+    try {
+      return jsonResponse(
+        await captureSupportSnapshot({
+          db: ctx.env.db,
+          sleeper: ctx.env.sleeper,
+          leagueId: ctx.params['id']!,
+          context,
+          gitSha: reportedGitSha(ctx.env.releaseSha),
+          mode: ctx.url.searchParams.get('mode'),
+          week: week == null ? null : Number(week),
+        }),
+      );
+    } catch (err) {
+      if (err instanceof NoDecision) return errorResponse(err.message, err.status);
+      if (err instanceof SnapshotRedactionError || err instanceof SnapshotLossyError) {
+        return errorResponse(err.message, 500);
+      }
       throw err;
     }
   });
@@ -2697,25 +2613,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   return (request, env) => router.handle(request, env);
-}
-
-/**
- * The best few unrostered players at each position, from the database.
- *
- * The ordering itself is shared — see `core/roster/freeAgents.ts` — so the
- * waiver scan is bounded identically wherever it runs. What is left here is the
- * two reads it needs, and the caller's option to hand in a player list it has
- * already fetched.
- */
-async function boundedFreeAgents(
-  db: Database,
-  opts: { rosteredIds: Set<string>; startable: Set<string>; players?: CanonicalPlayer[] },
-): Promise<string[]> {
-  const adpRepo = new AdpRepo(db);
-  const snapshot = await adpRepo.latestPlatformSnapshot();
-  const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
-  const players = opts.players ?? (await new PlayerRepo(db).listAll());
-  return boundedFreeAgentIds(players, { ...opts, ranks });
 }
 
 /**
