@@ -3035,3 +3035,154 @@ app JavaScript **−79 B** gzipped, CSS **+34 B**, and Demo Mode's lazy chunks
 kilobyte the budget is written in. Retiring the reprocess panel paid for the two
 Setup controls, and the demo chunk moved only because the four bytes are one
 field on the setup fixture.
+
+## Milestone — the card says the football, and moves under a thumb (done)
+
+Two complaints about the same object, reported together because a reader met
+them together: they open a player card, the sentence that explains the number
+beside his name is missing, and the rest of the card will not scroll.
+
+**Whether a card had a takeaway was decided by the calendar.** The selector
+ranked candidates by category, specificity, corroboration and a recency decay,
+and then compared the *decayed* score against a fixed floor — so the same
+unchanged evidence qualified in August and failed a fortnight later. Puka
+Nacua's row scores 5.0 on its merits against a floor of 3 and had dropped to
+2.68 by the time it was looked at, while still being the entire reason his tally
+read `+13`. Jaxon Smith-Njigba, with the same kind of row from a different
+issue, kept his. That is not a rule a reader can learn; it is the app being
+arbitrary. In the demo world it had gone further than inconsistent: *every*
+seeded player's takeaway was null, because a hand-scored tally row carries no
+category and therefore scored as `other`.
+
+The two questions are separated now. *Whether* there is a takeaway is a property
+of the words — ingestion bookkeeping, the name and score the card is already
+printing, or praise with nothing checkable behind it, and nothing else is
+refused. *Which* sentence leads is the ranking, decay and all. Nothing about the
+ordering changed, no category weight moved, and the floor is gone rather than
+retuned: it was measuring age. `tests/takeaway.test.ts` asks the production rows
+from `data/imports/2026-08-13-tally-r1-r4.md` the same question at four points
+on the calendar and expects one answer.
+
+**And the card stopped saying it twice.** The takeaway is chosen out of the same
+ledger `Latest news` prints, so a player with one applied item read it at the
+top of his card and again four lines down, word for word with a date under it —
+marked `quoted above`, which named the duplication without removing it. What the
+takeaway lifts is now dropped from that list. Nothing is destroyed: the item is
+still counted, still in the ledger, and still on the evidence timeline one tap
+in, where the mark stays because that surface exists to show the whole thing.
+
+**The scrolling had two independent causes and both were load-bearing.**
+
+The first was the fix from the last sheet pass. A sheet taller than the screen
+declares `touch-action: pan-y` so the browser can scroll it, which used to mean
+the browser had classified a downward drag as a scroll before the app saw an
+event — so the sheet registered a non-passive `touchmove` and claimed a downward
+drag on content sitting at its top, where scrolling has nowhere to go. The
+reasoning is sound and WebKit cannot act on it: it decides whether a touch
+sequence may scroll **once**, from the first `touchmove`, and never revisits it.
+The claim therefore had to be staked on one or two pixels of movement, and one
+or two pixels of a thumb landing is noise — an upward flick that began with a
+pixel of downward drift was refused its scroll for the whole swipe. First
+attempt does nothing, third attempt works. The listener also took WebKit off its
+fast scrolling path for every sheet in the app.
+
+No threshold fixes that, because at the instant the browser wants its answer the
+information is not there. So the question is settled from something that *is*
+known when the finger lands — whether the box under it can scroll at all — and
+scrolling gets the benefit of it. Dismissal keeps the grip, the header, the
+backdrop, Done and Escape, and keeps the content of the many sheets shorter than
+the screen, where there is no scroll to take. `useSheetDrag` calls
+`preventDefault` on no touch, and the claim in `gestures.ts` that this app
+prevents no touch default anywhere is true again.
+
+The second was a latch. `touch-action: none` goes on a body with nothing to
+scroll — and `none` means no touch scroll, no touch scroll means no `scroll`
+event, so a body measured before its content arrived had no way left to notice
+that it had grown. It was reachable by an ordinary route: a sheet is capped at
+`88dvh` and an expanded player fills in from two requests after it opens, so
+once the sheet reaches the cap the body's own box stops changing while its
+content is still coming, and the `ResizeObserver` watching that box goes quiet.
+Reproduced in Chromium before the fix — content grew from 286px to 1186px inside
+a 262px box with the flag still reading `false`. The sheet wraps its children in
+one bare block and observes that too, so the question is answered from the
+content rather than from the thing clipping it.
+
+**Coverage.** `e2e/player-card-scroll.spec.ts` walks the card the way a reader
+does at all four widths — takeaway present and quoted once, takeaway absent with
+no empty heading, and a long card scrolled to the bottom, back to the top,
+closed and reopened, with the list behind it pinned throughout and content that
+arrives late still flipping the flag. What a headless browser cannot answer is
+stated in the file: `page.mouse` is not a finger, so WebKit's own "may this
+touch scroll" decision is exercised by the CI shards and by the physical-device
+pass, not here. `sheet-interaction.spec.ts` now pins the reversed rule, and the
+`sheetCandidate` threshold went with the listener it existed for.
+
+No budget raised. Measured against `51d068c`: app JavaScript **130.6 kB**
+against a 140.0 kB ceiling (−0.3 kB, the removed listener), CSS **14.3 kB**
+against 20.0 kB, everything the browser must fetch **146.4 kB** against 160.0
+kB, Demo Mode's lazy chunks **149.0 kB** against 150.0 kB — unchanged.
+
+## Milestone — the draft card carries the insight (done)
+
+A wording pass and a hierarchy pass on the same object, and both are about what
+a card spends its lines on.
+
+**Three labels, shorter.** `Newsletter takeaway` is `Insight`; the provider's
+`2026 Season Outlook` is `2026 outlook`; `Read the full outlook` is `Full
+outlook`. And the attribution that ran after every takeaway — `— Demo FF
+Newsletter` — is no longer printed. This app has one newsletter, so it was the
+same four words under every player, spending the end of the one line the section
+exists for; `LatestNews` under it has withheld a source that never varies for
+exactly that reason since it was written. Nothing is lost: the name is on the
+element's title, in its accessible text, and on every row of the evidence
+timeline, which is the surface that exists to answer where something came from.
+The heading is now built from the season rather than trimmed out of the
+provider's title, because trimming a provider's words is how a heading starts
+saying something the provider did not — the attribution that *is* a quotation,
+`— Rotowire, via Sleeper`, still runs inside the paragraph.
+
+**The draft card spends two of its lines differently.** It rested at the working
+behind the row's own market deltas — `Sleeper ADP 6.4 · DOG ADP 7.7 · Pick 1 ·
+Val -5.4` — and its last-season band opened with a preseason figure the row
+already prints as `PTS`. Both are gone from the card and neither is gone from
+the screen: the row prints the deltas and carries the raw market and the pick in
+the title of the metric that shows them, and `PTS` is on the row itself. The one
+thing genuinely retired is the `Val` column, which the compact row stopped
+printing in an earlier pass and which nothing else draws.
+
+What took their place is the one thing a collapsed row cannot say: `Insight`,
+and under it `Latest news` — one item at rest, three when the card is opened in
+full, so the card's existing single control does the expanding rather than a new
+one. The reading is now Insight → Latest news → 2026 outlook → 2025 GP and rank,
+with the named `Full outlook` in the slot `.detail-foot` was built for: last
+season on the left, the way in on the right, one line for both. That control is
+new only in being *named* — the blurb has expanded itself since the card was cut
+down, which is the right affordance inside a paragraph that visibly runs out of
+room and a poor one as the only way in, because nothing on the card said it was
+there. It is drawn only where there is something behind it.
+
+**The height guard moved, deliberately, and it moved to the units it is about.**
+It was a ratio against the board's own collapsed rows, ceiling three, which was
+right while a card's content was roughly proportional to its row's. The insight
+broke that: a player with a busy ledger and no market line has the shortest
+collapsed row on the board and the most to say underneath it — Silas Mbeki's row
+is 59px and his card is 176px, a ratio of four and a perfectly reasonable card.
+So the rule the rationale actually states, *opening a player must not cost you
+the board you opened him from*, is asserted directly: the disclosed part of the
+card against the height of the phone, under 40%. Measured at 390×844 on the demo
+board, worst case of each: 21% of the viewport and 4.0 collapsed rows. The
+article this guard was written to catch was eight to nine rows and most of the
+screen, and it still fails on that.
+
+**Coverage.** `draft-card.spec.ts` gained the hierarchy — both branches of it,
+because which of `Insight` and `Latest news` a player carries depends on his
+ledger and the pair is the point — plus the named control and the two removals,
+and its band assertion now names `Market - ` among the spellings it refuses.
+`draft-market-delta.spec.ts` asserts the working where it now lives, on the
+title of the delta that was made from it.
+
+No budget raised: app JavaScript 130.6 kB against 140.0 kB, CSS 14.3 kB against
+20.0 kB, first paint 146.5 kB against 160.0 kB, Demo Mode 149.0 kB against
+150.0 kB. The Draft card's second request — the ledger, for the news under the
+insight — is made only when a card is opened, so a board of forty rows still
+costs nothing until one of them is tapped.

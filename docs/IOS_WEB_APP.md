@@ -210,7 +210,8 @@ sideways drag would navigate. Tabs are tapped.
 A modal sheet is pulled down to dismiss. The rules live in `useSheetDrag`
 ([`src/web/gestures.ts`](../src/web/gestures.ts)), the thresholds are unit-tested
 in `tests/gestures.test.ts`, and the behaviour is covered by
-`e2e/sheet-interaction.spec.ts` and `e2e/sheet-vs-pull.spec.ts`.
+`e2e/sheet-interaction.spec.ts`, `e2e/sheet-vs-pull.spec.ts` and
+`e2e/player-card-scroll.spec.ts`.
 
 | Rule | Value |
 | --- | --- |
@@ -220,38 +221,64 @@ in `tests/gestures.test.ts`, and the behaviour is covered by
 | Speed is measured over | the last 120ms of movement |
 | Otherwise | springs back |
 
-**Where a drag may start.** Anywhere on the sheet, including its content — with
-one condition, which is the rule every native sheet follows: *the content owns
-the gesture until the content is at its top.* A drag that begins on scrolled
-content is a scroll and is never taken. A drag that begins on content already at
-`scrollTop: 0` becomes a dismissal, because scrolling there has nowhere to go.
+**Where a drag may start.** On anything that does not scroll: the grip, the
+header, and the content of a sheet short enough to fit — which is most of them.
+A box with somewhere to scroll owns every vertical gesture on it, from the first
+pixel, whether or not it has been scrolled yet. The backdrop, Done and Escape
+close a sheet from outside the gesture entirely, so a card taller than the
+screen is never short of a way out.
 
-Three things are refused outright: a drag on anything that scrolls sideways, a
-drag that begins inside a text field — where dragging moves the caret and
-selects, which is what Setup's two paste boxes are for — and a drag that starts
-inside a control carrying `data-no-sheet-drag`, which is how a control the
-primitive cannot guess at claims its own gesture.
+Three more things are refused outright: a drag on anything that scrolls
+sideways, a drag that begins inside a text field — where dragging moves the
+caret and selects, which is what Setup's two paste boxes are for — and a drag
+that starts inside a control carrying `data-no-sheet-drag`, which is how a
+control the primitive cannot guess at claims its own gesture.
 
-**Why this needs a `preventDefault`, and why it is the only one.** A sheet
-taller than the screen declares `touch-action: pan-y` on its body so the browser
-can scroll it. That declaration is a promise, and WebKit collects on it before
-the first `pointermove` arrives: the drag is a scroll, the sheet never moves,
-and the reader is left pulling at something that does nothing. This is what made
-the app's popup cards feel impossible to swipe away — the grip was the only
-place the gesture worked, and a grip is about forty pixels of a phone.
+**Why scrolling wins outright, and what it cost to learn.** The rule used to be
+narrower: *the content owns the gesture until the content is at its top*, so a
+downward drag on content at `scrollTop: 0` became a dismissal, on the reasoning
+that scrolling there has nowhere to go. The reasoning is sound and the browser
+cannot act on it.
 
-`pan-up` was tried first and is the wrong answer: WebKit does not implement the
-directional values, discards the declaration, and the mechanism is inert on the
-one browser that has the problem. Chromium honours it, so nothing local catches
-that.
+A sheet taller than the screen declares `touch-action: pan-y` on its body so the
+browser can scroll it, and WebKit collects on that promise before the first
+`pointermove` arrives — which is what made popup cards feel impossible to swipe
+away, with the grip the only place the gesture worked. (`pan-up` was tried and
+is the wrong answer: WebKit does not implement the directional values, discards
+the declaration, and the mechanism is inert on the one browser that has the
+problem. Chromium honours it, so nothing local catches that.) The answer was a
+non-passive `touchmove` on the sheet, claiming the gesture when the drag looked
+downward and the scroller was at its top.
 
-So the sheet registers a **non-passive `touchmove`** on itself, which obliges
-the browser to ask before it starts scrolling, and answers *yes, this is mine*
-only when the drag is downward and the scroller under the finger is already at
-its top. Nothing is taken from the reader by that: the browser had nothing to
-offer a downward drag at the top of a scroller. This is the only
-`preventDefault` on a touch anywhere in the app, and its scope is one modal
-surface, one direction and one scroll position.
+**That answer broke scrolling, which is worse.** WebKit decides whether a touch
+sequence may scroll *once*, from its first `touchmove`, and never revisits it.
+So the claim had to be staked on one or two pixels of movement — and one or two
+pixels of a thumb landing is noise. An upward flick that began with a pixel of
+downward drift was refused its scroll for the whole swipe, so the reader's first
+attempt did nothing and their third worked. The listener also took WebKit off
+its fast scrolling path for every sheet in the app, which is the rest of why the
+interaction felt unreliable rather than merely stubborn.
+
+No threshold fixes it: at the instant the browser wants its answer, the
+information is not there. So the question is settled from something that *is*
+known when the finger lands — whether the box under it can scroll at all — and
+scrolling gets the benefit of it. `useSheetDrag` now calls `preventDefault` on
+no touch at all, and **there is no `preventDefault` on a touch anywhere in this
+app**; the arbitration is the browser's, through `touch-action`, exactly as it
+is for the back gesture and pull-to-refresh.
+
+**`data-scrollable`, and the latch that was hiding in it.** The body carries
+`touch-action: none` while it has nothing to scroll, which is what lets a short
+sheet be dragged shut from its content. Getting that wrong in one direction is a
+card that cannot be scrolled *at all*: `none` means no touch scroll, no touch
+scroll means no `scroll` event, and the card then has no way left to notice that
+it has grown. It was reachable by an ordinary route — a sheet is capped at
+`88dvh` and an expanded player fills in from two requests after it opens, so
+once the sheet hits the cap the body's own box stops changing while its content
+is still arriving, and a `ResizeObserver` watching only that box goes quiet. The
+sheet therefore wraps its children in one element and observes *that* as well,
+so the question is answered from the content rather than from the thing clipping
+it. Covered by `e2e/player-card-scroll.spec.ts`.
 
 **What a sheet owes the app while it is up** — the page behind held still, the
 app behind out of the reading order, focus in and focus back, Escape reaching

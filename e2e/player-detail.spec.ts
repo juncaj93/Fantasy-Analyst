@@ -311,7 +311,16 @@ test.describe('the expanded player, opened from Players', () => {
     // card that duplicates nothing, and the pass that removed four blocks is
     // exactly the pass that would take it by accident.
     await expect(page.getByTestId('outlook')).toContainText('via Sleeper');
-    await expect(page.getByTestId('player-page-snapshot')).toContainText(/20\d\d Season Outlook/);
+    /*
+     * The heading is the season and one word.
+     *
+     * It was the provider's own title, `2026 Season Outlook`, which spent a
+     * third of the line on a noun the paragraph beneath it already is. The
+     * attribution that *is* a quotation — `— Rotowire, via Sleeper` — is
+     * asserted on the line above and did not move.
+     */
+    await expect(page.getByTestId('player-page-snapshot')).toContainText(/20\d\d outlook/i);
+    await expect(page.getByTestId('player-page-snapshot')).not.toContainText(/Season Outlook/i);
 
     await expectNotAConsole(page);
 
@@ -453,23 +462,67 @@ test.describe('the expanded player, opened from Players', () => {
     await openPlayer(page, '1002');
     await expectNotAConsole(page);
 
-    const item = page.getByTestId('player-page-snapshot').getByTestId('evidence-item').first();
-    await expect(item).toBeVisible();
-    const shown = await item.locator('.player-news-text').evaluate((el) => {
-      // The polarity mark and the word beside it for assistive technology are
-      // the card's own furniture; what is being checked is the sentence.
+    /*
+     * The sentence the card leads with, wherever it is drawn.
+     *
+     * A player whose ledger supports one gets a `Newsletter takeaway`, chosen
+     * out of the ledger rather than written, and `Latest news` then carries
+     * what the takeaway did not — which for a player with a single applied item
+     * is nothing at all. Both blocks quote and neither composes, so the check
+     * is the same either way: whatever is on screen has to be a run of words
+     * the API actually stores.
+     */
+    const snapshot = page.getByTestId('player-page-snapshot');
+    const takeaway = snapshot.getByTestId('newsletter-takeaway');
+    const item = snapshot.getByTestId('evidence-item').first();
+    /*
+     * The takeaway is one element whose sentence is followed by its
+     * attribution; a news item is a sentence and a date on two lines. Each is
+     * narrowed to the part that is meant to be the newsletter's own words
+     * before anything is compared, rather than stripped by class from the whole
+     * block — a date left in the string would fail this against the API and
+     * send the next reader looking for a bug in the card.
+     */
+    const leading = (await takeaway.count()) > 0 ? takeaway : item.locator('.player-news-text');
+    await expect(leading).toBeVisible();
+    const shown = await leading.evaluate((el) => {
+      // The polarity mark, the attribution and the word beside it for assistive
+      // technology are the card's own furniture; what is checked is the
+      // sentence they surround.
       const clone = el.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll('.player-news-mark, .sr-only').forEach((n) => n.remove());
+      clone.querySelectorAll('.player-news-mark, .sr-only, .faint').forEach((n) => n.remove());
       return (clone.textContent ?? '').replace(/\s+/g, ' ').replace(/^“|”$/g, '').trim();
     });
-    expect(shown, 'the news item rendered no sentence at all').not.toBe('');
+    expect(shown, 'the card rendered no sentence at all').not.toBe('');
 
     const file = await page.evaluate(async () => (await fetch('/api/players/1002')).json());
-    const newest = file.evidence[0];
-    const stored = [newest.userOverride?.note, newest.contextSummary, newest.excerpt]
+    const stored = file.evidence
+      .flatMap((e: { userOverride?: { note?: string }; contextSummary: string | null; excerpt: string }) => [
+        e.userOverride?.note,
+        e.contextSummary,
+        e.excerpt,
+      ])
       .filter((s: string | null | undefined) => !!s)
       .map((s: string) => s.replace(/\s+/g, ' ').trim());
-    expect(stored, `"${shown}" is in none of the stored words for this item`).toContain(shown);
+    expect(stored, `"${shown}" is in none of the stored words for this player`).toContain(shown);
+
+    /*
+     * The newsletter is not read out twice.
+     *
+     * The takeaway is chosen from this same ledger, so before this a card with
+     * one applied item printed it at the top and again four lines down under
+     * `Latest news`, word for word with a date under it. What the takeaway
+     * quotes is dropped from that list; the item itself is untouched, still
+     * counted, and still in the Evidence timeline one tap in — asserted at the
+     * end of this test.
+     */
+    if ((await takeaway.count()) > 0) {
+      const quotedText = shown;
+      const news = await snapshot.getByTestId('evidence-item').allInnerTexts();
+      for (const line of news) {
+        expect(line, 'Latest news repeated the sentence the takeaway had already lifted').not.toContain(quotedText);
+      }
+    }
 
     /*
      * The source is printed when it varies and omitted when it cannot. The demo
@@ -479,9 +532,11 @@ test.describe('the expanded player, opened from Players', () => {
     const sources: string[] = [
       ...new Set(file.evidence.map((e: { sourceName: string }) => e.sourceName as string)),
     ] as string[];
-    const line = await item.innerText();
-    if (sources.length === 1) expect(line, 'a source that never varies is a repeated word').not.toContain(sources[0]!);
-    else expect(line).toContain(sources[0]!);
+    if ((await item.count()) > 0) {
+      const line = await item.innerText();
+      if (sources.length === 1) expect(line, 'a source that never varies is a repeated word').not.toContain(sources[0]!);
+      else expect(line).toContain(sources[0]!);
+    }
 
     await page.getByTestId('player-full-profile').click();
     await expect(page.getByTestId('player-page')).toBeVisible();

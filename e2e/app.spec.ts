@@ -781,12 +781,19 @@ test.describe('draft room', () => {
     expect(shown).toBe(stored.outlook.fullText);
     expect(shown.length).toBeGreaterThan(300);
 
-    // The provider's own title is part of "everything", not part of the
-    // snapshot: a heading over two clamped lines names prose that already names
-    // itself.
-    await expect(withOutlook.getByText(/season outlook/i)).toHaveCount(0);
+    /*
+     * The heading is part of "everything", not part of the snapshot: a heading
+     * over two clamped lines names prose that already names itself.
+     *
+     * `2026 outlook` rather than the provider's `2026 Season Outlook`, which
+     * spent a third of the line on a noun the paragraph under it already is.
+     * The attribution that is a quotation — `— demo, via Sleeper` — is asserted
+     * inside the paragraph above and did not move.
+     */
+    await expect(withOutlook.getByText(/20\d\d outlook/i)).toHaveCount(0);
     await withOutlook.getByTestId('outlook-expand').click();
-    await expect(withOutlook.getByText(/season outlook/i)).toBeVisible();
+    await expect(withOutlook.getByText(/20\d\d outlook/i)).toBeVisible();
+    await expect(withOutlook.getByText(/Season Outlook/i), 'the provider title is back').toHaveCount(0);
     await withOutlook.locator('.row-button').click();
 
     const without = page.locator('[data-testid="recommendation-row"]', { hasText: 'Bo Ashworth' }).first();
@@ -1713,9 +1720,21 @@ test.describe('player intelligence', () => {
     await expect(page.getByTestId('player-page-metrics')).toContainText('7d');
     await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
     await expect(page.getByTestId('player-page-windows')).toHaveCount(0);
-    // The ledger is on the same surface, newest first and counted honestly.
-    await expect(page.getByTestId('evidence-heading')).toBeVisible();
-    await expect(page.getByTestId('evidence-item').first()).toBeVisible();
+    /*
+     * The ledger is on the same surface, said once.
+     *
+     * Which block carries it depends on the player. A takeaway is lifted out of
+     * the ledger when one of his applied items supports a sentence, and `Latest
+     * news` then shows what the takeaway did not — so a player with a single
+     * item, which is what the demo seed gives 1001, has the takeaway and no
+     * list under it. Asserted as "the news is here, in one of its two places"
+     * rather than as one of them, because pinning the wrong one is how a card
+     * ends up printing the same sentence twice to keep a test happy.
+     */
+    const snapshot = page.getByTestId('player-page-snapshot');
+    const carried = (await snapshot.getByTestId('newsletter-takeaway').count())
+      + (await snapshot.getByTestId('evidence-heading').count());
+    expect(carried, 'the card carried none of what the newsletter said about him').toBeGreaterThan(0);
   });
 
   /**

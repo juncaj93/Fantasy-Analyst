@@ -558,7 +558,27 @@ export function Sheet({
           </button>
         </div>
         <div className="sheet-body" ref={drag.bodyRef}>
-          {children}
+          {/*
+            One element around the children, whose only job is to have a
+            height.
+
+            `useSheetDrag` decides whether the body may be touch-scrolled from
+            "is the content taller than the box", and it has to keep answering
+            as the card fills in — a player's card opens before either of its
+            two requests has come back. A `ResizeObserver` on the body alone
+            cannot do that: the sheet is capped at `88dvh`, so once it reaches
+            the cap the body's box stops changing while the content is still
+            arriving, and the observer goes quiet with the answer stuck at
+            "nothing to scroll" — which puts `touch-action: none` on a card
+            holding a screen and a half of content and gives the reader no way
+            to open it again. This element grows when the content does, so the
+            question is answered from the thing it is actually about.
+
+            It is a bare block with no styling of its own, so the body's
+            padding, the children's margins and their collapsing behaviour are
+            exactly what they were.
+          */}
+          <div className="sheet-content">{children}</div>
         </div>
       </div>
     </>,

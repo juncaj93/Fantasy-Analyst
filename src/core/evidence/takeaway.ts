@@ -123,13 +123,64 @@ const GENERIC_PATTERNS: RegExp[] = [
   /\b(?:impressive|solid|nice|good|great|strong)\s+(?:camp|showing|performance|game)\b/i,
 ];
 
+/**
+ * `Puka Nacua: +13` — a tally row that arrived with no drivers attached.
+ *
+ * The backfill importer writes this exact stand-in, and only when the tally
+ * document listed no reason: `excerpt: row.drivers || \`${name}: ${signed
+ * score}\`` in `newsletter/tally.ts`. (The ChatGPT importer cannot produce one:
+ * a row with no reason is rejected rather than filled in.) The sign is always
+ * written, which is what makes this shape safe to test for — a real sentence
+ * that happens to contain a colon does not end in a bare signed number, and one
+ * that ends in a number ("Played 88% of snaps in week 1.") has no colon in
+ * front of it.
+ *
+ * It is excluded because it is the one thing on the card that is *already* on
+ * the card: the reader can see `+13` beside his name. A headline restating it
+ * costs a line and buys a shrug, which is the whole of what the old score floor
+ * was reaching for.
+ */
+const TALLY_STAND_IN = /^[^:]{1,60}:\s*[+-]\d{1,3}$/;
+
+/**
+ * Does this sentence say anything the tally has not already said?
+ *
+ * The gate that decides whether a card gets a takeaway at all, and it is a
+ * question about the *sentence* — deliberately, because the thing it replaced
+ * was a question about the sentence's *age*.
+ *
+ * A numeric floor on the ranking score looked like a quality bar and was not
+ * one: the score is multiplied by a recency decay before it is compared, so the
+ * same unchanged evidence cleared the bar in August and failed it in September.
+ * Puka Nacua's row — "R1–R3 breakout/coverage dominance. R4: #1 in FPG
+ * excluding injury weeks (24.6)…" — scores 5.0 on its merits against a floor of
+ * 3, and disappeared from his card a fortnight after it was imported while
+ * still being the entire reason his tally read +13. Two players with the same
+ * kind of evidence showed different cards because their issues were imported on
+ * different days, which is exactly the inconsistency this replaces.
+ *
+ * So recency and confidence decide which sentence *leads*. They no longer
+ * decide whether there is one. Three things disqualify a sentence, and all
+ * three are properties of the words themselves:
+ *
+ *   - ingestion bookkeeping, refused further up in {@link sentenceOf} by
+ *     provenance rather than by matching the prose;
+ *   - {@link TALLY_STAND_IN}, the name and number the card already prints;
+ *   - praise with nothing checkable behind it — but only when the sentence
+ *     offers no specific fact at all, so "impressive camp: 91% of the snaps"
+ *     is kept for the half of it that is a fact.
+ */
+export function saysMoreThanTheTally(text: string): boolean {
+  if (TALLY_STAND_IN.test(text)) return false;
+  if (SPECIFICITY_PATTERNS.some(({ pattern }) => pattern.test(text))) return true;
+  return !GENERIC_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export interface TakeawayOptions {
   /** The instant "recent" is measured against. Injected, so this stays pure. */
   now: Date;
   /** How many runners-up to keep for the provenance view. */
   alternatives?: number;
-  /** Minimum score before anything is shown at all. */
-  minScore?: number;
   /**
    * Whose card this is.
    *
@@ -144,25 +195,18 @@ export interface TakeawayOptions {
 }
 
 /**
- * The bar below which no sentence is worth the top of a card.
- *
- * A takeaway that says less than the tally already said is worse than no
- * takeaway: it costs a line and buys a shrug.
- */
-export const MIN_TAKEAWAY_SCORE = 3;
-
-/**
  * Choose the sentence.
  *
  * The order of operations is the brief's, and each step throws work away rather
  * than blending it: gather, deduplicate, weight by recency and category and
- * specificity, take the best, and return null if the best is not good enough.
- * Nothing is ever averaged into a compound claim, because an average of two
- * sentences is a third sentence nobody wrote.
+ * specificity, and take the best. Nothing is ever averaged into a compound
+ * claim, because an average of two sentences is a third sentence nobody wrote.
+ *
+ * The score decides the *order* and nothing else. Whether a card has a takeaway
+ * at all is decided by {@link saysMoreThanTheTally}, one item at a time, and
+ * the answer does not change as the calendar moves.
  */
 export function selectTakeaway(items: EvidenceItem[], opts: TakeawayOptions): NewsletterTakeaway | null {
-  const minScore = opts.minScore ?? MIN_TAKEAWAY_SCORE;
-
   const usable = items.filter((item) => {
     if (!QUOTABLE.has(item.reviewStatus)) return false;
     const effective = effectiveEvidence(item);
@@ -173,7 +217,8 @@ export function selectTakeaway(items: EvidenceItem[], opts: TakeawayOptions): Ne
      * timeline; it is not the reason the number is what it is.
      */
     if (effective.polarity === 'neutral' || effective.polarity === 'mixed') return false;
-    return sentenceOf(item) != null;
+    const sentence = sentenceOf(item);
+    return sentence != null && saysMoreThanTheTally(sentence);
   });
 
   if (usable.length === 0) return null;
@@ -231,7 +276,7 @@ export function selectTakeaway(items: EvidenceItem[], opts: TakeawayOptions): Ne
     .sort((a, b) => b.score - a.score || b.sourceDate.localeCompare(a.sourceDate) || a.itemId.localeCompare(b.itemId));
 
   const best = candidates[0];
-  if (!best || best.score < minScore) return null;
+  if (!best) return null;
 
   return {
     text: best.text,
@@ -314,6 +359,13 @@ function scoreCandidate(text: string, item: EvidenceItem, corroboration: number,
    * practice report. Halving every three weeks lets a genuinely important old
    * fact keep beating a trivial new one, and stops it beating an equally
    * important new one.
+   *
+   * It orders and it does not gate. That distinction is new and it is the whole
+   * of the defect this module was reopened for: the decayed number used to be
+   * compared against a floor, so an unchanged row that was the entire reason a
+   * tally read `+13` simply left the card a fortnight after it was imported.
+   * Whether there is a takeaway is {@link saysMoreThanTheTally}'s question, and
+   * it has no clock in it.
    */
   const ageDays = Math.max(0, (now.getTime() - Date.parse(item.sourceDate)) / 86_400_000);
   if (Number.isFinite(ageDays)) score *= 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS);

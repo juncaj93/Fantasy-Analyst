@@ -552,17 +552,32 @@ test.describe('it does not get in the way', () => {
  * rests at four short blocks and one control.
  *
  * "Much shorter" is exactly the kind of claim that decays a line at a time, so
- * it is asserted as a ratio against the board's own collapsed rows rather than
- * as a pixel count that would need editing every time a font changes. The
- * budget is roughly two to two and a half rows; the ceiling here is three,
- * which leaves room for a long tier-cliff line without leaving room for the
- * article coming back.
+ * it is measured rather than described — and it is measured two ways, because
+ * one of them stopped meaning what it was written to mean.
+ *
+ * The original was a ratio against the board's own collapsed rows, with a
+ * ceiling of three. That was the right instrument while the card's content was
+ * roughly proportional to the row's: both grew with how much the board knew
+ * about a player. The newsletter insight broke that. A player with a busy
+ * ledger and *no* market line has the shortest collapsed row on the board and
+ * the most to say underneath it — Silas Mbeki's row is 59px and his card is
+ * 176px, which is a ratio of four and a perfectly reasonable card.
+ *
+ * So the rule the rationale actually states — *opening a player must not cost
+ * you the board you opened him from* — is asserted directly, in the units it is
+ * about: the disclosed part of the card, against the height of the phone. The
+ * ratio stays as a second guard against the article coming back, at a ceiling
+ * set from what the board actually draws rather than from what it used to.
+ *
+ * Measured at 390×844 on the demo board, worst case of each: the card is 21% of
+ * the viewport (Mbeki, 176px) and 4.0 collapsed rows (Mbeki again). The article
+ * this test was written to catch was eight to nine rows and most of the screen.
  *
  * Nothing was deleted to hit it. The second test is the other half of the
  * claim: everything the card stopped resting on is one tap away.
  */
 test.describe('the expanded card is a preview, not an article', () => {
-  test('rests at about two rows, on every player the board is drawing', async ({ page }) => {
+  test('leaves the board a board, on every player it is drawing', async ({ page }) => {
     /*
      * With a market reading on every card, because that is the shape the
      * ceiling has to hold for.
@@ -580,7 +595,9 @@ test.describe('the expanded card is a preview, not an article', () => {
     expect(collapsed, 'a collapsed row should be a row').toBeGreaterThan(40);
 
     // Several players, because they differ in what they have to say: a cliff
-    // line, an outlook or none, a market or none.
+    // line, an outlook or none, a market or none, an insight or a news list.
+    // Index 3 is the board's worst case for this — the shortest collapsed row
+    // with the busiest ledger under it.
     for (const i of [0, 1, 2, 3, 4]) {
       const row = rows.nth(i);
       await row.scrollIntoViewIfNeeded();
@@ -592,19 +609,38 @@ test.describe('the expanded card is a preview, not an article', () => {
       const expanded = (await row.boundingBox())!.height;
       const ratio = expanded / collapsed;
       const name = await row.locator('.player-name').first().innerText();
-      expect(ratio, `${name} expands to ${ratio.toFixed(1)} rows (${Math.round(expanded)}px)`).toBeLessThan(3);
+
+      /*
+       * The rule, in the units it is about: how much of the phone the card
+       * takes, so the board it covers is still a board underneath it.
+       */
+      const viewport = page.viewportSize()!.height;
+      const card = expanded - collapsed;
+      const share = card / viewport;
+      expect(
+        share,
+        `${name}'s card takes ${Math.round(share * 100)}% of the screen (${Math.round(card)}px of ${viewport})`,
+      ).toBeLessThan(0.4);
+
+      // And the second guard, against the article coming back a line at a time.
+      expect(ratio, `${name} expands to ${ratio.toFixed(1)} rows (${Math.round(expanded)}px)`).toBeLessThan(4.5);
       // …and it did open. A card that renders nothing would pass a ceiling.
       expect(ratio, `${name} did not actually open`).toBeGreaterThan(1.2);
 
       /*
-       * `Market - 247 Pts · 2025 · 17 GP · WR2 half-PPR` — one band, one line.
+       * `2025 · 17 GP · WR2 half-PPR` — one band, one line, last season only.
        *
-       * The wording is asserted whole rather than by fragment, because every
-       * one of the rejected spellings would satisfy a looser check: `Preseason
-       * 247 PTS`, `MKT PTS 247`, the figure with `StartWho · Aug 22` after it.
-       * And the band is asserted to be one line high, since the point of
-       * folding the market reading in was that the card stopped spending a row
-       * on it — a band that wraps has given the row straight back.
+       * The preseason market reading used to lead this band, and it left for
+       * the reason it arrived: the compact row above prints `PTS` from the same
+       * snapshot, so the band was the card answering a question it had already
+       * answered. What it bought is the space the newsletter insight now
+       * occupies — the one thing on the card the row underneath cannot say.
+       *
+       * The forbidden list is asserted whole rather than by fragment, because
+       * every one of the rejected spellings would satisfy a looser check:
+       * `Market - 247 Pts`, `Preseason 247 PTS`, `MKT PTS 247`, the figure with
+       * `StartWho · Aug 22` after it. And the band is still asserted to be one
+       * line high: a band that wraps has given the row straight back.
        */
       const band = row.getByTestId('last-season');
       const seen = await band.evaluate((el) => {
@@ -619,19 +655,23 @@ test.describe('the expanded card is a preview, not an article', () => {
           lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)),
         };
       });
-      expect(seen.text, `${name}'s band does not open with the market reading`).toMatch(/^Market - \d+ Pts(?: ·|$)/);
+      expect(seen.text, `${name}'s band does not open with the season it is about`).toMatch(/^\d{4}(?: ·|$)/);
       expect(seen.text, `${name} lost his games played`).toMatch(/\d+ GP/);
       expect(seen.text, `${name} lost his half-PPR finish`).toMatch(/(QB|RB|WR|TE|K|DEF)\d+ half-PPR/);
-      for (const forbidden of ['StartWho', 'Half PPR,', '6pt pass TD', 'Preseason', 'PTS', 'MKT']) {
+      for (const forbidden of ['Market - ', 'StartWho', 'Half PPR,', '6pt pass TD', 'Preseason', 'PTS', 'MKT']) {
         expect(seen.text, `${name}'s card prints "${forbidden}"`).not.toContain(forbidden);
       }
       expect(seen.lines, `${name}'s band wrapped to ${seen.lines} lines`).toBe(1);
+      await expect(row.getByTestId('preseason-projection'), 'the band still repeats the row').toHaveCount(0);
 
-      // Removed from the card, not from the app: the whole sentence is still
-      // on the metric, in the accessible text and in the title.
-      const provenance = row.getByTestId('preseason-projection');
-      expect(await provenance.getAttribute('title')).toContain('StartWho · Aug 22');
-      expect((await provenance.locator('.sr-only').innerText()).toLowerCase()).toContain('preseason');
+      // Removed from the expanded card, not from the screen: the figure is on
+      // the row itself, and says what it is to anything not looking at it.
+      const pts = row.getByTestId('pts-metric');
+      if ((await pts.count()) > 0) {
+        expect((await pts.innerText()).trim(), `${name}'s row lost its PTS`).toMatch(/^PTS/);
+        const spoken = (await pts.locator('strong').getAttribute('aria-label')) ?? '';
+        expect(spoken.toLowerCase(), 'the row does not say the figure is preseason').toContain('preseason');
+      }
 
       await row.locator('.row-button').click();
       await page.waitForTimeout(300);
@@ -645,9 +685,18 @@ test.describe('the expanded card is a preview, not an article', () => {
     await row.scrollIntoViewIfNeeded();
     await row.click();
 
-    // At rest: the working behind the row's deltas, and nothing that explains
-    // where those markets came from.
-    await expect(row.getByTestId('market-raw')).toBeVisible();
+    /*
+     * At rest: what the row cannot say, and nothing that explains where the
+     * markets came from.
+     *
+     * The resting card used to open with `market-raw` — the two raw markets and
+     * the pick they were measured against — which is the working behind deltas
+     * the row already prints and already carries raw in its own title. Its
+     * place went to the outlook and, where the ledger supports one, the
+     * newsletter insight.
+     */
+    await expect(row.getByTestId('market-raw'), 'the card is repeating the row again').toHaveCount(0);
+    await expect(row.getByTestId('outlook')).toBeVisible();
     await expect(row.getByTestId('market-detail')).toHaveCount(0);
     await expect(row.getByTestId('injury-current')).toHaveCount(0);
 
@@ -662,6 +711,129 @@ test.describe('the expanded card is a preview, not an article', () => {
     // And it closes again, back to the preview.
     await row.getByTestId('outlook-expand').click();
     await page.waitForTimeout(400);
+    await expect(row.getByTestId('market-detail')).toHaveCount(0);
+  });
+
+  /**
+   * The card reads in the order a reader wants it, and says each thing once.
+   *
+   * `Insight` is the whole reason this card was rearranged: it is the one thing
+   * a collapsed row cannot carry — the row prints the tally as a signed number,
+   * and this is the sentence saying why it reads that way — and it used to be
+   * behind the card's one control, three blocks down. What paid for it was two
+   * lines that were repeating the row above: the working behind the row's own
+   * market deltas, and a preseason figure the row already prints as `PTS`.
+   *
+   * Which of `Insight` and `Latest news` a given player carries depends on his
+   * ledger, and the pair is the point: what the insight quotes is not repeated
+   * underneath it. So both branches are walked here rather than one asserted,
+   * and the ordering is checked in the DOM rather than by eye.
+   */
+  test('leads with the insight, then the news, then the outlook, then last season', async ({ page }) => {
+    await openDraft(page);
+
+    const rows = page.getByTestId('recommendation-row');
+    const seen = { insight: 0, news: 0 };
+
+    for (let i = 0; i < 6; i++) {
+      const row = rows.nth(i);
+      if ((await row.count()) === 0) break;
+      await row.scrollIntoViewIfNeeded();
+      await row.click();
+      await expect(row.getByTestId('player-detail')).toBeVisible();
+      // Both requests behind the card have to have landed before its order
+      // means anything: an insight that has not arrived is not an insight the
+      // card declined to draw.
+      await expect(row.getByTestId('outlook').or(row.getByTestId('outlook-none'))).toBeVisible();
+
+      const card = row.getByTestId('player-detail');
+      const shape = await card.evaluate((el) => {
+        const at = (selector: string) => {
+          const found = el.querySelector(selector);
+          return found ? [...el.querySelectorAll('*')].indexOf(found) : -1;
+        };
+        return {
+          insight: at('[data-testid="newsletter-takeaway"]'),
+          news: at('[data-testid="evidence-heading"]'),
+          outlook: at('[data-testid="outlook"], [data-testid="outlook-none"]'),
+          foot: at('.detail-foot'),
+          // What the card actually paints, so a repeated source name or a
+          // resurrected market line fails here rather than in a screenshot.
+          painted: (() => {
+            const clone = el.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('.sr-only').forEach((n) => n.remove());
+            return (clone.textContent ?? '').replace(/\s+/g, ' ');
+          })(),
+        };
+      });
+
+      if (shape.insight >= 0) seen.insight += 1;
+      if (shape.news >= 0) seen.news += 1;
+
+      // Whatever the card carries, it carries in this order.
+      const order = [shape.insight, shape.news, shape.outlook, shape.foot].filter((n) => n >= 0);
+      expect([...order].sort((a, b) => a - b), 'the card is out of order').toEqual(order);
+      expect(shape.outlook, 'the card lost its outlook').toBeGreaterThanOrEqual(0);
+      expect(shape.foot, 'the card lost last season').toBeGreaterThanOrEqual(0);
+
+      /*
+       * An insight and a news list on the same card must not be the same
+       * sentence twice — that pairing is what `LatestNews` filters for — and
+       * neither block prints the newsletter's name, which never varies here.
+       */
+      expect(shape.painted, 'the card printed the market working again').not.toContain('Sleeper ADP');
+      expect(shape.painted, 'the preseason figure is back on the card').not.toContain('Market - ');
+      if (shape.insight >= 0) {
+        const sentence = await card.getByTestId('newsletter-takeaway').evaluate((el) => {
+          const clone = el.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('.sr-only').forEach((n) => n.remove());
+          return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+        });
+        expect(sentence, 'the source name is printed beside the insight').not.toContain('Newsletter');
+        for (const item of await card.getByTestId('evidence-item').allInnerTexts()) {
+          expect(item, 'the news list repeated the insight above it').not.toContain(sentence);
+        }
+      }
+
+      await row.locator('.row-button').click();
+      await page.waitForTimeout(200);
+    }
+
+    expect(
+      seen.insight,
+      'no card on the board carried an insight, so this test proved nothing about the branch that matters',
+    ).toBeGreaterThan(0);
+  });
+
+  /**
+   * The named way in, and what it promises.
+   *
+   * The blurb has expanded itself since the card was cut down, which is the
+   * right affordance inside a paragraph that visibly runs out of room and a
+   * poor one as the *only* way in — nothing on the card said it was there. The
+   * label is drawn only where there is something behind it: a control that
+   * opens nothing is one a reader stops trusting.
+   */
+  test('offers a named way in, which is the same control the blurb is', async ({ page }) => {
+    await openDraft(page);
+    const row = page.locator('[data-testid="recommendation-row"]', { hasText: 'Julian Reyes' }).first();
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+
+    const toggle = row.getByTestId('draft-outlook-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveText(/full outlook/i);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await toggle.click();
+    await page.waitForTimeout(400);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(row.getByTestId('market-detail'), 'the named control opened nothing').toBeVisible();
+
+    // The same state the blurb governs, so the card cannot disagree with itself.
+    await row.getByTestId('outlook-expand').click();
+    await page.waitForTimeout(400);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(row.getByTestId('market-detail')).toHaveCount(0);
   });
 });

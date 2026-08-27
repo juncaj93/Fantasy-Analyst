@@ -25,7 +25,6 @@ import {
   completesBack,
   dimOpacity,
   engageDecision,
-  sheetCandidate,
   sheetDecision,
   sheetDismisses,
   startsAtEdge,
@@ -122,14 +121,14 @@ describe('when a sheet is dismissed', () => {
 });
 
 /**
- * The rules that decide whether a movement on a sheet is a dismissal.
+ * The rule that decides whether a movement on a sheet is a dismissal.
  *
- * Two questions rather than one, and the split is the whole design. The browser
- * wants to know who owns a touch on the *first* move, long before there is
- * enough of it to be sure of anything — so {@link sheetCandidate} answers that
- * one weakly and reversibly, and {@link sheetDecision} takes the real decision a
- * few pixels later. Getting these the wrong way round is what made a sheet
- * dismissable only from its grip.
+ * One question now, not two. There used to be a weaker one asked on the very
+ * first pixel, because a non-passive `touchmove` listener had to tell WebKit
+ * immediately whether to scroll — and a pixel of a thumb landing is not enough
+ * to tell an upward flick from a downward pull, so the first swipe of a scroll
+ * was regularly refused. The listener is gone and the question with it: content
+ * that can scroll keeps its gestures, and this decides the rest.
  */
 describe('what a movement on a sheet is', () => {
   it('waits while there is not enough of it to tell', () => {
@@ -152,36 +151,6 @@ describe('what a movement on a sheet is', () => {
   it('never reads an upward drag as a dismissal, however large', () => {
     expect(sheetDecision(0, -300)).toBe('release');
     expect(sheetDecision(2, -40)).toBe('release');
-  });
-});
-
-describe('whether a movement could still become a dismissal', () => {
-  it('holds the gesture open on the very first downward pixel', () => {
-    // Well under the engage distance, which is the entire point: the browser
-    // asks before there is enough movement for `sheetDecision` to answer.
-    expect(sheetCandidate(0, 1)).toBe(true);
-    expect(sheetCandidate(1, 2)).toBe(true);
-  });
-
-  it('hands back anything upward or already more sideways than down', () => {
-    expect(sheetCandidate(0, 0)).toBe(false);
-    expect(sheetCandidate(0, -1)).toBe(false);
-    expect(sheetCandidate(6, 3)).toBe(false);
-    expect(sheetCandidate(-6, 3)).toBe(false);
-  });
-
-  it('is weaker than the decision it precedes, and deliberately so', () => {
-    // Everything the decision would call a drag is a candidate first. The
-    // reverse does not hold, and must not: a candidate is reversible.
-    const drags = [
-      [0, 20],
-      [4, 40],
-      [-4, 40],
-    ] as const;
-    for (const [dx, dy] of drags) {
-      expect(sheetDecision(dx, dy)).toBe('drag');
-      expect(sheetCandidate(dx, dy)).toBe(true);
-    }
   });
 });
 

@@ -311,7 +311,23 @@ test.describe('the player dossier', () => {
     await expect(snapshot).toBeVisible();
     // The windows moved up into the band above the snapshot; the news is here.
     await expect(page.getByTestId('player-page-metrics')).toContainText('30d');
-    await expect(snapshot.getByTestId('evidence-heading')).toBeVisible();
+    /*
+     * The newsletter's news, said once.
+     *
+     * Which of the two blocks carries it depends on the player: a takeaway is
+     * lifted out of the ledger when one of his items supports a sentence, and
+     * `Latest news` then shows what is left rather than repeating it — so a
+     * player with a single applied item has a takeaway and no news list, and
+     * one with several has both. What must always be true is that a player the
+     * newsletter has written about says so somewhere on his card.
+     */
+    const takeaway = snapshot.getByTestId('newsletter-takeaway');
+    const news = snapshot.getByTestId('evidence-heading');
+    await expect
+      .poll(async () => (await takeaway.count()) + (await news.count()), {
+        message: 'a player with newsletter evidence carried none of it on his card',
+      })
+      .toBeGreaterThan(0);
 
     // It dismisses without touching the list, which is still exactly there.
     await page.keyboard.press('Escape');

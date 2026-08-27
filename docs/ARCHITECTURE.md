@@ -848,23 +848,49 @@ is `unknown` and the flag stays silent.
 height and weight out at the boundary rather than trusting the browser to hide
 them: a number shown is a number the reader will weigh.
 
-### Newsletter takeaway (`core/evidence/takeaway.ts`)
+### Newsletter takeaway — `Insight` on screen (`core/evidence/takeaway.ts`)
 
 One sentence explaining what the signed tally already said. It is **selected,
-never written**: the sentence comes from evidence already in the ledger, ranked
-by category relevance, specificity, corroboration and a recency decay, and the
-answer is `null` whenever nothing clears the bar. A long excerpt is declined
-rather than trimmed, because cutting a sentence to fit is the cheapest way to
-change what it says.
+never written**: the sentence comes from evidence already in the ledger, and the
+answer is `null` whenever the ledger holds nothing worth a headline. A long
+excerpt is declined rather than trimmed, because cutting a sentence to fit is
+the cheapest way to change what it says.
+
+Two questions, kept apart, and the separation is the module's one hard-won rule.
+*Whether* a card gets a takeaway is a property of the words — is this ingestion
+bookkeeping, is it the name and score the card is already printing, is it praise
+with nothing checkable behind it. *Which* sentence leads is the ranking:
+category relevance, specificity, corroboration and a recency decay.
+
+They used to be one question, and the recency decay therefore decided both. The
+same unchanged tally row qualified in August and failed a fortnight later, so
+two players with the same kind of evidence showed different cards because their
+issues had been imported on different days — which reads as the app being
+arbitrary, and was. `tests/takeaway.test.ts` now asks the production rows the
+same question at four points on the calendar and expects one answer.
 
 It is explanation only. The evidence under it has already been counted once by
 the tally, so the returned object carries `scoreDelta: 0` and no consumer adds
 it to anything. `tests/takeaway.test.ts` pins the headline appearing while the
 aggregate signal is byte-identical before and after.
 
+It is headed `Insight` on every card. The label used to name its provenance —
+`Newsletter takeaway` — and so did the line under it, which ran `— Demo FF
+Newsletter` after the sentence on every player. This app has one newsletter, so
+that was the same four words under everybody, spending the end of the one line
+the section exists for; `LatestNews` beneath it has withheld a source that never
+varies for the same reason since it was written. The name is kept where it costs
+nothing — the element's title, its accessible text, and the evidence timeline,
+where each row carries its own source.
+
 Every screen renders it through `src/web/components/playerDetail.tsx`, which is
 also where the season outlook, the last-season line and the injury sections now
-live. Draft and Players had grown byte-identical copies of all three; two copies
+live. What the takeaway quotes is dropped from `Latest news` on the same card
+rather than marked there: the takeaway is chosen from that same ledger, so a
+player with one applied item was reading it twice, four lines apart. Nothing is
+deleted — the item is still counted, and still on the evidence timeline one tap
+in, where it is marked `quoted above` because that surface exists to show the
+whole ledger. Draft and Players had grown byte-identical copies of all three; two copies
 is how six start.
 
 ## Live matchup (`core/matchup/`)
