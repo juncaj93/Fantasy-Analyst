@@ -21,6 +21,10 @@ Read sections 1–4 to be able to hold a conversation about the project. Read 5�
 to be able to make decisions about it. Sections 10–14 are what you will actually
 manage day to day.
 
+**If you read only one section, read 13.** It carries the agreed lane plan, the
+capacity window, the parallelisation rules, and the one design that is about to
+be lost if nobody writes it down.
+
 If you have the accompanying zip, the deep references are in `docs/`. Section 17
 maps every one of them so you can pull the right file rather than all of them.
 
@@ -59,10 +63,20 @@ Every recommendation is a sum of separate, inspectable components. There is no
 opaque score anywhere, and no model output that cannot be broken back down into
 its parts on the phone that showed it.
 
-**State: feature-complete for the 2026 season, deployed, green, and waiting on
-the season itself.** Roughly twenty milestones are done. What remains is
-overwhelmingly *validation that only a live NFL Sunday can provide*, plus a
-short tail of polish. There is no half-finished work and no queued spec.
+**State: deployed, green, and nearly feature-complete for the 2026 season.**
+Roughly twenty milestones are done. There is no half-finished work.
+
+Two things remain, on different clocks:
+
+- **One substantial feature is still to build** — Mock Draft + Draft Tools
+  (Lane 2, section 13a). It is designed but not written down anywhere durable,
+  and it is the last thing the owner wants added before feature work stops.
+- **Everything else that remains is validation only a live NFL Sunday can
+  provide.** Five complete systems have never once run against reality.
+
+**Two dates govern the plan**: the owner's elevated Claude limits expire
+**2026-08-28**, which is the build window; and his real draft date, which is the
+deadline for Lane 2 and **is not recorded anywhere — ask him.**
 
 ---
 
@@ -181,16 +195,17 @@ first meet real data within the next few weeks:
    and there are zero. That is a season of Sundays away, which is exactly why the
    ledger writing had to start now.
 
-**So the honest state of the project is: the build is done and the proving has
-not started.** Managing this well means resisting the urge to add features
-before the existing ones have met a real Sunday, and instead making sure each of
-those five is *watched* the first time it fires.
+**So the honest state of the project is: almost everything is built and none of
+it has been proven.** Managing this well means making sure each of those five is
+*watched* the first time it fires — and, separately, spending the remaining
+build capacity on Lane 2 rather than on new capability nobody asked for. Those
+two are not in tension; see section 13.
 
 ### Recent shipped work (last ~10 merges, newest first)
 
 | PR | What |
 |---|---|
-| #196 | A newsletter creates work waiting for you, not fantasy opinions |
+| #196 | A newsletter creates work waiting for you, not fantasy opinions — **this is Lane 1, complete** |
 | #195 | Data Health: say whether what the app knew was *healthy*, not just what it knew |
 | #194 | Call the support row the same thing in all three places |
 | #193 | Capture the five in-season decisions, and replay them exactly |
@@ -717,12 +732,110 @@ codebase is trustworthy. Hold work to it.
 
 ## 13. The plan
 
-Ordered as the repository itself orders it, with the seasonal reality applied.
+There are **two plans running at once, on different clocks and against different
+resources**, and conflating them is the easiest mistake to make here:
 
-### Tier 1 — watch the five unproven systems meet reality
+- **The build plan** is a queue of three lanes, rate-limited by *Claude capacity*
+  and by the owner's real draft date. It is section 13a.
+- **The watch plan** is five systems meeting reality for the first time,
+  rate-limited by *the NFL calendar*. It is section 13b.
 
-These are not coding tasks. They are scheduled observations, and each has a
-defined thing to look at. **This is the whole of the next month's real work.**
+They do not compete. Building does not consume a Sunday and watching does not
+consume a Claude session. Sequence them independently.
+
+---
+
+### 13a. The build plan — three lanes, in order
+
+This is the owner's and the previous PM's agreed sequencing. It supersedes any
+ordering implied by the repository's own `docs/STATUS.md` "Recommended next
+work", which predates it.
+
+#### Lane 1 — Newsletter / ChatGPT tally correction · **SHIPPED**
+
+**Status: landed as #196 on 2026-08-27, in `main` at `51d068c`.** The previous
+PM chat had this queued as "next" and its context may predate the merge — **do
+not re-plan it.** Verify and move on.
+
+What it was scoped to do, and what actually landed, item for item:
+
+| Scoped | Landed |
+|---|---|
+| Kill the old automatic signal-generation behaviour | ✅ Arrival now writes nothing — not an evidence row, not a review item, not a signal. The classifier still runs and its verdicts are discarded. |
+| Establish one-newsletter → Copy for ChatGPT → Paste AI tally → review → approve | ✅ The whole loop, with `tally_state` as durable state so it survives a reload, another phone or a Worker restart. |
+| Prevent double counting | ✅ Three ways: `newsletter_tally_applications` claims one application per (newsletter, exact tally) and *the insert is the decision*; evidence rows keyed as before; an approved tally retires the classifier's whole reading of that issue, for every player, not only the scored ones. |
+| Setup notification dot + transient buttons | ✅ Both controls sit under the Newsletter row only while an issue is unscored and vanish once it is scored. The Setup dot composes newsletter work with the two review queues and says which is which in its accessible name. |
+| Clean up player-card evidence showing bookkeeping | ✅ "Carried over from a running tally covering several earlier issues (net +11)" no longer wins the sentence ladder — skipped by *provenance* rather than by matching the text, in both places that walk the ladder. The ledger is unchanged and the timeline still prints it, which is where an explanation of how data arrived belongs. |
+
+Also in it, and worth knowing because it touched production data: **migration
+`0034`** stops classifier rows counting for newsletters still awaiting a tally.
+It is narrow on purpose — classifier rows only, never `ai-tally-import` or
+`tally-backfill` (the hand-imported lifetime `+11` is the owner's own work and is
+never touched), never a row with an override, never one with any history in
+`user_reviews`. Its two `UPDATE`s are idempotent, tested against a database built
+migration by migration into the shape the deployed one is in.
+
+Cost: app JavaScript **−79 B** gzipped. Retiring the reprocess panel paid for the
+two Setup controls.
+
+**One consequence to carry forward:** `NewsletterService.reprocess()` and its
+preview are *gone*, along with the ops script and workflow built on them. That is
+what makes "one scoring path" true. The decoding repair they also carried moved
+to the way out — `chatSource` runs `recoverBody` every time an issue is copied,
+so a body stored as undecoded MIME still hands you clean text.
+
+#### Lane 2 — Mock Draft + Draft Tools · **NEXT, and the largest remaining piece**
+
+**Nothing of this exists in the repository yet.** No file, no route, no test, no
+`docs/` entry. Section 13c is about that.
+
+The shape, as designed:
+
+- The existing **`▦` grid control** beside the league name on the Draft header
+  stops being a single-purpose button and becomes the home for three things:
+  **Draft Board**, **Draft Order**, and **Mock Draft**.
+- **Mock Draft is completely isolated from the real league.** Nothing it does may
+  reach Sleeper, the real draft state, or any store the real board reads.
+- **It disappears forever for that draft, automatically, the moment Sleeper
+  contains the first real pick.** Not hidden, not disabled — gone, permanently,
+  for that draft id.
+
+What already exists that this builds on — this is the part that makes the lane
+tractable rather than enormous:
+
+| Existing | Why it matters here |
+|---|---|
+| `src/core/draft/boardGrid.ts` | A **pure** transformation: draft state → rounds → stable manager columns → pick cells. It arranges what it is handed and computes nothing else. A mock draft is a different thing to hand it. |
+| `src/core/draft/boardBuilder.ts` — `buildDraftBoard` over a `DraftBoardSources` interface | The board is *handed* its facts rather than fetching them. Demo Mode already substitutes fixtures for them; support-snapshot replay already substitutes a file. A mock is a third source object, not a second engine. |
+| `src/web/components/draftBoard.tsx` — `DraftBoardOverlay` | The overlay that draws the grid, with its sticky header row and round column. It fetches nothing and makes no request of its own. |
+| Demo Mode's write-refusing middleware | The isolation pattern is already built, tested, and refused twice — in the browser and again at the server. |
+| `core/draft/nextpick/ownership.ts` | Whose pick is whose, already correct for the snake, already imported rather than reimplemented by the board. |
+
+So the honest engineering read: **the mock-draft lane is mostly a source object,
+an isolation guarantee and a navigation change** — not a new draft engine. Any
+plan that proposes writing a second ranking path is wrong and should be pushed
+back on. The one genuinely new piece of judgement is what the *other* managers
+do on the clock in a mock, and that is a product decision worth asking about
+rather than assuming.
+
+**This lane has a hard deadline that nothing else in the project has:** a mock
+draft is a pre-draft tool, and its value goes to roughly zero the moment the
+owner's real draft starts. It is late August. **Ask him for his draft date and
+schedule backwards from it** — that single fact determines whether this lane is
+comfortable or impossible, and it is not written down anywhere in the repo.
+
+#### Lane 3 — Remaining pre-draft / final readiness
+
+After Lane 2, **stop adding features.** The owner's stated intent is to return to
+readiness work rather than continuing to add capability indefinitely. Section 12
+is the candidate list; section 13d has the small unblocked items.
+
+---
+
+### 13b. The watch plan — five unproven systems meeting reality
+
+These are not coding tasks. They are scheduled observations, each with a defined
+thing to look at, and none of them consumes engineering capacity.
 
 | # | Watch | Look at | When |
 |---|---|---|---|
@@ -734,31 +847,73 @@ defined thing to look at. **This is the whole of the next month's real work.**
 
 Item 5 also carries the repository's own judgement that **reading the coverage
 report and adding the missing phrase families is the single highest-value
-improvement to tally quality**.
+improvement to tally quality**. That one *is* engineering work, and it is the
+natural first item of Lane 3.
 
-### Tier 2 — small, well-defined, unblocked
+---
 
-6. **Close the three stale PRs** (section 12.15). Trivial, immediate.
-7. **Draft-weight tuning UI** — so the market-value vs personal-signal balance is
-   adjustable without a deploy. Called out repeatedly across sessions.
-8. **Tier visualisation on the draft board** — the tier map already computes the
-   ladder, the gaps and the ratios per position; nothing draws them.
-9. **Re-reading everything at once**, rather than one newsletter at a time. Worth
+### 13c. The risk that needs handling first: the mock-draft design is not written down
+
+The Lane 2 design was worked out in the ChatGPT conversation that is being
+replaced. **What survives into the new chat is the three-sentence summary in
+13a and nothing else.** The repository has no record of it at all.
+
+Before Lane 2 starts, that design needs to exist as a brief in
+`docs/brief/`, the way every other substantial feature here does — the nine
+existing briefs are what let an autonomous session build something correctly
+without the person who designed it in the room, and they are preserved verbatim
+for exactly this reason.
+
+Questions the brief has to answer, which the summary does not:
+
+- **What do the other managers do on the clock?** ADP with noise? The app's own
+  board? A room prior from `core/managers/`? This is the only genuinely new
+  modelling decision in the lane and it is undecided.
+- **What does "disappears forever for that draft" mean in storage?** A flag, a
+  deletion, or a state the phase resolver reads? The nearest precedent is
+  `draft_queue` keyed `(draft_id, player_id)` from migration `0029` — which
+  exists *because* a global list keyed by player alone let a finished best-ball
+  shortlist turn up in the next league's draft. Do not repeat that.
+- **Where does isolation get enforced, and is it refused twice?** Demo Mode's
+  answer is browser *and* server, and it is the standard to match.
+- **What do Draft Board / Draft Order / Mock Draft look like as three
+  destinations behind one `▦`?** The current overlay is one thing with no
+  navigation in it, and the Draft header is measured in the browser suite
+  (`nav.height < 60` at every width) — the control cannot grow a row.
+- **Does a mock produce a support snapshot?** Six decisions are capturable today;
+  a seventh is either in scope or explicitly out.
+
+**Recommended first action of the new chat:** reconstruct that design with the
+owner while it is still fresh in his head, and land it as
+`docs/brief/10_MOCK_DRAFT.md`. It is cheap now and unrecoverable later.
+
+---
+
+### 13d. Small, unblocked, and safe to hand to a parallel session
+
+None of these touch Lane 2's files, which is what makes them safe to run
+alongside it (see section 13e).
+
+1. **Close the three stale PRs** (section 12.15). Trivial, immediate, no branch.
+2. **Draft-weight tuning UI** — so the market-value vs personal-signal balance is
+   adjustable without a deploy. Called out repeatedly across sessions. *Touches
+   draft config; check for collision with Lane 2 before launching.*
+3. **Tier visualisation on the draft board** — the tier map already computes the
+   ladder, the gaps and the ratios per position; nothing draws them. *Touches the
+   Draft screen; likely collides with Lane 2. Sequence, do not parallelise.*
+4. **The `adp_snapshots` season column** (section 12.6) — a migration, the
+   importer, and `AdpRepo.latest()`. Genuinely independent of Lane 2's files.
+5. **The queue-filtered scoring defect** (section 12.7) — Integrity workstream.
+   Independent, well-specified, and a good audit-lane candidate.
+6. **Decide which specs need all four widths.** Every spec in `e2e/` runs at every
+   width by convention and many assert *content*, which does not get more true at
+   430 than at 360. Splitting width-sensitive from width-insensitive would cut
+   the gate again without adding a runner. No deadline — the next feature to add
+   browser tests can add them.
+7. **Re-reading everything at once**, rather than one newsletter at a time. Worth
    doing only once real issues have accumulated.
-10. **Decide which specs need all four widths.** Sharding bought the headroom but
-    did not answer the question: every spec in `e2e/` runs at every width by
-    convention, and many assert *content*, which does not get more true at 430
-    than at 360. Splitting width-sensitive from width-insensitive would cut the
-    gate again without adding a runner. No deadline — the next feature to add
-    browser tests can add them.
-
-### Tier 3 — real work, deliberately deferred
-
-11. **The `adp_snapshots` season column** (section 12.6) — belongs to the next
-    piece of work inside ADP ingestion.
-12. **The queue-filtered scoring defect** (section 12.7) — Integrity workstream.
-13. **A negotiation surface for the trade ladder** (section 12.11) — its own
-    design problem, and the engine is already waiting.
+8. **A negotiation surface for the trade ladder** (section 12.11) — its own design
+   problem, and the engine is already waiting. Too large for a filler lane.
 
 ### What is explicitly *not* on the plan
 
@@ -772,26 +927,113 @@ improvement to tally quality**.
 
 ---
 
+### 13e. Capacity, and running lanes in parallel
+
+**The scheduling constraint as of this writing: the owner's elevated Claude
+limits expire 2026-08-28.** The previous PM's call — which was right — was to
+front-load anything that benefits from high-effort autonomous coding, repo-wide
+analysis, large test work, or parallel lanes *while the capacity exists*, and
+leave lightweight cleanup, observation and small fixes for afterwards.
+
+Two consequences:
+
+- **Heavy work first, cheap work later.** Lane 2 is the heavy work. The watch
+  plan (13b), the stale-PR cleanup and the small items in 13d are exactly what
+  survives a downgrade, because none of them needs a long autonomous session.
+- **Do not artificially stay one-channel-at-a-time.** Running lanes serially when
+  they are genuinely independent wastes the window. Launch separate sessions.
+
+**But parallelise only where branch ownership is genuinely independent.** This
+repository has one property that makes concurrency safe and one that makes it
+dangerous:
+
+*Safe:* `core/` is pure, layered and injected, so two lanes working in different
+`core/` modules genuinely do not interact. Milestone 17 shipped eleven new
+`core/` modules and changed no screen, specifically so a parallel UI channel
+stayed mergeable.
+
+*Dangerous:* **exact-head discipline.** If head `A` is green and a further change
+makes head `B`, `A` is no longer the merge proof. Two lanes merging into `main`
+in quick succession each invalidate the other's gate. Merge one at a time, and
+re-run the gate on the actual head that will land. A green run against a head
+that no longer exists proves nothing about what would land.
+
+A workable split for the current window:
+
+| Session | Lane | Owns |
+|---|---|---|
+| Primary | Lane 2 — Mock Draft + Draft Tools | `core/draft/`, `web/screens/DraftScreen.tsx`, `web/components/draftBoard.tsx`, the `▦` navigation |
+| Audit / reliability | 13d.5 — the queue-filtered scoring defect | `core/draft/boardBuilder.ts` candidate-pool scoping — **check for collision with Lane 2 first** |
+| Independent | 13d.4 — the `adp_snapshots` season column | `migrations/`, `core/adp/`, `server/repos/adp.ts`, `seasonService.ts` |
+| Zero-cost | 13d.1 — close the three stale PRs | No branch at all |
+
+Before launching any two together, ask the one question that settles it: **do
+these two lanes write to the same files?** If yes, sequence them. The cost of
+being wrong is a merge conflict in a repository where the gate takes twelve to
+fifteen minutes per attempt.
+
+---
+
+### 13f. How to write a work brief for this repository
+
+The infrastructure below was built specifically so that remaining work can move
+faster *without getting sloppier*. A brief that ignores it makes a session
+slower, not safer. Every MD you hand to an engineering session should say which
+of these it expects to be used.
+
+- **Targeted tests first, not a giant serial sweep.** Name the tests that must
+  fail before the change and pass after it. The suite is 250 unit/integration
+  files and 44 browser specs; re-running all of it to learn one thing is waste.
+- **Use the sharding that already exists.** The browser gate is 4 widths × 3
+  shards = 12 parallel jobs, six to ten minutes each, eighteen-minute timeout.
+  Playwright splits by whole spec file, so a new spec file needs nothing added
+  anywhere. Reproduce one CI runner exactly with
+  `npx playwright test --project=webkit-iphone-430 --shard=2/3`.
+- **State the exact-head gate.** The brief should say plainly: the thing merged
+  must be the thing validated, and green-but-skipped is not green. Both have
+  already cost this project a mistake (#190 exists because of the second).
+- **Reach for Support Snapshot before archaeology.** When something looks wrong,
+  the answer is a captured file replayed deterministically through the real
+  engine with the network unplugged — not a reconstruction from memory with a
+  test written afterwards to agree with it. And `--write` the case as a fixture.
+- **Reach for Data Health when freshness is the question.** "Is the app wrong or
+  is its input stale?" already has a screen and an endpoint. Do not have a
+  session re-derive it from Cloudflare, GitHub and D1.
+- **Say what it costs.** Bytes against `perf-budgets.json`, milliseconds against
+  the Workers allowance, entities against the Vegas quota. The demo chunk has
+  about one kilobyte of headroom, so "no measurable change" is not a measurement.
+- **Name the deliberate mutations.** For anything load-bearing, say which bug
+  should be introduced on purpose and which *named* test must catch it.
+
+---
+
 ## 14. How to manage this well
 
 A short list of the judgements this project rewards:
 
-1. **Prefer watching to building, for the next month.** The build is done. Every
-   Tier-1 item is a first contact with reality that will either confirm the work
-   or produce the most valuable bug report of the season. Adding features on top
-   of five unproven systems compounds risk.
-2. **Schedule the Vegas activation deliberately.** It is the one decision that
-   needs the owner, it needs a weekend he can watch, and it should be asked as
-   *one* dummy-proofed action.
-3. **Guard the double-counting rules** (section 6). This is where a plausible
+1. **Do not trade the build window for the watch list.** They are different
+   resources (13). The watching costs nothing but calendar time and survives a
+   capacity downgrade; Lane 2 does not. Spend the window on Lane 2 and let the
+   five observations happen on the NFL's schedule.
+2. **Get the two undated facts out of the owner's head today.** His **real draft
+   date** (which is the only deadline Lane 2 has) and the **mock-draft design**
+   (13c, which currently exists in no durable place). Both are cheap now and
+   expensive or impossible later. Ask for them one at a time.
+3. **Schedule the Vegas activation deliberately.** It is the one decision that
+   needs him, it needs a weekend he can watch, and it should be asked as *one*
+   dummy-proofed action — not bundled with the two above.
+4. **Guard the double-counting rules** (section 6). This is where a plausible
    "improvement" does real damage.
-4. **Guard the byte budgets** (section 8). The demo chunk has ~1 kB of headroom.
-5. **Treat "unknown" as a feature under attack.** Every product instinct pushes
+5. **Guard the byte budgets** (section 8). The demo chunk has ~1 kB of headroom.
+6. **Treat "unknown" as a feature under attack.** Every product instinct pushes
    toward filling a blank field. This project's whole credibility rests on not
    doing that.
-6. **Turn every support case into a fixture.** `--write` is the definition of
+7. **Turn every support case into a fixture.** `--write` is the definition of
    done for a bug report.
-7. **Ask him for one thing at a time.** Section 3.
+8. **Check the lane plan against `main` before planning anything.** Lane 1 was
+   still "next" in the previous PM's context after it had merged. Read the last
+   ten commits before writing a brief.
+9. **Ask him for one thing at a time.** Section 3.
 
 ### Useful questions to ask the engineering session
 
