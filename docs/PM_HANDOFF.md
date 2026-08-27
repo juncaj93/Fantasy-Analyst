@@ -1,6 +1,6 @@
 # Fantasy Analyst — full project handoff
 
-**For: ChatGPT, acting as program and project manager.**
+**For: Claude, acting as program and project manager for this project.**
 **Written: 2026-08-27, from the repository at `main` = `51d068c`.**
 
 You are picking this project up cold, in a fresh chat, with no memory of the
@@ -8,6 +8,13 @@ previous one. This document is written to be the only thing you need in order to
 manage the work: what the product is, why it is built the way it is, what is
 finished, what is not, what the constraints are, what the plan is, and how the
 owner wants to be worked with.
+
+The project management role was previously held by a ChatGPT conversation that
+ran out of room. Nothing about the work changes with the handover; what changes
+is that the plan, the constraints and one undocumented design now live here
+rather than in a chat log. Where this document refers to ChatGPT it means either
+that prior manager or the *product's own* assistant integration, which is a
+separate thing and is described in section 10.
 
 Nothing here is aspirational. Where a number is a measurement it says so; where
 it is an estimate it says that instead. The project's own strongest rule is
@@ -38,7 +45,8 @@ Three things to internalise before anything else:
    runtime. Every data source is free-tier or public, and the free-tier ceilings
    are the hardest constraint in the project — harder than time.
 3. **You are inside the product, not just managing it.** Two of the app's
-   workflows hand work to ChatGPT by design. Section 10 is your job description.
+   workflows hand work to an assistant by design — one of them with a button
+   that says so. Section 10 is that half of your job description.
 
 ---
 
@@ -533,8 +541,21 @@ Wait against `date -u`, never against a feeling.
 
 ## 10. Your job inside the product
 
-Two of the app's workflows hand work to ChatGPT *by design*. This is not a
-metaphor — the buttons say "Copy for ChatGPT".
+Two of the app's workflows hand work to an assistant *by design*. This is not a
+metaphor — one of them ships a button that says "Copy for ChatGPT".
+
+**That label is a label, not a contract.** The app hands over cleaned newsletter
+text and parses a strict tally back; nothing in the pipeline authenticates,
+calls or knows about any provider. Any assistant that returns a well-formed
+tally does the job, and the support-snapshot docs already say "send it to
+ChatGPT or Claude and ask why". So **you can do both of these jobs as they
+stand.**
+
+Worth raising with the owner once, and not more than once: if you are now the
+permanent scorer, the button's wording is a small product question — it is one
+string, it appears on Setup beneath the Newsletter row, and it is the kind of
+thing that quietly confuses somebody six months from now. Not urgent. Do not
+bundle it with a real ask.
 
 ### 10a. The newsletter tally loop (weekly, in season)
 
