@@ -145,6 +145,23 @@ async function contentGrip(page: Page, sheet: string): Promise<{ x: number; y: n
   return { x: body.x + body.width / 2, y: body.y + 24 };
 }
 
+/**
+ * Where a dismissal actually starts: the sheet's grip.
+ *
+ * These specs used to pull sheets down by their *content*, which worked here
+ * and does not work under a thumb — the body declares `touch-action: pan-y`
+ * for its whole life now, so a real finger there scrolls or does nothing, and a
+ * mouse-driven test that dismissed from it was passing for a reason no reader
+ * has. The arbitration under test is unchanged by the move: the grip is inside
+ * the sheet, the sheet is rendered inside the screen's pull surface, and every
+ * pointer it receives still propagates to `usePullToRefresh` through the
+ * portal exactly as one from the body did.
+ */
+async function chromeGrip(page: Page, sheet: string): Promise<{ x: number; y: number }> {
+  const grip = (await page.locator(`[data-testid="${sheet}"] .sheet-grip`).boundingBox())!;
+  return { x: grip.x + grip.width / 2, y: grip.y + 4 };
+}
+
 /** Record every request the screen makes to its own endpoint, until read. */
 function watchRequests(page: Page, endpoint: string): string[] {
   const seen: string[] = [];
@@ -214,7 +231,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const from = await contentGrip(page, 'player-sheet');
+    const from = await chromeGrip(page, 'player-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
@@ -229,7 +246,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/startsit/refresh');
     await watchPulls(page);
-    const from = await contentGrip(page, 'weekly-sheet');
+    const from = await chromeGrip(page, 'weekly-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
 
     await expect(page.getByTestId('weekly-sheet')).toHaveCount(0);
@@ -256,7 +273,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/players?');
     await watchPulls(page);
-    const from = await contentGrip(page, 'player-sheet');
+    const from = await chromeGrip(page, 'player-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
@@ -337,7 +354,7 @@ test.describe('and gives it straight back', () => {
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await settled(page, 'sheet-grip');
-    const from = await contentGrip(page, 'player-sheet');
+    const from = await chromeGrip(page, 'player-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
 
@@ -430,7 +447,7 @@ test.describe('under touch-typed pointers', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const from = await contentGrip(page, 'player-sheet');
+    const from = await chromeGrip(page, 'player-sheet');
 
     await page.evaluate(({ x, y }) => {
       const target = document.elementFromPoint(x, y);

@@ -6297,19 +6297,19 @@ table.compact tr:last-child td {
   padding-bottom: var(--safe-bottom);
   animation: sheet-rise var(--dur-slow) var(--ease);
   /*
-   * The sheet's own chrome never scrolls, so the browser is told to keep its
-   * hands off every gesture that lands on it. This is the line that makes
-   * swipe-to-dismiss work from the grip and the header: with `pan-y` here
-   * Safari had already classified the drag as a scroll before the first
-   * `pointermove` arrived, the sheet never moved, and what the reader saw
-   * instead was the page behind rubber-banding. The same lesson is written on
-   * `.drag-handle`, which learned it first.
+   * No `touch-action` here, deliberately, and it used to say `none`.
    *
-   * It is inherited by everything in the sheet that does not override it —
-   * `.sheet-body` is the only thing that does, and only while it has somewhere
-   * to scroll to.
+   * The claim belongs on the chrome that actually takes the gesture — see
+   * `.sheet-grip` and `.sheet-header` — rather than on the box that contains
+   * the scroller, and the difference is a version of Safari. The spec has the
+   * engine intersect `touch-action` from the touched element up to *the
+   * scroller that would handle the pan*, which leaves a body's `pan-y` intact
+   * under a `none` above it; WebKit implements exactly that, and has since
+   * Safari 17 (`computeUsedTouchAction` resets the inherited value at any box
+   * with scrollable overflow). On anything older the `none` propagated straight
+   * through the scroller and the card could not be panned at all. Nothing here
+   * needs to know which, now that no ancestor of a scroller declares `none`.
    */
-  touch-action: none;
 }
 
 /*
@@ -6334,6 +6334,24 @@ table.compact tr:last-child td {
 .sheet-settling {
   animation: none;
   transition: transform var(--dur) var(--ease);
+}
+
+/*
+ * The two strips a sheet is dragged by, and the whole of what claims a gesture.
+ *
+ * Neither scrolls, so the browser is told to keep its hands off anything that
+ * lands on them: with the sheet's default `auto` here, Safari classified a
+ * downward drag as a scroll before the first `pointermove` arrived, the sheet
+ * never moved, and what the reader saw instead was the page behind
+ * rubber-banding. The same lesson is written on `.drag-handle`, which learned
+ * it first.
+ *
+ * Declared on the chrome rather than on `.sheet`, so that no ancestor of the
+ * scrolling body ever says `none` — see the note there.
+ */
+.sheet-grip,
+.sheet-header {
+  touch-action: none;
 }
 
 .sheet-grip {
@@ -6490,70 +6508,50 @@ table.compact tr:last-child td {
 }
 
 /*
- * The body scrolls only when it has somewhere to go.
+ * The body is the browser's, and says so once for its whole life.
  *
- * `data-scrollable` is set by `useSheetDrag` from the one question both engines
- * answer the same way — is this content taller than its box? A sheet shorter
- * than the screen, which is most of them, takes `none` and can be dragged shut
- * from anywhere on it. A taller one keeps `pan-y` so the browser scrolls it,
- * and the grip and header above — which never scroll, and inherit `none` from
- * `.sheet` — are what dismisses it.
+ * `pan-y` is unconditional, and that is the fix for the defect this rule kept
+ * producing. It used to be conditional: `useSheetDrag` measured the body and
+ * wrote `data-scrollable`, and a body with nothing to scroll took
+ * `touch-action: none` so that a short sheet could be dragged shut from its
+ * content as well as from its grip.
  *
- * This replaced a `pan-up` at the body's top edge. Chromium honoured it; WebKit
- * does not implement the directional values and discarded the declaration
- * entirely, which left the mechanism inert on the browser the original bug came
- * from. Nothing here now depends on a value both engines do not implement.
+ * The measurement was honest and the moment it was published was not. A card
+ * opens on skeletons and fills in from two requests, so for as long as those
+ * are in flight the body truthfully has nothing to scroll, takes `none`, and
+ * the engine — which reads this once, when the finger lands, and never again —
+ * refuses that whole gesture its scroll. The content arrives mid-flick and
+ * changes nothing: the reader has to lift and start again. On localhost that
+ * window is a few milliseconds, which is why every headless run of this was
+ * green; on a phone it is the length of two requests, which is why the card
+ * *locked up, then unlocked*.
  *
- * **And `pan-y` is the end of the conversation again.** For a while it was not:
- * `useSheetDrag` registered a non-passive `touchmove` on the sheet so that a
- * downward drag on content sitting at its top could be claimed as a dismissal,
- * on the reasoning that content at `scrollTop: 0` has nothing to lose. WebKit
- * decides whether a touch may scroll from the *first* `touchmove` and never
- * revisits it, and the claim had to be made on a pixel or two of movement — so
- * an upward flick that began with a pixel of downward drift was refused the
- * scroll for its whole duration. That is the "I drag and the card does not
- * move, then it works on the third try" this pass was opened for, and the
- * listener also took WebKit off its fast scrolling path for every sheet in the
- * app. Both are gone: a body that can scroll now owns every vertical gesture on
- * it, and dismissal comes from the grip, the header, the backdrop, Done and
- * Escape — none of which scroll, all of which inherit `none` above.
+ * There is no version of that measurement that is right at the instant it is
+ * needed, so there is no measurement. What it bought — a fourth way to dismiss
+ * a short sheet — is gone, and the grip, the header, the backdrop, Done and
+ * Escape are what dismisses one.
  *
- * `overscroll-behavior: contain` is the belt to that brace: whatever happens, a
+ * Two earlier attempts are worth not repeating. A directional `pan-up` at the
+ * body's top edge: Chromium honoured it, WebKit does not implement the
+ * directional values and discarded the declaration, so the mechanism was inert
+ * on the one browser the bug came from. And a non-passive `touchmove` on the
+ * sheet, which claimed the gesture before it could be classified and took
+ * WebKit off its fast scrolling path for every sheet in the app.
+ *
+ * `overscroll-behavior: contain` is the belt to the brace: whatever happens, a
  * scroll that runs out of sheet never becomes a scroll of the page.
+ *
+ * (`-webkit-overflow-scrolling: touch` was here too. WebKit removed it in iOS
+ * 13 — every scroller has momentum now — and on the versions that still honour
+ * it, it is the cause of a scroller that will not notice content added after it
+ * was created, which is the last thing this element needs.)
  */
 .sheet-body {
   flex: 1 1 auto;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
   padding: 0 var(--sp-4) var(--sp-4);
-}
-
-/*
- * A sheet with nowhere to scroll claims every gesture on it, so it can be
- * dragged shut from its content as well as its grip. Nothing is taken from the
- * reader by that: there is no scroll here to lose.
- *
- * `data-scrollable` is written by `useSheetDrag` from the body *and* its
- * content — the second half matters, because a body pinned at the sheet's
- * maximum height stops changing size while its content is still arriving, and
- * a wrong `false` here is a card that cannot be scrolled and cannot report
- * that it has grown.
- */
-.sheet-body[data-scrollable='false'] {
-  touch-action: none;
-}
-
-/*
- * The measured content. No box of its own on purpose — see `Sheet`.
- *
- * It exists so that "is there more content than there is room for" can be
- * observed directly rather than inferred from the height of the thing that is
- * clipping it.
- */
-.sheet-content {
-  display: block;
 }
 
 @keyframes sheet-rise {

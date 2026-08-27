@@ -129,8 +129,15 @@ test.describe('pulling a sheet down', () => {
    * So the sheet no longer claims anything a scroller could have wanted, and
    * `useSheetDrag` calls `preventDefault` on no touch at all. Dismissal lives
    * on the parts that do not scroll — the grip, the header, the backdrop, Done
-   * and Escape — all of which are covered below, and on the content of a sheet
-   * that has nothing to scroll, which is most of them.
+   * and Escape — all of which are covered below.
+   *
+   * And it no longer depends on how much the sheet is holding. The body used to
+   * take `touch-action: none` while it had nothing to scroll, so a short sheet
+   * could be dragged shut from its content too; a card cannot know how tall it
+   * is while its requests are in flight, and a body that says `none` in that
+   * window costs the reader the whole gesture they started in it. The
+   * permission is a constant now — see `player-card-scroll.spec.ts`, which
+   * reproduces what the measurement cost.
    */
   test('leaves a drag on the content of a scrolling sheet to the content', async ({ page }) => {
     await openPlayerCard(page);
@@ -152,10 +159,10 @@ test.describe('pulling a sheet down', () => {
       .poll(async () =>
         page.evaluate(() => {
           const body = document.querySelector('.sheet-body') as HTMLElement;
-          return { scrollable: body.dataset['scrollable'], top: body.scrollTop };
+          return { overflows: body.scrollHeight > body.clientHeight + 1, top: body.scrollTop };
         }),
       )
-      .toEqual({ scrollable: 'true', top: 0 });
+      .toEqual({ overflows: true, top: 0 });
 
     const body = (await page.locator('.sheet-body').boundingBox())!;
     const x = body.x + body.width / 2;

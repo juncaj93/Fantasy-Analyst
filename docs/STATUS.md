@@ -3186,3 +3186,96 @@ No budget raised: app JavaScript 130.6 kB against 140.0 kB, CSS 14.3 kB against
 150.0 kB. The Draft card's second request — the ledger, for the news under the
 insight — is made only when a card is opened, so a board of forty rows still
 costs nothing until one of them is tapped.
+
+## Milestone — the card's body stops answering a question it cannot answer in time (done)
+
+The expanded player card still would not scroll on the owner's iPhone after the
+last pass, on Team, Players, Trades and Matchup — everywhere the bottom-sheet
+card appears, and nowhere else. *"Locks up, then unlocks and is delayed/glitchy.
+Happens on every card aside from the draft page."* The previous pass shipped
+with twelve green WebKit shards and a note that `page.mouse` is not a finger.
+The note was right and the shards were not evidence.
+
+**What the last pass got right, and what it left behind.** Both of its causes
+were real and both are still gone: nothing calls `preventDefault` on a touch,
+and the `ResizeObserver` latch that froze a grown card at *nothing to scroll* is
+fixed. What it did not question was the mechanism underneath both of them —
+that the body publishes, ahead of the finger, whether the browser may pan it.
+
+**The body was answering a question about content that had not arrived.**
+`useSheetDrag` measured the body and wrote `data-scrollable`; the stylesheet
+turned `false` into `touch-action: none`, which is what let a sheet short enough
+to fit be dragged shut from its content as well as from its grip. The
+measurement is honest. The moment it is published is not. **A card does not know
+how tall it is when it opens**: it opens on skeletons and fills in from
+`/api/players/:id` and `/api/players/:id/detail`, and for as long as those are in
+flight the body correctly reports that it has nothing to scroll and takes
+`none`. The engine reads that **once**, when the finger lands, and never revisits
+it. So a reader whose thumb is already on the card when its content arrives is
+refused the scroll for that entire gesture — the content landing halfway through
+changes nothing — and only their next flick works. Lift, flick again, and it
+moves. That is *locks up, then unlocks*, in the app's own words rather than the
+engine's.
+
+Against localhost that window is a few milliseconds. On a phone it is the length
+of two requests. That asymmetry is the whole reason twelve WebKit shards were
+green twice: every drag in the suite is `page.mouse`, which obeys no
+`touch-action` at all, and the one test that reproduced the earlier latch used a
+1,200 ms route delay to open the window and then waited for it to close before
+touching anything.
+
+**Reproduced, at 430, 390, 375 and 360**, with real touch points injected through
+the DevTools protocol rather than a mouse: with both requests held back, the body
+reads `touch-action: none` 120 ms after the card opens; a drag begun there and
+run through the moment the content lands (the card grows from 311 px to 1,689 px
+mid-gesture, at 390) leaves `scrollTop` at 0; the next identical drag scrolls
+195 px. Both new tests in `e2e/player-card-scroll.spec.ts` fail on `9b271a4` and
+pass here.
+
+**So the body no longer answers.** `touch-action: pan-y` is unconditional and
+declared once for the life of the sheet. `data-scrollable`, the two
+`ResizeObserver`s, the `scroll` listener and the wrapper element they measured
+are deleted, and `useSheetDrag` refuses any drag that begins in the body — it
+does not ask what the body currently holds, because that is the question that
+cannot be asked in time. There is now no state in which the card tells the
+browser it may not be panned, and **nothing in this app runs on the main thread
+during a sheet scroll**, which the `scroll` listener writing an attribute to the
+element being scrolled previously did on every frame.
+
+**The deliberate reversal, stated plainly.** A short sheet can no longer be
+dismissed by dragging its content. That affordance only ever existed when a
+guess about unarrived content happened to be right, and the price of the guess
+being wrong was the card; the grip, the header, the backdrop, Done and Escape
+remain, which is five ways out. `e2e/sheet-vs-pull.spec.ts` dismissed its sheets
+from the content and now dismisses them from the grip — the arbitration it
+tests is unchanged, since the grip's pointers propagate to `usePullToRefresh`
+through the same portal, but a test that dismissed from the body was passing for
+a reason no reader has.
+
+**Two things fixed on the way, neither of them the cause.** `touch-action: none`
+moved off `.sheet` and onto `.sheet-grip` / `.sheet-header`, so that no ancestor
+of a scroller declares it: the spec has the engine stop intersecting at the
+scroller that would handle the pan, and WebKit's `computeUsedTouchAction` does
+exactly that — but only since Safari 17, and before that a `none` above a
+scroller went straight through it. Checked in WebKit's own source rather than
+assumed. And `-webkit-overflow-scrolling: touch` is gone from `.sheet-body`:
+WebKit removed it in iOS 13, and on the versions that still honour it, it is the
+documented cause of a scroller that will not notice content added after it was
+created (WebKit 158342), which is this card's exact sequence.
+
+**What is still not proved, and it matters.** This environment cannot run
+WebKit — the Playwright download host is blocked — so the twelve WebKit shards
+have *not* been run on this change; the four Chromium widths have. And with real
+touch in Chromium, a **fully loaded** card scrolls correctly both before and
+after this change, from every start point, on Players and on Trades, first
+opening and after a reopen. What is fixed is demonstrated; that it is the whole
+of what the owner is seeing is not. If the card still locks after this, the next
+thing to suspect is not the arbitration — it is the window itself: the card
+opens as a 311 px stub and grows past the screen, and for that second there is
+genuinely nothing under the finger to move, which the draft card never suffers
+because its expansion sits inside a board that is already scrolling.
+
+No budget raised, and the change is a net deletion: app JavaScript **130.4 kB**
+against a 140.0 kB ceiling (−0.2 kB against `9b271a4`), CSS **14.3 kB** against
+20.0 kB, everything the browser must fetch **146.2 kB** against 160.0 kB, Demo
+Mode's lazy chunks **149.0 kB** against 150.0 kB — unchanged.
