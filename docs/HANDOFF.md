@@ -376,7 +376,15 @@ that prints a provider payload must do the same.
 - **beatadp.com is blocked by the egress proxy** from this container (403 on
   CONNECT), so ADP cannot be fetched locally. `refresh-adp.yml` runs it on a
   GitHub runner. `api.sleeper.app` and `sleeper.app/graphql` *are* reachable
-  here, which is how the outlook and stats endpoints were established.
+  here, which is how the outlook and stats endpoints were established. To see
+  what the page is actually serving, run `probe-beatadp.mjs` through
+  `probe.yml`, which has the reach this container does not.
+- **beatadp keys its ADP by slice**, not by platform: a player's `adps` are
+  `{"SLEEPER|HALF_PPR|REDRAFT|1QB": 7.9, ...}` and the page ships every slice it
+  holds in one payload, each listed under `slices` with the date it was
+  recorded. It stopped applying a `scoringFormat` filter server-side on
+  2026-08-16, which broke twelve days of refreshes. Ask for a slice by name;
+  never read a neighbouring format because the one you want is missing.
 - **`search_rank` is not ADP.** It measures who gets looked up; it is a search
   tie-break only.
 - **D1 caps bound parameters at 100.** `MAX_BOUND_PARAMS = 90`; chunk any new

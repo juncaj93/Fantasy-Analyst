@@ -8812,3 +8812,94 @@ div.matchup-result {
 .claim-why-qualifier {
   margin: 2px 0 0 calc(1.1em + var(--sp-2));
 }
+
+/* ------------------------------------------------------------- mock draft */
+
+/*
+ * A rehearsal, over the Draft page.
+ *
+ * It borrows `.dboard-layer` and `.dboard-bar` wholesale — the covering layer,
+ * the safe-area padding, the bar grammar — because it is the same kind of
+ * thing: a full-screen companion to Draft that dies with it. What is added
+ * here is only what a *list* needs that a *grid* did not, which is why this
+ * block is short.
+ */
+.mock-layer {
+  --mock-banner: color-mix(in srgb, var(--warn) 14%, var(--surface));
+}
+
+/*
+ * The one line that says none of this is real, and it does not scroll away.
+ *
+ * Outside `.mock-body` on purpose. A reader who has scrolled forty rows into a
+ * mock board is looking at something indistinguishable from their live draft,
+ * and that is exactly the moment the sentence has to still be on screen.
+ */
+.mock-banner {
+  flex: 0 0 auto;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--mock-banner);
+  border-bottom: 1px solid var(--separator-soft);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.mock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--sp-2) var(--sp-2) calc(var(--safe-bottom) + var(--sp-4));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* What the reader has built, as chips rather than as a second list. */
+.mock-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.mock-roster-chip {
+  padding: 2px var(--sp-1);
+  border: 1px solid var(--separator-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46%;
+}
+
+.mock-roster-chip b {
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+.mock-roster-empty,
+.mock-since {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.mock-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dimmed, not disabled: the rows stay rows while the room is picking. */
+.mock-list[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+.mock-foot {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--sp-2);
+}

@@ -114,7 +114,7 @@ async function fixture(): Promise<Fixture> {
   ].join('\n');
   const index = await players.buildIndex();
   const result = importAdpSnapshot(csv, index, { label: 'deep ranking', source: 'test' });
-  const { snapshot } = await new AdpRepo(db).save(result);
+  const { snapshot } = await new AdpRepo(db).save(result, '2026');
   await leagues.setDraftSnapshot('deep-draft', snapshot.id);
 
   return { db, names: { priced, unpriced } };

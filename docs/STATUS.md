@@ -3187,6 +3187,65 @@ No budget raised: app JavaScript 130.6 kB against 140.0 kB, CSS 14.3 kB against
 insight — is made only when a card is opened, so a board of forty rows still
 costs nothing until one of them is tapped.
 
+## Milestone — one fact, one line (done)
+
+Bijan Robinson's expanded card, under `Latest news`, from the same day and one
+directly under the other:
+
+> Elite receiving efficiency/target rate paired with an NFL-leading 2,298
+> scrimmage yards
+>
+> Elite receiving efficiency/target rate and led the NFL with 2,298 scrimmage
+> yards
+
+Two of the card's lines spent saying one thing. The section already refused to
+repeat the sentence the `Insight` above it had quoted, but it refused it *by
+item id*, which catches the row the takeaway was built from and nothing else. A
+second row saying the same fact in different words is a different id, and the
+card had no way to tell that it was the same football.
+
+**Near-duplicate detection, in `core/evidence/nearDuplicate.ts`.** Two lines are
+one claim reworded when they share enough of the facts they are made of:
+Jaccard overlap of content tokens — grammar removed, punctuation split on, and
+`2,298` and `2298` read as the same number — at or above 0.6, over at least
+three shared tokens. The reported pair scores 0.75, with `paired`/`leading`
+against `led` the only difference between them.
+
+**The rule that keeps it from over-collapsing is about numbers.** If both lines
+carry numbers and share none of them, they are distinct however alike they read:
+"14 carries and 5 targets in Week 1" and "18 carries and 7 targets in Week 2"
+score 0.67 on vocabulary — above the threshold, and two separate weeks of
+football. Same-day is not
+evidence of anything either way — a role note and an injury note from one
+Wednesday share almost nothing and both still show, which is the owner's own
+rule: *if there's like two unique things from a certain day, that's fine to have
+both.* Every threshold here is set where a false merge is the harder mistake to
+make, because a repeated line costs a line and a suppressed one costs the reader
+a fact he will never know he did not see.
+
+**It is selection, and only selection.** Nothing is deleted, nothing is merged
+into a new sentence, and no row is altered: `selectLatestNews` picks the most
+recent telling of each distinct fact out of the list it is handed and hands the
+list back untouched. The suppressed rewording is still counted by the tally, is
+still counted in the `N older items on his full profile` line under the section,
+and is still printed whole on the evidence timeline one tap in — which is the
+surface that exists to show everything, and the one place the repetition is the
+point. The card also stops repeating the takeaway's fact in someone else's
+words, which is the same defect one rewording deeper.
+
+Collapsing a pair does not shorten the card: the freed line goes to the next
+distinct signal, so the card that showed one fact twice now shows two.
+
+**Coverage.** `evidence.nearDuplicate.test.ts` asserts the reported pair
+collapsing to its more recent telling, two genuinely distinct items from one day
+both surviving, two weeks of the same statistic staying apart, and the ledger
+handed to the section coming back with every row in it.
+
+No budget raised: the detector and the selection it feeds cost 572 bytes gzipped
+on the app JavaScript chunk, 130.6 kB to 131.2 kB against 140.0 kB. CSS 14.3 kB
+against 20.0 kB, first paint 147.0 kB against 160.0 kB, Demo Mode unchanged at
+149.0 kB against 150.0 kB.
+
 ## Milestone — the card's body stops answering a question it cannot answer in time (done)
 
 The expanded player card still would not scroll on the owner's iPhone after the

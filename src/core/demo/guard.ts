@@ -19,6 +19,8 @@
  * below, and none of them touches league or player truth.
  */
 
+import { READ_ONLY_POSTS, isReadShaped } from '../http/readShaped.ts';
+
 /**
  * Demo's own control plane. These are the only non-GET paths it will serve, and
  * they change nothing but whether the demo is running.
@@ -28,15 +30,13 @@ export const DEMO_CONTROL_PATHS = new Set(['/api/demo/enter', '/api/demo/exit', 
 /**
  * A read-shaped POST.
  *
- * `/api/startsit/compare` sends a list of players in a body and returns a
- * comparison. It writes nothing — it is a POST because the request does not fit
- * in a query string — and refusing it would remove Compare from every weekly
- * scenario for a reason that has nothing to do with safety.
- *
- * The list is exhaustive and short on purpose. Anything not on it, and not a
- * GET, is refused.
+ * Re-exported rather than declared. The list moved to `core/http/readShaped.ts`
+ * when Mock Draft became the second world that has to refuse a write below the
+ * UI: what counts as a read is a fact about this app's HTTP surface, not about
+ * demos, and one statement of it is what stops the two guards drifting. Every
+ * existing importer keeps the name it has always used.
  */
-export const DEMO_READ_ONLY_POSTS = new Set(['/api/startsit/compare']);
+export const DEMO_READ_ONLY_POSTS = READ_ONLY_POSTS;
 
 /** Everything Demo Mode must not be able to do, in the user's language. */
 export const DEMO_PROHIBITED = [
@@ -76,10 +76,8 @@ export function isDemoControlPath(path: string): boolean {
  * `path` must already be stripped of its query string.
  */
 export function isAllowedInDemo(method: string, path: string): boolean {
-  const verb = method.toUpperCase();
-  if (verb === 'GET' || verb === 'HEAD') return true;
   if (DEMO_CONTROL_PATHS.has(path)) return true;
-  return DEMO_READ_ONLY_POSTS.has(path);
+  return isReadShaped(method, path);
 }
 
 /** Throw unless this request is allowed. The service-boundary refusal. */

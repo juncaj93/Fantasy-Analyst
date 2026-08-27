@@ -73,10 +73,13 @@ import {
   RateLimiter,
   checkPassphrase,
   clearDemoCookie,
+  clearMockCookie,
   clearSessionCookie,
   createDemoCookie,
+  createMockCookie,
   createSessionCookie,
   isDemoRequest,
+  isMockRequest,
   isWrite,
   verifySession,
   type AuthEnv,
@@ -84,6 +87,8 @@ import {
 import { Router, errorResponse, jsonResponse } from './http/router.ts';
 /* The demo's own control routes, named once and shared with the demo runtime. */
 import { DEMO_CONTROL_PATHS } from '../core/demo/guard.ts';
+/* The same, for a practice draft. See `core/draft/mockGuard.ts`. */
+import { MOCK_CONTROL_PATHS, MOCK_READ_ONLY_POST } from '../core/draft/mockGuard.ts';
 import { AdpRepo, UNDERDOG_SOURCE } from './repos/adp.ts';
 import { validateRawAdp } from '../core/adp/underdog.ts';
 import { EvidenceRepo } from './repos/evidence.ts';
@@ -96,6 +101,9 @@ import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService, draftBoardSourcesFromDatabase } from './services/draftBoard.ts';
 import { captureDraftSnapshot, SnapshotRedactionError } from '../core/support/draftSnapshot.ts';
+import { buildMockBoard, mockSnapshotSources, type MockAction } from '../core/draft/mockBoard.ts';
+import { isUsableMockState } from '../core/draft/mockDraft.ts';
+import { MockDraftVoidError } from '../core/draft/mockSources.ts';
 import { InjuryService } from './services/injuryService.ts';
 import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
@@ -222,6 +230,39 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     );
   });
 
+  /**
+   * A mock draft is a rehearsal, and the server says so too.
+   *
+   * The second of the two refusals §4 asks for. The first is in the browser, at
+   * the one seam every request in this app goes through; this one catches
+   * whatever did not come through it — a call from a console, a replayed
+   * request, a screen that forgot to disable a control.
+   *
+   * The exemptions are the mock's own routes, and both kinds are reads. The
+   * three control paths change nothing but whether a rehearsal is running, and
+   * *leaving* one must never be blocked by the thing you are trying to leave.
+   * `/api/drafts/:id/mock/board` and its snapshot are POSTs only because a
+   * mock's state does not fit in a query string — the same reason
+   * `/api/startsit/compare` is one — and they build a board through
+   * `DraftBoardSources`, an interface with no write on it.
+   *
+   * Like the demo guard above it, this runs *before* the passphrase check and
+   * ignores it entirely: an unlocked session is not permission to mutate the
+   * real draft while rehearsing it.
+   */
+  router.use(async (ctx) => {
+    if (!ctx.url.pathname.startsWith('/api/')) return null;
+    if (MOCK_CONTROL_PATHS.has(ctx.url.pathname)) return null;
+    if (MOCK_READ_ONLY_POST.test(ctx.url.pathname)) return null;
+    if (!isWrite(ctx.request.method)) return null;
+    if (!isMockRequest(ctx.request)) return null;
+    return errorResponse(
+      'A mock draft is running, so this browser is read-only. Nothing in a rehearsal can change a real pick, ' +
+        'a real queue, Sleeper, a provider or the database. Leave the mock draft to make changes.',
+      403,
+    );
+  });
+
   router.use(async (ctx) => {
     if (ctx.env.disableAuth) return null;
     if (!ctx.url.pathname.startsWith('/api/')) return null;
@@ -324,6 +365,26 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
   router.get('/api/demo/status', (ctx) => jsonResponse({ demo: isDemoRequest(ctx.request) }));
 
+  // ------------------------------------------------------------- mock draft
+  /*
+   * The same three, for a practice draft, and for the same one reason.
+   *
+   * A mock's *state* never comes from here either — it lives in the browser and
+   * is posted to `/mock/board` to be read once and dropped. These set and clear
+   * the marker the guard above reads, so that while a rehearsal is running the
+   * server refuses every write from that browser regardless of what the UI does
+   * or does not send.
+   */
+  router.post('/api/mock/enter', (ctx) =>
+    jsonResponse({ mock: true }, 200, { 'set-cookie': createMockCookie(ctx.env) }),
+  );
+
+  router.post('/api/mock/exit', (ctx) =>
+    jsonResponse({ mock: false }, 200, { 'set-cookie': clearMockCookie(ctx.env) }),
+  );
+
+  router.get('/api/mock/status', (ctx) => jsonResponse({ mock: isMockRequest(ctx.request) }));
+
   router.post('/api/auth/login', async (ctx) => {
     const ip = ctx.request.headers.get('cf-connecting-ip') ?? 'local';
     const limit = loginLimiter.check(ip);
@@ -344,6 +405,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // ---------------------------------------------------------------- overview
   router.get('/api/overview', async (ctx) => {
     const db = ctx.env.db;
+    const adpSeason = await currentSeason(db);
     const [players, leagues, evidence, identity, newsletters, props, adp] = await Promise.all([
       new PlayerRepo(db).count(),
       new LeagueRepo(db).listLeagues(),
@@ -351,7 +413,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       new NewsletterRepo(db).pendingIdentityCount(),
       new NewsletterRepo(db).awaitingTallyCount(),
       new PropsRepo(db).freshness(),
-      new AdpRepo(db).latest(),
+      new AdpRepo(db).latest(adpSeason),
     ]);
     const selected = leagues.find((l) => l.isSelected) ?? null;
 
@@ -1405,6 +1467,107 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   /**
+   * A practice draft: one action applied, one board built, nothing stored.
+   *
+   * **A POST, and everything about it is a read.** It is a POST for exactly the
+   * reason `/api/startsit/compare` is one — the request carries a state that
+   * does not fit in a query string — and it is on the mock guard's allow-list
+   * for that reason and no other. It writes nothing: the board is built through
+   * `mockSources.ts` over `DraftBoardSources`, an interface with no write on
+   * it, so that is a property of the type rather than a promise.
+   *
+   * The rehearsal's state arrives in the body and leaves in the response. There
+   * is no mock table and no mock column; a mock draft exists in the reader's
+   * browser, keyed by the `draft_id` it rehearses, and this server never keeps a
+   * byte of one. That is the isolation requirement discharged by not having a
+   * place to violate it.
+   *
+   * A 409 means the real draft has started, at which point the mock for that
+   * `draft_id` does not exist any more — the browser deletes its copy on seeing
+   * this, and a client that has not noticed cannot get a board regardless.
+   */
+  router.post('/api/drafts/:id/mock/board', async (ctx) => {
+    const body = (await ctx.json<{
+      state?: unknown;
+      action?: MockAction;
+      limit?: number;
+      position?: string | null;
+      queuedOnly?: boolean;
+    }>()) ?? {};
+    const action = body.action ?? { kind: 'resume' as const };
+    /*
+     * The seed and the clock are stamped here, not in `core/`.
+     *
+     * A mock has to be a *different* draft every time it is started, which is
+     * the one thing a pure module cannot arrange for itself. So the request
+     * boundary — which is allowed to know what time it is — supplies both, and
+     * everything downstream of them is deterministic in the state they produce.
+     */
+    const stamped: MockAction =
+      action.kind === 'start'
+        ? { kind: 'start', seed: Date.now() >>> 0, startedAt: new Date().toISOString() }
+        : action;
+    try {
+      return jsonResponse(
+        await buildMockBoard(draftBoardSourcesFromDatabase(ctx.env.db), {
+          draftId: ctx.params['id']!,
+          state: body.state ?? null,
+          action: stamped,
+          ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+          position: body.position ?? null,
+          queuedOnly: body.queuedOnly === true,
+        }),
+      );
+    } catch (err) {
+      if (err instanceof MockDraftVoidError) return errorResponse(err.message, 409);
+      throw err;
+    }
+  });
+
+  /**
+   * The same support file, captured from a rehearsal.
+   *
+   * Explicitly asked for by the brief: Mock Draft doubles as a way to
+   * troubleshoot or demonstrate the Draft experience outside a live draft
+   * window, and a capture is what makes that useful to somebody who is not
+   * holding the phone. It goes through `captureDraftSnapshot` — the same
+   * recorder, the same redaction, the same seal — over the mock's sources.
+   *
+   * The one difference is that the file says so. `rehearsal` marks it in the
+   * envelope, above the decision, because a mock snapshot replays exactly as
+   * cleanly as a real one and nothing inside the payload would ever hint that
+   * the board it describes never happened.
+   *
+   * A POST for the same reason as the board above, and a read for the same
+   * reason as the GET it mirrors.
+   */
+  router.post('/api/drafts/:id/mock/support-snapshot', async (ctx) => {
+    const body = (await ctx.json<{ state?: unknown }>()) ?? {};
+    const draftId = ctx.params['id']!;
+    if (!isUsableMockState(body.state, draftId)) {
+      return errorResponse('there is no mock draft for this draft to capture', 400);
+    }
+    const state = body.state;
+    const sources = draftBoardSourcesFromDatabase(ctx.env.db);
+    try {
+      return jsonResponse(
+        await captureDraftSnapshot(await mockSnapshotSources(sources, draftId, state), {
+          draftId,
+          gitSha: reportedGitSha(ctx.env.releaseSha),
+          dataHealth: await snapshotHealth(ctx.env),
+          position: null,
+          queuedOnly: false,
+          rehearsal: { kind: 'mock', picksMade: state.picks.length, seed: state.seed },
+        }),
+      );
+    } catch (err) {
+      if (err instanceof MockDraftVoidError) return errorResponse(err.message, 409);
+      if (err instanceof SnapshotRedactionError) return errorResponse(err.message, 500);
+      throw err;
+    }
+  });
+
+  /**
    * The same file, for whichever in-season decision the reader was looking at.
    *
    * One route rather than five, because the user has one button: Setup infers
@@ -1565,7 +1728,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     }
 
     const repo = new AdpRepo(ctx.env.db);
-    const { snapshot, created } = await repo.save(result, {
+    const season = await currentSeason(ctx.env.db);
+    const { snapshot, created } = await repo.save(result, season, {
       provider: body.provider ?? null,
       sourceType: 'raw_adp',
       snapshotAt: body.snapshotAt ?? null,

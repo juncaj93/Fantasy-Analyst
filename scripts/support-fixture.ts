@@ -84,6 +84,21 @@ function printHuman(report: ReplayReport, file: string): void {
   console.log(`  ${report.summary}`);
   console.log('');
   console.log(`  decision       ${DECISION_LABELS[report.kind]} (${report.kind})`);
+  /*
+   * Said before anything else about the file, and only when it is true.
+   *
+   * A mock draft's snapshot replays through the same adapter as a real one and
+   * reproduces just as cleanly, which is what makes it useful and also what
+   * makes it dangerous: nothing further down this report would ever hint that
+   * the board it describes was a rehearsal. So the file's own claim is printed
+   * here, immediately under what kind of decision it is.
+   */
+  if (report.rehearsal) {
+    console.log(
+      `  REHEARSAL      ${report.rehearsal.kind} draft — ${report.rehearsal.picksMade} pick(s) in, ` +
+        `seed ${report.rehearsal.seed}. Not a real draft decision.`,
+    );
+  }
   console.log(`  schema         ${report.schema.found}`);
   console.log(
     `  engine         ${report.engine.captured}${report.engine.matches ? ' (unchanged)' : ` → ${report.engine.current} — MOVED`}`,

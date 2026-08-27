@@ -478,6 +478,12 @@ test.describe('the draft board, on the same layer primitive', () => {
     await page.getByTestId('tab-draft').click();
     await page.getByTestId('draft-board-open').focus();
     await page.keyboard.press('Enter');
+    /*
+     * Through the destinations menu, which is itself a sheet on this same
+     * primitive. Focus is handed back to the ▦ when the menu unmounts and the
+     * board then captures it, which is what keeps the Escape test below true.
+     */
+    await page.getByTestId('go-draft-board').click();
     await expect(page.getByTestId('draft-board')).toBeVisible();
   });
 

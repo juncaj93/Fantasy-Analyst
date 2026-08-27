@@ -181,7 +181,40 @@ export interface SupportSnapshot<Payload extends DecisionPayload = DecisionPaylo
    * {@link SnapshotDataHealth}.
    */
   dataHealth?: SnapshotDataHealth;
+  /**
+   * Present only when this decision was taken in a rehearsal.
+   *
+   * A mock draft produces a snapshot through exactly the same capture as a real
+   * one — that is deliberate, and it is what lets Mock Draft double as a way to
+   * troubleshoot the Draft experience outside a live draft window. It is also
+   * the reason this field has to exist: a file that replays perfectly, names a
+   * real league, carries a real market and describes a board nobody ever saw
+   * would be the most convincing wrong answer this feature can produce.
+   *
+   * So it is marked, in the envelope, above the decision. A reader — human or
+   * agent — is meant to be able to answer "what is this" without reading the
+   * payload, and "this is a practice draft" belongs to that question rather
+   * than to the draft board's own schema. Absent means a real decision, which
+   * is what every snapshot written before this existed was; the schema identity
+   * did not move for the same reason it did not move for `dataHealth`.
+   */
+  rehearsal?: SnapshotRehearsal;
   decision: Payload;
+}
+
+/**
+ * What kind of rehearsal, and enough about it to tell two apart.
+ *
+ * `kind` is the only field a reader has to branch on. The rest is provenance
+ * for the person holding the file: which run this was, and how far into it the
+ * capture was taken.
+ */
+export interface SnapshotRehearsal {
+  kind: 'mock';
+  /** Picks made in the rehearsal at the moment of capture. */
+  picksMade: number;
+  /** The rehearsal's own seed, so two runs of one board are distinguishable. */
+  seed: number;
 }
 
 /**

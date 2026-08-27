@@ -70,6 +70,24 @@ value, no Next%: the board is for reading the room, and the analysis is on the
 card you came from. It draws the picks the Draft screen already has, so it adds
 no polling of its own, and it stays readable as history once the draft is done.
 
+**Draft order** — the same ▦, second destination: who sits where, which picks
+are theirs after any trade, and the one number a drafter counts on their fingers
+between turns — your next pick. Read off the same grid the board draws, so the
+two cannot disagree about whose pick is whose.
+
+**Mock draft** — a practice draft against your **real league mates**, run as
+many times as you like before the draft starts. The other eleven managers pick
+on Sleeper ADP first, nudged by their own bounded draft tendencies wherever
+`core/managers/` has the sample to say anything, plus a bounded jitter so two
+runs are two drafts rather than one played twice. It is the production board:
+the same assembly, the same ranking, the same tiers, the same Next% — a mock is
+a different pick stream, not a second app, which is why it also works as a way
+to demo or troubleshoot the Draft experience outside a live draft window, and
+why it can produce a support snapshot of its own. It is completely isolated from
+the real league — refused in the browser and again at the server, the way Demo
+Mode is — and the moment Sleeper shows the first real pick for that draft, the
+mock for it is deleted outright. See [docs/MOCK_DRAFT.md](docs/MOCK_DRAFT.md).
+
 **Team** — what to change, and then the lineup it is about. The screen opens on
 the card that answers *is there anything I should do?*; under it the recommended
 starters, built from Vegas market expectation, news signal, availability and an
@@ -151,6 +169,15 @@ newsletter has said something usable about gets one, and a player it has not is
 given no empty heading and no invented copy. What it quotes is not repeated in
 *Latest news* underneath it; the item itself is untouched, and the evidence
 timeline one tap in still shows the whole ledger with that item marked.
+
+*Latest news* shows each distinct fact once, by its most recent telling. Two
+lines that are the same claim reworded — "paired with an NFL-leading 2,298
+scrimmage yards" and "led the NFL with 2,298 scrimmage yards" — take one line
+between them, and the one they free goes to the next real signal. Two genuinely
+different things from the same day still take two lines, and different numbers
+always mean different facts. This is which lines a card shows and nothing else:
+nothing is deleted, nothing is rewritten, the card still says how many rows it
+is not showing, and the evidence timeline one tap in still prints all of them.
 
 The same pair reads the same way on the draft board. Tapping a player there
 opens **Insight**, then **Latest news**, then the season outlook, then last
@@ -303,6 +330,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |
+| [docs/MOCK_DRAFT.md](docs/MOCK_DRAFT.md) | the practice draft: how a bot manager picks, where the state lives, the two refusals, and what deletes it |
 | [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md) | capturing the state behind a recommendation, replaying it deterministically, and turning a real case into a regression fixture |
 | [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md) | whether what the app knew was healthy and current: the source inventory, the freshness policy, the scheduled-run ledger and what a support snapshot carries |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |

@@ -400,6 +400,16 @@ export interface DraftRefreshReport extends DraftRefreshState {
   visible: boolean;
   online: boolean;
   onClock: boolean;
+  /**
+   * Whether a practice draft is over the screen.
+   *
+   * The loop is parked while one is, through the same `isVisible` a
+   * backgrounded tab uses — so without this the probe would read
+   * `visible: true, cadenceMs: 0` and look exactly like the bug it exists to
+   * distinguish from. `visible` stays the browser's own fact; this is the other
+   * reason the loop can be parked.
+   */
+  mockOpen?: boolean;
 }
 
 export function installDraftRefreshProbe(read: () => DraftRefreshReport): () => void {

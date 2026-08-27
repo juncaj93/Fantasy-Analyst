@@ -142,10 +142,13 @@ release. That is why `deploy.yml`'s stand-down message names it.
 
 ## Browser verification
 
-Sharded and parallel, always: four widths × three shards in CI, three widths in
-smoke. Never a serial sweep, never a raised timeout to cover a slow one, never a
-Playwright run piped through `tail` or `grep` — a pipe reports the exit code of
-the last command in it, which turns a failing suite into a green tick.
+Sharded and parallel, always: four widths × three shards in CI, and three shards
+in smoke — where `fullyParallel: false` makes a file-per-project the unit of
+splitting, so the three shards come out as one iPhone width each rather than the
+three in series they used to be. Never a serial sweep, never a raised timeout to
+cover a slow one, never a Playwright run piped through `tail` or `grep` — a pipe
+reports the exit code of the last command in it, which turns a failing suite
+into a green tick.
 
 **Locally, that means targeted rather than comprehensive.** CI already runs the
 whole suite at every width, so a local run that walks one width end to end is

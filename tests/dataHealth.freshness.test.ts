@@ -23,7 +23,14 @@ import { UsageSourceRepo } from '../src/server/repos/usage.ts';
 import { INJURY_SOURCE, injurySeason } from '../src/server/services/injuryService.ts';
 import { USAGE_SOURCE, usageSeason } from '../src/server/services/usageService.ts';
 import { FRESHNESS_HOURS } from '../src/core/injury/model.ts';
-import { DAILY_ATTEMPT_STALE_MINUTES, FREQUENT_ATTEMPT_STALE_MINUTES } from '../src/core/health/policy.ts';
+import {
+  DAILY_ATTEMPT_STALE_MINUTES,
+  FREQUENT_ATTEMPT_STALE_MINUTES,
+  VEGAS_REFRESH_GRACE_MINUTES,
+  minutesSinceLastVegasClock,
+  vegasFreshWithinMinutes,
+} from '../src/core/health/policy.ts';
+import { VEGAS_STALE_HOURS } from '../src/server/services/setupService.ts';
 import { needsAttention, type DataHealthView, type SourceHealth } from '../src/core/health/model.ts';
 
 const NOW = new Date('2026-09-15T12:00:00.000Z');
@@ -231,6 +238,91 @@ describe('per-source cadence', () => {
       note: null,
     });
     expect(find(await view(db), 'usage').state).toBe('degraded');
+  });
+});
+
+/**
+ * The market refreshes twice a weekend, so its patience is a weekend's worth.
+ *
+ * `NOW` is a Tuesday, which is the middle of the gap: the most recent clock is
+ * the Sunday 15:00 one, forty-five hours back. Under the flat thirty-six-hour
+ * window this suite used to assert, a market refreshed by that clock — the
+ * newest thing that has ever been available — read as `stale` and, being
+ * `critical`, put "1 input needs attention" on the Setup row for most of every
+ * week. These four cases pin the distinction the window now draws: lines that
+ * came from the last scheduled refresh are current however old the clock makes
+ * them, and lines that predate it are stale however new they look.
+ */
+describe('the Vegas market is measured against its own weekend cadence', () => {
+  /** The window `NOW` is measured against: 45h to the last clock, plus grace. */
+  const WINDOW = 2700 + VEGAS_REFRESH_GRACE_MINUTES;
+
+  /** Write the row a stored weekly market leaves behind. */
+  async function storedLines(db: NodeSqliteDatabase, fetchedAt: string): Promise<void> {
+    await db
+      .prepare(
+        `INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope)
+         VALUES ('sportsgameodds', 'evt-1', ?, ?, '{}', 'week')`,
+      )
+      .bind(new Date(NOW.getTime() + 86_400_000).toISOString(), fetchedAt)
+      .run();
+  }
+
+  it('knows when the last scheduled refresh was due', () => {
+    // Tuesday noon: the Sunday 15:00 clock, forty-five hours back.
+    expect(minutesSinceLastVegasClock(NOW)).toBe(2700);
+    // Sunday 16:00, an hour after that clock — not the Saturday one.
+    expect(minutesSinceLastVegasClock(new Date('2026-09-13T16:00:00.000Z'))).toBe(60);
+    // Sunday 14:00, an hour before it: the Saturday 23:00 clock, fifteen hours.
+    expect(minutesSinceLastVegasClock(new Date('2026-09-13T14:00:00.000Z'))).toBe(900);
+  });
+
+  it('calls lines from the last scheduled refresh current, though they are older than a flat window', async () => {
+    const db = await createTestDb();
+    await storedLines(db, ago(2695)); // stored by Sunday's clock, five minutes after it fired
+    const vegas = find(await view(db), 'vegas');
+
+    // The regression in one line: this is older than the flat rule and fine.
+    expect(vegas.ageMinutes).toBeGreaterThan(VEGAS_STALE_HOURS * 60);
+    expect(vegas.state).toBe('current');
+    expect(vegas.freshWithinMinutes).toBe(WINDOW);
+    expect(needsAttention(vegas)).toBe(false);
+  });
+
+  it('still calls lines that missed a scheduled refresh stale', async () => {
+    const db = await createTestDb();
+    // Saturday's clock stored these; Sunday's should have replaced them and did not.
+    await storedLines(db, ago(3660));
+    const vegas = find(await view(db), 'vegas');
+    expect(vegas.state).toBe('stale');
+    expect(needsAttention(vegas)).toBe(true);
+    // And it says what being stale costs rather than only that it is old.
+    expect(vegas.note).toMatch(/confidence/i);
+  });
+
+  it('is inclusive on the window and stale one minute past it', async () => {
+    const onIt = await createTestDb();
+    await storedLines(onIt, ago(WINDOW));
+    expect(find(await view(onIt), 'vegas').state).toBe('current');
+
+    const pastIt = await createTestDb();
+    await storedLines(pastIt, ago(WINDOW + 1));
+    expect(find(await view(pastIt), 'vegas').state).toBe('stale');
+  });
+
+  it('is never less patient than the rule Setup prints', () => {
+    /*
+     * The floor, checked across a whole week rather than at one instant. Setup
+     * calls a market stale at thirty-six hours; this window may stretch past
+     * that and must never fall short of it, or the two screens would disagree
+     * about the same stored snapshot.
+     */
+    for (let hour = 0; hour < 24 * 7; hour++) {
+      const at = new Date(Date.UTC(2026, 8, 13, hour));
+      expect(vegasFreshWithinMinutes(at, VEGAS_STALE_HOURS * 60)).toBeGreaterThanOrEqual(
+        VEGAS_STALE_HOURS * 60,
+      );
+    }
   });
 });
 
