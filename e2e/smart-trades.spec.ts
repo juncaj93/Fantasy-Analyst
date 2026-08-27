@@ -316,6 +316,23 @@ test.describe('the detail sheet', () => {
     await expect(page.getByTestId('smart-trade-evidence')).toBeVisible();
   });
 
+  /**
+   * And where to open, settle and stop on the player it is chasing.
+   *
+   * Closed, and only present because this offer returns exactly one player — a
+   * ladder prices a named target, and a package coming back has no single
+   * answer to give it. What is inside the fold is `e2e/trade-ladder.spec.ts`;
+   * this is the claim that the offer sheet is one of the two places it is
+   * reachable from, which matters because the market inventory — the other one
+   * — is folded away when the screen loads.
+   */
+  test('offers the price band for the player it is chasing', async ({ page }) => {
+    const toggle = page.getByTestId('smart-trade-ladder-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('smart-trade-ladder-body')).toHaveCount(0);
+  });
+
   test('does not overflow at any supported width', async ({ page }) => {
     expect(await horizontalOverflow(page)).toBe(0);
     const body = (await page.getByTestId('smart-trade-detail-body').boundingBox())!;

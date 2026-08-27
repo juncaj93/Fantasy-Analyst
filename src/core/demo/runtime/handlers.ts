@@ -50,6 +50,8 @@ import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION } from '../../roster/freeAgents.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
 import { assembleSmartTrades } from '../../trades/assemble.ts';
+import { buildLadderFor } from '../../trades/ladderInputs.ts';
+import { buildLadder } from '../../trades/ladder.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../../sleeper/eligibility.ts';
 import { leagueFitNotes } from '../../sleeper/scoring.ts';
 import { resolveSeasonPhase } from '../../sleeper/phase.ts';
@@ -234,6 +236,22 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
         week: week == null ? null : Number(week),
       }),
     );
+  }
+
+  /*
+   * What one named player would cost, priced through the same four passes.
+   *
+   * Its own branch rather than a case in the group below, because it is the one
+   * league read that takes a query parameter and the one whose "not found" is
+   * an answer rather than an error.
+   */
+  const ladder = /^\/api\/leagues\/([^/]+)\/trades\/ladder$/.exec(path);
+  if (ladder) {
+    const leagueId = decodeURIComponent(ladder[1]!);
+    if (leagueId !== data.league.id) return fail('league not found', 404);
+    const targetId = params.get('playerId');
+    if (!targetId) return fail('playerId is required', 400);
+    return tradeLadder(data, targetId);
   }
 
   const league = /^\/api\/leagues\/([^/]+)\/(roster|lineup|waivers|bench|managers)$/.exec(path);
@@ -731,6 +749,50 @@ function trades(data: ScenarioData, limit: number) {
     considered: candidates.length,
     warnings: data.notes,
   };
+}
+
+/**
+ * Where to open, where to settle, where to stop — over the scenario's rosters.
+ *
+ * The same two functions the deployed handler calls, in the same order:
+ * `buildLadderFor` runs the lineup optimiser four times (my roster with and
+ * without him, his owner's with and without him) and `buildLadder` turns those
+ * three numbers into rungs. Nothing about the price is decided here.
+ *
+ * `profile: null`, and deliberately — the same answer, for the same reason, as
+ * the `managers` endpoint above. That field is the *roster-keyed cached profile*
+ * a nightly backfill writes, a demo runs no backfill and stores nothing, and a
+ * fabricated one would put a tendency on a manager the app has not measured.
+ * The ladder handles it exactly as it handles a live league whose history has
+ * never been read: the standard opening discount, and a screen that says the
+ * sample is missing instead of describing somebody from it.
+ */
+function tradeLadder(data: ScenarioData, targetId: string): DemoResponse {
+  const { profile, shape, mine } = demoLeagueContext(data);
+  if (!mine) return fail('no roster in this league is marked as yours', 409);
+
+  const theirs = data.rosters.find((roster) => !roster.isMine && roster.playerIds.includes(targetId)) ?? null;
+  if (!theirs) {
+    return ok({ found: false, reason: 'Nobody in this league rosters him — this is an add, not a trade.' });
+  }
+
+  const built = buildLadderFor({
+    targetId,
+    mineInputs: startSitInputsFrom(data, mine.playerIds),
+    theirsInputs: startSitInputsFrom(data, theirs.playerIds),
+    shape,
+    profile,
+  });
+  if (!built) return fail('player not found on that roster', 404);
+
+  return ok({
+    found: true,
+    league: { id: data.league.id, name: data.league.name },
+    partner: { rosterId: theirs.rosterId, ownerName: theirs.ownerName, profile: null },
+    target: built.target,
+    ladder: buildLadder({ ...built.inputs, partner: null }),
+    consolidation: built.consolidation,
+  });
 }
 
 const MAX_COMPARE = 4;

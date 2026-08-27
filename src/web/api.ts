@@ -1599,6 +1599,72 @@ export interface SmartTradeBoard {
 }
 
 /**
+ * `GET /api/leagues/:id/trades/ladder?playerId=` — what one named player costs.
+ *
+ * The negotiation half of Trades, where the board above is the discovery half.
+ * It prices four lineup passes — my roster with and without him, his owner's
+ * roster with and without him — so it is asked for one player at a time, on
+ * demand, and never as part of a screen's first paint.
+ *
+ * The shapes come from core for the same reason the bilateral ones do: they are
+ * computed by pure modules both sides of the wire already compile, and a
+ * hand-written second copy is a copy that drifts.
+ */
+export type { LadderInputs, TradeLadder, TradeSide } from '../core/trades/ladder.ts';
+export type { ConsolidationAdvice, ConsolidationVerdict } from '../core/trades/consolidation.ts';
+export type { ManagerTradeProfile, NegotiationStyle } from '../core/managers/tradeProfile.ts';
+
+import type { TradeLadder } from '../core/trades/ladder.ts';
+import type { ConsolidationAdvice } from '../core/trades/consolidation.ts';
+import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
+
+/**
+ * A stored manager profile, with what the cache knows about its freshness.
+ *
+ * Restated here rather than imported because the type is declared in
+ * `server/repos/`, and nothing under `web/` imports from the server — the
+ * boundary `tests/infrastructureIsolation.test.ts` keeps. It is five fields and
+ * they are the wire's, not the repository's.
+ */
+export interface CachedManagerProfile<T> {
+  profile: T;
+  /** Completed observations behind the profile. */
+  sample: number;
+  /** False until the sample clears the profile's own threshold. Read this first. */
+  confident: boolean;
+  computedAt: string;
+  /** True when the cached row is older than the profile TTL. */
+  stale: boolean;
+}
+
+/** Who holds the target, and what this league's history says about him. */
+export interface LadderPartner {
+  rosterId: number;
+  /** Null wherever Sleeper has not named the seat — never a stand-in. */
+  ownerName: string | null;
+  /** Null when no profile has ever been built for this manager. */
+  profile: CachedManagerProfile<ManagerTradeProfile> | null;
+}
+
+/**
+ * Either a priced ladder, or the one honest reason there is no trade to price.
+ *
+ * `found: false` is not an error and is not a 404: a player nobody else rosters
+ * is a waiver add, and saying so answers the reader's actual question.
+ */
+export type TradeLadderResponse =
+  | { found: false; reason: string }
+  | {
+      found: true;
+      league: { id: string; name: string };
+      partner: LadderPartner;
+      target: { playerId: string; name: string; position: string; value: number };
+      ladder: TradeLadder;
+      /** Whether turning depth into one better player suits this roster at all. */
+      consolidation: ConsolidationAdvice | null;
+    };
+
+/**
  * `GET /api/leagues/:id/matchup` — this week's head-to-head.
  *
  * The forecast's own shapes are imported from core rather than restated here.
