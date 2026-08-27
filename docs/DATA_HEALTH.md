@@ -72,9 +72,21 @@ Almost every window is imported from the module that already owns it:
 | Source | Window | Owner |
 |---|---|---|
 | Injuries | `FRESHNESS_HOURS.fresh` (30h) | `core/injury/model.ts` — the same boundary `injuryLine` prints against |
-| Vegas lines | `VEGAS_STALE_HOURS` (36h) | `server/services/setupService.ts` |
+| Vegas lines | the gap to the last weekend clock, floored at `VEGAS_STALE_HOURS` (36h) | `core/health/policy.ts`, over `server/services/setupService.ts` |
 | Season market lines | `SEASON_TTL_MINUTES` (24h) | `server/services/seasonMarketService.ts`, used through its own `stale` verdict |
 | NFL week | `STATE_STALE_AFTER_DAYS` (14d) | `core/season/context.ts` |
+
+The Vegas row is the one window that is not a constant, and the reason is its
+cadence. Nothing refreshes the market between Sunday 15:00 UTC and the
+following Saturday 23:00 — that is deliberate, and it is what keeps the month
+inside the free allowance — so a flat 36-hour window reported a perfectly
+healthy market as stale for roughly four and a half days of every week, and
+`vegas` being `critical` meant it took the headline with it. The window now
+stretches to the gap the cadence itself creates and no further, which asks *did
+the last scheduled refresh land* rather than *how old are these lines*. Setup's
+36 hours stays as the floor, so this screen can only ever be more patient than
+Setup and never less, and the two cannot be made to disagree about the same
+snapshot.
 
 Two thresholds are genuinely new, and both answer a question no existing rule
 answers — *has the pipeline stopped running?* as opposed to *is the data old?*

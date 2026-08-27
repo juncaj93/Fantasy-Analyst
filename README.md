@@ -152,6 +152,15 @@ given no empty heading and no invented copy. What it quotes is not repeated in
 *Latest news* underneath it; the item itself is untouched, and the evidence
 timeline one tap in still shows the whole ledger with that item marked.
 
+*Latest news* shows each distinct fact once, by its most recent telling. Two
+lines that are the same claim reworded — "paired with an NFL-leading 2,298
+scrimmage yards" and "led the NFL with 2,298 scrimmage yards" — take one line
+between them, and the one they free goes to the next real signal. Two genuinely
+different things from the same day still take two lines, and different numbers
+always mean different facts. This is which lines a card shows and nothing else:
+nothing is deleted, nothing is rewritten, the card still says how many rows it
+is not showing, and the evidence timeline one tap in still prints all of them.
+
 The same pair reads the same way on the draft board. Tapping a player there
 opens **Insight**, then **Latest news**, then the season outlook, then last
 season — in place of two lines the collapsed row was already carrying.

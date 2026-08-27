@@ -150,6 +150,7 @@ describe('surfacing status changes no ranking', () => {
       .join('\n');
     const { snapshot } = await new AdpRepo(db).save(
       importAdpSnapshot(`${csv}\n`, index, { label: 't', source: 't' }),
+      '2026',
     );
     await leagues.setDraftSnapshot('dr', snapshot.id);
     return new DraftBoardService(db).build('dr', { limit: 20 });

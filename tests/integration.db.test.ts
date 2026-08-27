@@ -264,7 +264,7 @@ describe('AdpRepo', () => {
   it('persists a snapshot with its rows and match status', async () => {
     const index = await new PlayerRepo(db).buildIndex();
     const repo = new AdpRepo(db);
-    const { snapshot, created } = await repo.save(importAdpSnapshot(CSV, index));
+    const { snapshot, created } = await repo.save(importAdpSnapshot(CSV, index), '2026');
     expect(created).toBe(true);
     expect(snapshot.rowCount).toBe(3);
     expect(snapshot.matchedCount).toBe(2);
@@ -275,8 +275,8 @@ describe('AdpRepo', () => {
   it('does not duplicate an identical re-import (frozen snapshot)', async () => {
     const index = await new PlayerRepo(db).buildIndex();
     const repo = new AdpRepo(db);
-    const first = await repo.save(importAdpSnapshot(CSV, index));
-    const second = await repo.save(importAdpSnapshot(CSV, index));
+    const first = await repo.save(importAdpSnapshot(CSV, index), '2026');
+    const second = await repo.save(importAdpSnapshot(CSV, index), '2026');
     expect(second.created).toBe(false);
     expect(second.snapshot.id).toBe(first.snapshot.id);
     expect(await repo.list()).toHaveLength(1);
@@ -292,7 +292,7 @@ describe('AdpRepo', () => {
     const repo = new AdpRepo(db);
     const file = `${CSV}Ghost Player Two,WR,SEA,101\n`;
 
-    const { snapshot } = await repo.save(importAdpSnapshot(file, await players.buildIndex()));
+    const { snapshot } = await repo.save(importAdpSnapshot(file, await players.buildIndex()), '2026');
     expect(await repo.unresolvedRows(snapshot.id)).toHaveLength(2);
 
     // Teach the index one of the two names.
@@ -300,7 +300,7 @@ describe('AdpRepo', () => {
       player({ id: 'ghost', fullName: 'Ghost Player', team: 'SEA', position: 'WR' }),
     ]);
     const again = importAdpSnapshot(file, await players.buildIndex());
-    const second = await repo.save(again);
+    const second = await repo.save(again, '2026');
     expect(second.created).toBe(false);
     expect(await repo.reconcile(second.snapshot.id, again)).toBe(1);
 
@@ -313,7 +313,7 @@ describe('AdpRepo', () => {
     const players = new PlayerRepo(db);
     const repo = new AdpRepo(db);
     const result = importAdpSnapshot(CSV, await players.buildIndex());
-    const { snapshot } = await repo.save(result);
+    const { snapshot } = await repo.save(result, '2026');
     const [row] = await repo.unresolvedRows(snapshot.id);
     await repo.resolveRow(row!.id, '11');
     expect(await repo.reconcile(snapshot.id, result)).toBe(0);
@@ -323,15 +323,15 @@ describe('AdpRepo', () => {
   it('creates a separate snapshot for different content', async () => {
     const index = await new PlayerRepo(db).buildIndex();
     const repo = new AdpRepo(db);
-    await repo.save(importAdpSnapshot(CSV, index));
-    await repo.save(importAdpSnapshot(`${CSV}Jordan Love,QB,GB,120\n`, index));
+    await repo.save(importAdpSnapshot(CSV, index), '2026');
+    await repo.save(importAdpSnapshot(`${CSV}Jordan Love,QB,GB,120\n`, index), '2026');
     expect(await repo.list()).toHaveLength(2);
   });
 
   it('exposes unresolved rows and lets the user resolve them', async () => {
     const index = await new PlayerRepo(db).buildIndex();
     const repo = new AdpRepo(db);
-    const { snapshot } = await repo.save(importAdpSnapshot(CSV, index));
+    const { snapshot } = await repo.save(importAdpSnapshot(CSV, index), '2026');
     const unresolved = await repo.unresolvedRows(snapshot.id);
     expect(unresolved).toHaveLength(1);
     expect(unresolved[0]?.sourcePlayerName).toBe('Ghost Player');

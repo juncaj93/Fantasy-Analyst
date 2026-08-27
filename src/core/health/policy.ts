@@ -102,6 +102,87 @@ export const DAILY_ATTEMPT_STALE_MINUTES = 36 * 60;
 export const FREQUENT_ATTEMPT_STALE_MINUTES = 30;
 
 /**
+ * The two UTC clocks the Vegas refresh actually runs on.
+ *
+ * Saturday 23:00 and Sunday 15:00, which is what `wrangler.toml` registers and
+ * what `docs/VEGAS.md` §"The budget" commits to. The cadence is deliberately
+ * weekend-only: a weekday refresh would buy entities against a 2,500-a-month
+ * allowance to price games nobody's lineup is locked into yet.
+ *
+ * Named here rather than derived from the cron strings because a cron parser is
+ * a great deal of machinery for two instants that have not moved in a year, and
+ * because the numbers are checked against `CRON_LABELS` by the freshness suite.
+ */
+export const VEGAS_REFRESH_CLOCKS: readonly { readonly day: number; readonly hour: number }[] = [
+  { day: 6, hour: 23 },
+  { day: 0, hour: 15 },
+] as const;
+
+/**
+ * How long after a scheduled clock its run has to actually land.
+ *
+ * A run fires at 15:00 and stores at 15:02, and for those two minutes the
+ * newest thing in the database is last night's. Without a grace period the row
+ * would flick to `stale` at the top of every clock and back again a moment
+ * later, which is a screen crying wolf twice a week at the exact hours somebody
+ * is looking at it. Ninety minutes is the same figure `core/vegas/budget.ts`
+ * uses for a near-kickoff TTL, and it is long enough to cover a run that had to
+ * retry.
+ */
+export const VEGAS_REFRESH_GRACE_MINUTES = 90;
+
+/**
+ * Minutes since the most recent scheduled Vegas refresh should have fired.
+ *
+ * Walks back at most a week from `now`, which is more than enough: both clocks
+ * appear in any seven-day window, so the search always finds one.
+ */
+export function minutesSinceLastVegasClock(now: Date): number {
+  let best = -Infinity;
+  for (const clock of VEGAS_REFRESH_CLOCKS) {
+    for (let back = 0; back <= 7; back++) {
+      const at = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - back,
+        clock.hour,
+        0,
+        0,
+      );
+      if (new Date(at).getUTCDay() !== clock.day) continue;
+      if (at <= now.getTime() && at > best) best = at;
+    }
+  }
+  return Math.floor((now.getTime() - best) / 60_000);
+}
+
+/**
+ * How old the stored lines may be before the *schedule* is the story.
+ *
+ * The window this replaced was a flat 36 hours, and it was measuring the wrong
+ * thing. Nothing refreshes the market between Sunday afternoon and the
+ * following Saturday night — that is the design, and it is what protects the
+ * monthly allowance — so a flat day-and-a-half window reported the market as
+ * stale from about Tuesday morning until Saturday night, roughly four and a
+ * half days of every week, in season and out. Vegas is `critical`, so it took
+ * the headline with it: a screen that says two inputs need attention every
+ * Wednesday is a screen that has taught its reader to close it.
+ *
+ * The honest question for a feed on a weekend cadence is not *how old are these
+ * lines* but *did the last scheduled refresh land*. So the window stretches to
+ * cover the gap the cadence itself creates, and no further: lines newer than
+ * the most recent clock are current, and lines older than it are stale, because
+ * a refresh was due and they are not the result of it.
+ *
+ * `floorMinutes` keeps the caller's own flat rule as a lower bound, so this can
+ * only ever be *more* patient than the rule Setup prints and never less — the
+ * two screens can never be made to disagree about a market Setup calls stale.
+ */
+export function vegasFreshWithinMinutes(now: Date, floorMinutes: number): number {
+  return Math.max(floorMinutes, minutesSinceLastVegasClock(now)) + VEGAS_REFRESH_GRACE_MINUTES;
+}
+
+/**
  * What each of Cloudflare's cron expressions is called on the screen.
  *
  * Keyed by the expression `wrangler.toml` registers, because that is the string
