@@ -58,13 +58,28 @@ import {
   exact,
   type ReplayReport,
 } from './contract.ts';
-import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
+import {
+  SUPPORT_SNAPSHOT_SCHEMA,
+  type SnapshotDataHealth,
+  type SupportSnapshot,
+} from './schema.ts';
 import type { LineupPayload } from './payloads.ts';
 
 /** Everything the live route and Demo Mode already hold when they draw the screen. */
 export interface LineupCaptureInput {
   /** The deployed revision, from the same plumbing `/api/health` reports. */
   gitSha: string;
+  /**
+   * Whether the inputs behind this decision were healthy and current.
+   *
+   * Optional and passed in rather than measured here: it is a fact about the
+   * deployment, read by `DataHealthService` from state the pipelines already
+   * keep, and a capture adapter has no business asking a second time. Omitted
+   * where the health view could not be read, which is honest — a snapshot with
+   * no health section says nothing about health, where an empty one would
+   * claim everything was fine.
+   */
+  dataHealth?: SnapshotDataHealth | null;
   league: LeagueRecord;
   rosters: RosterRecord[];
   /** The roster the decision is on behalf of. */
@@ -124,6 +139,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
     schema: SUPPORT_SNAPSHOT_SCHEMA,
     capturedAt,
     release: { gitSha: input.gitSha, surface: 'lineup', engineVersion: LINEUP_ENGINE_VERSION },
+    ...(input.dataHealth ? { dataHealth: input.dataHealth } : {}),
     redaction: {
       replaced: {
         'manager id': aliases.counts.ids,

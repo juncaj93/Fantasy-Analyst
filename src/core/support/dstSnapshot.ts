@@ -59,7 +59,11 @@ import {
   exact,
   type ReplayReport,
 } from './contract.ts';
-import { SUPPORT_SNAPSHOT_SCHEMA, type SupportSnapshot } from './schema.ts';
+import {
+  SUPPORT_SNAPSHOT_SCHEMA,
+  type SnapshotDataHealth,
+  type SupportSnapshot,
+} from './schema.ts';
 import type { DstPlanPayload, DstReads } from './payloads.ts';
 
 /**
@@ -125,6 +129,17 @@ export function snapshotDstSources(reads: DstReads): DstPlanSources {
 
 export interface DstCaptureInput {
   gitSha: string;
+  /**
+   * Whether the inputs behind this decision were healthy and current.
+   *
+   * Optional and passed in rather than measured here: it is a fact about the
+   * deployment, read by `DataHealthService` from state the pipelines already
+   * keep, and a capture adapter has no business asking a second time. Omitted
+   * where the health view could not be read, which is honest — a snapshot with
+   * no health section says nothing about health, where an empty one would
+   * claim everything was fine.
+   */
+  dataHealth?: SnapshotDataHealth | null;
   league: LeagueRecord;
   mine: RosterRecord;
   sources: DstPlanSources;
@@ -159,6 +174,7 @@ export async function captureDstSnapshot(input: DstCaptureInput): Promise<Suppor
     schema: SUPPORT_SNAPSHOT_SCHEMA,
     capturedAt,
     release: { gitSha: input.gitSha, surface: 'dst-plan', engineVersion: DST_ENGINE_VERSION },
+    ...(input.dataHealth ? { dataHealth: input.dataHealth } : {}),
     redaction: {
       replaced: {
         'manager id': aliases.counts.ids,

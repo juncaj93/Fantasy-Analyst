@@ -190,6 +190,18 @@ refused outright rather than trimmed, and every snapshot carries the list of
 what was taken out of it. See
 [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md).
 
+**Data health** — the row directly above it, answering the other half of the
+same question. Support Snapshot says what the app knew; this says whether what
+it knew was healthy and current. `Healthy · refreshed 18 min ago`, or
+`2 inputs need attention`, and behind it one screen: which inputs are current,
+which are stale, which are waiting on a source that has not published, which are
+missing, and which background work deliberately yielded its refresh budget to
+the feeds a lineup depends on. Plus what the last scheduled refresh actually
+did. Every capture carries a small version of it, so a questionable Draft or
+Week 1+ recommendation can be diagnosed from the file rather than from
+Cloudflare, GitHub and D1. Reading it runs no cron, refreshes no provider and
+writes nothing. See [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md).
+
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
@@ -262,6 +274,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |
 | [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md) | capturing the state behind a recommendation, replaying it deterministically, and turning a real case into a regression fixture |
+| [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md) | whether what the app knew was healthy and current: the source inventory, the freshness policy, the scheduled-run ledger and what a support snapshot carries |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
 | [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) | the market-anchored usage model, evaluated side by side and consumed by nothing |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |

@@ -128,6 +128,9 @@ import { NflverseService } from './services/nflverseService.ts';
 import { ProjectionV2Service } from './services/projectionV2Service.ts';
 import { classificationsByClass } from '../core/projection/classification.ts';
 import { PlayerDetailService } from './services/playerDetailService.ts';
+import { DataHealthService } from './services/dataHealthService.ts';
+import { toSnapshotHealth } from '../core/health/snapshot.ts';
+import type { SnapshotDataHealth } from '../core/support/schema.ts';
 
 export interface AppEnv extends AuthEnv {
   db: Database;
@@ -249,6 +252,41 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       service: 'fantasy-analyst',
       release: { gitSha: reportedGitSha(ctx.env.releaseSha) },
     }));
+
+  /**
+   * Whether what the app knew was healthy and current.
+   *
+   * The read half of the support loop, and the companion to
+   * `/api/*​/support-snapshot`: that one says exactly what Junculator knew when
+   * it made a decision, this one says whether what it knew was any good. A
+   * questionable Draft or Week 1+ recommendation can be checked against both
+   * without anybody opening Cloudflare, GitHub or D1.
+   *
+   * **Its own route, deliberately not part of `/api/health`.** That endpoint
+   * has one job — is it up, which app is it, which revision is it running — and
+   * the release gate compares its `release.gitSha` against the SHA it deployed.
+   * Anything added there is a thing that can break the one check standing
+   * between a bad deploy and production.
+   *
+   * **A GET, and everything about it is a read.** `DataHealthService` has no
+   * write method, no refresh and no fetch: it reads state the shipped pipelines
+   * already record and derives from it. It cannot run a cron, refresh a
+   * provider, mutate D1, start manager ingestion or change a fantasy decision,
+   * and `tests/dataHealth.isolation.test.ts` asserts that by watching every
+   * statement it prepares rather than by describing it here.
+   *
+   * Public like every other read, and it carries nothing that would not be:
+   * timestamps, canonical outcome words, bounded notes written for a person,
+   * and the same revision `/api/health` already reports. No secrets, no
+   * provider payloads, no raw exceptions, no identifiers.
+   */
+  router.get('/api/data-health', async (ctx) =>
+    jsonResponse(
+      await new DataHealthService(ctx.env.db, {
+        vegas: ctx.env.vegas,
+        releaseSha: ctx.env.releaseSha ?? null,
+      }).view(),
+    ));
 
   router.get('/api/auth/status', async (ctx) => {
     const unlocked = ctx.env.disableAuth ? true : await verifySession(ctx.request, ctx.env);
@@ -1342,6 +1380,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         await captureDraftSnapshot(sources, {
           draftId: ctx.params['id']!,
           gitSha: reportedGitSha(ctx.env.releaseSha),
+          dataHealth: await snapshotHealth(ctx.env),
           position: ctx.url.searchParams.get('position'),
           queuedOnly: ctx.url.searchParams.get('queued') === '1',
         }),
@@ -1389,6 +1428,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           leagueId: ctx.params['id']!,
           context,
           gitSha: reportedGitSha(ctx.env.releaseSha),
+          dataHealth: await snapshotHealth(ctx.env),
           mode: ctx.url.searchParams.get('mode'),
           week: week == null ? null : Number(week),
         }),
@@ -2770,6 +2810,32 @@ function escapeRegex(input: string): string {
  * kept because the scheduled worker and the manual route both call it, and
  * neither should have to know any of that.
  */
+/**
+ * The health block a support snapshot carries, or nothing.
+ *
+ * Read here rather than inside the capture, for the reason `gitSha` is: it is a
+ * fact about the deployment, one service measures it, and a capture that
+ * measured it a second time could disagree with the screen the user was
+ * standing on when they tapped the button.
+ *
+ * Failure is silent and the section is simply absent. A snapshot with no health
+ * section says nothing about health, which is honest; a snapshot carrying an
+ * empty one would say everything was fine. And the point of the button is the
+ * decision — a diagnostic that refused to produce one because a health read
+ * threw would be the tail wagging the dog.
+ */
+async function snapshotHealth(env: AppEnv): Promise<SnapshotDataHealth | null> {
+  try {
+    const view = await new DataHealthService(env.db, {
+      vegas: env.vegas,
+      releaseSha: env.releaseSha ?? null,
+    }).view();
+    return toSnapshotHealth(view);
+  } catch {
+    return null;
+  }
+}
+
 export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {}): Promise<VegasRefreshReport> {
   return new VegasRefreshService(env.db, env.vegas).refresh(opts);
 }

@@ -62,6 +62,8 @@ import {
   tradeCandidatesFrom,
 } from './sources.ts';
 import { buildDemoPlayerDetail, buildDemoRollover, buildDemoSetupStatus } from './setup.ts';
+import { buildDemoDataHealth } from './health.ts';
+import { toSnapshotHealth } from '../../health/snapshot.ts';
 import { captureDemoSnapshot } from './support.ts';
 import { IN_SEASON_KINDS, isInSeasonKind } from '../../support/contexts.ts';
 import {
@@ -118,6 +120,15 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
   if (path === '/api/overview') return ok(overview(data));
   if (path === '/api/leagues') return ok({ leagues: [leagueSummary(data)] });
   if (path === '/api/setup/status') return ok(buildDemoSetupStatus(data));
+  /*
+   * Data Health, from the scenario's own declared freshness.
+   *
+   * Same shape, same words and same derivation functions as the deployment —
+   * see `runtime/health.ts`, which builds every row through the production
+   * assembler rather than writing a second one. No network, no D1, and the
+   * revision reports `demo` so a rehearsal cannot be mistaken for production.
+   */
+  if (path === '/api/data-health') return ok(buildDemoDataHealth(data));
   if (path === '/api/diagnostics/rollover') return ok(buildDemoRollover(data));
   if (path === '/api/setup/newsletter') return ok(buildDemoSetupStatus(data).newsletter);
   if (path === '/api/newsletter/messages') return ok({ messages: [] });
@@ -172,6 +183,13 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
       await captureDraftSnapshot(draftBoardSourcesFrom(data), {
         draftId: decodeURIComponent(snapshot[1]!),
         gitSha: 'demo',
+        /*
+         * And the same health section a live capture carries, from the same
+         * reducer over the scenario's own view. A support file produced in a
+         * rehearsal is the file the live app produces, health block included —
+         * which is what makes the support workflow learnable without a league.
+         */
+        dataHealth: toSnapshotHealth(buildDemoDataHealth(data)),
         position: params.get('position'),
         queuedOnly: params.get('queued') === '1',
       }),

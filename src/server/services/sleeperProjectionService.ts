@@ -95,11 +95,19 @@ export class SleeperProjectionService {
     try {
       rows = parseSleeperWeeklyProjections(await this.sleeper.getWeeklyProjections(season, week));
     } catch (err) {
-      return {
-        ...base,
-        outcome: 'unavailable',
-        detail: `published projections could not be read (${err instanceof Error ? err.message : String(err)})`,
-      };
+      /*
+       * The exception is logged; it is not the `detail`.
+       *
+       * `detail` is documented directly above as one clause safe to show a
+       * user, and this branch was interpolating whatever the transport threw —
+       * which is the request URL on a Sleeper failure, and would be whatever a
+       * future client chose to put in a message. That value now reaches a
+       * support surface and a support snapshot through the cron run record, so
+       * "safe to show a user" has to be true rather than intended. The
+       * operator's copy goes to the log, where a user cannot read it.
+       */
+      console.error('published projection fetch failed', err);
+      return { ...base, outcome: 'unavailable', detail: 'published projections could not be read' };
     }
 
     if (rows.length === 0) {

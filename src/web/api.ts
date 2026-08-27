@@ -822,6 +822,16 @@ export interface AiTallyApplyOutcome {
   detail: string;
 }
 
+/*
+ * Data health, typed from the model the server derives it with.
+ *
+ * Re-exported rather than restated, so the contract cannot drift: the screen
+ * renders exactly the shape `DataHealthService` produces and Demo Mode's
+ * `buildDemoDataHealth` produces, and a field added to one is a field the other
+ * two have to account for. Type-only, so nothing reaches the bundle.
+ */
+export type { DataHealthView, RunHealth, SourceHealth } from '../core/health/model.ts';
+
 export interface SetupStatus {
   steps: SetupStep[];
   readyForDraft: boolean;
