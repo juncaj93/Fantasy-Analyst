@@ -535,6 +535,16 @@ const POLARITY_WORD: Record<string, string> = {
  * The source is printed only when it varies. On this surface it is very often
  * one newsletter repeated down the list, and a name that is the same on every
  * line qualifies nothing while costing every line the room to say something.
+ *
+ * **What the takeaway has already said is not said again here.** The takeaway
+ * is chosen from this same ledger, so on the common card — one applied item,
+ * lifted to the top — `Latest news` was the takeaway a second time with a date
+ * under it, four lines apart and word for word. It was marked rather than
+ * dropped, which named the duplication without removing it. The item is not
+ * deleted from anything: it is still counted in the tally, still on the
+ * player's own page, and still in the Evidence timeline where it is marked
+ * `quoted above` — that surface exists to show the whole ledger and is the one
+ * place the repetition is the point.
  */
 export function LatestNews({
   items,
@@ -543,28 +553,30 @@ export function LatestNews({
 }: {
   /** The whole ledger for this player, or null while it is being read. */
   items: { id: string; sourceName: string; sourceDate: string; excerpt: string; contextSummary: string | null; ruleId?: string | null; polarity: string; userOverride: { polarity?: string; note?: string } | null }[] | null;
-  /** Items the takeaway above already quoted, marked rather than hidden. */
+  /** Items the takeaway above already quoted, and which this must not repeat. */
   quotedEvidenceIds: string[];
   /** How many of the newest to show before saying how many are left. */
   limit: number;
 }) {
   if (items == null) return <SkeletonRows rows={2} testId="player-news-skeleton" />;
   const quoted = new Set(quotedEvidenceIds);
+  const rest = items.filter((item) => !quoted.has(item.id));
   /*
-   * An empty ledger draws nothing at all, heading included.
+   * An empty ledger draws nothing at all, heading included — and so does one
+   * whose every item is already the takeaway above.
    *
    * A card is a set of answers, and `Latest news / nothing yet` is a heading
    * spending a line to report that a heading was not needed. Plenty of players
    * have never been written about — that is the ordinary case in August, not a
    * state worth announcing.
    */
-  if (items.length === 0) return null;
-  const shown = items.slice(0, limit);
-  const withheld = items.length - shown.length;
+  if (rest.length === 0) return null;
+  const shown = rest.slice(0, limit);
+  const withheld = rest.length - shown.length;
   // One name on every line is not provenance, it is a repeated word. Measured
   // across the whole ledger rather than the two on screen, so the answer does
   // not change as the list is scrolled or the limit is raised.
-  const varies = new Set(items.map((i) => i.sourceName)).size > 1;
+  const varies = new Set(rest.map((i) => i.sourceName)).size > 1;
 
   return (
     <>
@@ -598,12 +610,16 @@ export function LatestNews({
               <span className="sr-only">{word} news: </span>
               {sentence.quoted ? <span data-testid="evidence-excerpt">“{sentence.text}”</span> : sentence.text}
             </div>
+            {/*
+              No `quoted above` marker here any more, because nothing on this
+              list is quoted above: the takeaway's own items were filtered out
+              before the slice. The marker still exists on the Evidence
+              timeline, which shows every item and therefore does have to say
+              which one was lifted.
+            */}
             <div className="player-news-when">
               {formatDate(item.sourceDate)}
               {varies ? ` · ${item.sourceName}` : ''}
-              {quoted.has(item.id) ? (
-                <span data-testid="evidence-quoted"> · quoted above</span>
-              ) : null}
             </div>
           </div>
         );

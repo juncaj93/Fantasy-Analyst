@@ -20,6 +20,13 @@
  *     pan-y` on the layer is what makes that arbitration the browser's rather
  *     than ours: no `preventDefault` is called on any touch region anywhere.
  *
+ *     The sheet drag stopped being the exception to that. It briefly held a
+ *     non-passive `touchmove` listener so it could claim a downward drag on
+ *     content sitting at its top, and the claim had to be made on the first
+ *     move — before there was enough of the gesture to tell an upward scroll
+ *     from a thumb landing. WebKit decides once, so guessing wrong cost the
+ *     reader the whole swipe. See {@link useSheetDrag}.
+ *
  *  3. **Back is navigation, never undo.** The gesture calls exactly the same
  *     function the Back control calls. It cannot reach a draft pick, a My Guy
  *     level, a filter or anything else that is stored — leaving a detail screen
@@ -195,25 +202,6 @@ export function sheetDecision(dx: number, dy: number): 'wait' | 'drag' | 'releas
   if (ax < ENGAGE_DISTANCE && ay < ENGAGE_DISTANCE) return 'wait';
   if (dy > 0 && ay > ax * DIRECTION_RATIO) return 'drag';
   return 'release';
-}
-
-/**
- * Whether this movement could still, at this instant, become a dismissal.
- *
- * Asked *before* the engage distance, and that is the whole point of it. The
- * browser decides who owns a touch on the first `touchmove`; `wait` is not an
- * answer it accepts, and a sheet that waits for eight pixels of certainty has
- * already lost the gesture to the scroller by the time it has them.
- *
- * So the question here is much weaker than {@link sheetDecision}'s: is this
- * going *down*, and is it not already more sideways than down? Everything that
- * passes is held open as a candidate, the browser is asked to keep its hands
- * off, and the real decision is taken a few pixels later. Being wrong costs
- * nothing, because the only gesture this claims is a downward one on content
- * that is already at its top — where scrolling has nowhere to go.
- */
-export function sheetCandidate(dx: number, dy: number): boolean {
-  return dy > 0 && dy >= Math.abs(dx);
 }
 
 /** How much recent movement a flick is judged on, in milliseconds. */
@@ -564,7 +552,12 @@ function ownsItsOwnDrag(el: HTMLElement): boolean {
 interface GestureContext {
   /** A control claimed this drag before it started. */
   blocked: boolean;
-  /** The nearest thing between the finger and the sheet that scrolls vertically. */
+  /**
+   * The nearest thing between the finger and the sheet that scrolls vertically.
+   *
+   * Its presence is the answer, not its `scrollTop`: a box that can scroll owns
+   * this gesture wherever it happens to be scrolled to. See {@link useSheetDrag}.
+   */
   scroller: HTMLElement | null;
   /** Something under the finger scrolls sideways, so this is not a dismissal. */
   sideways: boolean;
@@ -603,7 +596,6 @@ interface SheetGesture {
   pointerId: number;
   startX: number;
   startY: number;
-  scroller: HTMLElement | null;
   engaged: boolean;
   samples: Sample[];
 }
@@ -616,28 +608,48 @@ const SAMPLE_LIMIT = 12;
  *
  * Four rules, in this order, and every one of them is a bug that was reported:
  *
- *  1. **Scrolled content owns the gesture.** A drag that begins with the
- *     content under the finger scrolled away from its top is a scroll, and is
- *     never taken. This is the rule every native sheet has and the reason one
- *     never feels like a fight.
+ *  1. **Content that scrolls owns every vertical gesture on it.** A drag that
+ *     begins on a box with somewhere to scroll is a scroll, from the first
+ *     pixel, and is never taken. This is the rule every native sheet has and
+ *     the reason one never feels like a fight.
  *
- *  2. **Content at its top hands the gesture over.** The other half of rule 1,
- *     and the half this app did not have. A tall sheet declares `touch-action:
- *     pan-y` on its body so the browser can scroll it — and that declaration
- *     meant WebKit had classified a downward drag as a scroll before the first
- *     `pointermove` arrived, so on the sheets a reader actually opens, a pull
- *     anywhere on the content did nothing at all. The grip was the only place
- *     it worked: about forty pixels of a phone.
+ *     It used to be narrower — *scrolled* content owned the gesture, and
+ *     content sitting at `scrollTop: 0` was fair game for a dismissal, on the
+ *     grounds that a downward drag there has nowhere to scroll anyway. The
+ *     grounds are true and the conclusion did not survive contact with WebKit,
+ *     for a reason worth writing down because it is not obvious and it cost a
+ *     release.
  *
- *     The fix is not a bigger threshold and not a handler per screen. It is one
- *     non-passive `touchmove` listener on the sheet, which is what obliges
- *     WebKit to ask before it starts scrolling, plus {@link sheetCandidate} —
- *     asked on the *first* move, well under the engage distance, because the
- *     first move is when the browser wants its answer. A downward drag on
- *     content already at `scrollTop: 0` has nowhere to scroll, so claiming it
- *     takes nothing away, and `preventDefault` there is exactly as narrow as a
- *     modal surface is entitled to be. Nothing outside a sheet is touched: the
- *     back gesture and the pull-to-refresh still call `preventDefault` nowhere.
+ *     WebKit decides whether a touch sequence may scroll **once**, from the
+ *     first `touchmove`: prevent that one and nothing in that sequence scrolls,
+ *     however far the finger then travels. The sheet had to answer before the
+ *     engage distance, on one or two pixels of movement, and one or two pixels
+ *     of a thumb landing is noise — an upward flick routinely starts with a
+ *     pixel of downward drift. So the first swipe of a scroll was claimed as a
+ *     candidate dismissal, `preventDefault` ran, and WebKit refused to scroll
+ *     the card for the rest of that touch. The reader lifted their thumb, tried
+ *     again, and the second attempt worked because it happened to start clean.
+ *     That is exactly the reported symptom: *drags to scroll and the card does
+ *     not move; scrolling starts only after repeated attempts.*
+ *
+ *     No threshold fixes it, because at the instant the browser wants its
+ *     answer the information is not there. What fixes it is deciding the
+ *     question from something that *is* known at `pointerdown` — whether the
+ *     box under the finger can scroll at all — and giving scrolling the
+ *     benefit of it. Dismissal keeps the grip, the header, the backdrop, Done
+ *     and Escape, none of which scroll and all of which already claim their
+ *     gestures through `touch-action: none`; on a sheet short enough not to
+ *     scroll, dismissal keeps the content too, because there is nothing there
+ *     to take away from.
+ *
+ *  2. **Nothing calls `preventDefault` on a touch.** The consequence of rule 1
+ *     and the reason the non-passive `touchmove` listener this hook used to
+ *     register is gone. A non-passive `touchmove` on an ancestor of the
+ *     scroller also takes WebKit off its fast scrolling path, which is the
+ *     other half of "the interaction feels buggy": every frame of every scroll
+ *     was waiting on the main thread to be asked. The arbitration is the
+ *     browser's again, through `touch-action`, exactly as it is for the back
+ *     gesture and pull-to-refresh.
  *
  *  3. **A gesture has to be vertical to be a dismissal.** See
  *     {@link sheetDecision}. A sideways swipe with a few pixels of drift used to
@@ -653,28 +665,17 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
   const body = useRef<HTMLElement | null>(null);
   const drag = useRef<SheetGesture | null>(null);
   const moved = useRef(false);
-  /**
-   * Whether the browser is being asked to keep its hands off, right now.
-   *
-   * A ref rather than state because the `touchmove` listener reads it in the
-   * same frame the `pointermove` handler wrote it — pointer events for a touch
-   * are dispatched before the touch events they were made from, which is what
-   * makes this ordering reliable rather than lucky.
-   */
-  const claiming = useRef(false);
   const settleTimer = useRef<number | null>(null);
-  const touchListener = useRef<((e: TouchEvent) => void) | null>(null);
   const [dragging, setDragging] = useState(false);
   const reduced = useReducedMotion();
   /** Held so the same function can be removed from a body that is going away. */
   const edgeListener = useRef<(() => void) | null>(null);
-  /** Watches the body for content that arrives after the sheet does. */
+  /** Watches the body *and its content* for what arrives after the sheet does. */
   const observer = useRef<ResizeObserver | null>(null);
 
   /** Everything back where it was, whether it dismissed or not. */
   const reset = useCallback(() => {
     drag.current = null;
-    claiming.current = false;
     moved.current = false;
     setDragging(false);
     if (settleTimer.current !== null) {
@@ -702,19 +703,21 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
       return;
     }
     moved.current = false;
-    claiming.current = false;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     const context = gestureContext(e.target, el);
     if (context.blocked || context.sideways) return;
-    // Scrolled content owns the gesture until it is back at the top.
-    if ((context.scroller?.scrollTop ?? 0) > 0) return;
+    /*
+     * Rule 1. Content with somewhere to scroll keeps every vertical gesture on
+     * it, whether or not it has been scrolled yet — see the note on this hook
+     * for why "not yet scrolled" is not the safe case it looks like.
+     */
+    if (context.scroller) return;
 
     drag.current = {
       pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
-      scroller: context.scroller,
       engaged: false,
       samples: [{ x: e.clientY, t: e.timeStamp }],
     };
@@ -725,27 +728,17 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
     if (!state || state.pointerId !== e.pointerId) return;
     const dx = e.clientX - state.startX;
     const dy = e.clientY - state.startY;
-    const atTop = (state.scroller?.scrollTop ?? 0) <= 0;
 
     if (!state.engaged) {
-      /*
-       * Renewed on every move until the decision is taken, because the browser
-       * asks on every move. Under the engage distance this is the only thing
-       * holding the gesture open.
-       */
-      claiming.current = atTop && sheetCandidate(dx, dy);
-
       const decision = sheetDecision(dx, dy);
-      if (decision === 'release' || (decision === 'drag' && !atTop)) {
+      if (decision === 'release') {
         drag.current = null;
-        claiming.current = false;
         return;
       }
       if (decision === 'wait') return;
 
       state.engaged = true;
       moved.current = true;
-      claiming.current = true;
       setDragging(true);
       sheet.current?.classList.add('sheet-dragging');
       try {
@@ -773,7 +766,6 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
       const state = drag.current;
       const el = sheet.current;
       drag.current = null;
-      claiming.current = false;
       if (!state || !el || !state.engaged) {
         setDragging(false);
         return;
@@ -859,10 +851,10 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
    * Whether this sheet's body has anywhere to scroll to.
    *
    * `touch-action` is the browser's half of the arbitration and this is what
-   * sets it: a sheet shorter than the screen — most of them — takes `none` and
-   * can be dragged shut from anywhere on it, and a taller one keeps `pan-y` so
-   * the browser can scroll it. Rule 2 above is what stops that second case from
-   * meaning "and therefore cannot be dismissed from its content".
+   * sets it: a sheet shorter than the screen — most of them — takes `none`, and
+   * can therefore be dragged shut from anywhere on it without any script
+   * getting involved, and a taller one keeps `pan-y` so the browser scrolls it
+   * on its own fast path.
    *
    * The question asked is one both engines answer the same way: *can this body
    * scroll at all?* An earlier attempt made the permission directional —
@@ -870,8 +862,21 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
    * in WebKit, which does not implement the directional values and discarded
    * the declaration. Inert on the one browser the bug was reported from.
    *
-   * Re-asked on scroll and on resize, because content arrives after the sheet
-   * does: a body that is short while its data loads is tall a moment later.
+   * **Getting this wrong in one direction is a card that cannot be scrolled at
+   * all**, which is the second half of the reported defect. `false` puts
+   * `touch-action: none` on the body; `touch-action: none` means no touch
+   * scroll; no touch scroll means no `scroll` event — so a stale `false` is a
+   * latch that nothing on the page can open. It was reachable, and by an
+   * ordinary route: a sheet is capped at `88dvh`, the two requests behind an
+   * expanded player land after it has opened, and once the *sheet* has reached
+   * that cap the *body*'s own box stops changing while its content carries on
+   * growing. A `ResizeObserver` watching the body therefore never fired again,
+   * and the card sat at "nothing to scroll" holding a screen and a half of it.
+   *
+   * So the content is observed as well as the box that holds it — see
+   * `Sheet`, which wraps its children in the element this reads. Between them
+   * the two observations cover both ways the answer can change: the box
+   * growing until it hits the cap, and the content growing after it has.
    */
   const markScrollable = useCallback((node: HTMLElement | null) => {
     if (node) node.dataset['scrollable'] = (node.scrollHeight > node.clientHeight + 1).toString();
@@ -879,36 +884,14 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
 
   return {
     sheetRef: useCallback((node: HTMLElement | null) => {
-      const previous = sheet.current;
-      if (previous && touchListener.current) previous.removeEventListener('touchmove', touchListener.current);
-      touchListener.current = null;
       sheet.current = node;
-      if (!node) return;
-      /*
-       * The listener that makes rule 2 possible, and the only `preventDefault`
-       * on a touch anywhere in this app.
-       *
-       * Registering it non-passively is half the mechanism on its own: a
-       * scrollable region with no non-passive `touchmove` handler lets WebKit
-       * start scrolling without consulting anybody, and by the first
-       * `pointermove` the verdict is already in. With the handler present the
-       * browser asks, and `claiming` is the answer.
-       *
-       * One finger only. A second is a pinch, and preventing default on it
-       * would take zooming away from a reader who asked for it.
-       */
-      const onTouchMove = (e: TouchEvent) => {
-        if (claiming.current && e.touches.length === 1 && e.cancelable) e.preventDefault();
-      };
-      touchListener.current = onTouchMove;
-      node.addEventListener('touchmove', onTouchMove, { passive: false });
     }, []),
     bodyRef: useCallback(
       (node: HTMLElement | null) => {
         if (body.current && edgeListener.current) {
           body.current.removeEventListener('scroll', edgeListener.current);
-          observer.current?.disconnect();
         }
+        observer.current?.disconnect();
         body.current = node;
         edgeListener.current = null;
         observer.current = null;
@@ -919,6 +902,14 @@ export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDra
         if (typeof ResizeObserver === 'function') {
           observer.current = new ResizeObserver(recheck);
           observer.current.observe(node);
+          /*
+           * The content, and not only the box around it. See `markScrollable`:
+           * this is the observation that survives the sheet reaching its
+           * maximum height, which is exactly when a card stops being able to
+           * report that it has grown.
+           */
+          const content = node.firstElementChild;
+          if (content) observer.current.observe(content);
         }
         markScrollable(node);
       },

@@ -6520,15 +6520,19 @@ table.compact tr:last-child td {
  * entirely, which left the mechanism inert on the browser the original bug came
  * from. Nothing here now depends on a value both engines do not implement.
  *
- * **And `pan-y` is no longer the end of the conversation.** It used to be, and
- * that is what made a tall sheet — a player's card, the compare sheet, the
- * odds — dismissable only from about forty pixels of grip: the body took the
- * whole gesture and the sheet never saw it. `useSheetDrag` now registers a
- * non-passive `touchmove` on the sheet, which obliges the browser to ask before
- * it scrolls, and takes the gesture back only for a downward drag on content
- * that is already at its top — where this declaration had nothing to offer it
- * anyway. Scrolling itself is untouched: an upward drag, or any drag on content
- * that is scrolled, never reaches the hook.
+ * **And `pan-y` is the end of the conversation again.** For a while it was not:
+ * `useSheetDrag` registered a non-passive `touchmove` on the sheet so that a
+ * downward drag on content sitting at its top could be claimed as a dismissal,
+ * on the reasoning that content at `scrollTop: 0` has nothing to lose. WebKit
+ * decides whether a touch may scroll from the *first* `touchmove` and never
+ * revisits it, and the claim had to be made on a pixel or two of movement — so
+ * an upward flick that began with a pixel of downward drift was refused the
+ * scroll for its whole duration. That is the "I drag and the card does not
+ * move, then it works on the third try" this pass was opened for, and the
+ * listener also took WebKit off its fast scrolling path for every sheet in the
+ * app. Both are gone: a body that can scroll now owns every vertical gesture on
+ * it, and dismissal comes from the grip, the header, the backdrop, Done and
+ * Escape — none of which scroll, all of which inherit `none` above.
  *
  * `overscroll-behavior: contain` is the belt to that brace: whatever happens, a
  * scroll that runs out of sheet never becomes a scroll of the page.
@@ -6542,8 +6546,30 @@ table.compact tr:last-child td {
   padding: 0 var(--sp-4) var(--sp-4);
 }
 
+/*
+ * A sheet with nowhere to scroll claims every gesture on it, so it can be
+ * dragged shut from its content as well as its grip. Nothing is taken from the
+ * reader by that: there is no scroll here to lose.
+ *
+ * `data-scrollable` is written by `useSheetDrag` from the body *and* its
+ * content — the second half matters, because a body pinned at the sheet's
+ * maximum height stops changing size while its content is still arriving, and
+ * a wrong `false` here is a card that cannot be scrolled and cannot report
+ * that it has grown.
+ */
 .sheet-body[data-scrollable='false'] {
   touch-action: none;
+}
+
+/*
+ * The measured content. No box of its own on purpose — see `Sheet`.
+ *
+ * It exists so that "is there more content than there is room for" can be
+ * observed directly rather than inferred from the height of the thing that is
+ * clipping it.
+ */
+.sheet-content {
+  display: block;
 }
 
 @keyframes sheet-rise {

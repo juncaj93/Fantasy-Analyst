@@ -3035,3 +3035,89 @@ app JavaScript **−79 B** gzipped, CSS **+34 B**, and Demo Mode's lazy chunks
 kilobyte the budget is written in. Retiring the reprocess panel paid for the two
 Setup controls, and the demo chunk moved only because the four bytes are one
 field on the setup fixture.
+
+## Milestone — the card says the football, and moves under a thumb (done)
+
+Two complaints about the same object, reported together because a reader met
+them together: they open a player card, the sentence that explains the number
+beside his name is missing, and the rest of the card will not scroll.
+
+**Whether a card had a takeaway was decided by the calendar.** The selector
+ranked candidates by category, specificity, corroboration and a recency decay,
+and then compared the *decayed* score against a fixed floor — so the same
+unchanged evidence qualified in August and failed a fortnight later. Puka
+Nacua's row scores 5.0 on its merits against a floor of 3 and had dropped to
+2.68 by the time it was looked at, while still being the entire reason his tally
+read `+13`. Jaxon Smith-Njigba, with the same kind of row from a different
+issue, kept his. That is not a rule a reader can learn; it is the app being
+arbitrary. In the demo world it had gone further than inconsistent: *every*
+seeded player's takeaway was null, because a hand-scored tally row carries no
+category and therefore scored as `other`.
+
+The two questions are separated now. *Whether* there is a takeaway is a property
+of the words — ingestion bookkeeping, the name and score the card is already
+printing, or praise with nothing checkable behind it, and nothing else is
+refused. *Which* sentence leads is the ranking, decay and all. Nothing about the
+ordering changed, no category weight moved, and the floor is gone rather than
+retuned: it was measuring age. `tests/takeaway.test.ts` asks the production rows
+from `data/imports/2026-08-13-tally-r1-r4.md` the same question at four points
+on the calendar and expects one answer.
+
+**And the card stopped saying it twice.** The takeaway is chosen out of the same
+ledger `Latest news` prints, so a player with one applied item read it at the
+top of his card and again four lines down, word for word with a date under it —
+marked `quoted above`, which named the duplication without removing it. What the
+takeaway lifts is now dropped from that list. Nothing is destroyed: the item is
+still counted, still in the ledger, and still on the evidence timeline one tap
+in, where the mark stays because that surface exists to show the whole thing.
+
+**The scrolling had two independent causes and both were load-bearing.**
+
+The first was the fix from the last sheet pass. A sheet taller than the screen
+declares `touch-action: pan-y` so the browser can scroll it, which used to mean
+the browser had classified a downward drag as a scroll before the app saw an
+event — so the sheet registered a non-passive `touchmove` and claimed a downward
+drag on content sitting at its top, where scrolling has nowhere to go. The
+reasoning is sound and WebKit cannot act on it: it decides whether a touch
+sequence may scroll **once**, from the first `touchmove`, and never revisits it.
+The claim therefore had to be staked on one or two pixels of movement, and one
+or two pixels of a thumb landing is noise — an upward flick that began with a
+pixel of downward drift was refused its scroll for the whole swipe. First
+attempt does nothing, third attempt works. The listener also took WebKit off its
+fast scrolling path for every sheet in the app.
+
+No threshold fixes that, because at the instant the browser wants its answer the
+information is not there. So the question is settled from something that *is*
+known when the finger lands — whether the box under it can scroll at all — and
+scrolling gets the benefit of it. Dismissal keeps the grip, the header, the
+backdrop, Done and Escape, and keeps the content of the many sheets shorter than
+the screen, where there is no scroll to take. `useSheetDrag` calls
+`preventDefault` on no touch, and the claim in `gestures.ts` that this app
+prevents no touch default anywhere is true again.
+
+The second was a latch. `touch-action: none` goes on a body with nothing to
+scroll — and `none` means no touch scroll, no touch scroll means no `scroll`
+event, so a body measured before its content arrived had no way left to notice
+that it had grown. It was reachable by an ordinary route: a sheet is capped at
+`88dvh` and an expanded player fills in from two requests after it opens, so
+once the sheet reaches the cap the body's own box stops changing while its
+content is still coming, and the `ResizeObserver` watching that box goes quiet.
+Reproduced in Chromium before the fix — content grew from 286px to 1186px inside
+a 262px box with the flag still reading `false`. The sheet wraps its children in
+one bare block and observes that too, so the question is answered from the
+content rather than from the thing clipping it.
+
+**Coverage.** `e2e/player-card-scroll.spec.ts` walks the card the way a reader
+does at all four widths — takeaway present and quoted once, takeaway absent with
+no empty heading, and a long card scrolled to the bottom, back to the top,
+closed and reopened, with the list behind it pinned throughout and content that
+arrives late still flipping the flag. What a headless browser cannot answer is
+stated in the file: `page.mouse` is not a finger, so WebKit's own "may this
+touch scroll" decision is exercised by the CI shards and by the physical-device
+pass, not here. `sheet-interaction.spec.ts` now pins the reversed rule, and the
+`sheetCandidate` threshold went with the listener it existed for.
+
+No budget raised. Measured against `51d068c`: app JavaScript **130.6 kB**
+against a 140.0 kB ceiling (−0.3 kB, the removed listener), CSS **14.3 kB**
+against 20.0 kB, everything the browser must fetch **146.4 kB** against 160.0
+kB, Demo Mode's lazy chunks **149.0 kB** against 150.0 kB — unchanged.

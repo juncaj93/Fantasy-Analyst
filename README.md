@@ -146,7 +146,11 @@ timeline. Every original excerpt is preserved.
 Each expanded card opens with a **newsletter takeaway**: one sentence saying why
 the tally reads the way it does. It is chosen from evidence the ledger already
 holds, never composed — and it changes no number, because the sentence it quotes
-has already been counted once by the tally it is explaining.
+has already been counted once by the tally it is explaining. Every player the
+newsletter has said something usable about gets one, and a player it has not is
+given no empty heading and no invented copy. What the takeaway quotes is not
+repeated in *Latest news* underneath it; the item itself is untouched, and the
+evidence timeline one tap in still shows the whole ledger with that item marked.
 
 **Review** — in **Setup**, under *This app*: anything the classifier was not
 confident about, plus ambiguous player identities and the items already applied.

@@ -1,13 +1,30 @@
 /**
  * Dismissing a sheet, and everything that must survive it.
  *
- * The complaint this suite exists for is specific: popup cards were hard to
- * swipe away. The cause was not a threshold. A sheet tall enough to scroll
- * declares `touch-action: pan-y` on its body so the browser can scroll it, and
- * that declaration meant the browser had already classified a downward drag as
- * a scroll before the app saw a single event — so on every sheet a reader
- * actually opens, the only place the gesture worked was the grip: about forty
- * pixels of a phone.
+ * Two complaints, a release apart, pulling in opposite directions — and the
+ * line between them is what this suite now pins.
+ *
+ * The first was that popup cards were hard to swipe away: a sheet tall enough
+ * to scroll declares `touch-action: pan-y` on its body, so the browser had
+ * classified a downward drag as a scroll before the app saw an event, and the
+ * only place the gesture worked was the grip. That was answered by claiming a
+ * downward drag on content sitting at its top, through a non-passive
+ * `touchmove` listener.
+ *
+ * The second was that those same cards were hard to *scroll*, which is the
+ * price of the first answer and is the worse of the two: a card you cannot
+ * dismiss can still be read, and a card you cannot scroll cannot. WebKit fixes
+ * whether a touch sequence may scroll on its first `touchmove`, so the claim
+ * had to be staked on a pixel or two of movement — and an upward flick that
+ * starts with a pixel of downward drift is not distinguishable, at that
+ * instant, from a pull. So the reader's first swipe did nothing and their third
+ * worked.
+ *
+ * The rule that settles it: **a box with somewhere to scroll owns every
+ * vertical gesture on it.** Dismissal keeps everything that does not scroll —
+ * the grip, the header, the backdrop, Done, Escape — and keeps the content of
+ * the many sheets that are shorter than the screen, where nothing is being
+ * taken away. `useSheetDrag` calls `preventDefault` on no touch at all.
  *
  * What is checked here, and what is deliberately not:
  *
@@ -18,9 +35,9 @@
  *
  *  - **Not checked, and cannot be.** Whether iOS Safari actually yields the
  *    gesture. Every drag below is synthesised from pointer events, which are
- *    not touches: `touch-action` and a non-passive `touchmove` govern *touch*
- *    input only, and no synthetic sequence exercises them. That is why the
- *    declarations are asserted directly in `navigation.spec.ts`, and why the
+ *    not touches: `touch-action` governs *touch* input only, and no synthetic
+ *    sequence exercises it. That is why the declarations are asserted directly
+ *    in `navigation.spec.ts` and in `player-card-scroll.spec.ts`, and why the
  *    physical-device list in the handoff is not optional.
  */
 
@@ -96,14 +113,26 @@ async function openPlayerCard(page: Page) {
 
 test.describe('pulling a sheet down', () => {
   /**
-   * The bug, stated as a test.
+   * The contract, stated as a test — and it is the opposite of what it was.
    *
-   * A drag that starts on the *content* of a sheet whose content scrolls — not
-   * on its grip, not on its header — and which begins with that content at its
-   * top. Before this, the gesture never reached the app at all and the sheet
-   * sat there while the reader pulled at it.
+   * A drag on the *content* of a sheet whose content scrolls belongs to the
+   * content, from the first pixel, whether or not that content has been
+   * scrolled yet. It used to belong to the sheet while the content sat at its
+   * top, on the reasoning that a downward drag there has nothing to scroll —
+   * which is true, and which WebKit cannot act on: it decides whether a touch
+   * sequence may scroll from the first `touchmove` and never revisits it, so
+   * the sheet had to claim the gesture on a pixel or two of movement. A pixel
+   * or two of a thumb landing is noise, and an upward flick that began with a
+   * pixel of drift was refused its scroll for the whole swipe. That is the
+   * reported defect: the card does not move, and then it does on the third try.
+   *
+   * So the sheet no longer claims anything a scroller could have wanted, and
+   * `useSheetDrag` calls `preventDefault` on no touch at all. Dismissal lives
+   * on the parts that do not scroll — the grip, the header, the backdrop, Done
+   * and Escape — all of which are covered below, and on the content of a sheet
+   * that has nothing to scroll, which is most of them.
    */
-  test('dismisses from the content of a scrolling sheet that is at its top', async ({ page }) => {
+  test('leaves a drag on the content of a scrolling sheet to the content', async ({ page }) => {
     await openPlayerCard(page);
 
     /*
@@ -114,8 +143,7 @@ test.describe('pulling a sheet down', () => {
      * that opened one and assumed it would scroll would pass or fail on the
      * fixture rather than on the behaviour. Capping the body makes the body
      * scroll, which is the only property that matters here: it is what puts
-     * `touch-action: pan-y` on the element under the finger, and that
-     * declaration is the whole of the original bug.
+     * `touch-action: pan-y` on the element under the finger.
      */
     await page.evaluate(() => {
       (document.querySelector('.sheet-body') as HTMLElement).style.maxHeight = '160px';
@@ -132,16 +160,30 @@ test.describe('pulling a sheet down', () => {
     const body = (await page.locator('.sheet-body').boundingBox())!;
     const x = body.x + body.width / 2;
     await drag(page, { x, y: body.y + 40 }, { x, y: body.y + 40 + 400 });
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+
+    /*
+     * A mouse dragged across text selects it, and a second drag that begins on
+     * a live selection is a drag-and-drop rather than a gesture — the browser
+     * cancels the pointer stream and the sheet correctly does nothing with it.
+     * That is an artefact of driving this with a mouse and not something a
+     * thumb can produce, so it is cleared rather than asserted about.
+     */
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+    // And the sheet is still a sheet: the grip, which never scrolls, closes it.
+    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
+    const gx = grip.x + grip.width / 2;
+    await drag(page, { x: gx, y: grip.y + 4 }, { x: gx, y: grip.y + 460 });
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
   });
 
   /**
-   * And the same drag, one line lower down the content, is a scroll.
+   * And the same drag, once the content has actually been scrolled.
    *
-   * The pair is the contract: content that is at its top hands the gesture
-   * over, and content that is not keeps it. Getting only the first half is how
-   * a sheet becomes impossible to read; getting only the second is the bug this
-   * work was opened for.
+   * The pair is the contract: a scroller keeps its gestures at its top and
+   * away from it alike, so the answer never depends on where the reader
+   * happened to be when they put their thumb down.
    */
   test('hands the same drag to the content once the content is scrolled', async ({ page }) => {
     await openPlayerCard(page);

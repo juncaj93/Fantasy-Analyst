@@ -273,3 +273,119 @@ describe('ingestion bookkeeping is not a player-facing sentence', () => {
     expect(before.raw.net).toBe(11);
   });
 });
+
+/**
+ * Whether a card has a takeaway is a question about the evidence, never about
+ * the date.
+ *
+ * The reported defect, and the reason it looked arbitrary from outside: the
+ * floor a candidate had to clear was applied to its score *after* the recency
+ * decay, so the same unchanged row qualified one week and failed the next. Two
+ * players with the same kind of tally row showed different cards because their
+ * issues had been imported on different days — which reads, correctly, as the
+ * app being inconsistent rather than as a rule.
+ *
+ * These are the production rows from `data/imports/2026-08-13-tally-r1-r4.md`,
+ * asked the same question at four points on the calendar.
+ */
+describe('a takeaway does not expire', () => {
+  const IMPORTED = '2026-08-13';
+  const tallyRow = (over: Partial<EvidenceItem> = {}) =>
+    item({
+      ruleId: 'tally-backfill',
+      sourceName: 'Newsletter tally',
+      sourceDate: IMPORTED,
+      category: null,
+      confidence: 'medium',
+      confidenceScore: 0.6,
+      ...over,
+    });
+
+  const PUKA =
+    'R1-R3 breakout/coverage dominance. R4: #1 in FPG excluding injury weeks (24.6), ' +
+    '#1 in YPRR vs. two-high coverage (3.40)';
+  const JSN =
+    'R1-R3 breakout/coverage numbers. R4: #2 FPG excl. injury weeks, #2 YPRR vs. two-high, ' +
+    'top-4 in most accurate deep targets';
+
+  /** A day after the import, a fortnight, a month, two months. */
+  const CLOCKS = ['2026-08-14', '2026-08-27', '2026-09-15', '2026-10-15'];
+
+  it('keeps the same sentence however long ago the issue was imported', () => {
+    for (const day of CLOCKS) {
+      const takeaway = selectTakeaway([tallyRow({ excerpt: PUKA, magnitude: 13 })], {
+        playerId: 'maye',
+        now: new Date(day),
+      });
+      expect(takeaway?.text, `the takeaway vanished from the card by ${day}`).toBe(PUKA);
+    }
+  });
+
+  it('gives two players with the same kind of evidence the same kind of card', () => {
+    const now = new Date('2026-08-27');
+    const puka = selectTakeaway([tallyRow({ excerpt: PUKA, magnitude: 13 })], { playerId: 'maye', now });
+    const jsn = selectTakeaway([tallyRow({ excerpt: JSN, magnitude: 11 })], { playerId: 'maye', now });
+    expect(puka?.text).toBe(PUKA);
+    expect(jsn?.text).toBe(JSN);
+  });
+
+  /**
+   * A row that arrived with no drivers has nothing to say.
+   *
+   * Both importers write `Name: +13` when the source listed no reason, and that
+   * is the number already printed beside his name. A headline restating it
+   * costs a line and buys a shrug, which is what the old floor was reaching for
+   * and is now said directly.
+   */
+  it('still declines a row whose only words are the name and the score', () => {
+    for (const stand of ['Puka Nacua: +13', 'Jaxon Smith-Njigba: +11', 'Some Guy: -2']) {
+      expect(
+        selectTakeaway([tallyRow({ excerpt: stand })], { playerId: 'maye', now: new Date('2026-08-27') }),
+        `"${stand}" was lifted to the top of a card`,
+      ).toBeNull();
+    }
+  });
+
+  /** …and a sentence that happens to contain the same shapes is not one. */
+  it('does not mistake a real sentence for a bare score', () => {
+    for (const real of [
+      'Played 88% of snaps in week 1.',
+      'Named the starter: first-team reps all week and the goal-line back.',
+      'R2: press-coverage elite.',
+    ]) {
+      expect(
+        selectTakeaway([tallyRow({ excerpt: real })], { playerId: 'maye', now: new Date('2026-08-27') })?.text,
+        `"${real}" was thrown away as bookkeeping`,
+      ).toBe(real);
+    }
+  });
+
+  /**
+   * Recency still decides which sentence leads. That was always its job; it had
+   * quietly acquired a second one.
+   */
+  it('still puts the newer of two facts first', () => {
+    const takeaway = selectTakeaway(
+      [
+        tallyRow({ excerpt: 'Took 62% of the snaps in week 1.', sourceDate: '2026-08-13' }),
+        tallyRow({ excerpt: 'Took 81% of the snaps in week 4.', sourceDate: '2026-09-10' }),
+      ],
+      { playerId: 'maye', now: new Date('2026-09-15') },
+    );
+    expect(takeaway?.text).toContain('81%');
+    expect(takeaway?.alternatives[0]?.text, 'the older fact was dropped rather than ranked').toContain('62%');
+  });
+
+  /** Praise with nothing behind it is still not a headline, at any age. */
+  it('declines unsupported praise however fresh it is', () => {
+    for (const day of CLOCKS) {
+      expect(
+        selectTakeaway([tallyRow({ excerpt: 'He looked good.', sourceDate: day })], {
+          playerId: 'maye',
+          now: new Date(day),
+        }),
+        `"He looked good." became a headline on ${day}`,
+      ).toBeNull();
+    }
+  });
+});
