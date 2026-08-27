@@ -116,6 +116,14 @@ async function seedPreDraft(db: NodeSqliteDatabase, ids: { league: string; draft
     .join('\n');
   const { snapshot } = await new AdpRepo(db).save(
     importAdpSnapshot(`${csv}\n`, index, { label: 'test', source: 'test' }),
+    /*
+     * The season the snapshot prices, stamped rather than inferred.
+     *
+     * Required since migration `0035` — "newest row in the table" stopped being
+     * "the current board" the moment two seasons of imports could sit side by
+     * side. The fixture league is a 2026 draft, so its market is a 2026 market.
+     */
+    '2026',
   );
   await leagues.setDraftSnapshot(ids.draft, snapshot.id);
 }
