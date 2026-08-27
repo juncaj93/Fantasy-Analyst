@@ -313,6 +313,24 @@ async function settled(page: Page, rowTestId: string, budget = FIRST_LOOK): Prom
   return rows.count();
 }
 
+/**
+ * Wait until an element has stopped moving — two readings in the same place.
+ *
+ * For grabbing something small on a surface that animates in. A sheet rises
+ * over a couple of hundred milliseconds, and a bounding box measured while it
+ * is still rising describes where the target *was*.
+ */
+async function stopsMoving(page: Page, testId: string, tries = 20): Promise<void> {
+  let previous = '';
+  for (let i = 0; i < tries; i++) {
+    const box = await page.getByTestId(testId).boundingBox();
+    const here = box ? `${Math.round(box.x)},${Math.round(box.y)}` : '';
+    if (here && here === previous) return;
+    previous = here;
+    await page.waitForTimeout(50);
+  }
+}
+
 /** What each width has established about each list, keyed by both. */
 const established = new Map<string, 'rows' | 'empty'>();
 
@@ -1046,9 +1064,30 @@ test.describe('the deployed app', () => {
       requestAnimationFrame(tick);
     });
 
-    const body = (await page.locator('[data-testid="player-sheet"] .sheet-body').boundingBox())!;
-    const x = body.x + body.width / 2;
-    const y = body.y + 24;
+    /*
+     * The grip, not the body — the same correction `sheet-vs-pull.spec.ts`
+     * already carries and this file was left behind by.
+     *
+     * `useSheetDrag` rule 1 changed underneath both of them: a sheet is now
+     * dismissed by its chrome, and *any* pointerdown inside the scrolling body
+     * is a scroll, whatever the body happens to be holding. The local suite was
+     * moved onto its own `chromeGrip` in the same change; this one still
+     * grabbed the body, and `ci.yml` does not run `e2e-production/`, so the
+     * mismatch could only ever surface after a deploy — which is how it did.
+     *
+     * What the test is for is unchanged and is the half that matters: the card
+     * goes, and the pull surface behind it neither arms, moves, nor fetches.
+     * Which part of the card the finger starts on was never the subject.
+     *
+     * The settle is not decoration. A body drag could start anywhere in a large
+     * box and did not care that the sheet was still rising; the grip is a few
+     * points tall, so a box measured mid-animation puts the press above or
+     * below it and the drag lands on nothing.
+     */
+    await stopsMoving(page, 'sheet-grip');
+    const grip = (await page.locator('[data-testid="player-sheet"] .sheet-grip').boundingBox())!;
+    const x = grip.x + grip.width / 2;
+    const y = grip.y + 4;
     await page.mouse.move(x, y);
     await page.mouse.down();
     for (let i = 1; i <= 14; i++) await page.mouse.move(x, y + (420 * i) / 14);
