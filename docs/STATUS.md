@@ -2778,3 +2778,68 @@ the CLI, the runbook — is surface-independent. Adding a lane is a payload type
 a recorder over that surface's own sources interface, and a replay adapter that
 calls the real assembly function. What each lane would capture is written down
 in [docs/SUPPORT_SNAPSHOT.md](SUPPORT_SNAPSHOT.md).
+
+## Milestone — the same button, for the week rather than the draft (done)
+
+**The Draft lane proved the architecture on one surface. This is the other
+five.** A questionable Start/Sit call, a Best Move that should have been a hold,
+a waiver plan with the wrong drop in it, a defence it says to stream, a trade
+offer nobody would send — every one of those is wrong once, against state that
+does not exist by the time anybody looks, and every one of them is now a file.
+
+**Setup → This app → Copy support snapshot**, with `Current context: Waivers`
+above it. One action, not six: the screens record which recommendation the reader
+was last looking at, the row states it so nothing is captured silently, and
+`Change` is there for a cold start into Settings or a reader who has moved on.
+`npm run support:fixture -- snapshot.json` reads whichever of the six it is
+handed and says which — no flag, no selection.
+
+**Two seams, because the surfaces are two shapes.** Matchup and the defence
+planner already receive their facts through an interface, so they are recording
+proxies exactly like Draft. The lineup, the wire and the trade search are handed
+a `StartSitInput[]` that one service assembles out of eight repositories — so
+*that value* is the seam, and capturing it captures every field rather than the
+calls one request happened to make. Each replays through the same assembly its
+screen calls, which is why `assembleLineup`, `assembleWaiverPlan` and
+`assembleSmartTrades` were extracted: those pipelines were written out twice, in
+`server/app.ts` and again in Demo Mode, and the comment beside the second copy
+said it mirrored the first "line for line". It did — and the demo's trade copy
+had already drifted.
+
+**The in-season outputs are the engines' own objects, compared leaf by leaf.** A
+hand-written output section is the fields somebody remembered, and the field they
+forgot is not compared at all; that is how this lane nearly lost `injuryLine`
+last time. The structural walk compares a field added next year on the day it is
+added.
+
+**Which cost `lossless.ts`, and it earned its keep immediately.** `JSON.stringify`
+turns a `Map` into `{}` silently, and four real ones were in the way: the
+opponent tendency table attached to every `StartSitInput`, the defence planner's
+season-form fallback, the transaction profiles behind the waiver pressure column,
+and the trending map behind a bid. Each of those, gone quiet, reads as an engine
+that suddenly knows less than it does. The fifth was not a `Map` at all — a
+league's points-allowed table ends at `to: Infinity`, which the wire turns into
+`null`, so every defence in the league replayed a fraction of a point out. The
+payloads now carry the league's own published settings and rebuild the profile.
+
+**And it cost a rethink of redaction.** Aliasing the inputs and scrubbing the
+output is what Draft does, and it cannot work for a display name: this app's own
+seeded league has a manager called `You`, so replacing names in prose turned
+`You are sending Ike Sandoval` into `Manager 9 are sending Ike Sandoval` — a
+redaction corrupting the sentence it was protecting. The in-season adapters alias
+the rosters, the wallet and the manager profiles *before* the assembly runs, so
+the engines compose `Manager 3` themselves and nothing needs replacing
+afterwards. One identifier could not be handled that way, and it is the same
+catch the draft id produced: the matchup fingerprint hashes the league id and
+seeds the simulation from it, so `MatchupForecast.seed` now reports the number
+actually drawn with and a replay hands it back.
+
+**A capture with no decision in it refuses.** A Tuesday has no matchup; a league
+with no DEF slot has no defence to plan. The sentence the screen would have shown
+is a better answer than a file with nothing in it, which somebody would send and
+then wait on.
+
+App JavaScript +0.5 kB gzipped, CSS byte-identical, Demo Mode's lazy chunk
++5.6 kB with 4.2 kB of headroom left. No budget raised, and the replay machinery
+reaches no browser chunk at all.
+

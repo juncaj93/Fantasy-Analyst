@@ -30,6 +30,7 @@ import {
 } from './distribution.ts';
 import { buildInsights, type HeroInsight, type MatchupPhase, type PreviousInsightState } from './insights.ts';
 import { matchupFingerprint } from './fingerprint.ts';
+import { hashString } from '../draft/nextpick/rng.ts';
 import { shortNamesFor } from './names.ts';
 import { assessClinch, rankLeverage, type ClinchState, type PlayerLeverage } from './needs.ts';
 import { DEFAULT_DRAWS, simulateMatchup, type SimulationResult } from './simulate.ts';
@@ -90,6 +91,14 @@ export interface MatchupForecast {
   modelVersion: string;
   /** The state this was computed from. Seeds the simulation and keys the cache. */
   fingerprint: string;
+  /**
+   * The 32-bit number the simulation actually drew with.
+   *
+   * Reported so a reader can check that two runs of the same matchup drew the
+   * same afternoons, rather than take it on trust — and carried by a support
+   * snapshot, which needs the seed without the league id the fingerprint hashes.
+   */
+  seed: number;
   computedAt: string;
   draws: number;
   phase: MatchupPhase;
@@ -132,6 +141,14 @@ export interface ForecastInput {
   slots: SlotSpec[];
   now: Date | string;
   draws?: number;
+  /**
+   * The seed to draw with, when the caller has one.
+   *
+   * Absent everywhere except a support replay, which hands back the number its
+   * capture drew with because the fingerprint that produced it hashes an
+   * identity the file does not carry.
+   */
+  seed?: number;
   previous?: PreviousInsightState | null;
   /** True when the league week is over, so a game with no schedule is settled. */
   weekSettled?: boolean;
@@ -237,10 +254,20 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
     coverage(startingDistributions, 'mine') < MIN_PROJECTED_SHARE ||
     coverage(startingDistributions, 'theirs') < MIN_PROJECTED_SHARE;
 
+  /*
+   * The seed actually drawn with, reported as well as used.
+   *
+   * Normally the 32-bit hash of the fingerprint above, which is what makes "the
+   * same matchup returns the same numbers" a property rather than a promise.
+   * `input.seed` overrides it for exactly one caller — a support replay, whose
+   * file carries the hash because it cannot carry the league id the fingerprint
+   * was built from. See `SimulationInput.seed`.
+   */
+  const seed = input.seed ?? hashString(fingerprint);
   const result = simulateMatchup({
     players: input.players,
     distributions,
-    seed: fingerprint,
+    seed,
     ...(input.draws === undefined ? {} : { draws: input.draws }),
   });
 
@@ -299,6 +326,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
   return {
     modelVersion: MATCHUP_MODEL_VERSION,
     fingerprint,
+    seed,
     computedAt: nowIso,
     draws: input.draws ?? DEFAULT_DRAWS,
     phase,

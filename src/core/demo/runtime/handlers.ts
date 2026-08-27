@@ -9,12 +9,14 @@
  * The engines are imported, never re-implemented:
  *
  *   - the draft board is `buildDraftBoard`, the same function the worker calls;
- *   - the lineup is `recommendLineup`;
- *   - the wire is `recommendWaiverUpgrades`, priced by `priceWaiverUpgrades` and
- *     layered with `waiverMultiWeekFor` and `waiverLeagueIntel`;
- *   - the lineup's advanced pass is `weeklyIntelligence`;
+ *   - the lineup is `assembleLineup`, which is `recommendLineup` with the
+ *     weekly intelligence pass and the projection fallback layered on it;
+ *   - the wire, its prices, the defence beside it and the claim plan are
+ *     `assembleWaiverPlan`, which is the same eight steps in the same order the
+ *     deployed route runs;
  *   - the comparison is `compareStartSit`;
- *   - the trade board is `rankTrades` and `groupByVerdict`;
+ *   - the trade board is `rankTrades` and `groupByVerdict`, and the bilateral
+ *     offers are `assembleSmartTrades`;
  *   - the player list is ordered by `orderPlayers`;
  *   - the matchup is `buildMatchupResponse`, distributions and all;
  *   - the lifecycle is `resolveLifecycle` and `resolveSeasonPhase`.
@@ -36,46 +38,39 @@ import { buildLiveRoster } from '../../draft/liveRoster.ts';
    functions the live roster route calls — see the note where it is used. */
 import { bestMove } from '../../draft/bestMove.ts';
 import { computeNeed } from '../../draft/need.ts';
-import { DEFENCE_POSITION, compareStartSit } from '../../startsit/engine.ts';
+import { compareStartSit } from '../../startsit/engine.ts';
 import { recommendLineup } from '../../startsit/lineup.ts';
-import { waiverMultiWeekFor, weeklyIntelligence } from '../../contracts/integration.ts';
+import { assembleLineup } from '../../startsit/assemble.ts';
+import { assembleWaiverPlan } from '../../waivers/assemble.ts';
 import { normalizeMode } from '../../startsit/mode.ts';
-import { recommendWaiverUpgrades } from '../../startsit/waivers.ts';
-import { priceWaiverUpgrades } from '../../waivers/pricing.ts';
-import { waiverLeagueIntel, withCompetition } from '../../waivers/intel.ts';
-import { collectBids } from '../../faab/bids.ts';
 import { demoManagerHistory } from './history.ts';
 import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../managers/draftProfile.ts';
-import { LEDGER_WEEKS } from '../fixtures/ledger.ts';
-import { buildWaiverClaimPlan } from '../../waivers/claimPlan.ts';
-import { assembleDstPlan } from '../../dst/assemble.ts';
-import { playoffContextFor } from '../../league/planning.ts';
-import { detectBestBall } from '../../sleeper/bestBall.ts';
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
-import { FREE_AGENTS_PER_POSITION, boundedFreeAgentIds } from '../../roster/freeAgents.ts';
+import { FREE_AGENTS_PER_POSITION } from '../../roster/freeAgents.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
-import { TRADE_BOUNDS, findBilateralTrades } from '../../trades/bilateral.ts';
-import { tradeCapabilityOf } from '../../trades/capability.ts';
-import { buildRosterViews } from '../../trades/rosterUtility.ts';
+import { assembleSmartTrades } from '../../trades/assemble.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../../sleeper/eligibility.ts';
-import {
-  buildRosterShape,
-  buildScoringProfile,
-  leagueFitNotes,
-  startablePositions,
-} from '../../sleeper/scoring.ts';
+import { leagueFitNotes } from '../../sleeper/scoring.ts';
 import { resolveSeasonPhase } from '../../sleeper/phase.ts';
 import { resolveLifecycle } from '../../season/lifecycle.ts';
 import type { ScenarioData } from '../fixtures/index.ts';
 import {
   draftBoardSourcesFrom,
-  dstPlanSourcesFrom,
   matchupSourcesFrom,
   startSitInputsFrom,
   tradeCandidatesFrom,
 } from './sources.ts';
 import { buildDemoPlayerDetail, buildDemoRollover, buildDemoSetupStatus } from './setup.ts';
+import { captureDemoSnapshot } from './support.ts';
+import { IN_SEASON_KINDS, isInSeasonKind } from '../../support/contexts.ts';
+import {
+  demoCandidateIds,
+  demoLeagueContext,
+  demoLineupInputs,
+  demoTradeRequest,
+  demoWaiverRequest,
+} from './decisions.ts';
 
 export interface DemoRequest {
   method: string;
@@ -92,16 +87,6 @@ export interface DemoResponse {
 
 const ok = (body: unknown): DemoResponse => ({ status: 200, body });
 const fail = (message: string, status = 400): DemoResponse => ({ status, body: { error: message } });
-
-/** The pieces every league-shaped answer starts from. */
-function leagueContext(data: ScenarioData) {
-  const profile = buildScoringProfile(data.league.scoringSettings, data.league.rosterPositions);
-  const shape = buildRosterShape(data.league.rosterPositions);
-  const mine = data.rosters.find((r) => r.isMine) ?? null;
-  const rosteredIds = new Set<string>();
-  for (const roster of data.rosters) for (const id of roster.playerIds) rosteredIds.add(id);
-  return { profile, shape, mine, rosteredIds };
-}
 
 /** How fresh the market is, in the shape every screen already prints. */
 function freshness(data: ScenarioData) {
@@ -191,6 +176,28 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
         queuedOnly: params.get('queued') === '1',
       }),
     );
+  }
+
+  /*
+   * A support snapshot of any of the five in-season decisions.
+   *
+   * The same route the deployment serves, over the same capture adapters, from
+   * the same gatherers the demo screens read — so the file a scenario produces
+   * is the file the live app produces: same schema, same redaction, same replay.
+   * Somebody learning the support workflow can run it end to end without a
+   * league, and a scenario's own week is a perfectly good bug report.
+   *
+   * `gitSha` is `demo` rather than a revision, and deliberately so: a snapshot
+   * of a rehearsal must never be mistakable for a snapshot of production.
+   */
+  const leagueSnapshot = /^\/api\/leagues\/([^/]+)\/support-snapshot$/.exec(path);
+  if (leagueSnapshot) {
+    if (decodeURIComponent(leagueSnapshot[1]!) !== data.league.id) return fail('league not found', 404);
+    const context = params.get('context');
+    if (!isInSeasonKind(context)) {
+      return fail(`context must be one of ${IN_SEASON_KINDS.join(', ')}; got ${JSON.stringify(context)}`, 400);
+    }
+    return captureDemoSnapshot(data, context, params);
   }
 
   // --------------------------------------------------------------- a league
@@ -298,7 +305,7 @@ function overview(data: ScenarioData) {
 }
 
 function leagueSummary(data: ScenarioData) {
-  const { profile, shape } = leagueContext(data);
+  const { profile, shape } = demoLeagueContext(data);
   return {
     id: data.league.id,
     name: data.league.name,
@@ -313,7 +320,7 @@ function leagueSummary(data: ScenarioData) {
 }
 
 function roster(data: ScenarioData) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   const byId = new Map(data.players.map((p) => [p.id, p]));
   const signals = data.signals;
 
@@ -382,7 +389,7 @@ function roster(data: ScenarioData) {
 }
 
 function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) {
     return {
       league: { id: data.league.id, name: data.league.name },
@@ -390,38 +397,36 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
       error: 'Your team was not found in this league.',
     };
   }
-  const inputs = startSitInputsFrom(data, mine.playerIds, { mode });
-  const recommendation = recommendLineup(inputs, shape, profile, {
-    currentStarterIds: mine.starterIds,
-    mode,
-  });
+  const { inputs } = demoLineupInputs(data, mine, mode);
 
   /*
-   * The advanced pass, layered exactly as the live handler layers it.
+   * The whole decision, through the one function the live handler calls.
    *
-   * `weeklyIntelligence` is one call producing the expected-points read, the
-   * contingency plans, the fragility and the rest, and it is applied to the
-   * same three evaluation lists. Calling it here rather than reproducing any
-   * of it is the whole point: the weekly card a demo shows is the weekly card
-   * the app shows.
+   * `assembleLineup` is the optimiser, the weekly intelligence pass and the
+   * projection fallback layered in `core` — so the card a demo shows is the
+   * card the app shows, and neither can grow a step the other lacks. It used
+   * to be spelled out here and again in `app.ts`, which is exactly the pair of
+   * copies `core/startsit/assemble.ts` exists to collapse.
+   *
+   * No published map: a scenario has no Rotowire fallback, and the projection
+   * pass then reports the market's own number or nothing, which is what a
+   * fixture league genuinely has.
    */
-  const intelligence = weeklyIntelligence({ lineup: recommendation, inputs, profile, mode });
-  const withIntelligence = <T extends { playerId: string }>(evaluations: T[]): T[] =>
-    evaluations.map((evaluation) => {
-      const extra = intelligence.get(evaluation.playerId);
-      return extra ? { ...evaluation, ...extra } : evaluation;
-    });
+  const decision = assembleLineup({
+    inputs,
+    shape,
+    profile,
+    currentStarterIds: mine.starterIds,
+    mode,
+    now: data.clock.now(),
+  });
 
   return {
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     found: true,
     dataFreshness: freshness(data),
-    rosterShape: shape,
-    ...recommendation,
-    starters: withIntelligence(recommendation.starters),
-    bench: withIntelligence(recommendation.bench),
-    undecidable: withIntelligence(recommendation.undecidable),
-    notes: [...recommendation.notes, ...data.notes],
+    ...decision,
+    notes: [...decision.notes, ...data.notes],
   };
 }
 
@@ -429,137 +434,30 @@ function lineup(data: ScenarioData, mode: ReturnType<typeof normalizeMode>) {
  * Smart Bilateral Trades, run through the real engine on fixture rosters.
  *
  * Not a canned payload. The scenario's own rosters go through the same
- * `buildRosterViews` and `findBilateralTrades` the deployed service uses, so a
- * demo shows what the app would actually say about these teams — and a change
- * that breaks the engine breaks the demo, which is the point of building it this
- * way rather than storing an answer.
+ * `assembleSmartTrades` the deployed service calls — the capability gate, the
+ * roster views, the partner list, the search and the empty answers — so a demo
+ * shows what the app would actually say about these teams, and a change that
+ * breaks the engine breaks the demo.
  *
- * Manager history is deliberately absent. A fixture league has no ingested
- * ledger, so every partner reads as `unknown` and contributes exactly zero —
- * which is also the correct demonstration of §18's last empty state: the
- * bilateral reasoning stands on its own.
+ * The behavioural half comes from the scenario's own ledger, which is what the
+ * live service reads from D1. Two of the room's managers have a usable profile
+ * and the rest do not, which is the honest and common case: `managerFit`
+ * contributes nothing for a manager it cannot describe, and the bilateral
+ * reasoning stands on its own.
  */
 function smartTrades(data: ScenarioData, limit: number) {
-  const { profile, shape, mine } = leagueContext(data);
-  const league = { id: data.league.id, name: data.league.name };
-  const capability = tradeCapabilityOf({ leagueSettings: data.league.leagueSettings });
-  const emptyBoard = (notes: string[]) => ({
-    league,
-    found: false,
-    offers: [],
-    search: { partners: 0, generated: 0, scored: 0, viable: 0, surfaced: 0, bounds: TRADE_BOUNDS },
-    capability,
-    // A fixture league has no ingested ledger, and saying so is the point.
-    history: { measured: true, profiles: 0, seasonsComplete: [], complete: false, leagueRate: null },
-    notes,
-    warnings: [],
-  });
-
-  /*
-   * The same format gate the deployed service applies, on the same reader.
-   *
-   * A best-ball scenario must behave in Demo Mode exactly as it would in the
-   * app — otherwise the demo is the one place the rule does not hold.
-   */
-  if (!capability.tradeable) return emptyBoard([capability.reason!]);
-
-  if (!mine || mine.playerIds.length === 0) {
-    return emptyBoard(['Your team was not found in this league.']);
-  }
-  const others = data.rosters.filter((r) => !r.isMine && r.playerIds.length > 0);
-  if (others.length === 0) return emptyBoard(['No other roster in this league has any players.']);
-
-  const everyId = [...new Set(data.rosters.flatMap((r) => r.playerIds))];
-  const pool = new Map(startSitInputsFrom(data, everyId).map((i) => [i.player.id, i]));
-  const views = buildRosterViews({
-    rosters: data.rosters.map((r) => ({ key: String(r.rosterId), playerIds: r.playerIds })),
-    pool,
-    shape,
-    profile,
-  });
-
-  const me = views.get(String(mine.rosterId));
-  if (!me) return emptyBoard(['Your roster could not be evaluated.']);
-
-  /*
-   * What is known about each partner, from the league's own ledger.
-   *
-   * `buildTradeTendencies` has read the season's trades and said what it can
-   * about who trades, with whom, and for what. Most of this room has never
-   * traded, and that is the honest and common case: `plausibilityFor` reports a
-   * thin sample as thin, `managerFit` contributes nothing for a manager it
-   * cannot describe, and the bilateral reasoning stands on its own — which is
-   * exactly what a demo of this feature should show, next to the two managers
-   * the ledger does know something about.
-   */
-  const history = demoManagerHistory(data);
-  const report = findBilateralTrades({
-    me,
-    partners: others.flatMap((roster) => {
-      const view = views.get(String(roster.rosterId));
-      return view
-        ? [
-            {
-              view,
-              partner: {
-                key: String(roster.rosterId),
-                rosterId: roster.rosterId,
-                displayName: roster.ownerName ?? `Roster ${roster.rosterId}`,
-                userId: roster.ownerId,
-              },
-              fit: {
-                tendencies: roster.ownerId ? (history.tradeTendencies.get(roster.ownerId) ?? null) : null,
-                userId: roster.ownerId,
-                displayName: roster.ownerName,
-                seasonsObserved: history.seasons.length,
-                historyComplete: history.seasons.length > 0,
-                askingUserId: mine.ownerId,
-                leagueRate: history.tradeBaseline?.tradesPerManagerSeason ?? null,
-              },
-            },
-          ]
-        : [];
-    }),
-    bounds: { offersTotal: Math.max(1, Math.min(limit, 20)) },
-  });
-
+  const decision = assembleSmartTrades({ ...demoTradeRequest(data), limit });
+  const { rejections: _rejections, ...board } = decision;
   return {
-    league,
-    found: report.offers.length > 0,
-    offers: report.offers,
-    search: {
-      partners: report.partners,
-      generated: report.generated,
-      scored: report.scored,
-      viable: report.viable,
-      surfaced: report.offers.length,
-      bounds: TRADE_BOUNDS,
-    },
-    capability,
-    history: {
-      measured: true,
-      profiles: [...history.tradeTendencies.values()].filter((t) => t.usable).length,
-      seasonsComplete: history.seasons,
-      complete: history.seasons.length > 0,
-      leagueRate: history.tradeBaseline?.tradesPerManagerSeason ?? null,
-    },
-    notes: [...report.notes, ...data.notes],
-    warnings: [],
+    league: { id: data.league.id, name: data.league.name },
+    ...board,
+    notes: [...board.notes, ...data.notes],
   };
 }
 
-/** The bounded wire, ordered exactly as the live scan orders it. */
-function candidateIdsFor(data: ScenarioData): string[] {
-  const { shape, rosteredIds } = leagueContext(data);
-  return boundedFreeAgentIds(data.players, {
-    rosteredIds,
-    startable: startablePositions(shape),
-    ranks: data.adpValues,
-  });
-}
 
 async function waivers(data: ScenarioData) {
-  const { profile, shape, mine, rosteredIds } = leagueContext(data);
+  const { profile, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) {
     return {
       league: { id: data.league.id, name: data.league.name },
@@ -571,161 +469,22 @@ async function waivers(data: ScenarioData) {
     };
   }
 
-  const candidateIds = candidateIdsFor(data);
-  const rosterInputs = startSitInputsFrom(data, mine.playerIds);
-  const candidateInputs = startSitInputsFrom(data, candidateIds);
+  const gathered = demoWaiverRequest(data, mine);
+  const { candidateIds, strategy } = gathered;
 
-  const currentLineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
-  const advice = recommendWaiverUpgrades({
-    roster: rosterInputs,
-    candidates: candidateInputs,
-    shape,
-    profile,
-    rosteredPlayerIds: rosteredIds,
-    currentStarterIds: mine.starterIds,
-    lineup: currentLineup,
-  });
-
-  /*
-   * The two league-intelligence passes the live handler layers on top, in the
-   * same order and from the same suppliers.
-   *
-   * `multiWeek` says what the add is worth past this Sunday; `competition` says
-   * who else needs him and can pay. Both are scoped to the players who actually
-   * made the board, both fold onto rows the waiver engine already built, and
-   * neither reorders anything — exactly as in `app.ts`. The competition count
-   * also feeds the price model, which is why it is computed before the bids.
-   */
-  const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
-  const multiWeek = waiverMultiWeekFor({
-    playerIds: boardIds,
-    inputs: candidateInputs,
-    scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
-    profile,
-    currentWeek: data.nflState?.week ?? 1,
-  });
-  const upgradesWithValue = advice.upgrades.map((upgrade) => ({
-    ...upgrade,
-    candidates: upgrade.candidates.map((candidate) => {
-      const value = multiWeek.get(candidate.playerId);
-      return value ? { ...candidate, multiWeek: value } : candidate;
-    }),
-  }));
-
-  const strategy = data.strategy;
-  /*
-   * The same three suppliers the live handler passes, from the same ledger.
-   *
-   * `observations` is every bid the league has published — which is what turns
-   * "somebody else needs a tight end" into a named rival with a price on him —
-   * and `history` is what the manager-intelligence pass concluded about the
-   * people holding those rosters. Both are absent in a scenario with no ledger,
-   * and the columns then report exactly what they report for a league nobody
-   * has backfilled: not known.
-   */
-  const history = demoManagerHistory(data);
-  const bidHistory = collectBids(data.transactions, LEDGER_WEEKS);
-  const intel = waiverLeagueIntel({
-    advice,
-    rosters: data.rosters,
-    players: data.players,
-    shape,
-    budgets: strategy?.budget ?? null,
-    prices: strategy?.prices ?? null,
-    observations: bidHistory.observations,
-    history: history.transactionBaseline
-      ? {
-          profiles: history.profilesByRoster,
-          baseline: history.transactionBaseline,
-          week: data.nflState?.week ?? 1,
-          finalWeek: history.finalWeek,
-        }
-      : undefined,
-  });
-
-  const bids = strategy
-    ? priceWaiverUpgrades({ advice, strategy, rosteredIds, competition: intel.competition })
-    : [];
-
-  /*
-   * The defence, decided in one place and drawn in two.
-   *
-   * Team and Waivers both read this response, so the DST recommendation is
-   * computed once here rather than on each screen — which is the only way
-   * `Stream PHI over DEN` and `Hold DEN` can never be on screen at the same
-   * time in the same app. Same call the live handler makes, over the same
-   * `assembleDstPlan`, with the schedule and the season form coming from the
-   * slate instead of from D1.
-   */
-  const playoff = playoffContextFor({
-    leagueSettings: data.league.leagueSettings,
-    rosters: data.rosters,
-    mine,
-    totalRosters: data.league.totalRosters,
-    currentWeek: data.nflState?.week ?? 1,
-  });
-  const dst = await assembleDstPlan(dstPlanSourcesFrom(data), {
-    season: data.league.season,
-    week: data.nflState?.week ?? 1,
-    shape,
-    profile,
-    bestBall: detectBestBall({ leagueSettings: data.league.leagueSettings, draftSettings: data.draft?.settings ?? null })
-      .bestBall,
-    /* Post-draft is a fact about the draft, never about the calendar. */
-    draftComplete: (data.draft?.status ?? '') === 'complete',
-    rosterInputs,
-    candidateInputs,
-    lineup: currentLineup,
-    reserveIds: mine.reserveIds,
-    playoff: { weeks: playoff.weeks, emphasis: playoff.emphasis },
-    now: data.clock.now(),
-  }).catch(() => null);
-
-  /*
-   * One owner for the DEF row, and it is the planner.
-   *
-   * The same filter the live handler applies, for the same reason: the generic
-   * scan can still offer a defence for an *empty* DEF slot, and the planner can
-   * say `Wait — no DST needed yet` about the same slot. Two answers to one
-   * question on one screen. The planner wins wherever it has an opinion.
-   */
-  const upgrades = withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure).filter(
-    (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),
-  );
-
-  /*
-   * The claims, from the same seam and the same inputs as the live handler.
-   *
-   * One call, mirroring `app.ts` line for line, so a scenario and a real league
-   * cannot draw two different shapes of the same screen. The clock is the
-   * scenario's rather than the device's — which is the whole reason Demo Mode
-   * can be on a Tuesday — and it is what makes a demo plan reproducible.
-   *
-   * The fixtures themselves are untouched. A scenario whose wire produces no
-   * worthwhile claim gets the honest empty plan, which is the same thing a real
-   * quiet week gets.
-   */
-  const claimPlan = buildWaiverClaimPlan({
-    roster: rosterInputs,
-    candidates: candidateInputs,
-    advice: { ...advice, upgrades, dst, faab: { bids } },
-    shape,
-    profile,
-    reserveIds: mine.reserveIds,
-    budget: strategy?.budget ?? null,
+  const decision = await assembleWaiverPlan({
+    ...gathered.request,
     now: data.clock.now(),
     generatedAt: data.clock.iso(),
   });
 
+  const { lineup: _lineup, bids, ...board } = decision;
   return {
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     found: true,
     dataFreshness: freshness(data),
-    ...advice,
-    dst,
-    upgrades,
-    claimPlan,
-    notes: [...advice.notes, ...data.notes],
+    ...board,
+    notes: [...board.notes, ...data.notes],
     pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
     faab: strategy
       ? {
@@ -743,11 +502,11 @@ async function waivers(data: ScenarioData) {
 }
 
 function bench(data: ScenarioData) {
-  const { profile, shape, mine } = leagueContext(data);
+  const { profile, shape, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) return { found: false, dropCandidates: [], ranked: [], notes: [] };
 
   const rosterInputs = startSitInputsFrom(data, mine.playerIds);
-  const candidateInputs = startSitInputsFrom(data, candidateIdsFor(data));
+  const candidateInputs = startSitInputsFrom(data, demoCandidateIds(data));
   const currentLineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
 
   return {
@@ -961,7 +720,7 @@ function compare(data: ScenarioData, body: unknown): DemoResponse {
   if (new Set(requested).size !== requested.length) return fail('the same player was sent twice');
   if (requested.length > MAX_COMPARE) return fail(`at most ${MAX_COMPARE} players can be compared at once`);
 
-  const { profile, shape } = leagueContext(data);
+  const { profile, shape } = demoLeagueContext(data);
   const mode = normalizeMode(input.mode ?? null);
   const inputs = startSitInputsFrom(data, requested, { mode });
   if (inputs.length !== requested.length) return fail('player not found', 404);

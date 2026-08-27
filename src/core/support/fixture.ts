@@ -51,7 +51,7 @@
  * purpose. See the note at the top of `tests/support.fixtures.test.ts`.
  */
 
-import type { DraftBoardPayload, SupportSnapshot } from './schema.ts';
+import type { SupportSnapshot } from './schema.ts';
 
 /**
  * A snapshot as canonical JSON: keys sorted at every depth, two-space indent,
@@ -61,7 +61,7 @@ import type { DraftBoardPayload, SupportSnapshot } from './schema.ts';
  * away would be a fixture that could not detect a reordering, which is the
  * first term of the reproduction contract.
  */
-export function canonicalSnapshotJson(snapshot: SupportSnapshot<DraftBoardPayload>): string {
+export function canonicalSnapshotJson(snapshot: SupportSnapshot): string {
   return `${JSON.stringify(sortKeys(snapshot), null, 2)}\n`;
 }
 

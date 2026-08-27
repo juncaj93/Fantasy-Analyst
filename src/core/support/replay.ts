@@ -48,125 +48,50 @@ import {
   type DraftBoardState,
 } from '../draft/boardBuilder.ts';
 import { DRAFT_ENGINE_VERSION } from '../draft/version.ts';
-import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
 import type { InjuryState } from '../injury/model.ts';
 import type { ManagerTendencies } from '../managers/managerTendencies.ts';
-import { normalizeName } from '../identity/normalize.ts';
-import { findRedactionViolations } from './redaction.ts';
+import { rehydratePlayer } from './players.ts';
+import {
+  classifyOutcome,
+  compareSets,
+  compareStructural,
+  describeDifference,
+  exact,
+  expectKind,
+  readSnapshot,
+  SnapshotRejected,
+  type ComparedCount,
+  type ReplayDifference,
+  type ReplayReport,
+} from './contract.ts';
 import {
   SUPPORT_SNAPSHOT_SCHEMA,
   type DraftBoardPayload,
   type ReplayOutcome,
-  type SnapshotPlayer,
   type SupportSnapshot,
 } from './schema.ts';
 
-/** One way in which the replay and the capture disagreed. */
-export interface ReplayDifference {
-  /** Which term of the contract failed — `order`, `components`, `warnings`, … */
-  term: string;
-  /** Where, in terms a reader can find in the file. */
-  at: string;
-  captured: unknown;
-  replayed: unknown;
-}
-
-export interface ReplayReport {
-  outcome: ReplayOutcome;
-  /** One sentence a person can read before looking at anything else. */
-  summary: string;
-  schema: { expected: string; found: string; supported: boolean };
-  engine: { captured: string; current: string; matches: boolean };
-  release: { capturedSha: string };
-  /** Rows compared in full, out of the ordering compared in full. */
-  compared: { order: number; detailRows: number };
-  differences: ReplayDifference[];
-  /**
-   * Things that are different and are *known* to be, because the snapshot is a
-   * distillation rather than a copy of the database.
-   *
-   * Reported rather than swallowed. `poolHealth.activeEligible` counts every
-   * eligible player in the league, including the two thousand below the scoring
-   * cap that no snapshot carries, so a replay will always see a smaller number —
-   * and a reader has to be able to tell that apart from a board that lost two
-   * thousand players.
-   */
-  distillation: ReplayDifference[];
-  /** The board the replay produced, for a caller that wants to look at it. */
-  board: DraftBoardState | null;
-}
-
-/** Raised when a snapshot cannot be read at all. */
-export class SnapshotRejected extends Error {
-  /** Plain fields, so type-stripping alone can run this — see the CLI. */
-  readonly outcome: Extract<ReplayOutcome, 'schema_unsupported' | 'data_mismatch'>;
-
-  constructor(outcome: Extract<ReplayOutcome, 'schema_unsupported' | 'data_mismatch'>, message: string) {
-    super(message);
-    this.name = 'SnapshotRejected';
-    this.outcome = outcome;
-  }
-}
+/*
+ * Re-exported so every existing caller keeps the import it has.
+ *
+ * `readSnapshot` and the outcome machinery became surface-independent when the
+ * in-season lanes arrived and moved to `contract.ts`, which is where the
+ * structural half of the reproduction contract is stated. Nothing about the
+ * Draft contract below moved with them.
+ */
+export { readSnapshot, SnapshotRejected, compareStructural };
+export type { ReplayDifference, ReplayReport, ComparedCount };
 
 /**
- * Read a parsed JSON value as a snapshot, or refuse it.
+ * What the Draft replay produced, for a caller that wants to look at it.
  *
- * Two gates, in this order. The schema identity decides whether this build
- * knows the shape at all; a version it has never heard of is not a malformed
- * file and must not be reported as one. Then the redaction scan runs *again* —
- * capture already ran it, and running it here as well is the point: a snapshot
- * is a file that travels, and the copy being replayed is not necessarily the
- * copy that was emitted.
+ * The board itself, on top of the surface-independent report. It is megabytes
+ * and is deliberately not part of what `--json` prints; everything that
+ * describes the *verdict* is on `ReplayReport`.
  */
-export function readSnapshot(value: unknown): SupportSnapshot<DraftBoardPayload> {
-  if (value == null || typeof value !== 'object') {
-    throw new SnapshotRejected('data_mismatch', 'not a JSON object');
-  }
-  const snapshot = value as Partial<SupportSnapshot<DraftBoardPayload>>;
-
-  if (snapshot.schema !== SUPPORT_SNAPSHOT_SCHEMA) {
-    throw new SnapshotRejected(
-      'schema_unsupported',
-      `schema is ${JSON.stringify(snapshot.schema ?? null)}; this build reads ${SUPPORT_SNAPSHOT_SCHEMA}`,
-    );
-  }
-
-  const decision = snapshot.decision;
-  if (!decision || decision.kind !== 'draft-board') {
-    throw new SnapshotRejected(
-      'schema_unsupported',
-      `decision.kind is ${JSON.stringify((decision as { kind?: string } | undefined)?.kind ?? null)}; only draft-board can be replayed today`,
-    );
-  }
-
-  for (const path of ['request', 'inputs', 'output', 'context'] as const) {
-    if (decision[path] == null) throw new SnapshotRejected('data_mismatch', `decision.${path} is missing`);
-  }
-  if (!Array.isArray(decision.inputs.players) || decision.inputs.players.length === 0) {
-    throw new SnapshotRejected('data_mismatch', 'decision.inputs.players is empty, so there is no board to rebuild');
-  }
-  if (typeof snapshot.capturedAt !== 'string' || Number.isNaN(Date.parse(snapshot.capturedAt))) {
-    throw new SnapshotRejected('data_mismatch', 'capturedAt is not an ISO-8601 instant, so the clock cannot be fixed');
-  }
-
-  /*
-   * A snapshot carrying a secret is refused, not cleaned.
-   *
-   * Cleaning it would mean writing a file that had contained one, and the
-   * person holding it would have no way to know. The honest response to
-   * "this file has an API key in it" is to say so and stop.
-   */
-  const violations = findRedactionViolations(snapshot);
-  if (violations.length > 0) {
-    throw new SnapshotRejected(
-      'data_mismatch',
-      `this snapshot carries ${violations.length} field${violations.length === 1 ? '' : 's'} a support snapshot must never contain — ` +
-        violations.map((v) => `${v.path} (${v.reason})`).join('; '),
-    );
-  }
-
-  return snapshot as SupportSnapshot<DraftBoardPayload>;
+export interface DraftReplayReport extends ReplayReport {
+  board: DraftBoardState | null;
 }
 
 /**
@@ -283,43 +208,6 @@ export function snapshotDraftBoardSources(snapshot: SupportSnapshot<DraftBoardPa
 }
 
 /**
- * Rebuild a `CanonicalPlayer` from the seven fields a snapshot keeps.
- *
- * The absent fields are the ones no path from a draft request to a ranked board
- * touches — aliases, external ids, height, weight, age, experience. They are
- * filled with the honest empty value rather than a plausible one, so a
- * component that started reading `age` tomorrow would replay as "Sleeper did
- * not say" rather than as a made-up number, and the replay comparison would
- * fail loudly instead of quietly agreeing with itself.
- *
- * `normalizedName` is derived with the app's own normaliser rather than stored,
- * because it is a pure function of the name and storing it would be a second
- * copy that could disagree with the first.
- */
-function rehydratePlayer(player: SnapshotPlayer): CanonicalPlayer {
-  const [firstName = '', ...rest] = player.name.split(' ');
-  return {
-    id: player.id,
-    sleeperPlayerId: player.id,
-    fullName: player.name,
-    firstName,
-    lastName: rest.join(' '),
-    team: player.team,
-    position: player.position,
-    status: player.status,
-    active: player.active,
-    normalizedName: normalizeName(player.name),
-    aliases: [],
-    searchRank: player.searchRank,
-    jerseyNumber: null,
-    heightInches: null,
-    weightPounds: null,
-    age: null,
-    yearsExp: null,
-  };
-}
-
-/**
  * A manager profile, with its `byPosition` Map put back.
  *
  * `JSON.stringify` turns a Map into `{}`, so the profile crosses the wire as a
@@ -347,7 +235,16 @@ function rehydrateTendencies(tendencies: Record<string, unknown>): ManagerTenden
  * `SnapshotRejected` is still thrown by `readSnapshot`, because a file that
  * cannot be read has no board to compare.
  */
-export async function replayDraftSnapshot(snapshot: SupportSnapshot<DraftBoardPayload>): Promise<ReplayReport> {
+export async function replayDraftSnapshot(value: SupportSnapshot): Promise<DraftReplayReport> {
+  /*
+   * Narrowed here rather than by the caller.
+   *
+   * `readSnapshot` reads any of the six kinds, so every adapter has to say which
+   * one it is. Doing it inside means a caller that hands this a waiver plan gets
+   * a `data_mismatch` naming both kinds, instead of a crash somewhere inside the
+   * board builder.
+   */
+  const snapshot = expectKind(value, 'draft-board');
   const { request, inputs, output } = snapshot.decision;
   const sources = snapshotDraftBoardSources(snapshot);
   if (inputs.managerTendencies != null) {
@@ -398,15 +295,19 @@ export async function replayDraftSnapshot(snapshot: SupportSnapshot<DraftBoardPa
   comparePoolHealth(snapshot, board, differences, distillation);
 
   const engineMatches = snapshot.release.engineVersion === DRAFT_ENGINE_VERSION;
-  const outcome = classify(differences, engineMatches);
+  const outcome = classifyOutcome(differences, engineMatches);
 
   return {
     outcome,
     summary: summarise(outcome, differences, snapshot, board),
+    kind: 'draft-board',
     schema: { expected: SUPPORT_SNAPSHOT_SCHEMA, found: snapshot.schema, supported: true },
     engine: { captured: snapshot.release.engineVersion, current: DRAFT_ENGINE_VERSION, matches: engineMatches },
     release: { capturedSha: snapshot.release.gitSha },
-    compared: { order: output.order.length, detailRows: output.detailRows },
+    compared: [
+      { what: 'ranked players', count: output.order.length },
+      { what: 'arguments in full', count: output.detailRows },
+    ],
     differences,
     distillation,
     board,
@@ -548,38 +449,6 @@ function compareRows(
   }
 }
 
-/**
- * Sentences, compared as sets rather than as an ordered list.
- *
- * "Semantically" in the reproduction contract means this and no more: the same
- * sentences, whatever order they were assembled in. It is not a fuzzy match —
- * a changed word is a difference — because a reason that reads differently is a
- * reason that argues differently, and a comparison that forgave it would hide
- * exactly the drift somebody replaying a snapshot is looking for.
- */
-function compareSets(term: string, captured: string[], replayed: string[], into: ReplayDifference[]): void {
-  const a = [...captured].sort();
-  const b = [...replayed].sort();
-  if (a.length === b.length && a.every((line, i) => line === b[i])) return;
-
-  /*
-   * The sorted lists, compared as sequences rather than as memberships.
-   *
-   * A `missing`/`added` diff over set membership alone would report *nothing*
-   * for a card that said the same sentence twice where it used to say it once —
-   * both sides contain it, so neither list is populated, and a real change to
-   * the argument would pass as a match. Reporting the two lists is still the
-   * useful output when they are non-empty, so both are said.
-   */
-  const missing = a.filter((line) => !b.includes(line));
-  const added = b.filter((line) => !a.includes(line));
-  into.push({
-    term,
-    at: 'set',
-    captured: missing.length > 0 || added.length > 0 ? missing : a,
-    replayed: missing.length > 0 || added.length > 0 ? added : b,
-  });
-}
 
 function compareFreshness(
   snapshot: SupportSnapshot<DraftBoardPayload>,
@@ -634,54 +503,7 @@ function comparePoolHealth(
   }
 }
 
-/**
- * Equal, with the one concession JSON forces and no others.
- *
- * `Object.is` rather than `===` so that two `NaN`s compare equal — a component
- * that could not be computed should replay as the same thing it captured — and
- * so that nothing is coerced. The single exception is **signed zero**.
- *
- * JSON has no `-0`: `JSON.stringify(-0)` is `"0"`, and there is no way to write
- * one. The engine does produce them — a component scoring exactly zero against
- * a negative weight rounds to `-0` — so a board captured with `-0` becomes `0`
- * in the file and replays as `-0` again, and `Object.is` calls that a
- * difference on every board with a zero-scoring component on it. It is an
- * artifact of the wire format and not a fact about the ranking: `-0` and `0`
- * are the same contribution, sort identically, and print the same everywhere a
- * reader can see.
- *
- * This is the *only* tolerance anywhere in the contract, and it is not a
- * numeric one — nothing here forgives a difference of any magnitude, however
- * small. See the module note.
- */
-function exact(term: string, at: string, captured: unknown, replayed: unknown, into: ReplayDifference[]): void {
-  if (Object.is(captured, replayed)) return;
-  if (captured === 0 && replayed === 0) return;
-  into.push({ term, at, captured, replayed });
-}
-
 // -------------------------------------------------------------- the verdict
-
-/**
- * One of six words, chosen in a fixed order of precedence.
- *
- * A moved engine version explains a difference and is therefore reported ahead
- * of the difference itself — otherwise every replay after a legitimate weight
- * change reads `output_difference`, and a real regression becomes
- * indistinguishable from Tuesday's calibration commit.
- *
- * `freshness_difference` sits between the two for the same reason at a smaller
- * scale: a board whose *only* disagreements are about how old the market is has
- * a specific, checkable cause — a clock that did not get pinned — and calling
- * that an output difference sends the reader to the ranking code for a problem
- * that is not there.
- */
-function classify(differences: ReplayDifference[], engineMatches: boolean): ReplayOutcome {
-  if (differences.length === 0) return 'reproduced';
-  if (!engineMatches) return 'engine_version_mismatch';
-  if (differences.every((d) => d.term.startsWith('freshness.'))) return 'freshness_difference';
-  return 'output_difference';
-}
 
 function summarise(
   outcome: ReplayOutcome,
@@ -698,10 +520,6 @@ function summarise(
     case 'freshness_difference':
       return `Every ranking term matched; only the market's own age read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:
-      return `The board reproduced differently in ${differences.length} place${differences.length === 1 ? '' : 's'}, on the same engine version. The first is: ${describe(differences[0]!)}.`;
+      return `The board reproduced differently in ${differences.length} place${differences.length === 1 ? '' : 's'}, on the same engine version. The first is: ${describeDifference(differences[0]!)}.`;
   }
-}
-
-function describe(difference: ReplayDifference): string {
-  return `${difference.term} at ${difference.at} — captured ${JSON.stringify(difference.captured)}, replayed ${JSON.stringify(difference.replayed)}`;
 }

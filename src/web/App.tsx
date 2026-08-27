@@ -18,6 +18,7 @@ import {
   WaiverIcon,
 } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
+import { CONTEXT_BY_TAB, readSupportContext, rememberSupportContext } from './supportContext.ts';
 import { DemoIndicator, useDemoWorld } from './demo/DemoIndicator.tsx';
 import { useKeyboardOpen } from './viewport.ts';
 import { DraftScreen } from './screens/DraftScreen.tsx';
@@ -97,6 +98,35 @@ export function App() {
    * happened again" and a screen has to be able to notice the second tap.
    */
   const [resetNonce, setResetNonce] = useState(0);
+  /*
+   * Which decision the reader is looking at, remembered for the support button.
+   *
+   * Recorded here rather than inside each screen because the tab *is* the
+   * decision for five of the six, and a `useEffect` in five components would be
+   * five places to forget. The sixth — the defence — is a line rather than a
+   * screen and records itself when it is opened; see `components/dst.tsx`.
+   *
+   * Players and Setup deliberately record nothing. Neither makes a
+   * recommendation, so arriving at Setup by way of Players must not overwrite
+   * the Waivers board somebody actually came to complain about.
+   *
+   * ## The first render does not overwrite what the session already knows
+   *
+   * A page load always starts on Draft, whatever the reader was doing before it
+   * — a reload, or iOS discarding a backgrounded tab and restoring it. Recording
+   * that mount would replace the Team screen somebody was three taps away from
+   * reporting with a board they never asked to see, silently, at exactly the
+   * moment they came back to finish. So a fresh session records its landing tab
+   * and a resumed one keeps what it had, until the reader navigates somewhere
+   * and says otherwise.
+   */
+  const firstRender = useRef(true);
+  useEffect(() => {
+    const context = CONTEXT_BY_TAB[tab];
+    const resuming = firstRender.current && readSupportContext() != null;
+    firstRender.current = false;
+    if (context && !resuming) rememberSupportContext(context);
+  }, [tab]);
   /** First load only: land on Setup when there is nothing to show yet. */
   const [, setLanded] = useState(false);
   /**

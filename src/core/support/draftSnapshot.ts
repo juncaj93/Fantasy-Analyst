@@ -61,7 +61,17 @@ import { DRAFT_ENGINE_VERSION } from '../draft/version.ts';
 import { buildRosterShape, startablePositions } from '../sleeper/scoring.ts';
 import { scoringKey, type ProjectionScoring } from '../startWho/scoring.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
-import { SnapshotAliases, REDACTION_RULES, findRedactionViolations } from './redaction.ts';
+import { SnapshotAliases, SnapshotRedactionError, REDACTION_RULES } from './redaction.ts';
+import { sealSnapshot } from './emit.ts';
+
+/*
+ * Re-exported so every existing caller keeps the import it has.
+ *
+ * It moved to `redaction.ts` when the in-season lanes arrived: five more
+ * captures refuse on the same rule, and none of them has any business importing
+ * the draft board to say so.
+ */
+export { SnapshotRedactionError };
 import {
   SUPPORT_SNAPSHOT_SCHEMA,
   type DraftBoardInputs,
@@ -108,29 +118,6 @@ export interface CaptureOptions {
   queuedOnly?: boolean;
   /** Override for tests and for a support conversation that needs more depth. */
   detailRows?: number;
-}
-
-/** Raised when a capture would have emitted something it must not. */
-export class SnapshotRedactionError extends Error {
-  /*
-   * A plain field rather than a constructor parameter property.
-   *
-   * Parameter properties are a TypeScript *transform*, not a type annotation,
-   * and Node's `--experimental-strip-types` refuses them. The replay CLI runs
-   * the shipped modules through exactly that loader — see
-   * `scripts/support-fixture.ts` — so anything on this path stays inside what
-   * type-stripping alone can erase.
-   */
-  readonly violations: { path: string; reason: string }[];
-
-  constructor(violations: { path: string; reason: string }[]) {
-    super(
-      `refusing to emit a support snapshot: ${violations.length} field${violations.length === 1 ? '' : 's'} must not be in one — ` +
-        violations.map((v) => `${v.path} (${v.reason})`).join('; '),
-    );
-    this.name = 'SnapshotRedactionError';
-    this.violations = violations;
-  }
 }
 
 /**
@@ -204,9 +191,16 @@ export async function captureDraftSnapshot(
     },
   };
 
-  const violations = findRedactionViolations(snapshot);
-  if (violations.length > 0) throw new SnapshotRedactionError(violations);
-  return snapshot;
+  /*
+   * The same seal the five in-season lanes pass through.
+   *
+   * Draft checked its own redaction here for as long as it was the only lane.
+   * It no longer is, and a guarantee that holds for five surfaces and not the
+   * sixth is a guarantee nobody can state — so the shared function owns it, and
+   * Draft gets the two checks it never had: nothing the wire would silently
+   * change, and nothing `readSnapshot` would refuse.
+   */
+  return sealSnapshot<DraftBoardPayload>(snapshot);
 }
 
 // ------------------------------------------------------------- the recorder

@@ -43,15 +43,31 @@
  *
  * ## Why `decision.kind`
  *
- * Draft is the first surface, not the only one. Everything above — schema
+ * Draft was the first surface, not the only one. Everything above — schema
  * identity, release plumbing, the fixed clock, redaction, the replay harness,
  * the fixture converter — is surface-independent, and the only Draft-specific
- * part is what sits under `decision`. Adding lineup or waivers later means
- * adding a payload type and a replay adapter, not a second snapshot format.
- * See docs/SUPPORT_SNAPSHOT.md for the extension contract.
+ * part is what sits under `decision`.
+ *
+ * All six kinds are now implemented, and the bill for the other five came in
+ * exactly as the design predicted: a payload type, a recorder and a replay
+ * adapter each, with no change to this envelope and no second snapshot format.
+ * The schema identity is still `@1`, because the contract a reader depends on
+ * did not move — an older build handed a `lineup` snapshot reports
+ * `schema_unsupported`, which is the honest answer and the one the outcome word
+ * was designed to give.
+ *
+ * See docs/SUPPORT_SNAPSHOT.md for the extension contract, and `payloads.ts` for
+ * the five in-season payloads.
  */
 
 import type { DraftBoardState } from '../draft/boardBuilder.ts';
+import type {
+  DstPlanPayload,
+  LineupPayload,
+  MatchupPayload,
+  TradeOfferPayload,
+  WaiverPlanPayload,
+} from './payloads.ts';
 
 /** The canonical schema identity. Present in every snapshot, checked on replay. */
 export const SUPPORT_SNAPSHOT_SCHEMA = 'junculator/support-snapshot@1' as const;
@@ -60,10 +76,12 @@ export type SupportSnapshotSchema = typeof SUPPORT_SNAPSHOT_SCHEMA;
 /**
  * The decisions this app makes, named once.
  *
- * Only `draft-board` is implemented. The rest are declared here deliberately —
- * a union with one member is a union nobody designs against, and the point of
- * writing all six down is that the foundation is shaped by six rather than by
- * one. See docs/SUPPORT_SNAPSHOT.md §Phase 2.
+ * All six are implemented. They were all six declared here from the first day
+ * the Draft lane shipped, with only `draft-board` behind them — because a union
+ * with one member is a union nobody designs against, and writing them all down
+ * is what made the envelope, the redaction, the fixed clock, the fixture
+ * converter and the CLI surface-independent before there was a second surface
+ * to prove it on. Adding the five cost no change to any of them.
  */
 export type DecisionKind =
   | 'draft-board'
@@ -73,7 +91,30 @@ export type DecisionKind =
   | 'dst-plan'
   | 'trade-offer';
 
-export const IMPLEMENTED_KINDS: readonly DecisionKind[] = ['draft-board'];
+export const IMPLEMENTED_KINDS: readonly DecisionKind[] = [
+  'draft-board',
+  'lineup',
+  'matchup',
+  'waiver-plan',
+  'dst-plan',
+  'trade-offer',
+];
+
+/**
+ * What a reader is told each decision is called.
+ *
+ * The user-facing name of the screen the decision was made on, so
+ * `Current context: Waivers` is a sentence about the app rather than about the
+ * schema. Kept beside the union so a new kind cannot be added without one.
+ */
+export const DECISION_LABELS: Record<DecisionKind, string> = {
+  'draft-board': 'Draft',
+  lineup: 'Team',
+  matchup: 'Matchup',
+  'waiver-plan': 'Waivers',
+  'dst-plan': 'Defence',
+  'trade-offer': 'Trades',
+};
 
 /**
  * Where this snapshot came from, in the two senses that matter.
@@ -127,7 +168,25 @@ export interface SupportSnapshot<Payload extends DecisionPayload = DecisionPaylo
   decision: Payload;
 }
 
-export type DecisionPayload = DraftBoardPayload;
+/**
+ * One of six, and the only surface-dependent thing in the file.
+ *
+ * The Draft payload is defined below because it was the first and because its
+ * output has to be hand-written — a three-hundred-player board copied whole is
+ * a file nobody can paste anywhere. The five in-season payloads are in
+ * `payloads.ts`, where the note explains why their outputs are the engines' own
+ * types instead.
+ */
+export type DecisionPayload =
+  | DraftBoardPayload
+  | LineupPayload
+  | MatchupPayload
+  | WaiverPlanPayload
+  | DstPlanPayload
+  | TradeOfferPayload;
+
+/** The payload for one kind, so an adapter can be typed by the word. */
+export type PayloadFor<K extends DecisionKind> = Extract<DecisionPayload, { kind: K }>;
 
 // ---------------------------------------------------------------- redaction
 

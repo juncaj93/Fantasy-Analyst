@@ -37,7 +37,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURE_DIR, FIXTURE_SUFFIX, canonicalSnapshotJson, fixturePath } from '../src/core/support/fixture.ts';
-import { readSnapshot, replayDraftSnapshot } from '../src/core/support/replay.ts';
+import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
 import { captureDraftSnapshot } from '../src/core/support/draftSnapshot.ts';
 import { buildDraftScenario } from '../src/core/demo/fixtures/draft.ts';
 import { draftBoardSourcesFrom } from '../src/core/demo/runtime/sources.ts';
@@ -83,7 +83,7 @@ describe('the fixture converter', () => {
      * replay would skip exactly that.
      */
     const snapshot = readSnapshot(JSON.parse(raw));
-    const report = await replayDraftSnapshot(snapshot);
+    const report = await replaySnapshot(snapshot);
 
     expect(report.differences).toEqual([]);
     expect(report.outcome).toBe('reproduced');
@@ -127,14 +127,47 @@ describe('committed support fixtures', () => {
       const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
       const snapshot = readSnapshot(JSON.parse(raw));
 
-      it('replays to the board it was captured from', async () => {
-        const report = await replayDraftSnapshot(snapshot);
-        expect(report.differences).toEqual([]);
+      /*
+       * Through the dispatcher, not through one surface's adapter.
+       *
+       * A committed fixture is whatever somebody sent in, and by now that can be
+       * any of the six decisions — so the suite reads the kind off the file the
+       * way the CLI does. That is the whole of "there is no test to edit and
+       * nothing to register": a waiver plan dropped into this directory is
+       * replayed by the waiver adapter without a line changing here.
+       */
+      it('replays to the decision it was captured from', async () => {
+        const report = await replaySnapshot(snapshot);
+        expect(report.differences, report.summary).toEqual([]);
         expect(report.outcome).toBe('reproduced');
       });
 
       it('is canonical on disk, so a re-write is an empty diff', () => {
         expect(raw).toBe(canonicalSnapshotJson(snapshot));
+      });
+
+      /**
+       * A fixture earns its place when its inputs cannot be regenerated.
+       *
+       * A snapshot captured from a *demo scenario* is the opposite: the
+       * scenarios are deterministic and their fixtures are already committed, so
+       * such a file is byte-for-byte regenerable from code in this same
+       * repository, and its only non-duplicated content is an assertion that the
+       * engine produced that answer on the day it was written. This repository
+       * pins invariants rather than outputs.
+       *
+       * The check is `release.gitSha`, because a demo capture says `demo` there
+       * precisely so a rehearsal can never be mistaken for a deployment — which
+       * makes it the one field that tells the two apart. It is here rather than
+       * in a review checklist because a `--write` in a test run has already
+       * leaked one into a commit once, and a rule nothing enforces is a rule
+       * that holds until somebody is in a hurry.
+       */
+      it('came from a deployment rather than from a rehearsal', () => {
+        expect(
+          snapshot.release.gitSha,
+          `${name} was captured from Demo Mode, and a demo scenario is regenerable from this repository`,
+        ).not.toBe('demo');
       });
     });
   }

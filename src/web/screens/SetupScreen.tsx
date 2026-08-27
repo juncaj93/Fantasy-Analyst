@@ -29,6 +29,13 @@ import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import { unwindOne } from '../tabReset.ts';
 import {
+  CONTEXT_LABELS,
+  CONTEXT_ORDER,
+  readSupportContext,
+  rememberSupportContext,
+  type SupportContext,
+} from '../supportContext.ts';
+import {
   APPEARANCES,
   APPEARANCE_LABELS,
   applyAppearance,
@@ -288,25 +295,39 @@ export function SetupScreen({
 }
 
 /**
- * One row, one action: the state behind the Draft board, in a file.
+ * One row, one action: the state behind a recommendation, in a file.
  *
- * The whole user-facing surface of Support Snapshot, and it is deliberately
- * this small. Somebody who thinks a Draft recommendation is wrong should be
- * able to send the exact state that produced it to whoever can look at it, and
- * that is a tap — not a diagnostics console, not a dashboard, not an upload.
- * Nothing here transmits anything: the snapshot reaches the clipboard or the
- * Files app, and where it goes next is the reader's decision.
+ * The whole user-facing surface of Support Snapshot, and it is deliberately this
+ * small. Somebody who thinks a recommendation is wrong should be able to send
+ * the exact state that produced it to whoever can look at it, and that is a tap
+ * — not a diagnostics console, not a dashboard, not an upload. Nothing here
+ * transmits anything: the snapshot reaches the clipboard or the Files app, and
+ * where it goes next is the reader's decision.
+ *
+ * ## One action, six decisions
+ *
+ * The app makes six recommendations and this is one button, not six. What it
+ * captures is **the decision the reader was last looking at** — recorded by the
+ * screens themselves, read here, and stated in words above the action so it can
+ * be checked at a glance rather than trusted.
+ *
+ * `Change` is beside it for the two cases inference cannot cover: Setup opened
+ * directly, from a cold start or a shortcut, where there is no last screen and
+ * guessing would be worse than asking; and a reader who has moved on since the
+ * thing they want to report. It is a control rather than the default because
+ * asking everybody to classify their own complaint before making it is the
+ * thing this row exists not to do.
  *
  * ## Why it says something different when there is nothing to capture
  *
- * A snapshot of no draft is a file that looks like a bug report and contains
- * nothing — the worst possible outcome, because somebody would send it and wait.
- * So the row says so before it is tapped, and the tap is disabled: a league
- * with no draft, or no league at all, has no board to explain.
+ * A snapshot of no draft, or of a league that is not loaded, is a file that
+ * looks like a bug report and contains nothing — the worst possible outcome,
+ * because somebody would send it and wait. So the row says so before it is
+ * tapped, and the tap is disabled.
  *
  * ## Copy, or download
  *
- * A real board's state runs to a couple of hundred kilobytes, which most
+ * A real decision's state runs to a couple of hundred kilobytes, which most
  * clipboards take and some refuse — and iOS will refuse `navigator.clipboard`
  * outright outside a secure context. Rather than guess, it tries the clipboard
  * and falls back to a download, and the row says which happened. A reader who
@@ -316,11 +337,33 @@ export function SetupScreen({
 function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
   const [state, setState] = useState<'idle' | 'working' | 'copied' | 'downloaded' | 'failed'>('idle');
   const [detail, setDetail] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  /*
+   * Read once, on mount, and then owned here.
+   *
+   * The value cannot change while this screen is open — the screens that write
+   * it are not on screen — so re-reading it would be a subscription to something
+   * that never fires. An explicit choice replaces it, which is the only way it
+   * moves from here.
+   */
+  const [chosen, setChosen] = useState<SupportContext | null>(() => readSupportContext());
 
-  const draftId = (leagues.find((l) => l.isSelected) ?? null)?.draftId ?? null;
+  const league = leagues.find((l) => l.isSelected) ?? null;
+  const draftId = league?.draftId ?? null;
+
+  /** Why this context cannot be captured right now, or null when it can. */
+  const blocker = (context: SupportContext | null): string | null => {
+    if (context == null) return 'Choose which recommendation looks wrong, and this will capture the state behind it.';
+    if (context === 'draft-board') {
+      return draftId ? null : 'No draft is loaded, so there is nothing to explain yet.';
+    }
+    return league ? null : 'No league is loaded, so there is nothing to explain yet.';
+  };
+
+  const reason = blocker(chosen);
 
   const capture = async () => {
-    if (!draftId) return;
+    if (chosen == null || reason != null) return;
     setState('working');
     setDetail(null);
     try {
@@ -328,34 +371,35 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
        * Around the session cache in both directions.
        *
        * `fresh` because a snapshot is a claim about a moment, and answering it
-       * from a cache would date the claim by however long the reader had been
-       * on another screen. `store: false` because it is a one-shot artifact of
-       * a couple of hundred kilobytes: keeping it would take one of the
-       * forty-eight slots, and stringify it a second time to do so, for an
-       * answer nothing will ever ask for again.
+       * from a cache would date the claim by however long the reader had been on
+       * another screen. `store: false` because it is a one-shot artifact of a
+       * couple of hundred kilobytes: keeping it would take one of the forty-eight
+       * slots, and stringify it a second time to do so, for an answer nothing
+       * will ever ask for again.
        */
-      const snapshot = await api.get<{ capturedAt: string; decision: { output: { order: string[] } } }>(
-        `/api/drafts/${encodeURIComponent(draftId)}/support-snapshot`,
-        { fresh: true, store: false },
-      );
+      const path =
+        chosen === 'draft-board'
+          ? `/api/drafts/${encodeURIComponent(draftId!)}/support-snapshot`
+          : `/api/leagues/${encodeURIComponent(league!.id)}/support-snapshot?context=${chosen}`;
+      const snapshot = await api.get<{ capturedAt: string }>(path, { fresh: true, store: false });
       const text = JSON.stringify(snapshot, null, 2);
-      const size = `${Math.round(text.length / 1024)} KB · ${snapshot.decision.output.order.length} ranked players`;
+      const size = `${Math.round(text.length / 1024)} KB`;
 
       try {
         await navigator.clipboard.writeText(text);
         setState('copied');
-        setDetail(`${size}. Paste it to your AI assistant and ask why the board says what it says.`);
+        setDetail(`${size}. Paste it to your AI assistant and ask why ${CONTEXT_LABELS[chosen]} says what it says.`);
       } catch {
-        downloadJson(`junculator-draft-snapshot-${stamp(snapshot.capturedAt)}.json`, text);
+        downloadJson(`junculator-${chosen}-${stamp(snapshot.capturedAt)}.json`, text);
         setState('downloaded');
         /*
          * What happened, not why.
          *
-         * A clipboard write is refused for several reasons this code cannot
-         * tell apart — an insecure context, a payload the browser thinks is too
-         * big, or iOS deciding the write was not close enough to the tap — so
-         * naming one of them would be a guess presented as a diagnosis. What
-         * the reader needs is that the file exists and where it went.
+         * A clipboard write is refused for several reasons this code cannot tell
+         * apart — an insecure context, a payload the browser thinks is too big,
+         * or iOS deciding the write was not close enough to the tap — so naming
+         * one of them would be a guess presented as a diagnosis. What the reader
+         * needs is that the file exists and where it went.
          */
         setDetail(`${size}. This browser would not take it on the clipboard, so it was saved as a file instead.`);
       }
@@ -367,20 +411,71 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
 
   const detailFor = (): string => {
     if (detail) return detail;
-    if (!draftId) return 'No draft is loaded, so there is nothing to explain yet.';
-    return 'The exact state behind the Draft board, to send to an AI assistant. Nothing is uploaded.';
+    if (reason) return reason;
+    return 'The exact state behind that recommendation, to send to an AI assistant. Nothing is uploaded.';
   };
 
   return (
-    <ListRow
-      testId="setup-support-snapshot"
-      dataState={state}
-      state={<StateMark state={state === 'failed' ? 'warn' : draftId ? 'ok' : 'todo'} />}
-      label="Copy Draft support snapshot"
-      detail={detailFor()}
-      value={state === 'working' ? 'Copying…' : state === 'copied' ? 'Copied' : state === 'downloaded' ? 'Saved' : undefined}
-      {...(draftId ? { onClick: () => void capture() } : {})}
-    />
+    <>
+      {/*
+        What is about to be captured, said before it is.
+
+        A row that copied "whatever you were last looking at" without naming it
+        would be asking the reader to trust an inference they cannot see. This is
+        the inference, in the words the app uses for its own screens.
+      */}
+      <ListRow
+        testId="setup-support-context"
+        label="Current context"
+        detail={
+          chosen == null
+            ? 'Not known — Setup was opened directly rather than from a recommendation.'
+            : `The last recommendation you looked at.`
+        }
+        value={chosen == null ? 'Choose' : CONTEXT_LABELS[chosen]}
+        onClick={() => setPicking((open) => !open)}
+        expanded={picking}
+      />
+      {picking ? (
+        <div className="list-row list-row-static">
+          <SegmentedControl
+            compact
+            label="Which recommendation looks wrong"
+            testId="support-context-picker"
+            segments={CONTEXT_ORDER.map((context) => ({
+              id: context,
+              label: CONTEXT_LABELS[context],
+              testId: `support-context-${context}`,
+            }))}
+            value={chosen ?? 'lineup'}
+            onChange={(context) => {
+              setChosen(context);
+              /*
+               * Remembered, not just used.
+               *
+               * A reader who corrects the context and then goes to look at the
+               * screen again should not have to correct it twice.
+               */
+              rememberSupportContext(context);
+              setPicking(false);
+              setState('idle');
+              setDetail(null);
+            }}
+          />
+        </div>
+      ) : null}
+      <ListRow
+        testId="setup-support-snapshot"
+        dataState={state}
+        state={<StateMark state={state === 'failed' ? 'warn' : reason == null ? 'ok' : 'todo'} />}
+        label="Copy support snapshot"
+        detail={detailFor()}
+        value={
+          state === 'working' ? 'Copying…' : state === 'copied' ? 'Copied' : state === 'downloaded' ? 'Saved' : undefined
+        }
+        {...(reason == null ? { onClick: () => void capture() } : {})}
+      />
+    </>
   );
 }
 

@@ -108,6 +108,22 @@ export class MatchupService {
     return buildMatchupResponse(this.sources(), leagueId, opts);
   }
 
+  /**
+   * The same sources, for a caller that means to record them.
+   *
+   * The support snapshot wraps these in a recording proxy and runs the identical
+   * assembly, so the file it emits describes the forecast this service would
+   * have produced. Exposed rather than rebuilt in the snapshot module for the
+   * usual reason: a second construction of the same eight reads is a second
+   * chance for them to differ.
+   *
+   * Still a read. There is no ledger on this object, so no caller of it can
+   * write however many times it is called.
+   */
+  supportSources(): MatchupSources {
+    return this.sources();
+  }
+
   /** This deployment, as the assembly is allowed to see it. */
   private sources(): MatchupSources {
     const leagueRepo = new LeagueRepo(this.db);

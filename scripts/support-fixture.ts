@@ -29,7 +29,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { canonicalSnapshotJson, fixturePath } from '../src/core/support/fixture.ts';
-import { readSnapshot, replayDraftSnapshot, SnapshotRejected, type ReplayReport } from '../src/core/support/replay.ts';
+import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
+import { describeCount, SnapshotRejected, type ReplayReport } from '../src/core/support/contract.ts';
+import { DECISION_LABELS } from '../src/core/support/schema.ts';
 
 interface Args {
   file: string | null;
@@ -55,9 +57,13 @@ function parseArgs(argv: string[]): Args {
 const USAGE = `
 Replay a Junculator support snapshot and, optionally, commit it as a fixture.
 
+Reads any of the six decisions — Draft, Team, Matchup, Waivers, Defence, Trades
+— identifies which from the file, and dispatches to that surface's adapter. No
+network, no database, no provider: everything it needs is in the file.
+
   npm run support:fixture -- <snapshot.json> [--write <name>] [--json] [--force]
 
-  <snapshot.json>   a file captured from Setup → "Copy Draft support snapshot"
+  <snapshot.json>   a file captured from Setup → "Copy support snapshot"
   --write <name>    also write tests/fixtures/support/<name>.snapshot.json
   --json            print the whole report as JSON instead of as prose
   --force           write the fixture even if the replay disagreed (rare; say
@@ -77,12 +83,28 @@ function printHuman(report: ReplayReport, file: string): void {
   console.log(`  outcome        ${report.outcome}`);
   console.log(`  ${report.summary}`);
   console.log('');
+  console.log(`  decision       ${DECISION_LABELS[report.kind]} (${report.kind})`);
   console.log(`  schema         ${report.schema.found}`);
   console.log(
     `  engine         ${report.engine.captured}${report.engine.matches ? ' (unchanged)' : ` → ${report.engine.current} — MOVED`}`,
   );
+  /*
+   * Printed only when the file makes the claim, and only in the two states that
+   * mean something.
+   *
+   * A line reading `derivation (unchanged)` on every healthy replay is noise a
+   * reader learns to skip, which is how the one that says MOVED gets skipped
+   * too. See `derivation.ts`.
+   */
+  if (report.derivation != null && report.derivation.captured != null) {
+    console.log(
+      `  derivation     ${report.derivation.captured}${
+        report.derivation.matches ? ' (league rules read the same)' : ` → ${report.derivation.current} — MOVED`
+      }`,
+    );
+  }
   console.log(`  captured from  ${report.release.capturedSha}`);
-  console.log(`  compared       ${report.compared.order} ranked players, ${report.compared.detailRows} in full`);
+  console.log(`  compared       ${report.compared.map(describeCount).join(', ')}`);
 
   if (report.distillation.length > 0) {
     console.log('');
@@ -159,12 +181,16 @@ async function main(): Promise<number> {
     throw err;
   }
 
-  const report = await replayDraftSnapshot(snapshot);
+  const report = await replaySnapshot(snapshot);
 
   if (args.json) {
-    // The board itself is megabytes and is not part of the report a caller
-    // wants piped; everything that describes the *verdict* is.
-    const { board: _board, ...rest } = report;
+    /*
+     * The replayed decision itself is not part of the report a caller wants
+     * piped — a draft board is megabytes — so only the verdict travels. The
+     * Draft adapter is the one that attaches `board`; the in-season adapters
+     * attach nothing, because the file already contains what they produced.
+     */
+    const { board: _board, ...rest } = report as ReplayReport & { board?: unknown };
     console.log(JSON.stringify({ file: path, ...rest }, null, 2));
   } else {
     printHuman(report, path);

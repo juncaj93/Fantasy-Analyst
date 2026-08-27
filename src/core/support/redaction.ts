@@ -172,6 +172,17 @@ export class SnapshotAliases {
   private readonly byName = new Map<string, string>();
   /** Aliases for league and draft ids, keyed by the real Sleeper id. */
   private readonly byScope = new Map<string, string>();
+  /**
+   * Other strings that must become an alias already handed out.
+   *
+   * The league's own *name* is the one that matters: it is replaced wholesale in
+   * the inputs, and it is also echoed back in several outputs — a matchup
+   * response prints it in its header block — so a capture that aliased the id
+   * and copied the name would have published the commissioner's own words
+   * anyway. Kept in its own map so registering one does not perturb the `league-N`
+   * / `draft-N` numbering, which is allocated by counting `byScope`.
+   */
+  private readonly byLabel = new Map<string, string>();
 
   /**
    * The alias for one Sleeper user id.
@@ -231,23 +242,70 @@ export class SnapshotAliases {
     return alias;
   }
 
+  /**
+   * Record a further string that must be replaced with an alias already given.
+   *
+   * For a value that is not itself an identifier the engine follows, but that
+   * names the same thing — a league's display name beside its id.
+   */
+  label(real: string | null | undefined, alias: string): void {
+    if (real == null || real === '' || real === alias) return;
+    this.byLabel.set(real, alias);
+  }
+
   /** How many distinct identifiers were aliased. Reported in the snapshot. */
-  get counts(): { ids: number; names: number; scopes: number } {
-    return { ids: this.byId.size, names: this.byName.size, scopes: this.byScope.size };
+  get counts(): { ids: number; names: number; scopes: number; labels: number } {
+    return { ids: this.byId.size, names: this.byName.size, scopes: this.byScope.size, labels: this.byLabel.size };
   }
 
   /**
    * Replace every aliased id found anywhere in a free-text string.
    *
-   * For the one place an identifier reaches a sentence: manager-history notes
-   * are composed upstream and can quote a display name. Applied after every id
-   * and name has been allocated, so it can only ever replace, never allocate.
+   * For the places an identifier reaches a sentence: manager-history notes are
+   * composed upstream and quote a display name, a matchup fingerprint hashes the
+   * league id into the string that seeds its simulation, and a trade's fit
+   * reasons name the manager they are about. Applied after every id and name has
+   * been allocated, so it can only ever replace, never allocate.
+   *
+   * **Matched on word boundaries, not as a bare substring.** A display name is
+   * whatever the manager typed, and short common words are ordinary: this app's
+   * own seeded league has a manager called `You`, and a substring replace turned
+   * every `Your roster is 22.1 pts better` into `Manager 1r roster is 22.1 pts
+   * better` — a redaction that corrupted the sentences it was protecting. The
+   * boundary is asserted only on a side where the identifier itself ends in a
+   * word character, so a name wrapped in punctuation is still replaced.
    */
   scrub(text: string): string {
+    return this.replaceIn(text, [this.byId, this.byName, this.byScope, this.byLabel]);
+  }
+
+  /**
+   * The same, over identifiers only — never over a display name.
+   *
+   * A Sleeper user id, a league id and a league name are high-entropy strings
+   * that appear in prose only because something composed them into it. A
+   * *display name* is whatever a manager typed, and short common words are
+   * ordinary: this app's own seeded league has a manager called `You`, so
+   * replacing display names in prose turned `You are sending Ike Sandoval` into
+   * `Manager 9 are sending Ike Sandoval` — a redaction corrupting the sentence
+   * it was protecting, in a way no amount of boundary-matching can fix, because
+   * the collision is the word itself.
+   *
+   * The in-season adapters therefore do not scrub names at all. They alias the
+   * rosters *before* the assembly runs, so the engine composes its sentences out
+   * of `Manager 3` in the first place and there is nothing to replace
+   * afterwards. This method is what is left: the identifiers, which cannot
+   * collide with English.
+   */
+  scrubIdentifiers(text: string): string {
+    return this.replaceIn(text, [this.byId, this.byScope, this.byLabel]);
+  }
+
+  private replaceIn(text: string, sources: ReadonlyMap<string, string>[]): string {
     let out = text;
-    for (const [real, alias] of this.byId) out = out.split(real).join(alias);
-    for (const [real, alias] of this.byName) out = out.split(real).join(alias);
-    for (const [real, alias] of this.byScope) out = out.split(real).join(alias);
+    for (const source of sources) {
+      for (const [real, alias] of source) out = out.replace(boundedPattern(real), alias);
+    }
     return out;
   }
 }
@@ -268,3 +326,41 @@ export const REDACTION_RULES: readonly string[] = [
   'Raw Sleeper pick payloads are reduced to the four player-name fields the board reads as a fallback.',
   'Players are identified by canonical player id; nothing outside the league’s own rosters is included.',
 ];
+
+/** Raised when a capture would have emitted something it must not. */
+export class SnapshotRedactionError extends Error {
+  /*
+   * A plain field rather than a constructor parameter property.
+   *
+   * Parameter properties are a TypeScript *transform*, not a type annotation,
+   * and Node's `--experimental-strip-types` refuses them. The replay CLI runs
+   * the shipped modules through exactly that loader — see
+   * `scripts/support-fixture.ts` — so anything on this path stays inside what
+   * type-stripping alone can erase.
+   */
+  readonly violations: { path: string; reason: string }[];
+
+  constructor(violations: { path: string; reason: string }[]) {
+    super(
+      `refusing to emit a support snapshot: ${violations.length} field${violations.length === 1 ? '' : 's'} must not be in one — ` +
+        violations.map((v) => `${v.path} (${v.reason})`).join('; '),
+    );
+    this.name = 'SnapshotRedactionError';
+    this.violations = violations;
+  }
+}
+
+/**
+ * One identifier, as a global pattern that will not match inside a longer word.
+ *
+ * The assertions are conditional because an identifier is not always a word: a
+ * name of `(commish)` has no word character at either end, and demanding a
+ * boundary there would mean never replacing it. Lookbehind is supported
+ * everywhere this runs — Workers, Node 22 and every browser the app targets.
+ */
+function boundedPattern(literal: string): RegExp {
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const before = /^[\p{L}\p{N}_]/u.test(literal) ? '(?<![\\p{L}\\p{N}_])' : '';
+  const after = /[\p{L}\p{N}_]$/u.test(literal) ? '(?![\\p{L}\\p{N}_])' : '';
+  return new RegExp(`${before}${escaped}${after}`, 'gu');
+}
