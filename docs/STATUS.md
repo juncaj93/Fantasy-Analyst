@@ -3028,6 +3028,10 @@ on delivery, as it was; the pending count is a diagnostic, and the mark that
 asks for the work is the Setup dot — a different mechanism on a different
 screen, deliberately.
 
-No budget raised, and none needed: app JavaScript −0.2 kB gzipped, CSS +0.1 kB,
-and Demo Mode's lazy chunk byte-identical at 149.0 kB against its 150.0 kB
-ceiling. Retiring the reprocess panel paid for the two Setup controls.
+No budget raised, and none needed. Measured against `989b4c9` and stated in
+bytes, because at this ceiling a tenth of a kilobyte is the whole margin:
+app JavaScript **−79 B** gzipped, CSS **+34 B**, and Demo Mode's lazy chunks
+**+4 B** — 149.0 kB against a 150.0 kB ceiling, unchanged to the tenth of a
+kilobyte the budget is written in. Retiring the reprocess panel paid for the two
+Setup controls, and the demo chunk moved only because the four bytes are one
+field on the setup fixture.
