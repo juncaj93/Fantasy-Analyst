@@ -11,7 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AI_TALLY_RULE_ID, TALLY_PROTOCOL } from '../src/core/newsletter/aiTally.ts';
+import { AI_TALLY_RULE_ID, ALLOWED_SCORES, TALLY_PROTOCOL } from '../src/core/newsletter/aiTally.ts';
 import { toEmailMessage } from '../src/core/newsletter/source.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { EvidenceRepo } from '../src/server/repos/evidence.ts';
@@ -76,6 +76,38 @@ describe('the ChatGPT tally import', () => {
     expect(source).toContain('Bijan Robinson was named the starter');
     // The delivery, not the article.
     expect(source).not.toMatch(/https?:|Unsubscribe|Privacy Policy|=E2=80|<[a-z]/i);
+  });
+
+  /**
+   * ...and hands over the job with it.
+   *
+   * The block used to be the article alone, which worked only because it was
+   * pasted into a thread that already knew what to do with it. That is a
+   * standing instruction living in one conversation on one device, and a new
+   * thread — or a different phone — gets an answer in a shape the importer
+   * refuses. Every rule here is one the importer already enforces, so the
+   * constants are read from the module rather than restated.
+   */
+  it('carries the rules the importer will hold the answer to', async () => {
+    const source = await service.chatSource(await stored());
+
+    // The exact protocol, so the answer comes back parseable.
+    expect(source).toContain(TALLY_PROTOCOL);
+    expect(source).toContain('END_NEWSLETTER_TALLY');
+    expect(source).toContain('| score |');
+
+    // The four scores it accepts, and nothing implying an open range.
+    for (const score of ALLOWED_SCORES) {
+      expect(source).toContain(score > 0 ? `+${score}` : String(score));
+    }
+
+    // The three semantics the ledger assumes and cannot check for itself.
+    expect(source).toMatch(/one row per player/i);
+    expect(source).toMatch(/leave a player out/i);
+    expect(source).toMatch(/full names/i);
+
+    // Instructions are not delivery either: no links, no markup.
+    expect(source).not.toMatch(/https?:|<[a-z]/i);
   });
 
   // -------------------------------------------------------------- preview ---

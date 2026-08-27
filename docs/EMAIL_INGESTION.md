@@ -19,6 +19,7 @@ FF Newsletter
 
 ```
 Copy for ChatGPT                         (NewsletterService.chatSource)
+     the article, plus the rules the answer will be held to
   -> your weekly ChatGPT thread
   -> Paste AI tally                      (core/newsletter/aiTally.ts)
   -> names resolved against Sleeper      (core/identity)
@@ -28,6 +29,15 @@ Copy for ChatGPT                         (NewsletterService.chatSource)
   -> derived player tallies              (player_signal_cache)
   -> review queue for a name that did not resolve
 ```
+
+The copied block carries the job as well as the material: the exact protocol to
+answer in, the four scores the importer accepts, one row per player for this
+issue only, omit the players whose signals cancel, a reason in football words —
+because that reason is what a player's card shows — and full names, because the
+identity ladder resolves a name to one player or to nobody and never guesses.
+Every one of those is a rule the importer already enforces or already assumes;
+sending them with the article is what makes a fresh chat thread, or a different
+phone, produce an answer the app can actually read.
 
 **Arrival scores nothing.** Reading editorial analysis and judging what it means
 for a player's value is a semantic question, and the honest ways to answer it are
