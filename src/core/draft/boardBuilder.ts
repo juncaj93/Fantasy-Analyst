@@ -16,7 +16,12 @@
  */
 
 import { rosterAlerts, type MyGuyLevel, type RosterAlert } from './decisions.ts';
-import { DEFENCE_WEIGHTS, rankAvailablePlayers, type DraftRecommendation } from './engine.ts';
+import {
+  DEFENCE_WEIGHTS,
+  rankAvailablePlayers,
+  type DraftRecommendation,
+  type MarketPoolPlayer,
+} from './engine.ts';
 import { computeNeed } from './need.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -796,11 +801,23 @@ export async function buildDraftBoard(
   const draftable = (player: CanonicalPlayer): boolean =>
     isDraftable({ team: player.team, sleeperAdp: rankOf(player), dogAdp: dogOf(player) });
 
-  const eligible = (player: CanonicalPlayer): boolean =>
+  /*
+   * On the board at all: available, draftable, at a position this league
+   * starts. Everything the *room* could still take, whatever the reader has
+   * chosen to look at.
+   *
+   * Split from `eligible` below rather than folded into it because the two
+   * answer different questions, and the tier ladders need this one. See
+   * `boardPool`.
+   */
+  const onTheBoard = (player: CanonicalPlayer): boolean =>
     player.active &&
     draftable(player) &&
     !takenIds.has(player.id) &&
-    (startable.size === 0 || startable.has(player.position)) &&
+    (startable.size === 0 || startable.has(player.position));
+
+  const eligible = (player: CanonicalPlayer): boolean =>
+    onTheBoard(player) &&
     // `FLX` narrows to RB/WR/TE; every other value is the exact position it
     // names. One helper, shared with the player list and the compare picker.
     positionMatchesFilter(player.position, positionFilter) &&
@@ -878,6 +895,46 @@ export async function buildDraftBoard(
   if (queuedOnly && pool.length === 0) {
     warnings.push('your queue is empty — tap the star beside a player to add them');
   }
+
+  /*
+   * The board the tiers are a claim about — which is not the board on screen.
+   *
+   * A tier says where the market's quality steps down at a position among the
+   * players still available. That is a fact about the draft, and it does not
+   * change because the reader tapped QB or ★. But the ladders were being built
+   * from `candidates`, which is what the *filter* left, so they did: three
+   * backs in the queue made a three-player position, the best of them sat in a
+   * tier with nothing below it, and the cliff eight picks away — the one thing
+   * on the board worth knowing at that moment — was gone. The unfiltered board
+   * and the filtered one disagreed about the same player, and only one of them
+   * could be right.
+   *
+   * So the ladders read the pool the unfiltered board is built from: the same
+   * players, in the same order, cut at the same cap. Filtering can then change
+   * which rows are drawn and nothing else about them.
+   *
+   * Unfiltered this *is* `candidates`, reused rather than rebuilt — the common
+   * case costs nothing, and the identity is what makes the invariant easy to
+   * see: the filtered board is measured against exactly what the unfiltered one
+   * measures itself against.
+   */
+  const filteredView = positionFilter != null || queuedOnly;
+  const boardPool = filteredView
+    ? allPlayers.filter(onTheBoard).sort(byMarketThenSearch(rankOf)).slice(0, MAX_CANDIDATES)
+    : candidates;
+  const marketPool: MarketPoolPlayer[] = boardPool.map((player) => ({
+    position: player.position,
+    adp: rankOf(player),
+    /*
+     * A defence carries no second market anywhere on this board — the pass
+     * below strips it, because the app has no opinion about a defence beyond
+     * the draft order — so his rung has to be built from the number his row is
+     * looked up by. A ladder built from the blend and queried with Sleeper's
+     * own figure would drop every defence the two markets disagree about off
+     * his own tier, silently and only sometimes.
+     */
+    dogAdp: player.position === DEFENCE ? null : dogOf(player),
+  }));
 
   // Non-blocking draft-day readiness: unresolved names are research the user
   // did that is not reaching the board. Say so here rather than only in Setup,
@@ -1112,6 +1169,13 @@ export async function buildDraftBoard(
         : undefined,
     // 60/40, or 75/25 in a best-ball league. Sleeper's own settings decide.
     marketFormat: marketFormatOf(format),
+    /*
+     * The tier ladders read the whole board, never the filtered view of it.
+     * Both passes are handed the same pool: a ladder is per position, so the
+     * defences in it are invisible to the field's arithmetic and the field is
+     * invisible to theirs.
+     */
+    marketPool,
   };
 
   /*

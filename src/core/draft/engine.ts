@@ -314,6 +314,36 @@ export interface DraftContext {
    * unconfident detection resolves to.
    */
   marketFormat?: MarketFormat;
+  /**
+   * The board's own pool, for the arithmetic that is about the pool rather than
+   * about a row.
+   *
+   * The tier ladders are the caller's answer to "which players is a tier a
+   * claim about", and it is not the same question as "which players am I
+   * scoring". A position chip or the ★ queue narrows the second without
+   * narrowing the first: the market's quality clusters at running back do not
+   * change because the reader is only looking at three of them.
+   *
+   * Absent means the two coincide — the caller is scoring a whole board — and
+   * the ladders are built from `available` exactly as they always were.
+   */
+  marketPool?: readonly MarketPoolPlayer[];
+}
+
+/**
+ * A pool member as the tier ladders need him: where he plays, and what each
+ * market says he costs.
+ *
+ * Deliberately not an `AvailablePlayerInput`. The ladder reads the blended
+ * baseline and nothing else, so a caller can name its pool without having
+ * loaded a news tally, a betting line or a projection for every player in it.
+ */
+export interface MarketPoolPlayer {
+  position: string;
+  /** Sleeper ADP for this league, or null where no ranking priced him. */
+  adp: number | null;
+  /** Raw Underdog ADP, or null. Never a fallback for the other. */
+  dogAdp: number | null;
 }
 
 export interface ComponentScore {
@@ -689,14 +719,35 @@ export function rankAvailablePlayers(
    * The lookup below uses the same blended number. That is not a detail: a
    * ladder built from one baseline and queried with another assigns players to
    * rungs they are not on, and the failure is silent.
+   *
+   * ## Built from the board's pool, not from the rows being scored
+   *
+   * `available` is whoever the caller asked to have scored, and on a filtered
+   * board that is a subset of the players the ladder is a claim about. Building
+   * the ladder from it made a tier a fact about the reader's chip: tap ★ with
+   * three backs queued and the best of them was alone in a three-man tier with
+   * nothing below him, on a board where he is one of thirty and a real cliff
+   * sits eight picks away. `ctx.marketPool` is the pool that ladder belongs to —
+   * the same one the unfiltered board is built from — so the answer is the same
+   * whichever way the reader has narrowed the list.
+   *
+   * Absent, this falls back to `available`, which is the right pool for a
+   * caller that is scoring a whole board and has no filter to speak of.
    */
+  const ladderPool: readonly MarketPoolPlayer[] =
+    ctx.marketPool ??
+    available.map((a) => ({ position: a.player.position, adp: a.adp, dogAdp: a.dogAdp ?? null }));
   const marketByPosition = new Map<string, number[]>();
-  for (const a of available) {
-    const baseline = blendByPlayer.get(a.player.id)?.adp ?? null;
+  for (const entry of ladderPool) {
+    const baseline = blendMarketBaseline({
+      dogAdp: entry.dogAdp,
+      sleeperAdp: entry.adp,
+      format: ctx.marketFormat ?? 'standard',
+    }).adp;
     if (baseline == null) continue;
-    const list = marketByPosition.get(a.player.position);
+    const list = marketByPosition.get(entry.position);
     if (list) list.push(baseline);
-    else marketByPosition.set(a.player.position, [baseline]);
+    else marketByPosition.set(entry.position, [baseline]);
   }
 
   const tierMaps = new Map<string, PositionTierMap>();
