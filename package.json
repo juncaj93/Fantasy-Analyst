@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test --project=webkit-iphone-430 --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360",
-    "e2e:chromium": "playwright test --project=chromium-iphone-430 --project=chromium-iphone-390 --project=chromium-iphone-375 --project=chromium-small-360",
+    "e2e:chromium": "CI=1 playwright test --project=chromium-iphone-430 --project=chromium-iphone-390 --project=chromium-iphone-375 --project=chromium-small-360",
     "verify": "npm run typecheck && npm run test && npm run e2e",
     "support:fixture": "node --experimental-transform-types --no-warnings scripts/support-fixture.ts",
     "perf:budget": "node scripts/perf-budget.mjs",

@@ -397,7 +397,7 @@ that prints a provider payload must do the same.
   that mutate global config break later tests. Prefer asserting presence over
   flipping shared state.
 - **WebKit is not installed in this container.** `npm run e2e` fails; use
-  `CI=1 npm run e2e:chromium`. WebKit runs in CI.
+  `npm run e2e:chromium`. WebKit runs in CI.
 - **One spec disagrees between the engines, and it is the fallback that is
   wrong.** `e2e/shell.spec.ts:179` — "the draft board shows at least eight
   players before a scroll" — fails at **Chromium 360 only**, on `main`, with no
@@ -434,9 +434,9 @@ that prints a provider payload must do the same.
 ## Verification
 
 ```bash
-npm run typecheck          # tsc
-npx vitest run             # 882 tests, 39 files
-CI=1 npm run e2e:chromium  # all four widths, fallback engine
+npm run typecheck       # tsc
+npx vitest run          # 882 tests, 39 files
+npm run e2e:chromium    # all four widths, fallback engine
 npm run build
 npx wrangler deploy --dry-run
 ```
