@@ -586,13 +586,34 @@ export class DataHealthService {
    *
    *   1. a state the source itself declared wins, because a pipeline knows
    *      things this function cannot infer (a 404 is `waiting`, a missing key
-   *      is `missing`);
+   *      is `missing`) — except a declared `waiting` while the check itself is
+   *      overdue, for the reason below;
    *   2. consecutive ingest failures are `degraded`, whatever the timestamps
    *      say — this is the case a fresh `checked_at` would otherwise vouch for;
    *   3. an overdue *check* is `degraded`, because data that is fine today only
    *      because it was fetched before the pipeline stopped is not fine;
    *   4. nothing ever stored, with no reason recorded, is `missing`;
    *   5. otherwise, age against this source's own window.
+   *
+   * ## Two questions, not one
+   *
+   * *Has the source published?* and *is the check still running?* are
+   * independent, and rule 1 used to answer both with the first. It cost the
+   * alarm rule 3 exists to raise: the injury file for a season that has not
+   * started 404s every five minutes on purpose, the reading is a declared
+   * `waiting`, and a declared state returned early meant the thirty-minute
+   * cron-death window underneath it never got to run. A trigger somebody
+   * deleted in July read exactly like a trigger firing on time — *Waiting on
+   * source*, all preseason, right up to the first Sunday it mattered.
+   *
+   * So the overdue check is decided before the state is, and a declared
+   * `waiting` yields to it: a quiet cron that is alive still reads `waiting`
+   * with its last attempt minutes old, and a cron that has stopped reads
+   * `degraded` whether or not the source had anything to say. Only `waiting`
+   * yields — every other declared state (`missing` for an unconfigured key,
+   * `degraded` for the mock provider) is already the more specific fault, and
+   * saying "the scheduled check has not run" over it would be a worse sentence
+   * about the same trouble.
    */
   private toHealth(reading: SourceReading, now: Date): SourceHealth {
     const policy = policyFor(reading.id);
@@ -610,15 +631,23 @@ export class DataHealthService {
     const ageMinutes = minutesSince(measured, now);
     const attemptAge = minutesSince(reading.lastAttemptAt, now);
 
+    /*
+     * Whether the *check* is overdue, asked once and independently of what the
+     * source itself had to say. A dead cron is a dead cron whether or not there
+     * was anything to fetch, which is why this is computed above the branch
+     * rather than inside it.
+     */
+    const checkOverdue = attemptWindow != null && attemptAge != null && attemptAge > attemptWindow;
+
     let state: SourceState;
     let note = reading.note ?? null;
 
-    if (reading.state != null) {
+    if (reading.state != null && !(checkOverdue && reading.state === 'waiting')) {
       state = reading.state;
     } else if (technical.consecutiveFailures > 0) {
       state = 'degraded';
       note = `${technical.consecutiveFailures} refresh${technical.consecutiveFailures === 1 ? '' : 'es'} in a row did not finish.`;
-    } else if (attemptWindow != null && attemptAge != null && attemptAge > attemptWindow) {
+    } else if (checkOverdue) {
       state = 'degraded';
       note = 'The scheduled check for this has not run recently.';
     } else if (measured == null) {

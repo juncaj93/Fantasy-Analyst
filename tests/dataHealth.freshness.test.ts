@@ -165,6 +165,100 @@ describe('last attempt and last success are different questions', () => {
   });
 });
 
+/**
+ * The alarm that has to survive a preseason, which is when it is most needed.
+ *
+ * A season's injury file does not exist until the league publishes it, so the
+ * five-minute check spends the whole summer recording a legitimate
+ * `not_published`. That is correct and stays correct. What it must not do is
+ * answer the *other* question — whether the check itself is still running — on
+ * the source's behalf: for a while it did, and a deleted cron trigger read
+ * exactly like a healthy one, calmly saying "waiting on source" until the first
+ * Sunday somebody needed a ruled-out player.
+ *
+ * The two readings below differ in one value: how long ago the check ran.
+ */
+describe('a check that has stopped, on a source with nothing to publish', () => {
+  it('is degraded while the source is still legitimately not published', async () => {
+    const db = await createTestDb();
+    await injuryState(db, {
+      checkedAt: ago(FREQUENT_ATTEMPT_STALE_MINUTES + 1),
+      ingestedAt: null,
+      outcome: 'not_published',
+    });
+
+    const v = await view(db);
+    const injuries = find(v, 'injuries');
+    expect(injuries.state).toBe('degraded');
+    expect(injuries.note).toMatch(/scheduled check/i);
+    // The source's own outcome is untouched — it is still the 404 the ingest recorded.
+    expect(injuries.technical.lastOutcome).toBe('not_published');
+    expect(injuries.lastSuccessAt).toBeNull();
+    // And a critical input in this state is something to act on, which is the point.
+    expect(v.sources.filter(needsAttention).map((s) => s.id)).toContain('injuries');
+    expect(v.overall.state).toBe('problem');
+  });
+
+  it('is still only waiting while the check is running on time', async () => {
+    const db = await createTestDb();
+    await injuryState(db, { checkedAt: ago(3), ingestedAt: null, outcome: 'not_published' });
+
+    const v = await view(db);
+    const injuries = find(v, 'injuries');
+    expect(injuries.state).toBe('waiting');
+    expect(injuries.note).toMatch(/no injury report published/i);
+    expect(injuries.lastAttemptAt).toBe(ago(3));
+    expect(v.sources.filter(needsAttention).map((s) => s.id)).not.toContain('injuries');
+  });
+
+  /**
+   * The boundary, on the same reading the rest of the summer produces: exactly
+   * thirty minutes is six ticks and still within tolerance, and one minute past
+   * it is a check that has missed enough of them to be worth saying so.
+   */
+  it('is waiting exactly on the boundary and degraded one minute past it', async () => {
+    const onTime = await createTestDb();
+    await injuryState(onTime, {
+      checkedAt: ago(FREQUENT_ATTEMPT_STALE_MINUTES),
+      ingestedAt: null,
+      outcome: 'not_published',
+    });
+    expect(find(await view(onTime), 'injuries').state).toBe('waiting');
+
+    const overdue = await createTestDb();
+    await injuryState(overdue, {
+      checkedAt: ago(FREQUENT_ATTEMPT_STALE_MINUTES + 1),
+      ingestedAt: null,
+      outcome: 'not_published',
+    });
+    expect(find(await view(overdue), 'injuries').state).toBe('degraded');
+  });
+
+  /**
+   * Scoped to the feed whose check stopped, and to nothing else.
+   *
+   * Both databases below hold the identical (empty) Vegas and schedule state
+   * and differ only in when the injury check last ran, so any difference in
+   * those two rows would be this rule reaching somewhere it has no business.
+   */
+  it('says nothing different about Vegas or the schedule', async () => {
+    const alive = await createTestDb();
+    await injuryState(alive, { checkedAt: ago(3), ingestedAt: null, outcome: 'not_published' });
+
+    const dead = await createTestDb();
+    await injuryState(dead, {
+      checkedAt: ago(FREQUENT_ATTEMPT_STALE_MINUTES + 1),
+      ingestedAt: null,
+      outcome: 'not_published',
+    });
+
+    const [a, d] = [await view(alive), await view(dead)];
+    for (const id of ['vegas', 'schedule']) {
+      expect(find(d, id)).toEqual(find(a, id));
+    }
+  });
+});
+
 describe('a source whose ingests are dying', () => {
   /**
    * `consecutive_failures` is the column that exists so a fresh `checked_at`
