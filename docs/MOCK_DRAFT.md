@@ -278,6 +278,59 @@ Two browser tests hold it: a request that never answers must hand the screen
 back inside seven seconds, and a tap during a slow pick must be the pick that
 lands. Both are mutation-proven.
 
+### What it turned out to be: an edge 503, above the Worker
+
+The record did its job on the first occurrence after it shipped. Three
+consecutive attempts at one pick, all **HTTP 503**, all through the **MIA**
+colo, at 2062ms / 518ms / 656ms — rays `a323e35dfb989be2`,
+`a323e38b4cbd9be2`, `a323e3906d739be2`.
+
+**No line of this application can produce that**, and the elimination is
+structural rather than circumstantial:
+
+  - `src/worker/index.ts` wraps every `/api/*` request in a try/catch that
+    answers **JSON 500** — written precisely so nothing escapes to Cloudflare's
+    HTML error page. It catches what the router cannot: a binding that will not
+    resolve, a failure building the environment, the router itself.
+  - `http/router.ts` wraps middleware *and* handler in a second try/catch, also
+    **JSON 500**. Its own comment states the rule: every answer to an `/api/`
+    request that leaves it is JSON.
+  - `wrangler.toml` sets `run_worker_first = ["/api/*"]`, so the static-asset
+    router cannot answer the path first.
+  - The only two 503s in the codebase are `errorResponse(…, 503)` about a
+    missing passphrase — **JSON**, and a JSON error keeps the server's own
+    message, so the banner would have read *"This site is read-only…"* rather
+    than the generic sentence. They would also fire for every write, forever,
+    not three times in three seconds.
+
+So the three named suspects are all excluded by construction: an unhandled
+exception is caught twice over and becomes a 500; a D1 lock or timeout is a
+throw, so also a 500; a CPU or subrequest limit is Cloudflare's own 1101/1102,
+which is **status 500** with an HTML page. **None of them can produce a 503
+here.** It was generated above the Worker, at the edge.
+
+And it is not about the request either. The decisive fact is that **the same
+bytes succeeded moments later**: the state is posted whole with every attempt,
+so a payload-, round- or size-dependent failure would have failed identically on
+the retry that worked. Concurrency is excluded too — the screen holds one board
+request at a time, and the live sync is parked while a rehearsal is open. The
+timing signature says the same thing: a slow first rejection (2s) followed by
+two fast ones is load being shed upstream, not work being attempted and failing.
+
+**The mitigation is therefore the right one, and is left alone.** The whole
+sequence took 4.1s against a 6s budget, so the bounding behaved exactly as
+designed; 503 is already retryable, so all three attempts were made. What the
+retry could not do is outrun a colo event lasting seconds — its 300ms and 600ms
+backoffs all landed inside the same bad window — and widening them is precisely
+the lockout this lane just removed. The correct outer retry is the human one:
+**Try again**, paced by a person's reaction time, which is what recovered it.
+
+One thing to know before asking for more: those ray ids cannot be looked up
+after the fact. `wrangler tail` streams live only, and nothing here has Logpush.
+Even with it, a request rejected at the edge never reached the Worker, so a
+Worker log would have nothing to show — the evidence would have to come from
+Cloudflare's own HTTP request logs.
+
 ### What is recorded when it fails
 
 `apiResponse.ts` reports every failure to `console.warn`, which on an iPhone is
