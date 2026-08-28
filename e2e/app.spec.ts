@@ -1902,14 +1902,27 @@ test.describe('review queue', () => {
     });
     expect(received.status()).toBe(200);
 
+    /*
+     * Short driver text, and deliberately not stamped with the message id.
+     *
+     * A driver is what the card prints — `excerpt` is `row.drivers` — so a
+     * marker here is test scaffolding rendered as product copy, and it wrapped
+     * one player's card from 135px to 306px once four widths had each left
+     * their own copy behind. `draft-card.spec.ts` measures that card against a
+     * ceiling of 40% of the screen and failed at 360 on exactly that.
+     *
+     * Nothing is lost by dropping it: the tally's dedupe key is
+     * `tally|sourceMessageId|playerId|score|drivers`, and the message id in it
+     * is already unique to this project and this moment.
+     */
     const applied = await page.request.post(
       `/api/newsletter/messages/${encodeURIComponent(messageId)}/ai-tally/apply`,
       {
         data: {
           text: [
             'NEWSLETTER_TALLY_V1',
-            `Julian Reyes | +1 | Back at practice (${messageId})`,
-            `Julian Reyes | -1 | Splitting the backfield (${messageId})`,
+            'Julian Reyes | +1 | Back at practice',
+            'Julian Reyes | -1 | Splitting the backfield',
             'END_NEWSLETTER_TALLY',
           ].join('\n'),
         },
