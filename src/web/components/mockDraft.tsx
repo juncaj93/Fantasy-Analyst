@@ -26,9 +26,9 @@ import { createPortal } from 'react-dom';
 import { ApiError, api, type DraftBoard, type MockBoardResponse } from '../api.ts';
 import { useOverlay } from '../overlay.ts';
 import { Empty, Loading, Notice } from './common.tsx';
-import { CompactPlayerRow } from './playerRow.tsx';
 import { CloseIcon } from './icons.tsx';
 import { DraftBoardOverlay } from './draftBoard.tsx';
+import { RecommendationRow, withTierDividers } from '../screens/DraftScreen.tsx';
 import { Sheet } from './native.tsx';
 import { fillSlotRows } from '../../core/draft/liveRoster.ts';
 import { enterMock, exitMock, forgetMock, readMock, writeMock } from '../mock/session.ts';
@@ -38,31 +38,74 @@ import type { MockDraftState } from '../../core/draft/mockDraft.ts';
 const MOCK_ROWS = 40;
 
 /**
- * Attempts at one board request: the first, and two more.
+ * How long one attempt may take before the reader is told instead.
  *
- * Reported from a real rehearsal as a save error that came and went while the
- * draft went on progressing — a pick that did nothing until it was tapped
- * again, sometimes twice. The route is not what fails: the same request
- * answered 200 across twenty-two complete drafts over the real router. What
- * fails is the trip, on a phone, and a lost trip was costing the reader the
- * pick they had just made.
+ * There was no deadline at all, and that turned out to be the whole of the
+ * ten-second lockout the owner reported: a request with nothing to stop it,
+ * three of them in a row behind a guard that swallowed every tap while they
+ * ran. A slow trip is now a failed trip, quickly, which is what lets the screen
+ * hand the decision back.
  *
- * Three is the number of attempts a person would make themselves before
- * deciding the app was broken, done for them and faster.
+ * Four seconds is well past any healthy answer — this route measured 76–173ms
+ * against a production-scale pool — and well short of the pause that makes
+ * somebody think the app has died.
  */
+const MOCK_ATTEMPT_MS = 4_000;
+
+/**
+ * How long the whole thing may take, retries included.
+ *
+ * The number the owner actually feels, and the one the previous fix got wrong
+ * by making it additive: three unbounded attempts plus their backoffs, with no
+ * ceiling anywhere. It is a *budget* rather than a count — checked before each
+ * retry — so a slow first attempt spends it and no second attempt is made,
+ * while three fast flakes are all retried inside a second.
+ */
+const MOCK_BUDGET_MS = 6_000;
+
+/** Attempts at one board request, when the budget allows them. */
 const MOCK_ATTEMPTS = 3;
+
+/**
+ * How long two taps count as one gesture.
+ *
+ * Under this, a second tap is the stray half of a double and is ignored — the
+ * bug that was silently throwing a pick away. Over it, the reader has watched
+ * nothing happen and is asking again, and is answered: what is in the air is
+ * cancelled and their tap takes its place.
+ *
+ * 700ms is longer than any double-tap and far shorter than the lockout it
+ * replaces. It is the whole of what the screen will ever ignore.
+ */
+const MOCK_IMPATIENCE_MS = 700;
+
+/** How many failed attempts the screen remembers, for the reader to send on. */
+const MOCK_TRACE_KEEP = 12;
 
 /**
  * Between attempts. Deliberately short, and growing.
  *
  * The reader is holding a phone with their finger on a player. Half a second of
- * dimmed list is a beat; three seconds is a bug. The step gives a cell handover
- * time to complete without ever making the screen feel stuck.
+ * dimmed list is a beat; three seconds is a bug.
  */
 const MOCK_RETRY_MS = 300;
 
+/** What one attempt did, kept so the reader can send it on. See `MockTrace`. */
+export interface MockAttemptRecord {
+  attempt: number;
+  /** Wall time for this attempt alone, in ms. */
+  ms: number;
+  /** HTTP status, or 0 when nothing answered. */
+  status: number;
+  /** `network`, `protocol`, `server`, `client`, `auth` — or `timeout`. */
+  failure: string;
+  /** Cloudflare's request id, which is what makes an edge failure findable. */
+  ray: string | null;
+  at: string;
+}
+
 /**
- * One board request, retried while what went wrong was the trip.
+ * One board request, retried while what went wrong was the trip, and bounded.
  *
  * **Retrying is safe here in a way it is almost nowhere else in this app**, and
  * that is why this exists at this seam and not in `api.ts`. The route writes
@@ -77,9 +120,28 @@ const MOCK_RETRY_MS = 300;
  * connection, a 5xx, a 408 or a 429 are asked again; a refusal is not. That is
  * what keeps the 409 that ends a rehearsal arriving immediately rather than
  * three attempts later — see `retryableFor` in `apiResponse.ts`.
+ *
+ * Every attempt that fails is recorded through `onAttempt`, because a failure
+ * that only reaches `console.warn` is a failure nobody holding a phone can
+ * report. See `MockTrace`.
  */
-async function postMockBoard(draftId: string, body: unknown): Promise<MockBoardResponse> {
+async function postMockBoard(
+  draftId: string,
+  body: unknown,
+  opts: { signal?: AbortSignal; onAttempt?: (record: MockAttemptRecord) => void } = {},
+): Promise<MockBoardResponse> {
+  const startedAt = Date.now();
   for (let attempt = 1; ; attempt += 1) {
+    const began = Date.now();
+    /*
+     * The caller's own cancellation and this attempt's deadline, as one signal.
+     *
+     * `AbortSignal.any` is what lets a tap cancel a request that is still
+     * waiting on its four seconds — without it the reader would be told to wait
+     * for a request they had already given up on.
+     */
+    const deadline = AbortSignal.timeout(MOCK_ATTEMPT_MS);
+    const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
     try {
       return await api.post<MockBoardResponse>(
         `/api/drafts/${encodeURIComponent(draftId)}/mock/board`,
@@ -93,12 +155,40 @@ async function postMockBoard(draftId: string, body: unknown): Promise<MockBoardR
          * mean every other tab in the app went back to the network for no
          * reason at all. See the note on `post` in `api.ts`.
          */
-        { invalidates: false },
+        { invalidates: false, signal },
       );
     } catch (err) {
-      const worthRetrying = err instanceof ApiError && err.retryable && attempt < MOCK_ATTEMPTS;
-      if (!worthRetrying) throw err;
-      await new Promise((resolve) => setTimeout(resolve, MOCK_RETRY_MS * attempt));
+      /* The reader changed their mind. Not a failure, and not recorded as one. */
+      if (opts.signal?.aborted) throw err;
+
+      const timedOut = deadline.aborted;
+      opts.onAttempt?.({
+        attempt,
+        ms: Date.now() - began,
+        status: err instanceof ApiError ? err.status : 0,
+        failure: timedOut ? 'timeout' : err instanceof ApiError ? err.failure : 'unknown',
+        ray: err instanceof ApiError ? err.ray : null,
+        at: new Date().toISOString(),
+      });
+
+      /*
+       * A timeout is worth one more go — the trip is what failed, and the next
+       * one may take a different route — but only if the budget can pay for it,
+       * which after a four-second attempt it cannot.
+       */
+      const kind = timedOut || (err instanceof ApiError && err.retryable);
+      const wait = MOCK_RETRY_MS * attempt;
+      /*
+       * What the next attempt could cost, not just what the last one did.
+       *
+       * Checking only the time already spent is how a budget stops bounding
+       * anything: after a four-second timeout there was still "room" for
+       * another four-second timeout, and the ceiling was twice what it said.
+       * A retry has to be affordable in the worst case it can produce.
+       */
+      const affordable = Date.now() - startedAt + wait + MOCK_ATTEMPT_MS <= MOCK_BUDGET_MS;
+      if (!kind || attempt >= MOCK_ATTEMPTS || !affordable) throw err;
+      await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
 }
@@ -143,6 +233,8 @@ export function MockDraftScreen({
    * touching anything — the behaviour every mock had before this step existed.
    */
   const [seat, setSeat] = useState<number | null>(null);
+  /** Which card is open. The same one-at-a-time rule the live board uses. */
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   /**
    * The rehearsal, and the one place it is kept.
@@ -175,8 +267,17 @@ export function MockDraftScreen({
    * work while the room is thinking, or a request that never lands leaves the
    * screen with no way out — so those go regardless, and `generation` below is
    * what stops the request they overtook from landing on top of them.
+   *
+   * ## And it stops gating after a moment, deliberately
+   *
+   * `since` is when the in-flight request started. Past `MOCK_IMPATIENCE_MS` a
+   * tap is not a stray second half of one gesture any more — it is somebody who
+   * has watched nothing happen and is asking again — so it cancels what is in
+   * the air and takes its place. That is the difference between a guard and the
+   * lockout the owner reported: a tap is never swallowed for longer than it
+   * takes to be sure it was a double.
    */
-  const inFlight = useRef(false);
+  const inFlight = useRef<{ since: number; abort: AbortController } | null>(null);
 
   /**
    * Which request the screen is currently waiting for.
@@ -200,6 +301,21 @@ export function MockDraftScreen({
     { kind: 'start'; slot?: number | null } | { kind: 'resume' } | { kind: 'take'; playerId: string } | null
   >(null);
 
+  /**
+   * What actually failed, kept where somebody holding a phone can reach it.
+   *
+   * `apiResponse.ts` reports every failure to `console.warn`, which on an
+   * iPhone is a place nobody can look. That is why the first report of this
+   * defect took a day of inference to narrow and still could not name the
+   * cause: there was no record of what the failing request had *done* — its
+   * status, how long it took, or Cloudflare's own id for it.
+   *
+   * So the screen keeps its own. It goes into the support snapshot and is
+   * printed under the banner, which turns the next occurrence into evidence
+   * instead of another report of a sentence.
+   */
+  const trace = useRef<MockAttemptRecord[]>([]);
+
   const apply = useCallback((next: MockBoardResponse) => {
     stateRef.current = next.state;
     writeMock(next.state);
@@ -215,8 +331,18 @@ export function MockDraftScreen({
         | { kind: 'resume' }
         | { kind: 'take'; playerId: string },
     ) => {
-      if (action.kind === 'take' && inFlight.current) return;
-      inFlight.current = true;
+      /*
+       * A second tap inside the double-tap window is the same gesture; after it
+       * the reader has changed their mind, and what is in the air is abandoned
+       * rather than allowed to answer over them.
+       */
+      const flight = inFlight.current;
+      if (action.kind === 'take' && flight) {
+        if (Date.now() - flight.since < MOCK_IMPATIENCE_MS) return;
+        flight.abort.abort();
+      }
+      const abort = new AbortController();
+      inFlight.current = { since: Date.now(), abort };
       const mine = ++generation.current;
       setPhase((current) => (current === 'loading' ? 'loading' : 'thinking'));
       setSnapshotNote(null);
@@ -226,11 +352,20 @@ export function MockDraftScreen({
        */
       lastAction.current = action;
       try {
-        const next = await postMockBoard(draftId, { state: stateRef.current, action, limit: MOCK_ROWS });
+        const next = await postMockBoard(
+          draftId,
+          { state: stateRef.current, action, limit: MOCK_ROWS },
+          {
+            signal: abort.signal,
+            onAttempt: (record) => {
+              trace.current = [...trace.current, record].slice(-MOCK_TRACE_KEEP);
+            },
+          },
+        );
         if (mine !== generation.current) return;
         apply(next);
       } catch (err) {
-        if (mine !== generation.current) return;
+        if (mine !== generation.current || abort.signal.aborted) return;
         /*
          * A 409 is the lifecycle rule arriving, not a failure.
          *
@@ -250,7 +385,7 @@ export function MockDraftScreen({
         setError(err instanceof Error ? err.message : String(err));
         setPhase('failed');
       } finally {
-        if (mine === generation.current) inFlight.current = false;
+        if (mine === generation.current) inFlight.current = null;
       }
     },
     [draftId, apply],
@@ -287,6 +422,19 @@ export function MockDraftScreen({
 
   const board: DraftBoard | null = result?.board ?? null;
 
+  /**
+   * The live screen's own row annotations, over the rehearsal's board.
+   *
+   * Tier dividers are **off**, for the same reason the live screen turns them
+   * off on its mixed board: a divider says "the market's next tier starts
+   * here", and there is no single position for that boundary to be about. A
+   * rehearsal has no position filter, so its list is always the mixed one.
+   *
+   * `showCliffProximity` is the other half of that same answer and is on, which
+   * is exactly what the live screen passes as `!isSinglePosition`.
+   */
+  const rows = useMemo(() => withTierDividers(board?.recommendations ?? [], false), [board?.recommendations]);
+
   const capture = async () => {
     if (!stateRef.current) return;
     setSnapshotNote('Capturing…');
@@ -296,7 +444,20 @@ export function MockDraftScreen({
         { state: stateRef.current },
         { invalidates: false },
       );
-      const text = JSON.stringify(snapshot, null, 2);
+      /*
+       * The attempts that were lost ride along with the capture.
+       *
+       * Added on the client, beside the server's snapshot rather than inside
+       * it, because they are facts about *this browser's* trips — timings,
+       * statuses and Cloudflare ray ids the server never saw, since by
+       * definition these are the requests that did not arrive. It is the one
+       * artefact that turns "it failed again" into something diagnosable.
+       */
+      const text = JSON.stringify(
+        trace.current.length > 0 ? { ...snapshot, lostAttempts: trace.current } : snapshot,
+        null,
+        2,
+      );
       const size = `${Math.round(text.length / 1024)} KB`;
       try {
         await navigator.clipboard.writeText(text);
@@ -333,7 +494,8 @@ export function MockDraftScreen({
     setTeamOpen(false);
     /* Anything still in the air belongs to the run being thrown away. */
     generation.current += 1;
-    inFlight.current = false;
+    inFlight.current?.abort.abort();
+    inFlight.current = null;
     setPhase('setup');
   };
 
@@ -455,6 +617,26 @@ export function MockDraftScreen({
             >
               Try again
             </button>
+            {/*
+              What actually happened, on the screen it happened on.
+
+              One line per lost attempt: how long it took, what came back, and
+              Cloudflare's own id for the request. It is the difference between
+              "it says it couldn't save" and a report somebody can act on, and
+              it costs nothing to anybody whose picks are landing — there is no
+              line here until an attempt has been lost.
+            */}
+            {trace.current.length > 0 ? (
+              <span className="mock-trace" data-testid="mock-trace">
+                {trace.current.slice(-3).map((record) => (
+                  <span className="mock-trace-line" key={`${record.at}:${record.attempt}`}>
+                    try {record.attempt} · {record.ms}ms · {record.failure}
+                    {record.status ? ` ${record.status}` : ''}
+                    {record.ray ? ` · ${record.ray}` : ''}
+                  </span>
+                ))}
+              </span>
+            ) : null}
           </Notice>
         ) : null}
         {result?.refused ? (
@@ -483,49 +665,64 @@ export function MockDraftScreen({
           <Empty>Nobody left to draft.</Empty>
         ) : (
           <div className="mock-list" data-testid="mock-list" aria-busy={phase === 'thinking'}>
-            {board.recommendations.map((rec, index) => (
-              <CompactPlayerRow
-                key={rec.playerId}
-                playerId={rec.playerId}
-                name={rec.name}
-                position={rec.position}
-                team={rec.team}
-                status={rec.status}
-                rank={index + 1}
-                /*
-                  The three numbers a rehearsal is actually about.
+            {/*
+              The board's own rows, not a simplified copy of them.
 
-                  Deliberately fewer than the live board's row. A mock is for
-                  practising *when to take somebody*, so it carries the board's
-                  own ranking, the market it is measured against, and the chance
-                  he lasts — and leaves the rest on the card the live screen
-                  already opens.
-                */
-                metrics={[
-                  { label: 'Score', value: Math.round(rec.score) },
-                  { label: 'ADP', value: rec.adp == null ? '—' : rec.adp.toFixed(1) },
-                  {
-                    label: 'Next',
-                    value:
-                      rec.survivalProbability == null ? '—' : `${Math.round(rec.survivalProbability * 100)}%`,
-                  },
-                ]}
-                testId={`mock-row-${rec.playerId}`}
-                /*
-                  One tap, one pick, and the room answers in the same request.
+              This was a compact row with three numbers on it — no expansion, no
+              Insight, no news, no outlook — which made a rehearsal a different
+              object on the one screen whose whole claim is that it *is* the
+              Draft screen with a different pick stream in it. The reader was
+              practising against a board they would not be looking at on the day.
 
-                  A no-op rather than a removed control while the room is
-                  picking: the list dims (`aria-busy`) and the rows stay rows,
-                  because a list whose controls vanished for half a second would
-                  read as a bug. The server refuses an out-of-turn pick anyway —
-                  see `takeMockPick` — so this is the cheap half of a rule that
-                  is enforced where it matters.
-                */
-                onOpen={() => {
-                  if (phase === 'thinking' || !result?.yourTurn) return;
-                  void ask({ kind: 'take', playerId: rec.playerId });
-                }}
-              />
+              `withTierDividers` and `RecommendationRow` are the live screen's
+              own, imported rather than reimplemented, so the tier bands, the
+              level-score runs and the score bands are the same computation over
+              the mock's recommendations. The one difference is the slot at the
+              end of the line: a `+` that takes the player, where the live board
+              carries the star that bookmarks him. See `PickControl`.
+            */}
+            {rows.map((item) => (
+              <div key={item.rec.playerId} data-testid={`mock-row-${item.rec.playerId}`}>
+                {item.divider ? <div className="tier-divider" role="separator" /> : null}
+                <RecommendationRow
+                  rank={item.rank}
+                  rec={item.rec}
+                  level={item.level}
+                  levelRun={item.levelRun}
+                  band={item.band}
+                  showCliffProximity
+                  ptsPresent={false}
+                  horizonPick={board.waitHorizonPick}
+                  currentPick={board.currentPick}
+                  marketSource={board.marketSource ?? null}
+                  scoringLabel={board.league?.scoringLabel ?? null}
+                  expanded={expanded === item.rec.playerId}
+                  onToggle={() =>
+                    setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)
+                  }
+                  /*
+                    Never reached: `onPick` is what this row renders, and the
+                    star it replaces is the only caller of `onQueue`. A mock
+                    cannot write to the queue anyway — the guard refuses it at
+                    the API seam and again at the server.
+                  */
+                  onQueue={() => {}}
+                  /*
+                    One tap, one pick, and the room answers in the same request.
+
+                    Not gated on `thinking`, and that is the lockout fix rather
+                    than an oversight: a tap has to reach `ask`, which is the
+                    only thing that can tell a stray double from a person asking
+                    again. The list keeps dimming through `aria-busy`, which is
+                    the honest signal that something is happening.
+                  */
+                  onPick={(playerId) => {
+                    if (!result?.yourTurn) return;
+                    void ask({ kind: 'take', playerId });
+                  }}
+                  busy={false}
+                />
+              </div>
             ))}
           </div>
         )}

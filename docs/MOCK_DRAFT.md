@@ -248,6 +248,79 @@ again**, which re-sends the action the reader actually asked for. Without it
 their pick is simply gone and the only way back is to find the row again — which
 is what the defect felt like from the other side of the screen.
 
+### The ten-second lockout, which that retry caused
+
+Retrying was right. Retrying the way it was first written was not, and the owner
+reported the result: after a failure he had to wait "roughly 10+ seconds" before
+the app would let him tap another player.
+
+Three things were wrong, and all three were the same mistake — nothing bounded
+anything:
+
+  - **no deadline on a request.** `api.ts` has no timeout, deliberately, so a
+    request that never answers never fails. Three of those in a row is an
+    unbounded wait.
+  - **a budget that was not a budget.** The retry loop counted attempts, not
+    time.
+  - **a tap that could not be heard.** The row returned early whenever a
+    request was in the air, so the tap never reached the code that could tell a
+    stray double from a person asking again. *That* was the lockout: not a
+    cooldown anybody wrote, but a guard with no way out of it.
+
+Now: `MOCK_ATTEMPT_MS` (4s) bounds one attempt, `MOCK_BUDGET_MS` (6s) bounds the
+whole thing — and is checked against what the *next* attempt could cost, not
+only what the last one did, which is the arithmetic error that let a 5s budget
+permit an 8.6s sequence. Past `MOCK_IMPATIENCE_MS` (700ms) a tap cancels what is
+in the air and takes its place, so the longest a tap can go unheard is the
+length of a double-tap.
+
+Two browser tests hold it: a request that never answers must hand the screen
+back inside seven seconds, and a tap during a slow pick must be the pick that
+lands. Both are mutation-proven.
+
+### What is recorded when it fails
+
+`apiResponse.ts` reports every failure to `console.warn`, which on an iPhone is
+a place nobody can look — which is why the first report of this took a day of
+inference to narrow and still could not name a cause. So the screen keeps its
+own record: per lost attempt, how long it took, the status, whether it was a
+timeout, and **Cloudflare's `cf-ray`**, which is what makes an edge failure
+findable at all.
+
+The last three are printed under the banner. All of them ride along with
+`Copy support snapshot`, as `lostAttempts` beside the server's own capture —
+beside rather than inside, because they are facts about trips the server never
+saw, which is by definition true of the requests that did not arrive.
+
+## The rehearsal's list is the Draft screen's list
+
+The rows are `RecommendationRow` — the live screen's own component, imported
+from `DraftScreen.tsx` rather than reimplemented — with the same expansion, the
+same Insight, news and outlook card, the same score bands and level-score runs
+from `withTierDividers`.
+
+It was a simplified compact row with three numbers on it, and that was the
+mistake: a reader practising on it was practising against a board they would not
+be looking at on the day, which is the one thing this feature exists not to do.
+
+Two differences, both deliberate:
+
+  - **Tier dividers are off**, exactly as they are on the live screen's mixed
+    board. A divider claims the market's next tier starts here, and a list with
+    every position in it has no single position for that boundary to be about.
+  - **The star's slot carries a `+`.** A star is "remind me later" and there is
+    no later in a rehearsal — the reader is the one picking, now — so the slot
+    takes the player instead. Same size, same position, same slot; see
+    `PickControl`. The queue control is not rendered at all, because a mock
+    cannot write to the queue and a control that would be refused twice is not
+    a control.
+
+`RecommendationRow` is exported rather than extracted into a module of its own,
+and that is a judgement call rather than the end state: it reaches a dozen
+helpers inside a 2,700-line file, and moving them on the morning of a real draft
+would have risked the screen the owner actually needed working. The export is
+what makes the reuse real today; the extraction is worth doing next.
+
 ## Tests
 
 | File | What it proves |

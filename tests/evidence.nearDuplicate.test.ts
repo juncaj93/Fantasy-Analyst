@@ -38,6 +38,8 @@ const item = (over: Partial<PlayerNewsItem> & { id: string; sourceDate: string; 
   contextSummary: null,
   ruleId: 'perf.usage',
   polarity: 'positive',
+  // These fixtures are all live rows; retirement is `latestNews.retired`'s subject.
+  reviewStatus: 'auto_applied',
   userOverride: null,
   ...over,
 });

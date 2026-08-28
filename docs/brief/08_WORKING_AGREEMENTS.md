@@ -22,7 +22,7 @@ minutes. That is long enough that a session which blocks on it spends most of
 its life asleep, and long enough that a `sleep` loop looks exactly like a stuck
 session. Neither is acceptable when the remote job is perfectly healthy.
 
-**Local work is not a watcher.** `npx vitest run` and `CI=1 npm run e2e:chromium`
+**Local work is not a watcher.** `npx vitest run` and `npm run e2e:chromium`
 are doing the work themselves and should be left alone until they finish. The
 rule is about processes whose only job is to wait for somebody else's.
 

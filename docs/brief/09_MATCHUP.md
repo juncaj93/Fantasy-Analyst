@@ -1040,7 +1040,7 @@ Before merge, integrate latest `main` and run:
 ```bash
 npm run typecheck
 npx vitest run
-CI=1 npm run e2e:chromium
+npm run e2e:chromium
 npm run build
 npx wrangler deploy --dry-run
 ```

@@ -105,7 +105,7 @@ import {
   orderBoardRows,
   type SortMode,
 } from '../../core/draft/boardSort.ts';
-import { QueueControl } from '../components/decisions.tsx';
+import { PickControl, QueueControl } from '../components/decisions.tsx';
 /*
  * The room, as a board.
  *
@@ -1642,7 +1642,7 @@ function RosterProgressLine({ progress }: { progress: SlotProgress[] }) {
 }
 
 /** A row to draw, and whether a tier boundary falls immediately above it. */
-interface BoardItem {
+export interface BoardItem {
   rec: DraftRecommendation;
   rank: number;
   divider: boolean;
@@ -1680,7 +1680,7 @@ interface BoardItem {
  * Off entirely on the mixed board, where there is no single position for a
  * boundary to be about.
  */
-function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
+export function withTierDividers(recs: DraftRecommendation[], enabled: boolean): BoardItem[] {
   /*
    * Level-with-neighbour is read off the sequence the reader is looking at,
    * after the sort and before any divider is inserted. It is a statement about
@@ -1881,7 +1881,21 @@ function MarketProvenance({
   );
 }
 
-function RecommendationRow({
+/**
+ * Exported so a rehearsal draws the board's own row rather than a copy of it.
+ *
+ * Mock Draft used to render a plain compact row: no expansion, no Insight, no
+ * news, no outlook — a different object on a screen whose whole claim is that
+ * it is the Draft screen with a different pick stream in it. It imports this
+ * instead, from its own lazily-loaded chunk, so the two cannot drift.
+ *
+ * Exported rather than extracted into a module of its own, deliberately and
+ * for now: this function reaches a dozen helpers in this file, and moving them
+ * on the morning of a real draft would risk the screen the owner actually needs
+ * working. The extraction is the right shape and is worth doing next; the
+ * import is what makes the reuse real today.
+ */
+export function RecommendationRow({
   rank,
   level,
   levelRun,
@@ -1903,6 +1917,7 @@ function RecommendationRow({
   scoringLabel,
   onToggle,
   onQueue,
+  onPick,
   busy,
   reorderable = false,
   onReorderStart,
@@ -1932,6 +1947,14 @@ function RecommendationRow({
   scoringLabel: string | null;
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
+  /**
+   * Present only in a rehearsal, where the row's action is the pick itself.
+   *
+   * The star's slot is a bookmark on the live board and a `+` in a mock — see
+   * `PickControl`. Absent everywhere else, so the real board renders exactly
+   * the row it rendered before this existed.
+   */
+  onPick?: (playerId: string) => void;
   busy: boolean;
   /** True only inside the ★ filter, where the order is the reader's own. */
   reorderable?: boolean;
@@ -2299,7 +2322,11 @@ function RecommendationRow({
         it on the line above.
       */}
       <span className="row-action">
-        <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+        {onPick ? (
+          <PickControl name={rec.name} busy={busy} onPick={() => onPick(rec.playerId)} />
+        ) : (
+          <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
+        )}
       </span>
 
       {/*

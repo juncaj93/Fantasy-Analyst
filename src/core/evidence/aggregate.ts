@@ -21,6 +21,23 @@ import type {
 const COUNTED_STATUSES = new Set(['auto_applied', 'accepted', 'corrected']);
 
 /**
+ * Is this row's reading of the player the one currently in force?
+ *
+ * The tally's own question, exported because the browser has to ask it too. A
+ * row that has been superseded, rejected or ignored is still in the ledger and
+ * still on the provenance timeline — that is the point of keeping it — but it
+ * is no longer what this app says about the player, and a surface that presents
+ * it as current news is quoting a retracted sentence.
+ *
+ * Asked through this function rather than by matching the three strings in each
+ * place that needs them, so a fourth state cannot mean one thing to the tally
+ * and another to a card.
+ */
+export function countsTowardTally(reviewStatus: string): boolean {
+  return COUNTED_STATUSES.has(reviewStatus);
+}
+
+/**
  * Rows that carry a period rather than a moment.
  *
  * Re-exported from `provenance.ts`, which is where the ledger's "where did this
@@ -49,7 +66,7 @@ export function effectiveEvidence(item: EvidenceItem): EffectiveEvidence {
   const override = item.userOverride ?? null;
   const polarity = override?.polarity ?? item.polarity;
   const magnitude = override?.magnitude ?? item.magnitude;
-  const counted = COUNTED_STATUSES.has(item.reviewStatus);
+  const counted = countsTowardTally(item.reviewStatus);
   const sign = polarity === 'positive' ? 1 : polarity === 'negative' ? -1 : 0;
   return {
     playerId: override?.playerId ?? item.playerId,

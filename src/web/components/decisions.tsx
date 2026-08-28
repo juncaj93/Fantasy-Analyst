@@ -136,6 +136,44 @@ export function MyGuyControl({
  * That is the whole difference from the heart. Rating a player is an opinion
  * the engine is allowed to hear; queueing him is a note to yourself.
  */
+/**
+ * The same slot, in a rehearsal, meaning something else entirely.
+ *
+ * A star is a bookmark — "remind me later" — and there is no later in a mock
+ * draft: the reader is the one picking, right now, and a shortlist they will
+ * never come back to is a control that does nothing. So the slot carries a `+`
+ * instead, and it takes the player.
+ *
+ * Deliberately the same size, the same position and the same slot as the star
+ * it replaces, so a row in a rehearsal is the row from the real board with one
+ * glyph changed rather than a second kind of row.
+ */
+export function PickControl({
+  onPick,
+  busy,
+  name,
+}: {
+  onPick: () => void;
+  busy?: boolean;
+  /** Whose row this is, so the control says what it will do to whom. */
+  name: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="star-btn pick-btn"
+      disabled={busy}
+      aria-label={`Draft ${name} in this mock draft`}
+      title="Draft him — practice only"
+      data-testid="mock-pick-control"
+      /* A sibling of the row's own button, not a child of it — see `QueueControl`. */
+      onClick={onPick}
+    >
+      <span className="control-glyph">+</span>
+    </button>
+  );
+}
+
 export function QueueControl({
   queued,
   onChange,
