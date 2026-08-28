@@ -71,6 +71,7 @@ interface Harness {
   controller: DraftRefreshController;
   sync: ReturnType<typeof vi.fn>;
   applyChange: ReturnType<typeof vi.fn>;
+  settledFingerprint: ReturnType<typeof vi.fn>;
   states: DraftRefreshState[];
   errors: unknown[];
   state(): DraftRefreshState;
@@ -85,7 +86,17 @@ interface Harness {
  * `respond` is called per poll and decides what came back, so a test reads as a
  * sequence of draft states rather than as timer arithmetic.
  */
-function harness(respond: (call: number) => Promise<DraftSyncResult> | DraftSyncResult): Harness {
+function harness(
+  respond: (call: number) => Promise<DraftSyncResult> | DraftSyncResult,
+  /**
+   * What the board already on screen was built from, as the screen reports it.
+   *
+   * Undefined models a screen that cannot say — an older deployment, or a board
+   * that never arrived — and the controller then behaves exactly as it always
+   * did. See `settledFingerprint` in `draftRefresh.ts`.
+   */
+  settled?: () => Promise<string | null>,
+): Harness {
   const clock = new Clock();
   let visible = true;
   let online = true;
@@ -96,10 +107,12 @@ function harness(respond: (call: number) => Promise<DraftSyncResult> | DraftSync
 
   const sync = vi.fn(() => Promise.resolve(respond(++calls)));
   const applyChange = vi.fn(() => Promise.resolve());
+  const settledFingerprint = vi.fn(() => (settled ? settled() : Promise.resolve(null)));
 
   const controller = createDraftRefreshController({
     sync: sync as unknown as () => Promise<DraftSyncResult>,
     applyChange: applyChange as unknown as () => Promise<void>,
+    ...(settled ? { settledFingerprint: settledFingerprint as unknown as () => Promise<string | null> } : {}),
     isOnClock: () => onClock,
     isVisible: () => visible,
     isOnline: () => online,
@@ -115,6 +128,7 @@ function harness(respond: (call: number) => Promise<DraftSyncResult> | DraftSync
     controller,
     sync,
     applyChange,
+    settledFingerprint,
     states,
     errors,
     state: () => controller.getState(),
@@ -148,8 +162,87 @@ describe('immediate triggers', () => {
 
     expect(h.sync).toHaveBeenCalledTimes(1);
     // And the very first answer is treated as new, because there was nothing
-    // to compare it to — arriving on Draft always builds a board.
+    // to compare it to — a screen that cannot say what it is holding still
+    // gets its board built on arrival.
     expect(h.applyChange).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * The cold-load double build, and the end of it.
+   *
+   * Draft used to build its board twice for one visit: the screen fetched one
+   * on mount, and the mount sync immediately asked for a second, because with
+   * no fingerprint of its own it read its first answer as a change. On a phone
+   * mid-draft that was a whole redundant board — the assembly, the Monte Carlo
+   * survival runs, the transfer — on every arrival.
+   *
+   * The screen now says what the board it is holding was built from, in the
+   * sync route's own terms, and the two are compared instead of assumed apart.
+   */
+  it('does not rebuild on arrival when the board on screen is already current', async () => {
+    const h = harness(still, () => Promise.resolve('fp-A'));
+    h.controller.start();
+    await settle();
+
+    expect(h.sync).toHaveBeenCalledTimes(1);
+    expect(h.applyChange, 'the visit already fetched this exact board').not.toHaveBeenCalled();
+    // It is still recorded, so the loop is not asking the screen the same
+    // question on every poll from here on.
+    expect(h.state().fingerprint).toBe('fp-A');
+    await h.clock.advance(DRAFT_POLL_MS + 1);
+    expect(h.sync).toHaveBeenCalledTimes(2);
+    expect(h.settledFingerprint).toHaveBeenCalledTimes(1);
+    expect(h.applyChange).not.toHaveBeenCalled();
+  });
+
+  /** A pick that landed between the visit's request and the mount sync. */
+  it('still rebuilds on arrival when the sync found a pick the board has not got', async () => {
+    const h = harness(still, () => Promise.resolve('fp-older'));
+    h.controller.start();
+    await settle();
+
+    expect(h.applyChange).toHaveBeenCalledTimes(1);
+    expect(h.state().fingerprint).toBe('fp-A');
+  });
+
+  /** A screen with no board yet, or one that failed: rebuild, as before. */
+  it('rebuilds on arrival when the screen has nothing to compare against', async () => {
+    const h = harness(still, () => Promise.resolve(null));
+    h.controller.start();
+    await settle();
+
+    expect(h.applyChange).toHaveBeenCalledTimes(1);
+  });
+
+  /** And a screen whose answer throws is a screen that did not answer. */
+  it('rebuilds on arrival when the screen cannot say what it is holding', async () => {
+    const h = harness(still, () => Promise.reject(new Error('no board')));
+    h.controller.start();
+    await settle();
+
+    expect(h.applyChange).toHaveBeenCalledTimes(1);
+    expect(h.errors, 'a screen that cannot answer is not a failed sync').toHaveLength(0);
+  });
+
+  /*
+   * Everything after the arrival is unchanged, which is the other half of the
+   * claim: the screen is consulted once, and the loop's own fingerprint decides
+   * every poll from then on — including the pick that lands while you read.
+   */
+  it('picks up a pick that lands after an arrival that rebuilt nothing', async () => {
+    let fingerprint = 'fp-A';
+    const h = harness(
+      () => ({ status: 'drafting', fingerprint, pollIntervalSeconds: 5 }),
+      () => Promise.resolve('fp-A'),
+    );
+    h.controller.start();
+    await settle();
+    expect(h.applyChange).not.toHaveBeenCalled();
+
+    fingerprint = 'fp-B';
+    await h.clock.advance(DRAFT_POLL_MS + 1);
+    expect(h.applyChange).toHaveBeenCalledTimes(1);
+    expect(h.settledFingerprint, 'asked once, on arrival, and never again').toHaveBeenCalledTimes(1);
   });
 
   it('syncs again on resume, and does not wait out the cadence first', async () => {

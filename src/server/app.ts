@@ -99,9 +99,11 @@ import { PlayerFlagsRepo } from './repos/playerFlags.ts';
 import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
-import { DraftBoardService, draftBoardSourcesFromDatabase } from './services/draftBoard.ts';
+import { DraftBoardService, draftBoardSourcesFromDatabase, readDraftSignalBalance } from './services/draftBoard.ts';
+import { boardForClient } from '../core/draft/boardWire.ts';
 import { captureDraftSnapshot, SnapshotRedactionError } from '../core/support/draftSnapshot.ts';
 import { buildMockBoard, mockSnapshotSources, type MockAction } from '../core/draft/mockBoard.ts';
+import { SIGNAL_BALANCE_ORDER, readSignalBalance } from '../core/draft/signalBalance.ts';
 import { isUsableMockState } from '../core/draft/mockDraft.ts';
 import { MockDraftVoidError } from '../core/draft/mockSources.ts';
 import { InjuryService } from './services/injuryService.ts';
@@ -618,6 +620,28 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       ]);
     }
     return jsonResponse(await setupService(ctx).newsletterStatus());
+  });
+
+  /**
+   * How loudly the owner's own research argues with the market on the board.
+   *
+   * A write, so it is behind the passphrase like every other write here. It
+   * stores one of five named positions and returns the one now in force, which
+   * is what the screen renders — so a value this build does not recognise comes
+   * back as `balanced` rather than being silently kept and quietly applied.
+   *
+   * Nothing is recomputed here. The next board built reads the row; there is no
+   * cached ranking to invalidate.
+   */
+  router.post('/api/setup/draft-balance', async (ctx) => {
+    const body = await ctx.json<{ balance?: string }>();
+    if (!body?.balance) return errorResponse('nothing to save', 400);
+    if (!(SIGNAL_BALANCE_ORDER as readonly string[]).includes(body.balance)) {
+      return errorResponse('that is not one of the positions on the control', 400);
+    }
+    const balance = readSignalBalance(body.balance);
+    await new SettingsRepo(ctx.env.db).set(SETTING_KEYS.draftSignalBalance, balance);
+    return jsonResponse({ balance });
   });
 
   // ----------------------------------------------------------------- sleeper
@@ -1427,13 +1451,32 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   // ------------------------------------------------------------------ drafts
+  /**
+   * The board, as a phone receives it.
+   *
+   * Trimmed to what a client actually reads — see `core/draft/boardWire.ts`,
+   * which is where the list of what that is lives and why. `diagnostics=1`
+   * returns the untrimmed state instead, and is how the probes in `scripts/`
+   * and the production smoke suite read the workings they check.
+   */
   router.get('/api/drafts/:id/board', async (ctx) => {
     const service = new DraftBoardService(ctx.env.db);
     const limit = Number(ctx.url.searchParams.get('limit') ?? 40);
     const position = ctx.url.searchParams.get('position');
     // `queued=1` narrows the board to the user's own queue.
     const queuedOnly = ctx.url.searchParams.get('queued') === '1';
-    return jsonResponse(await service.build(ctx.params['id']!, { limit, position, queuedOnly }));
+    const diagnostics = ctx.url.searchParams.get('diagnostics') === '1';
+    /*
+     * The weighting preference is read here rather than sent by the browser.
+     *
+     * It is an opinion about how this account ranks, so it belongs to the
+     * account and not to whichever phone asked: a query parameter would make
+     * two devices disagree, and would let anyone who can read the board choose
+     * the weights it was built with.
+     */
+    const signalBalance = await readDraftSignalBalance(ctx.env.db);
+    const board = await service.build(ctx.params['id']!, { limit, position, queuedOnly, signalBalance });
+    return jsonResponse(diagnostics ? board : boardForClient(board));
   });
 
   /**
@@ -1533,16 +1576,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           }
         : action;
     try {
-      return jsonResponse(
-        await buildMockBoard(draftBoardSourcesFromDatabase(ctx.env.db), {
-          draftId: ctx.params['id']!,
-          state: body.state ?? null,
-          action: stamped,
-          ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
-          position: body.position ?? null,
-          queuedOnly: body.queuedOnly === true,
-        }),
-      );
+      const result = await buildMockBoard(draftBoardSourcesFromDatabase(ctx.env.db), {
+        draftId: ctx.params['id']!,
+        state: body.state ?? null,
+        action: stamped,
+        ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+        position: body.position ?? null,
+        queuedOnly: body.queuedOnly === true,
+        // A rehearsal ranks the way the real board ranks, including this.
+        signalBalance: await readDraftSignalBalance(ctx.env.db),
+      });
+      // A rehearsal draws the same rows through the same components, so it is
+      // sent the same way — see `core/draft/boardWire.ts`.
+      return jsonResponse({ ...result, board: boardForClient(result.board) });
     } catch (err) {
       if (err instanceof MockDraftVoidError) return errorResponse(err.message, 409);
       throw err;

@@ -83,8 +83,17 @@ describe('the draft scenarios rank a real board', () => {
     expect([...scores].sort((a, b) => b - a)).toEqual(scores);
     for (const score of scores) expect(score).toBeGreaterThanOrEqual(0);
 
-    // Every recommendation carries the engine's own component breakdown.
-    const first = board.recommendations[0]!;
+    /*
+     * Every recommendation carries the engine's own component breakdown — but
+     * it is no longer sent to a screen that does not draw it, so this asks for
+     * it the way the probes do. Both halves matter: the breakdown is still
+     * computed under a demo exactly as it is live, and the default response is
+     * the trimmed one a phone actually receives.
+     */
+    expect(board.recommendations[0]!).not.toHaveProperty('components');
+    const full = await runtime.request('GET', '/api/drafts/demo-draft-2026/board?limit=40&diagnostics=1');
+    const first = (full.body as { recommendations: { components: unknown[]; reasons: unknown[] }[] })
+      .recommendations[0]!;
     expect(first.components.length).toBeGreaterThan(2);
     expect(first.reasons.length).toBeGreaterThan(0);
 
@@ -756,9 +765,13 @@ describe('DOG and the market blend', () => {
    * not model the outlier guard's `suspectDog` at all. Those are the right
    * choices for a client and the wrong ones for a test asserting on what the
    * engine produced, which is never partial.
+   *
+   * `diagnostics=1` for the same reason: the wire drops what no screen draws,
+   * and `marketBlend` is squarely in that set — so a test about the blend has
+   * to ask for the engine's view rather than the phone's.
    */
   const board = async (id: string, query = '?limit=300') =>
-    (await (await runtimeFor(id)).request('GET', `/api/drafts/demo-draft-2026/board${query}`))
+    (await (await runtimeFor(id)).request('GET', `/api/drafts/demo-draft-2026/board${query}&diagnostics=1`))
       .body as DraftBoardState;
 
   it('lights the DOG column from a fresh Underdog snapshot', async () => {

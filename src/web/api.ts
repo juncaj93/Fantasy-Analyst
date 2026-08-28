@@ -272,6 +272,13 @@ export interface RolloverReport {
   };
 }
 
+/**
+ * One line of the engine's scored breakdown.
+ *
+ * Not on a board row any more — nothing draws the breakdown, so it does not
+ * travel to a client. It is here because it describes what
+ * `?diagnostics=1` returns, which is what the probes and the audits read.
+ */
 export interface ComponentScore {
   key: string;
   label: string;
@@ -294,6 +301,21 @@ export interface DraftRecommendationExtras {
   injuryLine: string | null;
 }
 
+/**
+ * One row of the board, as the client is actually sent it.
+ *
+ * Deliberately narrower than the engine's own `DraftRecommendation`. The
+ * ranking rationale — the component breakdown, its reasons and counterpoints,
+ * the opportunity-cost and NFL-overlap arithmetic, the `Next` model's per-player
+ * workings, the wait guidance, the automatic caution — is computed on every
+ * board and drawn on none, and it was about seven bytes in ten of a response
+ * this app fetches on a phone in the middle of a draft. The server now leaves it
+ * off; `core/draft/boardWire.ts` holds the list and the reasoning, and
+ * `?diagnostics=1` still returns the whole thing for the probes that read it.
+ *
+ * **This type is the contract.** A field named here is a field the wire keeps,
+ * so anything that starts needing one goes in both places or in neither.
+ */
 export interface DraftRecommendation extends DraftRecommendationExtras {
   playerId: string;
   name: string;
@@ -308,32 +330,13 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
    * or the snapshot is not trusted — `dogState` on the board says which.
    */
   dogAdp: number | null;
-  /** How far past **Sleeper's** ADP this pick is. Unchanged by the blend. */
-  adpValue: number | null;
-  /** The blended market baseline that priced him, and how it was weighted. */
-  marketBlend: {
-    adp: number | null;
-    weights: { dog: number; sleeper: number };
-    nominal: { dog: number; sleeper: number };
-    sources: ('dog' | 'sleeper')[];
-    singleSource: boolean;
-    unknown: boolean;
-    note: string;
-  };
   /** How far apart the two markets are. Context, never a second bonus. */
   marketDisagreement: { picks: number | null; leader: 'dog' | 'sleeper' | null; note: string | null };
   survivalProbability: number | null;
   newsLifetimeNet: number;
-  news30Net: number;
-  news7Net: number;
-  newsConflicted: boolean;
-  components: ComponentScore[];
   total: number;
   /** `total` as a whole number, 0–100, higher is better. Board order follows it. */
   score: number;
-  reasons: string[];
-  counterpoints: string[];
-  degraded: boolean;
   /** What the season-long market expects, in this league's points. */
   marketBaseline: MarketBaseline | null;
   /** The one-line form of it, e.g. "1,085 scrim yd · 8.5 TD". */
@@ -380,12 +383,8 @@ export interface DraftRecommendation extends DraftRecommendationExtras {
     caveat: string | null;
   } | null;
   tierCliff: TierCliff;
-  avoid: AvoidTag;
-  /** Your rating from the players list. This one moves the ranking. */
-  myGuy: MyGuyFlag;
   /** Bookmarked with the ★ on this board. Deliberately no effect on ranking. */
   queued: boolean;
-  wait: WaitGuidance;
 }
 
 export interface MarketBaseline {
@@ -420,6 +419,14 @@ export interface TierCliff {
   message: string | null;
 }
 
+/**
+ * The automatic caution, and the wait guidance, as the engine produces them.
+ *
+ * Neither is on a board row a client receives: the label came off the card and
+ * the badge came off the row, so the fields came off the wire. Kept because
+ * they describe the shape `?diagnostics=1` answers with — see
+ * `core/draft/boardWire.ts`.
+ */
 export interface AvoidTag {
   active: boolean;
   lifetimeNet: number;
@@ -602,6 +609,15 @@ export interface MockBoardResponse {
 export interface DraftBoard {
   draftId: string;
   status: string;
+  /**
+   * The pick state this board was built from, in the sync route's own terms.
+   *
+   * The refresh loop compares it against the fingerprint its first sync returns,
+   * so arriving on Draft no longer rebuilds a board identical to the one that
+   * has just painted — see `draftRefresh.ts`. Optional so a client running
+   * against an older deployment simply rebuilds as it always did.
+   */
+  pickFingerprint?: string;
   type: string;
   teams: number;
   rounds: number;
@@ -900,6 +916,9 @@ export interface AiTallyApplyOutcome {
  * two have to account for. Type-only, so nothing reaches the bundle.
  */
 export type { DataHealthView, RunHealth, SourceHealth } from '../core/health/model.ts';
+/** The five positions of the draft board's weighting control. Type-only. */
+import type { SignalBalance } from '../core/draft/signalBalance.ts';
+export type { SignalBalance };
 
 export interface SetupStatus {
   steps: SetupStep[];
@@ -1097,6 +1116,14 @@ export interface SetupStatus {
     writesToday: number;
     writeCeiling: number;
   };
+  /**
+   * Where the draft board's market-vs-my-research control is pointing.
+   *
+   * Optional because Demo Mode answers this endpoint from fixtures written
+   * before the control existed, and the honest reading of a missing field is
+   * the default position rather than an error on the Settings screen.
+   */
+  draftBalance?: SignalBalance;
 }
 
 export interface LeagueSummary {

@@ -16,7 +16,15 @@
  */
 
 import { rosterAlerts, type MyGuyLevel, type RosterAlert } from './decisions.ts';
-import { DEFENCE_WEIGHTS, rankAvailablePlayers, type DraftRecommendation } from './engine.ts';
+import {
+  DEFAULT_WEIGHTS,
+  DEFENCE_WEIGHTS,
+  rankAvailablePlayers,
+  type DraftRecommendation,
+  type MarketPoolPlayer,
+} from './engine.ts';
+import { SIGNAL_BALANCE_DEFAULT, type SignalBalance } from './signalBalance.ts';
+import { personalScale, weightsForSignalBalance } from './signalWeights.ts';
 import { computeNeed } from './need.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -30,6 +38,7 @@ import { injuryStatusTag } from './injury.ts';
 import { injuryLine, type InjuryState } from '../injury/model.ts';
 import { tierContextLine } from './tierContext.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../sleeper/transform.ts';
+import { draftStateFingerprint } from '../sleeper/draftFingerprint.ts';
 import type { ManagerTendencies } from '../managers/managerTendencies.ts';
 import type { DraftPickRecord, DraftRecord, LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 /*
@@ -269,6 +278,16 @@ export type BoardRecommendation = DraftRecommendation & {
 export interface DraftBoardState {
   draftId: string;
   status: string;
+  /**
+   * The pick stream this board was built from, as the sync route names it.
+   *
+   * The same `draftStateFingerprint` a `POST /sync` returns, over the picks
+   * this build actually read. It exists so the screen's own visit and the
+   * refresh loop's first sync can recognise that they are describing the same
+   * draft, and the loop can then skip the redundant rebuild that used to
+   * follow every cold load — see `web/draftRefresh.ts`.
+   */
+  pickFingerprint: string;
   type: string;
   teams: number;
   rounds: number;
@@ -586,6 +605,14 @@ export async function buildDraftBoard(
      * captured from. See `nextpick/simulate.ts`.
      */
     nextPickSeed?: number;
+    /**
+     * How loudly the owner's own research argues with the market price.
+     *
+     * Absent means `balanced`, which returns `DEFAULT_WEIGHTS` itself — so a
+     * caller that does not know this exists builds the board this app has
+     * always built. See `signalBalance.ts`.
+     */
+    signalBalance?: SignalBalance;
   } = {},
 ): Promise<DraftBoardState> {
   const draft = await sources.leagues.getDraft(draftId);
@@ -785,11 +812,23 @@ export async function buildDraftBoard(
   const draftable = (player: CanonicalPlayer): boolean =>
     isDraftable({ team: player.team, sleeperAdp: rankOf(player), dogAdp: dogOf(player) });
 
-  const eligible = (player: CanonicalPlayer): boolean =>
+  /*
+   * On the board at all: available, draftable, at a position this league
+   * starts. Everything the *room* could still take, whatever the reader has
+   * chosen to look at.
+   *
+   * Split from `eligible` below rather than folded into it because the two
+   * answer different questions, and the tier ladders need this one. See
+   * `boardPool`.
+   */
+  const onTheBoard = (player: CanonicalPlayer): boolean =>
     player.active &&
     draftable(player) &&
     !takenIds.has(player.id) &&
-    (startable.size === 0 || startable.has(player.position)) &&
+    (startable.size === 0 || startable.has(player.position));
+
+  const eligible = (player: CanonicalPlayer): boolean =>
+    onTheBoard(player) &&
     // `FLX` narrows to RB/WR/TE; every other value is the exact position it
     // names. One helper, shared with the player list and the compare picker.
     positionMatchesFilter(player.position, positionFilter) &&
@@ -867,6 +906,46 @@ export async function buildDraftBoard(
   if (queuedOnly && pool.length === 0) {
     warnings.push('your queue is empty — tap the star beside a player to add them');
   }
+
+  /*
+   * The board the tiers are a claim about — which is not the board on screen.
+   *
+   * A tier says where the market's quality steps down at a position among the
+   * players still available. That is a fact about the draft, and it does not
+   * change because the reader tapped QB or ★. But the ladders were being built
+   * from `candidates`, which is what the *filter* left, so they did: three
+   * backs in the queue made a three-player position, the best of them sat in a
+   * tier with nothing below it, and the cliff eight picks away — the one thing
+   * on the board worth knowing at that moment — was gone. The unfiltered board
+   * and the filtered one disagreed about the same player, and only one of them
+   * could be right.
+   *
+   * So the ladders read the pool the unfiltered board is built from: the same
+   * players, in the same order, cut at the same cap. Filtering can then change
+   * which rows are drawn and nothing else about them.
+   *
+   * Unfiltered this *is* `candidates`, reused rather than rebuilt — the common
+   * case costs nothing, and the identity is what makes the invariant easy to
+   * see: the filtered board is measured against exactly what the unfiltered one
+   * measures itself against.
+   */
+  const filteredView = positionFilter != null || queuedOnly;
+  const boardPool = filteredView
+    ? allPlayers.filter(onTheBoard).sort(byMarketThenSearch(rankOf)).slice(0, MAX_CANDIDATES)
+    : candidates;
+  const marketPool: MarketPoolPlayer[] = boardPool.map((player) => ({
+    position: player.position,
+    adp: rankOf(player),
+    /*
+     * A defence carries no second market anywhere on this board — the pass
+     * below strips it, because the app has no opinion about a defence beyond
+     * the draft order — so his rung has to be built from the number his row is
+     * looked up by. A ladder built from the blend and queried with Sleeper's
+     * own figure would drop every defence the two markets disagree about off
+     * his own tier, silently and only sometimes.
+     */
+    dogAdp: player.position === DEFENCE ? null : dogOf(player),
+  }));
 
   // Non-blocking draft-day readiness: unresolved names are research the user
   // did that is not reaching the board. Say so here rather than only in Setup,
@@ -1101,7 +1180,36 @@ export async function buildDraftBoard(
         : undefined,
     // 60/40, or 75/25 in a best-ball league. Sleeper's own settings decide.
     marketFormat: marketFormatOf(format),
+    /*
+     * The tier ladders read the whole board, never the filtered view of it.
+     * Both passes are handed the same pool: a ladder is per position, so the
+     * defences in it are invisible to the field's arithmetic and the field is
+     * invisible to theirs.
+     */
+    marketPool,
   };
+
+  /*
+   * The owner's own reading, at whatever volume he set in Settings.
+   *
+   * `balanced` hands `rankAvailablePlayers` the same `DEFAULT_WEIGHTS` object
+   * its own default parameter would have supplied, so the default position is
+   * not a near-miss of today's board — it is today's board.
+   *
+   * The defence pass below is deliberately not given this: a defence is ranked
+   * on the market and nothing else, so there is nothing here to turn up.
+   */
+  const balance = opts.signalBalance ?? SIGNAL_BALANCE_DEFAULT;
+  const fieldWeights = weightsForSignalBalance(balance, DEFAULT_WEIGHTS);
+  if (personalScale(balance) !== 1) {
+    warnings.push(
+      personalScale(balance) > 1
+        ? 'your own research is set louder than usual in Settings, so your ♥, AVOIDs and newsletter tally ' +
+          'move these rankings further than the board’s default'
+        : 'your own research is set quieter than usual in Settings, so your ♥, AVOIDs and newsletter tally ' +
+          'move these rankings less than the board’s default',
+    );
+  }
 
   /*
    * DEFENCES ARE RANKED APART, ON THE MARKET AND NOTHING ELSE.
@@ -1137,6 +1245,7 @@ export async function buildDraftBoard(
   const rankedField = rankAvailablePlayers(
     candidates.filter((player) => player.position !== DEFENCE).map(rankInput),
     rankingContext,
+    fieldWeights,
   );
 
   const rankedDefence = rankAvailablePlayers(
@@ -1258,6 +1367,26 @@ export async function buildDraftBoard(
   return {
     draftId,
     status: draft.status,
+    /*
+     * The pick state this board was assembled from, in the sync's own terms.
+     *
+     * Computed from the picks read at the top of this function with the same
+     * function `SleeperSyncService.syncDraft` reports, so the two strings are
+     * comparable rather than merely similar — which is what lets the client ask
+     * "is the board I am holding already the board this sync describes?" and
+     * skip a rebuild that would produce identical rows. A mismatch for any
+     * reason falls the wrong way safely: the client rebuilds, as it always did.
+     */
+    pickFingerprint: draftStateFingerprint({
+      draftId,
+      status: draft.status,
+      picks: picks.map((p) => ({
+        pickNo: p.pickNo,
+        playerId: p.playerId ?? p.sleeperPlayerId ?? null,
+        rosterId: p.rosterId ?? null,
+        pickedBy: p.pickedBy ?? null,
+      })),
+    }),
     type: draft.type,
     teams,
     rounds,

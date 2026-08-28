@@ -64,7 +64,7 @@ check('a league with a draft is configured', !!draftId, draftId ?? 'none');
 // below are about the shape of a position's ladder, and five players is not one.
 let board = { status: 0, json: null };
 if (draftId) {
-  board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=200`);
+  board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=200&diagnostics=1`);
   check('the draft board builds', board.status === 200, `HTTP ${board.status}`);
   const rec = board.json?.recommendations?.[0];
   check('it returns ranked players', !!rec, rec ? rec.name : 'none');

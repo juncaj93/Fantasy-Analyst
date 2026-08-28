@@ -13,6 +13,8 @@
  */
 
 import { buildDraftBoard, type DraftBoardSources } from '../../core/draft/boardBuilder.ts';
+import { readSignalBalance, type SignalBalance } from '../../core/draft/signalBalance.ts';
+import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { InjuryService } from './injuryService.ts';
 import { RepairService } from './repairService.ts';
 import { ManagerProfileRepo } from '../repos/managerProfiles.ts';
@@ -131,6 +133,20 @@ export function draftBoardSourcesFromDatabase(db: Database): DraftBoardSources {
   };
 }
 
+/**
+ * The owner's market-vs-own-research position, as stored.
+ *
+ * One read of one row, shared by the live board and the rehearsal so the two
+ * cannot disagree about it. An unset row — every database until somebody moves
+ * the control — reads as `balanced`, which is the weight table the board has
+ * always used. See `core/draft/signalBalance.ts`.
+ */
+export async function readDraftSignalBalance(db: Database): Promise<SignalBalance> {
+  return readSignalBalance(
+    await new SettingsRepo(db).get<unknown>(SETTING_KEYS.draftSignalBalance, null),
+  );
+}
+
 export class DraftBoardService {
   private readonly sources: DraftBoardSources;
 
@@ -138,7 +154,15 @@ export class DraftBoardService {
     this.sources = draftBoardSourcesFromDatabase(db);
   }
 
-  build(draftId: string, opts: { limit?: number; position?: string | null; queuedOnly?: boolean } = {}) {
+  build(
+    draftId: string,
+    opts: {
+      limit?: number;
+      position?: string | null;
+      queuedOnly?: boolean;
+      signalBalance?: SignalBalance;
+    } = {},
+  ) {
     return buildDraftBoard(this.sources, draftId, opts);
   }
 }

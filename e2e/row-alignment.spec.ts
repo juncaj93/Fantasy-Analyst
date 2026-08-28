@@ -980,9 +980,14 @@ test.describe('the AVOID tag', () => {
    * The API still carries it and the engine still applies its bounded penalty
    * below the threshold — this change removed a label from a card, not a
    * judgement from the model.
+   *
+   * It travels under `diagnostics=1` rather than by default, for the reason the
+   * label went in the first place: nothing draws it. See `draft/boardWire.ts`.
    */
   test('and the model still computes it', async ({ page }) => {
-    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
+    const board = await (
+      await page.request.get('/api/drafts/demo-draft/board?limit=40&diagnostics=1')
+    ).json();
     const recommendations = board.recommendations as { avoid?: { active: boolean; lifetimeNet: number } }[];
     expect(recommendations.every((r) => typeof r.avoid?.active === 'boolean')).toBe(true);
   });
