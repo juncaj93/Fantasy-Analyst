@@ -19,7 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket } from './helpers.ts';
+import { emptyQueue, exploreMarket } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -33,6 +33,17 @@ async function retap(page: Page, tab: string) {
 }
 
 test.describe('a retap returns the screen home', () => {
+  /*
+   * The one thing in this file that is not view state is the ★, and the file
+   * lights it on purpose to prove a retap leaves it alone. Put back here, so
+   * that a test which fails before its last line cannot hand the bookmark to
+   * the next spec — nor to the next width, which is the same database: one
+   * `playwright test` invocation serves all four projects from one server.
+   */
+  test.afterEach(async ({ page }) => {
+    await emptyQueue(page);
+  });
+
   test('Draft: unwinds the expansion, then the search, then the filter', async ({ page }) => {
     await page.goto('/');
     await open(page, 'draft');
@@ -96,8 +107,6 @@ test.describe('a retap returns the screen home', () => {
       'data-queued',
       '1',
     );
-    // Put it back, so the next test in this file starts where this one did.
-    await same.getByTestId('queue-control').click();
   });
 
   test('Players: clears the query and returns to the top', async ({ page }) => {

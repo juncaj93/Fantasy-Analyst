@@ -84,3 +84,48 @@ export async function pullToRefresh(page: Page, testId: string): Promise<void> {
   for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
   await page.mouse.up();
 }
+
+/**
+ * Empty the demo draft's ★ queue.
+ *
+ * The dev server keeps one database for the whole run and every project runs
+ * against it, so a star left behind is a star every later spec — and every
+ * later width — has to cope with, and several of them reasonably assume the
+ * list starts empty. Done through the API rather than the UI because it is a
+ * teardown, not a thing being tested, and it must not fail a passing test by
+ * being slow.
+ *
+ * Call it from `test.afterEach`, never as the last line of a test body: a
+ * teardown that only runs when every assertion before it passed is a teardown
+ * that is missing exactly when it is needed.
+ */
+export async function emptyQueue(page: Page): Promise<void> {
+  const res = await page.request.get('/api/drafts/demo-draft/board?limit=200&queued=1');
+  if (!res.ok()) return;
+  const board = (await res.json()) as { recommendations: { playerId: string }[] };
+  for (const rec of board.recommendations ?? []) {
+    await page.request.post('/api/drafts/demo-draft/queue', {
+      data: { playerId: rec.playerId, queued: false },
+    });
+  }
+}
+
+/**
+ * Clear every ♥ the specs can have set.
+ *
+ * The heart outlives the draft the ★ belongs to — it is stored per player, not
+ * per draft — so it is the other half of the same hygiene problem, and it gets
+ * the same answer. The sweep is bounded to the first page of the players list
+ * because that is the only part of it a browser test can reach: the rows these
+ * specs act on are the ones the screen draws first.
+ */
+export async function clearMyGuys(page: Page): Promise<void> {
+  const res = await page.request.get('/api/players?limit=200');
+  if (!res.ok()) return;
+  const body = (await res.json()) as { players: { id: string; myGuy?: { level: number } }[] };
+  for (const player of body.players ?? []) {
+    if ((player.myGuy?.level ?? 0) > 0) {
+      await page.request.post(`/api/players/${player.id}/my-guy`, { data: { level: 0 } });
+    }
+  }
+}

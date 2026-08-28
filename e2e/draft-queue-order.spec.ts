@@ -17,6 +17,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { LONG_PRESS_MS } from '../src/core/draft/dragReorder.ts';
+import { emptyQueue } from './helpers.ts';
 
 async function openQueue(page: Page) {
   await page.goto('/');
@@ -105,26 +106,6 @@ async function dragRow(page: Page, from: number, to: number) {
   // way past, which is not what a finger does.
   await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 });
   await page.mouse.up();
-}
-
-/**
- * Put the queue back the way this spec found it: empty.
- *
- * The dev server keeps one database for the whole run, so a queue left behind
- * here is a queue every later spec has to cope with — and several of them
- * reasonably assume the ★ list starts empty. Done through the API rather than
- * the UI because it is a teardown, not a thing being tested, and it must not
- * fail a passing test by being slow.
- */
-async function emptyQueue(page: Page) {
-  const res = await page.request.get('/api/drafts/demo-draft/board?limit=200&queued=1');
-  if (!res.ok()) return;
-  const board = (await res.json()) as { recommendations: { playerId: string }[] };
-  for (const rec of board.recommendations ?? []) {
-    await page.request.post('/api/drafts/demo-draft/queue', {
-      data: { playerId: rec.playerId, queued: false },
-    });
-  }
 }
 
 test.describe('the queue order', () => {

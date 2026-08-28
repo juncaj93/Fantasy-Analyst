@@ -349,10 +349,50 @@ test.describe('appearance', () => {
 });
 
 test.describe('newsletter setup', () => {
+  /**
+   * Which sender this deployment accepts, as the app reports it.
+   *
+   * A read, so it costs nothing to take before every test in here — and it is
+   * the only way to put the rule back, because the value is whatever the width
+   * before this one finished with rather than something written down.
+   */
+  async function senderRule(page: Page): Promise<string | null> {
+    const res = await page.request.get('/api/setup/newsletter');
+    if (!res.ok()) return null;
+    const status = (await res.json()) as { expectedSenders?: string[] };
+    return status.expectedSenders?.[0] ?? null;
+  }
+
+  /**
+   * The accepted sender is one row of configuration on a server four projects
+   * share, and two tests in here change it for real: one saves an address, one
+   * accepts the address a quarantined issue arrived from. Left behind, that
+   * change is what a later width inherits — the mechanism behind "a 390 run
+   * sees a 375 run's newsletter sender" in `docs/STATUS.md`.
+   *
+   * So it is snapshotted before every test and put back after, through the same
+   * route the control itself posts to. `afterEach` rather than a line at the
+   * foot of the tests that change it: a teardown that runs only when every
+   * assertion passed is missing exactly when it is needed.
+   *
+   * What this cannot put back is the shipped *subject* filter, which the
+   * product's own Save drops as well — the route takes one plain phrase and
+   * stores it escaped, so a regex like `week \d+` cannot be round-tripped. It
+   * is not what these tests change, and nothing in the suite reads it.
+   */
+  let sender: string | null = null;
+
   test.beforeEach(async ({ page }) => {
+    sender = await senderRule(page);
     await openSetup(page);
     await page.getByTestId('setup-step-newsletter').click();
     await expect(page.getByTestId('panel-newsletter')).toBeVisible();
+  });
+
+  test.afterEach(async ({ page }) => {
+    if (sender && (await senderRule(page)) !== sender) {
+      await page.request.post('/api/setup/newsletter', { data: { senderEmail: sender } });
+    }
   });
 
   /**
@@ -395,8 +435,13 @@ test.describe('newsletter setup', () => {
     await expect(page.getByTestId('panel-newsletter')).toContainText('never need to forward');
   });
 
-  test('lets the user set which sender to accept', async ({ page }) => {
-    await page.getByLabel('Or only accept one sender (address or domain)').fill('news@theirsite.com');
+  test('lets the user set which sender to accept', async ({ page }, testInfo) => {
+    // Unique per project for the same reason as the test below it: saving is a
+    // real state change on a shared server, so a fixed address cannot be told
+    // apart from the one another width left behind. `afterEach` puts the rule
+    // back either way.
+    const slug = testInfo.project.name.replace(/[^a-z0-9]/gi, '');
+    await page.getByLabel('Or only accept one sender (address or domain)').fill(`news@${slug}.theirsite.example`);
     await page.getByRole('button', { name: 'Save sender' }).click();
     await expect(page.locator('.notice')).toContainText('Mail from that sender will now be read');
   });
@@ -518,7 +563,13 @@ test.describe('newsletter setup', () => {
         data: {
           text: [
             'NEWSLETTER_TALLY_V1',
-            `Owen Fitzgerald | +1 | Ran with the starters (${id})`,
+            // Short, and unstamped, for the reason given in the review-queue
+            // fixture above: a driver is what the player's card prints, and a
+            // message id in it is test scaffolding rendered as product copy —
+            // four widths of which grew this player's card past the ceiling
+            // `draft-card.spec.ts` holds it to. The id is already in the
+            // tally's dedupe key.
+            'Owen Fitzgerald | +1 | Ran with the starters',
             'END_NEWSLETTER_TALLY',
           ].join('\n'),
         },
@@ -795,14 +846,27 @@ test.describe('review actions added for setup', () => {
         force: true,
       },
     });
+    /*
+     * Short driver text, and deliberately not stamped with the message id.
+     *
+     * A driver is what the card prints — `excerpt` is `row.drivers` — so a
+     * marker here is test scaffolding rendered as product copy, and it wrapped
+     * one player's card from 135px to 306px once four widths had each left
+     * their own copy behind. `draft-card.spec.ts` measures that card against a
+     * ceiling of 40% of the screen and failed at 360 on exactly that.
+     *
+     * Nothing is lost by dropping it: the tally's dedupe key is
+     * `tally|sourceMessageId|playerId|score|drivers`, and the message id in it
+     * is already unique to this project and this moment.
+     */
     const applied = await page.request.post(
       `/api/newsletter/messages/${encodeURIComponent(messageId)}/ai-tally/apply`,
       {
         data: {
           text: [
             'NEWSLETTER_TALLY_V1',
-            `Julian Reyes | +1 | Back at practice (${messageId})`,
-            `Julian Reyes | -1 | Splitting the backfield (${messageId})`,
+            'Julian Reyes | +1 | Back at practice',
+            'Julian Reyes | -1 | Splitting the backfield',
             'END_NEWSLETTER_TALLY',
           ].join('\n'),
         },
