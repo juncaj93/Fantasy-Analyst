@@ -563,7 +563,13 @@ test.describe('newsletter setup', () => {
         data: {
           text: [
             'NEWSLETTER_TALLY_V1',
-            `Owen Fitzgerald | +1 | Ran with the starters (${id})`,
+            // Short, and unstamped, for the reason given in the review-queue
+            // fixture above: a driver is what the player's card prints, and a
+            // message id in it is test scaffolding rendered as product copy —
+            // four widths of which grew this player's card past the ceiling
+            // `draft-card.spec.ts` holds it to. The id is already in the
+            // tally's dedupe key.
+            'Owen Fitzgerald | +1 | Ran with the starters',
             'END_NEWSLETTER_TALLY',
           ].join('\n'),
         },
