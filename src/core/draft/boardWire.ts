@@ -42,11 +42,17 @@ import type { BoardRecommendation, DraftBoardState } from './boardBuilder.ts';
 /**
  * The recommendation fields no client reads.
  *
- * Checked mechanically rather than by eye: renaming each of these in
- * `web/api.ts` and running `tsc` over the whole project produces no error,
- * which is the only proof that survives somebody adding a read next month —
- * `tests/draft.boardWire.test.ts` holds the list against the client type so
- * that a field which starts being read cannot stay trimmed.
+ * Established mechanically rather than by eye: each one was renamed in
+ * `web/api.ts` and `tsc` was run over the whole project, and none of them
+ * produced an error. Reading a list of fields and deciding which "look used" is
+ * exactly how a field that *is* used gets dropped.
+ *
+ * It stays true by the same mechanism, from the other side. None of these is on
+ * `DraftRecommendation` in `web/api.ts` any more, so a screen that starts
+ * reading one does not get `undefined` at runtime — it fails to compile, and
+ * whoever adds the read has to put the field back on the client type and here
+ * in the same change. `tests/draft.boardWire.test.ts` holds the other half: the
+ * projection drops these and nothing else, and changes no value it keeps.
  */
 const DROPPED_FROM_RECOMMENDATION = [
   /** The scored breakdown. Read by the probes; drawn nowhere. */

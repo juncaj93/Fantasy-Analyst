@@ -272,6 +272,13 @@ export interface RolloverReport {
   };
 }
 
+/**
+ * One line of the engine's scored breakdown.
+ *
+ * Not on a board row any more — nothing draws the breakdown, so it does not
+ * travel to a client. It is here because it describes what
+ * `?diagnostics=1` returns, which is what the probes and the audits read.
+ */
 export interface ComponentScore {
   key: string;
   label: string;
@@ -412,6 +419,14 @@ export interface TierCliff {
   message: string | null;
 }
 
+/**
+ * The automatic caution, and the wait guidance, as the engine produces them.
+ *
+ * Neither is on a board row a client receives: the label came off the card and
+ * the badge came off the row, so the fields came off the wire. Kept because
+ * they describe the shape `?diagnostics=1` answers with — see
+ * `core/draft/boardWire.ts`.
+ */
 export interface AvoidTag {
   active: boolean;
   lifetimeNet: number;

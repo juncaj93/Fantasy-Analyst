@@ -79,9 +79,9 @@
     },
     {
       "name": "draft board",
-      "maxGzipBytes": 14000,
+      "maxGzipBytes": 7000,
       "maxWaves": 20,
-      "why": "The largest answer this API sends, and the one whose growth nobody was watching: 11kB gzipped over 125kB of JSON, mid-draft, on a phone. Two known trims live in Draft-side files owned elsewhere and are a separate coordinated task; this ceiling is here so that whatever lands next has to notice. 17 waves today."
+      "why": "The largest answer this API sends, and the one whose growth nobody was watching. It was 11kB gzipped over 125kB of JSON, mid-draft, on a phone; the two known Draft-side trims have since landed and it is 4.9kB over 32kB \u2014 the ranking rationale is computed on every board, drawn on none, and no longer travels to a client. See core/draft/boardWire.ts. The ceiling came down with the payload: a 14kB ceiling over a 5kB answer would let the whole explanation creep back without failing. 17 waves today."
     }
   ],
   "$flowComment": [
