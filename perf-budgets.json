@@ -116,8 +116,7 @@
       "src/core/startsit/mode.ts",
       "src/core/startsit/projection.ts",
       "src/core/startsit/weekCard.ts",
-      "src/core/vegas/season.ts",
-      "src/core/vegas/types.ts",
+      "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",
       "src/web/demo/DemoIndicator.tsx",
       "src/web/demo/session.ts"
