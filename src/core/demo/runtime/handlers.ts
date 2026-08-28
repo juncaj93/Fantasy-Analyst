@@ -27,6 +27,7 @@
  */
 
 import { buildDraftBoard } from '../../draft/boardBuilder.ts';
+import { boardForClient } from '../../draft/boardWire.ts';
 import { captureDraftSnapshot } from '../../support/draftSnapshot.ts';
 /* The one player matcher, so Demo Mode searches exactly as the product does. */
 import { rankByNormalized } from '../../search/players.ts';
@@ -154,13 +155,14 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
     if (data.freshness.sleeper === 'unavailable') {
       return fail('network request failed', 503);
     }
-    return ok(
-      await buildDraftBoard(draftBoardSourcesFrom(data), decodeURIComponent(board[1]!), {
-        limit: Number(params.get('limit') ?? 40) || 40,
-        position: params.get('position'),
-        queuedOnly: params.get('queued') === '1',
-      }),
-    );
+    // Trimmed exactly as the worker trims it, so a scenario is a rehearsal of
+    // the real response and not a fatter cousin of it. See `draft/boardWire.ts`.
+    const built = await buildDraftBoard(draftBoardSourcesFrom(data), decodeURIComponent(board[1]!), {
+      limit: Number(params.get('limit') ?? 40) || 40,
+      position: params.get('position'),
+      queuedOnly: params.get('queued') === '1',
+    });
+    return ok(params.get('diagnostics') === '1' ? built : boardForClient(built));
   }
 
   /*

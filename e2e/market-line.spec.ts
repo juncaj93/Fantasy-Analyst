@@ -420,7 +420,12 @@ test.describe('receptions and market-implied points', () => {
       const league = leagues.find((l: { draftId: string | null }) => l.draftId);
       if (!league) return null;
       const read = async () => {
-        const board = await (await fetch(`/api/drafts/${league.draftId}/board?limit=80`)).json();
+        // `diagnostics=1` because this reads the component breakdown, which is
+        // computed on every board and drawn on none, and so no longer travels
+        // to a client by default — see `core/draft/boardWire.ts`.
+        const board = await (
+          await fetch(`/api/drafts/${league.draftId}/board?limit=80&diagnostics=1`)
+        ).json();
         return (board.recommendations ?? []).map((r: Record<string, unknown>) => ({
           id: r['playerId'],
           score: r['score'],

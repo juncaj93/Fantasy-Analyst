@@ -100,6 +100,7 @@ import { PlayerRepo } from './repos/players.ts';
 import { PropsRepo } from './repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from './repos/settings.ts';
 import { DraftBoardService, draftBoardSourcesFromDatabase } from './services/draftBoard.ts';
+import { boardForClient } from '../core/draft/boardWire.ts';
 import { captureDraftSnapshot, SnapshotRedactionError } from '../core/support/draftSnapshot.ts';
 import { buildMockBoard, mockSnapshotSources, type MockAction } from '../core/draft/mockBoard.ts';
 import { isUsableMockState } from '../core/draft/mockDraft.ts';
@@ -1427,13 +1428,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   });
 
   // ------------------------------------------------------------------ drafts
+  /**
+   * The board, as a phone receives it.
+   *
+   * Trimmed to what a client actually reads — see `core/draft/boardWire.ts`,
+   * which is where the list of what that is lives and why. `diagnostics=1`
+   * returns the untrimmed state instead, and is how the probes in `scripts/`
+   * and the production smoke suite read the workings they check.
+   */
   router.get('/api/drafts/:id/board', async (ctx) => {
     const service = new DraftBoardService(ctx.env.db);
     const limit = Number(ctx.url.searchParams.get('limit') ?? 40);
     const position = ctx.url.searchParams.get('position');
     // `queued=1` narrows the board to the user's own queue.
     const queuedOnly = ctx.url.searchParams.get('queued') === '1';
-    return jsonResponse(await service.build(ctx.params['id']!, { limit, position, queuedOnly }));
+    const diagnostics = ctx.url.searchParams.get('diagnostics') === '1';
+    const board = await service.build(ctx.params['id']!, { limit, position, queuedOnly });
+    return jsonResponse(diagnostics ? board : boardForClient(board));
   });
 
   /**
@@ -1533,16 +1544,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
           }
         : action;
     try {
-      return jsonResponse(
-        await buildMockBoard(draftBoardSourcesFromDatabase(ctx.env.db), {
-          draftId: ctx.params['id']!,
-          state: body.state ?? null,
-          action: stamped,
-          ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
-          position: body.position ?? null,
-          queuedOnly: body.queuedOnly === true,
-        }),
-      );
+      const result = await buildMockBoard(draftBoardSourcesFromDatabase(ctx.env.db), {
+        draftId: ctx.params['id']!,
+        state: body.state ?? null,
+        action: stamped,
+        ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+        position: body.position ?? null,
+        queuedOnly: body.queuedOnly === true,
+      });
+      // A rehearsal draws the same rows through the same components, so it is
+      // sent the same way — see `core/draft/boardWire.ts`.
+      return jsonResponse({ ...result, board: boardForClient(result.board) });
     } catch (err) {
       if (err instanceof MockDraftVoidError) return errorResponse(err.message, 409);
       throw err;

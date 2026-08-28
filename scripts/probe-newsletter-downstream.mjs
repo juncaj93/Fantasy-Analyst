@@ -94,7 +94,7 @@ console.log('\n=== DRAFT =================================================');
 if (!DRAFT_ID) {
   console.log('  no draft configured on this deployment; the board cannot be read.');
 } else {
-  const board = (await get(`/api/drafts/${encodeURIComponent(DRAFT_ID)}/board?limit=200`)).body;
+  const board = (await get(`/api/drafts/${encodeURIComponent(DRAFT_ID)}/board?limit=200&diagnostics=1`)).body;
   // The board's rows are its recommendations; there is no `players` array.
   const rows = board?.recommendations ?? [];
   console.log(`  board status=${board?.status ?? '(none)'}, ${rows.length} recommendation(s)`);

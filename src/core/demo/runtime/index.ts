@@ -19,6 +19,7 @@ import { loadScenarioData, type ScenarioData } from '../fixtures/index.ts';
 import type { DemoScenario } from '../types.ts';
 import { handleDemoRequest, type DemoResponse } from './handlers.ts';
 import { buildDraftBoard } from '../../draft/boardBuilder.ts';
+import { boardForClient } from '../../draft/boardWire.ts';
 import { draftBoardSourcesFrom } from './sources.ts';
 
 export type { DemoResponse } from './handlers.ts';
@@ -81,7 +82,9 @@ export class DemoRuntime {
     if (!draft) return null;
     return {
       draftId: draft.id,
-      board: await buildDraftBoard(draftBoardSourcesFrom(this.data), draft.id, { limit: 40 }),
+      // Through the wire projection, because what the live app caches is what
+      // the live app was sent — see `draft/boardWire.ts`.
+      board: boardForClient(await buildDraftBoard(draftBoardSourcesFrom(this.data), draft.id, { limit: 40 })),
     };
   }
 }

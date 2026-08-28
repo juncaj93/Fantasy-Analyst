@@ -293,6 +293,31 @@ describe('the transition out of a completed draft', () => {
     expect(r.starters).toHaveLength(0);
   });
 
+  /**
+   * The board and the sync say the same thing about the same draft.
+   *
+   * This is the whole basis of the cold-load fix: arriving on Draft fetches a
+   * board and syncs Sleeper, and the second used to rebuild the first because
+   * it had nothing to compare its answer against. It compares these two strings
+   * now, so they have to be produced by the same function over the same picks —
+   * *equal*, not merely similar. A drift here would not break the board; it
+   * would silently restore the double build, which is exactly the kind of
+   * regression nobody notices.
+   */
+  it('reports the same pick state the sync route reports', async () => {
+    const board = () =>
+      app(get(`/api/drafts/${DRAFT}/board?limit=5`), env).then(body<{ pickFingerprint: string }>);
+
+    const synced = await body<{ fingerprint: string }>(await syncDraft());
+    expect((await board()).pickFingerprint).toBe(synced.fingerprint);
+
+    // And it moves the moment a pick does, or the loop would never rebuild.
+    sleeper.picks = ALL_PICKS;
+    const after = await body<{ fingerprint: string }>(await syncDraft());
+    expect(after.fingerprint).not.toBe(synced.fingerprint);
+    expect((await board()).pickFingerprint).toBe(after.fingerprint);
+  });
+
   it('hydrates Team from Sleeper the moment the last pick lands', async () => {
     // The board as the final pick lands — the twenty-three names, in miniature.
     // Still `drafting`, so this is the pick stream standing in for a roster

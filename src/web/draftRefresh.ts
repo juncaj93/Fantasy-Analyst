@@ -85,6 +85,24 @@ export interface DraftRefreshDeps {
    * controller neither knows nor cares what is in it.
    */
   applyChange(): Promise<void>;
+  /**
+   * The pick state the board already on screen was built from, once it has
+   * landed. Null when there is none, or when it cannot be known.
+   *
+   * Consulted **only for the first sync of this controller's life**, which is
+   * the one on mount. Without it that sync compared its answer against `null`,
+   * concluded the draft had moved, and called `applyChange` — so every cold load
+   * built the board twice: once for the visit, and once more, immediately, for
+   * a change that had not happened. The screen has the answer, because it has
+   * just fetched a board and the board says which picks it read.
+   *
+   * A promise rather than a value because the visit's own request is usually
+   * still in the air when this sync lands, and guessing while it is would put
+   * the race back. It is awaited once, so a screen that never resolves it
+   * delays one poll and nothing else; anything unknown resolves null and the
+   * rebuild happens exactly as it used to.
+   */
+  settledFingerprint?(): Promise<string | null>;
   /** Whether Sleeper currently says it is the user's pick. */
   isOnClock(): boolean;
   isVisible(): boolean;
@@ -257,8 +275,19 @@ export function createDraftRefreshController(deps: DraftRefreshDeps): DraftRefre
       try {
         const result = await deps.sync();
         if (gen !== generation) return;
+        /*
+         * What this controller is comparing against.
+         *
+         * Its own recorded fingerprint once it has one. Before that — the sync
+         * on mount — the screen's, because the screen has already asked for a
+         * board and a board says which picks it was built from. Comparing
+         * against `null` there was what made the first sync always look like a
+         * change and rebuild a board that had just been fetched.
+         */
+        const known = state.fingerprint ?? (await deps.settledFingerprint?.().catch(() => null)) ?? null;
+        if (gen !== generation) return;
         const checkedAt = deps.now();
-        const changed = result.fingerprint !== state.fingerprint;
+        const changed = result.fingerprint !== known;
         const finished = result.pollIntervalSeconds <= 0;
 
         if (changed) {
@@ -282,9 +311,18 @@ export function createDraftRefreshController(deps: DraftRefreshDeps): DraftRefre
             stopped: finished,
           });
         } else {
-          // Nothing happened. Say so, touch nothing else, and cost the phone
-          // no more than the request that just landed.
+          /*
+           * Nothing happened. Say so, touch nothing else, and cost the phone
+           * no more than the request that just landed.
+           *
+           * The fingerprint is recorded here as well as above, which used to be
+           * redundant and no longer is: reaching this branch now also covers
+           * "the board on screen already describes this state", and without
+           * writing it down the controller would go on asking the screen the
+           * same question on every poll.
+           */
           publish({
+            fingerprint: result.fingerprint,
             lastCheckedAt: checkedAt,
             status: result.status,
             consecutiveFailures: 0,
