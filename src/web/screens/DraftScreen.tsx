@@ -74,7 +74,7 @@ import { levelRunSize, levelWithNeighbour } from '../../core/draft/levelScores.t
 /* How strong a Score is, against the board on screen. Presentation only. */
 import { scoreBandLabel, scoreBands, type ScoreBand } from '../../core/draft/scoreBand.ts';
 /* One vocabulary for market names, shared with the baseline's own note. */
-import { seasonMarketLabel } from '../../core/vegas/season.ts';
+import { seasonMarketLabel } from '../../core/vegas/marketLabel.ts';
 import { marketDelta, marketDeltaTitle } from '../marketDelta.ts';
 /*
  * Three ways to read the same board, and one pure function that reorders it.

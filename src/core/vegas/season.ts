@@ -16,7 +16,18 @@
 import { resolvePlayer } from '../identity/index.ts';
 import type { PlayerIndex } from '../identity/index.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
+import { MARKET_LABEL, seasonMarketLabel } from './marketLabel.ts';
 import { SEASON_MARKET_KEYS, type SeasonMarketKey, type SeasonMarketQuote } from './types.ts';
+
+/*
+ * The market vocabulary moved to a module of its own, and is re-exported here
+ * so every caller that wants both a market's name and what it is worth still
+ * reads them from one place. The split is a page-weight one: the Draft screen
+ * needed only the words, and was pulling this file and `types.ts` into the
+ * entry chunk to get them — 1.7kB gzipped on every page load. See
+ * `marketLabel.ts`, which has the measurement and what was actually in it.
+ */
+export { seasonMarketLabel };
 
 /** One market for one canonical player, after identity resolution. */
 export interface PlayerSeasonMarket {
@@ -131,28 +142,6 @@ const POSITION_MARKETS: Record<string, SeasonMarketKey[]> = {
   RB: ['season_rush_yards', 'season_rush_tds', 'season_receptions', 'season_receiving_yards'],
   WR: ['season_receiving_yards', 'season_receptions', 'season_receiving_tds'],
   TE: ['season_receiving_yards', 'season_receptions', 'season_receiving_tds'],
-};
-
-/**
- * One market's name in words, shared by everything that prints one.
- *
- * Exported so a screen naming the components behind a summed number uses the
- * same vocabulary the baseline's own note does. Two spellings of "receiving
- * yards" in one card is how a reader starts wondering whether they are two
- * different things.
- */
-export function seasonMarketLabel(market: string): string {
-  return MARKET_LABEL[market as SeasonMarketKey] ?? market;
-}
-
-const MARKET_LABEL: Record<SeasonMarketKey, string> = {
-  season_pass_yards: 'passing yards',
-  season_pass_tds: 'passing TDs',
-  season_rush_yards: 'rushing yards',
-  season_rush_tds: 'rushing TDs',
-  season_receptions: 'receptions',
-  season_receiving_yards: 'receiving yards',
-  season_receiving_tds: 'receiving TDs',
 };
 
 /**
