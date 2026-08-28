@@ -19,6 +19,16 @@
  * in the repo. It runs in the same CI job that already builds the site, so it
  * costs nothing beyond the gzip.
  *
+ * **Two things are measured, not one.** The bundles above are what a phone
+ * downloads once. The API budgets below are what it downloads on every tap —
+ * and, more importantly, how many times the server had to wait for the database
+ * before it could answer. That second number is the one that grew unwatched:
+ * `/api/players/:id/detail` reached seventeen serialized statements to build
+ * under a kilobyte, and no measurement in this repository would have failed if
+ * it had reached thirty. It is measured by
+ * `scripts/measure-api-budgets.ts`, which is spawned rather than imported
+ * because that file is TypeScript and this one is not.
+ *
  * Usage:
  *   node scripts/perf-budget.mjs            # measure, exit non-zero if over
  *   node scripts/perf-budget.mjs --report   # print the table, always exit 0
@@ -26,6 +36,7 @@
 
 import { gzipSync } from 'node:zlib';
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -173,10 +184,78 @@ for (const row of rows) {
 }
 console.log('');
 
-if (failed > 0 && !reportOnly) {
-  console.error(`${failed} budget${failed === 1 ? '' : 's'} exceeded.\n`);
+/*
+ * What one tap costs, on the endpoints with a ceiling.
+ *
+ * Measured in a child process because the measurement has to run the real app
+ * — the real routes, the real repositories, the real query plan — and that is
+ * TypeScript this file cannot import. It builds an in-memory database from the
+ * committed migrations and the demo dataset, so it needs no network, no
+ * deployment and no `dist/`, and answers the same on a laptop and on a runner.
+ *
+ * The cold-cache figures are the ones budgeted: a warm cache is the easy case,
+ * and the thing worth catching is the first open.
+ */
+const apiBudgets = budgets.apis ?? [];
+const apiRows = [];
+let apiFailed = 0;
+
+if (apiBudgets.length > 0) {
+  const measured = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ['--experimental-transform-types', '--no-warnings', join(root, 'scripts', 'measure-api-budgets.ts'), '--json'],
+      {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        // Latency is modelled for the timing report and is noise here: this
+        // check is about bytes and waves, both of which are counts.
+        env: { ...process.env, FA_MEASURE_LATENCY_MS: '0', FA_MEASURE_OUTLOOK_MS: '0' },
+      },
+    ),
+  );
+
+  for (const budget of apiBudgets) {
+    const row = measured.cold.find((r) => r.name === budget.name);
+    if (!row) {
+      console.error(`\nNo measurement for the "${budget.name}" budget — see MEASURED_ENDPOINTS in scripts/measure-api-budgets.ts.\n`);
+      process.exit(reportOnly ? 0 : 1);
+    }
+    const over = row.gzipBytes > budget.maxGzipBytes || row.waves > budget.maxWaves;
+    if (over) apiFailed++;
+    apiRows.push({ ...budget, ...row, over });
+  }
+
+  const apiWidth = Math.max(...apiRows.map((r) => r.name.length), 8);
+  console.log(`${'endpoint'.padEnd(apiWidth)}  ${'gzip'.padStart(9)}  ${'budget'.padStart(9)}  ${'waves'.padStart(6)}  ${'budget'.padStart(6)}`);
+  console.log('-'.repeat(apiWidth + 40));
+  for (const row of apiRows) {
+    console.log(
+      `${row.name.padEnd(apiWidth)}  ${kb(row.gzipBytes).padStart(9)}  ${kb(row.maxGzipBytes).padStart(9)}  ${String(row.waves).padStart(6)}  ${String(row.maxWaves).padStart(6)}${row.over ? '  ✗' : ''}`,
+    );
+  }
+  console.log('');
+}
+
+const totalFailed = failed + apiFailed;
+
+if (totalFailed > 0 && !reportOnly) {
+  console.error(`${totalFailed} budget${totalFailed === 1 ? '' : 's'} exceeded.\n`);
   for (const row of rows.filter((r) => r.over)) {
     console.error(`  ${row.name}: ${kb(row.gzip)} against a budget of ${kb(row.limit)}`);
+    console.error(`    ${row.why}\n`);
+  }
+  for (const row of apiRows.filter((r) => r.over)) {
+    if (row.gzipBytes > row.maxGzipBytes) {
+      console.error(`  ${row.name}: ${kb(row.gzipBytes)} of payload against a budget of ${kb(row.maxGzipBytes)}`);
+    }
+    if (row.waves > row.maxWaves) {
+      console.error(
+        `  ${row.name}: ${row.waves} serialized query waves against a budget of ${row.maxWaves}` +
+          ` (${row.statements} statements in total)`,
+      );
+      console.error('    Statements that run together share a wave. A new wave means something waited.');
+    }
     console.error(`    ${row.why}\n`);
   }
   console.error(
@@ -187,4 +266,4 @@ if (failed > 0 && !reportOnly) {
   process.exit(1);
 }
 
-console.log(failed > 0 ? 'Over budget (reporting only).' : 'Within budget.');
+console.log(totalFailed > 0 ? 'Over budget (reporting only).' : 'Within budget.');
