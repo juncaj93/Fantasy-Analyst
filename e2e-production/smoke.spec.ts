@@ -1868,7 +1868,13 @@ test.describe('the decision intelligence', () => {
             opportunity?: { score: number };
             concentration?: { score: number };
           }[];
-        }>(page, `/api/drafts/${draft}/board?limit=25`)
+          /*
+           * The scored breakdown is asked for, not assumed: it is computed on
+           * every board and drawn on none, so it stopped travelling to a phone
+           * by default — see `core/draft/boardWire.ts`. An older deployment
+           * ignores the parameter and answers exactly as it did.
+           */
+        }>(page, `/api/drafts/${draft}/board?limit=25&diagnostics=1`)
       : null;
     test.skip(!board || board.recommendations.length === 0, 'no draft board on this deployment');
 

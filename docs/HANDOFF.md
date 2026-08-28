@@ -102,8 +102,10 @@ A later brief cut the expansion again, and this cut changed what it is for.
 **gone from the quick expansion** — all three justified a position the reader
 can already see, on a screen where the question is "who is this". They are not
 gone from the system: the engine still computes every reason, counterpoint,
-component, weight and contribution, and `/api/drafts/:id/board` still returns
-them. Only the rendering stopped.
+component, weight and contribution, and `/api/drafts/:id/board?diagnostics=1`
+still returns them. Only the rendering stopped — and, later, the *sending*: a
+board that draws none of it stopped carrying it to a phone, which was about
+seven bytes in ten of the response. See `core/draft/boardWire.ts`.
 
 What is there now: one tier-context line, the outlook, `15 GP · WR50 half-PPR`,
 and injury context when there is any.

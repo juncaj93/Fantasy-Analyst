@@ -293,6 +293,11 @@ The full set, with confidence and the ADP-only baseline for comparison, is on
 each recommendation as `nextPick`, and the model's own workings are on the board
 response as `nextPickModel`.
 
+Both are **diagnostics rather than payload**: nothing on screen reads either, so
+neither is sent to a client by default. `?diagnostics=1` on the board route
+returns them, which is what the probe below asks for — see
+`core/draft/boardWire.ts`.
+
 ## Looking at it
 
 ```bash

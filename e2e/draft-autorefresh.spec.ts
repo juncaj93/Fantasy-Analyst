@@ -54,6 +54,18 @@ async function installDraftDouble(page: Page): Promise<DraftDouble> {
   let broken = false;
   let onClock = false;
 
+  /*
+   * The one string both halves of this double have to agree on.
+   *
+   * A real server derives the sync's fingerprint and the board's
+   * `pickFingerprint` from the same stored picks, and the app now relies on
+   * that: arriving on Draft compares them and skips the rebuild when the board
+   * it has just fetched already describes the state the sync reports. A double
+   * that fabricated the two independently would model a server that cannot
+   * exist, and would put the redundant cold-load build back into every run.
+   */
+  const fingerprintFor = (n: number) => `demo-draft:drafting:${n}:deadbeef`;
+
   await page.route('**/api/drafts/*/sync', async (route) => {
     syncs++;
     if (broken) {
@@ -71,7 +83,7 @@ async function installDraftDouble(page: Page): Promise<DraftDouble> {
         status: 'drafting',
         picks: pick,
         lastPickNo: pick,
-        fingerprint: `demo-draft:drafting:${pick}:deadbeef`,
+        fingerprint: fingerprintFor(pick),
         pollIntervalSeconds: 5,
       }),
     });
@@ -86,6 +98,7 @@ async function installDraftDouble(page: Page): Promise<DraftDouble> {
         currentPick: number;
         onTheClock: boolean;
         picksUntilMyTurn: number | null;
+        pickFingerprint: string;
       };
       /*
        * One player gone per pick, exactly like a real draft.
@@ -99,6 +112,8 @@ async function installDraftDouble(page: Page): Promise<DraftDouble> {
       body.currentPick += drafted;
       body.onTheClock = onClock;
       body.picksUntilMyTurn = onClock ? 0 : 3;
+      // This board is the board for this many picks, and says so.
+      body.pickFingerprint = fingerprintFor(pick);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -179,6 +194,17 @@ test.describe('draft auto-refresh', () => {
     // Arriving on Draft syncs immediately rather than waiting out a cadence.
     await expect.poll(() => sleeper.syncs(), { timeout: 5_000 }).toBeGreaterThanOrEqual(1);
     const firstPlayer = await page.getByTestId('recommendation-row').first().innerText();
+
+    /*
+     * And it costs one board, not two.
+     *
+     * The mount sync used to rebuild the board the visit had just fetched,
+     * because with no fingerprint of its own it read its first answer as a
+     * change — a whole redundant assembly, survival runs and transfer, on every
+     * cold load. The board now says which picks it was built from and the two
+     * are compared. See `web/draftRefresh.ts`.
+     */
+    expect(sleeper.boards(), 'arriving on Draft builds the board once').toBe(1);
 
     // A quiet poll: it checks, finds nothing, and leaves the screen alone.
     const boardsAfterArrival = sleeper.boards();

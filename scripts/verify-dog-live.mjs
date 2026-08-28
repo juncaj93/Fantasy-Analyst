@@ -73,7 +73,7 @@ if (!league) {
 }
 console.log(`reading ${league.name} (${league.season}), draft ${league.draftId}`);
 
-const board = await call(`/api/drafts/${league.draftId}/board?limit=250`);
+const board = await call(`/api/drafts/${league.draftId}/board?limit=250&diagnostics=1`);
 if (board.status !== 200) {
   console.error(`::error::the board endpoint answered HTTP ${board.status}`);
   console.error(JSON.stringify(board.body).slice(0, 600));

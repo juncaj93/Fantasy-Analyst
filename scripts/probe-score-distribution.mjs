@@ -30,7 +30,7 @@ if (!draftId) {
   process.exit(1);
 }
 
-const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=300`);
+const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=300&diagnostics=1`);
 const recs = board.json?.recommendations ?? [];
 console.log(`${recs.length} scored players at pick ${board.json?.currentPick}\n`);
 

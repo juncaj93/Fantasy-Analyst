@@ -38,6 +38,7 @@ import { injuryStatusTag } from './injury.ts';
 import { injuryLine, type InjuryState } from '../injury/model.ts';
 import { tierContextLine } from './tierContext.ts';
 import { nextPickForSlot, slotForRoster, slotFromPicks } from '../sleeper/transform.ts';
+import { draftStateFingerprint } from '../sleeper/draftFingerprint.ts';
 import type { ManagerTendencies } from '../managers/managerTendencies.ts';
 import type { DraftPickRecord, DraftRecord, LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 /*
@@ -277,6 +278,16 @@ export type BoardRecommendation = DraftRecommendation & {
 export interface DraftBoardState {
   draftId: string;
   status: string;
+  /**
+   * The pick stream this board was built from, as the sync route names it.
+   *
+   * The same `draftStateFingerprint` a `POST /sync` returns, over the picks
+   * this build actually read. It exists so the screen's own visit and the
+   * refresh loop's first sync can recognise that they are describing the same
+   * draft, and the loop can then skip the redundant rebuild that used to
+   * follow every cold load — see `web/draftRefresh.ts`.
+   */
+  pickFingerprint: string;
   type: string;
   teams: number;
   rounds: number;
@@ -1356,6 +1367,26 @@ export async function buildDraftBoard(
   return {
     draftId,
     status: draft.status,
+    /*
+     * The pick state this board was assembled from, in the sync's own terms.
+     *
+     * Computed from the picks read at the top of this function with the same
+     * function `SleeperSyncService.syncDraft` reports, so the two strings are
+     * comparable rather than merely similar — which is what lets the client ask
+     * "is the board I am holding already the board this sync describes?" and
+     * skip a rebuild that would produce identical rows. A mismatch for any
+     * reason falls the wrong way safely: the client rebuilds, as it always did.
+     */
+    pickFingerprint: draftStateFingerprint({
+      draftId,
+      status: draft.status,
+      picks: picks.map((p) => ({
+        pickNo: p.pickNo,
+        playerId: p.playerId ?? p.sleeperPlayerId ?? null,
+        rosterId: p.rosterId ?? null,
+        pickedBy: p.pickedBy ?? null,
+      })),
+    }),
     type: draft.type,
     teams,
     rounds,

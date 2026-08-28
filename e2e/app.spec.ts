@@ -602,9 +602,16 @@ test.describe('draft room', () => {
     await expect(first.getByTestId('all-reasons')).toHaveCount(0);
   });
 
-  /** …and the engine still produces all of it, for anything that wants it. */
+  /**
+   * …and the engine still produces all of it, for anything that wants it.
+   *
+   * Asked for explicitly, because "anything that wants it" no longer includes a
+   * phone: the explanation is computed on every board, drawn on none, and was
+   * most of the response — so it is behind `diagnostics=1` now. See
+   * `core/draft/boardWire.ts`. What is asserted is exactly what was.
+   */
   test('still computes the full explanation behind the board', async ({ page }) => {
-    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=3')).json();
+    const board = await (await page.request.get('/api/drafts/demo-draft/board?limit=3&diagnostics=1')).json();
     const rec = board.recommendations[0];
     expect(rec.reasons.length, 'reasons are still produced').toBeGreaterThan(0);
     const labels = rec.components.map((c: { label: string }) => c.label).join(' | ');
