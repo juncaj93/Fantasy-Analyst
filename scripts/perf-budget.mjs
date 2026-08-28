@@ -19,7 +19,7 @@
  * in the repo. It runs in the same CI job that already builds the site, so it
  * costs nothing beyond the gzip.
  *
- * **Two things are measured, not one.** The bundles above are what a phone
+ * **Three things are measured, not one.** The bundles above are what a phone
  * downloads once. The API budgets below are what it downloads on every tap —
  * and, more importantly, how many times the server had to wait for the database
  * before it could answer. That second number is the one that grew unwatched:
@@ -28,6 +28,14 @@
  * it had reached thirty. It is measured by
  * `scripts/measure-api-budgets.ts`, which is spawned rather than imported
  * because that file is TypeScript and this one is not.
+ *
+ * The third is not a number at all. Bytes cannot tell you *what* got heavier,
+ * and the failure this repository has actually suffered twice — a module Demo
+ * Mode runs for real being placed in the entry chunk, because one render-path
+ * import reached it — is invisible to a ceiling with headroom in it. So the
+ * chunk-ownership check below reads the build's own source maps and fails by
+ * name when a watched module crosses onto the render path. See
+ * `scripts/lib/chunkOwnership.mjs`.
  *
  * Usage:
  *   node scripts/perf-budget.mjs            # measure, exit non-zero if over
@@ -39,6 +47,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  describeChunkOwnershipLeaks,
+  findChunkOwnershipLeaks,
+  readBuiltChunks,
+} from './lib/chunkOwnership.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const distDir = join(root, 'dist', 'web');
@@ -237,6 +250,63 @@ if (apiBudgets.length > 0) {
   console.log('');
 }
 
+/*
+ * What is in the render path, as opposed to how much of it there is.
+ *
+ * This one measures identity rather than size, and it is here rather than in
+ * the unit suite because it needs the build: nothing but the bundler's own
+ * output can say which chunk a module ended up in. `tests/chunkOwnership.test.ts`
+ * asserts the detector's behaviour from `npm test`, in seconds and without a
+ * build, the same split `tests/playerDetailWaves.test.ts` has against the API
+ * budgets above.
+ *
+ * The declaration is read unguarded, exactly like `budgets.bundles` is. A
+ * missing one is not a reason to skip: the only way this check can be defeated
+ * without anybody noticing is for it to shrug and report green.
+ */
+const ownership = budgets.chunkOwnership;
+const { chunks, chunksWithoutMap } = readBuiltChunks(distDir, root);
+
+if (chunksWithoutMap.length > 0 || chunks.length === 0) {
+  /*
+   * Not a skip. A chunk this cannot see inside is a chunk that could be
+   * carrying anything, and a guard that quietly stops guarding the day source
+   * maps are turned off is worse than no guard at all.
+   */
+  console.error(
+    chunks.length === 0
+      ? '\nNo JavaScript chunks found under dist/web/assets — chunk ownership cannot be checked.\n'
+      : `\nNo source map for ${chunksWithoutMap.join(', ')} — chunk ownership cannot be checked.\n` +
+          'Set `build.sourcemap` in vite.config.ts back to true.\n',
+  );
+  process.exit(reportOnly ? 0 : 1);
+}
+
+const { leaks, unusedAllowances } = findChunkOwnershipLeaks({
+  chunks,
+  watch: ownership.watch,
+  renderPath: ownership.renderPath,
+});
+
+const watched = chunks
+  .filter((c) => !c.isDemo)
+  .flatMap((c) => c.modules)
+  .filter((m) => ownership.watch.some((prefix) => m.startsWith(prefix))).length;
+
+console.log(
+  `chunk ownership: ${watched} watched module${watched === 1 ? '' : 's'} on the render path, ` +
+    `${leaks.length === 0 ? 'all declared' : `${leaks.length} undeclared`}.`,
+);
+if (unusedAllowances.length > 0) {
+  console.log(
+    `  ${unusedAllowances.length} renderPath entr${unusedAllowances.length === 1 ? 'y is' : 'ies are'} ` +
+      `no longer in the build and could be dropped: ${unusedAllowances.join(', ')}`,
+  );
+}
+console.log('');
+
+const ownershipFailed = leaks.length;
+
 const totalFailed = failed + apiFailed;
 
 if (totalFailed > 0 && !reportOnly) {
@@ -263,7 +333,15 @@ if (totalFailed > 0 && !reportOnly) {
       'in the same commit, with the reason in the commit message. Raising it on its own,\n' +
       'to make a red build green, is how a budget stops meaning anything.\n',
   );
-  process.exit(1);
 }
 
-console.log(totalFailed > 0 ? 'Over budget (reporting only).' : 'Within budget.');
+/*
+ * Printed after the byte overruns, and deliberately: when a leak is what made a
+ * budget grow, the last advice on screen should not be "raise the number".
+ */
+if (ownershipFailed > 0) console.error(describeChunkOwnershipLeaks(leaks));
+
+const problems = totalFailed + ownershipFailed;
+if (problems > 0 && !reportOnly) process.exit(1);
+
+console.log(problems > 0 ? 'Over budget (reporting only).' : 'Within budget.');
