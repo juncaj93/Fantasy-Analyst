@@ -1,11 +1,26 @@
 /**
- * League scoring / roster-shape interpretation.
+ * League scoring interpretation.
  *
  * Everything here is derived from the Sleeper league payload — nothing about the
  * league's rules is hardcoded in the recommendation engines.
  */
 
 import { buildDstScoring, type DstScoring } from './dstScoring.ts';
+/*
+ * The roster shape moved to a module of its own, and is re-exported here so
+ * every caller that wants both a league's shape and its scoring still reads
+ * them from one place. The split is a page-weight one: the screens that only
+ * need the shape were pulling the defence scoring table into the entry chunk
+ * behind `buildScoringProfile`. See `rosterShape.ts`.
+ */
+import {
+  FLEX_ELIGIBILITY,
+  buildRosterShape,
+  startablePositions,
+  type RosterShape,
+} from './rosterShape.ts';
+
+export { FLEX_ELIGIBILITY, buildRosterShape, startablePositions, type RosterShape };
 
 export interface ScoringProfile {
   /** Points per reception (Sleeper key `rec`). */
@@ -36,31 +51,6 @@ export interface ScoringProfile {
    * `dstScoring.ts` for why this cannot fall back to a standard table.
    */
   dst: DstScoring;
-}
-
-export interface RosterShape {
-  /** Fixed starting slots by position, e.g. `{ QB: 1, RB: 2, WR: 3, TE: 1 }`. */
-  starters: Record<string, number>;
-  /** Flex slots keyed by slot name with the positions they accept. */
-  flex: { slot: string; positions: string[] }[];
-  benchSlots: number;
-  irSlots: number;
-  totalStarters: number;
-  superflex: boolean;
-}
-
-/**
- * Every position this league can actually start.
- *
- * The draft board and player list are filtered by this rather than by a fixed
- * list, because "which positions matter" is a property of the league, not of
- * football. A league with no kicker slot should never be offered a kicker, and
- * one that starts a defence should see defences.
- */
-export function startablePositions(shape: RosterShape): Set<string> {
-  const out = new Set<string>(Object.keys(shape.starters));
-  for (const flex of shape.flex) for (const p of flex.positions) out.add(p);
-  return out;
 }
 
 /**
@@ -97,25 +87,6 @@ export function adpFormatForLeague(
   return { scoringFormat, draftType, qbType };
 }
 
-/** Which real positions each Sleeper roster slot accepts. */
-export const FLEX_ELIGIBILITY: Record<string, string[]> = {
-  FLEX: ['RB', 'WR', 'TE'],
-  WRRB_FLEX: ['RB', 'WR'],
-  REC_FLEX: ['WR', 'TE'],
-  WRRB_WRT: ['RB', 'WR', 'TE'],
-  SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
-  IDP_FLEX: ['DL', 'LB', 'DB'],
-};
-
-/**
- * Slots that never get a recommendation.
- *
- * `K` sits here for the same reason kickers are not synced: the app has no
- * opinion about them, so treating a kicker slot as a starting slot would
- * produce a lineup row it could never fill and a warning it could never clear.
- */
-const NON_PLAYING_SLOTS = new Set(['BN', 'IR', 'TAXI', 'K']);
-
 function num(settings: Record<string, number>, key: string, fallback = 0): number {
   const v = settings[key];
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -149,43 +120,6 @@ function pprLabel(ppr: number): string {
   if (ppr >= 0.4) return 'Half PPR';
   if (ppr > 0) return `${ppr} PPR`;
   return 'Standard';
-}
-
-export function buildRosterShape(rosterPositions: string[]): RosterShape {
-  const starters: Record<string, number> = {};
-  const flex: { slot: string; positions: string[] }[] = [];
-  let benchSlots = 0;
-  let irSlots = 0;
-
-  for (const raw of rosterPositions ?? []) {
-    const slot = String(raw).toUpperCase();
-    if (slot === 'BN') {
-      benchSlots++;
-      continue;
-    }
-    if (slot === 'IR' || slot === 'TAXI') {
-      irSlots++;
-      continue;
-    }
-    const eligible = FLEX_ELIGIBILITY[slot];
-    if (eligible) {
-      flex.push({ slot, positions: [...eligible] });
-      continue;
-    }
-    if (NON_PLAYING_SLOTS.has(slot)) continue;
-    const pos = slot === 'QB2' ? 'QB' : slot;
-    starters[pos] = (starters[pos] ?? 0) + 1;
-  }
-
-  const totalStarters = Object.values(starters).reduce((a, b) => a + b, 0) + flex.length;
-  return {
-    starters,
-    flex,
-    benchSlots,
-    irSlots,
-    totalStarters,
-    superflex: (rosterPositions ?? []).some((p) => p === 'SUPER_FLEX' || p === 'QB2'),
-  };
 }
 
 /**

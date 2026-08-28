@@ -60,7 +60,7 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
  * detail and Trades so the three cannot disagree about which round pick 40 was.
  */
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
-import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
+import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';

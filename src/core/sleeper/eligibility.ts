@@ -17,7 +17,7 @@
  * every other slot; `FLX` is the ordinary W/R/T view and never includes one.
  */
 
-import { FLEX_ELIGIBILITY, type RosterShape } from './scoring.ts';
+import { FLEX_ELIGIBILITY, type RosterShape } from './rosterShape.ts';
 
 /**
  * Normal flex eligibility: running backs, receivers and tight ends.

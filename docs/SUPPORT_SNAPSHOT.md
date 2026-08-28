@@ -139,7 +139,7 @@ And for the five in-season decisions:
 | `inputs.startSit` / `inputs.roster` | anything about one player. Every field the engine had about him is there — the props, the previous props, the tally, the injury state, the usage weeks, the game, home or away |
 | `output.claimPlan.claims[].why` | a claim. Each line is one sentence of the argument, in the order the plan makes it |
 | `output.forecast.decision.note` | a Hold. It says *which* hold: everything locked, nobody legal for the slot, or nothing better |
-| `inputs.rules.derivation` | a replay that says `engine_version_mismatch` while naming no engine. The build reading the file derives roster shape or scoring differently from the build that wrote it — the answer is in `sleeper/scoring.ts`, not in the lane |
+| `inputs.rules.derivation` | a replay that says `engine_version_mismatch` while naming no engine. The build reading the file derives roster shape or scoring differently from the build that wrote it — the answer is in `sleeper/scoring.ts` or `sleeper/rosterShape.ts`, not in the lane |
 
 That maps onto the categories worth separating: **stale or missing data**
 (freshness, an empty market, an absent projection), **mapping** (a player who
