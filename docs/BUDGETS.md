@@ -59,6 +59,74 @@ whatever needed the room, with the reason in the commit message. A budget
 raised on its own, to turn a red build green, is a budget that has stopped
 meaning anything.
 
+## What is in the render path — `npm run perf:budget`
+
+The budgets above measure how *much* a page load fetches. This measures *what*
+is in it, and it exists because the failure it catches is invisible to a byte
+count until it is already large.
+
+Rollup places a module reachable from the entry in the entry chunk, whatever
+else also reaches it. So one render-path import into a module Demo Mode runs for
+real moves that module — and the whole tree behind it — out of `demo-*.js` and
+onto every page load. It has happened twice, and both times a person found it
+rather than a check:
+
+- **`core/dst/planner.ts`**, reached for `weekRange` to print `Weeks 15–17`,
+  which put the whole defence model and the start/sit engine behind it in the
+  entry chunk: 25 kB on every page load, for a heading. Fixed by splitting the
+  leaf out to `core/dst/weeks.ts`.
+- **`core/sleeper/scoring.ts`**, reached by the Team and Players screens for a
+  roster's *shape*, which shipped the defence scoring table with it. Fixed by
+  splitting the leaf out to `core/sleeper/rosterShape.ts`.
+
+**Neither failed a size budget at the commit that caused it, and neither could
+have.** The app-JavaScript ceiling carries headroom on purpose — one with none
+fails the next commit whatever that commit is — and a leak that fits inside the
+headroom is green. Reintroducing the second of these takes app JavaScript from
+138.3 kB to 140.0 kB against a 148 kB ceiling: eight kilobytes of headroom left,
+and nothing to say anything had gone wrong.
+
+So `chunkOwnership` in `perf-budgets.json` declares two things, and
+`scripts/lib/chunkOwnership.mjs` enforces them against the build's own source
+maps — what the bundler *did*, not what the imports suggest it should have done:
+
+| | |
+| --- | --- |
+| `watch` | regions whose modules belong to Demo Mode or to an engine unless this file says otherwise: `src/core/`, `src/web/demo/` |
+| `renderPath` | the modules in those regions that a page load genuinely needs |
+
+Anything else from a watched region, found in a chunk that is not `demo-*.js`,
+fails by name — which is the part a byte count can never do:
+
+```
+2 modules crossed into the render path:
+
+  src/core/sleeper/scoring.ts
+    now placed in assets/index-BNkjbmoM.js, which every page load fetches.
+```
+
+It is a *region* allowlist rather than a list of the two modules already fixed,
+deliberately: naming the known offenders would catch the same bug twice and the
+next one never. A module invented tomorrow, in a file nothing here mentions, is
+caught the same way.
+
+**Adding a line to `renderPath` is the same deliberate act as raising a number**
+— in the same commit as whatever needed it, with the reason in the commit
+message. Adding one to turn a red build green is how this stops meaning
+anything. The usual answer is the other one: split the leaf the render path
+needs into its own module, which is exactly what `core/dst/weeks.ts` and
+`core/sleeper/rosterShape.ts` are.
+
+A chunk whose source map is missing is a failure, not a skip. This can only see
+inside a chunk the build described, and a guard that quietly stops guarding the
+day `build.sourcemap` is turned off is worse than no guard at all.
+
+`tests/chunkOwnership.test.ts` asserts the detector's behaviour from the unit
+suite — every rule against a build that satisfies it and a build that breaks it
+in the specific way this repository has already broken it — so a broken *guard*
+fails in seconds. The guard itself needs the build, because nothing but the
+bundler's output can say which chunk a module ended up in.
+
 ## API payloads and query waves — `npm run perf:budget`
 
 Page weight is what a phone downloads once. This is what it downloads on every
