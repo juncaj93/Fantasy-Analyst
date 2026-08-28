@@ -297,8 +297,6 @@ export function SetupScreen({
 
       <AppearanceCard />
 
-      <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
-
       <ListGroup header="Your league">
         {status.steps.map((step) => (
           <Fragment key={step.id}>
@@ -350,6 +348,16 @@ export function SetupScreen({
           </Fragment>
         ))}
       </ListGroup>
+
+      {/*
+        Below the five steps, deliberately.
+
+        Settings' first screen belongs to the checklist — `shell.spec.ts`
+        measures that every step is reachable without a scroll, on the shortest
+        phone this app supports — and a preference is not a step. This is
+        something to come back to once the app works, so it sits after the work.
+      */}
+      <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
 
       <ListGroup header="This app">
         <InstallPanel />
