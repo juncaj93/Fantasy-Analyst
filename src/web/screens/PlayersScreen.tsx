@@ -25,7 +25,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../api.ts';
 import type { CacheOptions } from '../sessionCache.ts';
 import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
-import { buildRosterShape, startablePositions } from '../../core/sleeper/scoring.ts';
+import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { ALL_FILTER, playerFilterChips } from '../playerFilters.ts';
 import { Empty, SignedValue } from '../components/common.tsx';
 import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
