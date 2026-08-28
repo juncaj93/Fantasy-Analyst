@@ -3408,17 +3408,39 @@ WebKit removed it in iOS 13, and on the versions that still honour it, it is the
 documented cause of a scroller that will not notice content added after it was
 created (WebKit 158342), which is this card's exact sequence.
 
-**What is still not proved, and it matters.** This environment cannot run
-WebKit — the Playwright download host is blocked — so the twelve WebKit shards
-have *not* been run on this change; the four Chromium widths have. And with real
-touch in Chromium, a **fully loaded** card scrolls correctly both before and
-after this change, from every start point, on Players and on Trades, first
-opening and after a reopen. What is fixed is demonstrated; that it is the whole
-of what the owner is seeing is not. If the card still locks after this, the next
-thing to suspect is not the arbitration — it is the window itself: the card
-opens as a 311 px stub and grows past the screen, and for that second there is
-genuinely nothing under the finger to move, which the draft card never suffers
-because its expansion sits inside a board that is already scrolling.
+**One test was left behind, and only production could say so.**
+`e2e-production/smoke.spec.ts` keeps its own copy of the dismissal — *a card
+swiped away on Trades takes the board with it, not the network* — and it dragged
+the card's content, like the three in `e2e/sheet-vs-pull.spec.ts` that moved to
+the grip with this change. It was not moved with them. `ci.yml` does not run
+`e2e-production/`, so nothing could have caught the mismatch before a deploy,
+and nothing did: the release went out, deployed cleanly, and the post-deploy
+smoke went red on that one test at 390 and 375 with the card still open — the
+new rule working exactly as intended against the live site, asserted against the
+old one. Fixed forward in `f191632`, which points the swipe at the grip and
+settles the sheet before measuring it: a body drag could start anywhere in a
+large box and did not care that the sheet was still rising, but the grip is a
+few points tall, so a box read mid-animation puts the press above or below it.
+Recorded for the shape of the mistake rather than its size — the behaviour was
+changed in one suite and asserted in two.
+
+**What was not proved when this was written, and now is.** The environment this
+was developed in cannot run WebKit — the Playwright download host is blocked —
+so the twelve shards were not run locally; the four Chromium widths were, and
+the reproduction above had to be built out of injected touch points, because
+`page.mouse` obeys no `touch-action` whatever and that is precisely how a body
+declaring `none` at the wrong moment survived twelve green shards twice. CI ran
+the shards on the branch head and again on main after the merge: green at 360,
+375, 390 and 430. **And the owner has confirmed it on his iPhone.** That is the
+evidence this was waiting for and the only kind that settles it.
+
+One observation survives without having been the defect. A card still opens as a
+311 px stub and grows past the screen when its two requests land, and for that
+second there is genuinely nothing under the finger to move — in any engine, by
+construction rather than by arbitration. The draft card never suffers it because
+its expansion sits inside a board that is already scrolling. If an expanded card
+ever feels slow to come alive again, that is where to look, and the cure would
+be a loading state that occupies the sheet rather than collapsing it.
 
 No budget raised, and the change is a net deletion. Measured on the merged head
 against `1ec8618`, the base it landed on: app JavaScript **135.9 kB** against a
