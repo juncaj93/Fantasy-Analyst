@@ -8,7 +8,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { inSeason, openReview, pullToRefresh } from './helpers.ts';
+import { clearMyGuys, emptyQueue, inSeason, openReview, pullToRefresh } from './helpers.ts';
 
 /**
  * Wait for a disclosure to finish opening before reading its text.
@@ -283,6 +283,17 @@ test.describe('draft room', () => {
     await login(page);
     await openTab(page, 'draft');
     await expect(page.getByTestId('board-list')).toBeVisible();
+  });
+
+  /*
+   * The ★ is a real write to a database four projects share, so it is put back
+   * here rather than at the end of whichever test lit it. A test that fails
+   * half way through is exactly the test whose bookmark survives it, and one
+   * survivor is enough to change what every later spec and every later width
+   * sees on the board.
+   */
+  test.afterEach(async ({ page }) => {
+    await emptyQueue(page);
   });
 
   test('shows live draft state above the fold, on one line', async ({ page }) => {
@@ -1241,12 +1252,6 @@ test.describe('draft room', () => {
      */
     const starred = await (await page.request.get('/api/drafts/demo-draft/board?limit=40')).json();
     expect(starred.recommendations.find((r: { playerId: string }) => r.playerId === playerId).queued).toBe(true);
-
-    // Leave the board as it was found, so the shared dev server stays clean.
-    await afterReload.getByTestId('queue-control').click();
-    await expect(
-      page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`).getByTestId('queue-control'),
-    ).toHaveAttribute('data-queued', '0');
   });
 
   test('starring keeps the board in exactly the same order', async ({ page }) => {
@@ -1260,7 +1265,6 @@ test.describe('draft room', () => {
     await target.getByTestId('queue-control').click();
     await expect(target.getByTestId('queue-control')).toHaveAttribute('data-queued', '1');
     expect(await ids()).toEqual(before);
-    await target.getByTestId('queue-control').click();
   });
 
   test('the star filter shows only the players you queued', async ({ page }) => {
@@ -1286,7 +1290,6 @@ test.describe('draft room', () => {
     await row.getByTestId('queue-control').click();
     const after = page.locator(`[data-testid="recommendation-row"][data-player-id="${playerId}"]`);
     await expect(after.locator('.explain')).toHaveCount(0);
-    await after.getByTestId('queue-control').click();
   });
 
   /**
@@ -1667,9 +1670,18 @@ test.describe('player intelligence', () => {
     await openTab(page, 'players');
   });
 
+  /*
+   * The ♥ is stored per player and outlives every draft, so it is the one piece
+   * of state on this screen that a failed test can hand to the next one — and
+   * to the next width. Cleared here rather than at the foot of the test, where
+   * a failure would step straight over it.
+   */
+  test.afterEach(async ({ page }) => {
+    await clearMyGuys(page);
+  });
+
   test('rates a player with the heart, which is not the draft queue', async ({ page }) => {
     const firstRow = page.getByTestId('player-search-row').first();
-    const playerId = await firstRow.getAttribute('data-player-id');
     const control = firstRow.getByTestId('my-guy-control');
     await expect(control).toHaveAttribute('data-icon', 'heart');
     // Colour is not doing the work: the glyph itself changes.
@@ -1683,16 +1695,6 @@ test.describe('player intelligence', () => {
     await openTab(page, 'draft');
     await page.getByTestId('queue-filter').click();
     await expect(page.getByText(/Your queue is empty/)).toBeVisible();
-
-    // Leave the shared dev server as it was found.
-    await openTab(page, 'players');
-    const back = page
-      .locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`)
-      .getByTestId('my-guy-control');
-    await back.click();
-    await back.click();
-    await back.click();
-    await expect(back).toHaveAttribute('data-level', '0');
   });
 
   test('searches players and opens the evidence timeline', async ({ page }) => {
