@@ -38,6 +38,72 @@ import type { MockDraftState } from '../../core/draft/mockDraft.ts';
 const MOCK_ROWS = 40;
 
 /**
+ * Attempts at one board request: the first, and two more.
+ *
+ * Reported from a real rehearsal as a save error that came and went while the
+ * draft went on progressing — a pick that did nothing until it was tapped
+ * again, sometimes twice. The route is not what fails: the same request
+ * answered 200 across twenty-two complete drafts over the real router. What
+ * fails is the trip, on a phone, and a lost trip was costing the reader the
+ * pick they had just made.
+ *
+ * Three is the number of attempts a person would make themselves before
+ * deciding the app was broken, done for them and faster.
+ */
+const MOCK_ATTEMPTS = 3;
+
+/**
+ * Between attempts. Deliberately short, and growing.
+ *
+ * The reader is holding a phone with their finger on a player. Half a second of
+ * dimmed list is a beat; three seconds is a bug. The step gives a cell handover
+ * time to complete without ever making the screen feel stuck.
+ */
+const MOCK_RETRY_MS = 300;
+
+/**
+ * One board request, retried while what went wrong was the trip.
+ *
+ * **Retrying is safe here in a way it is almost nowhere else in this app**, and
+ * that is why this exists at this seam and not in `api.ts`. The route writes
+ * nothing — `DraftBoardSources` has no write on it — and it is a pure function
+ * of the state posted to it: the same state and the same action produce the
+ * same room, because every bot pick is drawn from a generator seeded by the
+ * state and the pick number. So a second attempt is not a second pick. It
+ * cannot double-draft anybody, and it cannot reach Sleeper. See
+ * `core/draft/mockDraft.ts`.
+ *
+ * `retryable` is the client's own existing judgement, not a new rule: a dropped
+ * connection, a 5xx, a 408 or a 429 are asked again; a refusal is not. That is
+ * what keeps the 409 that ends a rehearsal arriving immediately rather than
+ * three attempts later — see `retryableFor` in `apiResponse.ts`.
+ */
+async function postMockBoard(draftId: string, body: unknown): Promise<MockBoardResponse> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await api.post<MockBoardResponse>(
+        `/api/drafts/${encodeURIComponent(draftId)}/mock/board`,
+        body,
+        /*
+         * `invalidates: false`, and it is not the exception it looks like.
+         *
+         * `api.post` empties the session cache because a write can change an
+         * answer already held. This one cannot: it writes nothing anywhere, and
+         * emptying the cache on every pick of a fifteen-round rehearsal would
+         * mean every other tab in the app went back to the network for no
+         * reason at all. See the note on `post` in `api.ts`.
+         */
+        { invalidates: false },
+      );
+    } catch (err) {
+      const worthRetrying = err instanceof ApiError && err.retryable && attempt < MOCK_ATTEMPTS;
+      if (!worthRetrying) throw err;
+      await new Promise((resolve) => setTimeout(resolve, MOCK_RETRY_MS * attempt));
+    }
+  }
+}
+
+/**
  * `setup` is the step before a rehearsal exists.
  *
  * Reached only when there is nothing to resume — a first run, or a reset. A mock
@@ -122,6 +188,18 @@ export function MockDraftScreen({
    */
   const generation = useRef(0);
 
+  /**
+   * The last thing asked for, so a failure can be asked for again.
+   *
+   * Every attempt this screen makes is already retried three times when the
+   * failure was the trip; this is for the reader whose trip failed all three.
+   * Without it their pick is simply gone and the only way back is to find the
+   * row again and hope — which is what the reported defect actually felt like.
+   */
+  const lastAction = useRef<
+    { kind: 'start'; slot?: number | null } | { kind: 'resume' } | { kind: 'take'; playerId: string } | null
+  >(null);
+
   const apply = useCallback((next: MockBoardResponse) => {
     stateRef.current = next.state;
     writeMock(next.state);
@@ -142,21 +220,13 @@ export function MockDraftScreen({
       const mine = ++generation.current;
       setPhase((current) => (current === 'loading' ? 'loading' : 'thinking'));
       setSnapshotNote(null);
+      /*
+       * Kept, so the banner below can offer the pick back rather than only
+       * apologise for having lost it. See `mock-retry`.
+       */
+      lastAction.current = action;
       try {
-        /*
-         * `invalidates: false`, and it is not the exception it looks like.
-         *
-         * `api.post` empties the session cache because a write can change an
-         * answer already held. This one cannot: it writes nothing anywhere, and
-         * emptying the cache on every pick of a fifteen-round rehearsal would
-         * mean every other tab in the app went back to the network for no
-         * reason at all. See the note on `post` in `api.ts`.
-         */
-        const next = await api.post<MockBoardResponse>(
-          `/api/drafts/${encodeURIComponent(draftId)}/mock/board`,
-          { state: stateRef.current, action, limit: MOCK_ROWS },
-          { invalidates: false },
-        );
+        const next = await postMockBoard(draftId, { state: stateRef.current, action, limit: MOCK_ROWS });
         if (mine !== generation.current) return;
         apply(next);
       } catch (err) {
@@ -364,8 +434,27 @@ export function MockDraftScreen({
           </Notice>
         ) : null}
         {phase === 'failed' && error ? (
+          /*
+            The pick is offered back, not just apologised for.
+
+            Three attempts have already been made and all three lost the trip.
+            Without this control the reader's pick is gone and the only way back
+            is to find the row again — which is what the reported defect
+            actually felt like from the other side of the screen.
+          */
           <Notice tone="error" data-testid="mock-error" role="alert">
-            {error}
+            {error}{' '}
+            <button
+              type="button"
+              className="btn btn-sm"
+              data-testid="mock-retry"
+              onClick={() => {
+                const again = lastAction.current;
+                if (again) void ask(again);
+              }}
+            >
+              Try again
+            </button>
           </Notice>
         ) : null}
         {result?.refused ? (

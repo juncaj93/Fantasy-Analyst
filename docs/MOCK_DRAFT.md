@@ -218,6 +218,36 @@ has picked, or while Demo Mode is running, the row is present and disabled with
 the reason written on it — a control that vanishes teaches the reader that they
 imagined it.
 
+## When the trip fails
+
+Reported from a real rehearsal: `Couldn't save that yet` over a mock, coming and
+going while the draft went on progressing — a pick that did nothing until it was
+tapped again, sometimes twice.
+
+The banner is `mock-error`, and only a `POST /mock/board` that does not come
+back as JSON can draw it. The route is not what fails: the same request answered
+200 across twenty-two complete mock drafts over the real router and a real
+database, on a uniform pool and a production-shaped one. Nothing else in the app
+can draw it over a rehearsal either — the layer covers the viewport at the top
+of the stack, and the app's only recurring POST (`/sync`) is parked while a mock
+is open. What failed was the trip.
+
+So the request is **retried**, twice, at 300ms and 600ms, and only while the
+client's own `retryable` says the failure was transport — a dropped connection,
+a 5xx, a 408, a 429. A refusal is never retried, which is what keeps the 409
+that ends a rehearsal arriving immediately.
+
+Retrying is safe here in a way it is almost nowhere else in this app, and that
+is why it lives at this seam rather than in `api.ts`: the route writes nothing,
+and it is a pure function of the state posted to it — the same state and action
+produce the same room, because every bot pick is drawn from a generator seeded
+by the state and the pick number. A second attempt is not a second pick.
+
+If all three attempts are lost the banner stays, and it now carries **Try
+again**, which re-sends the action the reader actually asked for. Without it
+their pick is simply gone and the only way back is to find the row again — which
+is what the defect felt like from the other side of the screen.
+
 ## Tests
 
 | File | What it proves |
@@ -227,7 +257,7 @@ imagined it.
 | `tests/mock.isolation.test.ts` | both refusals, mutation-tested; the seam is structural |
 | `tests/mock.board.test.ts` | end to end over the real router: the board is real, the real draft is untouched, the 409, the snapshot round-trip |
 | `tests/liveRoster.test.ts` | `fillSlotRows`: the team sheet cannot disagree with the header strip |
-| `e2e/mock-draft.spec.ts` | the menu's shape and the nav height, the setup step and the seat, the team sheet, the draft order's striping, the double-tap guard, and that no write leaves the browser while one is open |
+| `e2e/mock-draft.spec.ts` | the menu's shape and the nav height, the setup step and the seat, the team sheet, the draft order's striping, the double-tap guard, the retry and the recovery, and that no write leaves the browser while one is open |
 
 ## Deliberately not built
 

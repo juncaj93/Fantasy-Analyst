@@ -423,6 +423,84 @@ test.describe('a mock draft', () => {
     await expect(page.getByTestId('mock-draft')).toHaveAttribute('data-phase', 'ready');
   });
 
+  /**
+   * The reported defect, from the other side of the screen.
+   *
+   * "Couldn't save that yet" over a rehearsal, coming and going while the draft
+   * went on progressing — a pick that did nothing until it was tapped again,
+   * sometimes twice. The route was never what failed: the same request answered
+   * 200 across twenty-two complete drafts over the real router. The trip failed,
+   * and a lost trip cost the reader the pick they had just made.
+   *
+   * Retrying is safe here in a way it is almost nowhere else in this app: the
+   * board route writes nothing and is a pure function of the state posted to it,
+   * so a second attempt is not a second pick.
+   */
+  test('a dropped request costs the pick nothing — it is asked again', async ({ page }) => {
+    const double = await installMockDouble(page);
+
+    /*
+     * Registered after the double, so it runs first and falls through to it.
+     * Two dropped trips, which is what the owner saw before a pick landed.
+     */
+    let drop = 0;
+    await page.route('**/mock/board', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as { action?: { kind?: string } };
+      if (body.action?.kind === 'take' && drop < 2) {
+        drop += 1;
+        await route.abort('failed');
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openDraft(page);
+    await openMock(page);
+
+    const first = page.locator('[data-testid^="mock-row-"]').first();
+    const taken = (await first.getAttribute('data-testid'))!.replace('mock-row-', '');
+    await first.getByRole('button').first().click();
+
+    /* One tap, and the pick is on the board — the reader never sees the loss. */
+    await expect(page.getByTestId('mock-since')).toBeVisible();
+    await expect(page.getByTestId(`mock-row-${taken}`)).toHaveCount(0);
+    await expect(page.getByTestId('mock-error')).toHaveCount(0);
+    expect(drop, 'both trips really were dropped').toBe(2);
+    expect(
+      double.requests().filter((r) => r.action === 'take'),
+      'the retries reached the server; the tap did not become three picks',
+    ).toHaveLength(1);
+  });
+
+  test('offers the pick back when every attempt is lost', async ({ page }) => {
+    await installMockDouble(page);
+
+    let dropping = true;
+    await page.route('**/mock/board', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as { action?: { kind?: string } };
+      if (body.action?.kind === 'take' && dropping) {
+        await route.abort('failed');
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openDraft(page);
+    await openMock(page);
+    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+
+    await expect(page.getByTestId('mock-error')).toContainText('Try again in a moment');
+    /*
+     * The control that makes the difference between a report and a recovery:
+     * without it the reader's pick is gone and the only way back is to find the
+     * row again and hope.
+     */
+    dropping = false;
+    await page.getByTestId('mock-retry').click();
+    await expect(page.getByTestId('mock-since')).toBeVisible();
+    await expect(page.getByTestId('mock-error')).toHaveCount(0);
+  });
+
   test('resets to a fresh run, as many times as asked', async ({ page }) => {
     const double = await installMockDouble(page);
     await openDraft(page);
