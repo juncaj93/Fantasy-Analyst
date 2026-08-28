@@ -108,4 +108,24 @@ describe('the recent-window label says what the window is', () => {
     }
     expect(page, 'a tooltip still claims twenty-one days').not.toContain('last 21 days');
   });
+
+  /**
+   * The evidence timeline's "show older" control names the same window.
+   *
+   * It is the newest surface to print the window, and the one where getting it
+   * wrong is most concrete: the control tells the reader precisely which rows
+   * it is holding back, so a label that said `21d` over a thirty-day cut would
+   * be a miscount of a list sitting directly above it.
+   *
+   * Asserted through the constant, not the digits, so widening the window moves
+   * the control's wording with it.
+   */
+  it('names the recent window on the evidence timeline control', () => {
+    const page = source('src/web/components/playerPage.tsx');
+    expect(page).toContain('const RECENT_WINDOW_LABEL = `${RECENCY_WINDOWS.last30}d`;');
+    expect(page).toContain('older than{\' \'}\n          {RECENT_WINDOW_LABEL}');
+    expect(page, 'the collapse boundary hard-codes a number instead of the window').not.toMatch(
+      /older than 30d/,
+    );
+  });
 });

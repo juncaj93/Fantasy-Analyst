@@ -39,6 +39,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
+import { RECENCY_WINDOWS } from '../../core/evidence/aggregate.ts';
 import {
   Badge,
   DetailLabel,
@@ -856,12 +857,72 @@ function Market({
 }
 
 /**
+ * The label for the recent window, spelled by the constant it means.
+ *
+ * `tests/windowVocabulary.test.ts` exists because this page once printed `21d`
+ * over a thirty-day number for months. Deriving the word from the window is
+ * what stops the two drifting apart again.
+ */
+const RECENT_WINDOW_LABEL = `${RECENCY_WINDOWS.last30}d`;
+
+/**
+ * Split the ledger at the recent-window boundary.
+ *
+ * Separated from the component for the same reason {@link selectLatestNews} is:
+ * which rows a reader is shown by default is the whole of the decision and none
+ * of the drawing, and it is worth asserting directly rather than through a
+ * rendered tree.
+ *
+ * Two things this deliberately does not do:
+ *
+ *   - **it does not read the clock itself.** `now` is injected, so the boundary
+ *     is a pure function of its arguments and a test can stand either side of
+ *     it without waiting a month;
+ *   - **it never hides a row it cannot date.** An absent or unparseable
+ *     `sourceDate` is not evidence that something is old, and the one outcome
+ *     this change must not produce is a row disappearing from the timeline on a
+ *     guess. Undateable rows stay in `recent`, which is the visible half.
+ *
+ * The input is already newest-first, so `recent` and `older` each keep that
+ * order and `[...recent, ...older]` is the original list again.
+ */
+export function partitionByRecency<T extends { sourceDate: string }>(
+  items: T[],
+  now: Date,
+  windowDays: number = RECENCY_WINDOWS.last30,
+): { recent: T[]; older: T[] } {
+  const cutoff = now.getTime() - windowDays * 86_400_000;
+  const recent: T[] = [];
+  const older: T[] = [];
+  for (const item of items) {
+    const at = Date.parse(item.sourceDate);
+    if (!Number.isFinite(at) || at >= cutoff) recent.push(item);
+    else older.push(item);
+  }
+  return { recent, older };
+}
+
+/**
  * The ledger, entire and in order.
  *
  * Chronological, newest first, with a filter across polarity for a player who
  * has been written about fifty times. The filter narrows what is *shown* and
  * changes no tally anywhere: the counts beside each chip are printed from the
  * same list, so a reader can always see what they are not looking at.
+ *
+ * **Older than the recent window is collapsed, not dropped.** A player followed
+ * all season arrives here as fifty blurbs in one column, and the ones that
+ * change a decision this week are the newest few; the rest were costing every
+ * visit a scroll past last September. So the timeline opens on the last
+ * {@link RECENT_WINDOW_LABEL} and offers the remainder on a control that says
+ * how many there are.
+ *
+ * It is a display default and only that, and the distinction is the whole of
+ * why it is safe: nothing leaves the ledger, the tally still counts every row,
+ * the polarity chips still count across all of them, the heading still reports
+ * the full length, and Review and the provenance view are untouched. The one
+ * boundary is {@link partitionByRecency}, which reads each row's own
+ * `sourceDate` — the date the news happened, not the date it was imported.
  */
 function Evidence({
   file,
@@ -881,14 +942,28 @@ function Evidence({
   limit?: number;
 }) {
   const [lens, setLens] = useState<'all' | 'positive' | 'negative'>('all');
+  const [showOlder, setShowOlder] = useState(false);
   const quoted = useMemo(() => new Set(quotedEvidenceIds), [quotedEvidenceIds]);
 
   if (!file) return <SkeletonRows rows={5} testId="player-page-evidence-skeleton" />;
   const items = file.evidence;
   const effective = (e: EvidenceItem) => e.userOverride?.polarity ?? e.polarity;
   const all = lens === 'all' ? items : items.filter((e) => effective(e) === lens);
-  const shown = limit == null ? all : all.slice(0, limit);
-  const withheld = all.length - shown.length;
+  const capped = limit == null ? all : all.slice(0, limit);
+  const withheld = all.length - capped.length;
+
+  /*
+   * Age collapses only the full timeline, never a snapshot.
+   *
+   * A snapshot is already cut to its newest few by `limit`; folding a second
+   * rule into it would be two answers to "why is that row not here". The full
+   * timeline has no `limit`, and it is the surface this collapse is for: a
+   * player written about fifty times over a season arrives as fifty blurbs,
+   * and the ones that change a decision are at the top.
+   */
+  const { recent, older } =
+    limit == null ? partitionByRecency(capped, new Date()) : { recent: capped, older: [] as EvidenceItem[] };
+  const shown = showOlder ? [...recent, ...older] : recent;
 
   return (
     <>
@@ -908,16 +983,46 @@ function Evidence({
         />
       </div>
       ) : null}
+      {/*
+        The count is of the whole filtered ledger, not of what is on screen.
+        Collapsing the older half is a display choice; a heading that counted
+        only the visible rows would report the timeline as shorter than it is,
+        which is the one thing this section cannot do.
+      */}
       <div className="detail-label" data-testid="evidence-heading">
-        {limit == null ? `Evidence timeline (${shown.length})` : 'Latest news'}
+        {limit == null ? `Evidence timeline (${all.length})` : 'Latest news'}
       </div>
       {items.length === 0 ? (
         <Empty>No evidence recorded for him yet.</Empty>
-      ) : shown.length === 0 ? (
+      ) : all.length === 0 ? (
         <div className="muted">Nothing in this window. The other {items.length} item(s) are under “All”.</div>
+      ) : shown.length === 0 ? (
+        /*
+         * Everything this filter matches is older than the window. Say so,
+         * rather than drawing an empty list above a control that offers to
+         * expand it — the reader is one tap from all of it either way.
+         */
+        <div className="muted">Nothing in the last {RECENT_WINDOW_LABEL}.</div>
       ) : (
         shown.map((e) => <EvidenceRow key={e.id} item={e} quoted={quoted.has(e.id)} />)
       )}
+      {/*
+        Reachable, not deleted. Nothing leaves the ledger, the tally, or
+        provenance — this control is the whole of the difference between an
+        older row being collapsed and being gone.
+      */}
+      {older.length > 0 ? (
+        <button
+          type="button"
+          className="link-button"
+          data-testid="evidence-older-toggle"
+          aria-expanded={showOlder}
+          onClick={() => setShowOlder((open) => !open)}
+        >
+          {showOlder ? 'Hide' : 'Show'} {older.length} item{older.length === 1 ? '' : 's'} older than{' '}
+          {RECENT_WINDOW_LABEL}
+        </button>
+      ) : null}
       {/*
         What was left out, counted rather than hidden. A snapshot that quietly
         showed two of forty items would be a snapshot the reader could not trust.
