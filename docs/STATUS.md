@@ -475,16 +475,34 @@ suggestions).
    assertion: it waits for the element to stop moving, asked as a question about
    the element rather than answered with a fixed sleep.
 
-11. **A queue-filtered draft board scores differently from the full one.**
-   Found while asserting that the ★ moves no ranking: it does not, but
-   `?queued=1` narrows the *candidate pool*, and the tier-cliff and positional-
-   scarcity components are computed over that pool — so three starred players
-   across three positions have no tier structure to read and their scores move.
-   The `Next%` simulation is already immune: it was deliberately given the whole
-   board rather than the filtered one, and the same argument applies to the tier
-   inputs. **Assigned to the Integrity workstream**; Demo Mode did not change it
-   and `tests/demo.scenarios.test.ts` asserts the star's neutrality by building
-   the same board twice with and without the flags rather than by comparing a
+11. **A queue-filtered draft board still *scores* differently from the full one
+   — the tier half of this is fixed.** Found while asserting that the ★ moves no
+   ranking: it does not, but `?queued=1` narrows the *candidate pool*, and the
+   tier-cliff and positional-scarcity components were computed over that pool —
+   so three starred players across three positions had no tier structure to read
+   and their scores moved. The same went for the position chips, where the
+   candidate cap is applied after the filter and a one-position board therefore
+   reaches deeper than the whole-board cut.
+
+   **The tier ladders no longer read the filtered pool.** `DraftContext.market-
+   Pool` names the pool a ladder is a claim about separately from the rows being
+   scored, and the board passes the pool the *unfiltered* board is built from —
+   which unfiltered is literally the same array, so that path is unchanged.
+   `tests/draft.filterTier.test.ts` asserts the whole tier assessment, field for
+   field, is identical under the position chips, FLX and ★ for every player the
+   two boards share. This is the argument the `Next%` simulation already made
+   for itself, applied where it was still missing.
+
+   **What is left, and it is deliberate: `scarcity` and `separation`.** Both are
+   still computed over the filtered set, so a filtered board's Score can differ
+   from the unfiltered one by about a point. Scarcity would take the same pool
+   the ladders now use; separation cannot, because it compares *composites* and
+   so needs the whole pool actually scored — which means the news, market and
+   projection reads widening on every board poll. Deferred past the live draft
+   rather than rushed into it, and **assigned to the Integrity workstream** for
+   after Sunday. Demo Mode did not change any of this and
+   `tests/demo.scenarios.test.ts` asserts the star's neutrality by building the
+   same board twice with and without the flags rather than by comparing a
    filtered board to an unfiltered one.
 
 12. **The browser suite shares one dev server across all three viewports, and
