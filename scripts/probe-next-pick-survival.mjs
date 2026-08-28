@@ -62,7 +62,7 @@ const draftId = process.env.DRAFT_ID || status.json?.league?.draftId || '';
 checkWith('a league with a draft is configured', !!draftId, draftId || 'none');
 if (!draftId) process.exit(1);
 
-const board = await get(`/api/drafts/${draftId}/board?limit=60`);
+const board = await get(`/api/drafts/${draftId}/board?limit=60&diagnostics=1`);
 checkWith('the board answers', board.status === 200, `HTTP ${board.status}`);
 if (board.status !== 200) process.exit(1);
 
@@ -226,7 +226,7 @@ if (model.targetPick == null) {
 
 // The regression that a live draft would show first: a number that moves when
 // nothing has.
-const again = await get(`/api/drafts/${draftId}/board?limit=60`);
+const again = await get(`/api/drafts/${draftId}/board?limit=60&diagnostics=1`);
 check(
   'the same board twice gives the same numbers',
   JSON.stringify((again.json?.recommendations ?? []).map((r) => [r.playerId, r.survivalProbability])) ===

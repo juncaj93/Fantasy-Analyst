@@ -173,13 +173,19 @@ describe('API with seeded data', () => {
     expect(body.leagues[0]?.isSelected).toBe(true);
   });
 
+  /*
+   * The explanation is asked for explicitly, because it is no longer sent by
+   * default: nothing on the Draft screen draws it, and it was most of the
+   * response — see `core/draft/boardWire.ts`. What is asserted is unchanged;
+   * only the request says which view of the board it wants.
+   */
   it('builds an explained draft board', async () => {
     const board = await json<{
       currentPick: number;
       recommendations: { name: string; reasons: string[]; components: { key: string }[]; adp: number | null }[];
       adpSnapshot: unknown;
       myRoster: unknown[];
-    }>(get('/api/drafts/demo-draft/board', cookie));
+    }>(get('/api/drafts/demo-draft/board?diagnostics=1', cookie));
 
     expect(board.currentPick).toBe(3); // two picks already made
     expect(board.recommendations.length).toBeGreaterThan(0);
@@ -200,7 +206,7 @@ describe('API with seeded data', () => {
         myGuy: { level: number };
         wait: { state: string; detail: string };
       }[];
-    }>(get('/api/drafts/demo-draft/board', cookie));
+    }>(get('/api/drafts/demo-draft/board?diagnostics=1', cookie));
 
     expect(board.round).toBeGreaterThanOrEqual(1);
     expect(board.rosterAlerts.length).toBeGreaterThan(0);
@@ -230,7 +236,7 @@ describe('API with seeded data', () => {
     expect(set.myGuy.marks).toBe('♥♥');
 
     const after = await json<{ recommendations: { playerId: string; myGuy: { level: number }; reasons: string[] }[] }>(
-      get('/api/drafts/demo-draft/board', cookie),
+      get('/api/drafts/demo-draft/board?diagnostics=1', cookie),
     );
     const flagged = after.recommendations.find((r) => r.playerId === target.playerId)!;
     expect(flagged.myGuy.level).toBe(2);
@@ -321,7 +327,7 @@ describe('API with seeded data', () => {
     await app(post('/api/drafts/demo-draft/queue', { playerId: second, queued: true }, cookie), env);
 
     const queued = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
-      get('/api/drafts/demo-draft/board?queued=1', cookie),
+      get('/api/drafts/demo-draft/board?queued=1&diagnostics=1', cookie),
     );
     expect(queued.recommendations.map((r) => r.playerId).sort()).toEqual([first, second].sort());
     // Queued, and still nobody's My Guy — the star does not rate a player.
@@ -346,7 +352,7 @@ describe('API with seeded data', () => {
     await app(post(`/api/players/${hearted}/my-guy`, { level: 3 }, cookie), env);
 
     const after = await json<{ recommendations: { playerId: string; queued: boolean; myGuy: { level: number } }[] }>(
-      get('/api/drafts/demo-draft/board', cookie),
+      get('/api/drafts/demo-draft/board?diagnostics=1', cookie),
     );
     const byId = new Map(after.recommendations.map((r) => [r.playerId, r]));
     expect(byId.get(starred)).toMatchObject({ queued: true, myGuy: { level: 0 } });
@@ -480,7 +486,7 @@ describe('API with seeded data', () => {
         get('/api/leagues/demo-league/roster', cookie),
       );
       const board = await json<{ myRoster: { playerId: string }[]; openStarters: unknown[] }>(
-        get('/api/drafts/demo-draft/board', cookie),
+        get('/api/drafts/demo-draft/board?diagnostics=1', cookie),
       );
       expect(board.myRoster.map((p) => p.playerId)).toEqual(roster.drafted.map((p) => p.playerId));
       expect(board.openStarters).toEqual(roster.openStarters);

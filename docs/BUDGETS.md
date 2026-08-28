@@ -101,6 +101,22 @@ app lives under and the one that has actually been hit.
   candidate. `core/sleeper/draftFingerprint.ts` decides whether anything
   actually moved, and most polls during a live draft land on a draft where
   nobody has picked since the last one.
+- **Arriving on Draft costs one board, not two.** The gate above had a hole at
+  exactly the moment it was most expensive: the refresh loop's first sync had no
+  fingerprint to compare against, read its own first answer as a change, and
+  rebuilt the board the visit had already fetched. Every board now reports the
+  pick state it was built from as `pickFingerprint`, produced by the same
+  function the sync route uses, so the two are compared instead of assumed
+  apart. Measured on the seeded fixture: **2 board builds and 250kB down to 1
+  and 32kB** on a cold load.
+- **The board sends what the board draws.** A recommendation carries its own
+  workings — fifteen scored components, the bullets they produce, the
+  opportunity-cost and NFL-overlap arithmetic, the `Next` model's per-player
+  probabilities — and the Draft screen renders none of it. It was about seven
+  bytes in ten of the response, on a phone, mid-draft. `core/draft/boardWire.ts`
+  is the list of what is dropped and why; everything on it is still computed,
+  still carried on `DraftBoardState`, still in every support snapshot, and still
+  reachable over HTTP with `?diagnostics=1`, which is how the probes ask.
 
 ## D1 reads and writes
 

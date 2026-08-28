@@ -326,6 +326,22 @@ export function DraftScreen({
   const positionRef = useRef(position);
   positionRef.current = position;
   const controllerRef = useRef<DraftRefreshController | null>(null);
+  /**
+   * The visit's own board request, as something the refresh loop can wait on.
+   *
+   * The loop's first sync needs to know what the board on screen was built from
+   * before it can decide whether the draft has actually moved, and on a cold
+   * load that board is still in the air when the sync lands — so this is what
+   * it waits for. It resolves rather than rejects in every case `load` handles,
+   * which is all of them.
+   *
+   * Tagged with the draft it was for, and only the first request per draft is
+   * kept. The screen renders before the league listing arrives, so an untagged
+   * ref would capture the no-op `load` that ran while there was no draft id yet
+   * and the loop would be waiting on a request that never happened. Switching
+   * league is the same problem a second time.
+   */
+  const firstLoadRef = useRef<{ draftId: string; done: Promise<void> } | null>(null);
 
   /*
    * Opening or closing a mock is the same event as a tab being hidden or shown.
@@ -529,8 +545,11 @@ export function DraftScreen({
    * whole scored board is already here and the query filters what is drawn.
    */
   useEffect(() => {
-    void load(position);
-  }, [load, position]);
+    const run = load(position);
+    // The first one for this draft is the visit's — see `firstLoadRef`.
+    if (draftId && firstLoadRef.current?.draftId !== draftId) firstLoadRef.current = { draftId, done: run };
+    void run;
+  }, [load, position, draftId]);
 
   /*
    * Tapping Draft while already on Draft — one rung per tap.
@@ -686,6 +705,23 @@ export function DraftScreen({
        * contribution is deciding that it is worth doing.
        */
       applyChange: () => loadRef.current(positionRef.current, { quiet: true }),
+      /*
+       * What the board on screen was built from, once it is on screen.
+       *
+       * Arriving on Draft used to cost two builds of the same board: this
+       * effect's own `load` above, and then a second one the moment the mount
+       * sync landed — because the controller had no fingerprint to compare
+       * against and read that as "the draft moved". It has one now, and it is
+       * the server's own, computed over the same picks by the same function the
+       * sync route uses, so equal really does mean equal. A sync that finds a
+       * genuinely new pick still differs, and still rebuilds.
+       */
+      settledFingerprint: async () => {
+        const first = firstLoadRef.current;
+        if (first?.draftId !== draftId) return null;
+        await first.done;
+        return boardRef.current?.draftId === draftId ? (boardRef.current.pickFingerprint ?? null) : null;
+      },
       isOnClock: () => boardRef.current?.onTheClock ?? false,
       /*
        * Parked while a rehearsal is up.

@@ -457,7 +457,9 @@ describe('the draft showcase keeps its columns', () => {
     const board = await get<{
       openStarters: { slot: string }[];
       rosterAlerts: { message: string; positions?: string[] }[];
-    }>('draft-mid', '/api/drafts/demo-draft-2026/board?limit=10');
+      // `openStarters` is not sent to a screen that reads `rosterProgress`
+      // instead, so this asks for the engine's view — see `draft/boardWire.ts`.
+    }>('draft-mid', '/api/drafts/demo-draft-2026/board?limit=10&diagnostics=1');
 
     expect(board.openStarters.map((s) => s.slot)).toContain('DEF');
     /* Round six is not when a defence is taken, and no alert says otherwise. */

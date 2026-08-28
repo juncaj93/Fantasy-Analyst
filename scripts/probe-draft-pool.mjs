@@ -54,7 +54,7 @@ if (!draftId) process.exit(1);
  * anything missing is missing because the server dropped it rather than because
  * this probe asked for too little -- which is exactly the mistake being tested.
  */
-const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=400`);
+const board = await get(`/api/drafts/${encodeURIComponent(draftId)}/board?limit=400&diagnostics=1`);
 check('the draft board builds', board.status === 200, `HTTP ${board.status}`);
 
 const recs = board.json?.recommendations ?? [];
