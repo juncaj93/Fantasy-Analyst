@@ -26,6 +26,7 @@ import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
+import { FlaggedRow, FlaggedScreen } from '../components/feedbackQueue.tsx';
 
 import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
@@ -56,7 +57,17 @@ import {
  */
 const DemoPanel = lazy(() => import('../demo/DemoPanel.tsx'));
 
-type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | 'review' | 'data-health' | null;
+type Panel =
+  | 'sleeper'
+  | 'league'
+  | 'adp'
+  | 'newsletter'
+  | 'vegas'
+  | 'repair'
+  | 'review'
+  | 'data-health'
+  | 'flagged'
+  | null;
 
 /**
  * The state of a step, drawn rather than typed.
@@ -98,6 +109,7 @@ const PANEL_TITLES: Record<Exclude<Panel, null>, string> = {
   repair: 'Help my scores',
   review: 'Review',
   'data-health': 'Data health',
+  flagged: 'Flagged',
 };
 
 export function SetupScreen({
@@ -262,6 +274,16 @@ export function SetupScreen({
     return <DataHealthScreen onBack={() => setOpen(null)} />;
   }
 
+  /*
+   * The flag queue draws its own pushed screen, for the reason the two above
+   * do: its subtitle counts what is in it, and the count changes underneath as
+   * entries are deleted — so the generic `PushScreen` below would mean passing
+   * a live number up through a component with no business knowing about it.
+   */
+  if (open === 'flagged') {
+    return <FlaggedScreen onBack={() => setOpen(null)} />;
+  }
+
   if (open) {
     return (
       <PushScreen title={PANEL_TITLES[open]} backLabel="Setup" onBack={() => setOpen(null)} testId={`setup-detail-${open}`}>
@@ -400,6 +422,18 @@ export function SetupScreen({
         */}
         <DataHealthRow onOpen={() => setOpen('data-health')} />
         <SupportSnapshotRow leagues={leagues} />
+        {/*
+          Everything flagged from the floating control, last of the three.
+
+          The support loop reads downwards: whether the data was healthy, the
+          state behind one recommendation, and then the list of everything that
+          looked wrong in passing. This one is last because it is the only one
+          that holds something from before the reader arrived here — it is the
+          inbox, and an inbox belongs at the bottom of the tools rather than
+          above them. Never in the taskbar, for the same reason as the two
+          above it — §9.
+        */}
+        <FlaggedRow onOpen={() => setOpen('flagged')} />
       </ListGroup>
 
       {/*

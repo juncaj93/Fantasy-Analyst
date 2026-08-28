@@ -9288,3 +9288,242 @@ div.matchup-result {
 .pick-btn:active:not(:disabled) .control-glyph {
   opacity: 0.6;
 }
+
+/*
+ * ========================================================== flagging a screen
+ *
+ * A control that belongs to the shell rather than to any screen, and the strip
+ * that follows a tap on it. `components/feedbackCapture.tsx` carries the
+ * argument for it floating here at all; this is the arithmetic.
+ *
+ * The layer is the whole page's width and takes no pointer events, so the only
+ * things on screen that can be tapped are the control itself and, while it is
+ * up, the strip. A fixed band that swallowed taps across the bottom of every
+ * screen would be a far worse trade than the corner this actually spends.
+ */
+.flag-layer {
+  position: fixed;
+  left: var(--page-x);
+  right: var(--page-x);
+  /*
+   * Above the toolbar's reservation, and above the keyboard when there is one.
+   *
+   * `--content-inset` is where the page's own content stops, so at the bottom
+   * of a fully scrolled screen the control sits in the strip already left
+   * clear rather than over the last row. The `max` is the keyboard: this is
+   * pinned to the bottom of the *layout* viewport and iOS shrinks only the
+   * visual one, so a composer with a field in it would otherwise draw its own
+   * field underneath the keyboard the moment it was tapped into — the same
+   * arithmetic `.sheet` does, for the same reason.
+   */
+  bottom: max(var(--content-inset), calc(var(--flag-keyboard, 0px) + var(--sp-2)));
+  /* Under the toolbar's own layer, and far under anything that covers the app. */
+  z-index: 29;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  pointer-events: none;
+  transition:
+    transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
+    visibility 0s,
+    bottom var(--dur-fast) var(--ease);
+}
+
+/*
+ * Out of the way while the keyboard is up and there is nothing to type into.
+ *
+ * The same exit the toolbar makes, and `visibility` is what takes it out of the
+ * tab order and off the screen reader's map while it is gone — delayed by the
+ * length of the transition so the exit is still seen.
+ */
+.flag-layer[data-hidden='yes'] {
+  transform: translateY(calc(100% + var(--content-inset)));
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
+    visibility 0s var(--dur);
+}
+
+/*
+ * The control: the toolbar's material, at a quarter of its size.
+ *
+ * The same capsule, blur, hairline and shadow the navigation uses, because it
+ * floats over the page in the same way and a second floating material would be
+ * a second design. What it does not take is the accent: this is not a primary
+ * action and a filled circle in the corner of every screen would read as one.
+ *
+ * 40px drawn, 44px reached — §5, the mark and the target are two boxes. The
+ * target grows in both directions here rather than only downwards, because
+ * unlike `.icon-btn` this control has no neighbour to reach under.
+ */
+.flag-button {
+  position: relative;
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--toolbar-border);
+  background: var(--toolbar-surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-toolbar);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    opacity var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.flag-button::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+}
+
+.flag-button:active {
+  opacity: 0.55;
+  color: var(--accent);
+}
+
+.flag-glyph {
+  display: inline-flex;
+  line-height: 0;
+}
+
+/*
+ * The strip: what was just flagged, and the one line that may qualify it.
+ *
+ * A card rather than a sheet. Nothing here is modal — the screen being flagged
+ * stays visible and stays scrollable, which is the point: a note about what is
+ * on screen is easier to write with it still on screen.
+ */
+.flag-strip {
+  pointer-events: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--toolbar-border);
+  background: var(--toolbar-surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-2);
+  animation: flag-strip-in var(--dur) var(--ease);
+}
+
+@keyframes flag-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.flag-strip-said {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.flag-strip-what {
+  font-size: 0.86rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Done is a full target even though it is a `.btn-sm`.
+ *
+ * It is one of two controls on a strip that appears under a thumb, and §5 does
+ * not have an exception for a control that happens to be small.
+ */
+.flag-done {
+  min-height: var(--tap);
+  flex: 0 0 auto;
+}
+
+/* One line, at the field height everything else in the app uses. */
+.flag-note {
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--separator);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+/* ------------------------------------------------- the queue, inside Setup */
+
+/*
+ * The reader's own sentence, in the app's voice for the row and in theirs for
+ * the note. Two lines rather than one because the note is the thing being read
+ * and the context under it is the thing being checked, and a single run-on line
+ * makes the reader find the quotation marks to tell them apart.
+ */
+.flagged-note {
+  display: block;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.flagged-when {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+/*
+ * Forget one flag: a quiet mark with a full target under it.
+ *
+ * A sibling of the row's body rather than something nested inside a row that
+ * leads somewhere — §6 — which is why the row it sits on is a static container
+ * and not a button. Nothing else on that row is tappable, so this is the only
+ * thing a thumb can land on and it can afford to be small and quiet.
+ */
+.flagged-forget {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--row-action);
+  height: var(--row-action);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+
+.flagged-forget::after {
+  content: '';
+  position: absolute;
+  /* 28px drawn, 44px reached. */
+  inset: calc((var(--row-action) - var(--tap)) / 2);
+}
+
+.flagged-forget:active {
+  color: var(--neg);
+}

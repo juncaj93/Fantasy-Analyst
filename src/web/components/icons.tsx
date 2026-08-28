@@ -280,3 +280,30 @@ export function InstallIcon({ size = 18, className }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * Flag this: a pennant on a staff.
+ *
+ * The mark on the capture control, and the one on its row in Settings. A flag
+ * rather than a bug, a megaphone or an exclamation — what the control does is
+ * *mark this spot*, and nothing about it claims that what was marked is broken.
+ */
+export function FlagIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M6 21V3.75" />
+      <path d="M6 4.5h11.5l-2.4 3.75L17.5 12H6" />
+    </svg>
+  );
+}
+
+/** Delete one thing from a list: a bin. */
+export function TrashIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M4.75 6.75h14.5" />
+      <path d="M9.5 6.75V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5v1.25" />
+      <path d="M7 6.75 7.75 19a1.5 1.5 0 0 0 1.5 1.4h5.5a1.5 1.5 0 0 0 1.5-1.4L17 6.75" />
+    </svg>
+  );
+}

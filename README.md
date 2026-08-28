@@ -237,6 +237,19 @@ Week 1+ recommendation can be diagnosed from the file rather than from
 Cloudflare, GitHub and D1. Reading it runs no cron, refreshes no provider and
 writes nothing. See [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md).
 
+**Flagged** — the third row in the same group, and the only one that holds
+something from before you got there. A small flag sits in the corner of every
+screen: tap it and the screen is flagged, with a one-line note if you have one
+and nothing at all if you do not — the flag is written down before the strip
+appears, so ignoring it keeps it. **Setup → This app → Flagged** lists
+everything, newest first, deletes them one at a time, and copies the whole queue
+as plain text ready to paste into a chat — then *asks* whether to clear it,
+because you may have copied it only to look at it. It records the destination,
+the recommendation you had last looked at, live or demo, the theme, the width
+and the shell; it deliberately does not read the screen's own title, because one
+of those titles is your league's name. Nothing is uploaded. See
+[docs/FEEDBACK_CAPTURE.md](docs/FEEDBACK_CAPTURE.md).
+
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
@@ -338,6 +351,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/MOCK_DRAFT.md](docs/MOCK_DRAFT.md) | the practice draft: how a bot manager picks, where the state lives, the two refusals, and what deletes it |
 | [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md) | capturing the state behind a recommendation, replaying it deterministically, and turning a real case into a regression fixture |
 | [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md) | whether what the app knew was healthy and current: the source inventory, the freshness policy, the scheduled-run ledger and what a support snapshot carries |
+| [docs/FEEDBACK_CAPTURE.md](docs/FEEDBACK_CAPTURE.md) | flagging a screen from anywhere in the app: what one tap records, what it refuses to record, where the control lives and every place it does not |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
 | [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) | the market-anchored usage model, evaluated side by side and consumed by nothing |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |
