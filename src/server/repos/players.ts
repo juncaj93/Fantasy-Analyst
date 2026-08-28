@@ -55,6 +55,34 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
 const EXCLUDED_LIST = [...EXCLUDED_POSITIONS];
 const EXCLUDED_PLACEHOLDERS = EXCLUDED_LIST.map(() => '?').join(',');
 
+/**
+ * The columns `toPlayer` actually reads, as SQL.
+ *
+ * Typed as the keys of `PlayerRow` so it cannot quietly fall behind the shape
+ * it is filling: a column added to the interface and forgotten here is a
+ * compile error, and one removed from the interface and left here is too.
+ */
+const PLAYER_COLUMNS: string = Object.keys({
+  id: true,
+  sleeper_player_id: true,
+  full_name: true,
+  first_name: true,
+  last_name: true,
+  team: true,
+  position: true,
+  status: true,
+  active: true,
+  normalized_name: true,
+  aliases_json: true,
+  external_ids_json: true,
+  draft_rank: true,
+  jersey_number: true,
+  height_inches: true,
+  weight_pounds: true,
+  age: true,
+  years_exp: true,
+} satisfies Record<keyof PlayerRow, true>).join(', ');
+
 export class PlayerRepo {
   constructor(private readonly db: Database) {}
 
@@ -71,14 +99,34 @@ export class PlayerRepo {
     return Number(row?.n ?? 0);
   }
 
+  /**
+   * The whole dictionary, as narrow as the code that reads it.
+   *
+   * Two filters and a column list, and each of the three is here for a measured
+   * reason:
+   *
+   *   - **the columns.** `SELECT *` returned every column of every row —
+   *     `search_name`, the timestamps, the raw JSON blobs — to build objects
+   *     that use eighteen of them. This is the query every screen ultimately
+   *     reads through, over a three-thousand-row table, on a platform that
+   *     serialises each row across a network boundary. `PLAYER_COLUMNS` is the
+   *     `PlayerRow` interface written as SQL, so the two cannot drift: adding a
+   *     field to one without the other fails to compile or fails to bind.
+   *   - **the excluded positions**, filtered in SQL rather than after the fact,
+   *     so a kicker that was synced before they were dropped disappears now
+   *     rather than at the next sync.
+   *   - **`active = 1`.** Retired and released players are not draftable, not
+   *     rosterable and not searchable, and every consumer of this list already
+   *     discards them — after paying to load them. The dictionary carries years
+   *     of them.
+   */
   async listAll(): Promise<CanonicalPlayer[]> {
     const [players, aliases] = await Promise.all([
-      // Excluded positions are filtered in SQL rather than after the fact: this
-      // is the query every screen ultimately reads through, and a kicker that
-      // was synced before they were dropped should disappear now, not at the
-      // next sync.
       this.db
-        .prepare(`SELECT * FROM players WHERE position NOT IN (${EXCLUDED_PLACEHOLDERS})`)
+        .prepare(
+          `SELECT ${PLAYER_COLUMNS} FROM players
+            WHERE active = 1 AND position NOT IN (${EXCLUDED_PLACEHOLDERS})`,
+        )
         .bind(...EXCLUDED_LIST)
         .all<PlayerRow>(),
       this.db.prepare('SELECT player_id, alias FROM player_aliases').all<{ player_id: string; alias: string }>(),
@@ -94,6 +142,24 @@ export class PlayerRepo {
 
   async buildIndex(): Promise<PlayerIndex> {
     return new PlayerIndex(await this.listAll());
+  }
+
+  /**
+   * Every player's position, active or not, and nothing else about him.
+   *
+   * The one read that legitimately wants the whole dictionary rather than the
+   * part of it the app shows. Last season's statistics arrive as one payload
+   * covering everybody who played, and a player who has since retired or been
+   * released still played the season the card looks back at — so filing his
+   * line under "unmatched" because he is inactive today would delete last year
+   * on a roster that still holds him.
+   *
+   * Two columns rather than eighteen, because a position is all the caller
+   * needs to rank a stat line.
+   */
+  async positionsById(): Promise<Map<string, string>> {
+    const rows = await this.db.prepare('SELECT id, position FROM players').all<{ id: string; position: string }>();
+    return new Map(rows.results.map((r) => [r.id, r.position]));
   }
 
   async getById(id: string): Promise<CanonicalPlayer | null> {

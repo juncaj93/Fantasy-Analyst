@@ -34,14 +34,16 @@ import {
   type DraftComponentWeights,
 } from '../src/core/draft/engine.ts';
 import {
-  PERSONAL_COMPONENT_KEYS,
   SIGNAL_BALANCE_DEFAULT,
   SIGNAL_BALANCE_ORDER,
-  personalScale,
   readSignalBalance,
-  weightsForSignalBalance,
   type SignalBalance,
 } from '../src/core/draft/signalBalance.ts';
+import {
+  PERSONAL_COMPONENT_KEYS,
+  personalScale,
+  weightsForSignalBalance,
+} from '../src/core/draft/signalWeights.ts';
 
 // ------------------------------------------------------------- the weights
 
