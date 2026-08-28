@@ -29,6 +29,7 @@ import { PlayerDetailService } from './playerDetailService.ts';
 import { InjuryService, type InjuryHealth } from './injuryService.ts';
 import { UsageService, type UsageHealth } from './usageService.ts';
 import type { SleeperUserSetting } from './sleeperSync.ts';
+import { readSignalBalance, type SignalBalance } from '../../core/draft/signalBalance.ts';
 
 /** `ok` = done, `warn` = needs you, `todo` = not started, `off` = optional/not enabled. */
 export type StepState = 'ok' | 'warn' | 'todo' | 'off';
@@ -182,6 +183,16 @@ export interface SetupStatus {
    * in working out why.
    */
   usage: UsageHealth;
+  /**
+   * How loudly the owner's own research argues with the market on the draft
+   * board, as set in Settings.
+   *
+   * Carried on the status the screen already fetches rather than behind a
+   * request of its own: it is one word, it is read on the same tap, and a
+   * second round trip to learn where a control is pointing would be a second
+   * thing that can fail on a phone in a hotel lobby.
+   */
+  draftBalance: SignalBalance;
 }
 
 export type PlayerDetailDiagnostics = Awaited<ReturnType<PlayerDetailService['diagnostics']>>;
@@ -372,6 +383,9 @@ export class SetupService {
       playerDetail: await new PlayerDetailService(this.db).diagnostics(),
       injury: await new InjuryService(this.db).health(),
       usage: await new UsageService(this.db).health(),
+      draftBalance: readSignalBalance(
+        await this.settings.get<unknown>(SETTING_KEYS.draftSignalBalance, null),
+      ),
     };
   }
 

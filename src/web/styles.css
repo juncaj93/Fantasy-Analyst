@@ -4252,6 +4252,46 @@ input[type='file'] {
   font-size: 0.86rem;
 }
 
+/*
+ * A slider, drawn by the platform.
+ *
+ * The rule above gives every input a recessed box and 40px of height, which is
+ * a text field's shape and not a slider's, so this undoes exactly that and adds
+ * nothing of its own: `accent-color` hands the track and the thumb to the
+ * browser, which draws the control the phone's owner already knows how to use
+ * and gets the focus ring, the dark theme and the reduced-motion behaviour
+ * right without a line of CSS here.
+ *
+ * The padding is the tap target. A native range thumb is around 20px and the
+ * floor for a thumb is 44, so the padding buys the rest — vertically only,
+ * because a slider that lost width would lose resolution.
+ */
+.slider {
+  min-height: 44px;
+  padding: var(--sp-2) 0;
+  background: transparent;
+  border-radius: 0;
+  accent-color: var(--accent);
+}
+
+/* The two ends, said in words rather than left to the reader to infer. */
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: -2px 2px 0;
+  font-size: 0.76rem;
+  color: var(--text-faint);
+}
+
+/* Where the thumb is now, in the same words the ends are written in. */
+.slider-value {
+  margin: var(--sp-2) 4px 2px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 textarea {
   min-height: 110px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

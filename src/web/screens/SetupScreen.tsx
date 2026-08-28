@@ -6,7 +6,7 @@
  * here; this screen only shows what the user can do from their phone.
  */
 
-import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -18,7 +18,9 @@ import {
   type ProjectionImportResult,
   type ProjectionStatus,
   type SetupStatus,
+  type SignalBalance,
 } from '../api.ts';
+import { SIGNAL_BALANCE_ORDER } from '../../core/draft/signalBalance.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
@@ -294,6 +296,8 @@ export function SetupScreen({
       )}
 
       <AppearanceCard />
+
+      <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
 
       <ListGroup header="Your league">
         {status.steps.map((step) => (
@@ -663,6 +667,140 @@ function AppearanceCard() {
         System follows your phone, and keeps following it when your phone changes at sunset. Light and
         Dark stay exactly as you set them here, on this phone.
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------- market vs the owner's own reads */
+
+/**
+ * What each position of the control is called, in the reader's words.
+ *
+ * The stored values are `market` … `personal`; nothing on screen says either.
+ */
+const BALANCE_LABELS: Record<SignalBalance, string> = {
+  market: 'Market first',
+  'lean-market': 'Leaning market',
+  balanced: 'Balanced',
+  'lean-personal': 'Leaning my research',
+  personal: 'My research first',
+};
+
+/** What each position actually does to the board, in one sentence. */
+const BALANCE_NOTES: Record<SignalBalance, string> = {
+  market:
+    'Your ♥, your AVOIDs and the newsletter tally count half as much as usual. They can still separate two ' +
+    'players the market rates alike; they cannot move anybody far.',
+  'lean-market': 'Your own research counts three-quarters of what it usually does.',
+  balanced:
+    'How this board has always ranked: the market prices a player and your own research argues with the price. ' +
+    'Leave it here unless you have a reason not to.',
+  'lean-personal': 'Your own research counts a quarter more than it usually does.',
+  personal:
+    'Your own research counts half again as much as usual — ♥♥♥ is worth about fifteen picks of draft position ' +
+    'rather than ten. The market still sets the price it is arguing with.',
+};
+
+/**
+ * How loudly your own research argues with the draft market.
+ *
+ * The one thing this control must not do is change anything by existing.
+ * `Balanced` is the position every account starts in and it hands the ranking
+ * the same weight table it has always used, so a board built here is the board
+ * built before this shipped — see `core/draft/signalBalance.ts`, which returns
+ * the default table by identity rather than by arithmetic.
+ *
+ * A slider rather than a row of chips because five named positions in a row do
+ * not fit a 360px phone, and because the thing being set is genuinely a
+ * quantity with a middle. The numbers behind it are never shown: "half again as
+ * much" is the truthful description a person can act on, and `1.25` is a
+ * number that invites a precision this model does not have.
+ *
+ * Saved against the account rather than this phone — unlike Appearance — because
+ * the board it changes is built on the server. It is a write, so it is behind
+ * the passphrase like every other write in here.
+ */
+function DraftBalanceCard({ current, unlocked }: { current: SignalBalance; unlocked: boolean }) {
+  const [balance, setBalance] = useState<SignalBalance>(current);
+  const [error, setError] = useState<string | null>(null);
+  /** The position the server last confirmed, to fall back to when a save fails. */
+  const saved = useRef<SignalBalance>(current);
+  /**
+   * Which write is the current one.
+   *
+   * A drag across the control fires a change per position it crosses, so
+   * several writes can be in the air at once and they need not come back in
+   * order. The last one asked for is the one the reader chose, and an older
+   * reply may not be allowed to overwrite it — on screen or in this ref.
+   */
+  const latest = useRef(0);
+
+  // A re-read of the status wins: it is what the server actually has.
+  useEffect(() => {
+    setBalance(current);
+    saved.current = current;
+  }, [current]);
+
+  /*
+   * Saved on the change itself, rather than a moment after the thumb settles.
+   *
+   * A debounce would be fewer writes and one real defect: leaving Settings
+   * inside the delay unmounts this and takes the pending save with it, so the
+   * reader would have moved a control that silently did not move. Five
+   * positions means a drag across the whole range is at most four writes of one
+   * short word, which is a cheaper thing to spend than a lost setting.
+   */
+  const choose = (next: SignalBalance) => {
+    setBalance(next);
+    const ticket = ++latest.current;
+    void (async () => {
+      try {
+        const result = await api.post<{ balance: SignalBalance }>('/api/setup/draft-balance', { balance: next });
+        if (ticket !== latest.current) return;
+        saved.current = result.balance;
+        setBalance(result.balance);
+        setError(null);
+      } catch (err) {
+        if (ticket !== latest.current) return;
+        // Back to what the server holds: a control showing a position that was
+        // not saved is worse than one that visibly did not move.
+        setBalance(saved.current);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+  };
+
+  const index = Math.max(0, SIGNAL_BALANCE_ORDER.indexOf(balance));
+
+  return (
+    <div data-testid="draft-balance">
+      <div className="section-title">Draft board weighting</div>
+      <input
+        className="slider"
+        type="range"
+        min={0}
+        max={SIGNAL_BALANCE_ORDER.length - 1}
+        step={1}
+        value={index}
+        disabled={!unlocked}
+        aria-label="How much your own research counts against the draft market"
+        aria-valuetext={BALANCE_LABELS[balance]}
+        data-testid="draft-balance-slider"
+        onChange={(e) => choose(SIGNAL_BALANCE_ORDER[Number(e.target.value)] ?? 'balanced')}
+      />
+      <div className="slider-ends">
+        <span>Market consensus</span>
+        <span>My own research</span>
+      </div>
+      <div className="slider-value" data-testid="draft-balance-label">
+        {BALANCE_LABELS[balance]}
+        {balance === 'balanced' ? ' (default)' : null}
+      </div>
+      <div className="faint" style={{ margin: '2px 4px 14px' }}>
+        {BALANCE_NOTES[balance]}
+        {unlocked ? null : ' Unlock with your passphrase to change this.'}
+      </div>
+      {error ? <Notice tone="error">{error}</Notice> : null}
     </div>
   );
 }
