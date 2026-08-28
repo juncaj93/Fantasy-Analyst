@@ -8,7 +8,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildLiveRoster, openStarters, rosterProgress, type LiveRosterInput } from '../src/core/draft/liveRoster.ts';
+import {
+  buildLiveRoster,
+  fillSlotRows,
+  openStarters,
+  rosterProgress,
+  type LiveRosterInput,
+} from '../src/core/draft/liveRoster.ts';
 import { buildRosterShape } from '../src/core/sleeper/scoring.ts';
 
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN']);
@@ -284,5 +290,92 @@ describe('roster progress line', () => {
     expect(before.find((s) => s.slot === 'RB')!.filled).toBe(0);
     expect(after.find((s) => s.slot === 'RB')!.filled).toBe(1);
     expect(after.find((s) => s.slot === 'WR')!.filled).toBe(1);
+  });
+});
+
+/**
+ * The same allocation, reported by name instead of by count.
+ *
+ * `rosterProgress` says *how many* of each slot are covered; `fillSlotRows`
+ * says *who* is in them, and it must never be able to disagree — a team sheet
+ * showing three receivers beside a header strip saying `2/3 WR` would be two
+ * answers to one question. The invariant is asserted directly below, because it
+ * is the whole reason the function walks the rows rather than the shape.
+ */
+describe('putting players into the slots the league has', () => {
+  const shape = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN']);
+
+  const held = (positions: string[]) => positions.map((position, i) => ({ playerId: `h${i}`, position }));
+
+  const counts = (positions: string[]): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const p of positions) out[p] = (out[p] ?? 0) + 1;
+    return out;
+  };
+
+  it('fills fixed slots first, then the flex, then the bench', () => {
+    const positions = ['RB', 'WR', 'WR', 'RB', 'QB', 'WR'];
+    const rows = fillSlotRows(rosterProgress(shape, counts(positions)), held(positions));
+    expect(rows.map((r) => [r.slot, r.players.map((p) => p.position)])).toEqual([
+      ['QB', ['QB']],
+      ['RB', ['RB', 'RB']],
+      ['WR', ['WR', 'WR']],
+      ['TE', []],
+      ['FLEX', ['WR']],
+      ['BN', []],
+    ]);
+  });
+
+  it('cannot disagree with the count the header strip already shows', () => {
+    for (const positions of [
+      [],
+      ['QB'],
+      ['WR', 'WR', 'WR', 'WR'],
+      ['RB', 'RB', 'RB', 'TE', 'TE', 'QB', 'QB', 'WR'],
+      ['TE', 'TE', 'TE', 'TE', 'TE'],
+    ]) {
+      const progress = rosterProgress(shape, counts(positions));
+      const filled = fillSlotRows(progress, held(positions));
+      for (const row of progress) {
+        const found = filled.find((f) => f.slot === row.slot);
+        const got = found?.players.length ?? 0;
+        /*
+         * Starting slots match exactly. The bench is the one row where the two
+         * are allowed to differ, and only upwards: `rosterProgress` caps its
+         * count at the configured bench so the strip never reads `9/6 BN`,
+         * while the team sheet has to draw every player the reader actually
+         * holds — a pick vanishing off your own roster is worse than a row that
+         * shows more names than spaces. See `fillSlotRows`.
+         */
+        if (row.bench) expect(got, `BN with ${positions.join('/')}`).toBeGreaterThanOrEqual(row.filled);
+        else expect(got, `${row.slot} with ${positions.join('/')}`).toBe(row.filled);
+      }
+    }
+  });
+
+  it('draws every player on an over-full bench, though the strip caps its count', () => {
+    const positions = ['TE', 'TE', 'TE', 'TE', 'TE'];
+    const progress = rosterProgress(shape, counts(positions));
+    const bench = fillSlotRows(progress, held(positions)).find((r) => r.bench);
+    expect(progress.find((r) => r.bench)?.filled, 'the strip says 2/2, not 3/2').toBe(2);
+    expect(bench?.players).toHaveLength(3);
+  });
+
+  it('keeps pick order inside a slot, so the earlier pick is listed first', () => {
+    const players = [
+      { playerId: 'early', position: 'WR' },
+      { playerId: 'late', position: 'WR' },
+    ];
+    const rows = fillSlotRows(rosterProgress(shape, { WR: 2 }), players);
+    expect(rows.find((r) => r.slot === 'WR')?.players.map((p) => p.playerId)).toEqual(['early', 'late']);
+  });
+
+  it('drops nobody, even in a league with no bench at all', () => {
+    const benchless = buildRosterShape(['QB', 'RB']);
+    const positions = ['QB', 'RB', 'WR', 'WR'];
+    const rows = fillSlotRows(rosterProgress(benchless, counts(positions)), held(positions));
+    const placed = rows.flatMap((r) => r.players.map((p) => p.playerId));
+    expect(new Set(placed).size, 'every player is somewhere, exactly once').toBe(positions.length);
+    expect(rows.find((r) => r.bench)?.players.map((p) => p.position)).toEqual(['WR', 'WR']);
   });
 });

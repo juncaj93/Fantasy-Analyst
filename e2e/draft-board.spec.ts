@@ -138,7 +138,8 @@ async function openDraft(page: Page) {
 /**
  * Two taps now, not one.
  *
- * The ▦ leads to three destinations rather than straight to the board — see
+ * The header's menu leads to three destinations rather than straight to the
+ * board — see
  * `web/components/draftDestinations.tsx` — so every test that wants the board
  * goes through the menu. The helper is what keeps that one change rather than
  * fourteen.

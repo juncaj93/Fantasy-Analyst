@@ -71,11 +71,23 @@ export class MockDraftVoidError extends Error {
 export async function readMockRoom(
   sources: DraftBoardSources,
   draftId: string,
+  /**
+   * The seat to rehearse from, when the reader has chosen one.
+   *
+   * Null or absent is the reader's own seat, which is every mock that predates
+   * the choice. Out of range is treated as absent rather than refused: a stored
+   * state naming seat 14 of a twelve-team league is a league that shrank, and
+   * dropping the reader back into their own seat is the answer that still gives
+   * them a rehearsal.
+   */
+  opts: { slot?: number | null } = {},
 ): Promise<{
   room: MockRoom;
   myRosterId: number | null;
   myUserId: string | null;
   realPicksMade: number;
+  /** What `slotToRosterId` the board must be shown, once a seat is chosen. */
+  slotToRosterId: Record<string, number> | undefined;
 }> {
   const draft = await sources.leagues.getDraft(draftId);
   if (!draft) throw new Error(`draft ${draftId} not found`);
@@ -88,8 +100,25 @@ export async function readMockRoom(
 
   const rosters = await sources.leagues.listRosters(league.id);
   const mine = rosters.find((r) => r.isMine) ?? null;
-  const slotToRosterId = draft.slotToRosterId ?? undefined;
-  const mySlot = slotForRoster(slotToRosterId, mine?.rosterId ?? null);
+  const teams = draft.teams || league.totalRosters || 12;
+  const realSlot = slotForRoster(draft.slotToRosterId ?? undefined, mine?.rosterId ?? null);
+
+  /*
+   * Sitting somewhere else is a swap, not a relabelling.
+   *
+   * The reader takes the chosen seat and the manager who had it takes the
+   * reader's — so the room still has exactly the twelve managers the league
+   * has, each of them once, and the draft order screen still names a real
+   * person in every chair. Doing it here, on `slotToRosterId`, is what makes
+   * everything downstream follow for free: the tendencies below are keyed off
+   * this map, `mockPickRecords` files each pick under the roster this map
+   * names, and the board's own manager list is built from the same map handed
+   * back through `getDraft`. One transform, applied once.
+   */
+  const chosen =
+    opts.slot != null && Number.isInteger(opts.slot) && opts.slot >= 1 && opts.slot <= teams ? opts.slot : null;
+  const slotToRosterId = swapSeats(draft.slotToRosterId ?? undefined, realSlot, chosen);
+  const mySlot = chosen ?? realSlot;
 
   /*
    * Tendencies arrive keyed by *current roster id* and are wanted by *seat*.
@@ -108,7 +137,7 @@ export async function readMockRoom(
   }
 
   const room: MockRoom = {
-    teams: draft.teams || league.totalRosters || 12,
+    teams,
     rounds: draft.rounds || 15,
     type: draft.type ?? 'snake',
     ...(slotToRosterId ? { slotToRosterId } : {}),
@@ -117,7 +146,33 @@ export async function readMockRoom(
     tendenciesBySlot,
   };
 
-  return { room, myRosterId: mine?.rosterId ?? null, myUserId: mine?.ownerId ?? null, realPicksMade };
+  return {
+    room,
+    myRosterId: mine?.rosterId ?? null,
+    myUserId: mine?.ownerId ?? null,
+    realPicksMade,
+    slotToRosterId,
+  };
+}
+
+/**
+ * Two seats trade places, or nothing does.
+ *
+ * A no-op whenever the reader is staying put, whenever their real seat cannot
+ * be identified, and whenever the chosen seat is not in the map — the last of
+ * which is a league whose `slot_to_roster_id` does not cover every chair, and
+ * where inventing an entry would be inventing a manager.
+ */
+function swapSeats(
+  slotToRosterId: Record<string, number> | undefined,
+  from: number | null,
+  to: number | null,
+): Record<string, number> | undefined {
+  if (!slotToRosterId || from == null || to == null || from === to) return slotToRosterId;
+  const a = slotToRosterId[String(from)];
+  const b = slotToRosterId[String(to)];
+  if (a == null || b == null) return slotToRosterId;
+  return { ...slotToRosterId, [String(from)]: b, [String(to)]: a };
 }
 
 /**
@@ -178,7 +233,12 @@ export function mockDraftBoardSources(
   inner: DraftBoardSources,
   state: MockDraftState,
   room: MockRoom,
-  ids: { myRosterId?: number | null; myUserId?: string | null } = {},
+  ids: {
+    myRosterId?: number | null;
+    myUserId?: string | null;
+    /** The seating the room was built with; see `readMockRoom`. */
+    slotToRosterId?: Record<string, number> | undefined;
+  } = {},
 ): DraftBoardSources {
   const records = mockPickRecords(state, room, ids);
   return {
@@ -194,6 +254,23 @@ export function mockDraftBoardSources(
        * mock can never be read as another league's draft.
        */
       listPicks: async (id: string) => (id === state.draftId ? records : inner.leagues.listPicks(id)),
+      /*
+       * The second substitution, and it exists only because a seat can be
+       * chosen.
+       *
+       * The board builds its grid, its manager names and its ownership from the
+       * draft's own `slot_to_roster_id`, not from `MockRoom` — so a rehearsal
+       * run from seat 7 would have put the reader on the clock at 7 while the
+       * board went on drawing them at their real chair. Handing back the same
+       * draft with the swapped seating is what keeps the two halves telling one
+       * story. It is byte-identical to the real draft whenever no seat was
+       * chosen, which is every mock that does not use this feature.
+       */
+      getDraft: async (id: string) => {
+        const draft = await inner.leagues.getDraft(id);
+        if (id !== state.draftId || !draft || !ids.slotToRosterId) return draft;
+        return { ...draft, slotToRosterId: ids.slotToRosterId };
+      },
     },
   };
 }

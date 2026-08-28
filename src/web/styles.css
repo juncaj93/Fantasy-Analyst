@@ -6326,6 +6326,164 @@ table.compact tr:last-child td {
   outline: none;
 }
 
+/* -------------------------------------------------------- the draft order */
+
+/*
+ * Something to count by.
+ *
+ * A twelve-seat draft is twelve rows of the same shape, and a reader tracing
+ * "who is between me and my next pick" has to hold their place with a finger.
+ * The stripe is deliberately faint — it is a counting aid, not a second kind of
+ * row — and it is drawn on the even seats so seat 1 keeps the group's own
+ * surface and the list starts where the eye expects a list to start.
+ */
+.order-seats > .list-row:nth-child(even) {
+  background: var(--surface-inset);
+}
+
+/*
+ * The reader's own seat, marked as a place rather than labelled as one.
+ *
+ * It used to be the word "You" at the end of a line, in a list where every
+ * line ends in numbers — the smallest possible difference in the busiest
+ * possible spot. The bar is what the eye finds; the tint is what holds the row
+ * together once found; the word stays, because a colour alone is not a label
+ * and is not available to everybody reading this screen.
+ *
+ * `box-shadow` rather than a border, so the row does not gain 3px of width and
+ * shove its text out of line with every other seat's.
+ */
+.order-seats > .list-row[data-state='mine'] {
+  background: var(--accent-tint);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.order-seats > .list-row[data-state='mine'] .list-row-label {
+  font-weight: 600;
+}
+
+.order-seats > .list-row[data-state='mine'] .list-row-value {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------- anchored popover menu */
+
+/*
+ * A menu, on the same stack as everything else that covers the app.
+ *
+ * The backdrop is transparent on purpose. A popover is not a modal surface a
+ * reader has to get out of, so dimming the page for three words would be the
+ * sheet's weight arriving by another route — but the tap that lands outside
+ * still has to close it, and that tap needs something to land on.
+ */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(40 + var(--overlay-lift, 0));
+  /* Nothing drawn, and every gesture on it still belongs to the menu. */
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/*
+ * As tall as what is in it, and no taller.
+ *
+ * The whole point of the shape: a sheet has a floor to stand on and a popover
+ * does not, so three items are three items high. `max-height` is a guard for a
+ * future list, not a size — nothing this menu holds today comes near it.
+ */
+.menu-pop {
+  position: fixed;
+  z-index: calc(41 + var(--overlay-lift, 0));
+  min-width: 12.5rem;
+  max-width: min(19rem, calc(100vw - 2 * var(--page-x)));
+  max-height: 60dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /*
+   * `--shadow-sheet` throws its shadow *upward*, because a sheet rises from the
+   * bottom of the screen. A menu hangs down from a button, so it uses the
+   * app's ordinary raised shadow and reads as attached to the control above it.
+   */
+  box-shadow: var(--shadow-2);
+  animation: menu-open var(--dur-fast) var(--ease);
+  transform-origin: top right;
+}
+
+/* Same rule, same reason, as `.sheet` above: focused on arrival, not ringed. */
+.menu-pop:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@keyframes menu-open {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  /* 44px with the padding below, which is the target a thumb needs. */
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:active:not(:disabled) {
+  background: var(--surface-inset);
+}
+
+.menu-item:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.menu-item-label {
+  display: block;
+  font-size: 0.95rem;
+}
+
+/*
+ * The one second line in this menu, and only when an item is refusing.
+ *
+ * Wrapped rather than truncated: it is a sentence explaining why a control the
+ * reader just reached for is not available, and half of that sentence would be
+ * worse than none of it.
+ */
+.menu-item-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: var(--text-faint);
+  white-space: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-pop {
+    animation: none;
+  }
+}
+
 .sheet-dragging {
   animation: none;
   transition: none;
@@ -8904,4 +9062,154 @@ div.matchup-result {
   display: flex;
   justify-content: center;
   padding-top: var(--sp-2);
+}
+
+/* ------------------------------------------- the mock's setup step and team */
+
+/*
+ * One question, and it fits above the fold on the narrowest phone tested.
+ *
+ * The seats are a wrapping grid rather than a list, because twelve numbers are
+ * a shape a reader takes in at a glance and twelve rows are a scroll.
+ */
+.mock-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+
+.mock-setup-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.mock-setup-seats {
+  display: grid;
+  /* Six across at 360px, which keeps a twelve-team league to two rows. */
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: var(--sp-1);
+}
+
+.mock-seat {
+  position: relative;
+  min-height: 44px;
+  padding: var(--sp-1) 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.mock-seat[data-state='chosen'] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/*
+ * The reader's real chair, marked even when it is not the one chosen.
+ *
+ * Without it "seat 7" is a number with nothing to measure against, and the
+ * whole point of choosing is knowing what you are choosing instead of.
+ */
+.mock-seat-mine {
+  display: block;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mock-seat[data-state='chosen'] .mock-seat-mine {
+  color: inherit;
+}
+
+.mock-setup-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.mock-setup-actions > .btn-primary {
+  flex: 1;
+}
+
+.mock-setup-note {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.mock-team-note {
+  margin: 0 2px var(--sp-2);
+  font-size: 0.78rem;
+}
+
+.mock-team-slot {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.mock-team-slot + .mock-team-slot {
+  border-top: 1px solid var(--separator);
+}
+
+.mock-team-slot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.mock-team-slot-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mock-team-slot-count {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.mock-team-player {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-height: 26px;
+}
+
+.mock-team-pos {
+  min-width: 2.4em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.mock-team-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-team-pick {
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+/* An unfilled starting slot is the most useful line here, so it is drawn. */
+.mock-team-empty {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  font-style: italic;
 }

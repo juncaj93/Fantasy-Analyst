@@ -1,5 +1,5 @@
 /**
- * The three places the Draft header's ▦ leads.
+ * The three places the Draft header's menu control leads.
  *
  * The control used to do one thing: open the board. It now opens a choice of
  * three — **Draft board**, **Draft order**, **Mock draft** — and the brief
@@ -7,46 +7,133 @@
  * carried over from the browser suite: *the Draft header's nav must stay under
  * 60px at every tested width, and the control cannot grow a second row.*
  *
- * A sheet is the presentation that satisfies that by construction. It is not
- * drawn until it is opened, so the header keeps exactly the height it had; it
- * is the same grouped-list grammar the reader meets in Setup and in every
- * settings screen they have ever used; and it costs no new CSS, because
- * `Sheet` and `ListRow` already exist and already handle the four things a
- * covering layer owes the app. Tabs across the header would have cost the row
- * the constraint forbids, and a popover menu would have been a new component
- * with its own dismissal, focus and scroll-lock behaviour to get wrong.
+ * Nothing drawn until it is opened satisfies that by construction, and both a
+ * sheet and an anchored menu qualify. This started as a sheet — it cost no new
+ * CSS and reused the grouped-list grammar — and the first real rehearsal said
+ * what a screenshot could not: half the screen covered to offer three words is
+ * the wrong *shape* for the content, whatever it costs. So it is a popover now,
+ * hung under the button that opened it, and the constraint is untouched: an
+ * element that does not exist until a tap cannot add height to a header.
  *
- * The header's button keeps its test id, its glyph, its position and its size.
- * Only what it opens has changed.
+ * The one thing a popover owes that a sheet already had is the behaviour of a
+ * covering layer — a page that holds still, Escape, focus in and focus back.
+ * That is `useOverlay`, which is where all four have lived since before this
+ * lane, so the menu inherits them rather than reimplementing them.
+ *
+ * The header's button keeps its test id, its position and its size; its glyph
+ * changed, because a board grid on a control that opens a menu draws its
+ * destination and then goes somewhere else. See `MenuChevronIcon`.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { DraftBoard } from '../api.ts';
 import { ListRow, Sheet } from './native.tsx';
+import { useOverlay } from '../overlay.ts';
 import { buildDraftBoardGrid } from '../../core/draft/boardGrid.ts';
 import { demoSession } from '../demo/session.ts';
 
-/** Where the ▦ can take you. `none` is the closed state. */
+/** Where the header's menu can take you. `none` is the closed state. */
 export type DraftDestination = 'none' | 'menu' | 'board' | 'order' | 'mock';
 
 /**
- * The menu itself.
+ * One item of the menu.
+ *
+ * A `<button>` rather than a `ListRow`, because a row in a grouped list and an
+ * item in a popover are different objects: the first is a destination in a
+ * settings screen and carries a chevron saying so, the second is a command and
+ * carries nothing. `role="menuitem"` is what tells a screen reader which of the
+ * two it has landed on.
+ */
+function MenuItem({
+  label,
+  note,
+  disabled,
+  onClick,
+  testId,
+}: {
+  label: string;
+  note?: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="menu-item"
+      role="menuitem"
+      data-testid={testId}
+      disabled={disabled === true}
+      {...(disabled === true ? { 'aria-disabled': true } : {})}
+      onClick={onClick}
+    >
+      <span className="menu-item-label">{label}</span>
+      {note ? <span className="menu-item-note">{note}</span> : null}
+    </button>
+  );
+}
+
+/**
+ * The menu itself, hung under the control that opened it.
+ *
+ * Three commands and, at most, one sentence — which is the whole argument for
+ * the shape. A sheet has to be tall enough to be a sheet; a popover is as tall
+ * as what is in it, and what is in it is three words.
  *
  * `Mock draft` is offered only while the rehearsal is still possible. Once the
- * real draft has made a pick the row is present and disabled with the reason
+ * real draft has made a pick the item is present and disabled with the reason
  * written on it, rather than removed: a control that vanishes teaches the
  * reader that they imagined it, and the sentence is the whole explanation of
- * the lifecycle rule at the one moment they need it.
+ * the lifecycle rule at the one moment they need it. It is the only item that
+ * carries a second line, and only when it is refusing — an enabled item saying
+ * what it does is a description of a word the reader has already read.
  */
-export function DraftDestinationsSheet({
+export function DraftDestinationsMenu({
   board,
+  anchor,
   onGo,
   onClose,
 }: {
   board: DraftBoard;
+  /** The button this hangs from. Measured, never touched. */
+  anchor: RefObject<HTMLElement | null>;
   onGo: (destination: DraftDestination) => void;
   onClose: () => void;
 }) {
+  const panel = useRef<HTMLDivElement | null>(null);
+  /*
+   * Declared before anything measures, and the order matters.
+   *
+   * `useOverlay` pins the page in its own effect; effects run in the order
+   * their hooks were called, so measuring *after* this call is measuring the
+   * layout the menu will actually be drawn in rather than the one that existed
+   * a frame earlier.
+   */
+  const { lift } = useOverlay({ container: panel, onDismiss: onClose });
+  const [at, setAt] = useState<{ top: number; right: number } | null>(null);
+
+  useEffect(() => {
+    const place = () => {
+      const node = anchor.current;
+      if (!node) return;
+      const box = node.getBoundingClientRect();
+      /*
+       * Under the button and aligned to its right edge, in viewport
+       * coordinates, because that is the frame `position: fixed` reads and the
+       * one a pinned page cannot shift underneath it.
+       */
+      setAt({ top: Math.round(box.bottom + 6), right: Math.round(window.innerWidth - box.right) });
+    };
+    place();
+    /*
+       A rotation moves the anchor and would leave the menu behind it. Closing
+       would also be correct; re-placing is kinder, and costs one listener.
+     */
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [anchor]);
+
   /*
    * Two reasons a rehearsal is not on offer, and both are said rather than
    * hidden.
@@ -61,41 +148,49 @@ export function DraftDestinationsSheet({
     : demoSession()
       ? 'Not in Demo Mode — a mock draft practises against your own league'
       : null;
-  return (
-    <Sheet title="Draft" onClose={onClose} testId="draft-destinations">
-      <div className="list-group">
-        <ListRow
-          label="Draft board"
-          detail="Every pick, by round and by manager"
-          chevron
-          testId="go-draft-board"
-          onClick={() => onGo('board')}
-        />
-        <ListRow
-          label="Draft order"
-          detail="Who picks where, and when you are up again"
-          chevron
-          testId="go-draft-order"
-          onClick={() => onGo('order')}
-        />
+
+  return createPortal(
+    <>
+      {/*
+        Transparent, and still the thing that closes the menu.
+
+        A popover has no visible scrim — dimming the page for a three-item menu
+        would be the sheet's weight arriving by another route — but a tap
+        outside still has to dismiss it, and on iOS a `blur` handler is not that
+        tap. So the backdrop is here, invisible, doing the one job it has.
+      */}
+      <div
+        className="menu-backdrop"
+        data-testid="draft-destinations-backdrop"
+        style={{ ['--overlay-lift' as string]: String(lift) }}
+        onClick={onClose}
+      />
+      <div
+        className="menu-pop"
+        role="menu"
+        aria-label="Draft destinations"
+        data-testid="draft-destinations"
+        tabIndex={-1}
+        ref={panel}
+        style={{
+          ['--overlay-lift' as string]: String(lift),
+          top: at ? `${at.top}px` : undefined,
+          right: at ? `${at.right}px` : undefined,
+          /* Until it has been measured it is not drawn anywhere a reader can
+             see it land in the wrong place first. */
+          visibility: at ? undefined : 'hidden',
+        }}
+      >
+        <MenuItem label="Draft board" testId="go-draft-board" onClick={() => onGo('board')} />
+        <MenuItem label="Draft order" testId="go-draft-order" onClick={() => onGo('order')} />
         {unavailable ? (
-          <ListRow
-            label="Mock draft"
-            detail={unavailable}
-            testId="go-mock-draft-unavailable"
-            dataState="unavailable"
-          />
+          <MenuItem label="Mock draft" note={unavailable} disabled testId="go-mock-draft-unavailable" />
         ) : (
-          <ListRow
-            label="Mock draft"
-            detail="Practise against your league, as many times as you like"
-            chevron
-            testId="go-mock-draft"
-            onClick={() => onGo('mock')}
-          />
+          <MenuItem label="Mock draft" testId="go-mock-draft" onClick={() => onGo('mock')} />
         )}
       </div>
-    </Sheet>
+    </>,
+    document.body,
   );
 }
 
@@ -183,7 +278,17 @@ export function DraftOrderSheet({ board, onClose }: { board: DraftBoard; onClose
         />
       </div>
 
-      <div className="list-group" data-testid="draft-order-seats">
+      {/*
+        Twelve rows that were twelve of the same row.
+
+        Every seat drew identically and the reader's own was marked by the word
+        "You" in the value slot — three letters at the end of a line, in a list
+        where every line ends in a number. Reported from a real draft as "I
+        can't find myself". Striping gives the eye something to count by and the
+        owner's seat gets an actual treatment; both are in `.order-seats`,
+        because they are about *this* list rather than about grouped lists.
+      */}
+      <div className="list-group order-seats" data-testid="draft-order-seats">
         {seats.map((seat) => (
           <ListRow
             key={seat.slot}

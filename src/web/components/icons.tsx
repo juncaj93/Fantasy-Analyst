@@ -216,6 +216,23 @@ export function ChevronIcon({ size = 16, className }: IconProps) {
   );
 }
 
+/**
+ * A control that opens a menu.
+ *
+ * The same chevron, pointing down. It replaced a board grid on the Draft
+ * header: that glyph was honest while the button opened the board directly and
+ * became a lie the moment it started opening a choice of three, because an icon
+ * that draws its destination promises to go there. A chevron promises only that
+ * something will unfold, which is what the button now does.
+ */
+export function MenuChevronIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2.4}>
+      <path d="M5.5 9.25 12 15.75l6.5-6.5" />
+    </svg>
+  );
+}
+
 /** Back: the same chevron, pointing the other way. */
 export function BackChevronIcon({ size = 20, className }: IconProps) {
   return (

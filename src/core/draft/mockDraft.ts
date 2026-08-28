@@ -76,15 +76,32 @@ export interface MockDraftState {
   seed: number;
   /** ISO-8601, from the caller's clock. Shown as "started at"; never compared. */
   startedAt: string;
+  /**
+   * The seat the reader is rehearsing from, when it is not their own.
+   *
+   * Absent means "wherever the league actually seated me", which is what every
+   * mock did before there was a choice — so a state written by an older build
+   * stays readable and rehearses the real seat, and the version does not move.
+   * Picking a seat is the point of practising: the round-turn at seat 12 and
+   * the wait at seat 1 are different drafts, and a rehearsal you can only run
+   * from one of them is a rehearsal of one of them.
+   */
+  slot?: number;
   picks: MockDraftPick[];
 }
 
-export function createMockDraft(input: { draftId: string; seed: number; startedAt: string }): MockDraftState {
+export function createMockDraft(input: {
+  draftId: string;
+  seed: number;
+  startedAt: string;
+  slot?: number | null;
+}): MockDraftState {
   return {
     version: MOCK_DRAFT_VERSION,
     draftId: input.draftId,
     seed: input.seed >>> 0,
     startedAt: input.startedAt,
+    ...(input.slot != null ? { slot: input.slot } : {}),
     picks: [],
   };
 }
@@ -104,6 +121,9 @@ export function isUsableMockState(value: unknown, draftId: string): value is Moc
     state.version === MOCK_DRAFT_VERSION &&
     state.draftId === draftId &&
     typeof state.seed === 'number' &&
+    // Optional, and checked when present: a seat that is not a number is a
+    // state this build cannot honour, which is the same answer as the rest.
+    (state.slot === undefined || (typeof state.slot === 'number' && Number.isInteger(state.slot))) &&
     Array.isArray(state.picks)
   );
 }
@@ -259,8 +279,17 @@ export function takeMockPick(
  * abandoned — which is the only reason anybody resets. Unlimited, per the
  * brief: there is no counter here and nowhere to keep one.
  */
-export function resetMockDraft(state: MockDraftState, seed: number, startedAt: string): MockDraftState {
-  return createMockDraft({ draftId: state.draftId, seed, startedAt });
+export function resetMockDraft(
+  state: MockDraftState,
+  seed: number,
+  startedAt: string,
+  /* Absent keeps the seat the abandoned run was drafting from — a reset is
+     another go at the same rehearsal, and changing where you are sitting
+     without being asked would be a different one. */
+  slot?: number | null,
+): MockDraftState {
+  const seat = slot === undefined ? state.slot : slot;
+  return createMockDraft({ draftId: state.draftId, seed, startedAt, slot: seat ?? null });
 }
 
 /**

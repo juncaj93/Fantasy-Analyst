@@ -21,7 +21,7 @@
  *     retrying.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, api, type DraftBoard, type MockBoardResponse } from '../api.ts';
 import { useOverlay } from '../overlay.ts';
@@ -29,15 +29,38 @@ import { Empty, Loading, Notice } from './common.tsx';
 import { CompactPlayerRow } from './playerRow.tsx';
 import { CloseIcon } from './icons.tsx';
 import { DraftBoardOverlay } from './draftBoard.tsx';
+import { Sheet } from './native.tsx';
+import { fillSlotRows } from '../../core/draft/liveRoster.ts';
 import { enterMock, exitMock, forgetMock, readMock, writeMock } from '../mock/session.ts';
 import type { MockDraftState } from '../../core/draft/mockDraft.ts';
 
 /** How many of the mock board's rows the list draws. The same as Draft's own. */
 const MOCK_ROWS = 40;
 
-type Phase = 'loading' | 'ready' | 'thinking' | 'gone' | 'failed';
+/**
+ * `setup` is the step before a rehearsal exists.
+ *
+ * Reached only when there is nothing to resume — a first run, or a reset. A mock
+ * that dropped the reader straight into a running draft at whichever seat the
+ * league happened to give them was answering a question it had never asked: the
+ * turn at seat 1 and the round-turn at seat 12 are different drafts to practise,
+ * and choosing which is the whole reason to rehearse twice.
+ */
+type Phase = 'setup' | 'loading' | 'ready' | 'thinking' | 'gone' | 'failed';
 
-export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose: () => void }) {
+export function MockDraftScreen({
+  draftId,
+  teams,
+  mySlot,
+  onClose,
+}: {
+  draftId: string;
+  /** Seats in this league, from the live board. Nothing is fetched for it. */
+  teams: number;
+  /** The reader's own seat, or null when the league does not say. */
+  mySlot: number | null;
+  onClose: () => void;
+}) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const { lift } = useOverlay({ container: layerRef, onDismiss: onClose });
 
@@ -45,7 +68,15 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
   const [result, setResult] = useState<MockBoardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
+  /**
+   * The seat the setup step is offering, before it is committed to a state.
+   *
+   * Null means "my own seat", which is what the reader gets by starting without
+   * touching anything — the behaviour every mock had before this step existed.
+   */
+  const [seat, setSeat] = useState<number | null>(null);
 
   /**
    * The rehearsal, and the one place it is kept.
@@ -57,6 +88,40 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
    */
   const stateRef = useRef<MockDraftState | null>(null);
 
+  /**
+   * Whether a request is already in the air, decided synchronously.
+   *
+   * `phase` cannot answer this. It is a render's opinion, and two taps
+   * dispatched in the same frame — a thumb on a dimmed list, a browser that
+   * fires a click twice — both read the render that came *before* either of
+   * them. Both passed the `thinking` check, both posted `stateRef.current` as
+   * it was, and the server answered each of them with a different room built
+   * from the same starting state. The second answer overwrote the first, so the
+   * pick the reader actually made and the whole round of bot picks that came
+   * with it disappeared with no error anywhere: the request succeeded, the
+   * board simply came back as though the tap had never happened.
+   *
+   * A ref is the only thing two taps in one frame agree on. The first tap wins,
+   * which is the one the reader meant; the second is the no-op the dimmed list
+   * already claims it is.
+   *
+   * It gates *taps* only. Starting and resuming are not picks — Reset has to
+   * work while the room is thinking, or a request that never lands leaves the
+   * screen with no way out — so those go regardless, and `generation` below is
+   * what stops the request they overtook from landing on top of them.
+   */
+  const inFlight = useRef(false);
+
+  /**
+   * Which request the screen is currently waiting for.
+   *
+   * Bumped by every ask, checked before every apply, and the same device
+   * `draftRefresh.ts` uses for the same reason: an answer to a question the
+   * screen has stopped asking must not be drawn. Without it a Reset issued
+   * while a pick was in the air would be overwritten by that pick's room.
+   */
+  const generation = useRef(0);
+
   const apply = useCallback((next: MockBoardResponse) => {
     stateRef.current = next.state;
     writeMock(next.state);
@@ -66,7 +131,15 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
   }, []);
 
   const ask = useCallback(
-    async (action: { kind: 'start' } | { kind: 'resume' } | { kind: 'take'; playerId: string }) => {
+    async (
+      action:
+        | { kind: 'start'; slot?: number | null }
+        | { kind: 'resume' }
+        | { kind: 'take'; playerId: string },
+    ) => {
+      if (action.kind === 'take' && inFlight.current) return;
+      inFlight.current = true;
+      const mine = ++generation.current;
       setPhase((current) => (current === 'loading' ? 'loading' : 'thinking'));
       setSnapshotNote(null);
       try {
@@ -84,8 +157,10 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
           { state: stateRef.current, action, limit: MOCK_ROWS },
           { invalidates: false },
         );
+        if (mine !== generation.current) return;
         apply(next);
       } catch (err) {
+        if (mine !== generation.current) return;
         /*
          * A 409 is the lifecycle rule arriving, not a failure.
          *
@@ -104,6 +179,8 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
         }
         setError(err instanceof Error ? err.message : String(err));
         setPhase('failed');
+      } finally {
+        if (mine === generation.current) inFlight.current = false;
       }
     },
     [draftId, apply],
@@ -121,7 +198,16 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
      * set is the one thing this ordering exists to close.
      */
     void enterMock(draftId).then(() => {
-      if (live) void ask(stateRef.current ? { kind: 'resume' } : { kind: 'start' });
+      if (!live) return;
+      /*
+       * Resume what is there; otherwise ask where they want to sit.
+       *
+       * A stored rehearsal is already seated, so setup would be asking a
+       * question that has an answer — and the reader who reopened the screen
+       * came back to the draft they were in the middle of.
+       */
+      if (stateRef.current) void ask({ kind: 'resume' });
+      else setPhase('setup');
     });
     return () => {
       live = false;
@@ -159,11 +245,32 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
     }
   };
 
+  /**
+   * Back to the setup step, with the last seat still chosen.
+   *
+   * Reset used to start a new run immediately. It goes through setup now
+   * because setup is where the seat lives and there is nowhere else to change
+   * it — and it costs the reader who only wants another go at the same seat one
+   * tap, on a control they reached for deliberately.
+   */
   const reset = () => {
     forgetMock(draftId);
     stateRef.current = null;
+    setResult(null);
+    setError(null);
+    setSnapshotNote(null);
+    setBoardOpen(false);
+    setTeamOpen(false);
+    /* Anything still in the air belongs to the run being thrown away. */
+    generation.current += 1;
+    inFlight.current = false;
+    setPhase('setup');
+  };
+
+  const startWith = (slot: number | null) => {
+    setSeat(slot);
     setPhase('loading');
-    void ask({ kind: 'start' });
+    void ask({ kind: 'start', slot });
   };
 
   return createPortal(
@@ -191,27 +298,51 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
         <div className="dboard-titles">
           <div className="dboard-title">Mock draft</div>
           <div className="dboard-sub" data-testid="mock-subtitle">
-            {board
-              ? result?.complete
-                ? `Finished · ${board.rounds} rounds`
-                : `R${board.round} #${board.currentPick} · ${result?.yourTurn ? 'your pick' : 'the room is picking'}`
-              : 'Setting up the room…'}
+            {phase === 'setup'
+              ? 'Choose where you are drafting from'
+              : board
+                ? result?.complete
+                  ? `Finished · ${board.rounds} rounds`
+                  : `R${board.round} #${board.currentPick} · ${result?.yourTurn ? 'your pick' : 'the room is picking'}`
+                : 'Setting up the room…'}
           </div>
         </div>
         {board ? (
-          <button
-            type="button"
-            className="btn btn-sm"
-            data-testid="mock-board-open"
-            aria-haspopup="dialog"
-            onClick={() => setBoardOpen(true)}
-          >
-            Board
-          </button>
+          <>
+            {/*
+              Your own team, in the slots it will actually be scored in.
+
+              The list beside it is a ranking — it says who is worth taking, and
+              says nothing about what you have already built. Two receivers into
+              a league that starts three is a fact about your roster that a flat
+              list of names cannot show, and it is the fact that decides the
+              next pick.
+            */}
+            <button
+              type="button"
+              className="btn btn-sm"
+              data-testid="mock-team-open"
+              aria-haspopup="dialog"
+              onClick={() => setTeamOpen(true)}
+            >
+              Team
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              data-testid="mock-board-open"
+              aria-haspopup="dialog"
+              onClick={() => setBoardOpen(true)}
+            >
+              Board
+            </button>
+          </>
         ) : null}
-        <button type="button" className="btn btn-sm" data-testid="mock-reset" onClick={reset}>
-          Reset
-        </button>
+        {phase === 'setup' ? null : (
+          <button type="button" className="btn btn-sm" data-testid="mock-reset" onClick={reset}>
+            Reset
+          </button>
+        )}
       </div>
 
       {/*
@@ -248,10 +379,14 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
           </Notice>
         ) : null}
 
+        {phase === 'setup' ? (
+          <MockSetup teams={teams} mySlot={mySlot} seat={seat} onSeat={setSeat} onStart={startWith} />
+        ) : null}
+
         {board ? <MockRoster board={board} /> : null}
         {result && result.made.length > 0 ? <RoomSince made={result.made} /> : null}
 
-        {phase === 'loading' ? (
+        {phase === 'setup' ? null : phase === 'loading' ? (
           <Loading what="the room" />
         ) : board == null ? null : result?.complete ? (
           <Empty>This mock draft is finished. Reset to run it again.</Empty>
@@ -306,11 +441,13 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
           </div>
         )}
 
-        <div className="mock-foot">
-          <button type="button" className="btn btn-sm" data-testid="mock-snapshot" onClick={() => void capture()}>
-            Copy support snapshot
-          </button>
-        </div>
+        {phase === 'setup' ? null : (
+          <div className="mock-foot">
+            <button type="button" className="btn btn-sm" data-testid="mock-snapshot" onClick={() => void capture()}>
+              Copy support snapshot
+            </button>
+          </div>
+        )}
       </div>
 
       {/*
@@ -321,8 +458,150 @@ export function MockDraftScreen({ draftId, onClose }: { draftId: string; onClose
         available that a mock is a pick stream rather than a second app.
       */}
       {boardOpen && board ? <DraftBoardOverlay board={board} onClose={() => setBoardOpen(false)} /> : null}
+      {teamOpen && board ? <MockTeamSheet board={board} onClose={() => setTeamOpen(false)} /> : null}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Where you are drafting from, before the room is built.
+ *
+ * Deliberately the whole of the setup: one question, twelve answers and a
+ * shortcut. A mock has one other input — the seed — and it is not offered,
+ * because "which random draft" is not a decision anybody can make and Reset is
+ * already the control for "give me a different one".
+ *
+ * The reader's real seat is marked rather than pre-imposed. Starting without
+ * touching anything gives them that seat, which is what every mock did before
+ * this step existed, so the default is the old behaviour and the choice is the
+ * addition.
+ */
+function MockSetup({
+  teams,
+  mySlot,
+  seat,
+  onSeat,
+  onStart,
+}: {
+  teams: number;
+  mySlot: number | null;
+  seat: number | null;
+  onSeat: (slot: number | null) => void;
+  onStart: (slot: number | null) => void;
+}) {
+  const seats = Array.from({ length: Math.max(1, teams) }, (_, i) => i + 1);
+  const chosen = seat ?? mySlot;
+  return (
+    <div className="mock-setup" data-testid="mock-setup">
+      <div className="mock-setup-title">Which seat?</div>
+      <div className="mock-setup-seats" role="radiogroup" aria-label="Draft seat">
+        {seats.map((slot) => (
+          <button
+            key={slot}
+            type="button"
+            role="radio"
+            aria-checked={chosen === slot}
+            className="mock-seat"
+            data-state={chosen === slot ? 'chosen' : undefined}
+            data-mine={slot === mySlot ? 'yes' : undefined}
+            data-testid={`mock-seat-${slot}`}
+            onClick={() => onSeat(slot)}
+          >
+            {slot}
+            {slot === mySlot ? <span className="mock-seat-mine">yours</span> : null}
+          </button>
+        ))}
+      </div>
+      <div className="mock-setup-actions">
+        <button
+          type="button"
+          className="btn btn-sm"
+          data-testid="mock-seat-random"
+          /*
+           * A draw, not a shuffle of the list. `Math.random` is fine *here* and
+           * only here: this is a reader asking to be surprised once, at the one
+           * point in this feature that is not replayed. Everything downstream
+           * of the seat — every bot pick in the rehearsal — is still seeded and
+           * still deterministic; see `nextpick/rng.ts`.
+           */
+          onClick={() => onSeat(seats[Math.floor(Math.random() * seats.length)] ?? 1)}
+        >
+          Random seat
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          data-testid="mock-start"
+          onClick={() => onStart(chosen)}
+        >
+          Start mock draft
+        </button>
+      </div>
+      <div className="mock-setup-note">
+        {chosen == null
+          ? 'Your seat in this league could not be identified, so the room will draft around you where it can.'
+          : chosen === mySlot
+            ? `Seat ${chosen} of ${teams} — the one you actually have.`
+            : `Seat ${chosen} of ${teams}. Practice only: your real seat is unchanged.`}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Your own team, in the slots the league scores.
+ *
+ * The allocation is `fillSlotRows` over the board's own `rosterProgress` — the
+ * same rows the header strip counts — so this sheet and `0/1 QB · 2/3 WR`
+ * cannot disagree about what is filled. Nothing is fetched and nothing is
+ * computed twice; see `core/draft/liveRoster.ts` for why the Team screen's
+ * lineup was not the thing to reuse.
+ */
+function MockTeamSheet({ board, onClose }: { board: DraftBoard; onClose: () => void }) {
+  const rows = useMemo(() => {
+    const byId = new Map(board.myRoster.map((p) => [p.playerId, p]));
+    return fillSlotRows(
+      board.rosterProgress,
+      board.myRoster.map((p) => ({ playerId: p.playerId, position: p.position })),
+    ).map((row) => ({ ...row, held: row.players.map((p) => byId.get(p.playerId)).filter((p) => p != null) }));
+  }, [board.rosterProgress, board.myRoster]);
+
+  return (
+    <Sheet title="Your team" onClose={onClose} testId="mock-team">
+      <div className="mock-team-note faint">
+        A rehearsal's roster. Nothing here is on your real team.
+      </div>
+      <div className="list-group">
+        {rows.map((row) => (
+          <div className="mock-team-slot" data-testid={`mock-team-slot-${row.slot}`} key={row.slot}>
+            <div className="mock-team-slot-head">
+              <span className="mock-team-slot-name">{row.slot}</span>
+              <span className="mock-team-slot-count">
+                {row.held.length}
+                {row.required > 0 ? `/${row.required}` : ''}
+              </span>
+            </div>
+            {row.held.length === 0 ? (
+              /*
+                An empty starting slot is the most useful line on this sheet, so
+                it is drawn rather than skipped: the hole in the lineup is what
+                the next pick is for.
+              */
+              <div className="mock-team-empty">{row.bench ? 'nobody yet' : 'still to fill'}</div>
+            ) : (
+              row.held.map((player) => (
+                <div className="mock-team-player" key={player.playerId}>
+                  <span className="mock-team-pos">{player.position}</span>
+                  <span className="mock-team-name">{player.name}</span>
+                  <span className="mock-team-pick">#{player.pickNo}</span>
+                </div>
+              ))
+            )}
+          </div>
+        ))}
+      </div>
+    </Sheet>
   );
 }
 
