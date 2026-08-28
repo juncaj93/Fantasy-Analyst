@@ -1505,7 +1505,19 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const stamped: MockAction =
       action.kind === 'start'
-        ? { kind: 'start', seed: Date.now() >>> 0, startedAt: new Date().toISOString() }
+        ? {
+            kind: 'start',
+            seed: Date.now() >>> 0,
+            startedAt: new Date().toISOString(),
+            /*
+             * The seat is the caller's, and is carried through untouched.
+             *
+             * Range-checked in `readMockRoom` against the league the request is
+             * actually for, rather than here against nothing: this boundary
+             * knows what time it is and not how many teams there are.
+             */
+            ...(action.slot === undefined ? {} : { slot: action.slot }),
+          }
         : action;
     try {
       return jsonResponse(

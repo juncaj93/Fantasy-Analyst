@@ -203,6 +203,91 @@ export function rosterProgress(shape: RosterShape, counts: Record<string, number
   return orderProgress(rows);
 }
 
+/** One slot of a roster, with the players actually in it. */
+export interface FilledSlot extends SlotProgress {
+  players: { playerId: string; position: string }[];
+}
+
+/**
+ * Who is in which slot, given rows `rosterProgress` already worked out.
+ *
+ * ## Why this is not the Team screen's layout
+ *
+ * Team draws the lineup Sleeper *stores* — starters and bench as the manager
+ * set them — and a draft has no such thing: nobody sets a lineup while they are
+ * drafting, and inventing one would be committing a decision the reader has not
+ * made. So there was nothing there to reuse. What there was to reuse is the
+ * allocation this file already does for the draft header's `0/1 QB · 1/2 RB`
+ * strip, and that is what this walks.
+ *
+ * ## Why it walks the rows rather than the shape
+ *
+ * `rosterProgress` decides the allocation — fixed slots first, then the flex,
+ * then the bench — and it decides it once. Walking its output in the order it
+ * produced means this cannot allocate differently from the counts already on
+ * screen beside it. Handing it the shape again and re-deriving would be a
+ * second implementation of the same rule, and the two would disagree the first
+ * time either changed.
+ *
+ * Order within a slot is the order the players are given, which for a draft is
+ * pick order: the receiver you took in the second round is above the one you
+ * took in the ninth.
+ *
+ * ## The one place it may read differently from the strip
+ *
+ * `rosterProgress` caps its bench *count* at the configured bench, so the
+ * header never reads `9/6 BN` and blame the app for a Sleeper-side fact. This
+ * draws every player regardless, because a pick the reader made disappearing
+ * off their own team sheet is the worse of the two. Every starting slot matches
+ * the strip exactly; only the bench can hold more names than spaces.
+ */
+export function fillSlotRows(
+  rows: readonly SlotProgress[],
+  players: readonly { playerId: string; position: string }[],
+): FilledSlot[] {
+  const left = [...players];
+  const take = (accepts: readonly string[], upTo: number): { playerId: string; position: string }[] => {
+    const got: { playerId: string; position: string }[] = [];
+    while (got.length < upTo) {
+      const at = left.findIndex((p) => accepts.includes(p.position));
+      if (at < 0) break;
+      got.push(left.splice(at, 1)[0]!);
+    }
+    return got;
+  };
+
+  const filled: FilledSlot[] = [];
+  for (const row of rows) {
+    // The bench is everyone the starting slots did not want, so it is filled
+    // last whatever order the rows arrived in.
+    if (row.bench) continue;
+    filled.push({ ...row, players: take(row.accepts, row.required) });
+  }
+
+  /*
+   * Everyone the starting slots did not want, and nobody is dropped.
+   *
+   * A league with no bench row still gets one here when there is somebody to
+   * put in it — a roster over its own configured depth, or holding a position
+   * the league neither starts nor benches. That is a Sleeper-side fact, and a
+   * pick the reader made vanishing off their own team sheet would report it as
+   * an app that had lost track.
+   */
+  const bench = rows.find((r) => r.bench);
+  if (bench || left.length > 0) {
+    filled.push({
+      ...(bench ?? { slot: 'BN', filled: left.length, required: 0, accepts: [], bench: true }),
+      players: left.splice(0, left.length),
+    });
+  }
+  return orderFilled(filled, rows);
+}
+
+function orderFilled(filled: FilledSlot[], rows: readonly SlotProgress[]): FilledSlot[] {
+  const at = new Map(rows.map((row, i) => [row.slot, i]));
+  return [...filled].sort((a, b) => (at.get(a.slot) ?? 0) - (at.get(b.slot) ?? 0));
+}
+
 /**
  * The order the strip reads in: `QB · RB · WR · TE · FLX · DEF · BN`.
  *

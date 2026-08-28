@@ -117,7 +117,7 @@ import { QueueControl } from '../components/decisions.tsx';
  */
 import { DraftBoardOverlay } from '../components/draftBoard.tsx';
 /*
- * The ▦ leads to three places now, not one.
+ * The header's menu leads to three places now, not one.
  *
  * The menu and the draft-order view are ordinary components and travel in the
  * main bundle; the mock draft is loaded only when somebody opens one. A
@@ -125,8 +125,8 @@ import { DraftBoardOverlay } from '../components/draftBoard.tsx';
  * screen behind it, the board it draws and the state it keeps have no business
  * being downloaded by a reader who never taps it.
  */
-import { DraftDestinationsSheet, DraftOrderSheet, type DraftDestination } from '../components/draftDestinations.tsx';
-import { GridIcon } from '../components/icons.tsx';
+import { DraftDestinationsMenu, DraftOrderSheet, type DraftDestination } from '../components/draftDestinations.tsx';
+import { MenuChevronIcon } from '../components/icons.tsx';
 import { forgetMock } from '../mock/session.ts';
 
 import { unwindOne } from '../tabReset.ts';
@@ -265,7 +265,7 @@ export function DraftScreen({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
   /**
-   * Which of the ▦'s destinations is over the screen, if any.
+   * Which of the menu's destinations is over the screen, if any.
    *
    * One value, and deliberately nothing else. Everything this screen holds —
    * the filter, the query, the fold, the expanded card, the queue, the scroll —
@@ -285,6 +285,15 @@ export function DraftScreen({
    * See the effect below, which is what tells the controller the answer moved.
    */
   const mockOpenRef = useRef(false);
+
+  /**
+   * The header's menu button, so the menu it opens knows where to hang.
+   *
+   * The only thing the menu is told about the header. It measures this and
+   * touches nothing, which is what keeps the header's layout the header's
+   * business — see `draftDestinations.tsx`.
+   */
+  const destinationsRef = useRef<HTMLButtonElement | null>(null);
 
   /** Manual refresh state: in-flight spinner, last success, last complaint. */
   const [refreshing, setRefreshing] = useState(false);
@@ -927,7 +936,12 @@ export function DraftScreen({
       */}
       {boardOpen ? <DraftBoardOverlay board={board} onClose={() => setDestination('none')} /> : null}
       {destination === 'menu' ? (
-        <DraftDestinationsSheet board={board} onGo={setDestination} onClose={() => setDestination('none')} />
+        <DraftDestinationsMenu
+          board={board}
+          anchor={destinationsRef}
+          onGo={setDestination}
+          onClose={() => setDestination('none')}
+        />
       ) : null}
       {destination === 'order' ? <DraftOrderSheet board={board} onClose={() => setDestination('none')} /> : null}
       {/*
@@ -942,7 +956,14 @@ export function DraftScreen({
       */}
       {destination === 'mock' && draftId ? (
         <Suspense fallback={null}>
-          <MockDraftScreen draftId={draftId} onClose={() => setDestination('none')} />
+          <MockDraftScreen
+            draftId={draftId}
+            /* The live board already knows both. A rehearsal's setup step
+               costs no request of its own. */
+            teams={board.teams}
+            mySlot={board.mySlot}
+            onClose={() => setDestination('none')}
+          />
         </Suspense>
       ) : null}
 
@@ -1031,11 +1052,12 @@ export function DraftScreen({
               className="icon-btn"
               data-testid="draft-board-open"
               aria-label="Draft destinations"
-              aria-haspopup="dialog"
-              aria-expanded={destination !== 'none'}
+              ref={destinationsRef}
+              aria-haspopup="menu"
+              aria-expanded={destination === 'menu'}
               onClick={() => setDestination('menu')}
             >
-              <GridIcon size={19} />
+              <MenuChevronIcon size={19} />
             </button>
             <SortControl
               value={sort}

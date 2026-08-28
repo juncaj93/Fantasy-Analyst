@@ -49,9 +49,19 @@ only thing it is entitled to have a view on.
 ## A mock is a third source object
 
 `src/core/draft/mockSources.ts` decorates the reader's own `DraftBoardSources`
-and answers **exactly one method differently**: `leagues.listPicks(draftId)`
-returns the rehearsal's picks instead of Sleeper's, and only for the draft the
-mock is for.
+and answers **two named methods differently**, both scoped to the draft the mock
+is for:
+
+- `leagues.listPicks(draftId)` returns the rehearsal's picks instead of
+  Sleeper's;
+- `leagues.getDraft(draftId)` returns the same draft with the rehearsal's
+  seating, which is byte-identical to the real one unless a seat was chosen.
+
+The second arrived with the seat chooser and is the same fact as the first seen
+from the other side: the picks say who drafted where, and `slot_to_roster_id` is
+what the board reads to draw them there. Substituting one without the other put
+the reader on the clock at seat 7 and went on drawing them in their real chair.
+`tests/mock.isolation.test.ts` asserts there are exactly two.
 
 Everything else — the player dictionary, the ADP snapshots, the newsletter
 evidence, the injury states, the season markets, the ★ queue — is read from live
@@ -75,6 +85,43 @@ deleting one leaves the other exactly as it was.
 One active mock per draft, freely resettable — a reset is a new seed rather than
 an edit. There is no saved history of past runs; §3 of the brief flags that as a
 recommendation rather than an owner decision.
+
+## Where you sit
+
+A rehearsal begins at a **setup step**, not in a running draft. The one thing it
+asks is the seat: the turn at seat 1 and the round-turn at seat 12 are different
+drafts to practise, and a mock you could only run from your own chair was
+rehearsing one of them. Any seat, or a random draw; starting without choosing
+takes the seat the league actually gave you, which is what every mock did before
+the step existed.
+
+Choosing a seat is a **swap**, not a relabelling — the reader takes the chosen
+chair and its manager takes theirs — so the room still holds every manager the
+league has, each of them once, and the draft order still names a real person in
+every seat. The state carries it as an optional `slot`, so a rehearsal stored by
+an older build stays readable and runs from the real seat.
+
+Reset returns to the setup step rather than starting immediately, because that
+is where the seat lives and there is nowhere else to change it.
+
+## Your own team
+
+`Team`, in the rehearsal's header, draws what you have built into the slots the
+league scores — the empty starting slot being the most useful line on it. The
+allocation is `fillSlotRows` over the board's own `rosterProgress`, the same
+rows the header strip counts, so the sheet and `0/1 QB · 2/3 WR` cannot
+disagree.
+
+The real Team screen was not reusable and the check is worth recording: it draws
+the lineup Sleeper *stores*, and a draft has no such thing — nobody sets a
+lineup while drafting, and inventing one would commit a decision the reader has
+not made. What was reusable is the allocation `core/draft/liveRoster.ts` already
+does for the draft header.
+
+One documented divergence: `rosterProgress` caps its bench count at the
+configured bench so the strip never reads `9/6 BN`; the team sheet draws every
+player regardless, because a pick vanishing off your own roster is worse than a
+row with more names than spaces.
 
 ## What ends it
 
@@ -144,16 +191,62 @@ immediately under what kind of decision the file is:
 
 ## Navigation
 
-The Draft header's `▦` is now the home for three destinations — **Draft board**,
-**Draft order**, **Mock draft** — presented as a sheet. A sheet satisfies the
-brief's one hard constraint by construction: it is not drawn until it is opened,
-so the header keeps the height it had, and the browser suite measures that the
-nav stays under 60px with the menu up.
+The Draft header's menu control is the home for three destinations — **Draft
+board**, **Draft order**, **Mock draft** — presented as a compact popover
+anchored under the button.
+
+It began as a bottom sheet, which cost no new CSS and reused the grouped-list
+grammar. The first real rehearsal said what a screenshot could not: half the
+screen covered to offer three words is the wrong *shape* for the content. Both
+presentations satisfy the brief's one hard constraint the same way — nothing
+drawn until a tap cannot add height to a header — so this was picking a better
+control for the constraint rather than reopening it. The browser suite measures
+both halves now: the nav stays under 60px with the menu up, **and** the menu
+stays under 40% of the viewport.
+
+The glyph changed with it, from a board grid to a chevron. An icon that draws
+its destination promises to go there, which was honest while the button opened
+the board and became a lie the moment it started opening a choice of three.
+
+The **Draft order** screen stripes its rows and paints the reader's own seat —
+reported from a real draft as "I can't find myself", when twelve identical rows
+marked the owner's with the word "You" at the end of a line in a list where
+every line ends in numbers.
 
 `Mock draft` is offered only when a rehearsal is possible. Once the real draft
 has picked, or while Demo Mode is running, the row is present and disabled with
 the reason written on it — a control that vanishes teaches the reader that they
 imagined it.
+
+## When the trip fails
+
+Reported from a real rehearsal: `Couldn't save that yet` over a mock, coming and
+going while the draft went on progressing — a pick that did nothing until it was
+tapped again, sometimes twice.
+
+The banner is `mock-error`, and only a `POST /mock/board` that does not come
+back as JSON can draw it. The route is not what fails: the same request answered
+200 across twenty-two complete mock drafts over the real router and a real
+database, on a uniform pool and a production-shaped one. Nothing else in the app
+can draw it over a rehearsal either — the layer covers the viewport at the top
+of the stack, and the app's only recurring POST (`/sync`) is parked while a mock
+is open. What failed was the trip.
+
+So the request is **retried**, twice, at 300ms and 600ms, and only while the
+client's own `retryable` says the failure was transport — a dropped connection,
+a 5xx, a 408, a 429. A refusal is never retried, which is what keeps the 409
+that ends a rehearsal arriving immediately.
+
+Retrying is safe here in a way it is almost nowhere else in this app, and that
+is why it lives at this seam rather than in `api.ts`: the route writes nothing,
+and it is a pure function of the state posted to it — the same state and action
+produce the same room, because every bot pick is drawn from a generator seeded
+by the state and the pick number. A second attempt is not a second pick.
+
+If all three attempts are lost the banner stays, and it now carries **Try
+again**, which re-sends the action the reader actually asked for. Without it
+their pick is simply gone and the only way back is to find the row again — which
+is what the defect felt like from the other side of the screen.
 
 ## Tests
 
@@ -163,7 +256,8 @@ imagined it.
 | `tests/mockDraft.test.ts` | the snake, turn-taking, determinism, the deletion rule, per-draft scoping |
 | `tests/mock.isolation.test.ts` | both refusals, mutation-tested; the seam is structural |
 | `tests/mock.board.test.ts` | end to end over the real router: the board is real, the real draft is untouched, the 409, the snapshot round-trip |
-| `e2e/mock-draft.spec.ts` | the menu, the nav height, the rehearsal, and that no write leaves the browser while one is open |
+| `tests/liveRoster.test.ts` | `fillSlotRows`: the team sheet cannot disagree with the header strip |
+| `e2e/mock-draft.spec.ts` | the menu's shape and the nav height, the setup step and the seat, the team sheet, the draft order's striping, the double-tap guard, the retry and the recovery, and that no write leaves the browser while one is open |
 
 ## Deliberately not built
 

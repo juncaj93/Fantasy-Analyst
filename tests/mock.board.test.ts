@@ -531,3 +531,111 @@ describe('a support snapshot from a rehearsal', () => {
     expect(res.status).toBe(409);
   });
 });
+
+/**
+ * Sitting somewhere else.
+ *
+ * The seat is the one input a rehearsal has that a real draft does not offer,
+ * and it has to be a real move rather than a relabelling: the reader is on the
+ * clock at the chosen chair, their picks land on *their* roster, and the room
+ * still contains every manager the league has, each of them once.
+ */
+describe('a mock can be drafted from a seat that is not yours', () => {
+  let db: NodeSqliteDatabase;
+
+  beforeEach(async () => {
+    clearNextPickCache();
+    db = await createTestDb();
+    await seedPreDraft(db, { league: 'lg', draft: 'dr' });
+    await new LeagueRepo(db).selectLeague('lg');
+  });
+
+  const startAt = (slot: number | null) =>
+    buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: null,
+      action: { kind: 'start', seed: 99, startedAt: '2026-08-27T12:00:00.000Z', slot },
+      limit: 40,
+    });
+
+  it('puts you on the clock at the seat you chose, not the one you have', async () => {
+    const result = await startAt(9);
+    expect(result.state.slot).toBe(9);
+    expect(result.board.mySlot).toBe(9);
+    expect(result.onTheClock).toBe(9);
+    expect(result.yourTurn).toBe(true);
+    // Eight bots have picked ahead of seat 9, where three would have picked
+    // ahead of the reader's real seat 3.
+    expect(result.state.picks).toHaveLength(8);
+  });
+
+  it('lands the picks you make on your own roster, wherever you sat', async () => {
+    const opened = await startAt(9);
+    const taken = opened.board.recommendations[0]!.playerId;
+    const after = await buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: opened.state,
+      action: { kind: 'take', playerId: taken },
+      limit: 40,
+    });
+    expect(after.refused).toBeNull();
+    /*
+     * The claim this test exists for. `myRoster` is matched by the *reader's*
+     * roster id, so a pick filed under seat 9's real owner would show a board
+     * that had accepted the pick beside a roster that had never heard of it.
+     */
+    expect(after.board.myRoster.map((p) => p.playerId)).toContain(taken);
+  });
+
+  it('seats every manager exactly once — a swap, not an eviction', async () => {
+    const result = await startAt(9);
+    const slots = (result.board.managers ?? []).map((m) => m.slot);
+    expect(new Set(slots).size).toBe(TEAMS);
+    const mine = (result.board.managers ?? []).filter((m) => m.isMine);
+    expect(mine.map((m) => m.slot), 'you are in exactly one chair').toEqual([9]);
+  });
+
+  it('falls back to your own seat when the stored one is not in this league', async () => {
+    const result = await startAt(TEAMS + 5);
+    expect(result.board.mySlot).toBe(MY_SLOT);
+    expect(result.onTheClock).toBe(MY_SLOT);
+  });
+
+  it('keeps the seat across a reset, and changes it only when asked', async () => {
+    const first = await startAt(9);
+    const again = await buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: first.state,
+      /* No `slot` at all: a reset is another go at the same rehearsal. */
+      action: { kind: 'start', seed: 1234, startedAt: '2026-08-27T12:30:00.000Z' },
+      limit: 40,
+    });
+    expect(again.state.slot).toBe(9);
+    expect(again.state.seed).toBe(1234);
+
+    const moved = await buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: again.state,
+      action: { kind: 'start', seed: 4321, startedAt: '2026-08-27T12:40:00.000Z', slot: null },
+      limit: 40,
+    });
+    expect(moved.state.slot, 'null is "my own seat", not "you did not say"').toBeUndefined();
+    expect(moved.board.mySlot).toBe(MY_SLOT);
+  });
+
+  it('changes nothing about the real draft, from any seat', async () => {
+    const before = await new LeagueRepo(db).listPicks('dr');
+    const opened = await startAt(12);
+    await buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: opened.state,
+      action: { kind: 'take', playerId: opened.board.recommendations[0]!.playerId },
+      limit: 40,
+    });
+    expect(await new LeagueRepo(db).listPicks('dr')).toEqual(before);
+    const draft = await new LeagueRepo(db).getDraft('dr');
+    expect(draft?.slotToRosterId, 'the stored seating is untouched').toEqual(
+      Object.fromEntries(Array.from({ length: TEAMS }, (_, i) => [String(i + 1), rosterOf(i + 1)])),
+    );
+  });
+});

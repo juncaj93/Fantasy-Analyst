@@ -46,7 +46,15 @@ import { hashString } from './nextpick/rng.ts';
  * state is already right and only a board is wanted.
  */
 export type MockAction =
-  | { kind: 'start'; seed: number; startedAt: string }
+  /**
+   * `slot` is the seat the reader chose to draft from.
+   *
+   * Three values, and they are three different things: a number is that seat,
+   * `null` is "my own", and absent is "you did not say" — which on a reset
+   * keeps whatever the run being replaced was drafting from. See
+   * `resetMockDraft`.
+   */
+  | { kind: 'start'; seed: number; startedAt: string; slot?: number | null }
   | { kind: 'resume' }
   | { kind: 'take'; playerId: string };
 
@@ -90,8 +98,6 @@ export async function buildMockBoard(
   sources: DraftBoardSources,
   request: MockBoardRequest,
 ): Promise<MockBoardResult> {
-  const { room, myRosterId, myUserId } = await readMockRoom(sources, request.draftId);
-
   const stored = isUsableMockState(request.state, request.draftId) ? request.state : null;
   const notes: string[] = [];
   let refused: string | null = null;
@@ -115,12 +121,30 @@ export async function buildMockBoard(
      * that says so out loud, and it is reached whenever there was something to
      * reset.
      */
+    /*
+     * A start names the seat; a recovery keeps whatever the abandoned state
+     * was drafting from. `undefined` and `null` are different answers here —
+     * the first means "you did not say", the second means "my own seat".
+     */
+    const slot = request.action.kind === 'start' ? request.action.slot : undefined;
     state = stored
-      ? resetMockDraft(stored, seed, startedAt)
-      : createMockDraft({ draftId: request.draftId, seed, startedAt });
+      ? resetMockDraft(stored, seed, startedAt, slot)
+      : createMockDraft({ draftId: request.draftId, seed, startedAt, slot: slot ?? null });
   } else {
     state = stored;
   }
+
+  /*
+   * The room is read *after* the state, because the state says where to sit.
+   *
+   * The lifecycle refusal still happens here and still happens first for every
+   * caller — `readMockRoom` throws `MockDraftVoidError` before it returns
+   * anything — so resolving the seat above has not moved the one check that
+   * must never be skippable.
+   */
+  const { room, myRosterId, myUserId, slotToRosterId } = await readMockRoom(sources, request.draftId, {
+    slot: state.slot ?? null,
+  });
 
   /*
    * The pool is read once, before anything is applied.
@@ -155,7 +179,7 @@ export async function buildMockBoard(
   }
 
   const board = await buildDraftBoard(
-    mockDraftBoardSources(sources, state, room, { myRosterId, myUserId }),
+    mockDraftBoardSources(sources, state, room, { myRosterId, myUserId, slotToRosterId }),
     request.draftId,
     {
       ...(request.limit != null ? { limit: request.limit } : {}),
@@ -190,8 +214,10 @@ export async function mockSnapshotSources(
   draftId: string,
   state: MockDraftState,
 ): Promise<DraftBoardSources> {
-  const { room, myRosterId, myUserId } = await readMockRoom(sources, draftId);
-  return mockDraftBoardSources(sources, state, room, { myRosterId, myUserId });
+  const { room, myRosterId, myUserId, slotToRosterId } = await readMockRoom(sources, draftId, {
+    slot: state.slot ?? null,
+  });
+  return mockDraftBoardSources(sources, state, room, { myRosterId, myUserId, slotToRosterId });
 }
 
 /**

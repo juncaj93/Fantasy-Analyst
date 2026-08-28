@@ -400,17 +400,26 @@ describe('a mock cannot reach live truth even by accident', () => {
     }
   });
 
-  it('substitutes exactly one source method, and only for its own draft', () => {
+  it('substitutes two named source methods, and only for its own draft', () => {
     const code = codeOf(join(SRC, 'core', 'draft', 'mockSources.ts'));
     /*
-     * The whole design in one assertion: a mock is a different pick stream and
-     * nothing else. A second overridden method here would mean the rehearsal
-     * had started serving different evidence, a different market or a different
-     * player dictionary — at which point it stops being a rehearsal of this
-     * league.
+     * The whole design in one assertion: a mock is a different pick stream, a
+     * seating chart, and nothing else. A third overridden method here would
+     * mean the rehearsal had started serving different evidence, a different
+     * market or a different player dictionary — at which point it stops being a
+     * rehearsal of *this* league.
+     *
+     * The second one arrived with the seat chooser and is the same fact as the
+     * first seen from the other side: the picks say who drafted where, and the
+     * draft's `slot_to_roster_id` is what the board reads to draw them there.
+     * Substituting one without the other put the reader on the clock at seat 7
+     * and went on drawing them in their real chair.
      */
     expect(code).toContain('listPicks: async (id: string) =>');
-    expect(code).toContain("id === state.draftId");
-    expect(code.match(/^\s+\w+: async \(/gm)?.length ?? 0).toBe(1);
+    expect(code).toContain('getDraft: async (id: string) =>');
+    expect(code).toContain('id === state.draftId');
+    /* Both are scoped to this draft, and neither answers for another league's. */
+    expect(code).toContain('id !== state.draftId');
+    expect(code.match(/^\s+\w+: async \(/gm)?.length ?? 0).toBe(2);
   });
 });
