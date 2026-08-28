@@ -21,6 +21,7 @@ import { api, type PlayerDetail } from '../api.ts';
 /* What Sleeper says about a player's availability right now. Never a ranking input. */
 import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { summaryIsIngestionBookkeeping } from '../../core/evidence/provenance.ts';
+import { countsTowardTally } from '../../core/evidence/aggregate.ts';
 /* Two rows that are one fact reworded, and which of them to show. Selection only. */
 import { distinctByFact, isNearDuplicate } from '../../core/evidence/nearDuplicate.ts';
 import { DetailLabel, Unknown, formatDate } from './common.tsx';
@@ -67,6 +68,15 @@ export interface PlayerNewsItem {
   contextSummary: string | null;
   ruleId?: string | null;
   polarity: string;
+  /**
+   * The row's review state, which decides whether it is current.
+   *
+   * Required, because the endpoint always sends it — `EvidenceItem` in
+   * `api.ts` declares it on the same payload — and because a card that cannot
+   * tell a live row from a superseded one shows both. Leaving it off this
+   * projection is exactly how a retracted sentence reached `Latest news`.
+   */
+  reviewStatus: string;
   userOverride: { polarity?: string; note?: string } | null;
 }
 
@@ -614,18 +624,36 @@ function tidy(text: string): string {
  * ledger is not on screen. A rule about *which facts a reader is shown* is
  * worth asserting directly rather than through a rendered tree.
  *
- * Three exclusions, in order, and every one of them is a display choice over a
+ * Four exclusions, in order, and every one of them is a display choice over a
  * ledger that still holds everything:
  *
+ *   0. rows that are no longer in force — superseded, rejected, ignored;
  *   1. the rows the takeaway above was built from, by id;
  *   2. a row saying the takeaway's fact in different words — the same
  *      repetition the id check exists to prevent, one rewording deeper;
  *   3. rows that repeat *each other*, collapsed to the most recent telling.
  *
+ * **The first exclusion is the one this section was missing.** Re-importing a
+ * revised tally retires each old row rather than deleting it: it keeps its
+ * date, stops counting, and stays on the provenance timeline where the history
+ * belongs. `Latest news` did not ask, so a card printed the retired sentence
+ * and its replacement as two separate pieces of news, four lines apart — the
+ * pre-rewrite `R1-R3 breakout/coverage dominance…` sitting directly under the
+ * plain-English sentence that replaced it. Recency cannot catch this: both rows
+ * carry the same source date, so the retired one is exactly as recent as the
+ * row that superseded it. Only its review state tells them apart, which is why
+ * {@link PlayerNewsItem} now carries one.
+ *
+ * Nothing is deleted and nothing moves: the retired row is still in the ledger,
+ * still on the Evidence timeline with its own status beside it, and still in
+ * Review. It is simply not news any more.
+ *
  * `withheld` is counted against everything the section could have drawn rather
  * than against the deduplicated list, because a suppressed rewording is always
- * the older of its pair and really is on his full profile. The reader is told
- * how many rows are not on screen; they are never quietly dropped from a count.
+ * the older of its pair and really is on his full profile. Retired rows are not
+ * in that count: they are not rows this section chose to hold back, they are
+ * rows it can no longer say. The reader is told how many rows are not on
+ * screen; they are never quietly dropped from a count.
  */
 export function selectLatestNews(
   items: PlayerNewsItem[],
@@ -633,7 +661,8 @@ export function selectLatestNews(
 ): { shown: PlayerNewsItem[]; withheld: number; varies: boolean } {
   const quoted = new Set(opts.quotedEvidenceIds);
   const said = opts.quotedText?.trim();
-  const rest = items.filter(
+  const live = items.filter((item) => countsTowardTally(item.reviewStatus));
+  const rest = live.filter(
     (item) => !quoted.has(item.id) && !(said ? isNearDuplicate(said, newsSentence(item).text) : false),
   );
   const distinct = distinctByFact(rest, (item) => ({
