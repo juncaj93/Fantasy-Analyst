@@ -14,6 +14,23 @@
  *
  * Neither may ever block the draft board. The board does not read this at all;
  * the card asks for it separately, after it is open.
+ *
+ * ## Nor may either block the card
+ *
+ * "Fetched when a card is opened" used to mean *awaited* when a card is opened,
+ * and that was the single largest thing between a tap and a card: a cold
+ * outlook is a GraphQL round trip to somebody else's server, 150-400ms of it,
+ * in front of a payload of eight hundred bytes the database already had. It is
+ * now started and not waited for — see `scheduleOutlookRefresh` — so the first
+ * open costs what the second one does and the text arrives on the next open.
+ *
+ * The database reads went the same way, for the same reason. They used to run
+ * one after another because they were written one after another: seventeen
+ * statements, seventeen serialized round trips, four of them asking for the
+ * same player row. `forPlayer` now issues them in three waves — everything that
+ * depends on nothing, then everything that depends on that, then the one read
+ * that needs a snapshot id — and `tests/playerDetailWaves.test.ts` fails if a
+ * fourth appears.
  */
 
 import { calendarSeason, priorSeason } from '../../core/season/context.ts';
@@ -42,6 +59,7 @@ import { UsageService } from './usageService.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
+import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
 
 /**
@@ -86,6 +104,15 @@ const OUTLOOK_MISS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  * cuts the tail rather than the head.
  */
 const TAKEAWAY_EVIDENCE_LIMIT = 40;
+
+/**
+ * The stored weekly injury rows, named off the function that consumes them.
+ *
+ * Taken from `deriveEpisodes` rather than imported from the repository so the
+ * two cannot drift: whatever shape the derivation reads is the shape this
+ * service is obliged to hand it.
+ */
+type HistoryRows = Parameters<typeof deriveEpisodes>[0];
 
 export interface SeasonStatsView {
   season: string;
@@ -277,7 +304,24 @@ export class PlayerDetailService {
 
   constructor(
     private readonly db: Database,
-    private readonly deps: { sleeper?: SleeperClient; fetch?: FetchLike; now?: () => Date } = {},
+    private readonly deps: {
+      sleeper?: SleeperClient;
+      fetch?: FetchLike;
+      now?: () => Date;
+      /**
+       * Where work that must outlive the response goes.
+       *
+       * `ExecutionContext.waitUntil`, in the deployed Worker: the platform keeps
+       * the invocation alive until the promise settles, which is what makes
+       * "populate the cache without making the reader wait for it" a real thing
+       * rather than a race against the response being sent.
+       *
+       * Left unset anywhere there is no such context — a test, the dev server —
+       * and the task then simply runs detached. The one thing it must never do
+       * is become an `await` again.
+       */
+      background?: (task: Promise<unknown>) => void;
+    } = {},
   ) {
     this.repo = new PlayerDetailRepo(db);
     this.players = new PlayerRepo(db);
@@ -288,35 +332,34 @@ export class PlayerDetailService {
   }
 
   /**
-   * Everything the expanded card adds, for one player.
+   * Start something, and do not wait for it.
    *
-   * Statistics are read from the cache only — they are somebody else's nightly
-   * job and this must not turn into a second one. The outlook may reach out,
-   * once, and a failure to reach it is reported rather than thrown: an outlook
-   * the network could not deliver must not take the rest of the card with it.
+   * Errors are swallowed here rather than reported, deliberately: nobody is
+   * listening. A background refresh that fails leaves the cache exactly as it
+   * was, the card says the same thing it said, and the next open tries again.
    */
+  private detach(task: () => Promise<unknown>): void {
+    const running = task().catch(() => undefined);
+    if (this.deps.background) this.deps.background(running);
+  }
+
   /**
-   * The newest preseason projection covering this player, under the league's
-   * own scoring.
+   * What a market-derived model expected of him, out of one snapshot.
    *
-   * Scoped by scoring profile before anything else, and silent when the league
-   * has none stored: a projection computed under other rules is not a rough
-   * answer for this reader, it is the wrong number with a plausible size.
-   *
-   * Returns null rather than throwing when no league is selected — a player
-   * card is not the place to discover a configuration problem.
+   * The scoping decision lives with the caller now, where the league is read:
+   * the snapshot handed here has already been chosen by this league's scoring
+   * profile, because a projection computed under other rules is not a rough
+   * answer for this reader, it is the wrong number with a plausible size. A
+   * league with no snapshot arrives as `null` and gets nothing, which is also
+   * the answer when no league is selected — a player card is not the place to
+   * discover a configuration problem.
    */
-  private async preseasonProjectionFor(
+  private async pointsFromSnapshot(
     playerId: string,
-    season: string,
+    snapshot: { id: number; label: string; scoringLabel: string; capturedAt: string } | null,
   ): Promise<PreseasonProjectionView | null> {
-    const league = await new LeagueRepo(this.db).getSelectedLeague();
-    if (!league) return null;
-    const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
-    const repo = new PreseasonProjectionsRepo(this.db);
-    const snapshot = await repo.latest(season, scoringKey(projectionScoringFrom(profile)));
     if (!snapshot) return null;
-    const points = await repo.pointsForSnapshot(snapshot.id, [playerId]);
+    const points = await new PreseasonProjectionsRepo(this.db).pointsForSnapshot(snapshot.id, [playerId]);
     const value = points.get(playerId);
     if (value == null) return null;
     return {
@@ -327,21 +370,78 @@ export class PlayerDetailService {
     };
   }
 
-  async forPlayer(playerId: string): Promise<PlayerDetailView> {
+  /**
+   * Everything the expanded card adds, in three waves rather than seventeen.
+   *
+   * The waves are the whole design, so they are written as three explicit
+   * `Promise.all`s rather than left to emerge from the order the lines happen
+   * to be in:
+   *
+   *   1. **what depends on nothing** — the season stat row, the player row, the
+   *      two outlook cache reads, last season's injury reports, the evidence
+   *      ledger, the selected league. Six answers, one round trip's latency.
+   *   2. **what depends on those** — current injury state and the usage trend
+   *      (both need the player row), the newest projection snapshot (needs the
+   *      league's scoring), the season's games-played distribution (needed only
+   *      when there are injury reports to reconcile against it, so it is asked
+   *      for here rather than in wave 1 where it would cost a query on every
+   *      card open for the majority of players who have none).
+   *   3. **the one read that needs an id from wave 2** — this player's points
+   *      inside that snapshot.
+   *
+   * `player` is accepted from the caller because the route has already read the
+   * row to decide whether to answer 404 at all, and asking for it again is a
+   * round trip spent re-establishing something the caller is holding.
+   */
+  async forPlayer(playerId: string, opts: { player?: CanonicalPlayer | null } = {}): Promise<PlayerDetailView> {
     const now = this.now();
     const statsSeason = lastCompletedSeason(now);
     const season = outlookSeason(now);
 
-    /*
-     * A row is the difference between "he did not play" and "we do not know".
-     *
-     * Those are two different sentences and the card is allowed to say either,
-     * but never the wrong one. A stored row with no games means the season was
-     * looked up and he did not appear in it — a dash. No row at all means the
-     * statistics have not been ingested for him, and the section stays away
-     * rather than implying an empty season.
-     */
-    const stored = await this.repo.getSeasonStats(playerId, statsSeason);
+    // ---------------------------------------------------------------- wave 1
+    const [stored, player, cachedOutlook, outlookMissAt, historyRows, evidence, league] = await Promise.all([
+      /*
+       * A row is the difference between "he did not play" and "we do not know".
+       *
+       * Those are two different sentences and the card is allowed to say
+       * either, but never the wrong one. A stored row with no games means the
+       * season was looked up and he did not appear in it — a dash. No row at
+       * all means the statistics have not been ingested for him, and the
+       * section stays away rather than implying an empty season.
+       */
+      this.repo.getSeasonStats(playerId, statsSeason),
+      /*
+       * His row, once.
+       *
+       * It was read four times: for the summariser's name, for the injury
+       * status, for the measurements, and again by the route. One read, passed
+       * to everything that needs it.
+       */
+      opts.player !== undefined ? Promise.resolve(opts.player) : this.players.getById(playerId),
+      /*
+       * Both halves of the outlook cache, together.
+       *
+       * They used to be read one after the other because the second is only
+       * consulted when the first misses — which is true, and cost a whole round
+       * trip to find out. Two point lookups on indexed keys are cheaper in one
+       * wave than one of them is in two.
+       */
+      this.repo.getOutlook(playerId, season),
+      this.repo.getOutlookMiss(playerId, season),
+      new InjuryHistoryRepo(this.db)
+        .reportsFor([playerId], statsSeason)
+        .then((rows) => rows.get(playerId) ?? [])
+        .catch(() => []),
+      /*
+       * The newsletter ledger, bounded to the most recent items rather than the
+       * whole history: the selection weights recency heavily enough that a
+       * two-year-old sentence cannot win, so reading two years of them to
+       * discard them is work with a known answer.
+       */
+      new EvidenceRepo(this.db).listForPlayer(playerId, TAKEAWAY_EVIDENCE_LIMIT).catch(() => []),
+      new LeagueRepo(this.db).getSelectedLeague().catch(() => null),
+    ]);
+
     const lastSeason: SeasonStatsView | null = stored
       ? {
           season: statsSeason,
@@ -355,12 +455,48 @@ export class PlayerDetailService {
      * His name, for the summariser.
      *
      * The one thing that reliably tells a sentence about the player apart from
-     * a sentence about his offensive line is whether it mentions him. Read from
-     * the player dictionary the app already holds; absent is fine, and the
-     * summariser falls back to pronouns.
+     * a sentence about his offensive line is whether it mentions him. Absent is
+     * fine, and the summariser falls back to pronouns.
      */
-    const name = (await this.players.getById(playerId))?.fullName ?? null;
-    const { outlook, note } = await this.outlookFor(playerId, season, now, name);
+    const name = player?.fullName ?? null;
+    const { outlook, note } = this.outlookFrom(cachedOutlook, outlookMissAt, playerId, season, now, name);
+
+    // ---------------------------------------------------------------- wave 2
+    const [injury, usageTrend, snapshot, slate] = await Promise.all([
+      /*
+       * Current availability, from the shared layer. An injury store that
+       * cannot answer costs this section and leaves the rest of the card
+       * intact, which is the same rule every other feed on this screen follows.
+       */
+      this.injuryFor(playerId, player?.status ?? null).catch(() => null),
+      /*
+       * The usage trend comes from the injury/role layer rather than from a
+       * source of its own: the age flag requires *declining usage* as well as
+       * age, and asking a different source for that would let the card disagree
+       * with the role line printed a few pixels away.
+       */
+      player
+        ? this.usageTrendFor(player.id, player.position).catch(() => 'unknown' as const)
+        : Promise.resolve('unknown' as const),
+      /*
+       * The newest projection snapshot, scoped by this league's scoring before
+       * anything else: a projection computed under other rules is not a rough
+       * answer for this reader, it is the wrong number with a plausible size.
+       */
+      league
+        ? new PreseasonProjectionsRepo(this.db)
+            .latest(
+              season,
+              scoringKey(
+                projectionScoringFrom(buildScoringProfile(league.scoringSettings, league.rosterPositions)),
+              ),
+            )
+            .catch(() => null)
+        : Promise.resolve(null),
+      // Only when there is something to reconcile it against. See above.
+      historyRows.length > 0 ? this.repo.gamesPlayedCounts(statsSeason).catch(() => []) : Promise.resolve([]),
+    ]);
+
     /*
      * Read out of the outlook, and only out of the outlook.
      *
@@ -381,20 +517,9 @@ export class PlayerDetailService {
      * filed for; Sleeper counts the games he played. Reconciling them is what
      * stops the card printing `8 GP` above `missed 2 games` — see
      * `availability.ts` for why those two numbers were never measuring the same
-     * thing.
+     * thing. Arithmetic over rows already in hand, so it costs no trip.
      */
-    const measured = await this.availabilityFor(playerId, statsSeason, lastSeason, outlook?.fullText ?? null).catch(
-      () => null,
-    );
-
-    /*
-     * Current availability, from the shared layer.
-     *
-     * Read after the outlook and never blocking it: an injury store that
-     * cannot answer costs this section and leaves the rest of the card intact,
-     * which is the same rule every other feed on this screen follows.
-     */
-    const injury = await this.injuryFor(playerId, name).catch(() => null);
+    const measured = this.availabilityFrom(historyRows, slate, statsSeason, lastSeason, outlook?.fullText ?? null);
 
     /*
      * One line, never two.
@@ -407,25 +532,8 @@ export class PlayerDetailService {
      */
     const injuryContext = measured?.displaySummary ?? history?.line ?? null;
 
-    /*
-     * The newsletter takeaway, from the ledger this app already keeps.
-     *
-     * Bounded to the most recent items rather than the whole history: the
-     * selection weights recency heavily enough that a two-year-old sentence
-     * cannot win, so reading two years of them to discard them is work with a
-     * known answer. A ledger read that fails costs this line and nothing else.
-     */
-    const takeaway = await this.takeawayFor(playerId, now).catch(() => null);
+    const takeaway = this.takeawayFrom(evidence, playerId, now);
 
-    /*
-     * Physical and age context, from the measurements the sync now keeps.
-     *
-     * The usage trend comes from the injury/role layer already read above
-     * rather than from a second query: the age flag requires *declining usage*
-     * as well as age, and asking a different source for that would let the card
-     * disagree with the role line printed a few pixels away.
-     */
-    const player = await this.players.getById(playerId);
     const profile = player
       ? profileContext(
           {
@@ -436,13 +544,14 @@ export class PlayerDetailService {
             age: player.age ?? null,
             yearsExp: player.yearsExp ?? null,
           },
-          { usageTrend: await this.usageTrendFor(player.id, player.position).catch(() => 'unknown' as const) },
+          { usageTrend },
         )
       : { flags: [], showMeasurements: false, scoreDelta: 0 as const };
 
     return {
       playerId,
-      preseasonProjection: await this.preseasonProjectionFor(playerId, season).catch(() => null),
+      // ------------------------------------------------------------- wave 3
+      preseasonProjection: await this.pointsFromSnapshot(playerId, snapshot).catch(() => null),
       lastSeason,
       outlook,
       outlookNote: note,
@@ -507,8 +616,11 @@ export class PlayerDetailService {
    * the kind of decision that becomes untestable the moment it is written
    * beside a SQL query.
    */
-  private async takeawayFor(playerId: string, now: Date): Promise<PlayerDetailView['newsletterTakeaway']> {
-    const items = await new EvidenceRepo(this.db).listForPlayer(playerId, TAKEAWAY_EVIDENCE_LIMIT);
+  private takeawayFrom(
+    items: Parameters<typeof selectTakeaway>[0],
+    playerId: string,
+    now: Date,
+  ): PlayerDetailView['newsletterTakeaway'] {
     const takeaway = selectTakeaway(items, { now, playerId });
     if (!takeaway) return null;
     return {
@@ -532,14 +644,18 @@ export class PlayerDetailService {
    * column, and evidence is the thing worth storing anyway.
    *
    * `null` when there is nothing worth a line, which is most players.
+   *
+   * Both reads happen in `forPlayer`'s waves and arrive here as values, so this
+   * is arithmetic and nothing else — which is also why it no longer needs a
+   * `catch` around it at the call site.
    */
-  private async availabilityFor(
-    playerId: string,
+  private availabilityFrom(
+    rows: HistoryRows,
+    slate: Parameters<typeof fullSeasonSlate>[0],
     season: string,
     lastSeason: SeasonStatsView | null,
     outlook: string | null,
-  ): Promise<HistoricalAvailability | null> {
-    const rows = (await new InjuryHistoryRepo(this.db).reportsFor([playerId], season)).get(playerId) ?? [];
+  ): HistoricalAvailability | null {
     if (rows.length === 0) return null;
 
     const episodes = deriveEpisodes(rows);
@@ -547,7 +663,7 @@ export class PlayerDetailService {
       season,
       participation: {
         gamesPlayed: lastSeason?.gamesPlayed ?? null,
-        gamesAvailable: fullSeasonSlate(await this.repo.gamesPlayedCounts(season)),
+        gamesAvailable: fullSeasonSlate(slate),
       },
       evidence: { episodes, corroboration: outlook },
     });
@@ -576,10 +692,8 @@ export class PlayerDetailService {
    * `null` when nobody has said anything, so the card renders no section at all
    * rather than a heading over the word "unknown".
    */
-  private async injuryFor(playerId: string, name: string | null): Promise<PlayerDetailView['injury']> {
-    void name;
-    const player = await this.players.getById(playerId);
-    const state = await new InjuryService(this.db).stateFor(playerId, player?.status ?? null);
+  private async injuryFor(playerId: string, status: string | null): Promise<PlayerDetailView['injury']> {
+    const state = await new InjuryService(this.db).stateFor(playerId, status);
     if (state.designation === 'unknown') return null;
     if (state.designation === 'healthy' && !state.bodyPart && !state.practice.label) return null;
     return {
@@ -595,39 +709,67 @@ export class PlayerDetailService {
     };
   }
 
-  private async outlookFor(
+  /**
+   * What the card says about the outlook, decided from cache alone.
+   *
+   * **Nothing here reaches the network, and that is the point.** This was the
+   * biggest single thing between a tap and a card: a cold outlook is a GraphQL
+   * request to a third party, and the request that was waiting on it had
+   * already read everything else it needed. "First open is slow, second open is
+   * instant" was that fetch, described from the outside.
+   *
+   * The four cases, in the order they are decided:
+   *
+   *   - **fresh in cache** — shown, and nothing is started;
+   *   - **stale in cache** — shown anyway, and a refresh is started behind the
+   *     response. A stale outlook beats no outlook: the text is months old by
+   *     design, so an expired entry is still the right paragraph, and the
+   *     reader gets this week's copy on the next open;
+   *   - **a recorded miss, still standing** — "none published", which is a fact
+   *     that was checked, not an assumption;
+   *   - **nothing at all** — a fetch is started, and the note says so. The card
+   *     is allowed to say it has not got the text yet; it is not allowed to
+   *     imply nobody wrote one, which is a different claim and would be cached
+   *     as if it had been checked.
+   */
+  private outlookFrom(
+    cached: (Parameters<typeof toView>[0] & { fetchedAt: string }) | null,
+    missAt: string | null,
     playerId: string,
     season: string,
     now: Date,
     name: string | null,
-  ): Promise<{ outlook: OutlookView | null; note: string | null }> {
-    const cached = await this.repo.getOutlook(playerId, season);
+  ): { outlook: OutlookView | null; note: string | null } {
     const fresh = cached && now.getTime() - Date.parse(cached.fetchedAt) < OUTLOOK_TTL_MS;
     if (cached && fresh) return { outlook: toView(cached, season, cached.fetchedAt, name), note: null };
 
-    const missAt = await this.repo.getOutlookMiss(playerId, season);
     if (missAt && now.getTime() - Date.parse(missAt) < OUTLOOK_MISS_TTL_MS) {
       return { outlook: null, note: `No ${season} outlook published for him.` };
     }
 
-    try {
+    this.scheduleOutlookRefresh(playerId, season);
+
+    if (cached) return { outlook: toView(cached, season, cached.fetchedAt, name), note: null };
+    return { outlook: null, note: `Fetching his ${season} outlook — it will be here next time you open this.` };
+  }
+
+  /**
+   * Go and get the outlook, after the reader has their card.
+   *
+   * Misses are written down as well as hits, because most players have no
+   * outlook and asking Sleeper again every time one of those cards is opened is
+   * precisely the unbounded fetching this project refuses.
+   */
+  private scheduleOutlookRefresh(playerId: string, season: string): void {
+    this.detach(async () => {
       const fetched = await fetchPlayerOutlook(playerId, season, { fetch: this.deps.fetch });
-      const at = now.toISOString();
+      const at = this.now().toISOString();
       if (!fetched) {
         await this.repo.recordOutlookMiss(playerId, season, at, 'provider has no outlook for this player');
-        return { outlook: null, note: `No ${season} outlook published for him.` };
+        return;
       }
       await this.repo.saveOutlook(fetched, at);
-      return { outlook: toView(fetched, season, at, name), note: null };
-    } catch (err) {
-      // A stale outlook beats no outlook: the text is months old by design, so
-      // an expired cache entry is still the right paragraph.
-      if (cached) return { outlook: toView(cached, season, cached.fetchedAt, name), note: null };
-      return {
-        outlook: null,
-        note: `Could not reach Sleeper for the ${season} outlook (${err instanceof Error ? err.message : String(err)}).`,
-      };
-    }
+    });
   }
 
   /**
@@ -646,7 +788,10 @@ export class PlayerDetailService {
     const client = this.deps.sleeper ?? new SleeperClient();
     const payload = await client.getSeasonStats(season);
 
-    const known = new Map((await this.players.listAll()).map((p) => [p.id, p.position]));
+    // Everybody, including the players `listAll` now filters out: see
+    // `positionsById` for why last season's file is the one read that wants
+    // them.
+    const known = await this.players.positionsById();
     const { lines, diagnostics } = buildSeasonStatLines(payload, (id) => known.get(id) ?? null);
 
     const at = this.now().toISOString();

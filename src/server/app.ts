@@ -152,6 +152,19 @@ export interface AppEnv extends AuthEnv {
   /** Set true to skip auth entirely (local dev / e2e only). */
   disableAuth?: boolean;
   /**
+   * Work that outlives the response, when the runtime supports it.
+   *
+   * `ExecutionContext.waitUntil` in the deployed Worker. It exists for one
+   * shape of problem: a cache that is worth filling but that nobody should have
+   * to wait for — today, the season outlook behind a player card, which is a
+   * request to Sleeper in front of a payload the database already had.
+   *
+   * Absent on the dev server and in tests, where a background task simply runs
+   * detached. Nothing may depend on it having finished; a route that needs a
+   * result must await it itself.
+   */
+  waitUntil?: (task: Promise<unknown>) => void;
+  /**
    * The exact git revision this deployment was built from, injected at deploy
    * time and reported by `/api/health` — so "what code is production running?"
    * is a question the site answers itself rather than one anybody has to infer
@@ -2024,24 +2037,55 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     jsonResponse({ runs: await new NflverseService(ctx.env.db).refreshAll() }),
   );
 
+  /**
+   * The expanded card's payload.
+   *
+   * The player row is read here to decide whether this is a 404 at all, and
+   * then handed to the service rather than read again: the same row used to be
+   * fetched four times over one card open, which on D1 is four round trips to
+   * re-establish something already in hand.
+   *
+   * `?draft=1` adds the draft provenance below. It is off by default because it
+   * is four more statements for a line the reader has not asked to see — see
+   * `/api/players/:id/draft` for where it went and why.
+   */
   router.get('/api/players/:id/detail', async (ctx) => {
     const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
     if (!player) return errorResponse('player not found', 404);
-    const detail = await new PlayerDetailService(ctx.env.db, { sleeper: ctx.env.sleeper }).forPlayer(player.id);
-    /*
-     * Where he came from, kept after it stops being the headline.
-     *
-     * Mid-draft a Team row says `1.04` and the reader needs nothing more. Once
-     * the season starts the row shows his shirt number instead — and "what did
-     * I spend on him" is still a real question in week nine, so the draft
-     * position moves here rather than being dropped.
-     *
-     * Read from Sleeper's own draft history, and only ever attached to a
-     * manager Sleeper names. Attributing a pick to a person is the worst thing
-     * on this card to get wrong, so an unnamed seat produces a line about the
-     * pick alone rather than a guess about who made it.
-     */
+    const detail = await new PlayerDetailService(ctx.env.db, {
+      sleeper: ctx.env.sleeper,
+      // Where the outlook refresh goes when the cache is cold: started, not
+      // awaited, so a card open never waits on Sleeper. See AppEnv.waitUntil.
+      ...(ctx.env.waitUntil ? { background: ctx.env.waitUntil } : {}),
+    }).forPlayer(player.id, { player });
+    if (ctx.url.searchParams.get('draft') !== '1') return jsonResponse(detail);
     return jsonResponse({ ...detail, draft: await draftProvenanceFor(ctx.env.db, player.id) });
+  });
+
+  /**
+   * Where he came from, kept after it stops being the headline — and asked for
+   * separately, because most card opens never look at it.
+   *
+   * Mid-draft a Team row says `1.04` and the reader needs nothing more. Once
+   * the season starts the row shows his shirt number instead — and "what did I
+   * spend on him" is still a real question in week nine, so the draft position
+   * moved onto the card rather than being dropped.
+   *
+   * It moved *off the card's own request* because of what it costs: the league,
+   * the draft, every pick in it and every roster — four serialized statements,
+   * on every open, for a line behind a further tap. It is the same read, in the
+   * same function, at the moment somebody actually wants it.
+   *
+   * Read from Sleeper's own draft history, and only ever attached to a manager
+   * Sleeper names. Attributing a pick to a person is the worst thing on this
+   * card to get wrong, so an unnamed seat produces a line about the pick alone
+   * rather than a guess about who made it. `null` — a 200, not a 404 — is the
+   * ordinary answer for a waiver pickup and for a league with no draft.
+   */
+  router.get('/api/players/:id/draft', async (ctx) => {
+    const player = await new PlayerRepo(ctx.env.db).getById(ctx.params['id']!);
+    if (!player) return errorResponse('player not found', 404);
+    return jsonResponse({ playerId: player.id, draft: await draftProvenanceFor(ctx.env.db, player.id) });
   });
 
   /**
