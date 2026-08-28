@@ -9211,3 +9211,40 @@ div.matchup-result {
   color: var(--text-faint);
   font-style: italic;
 }
+
+/*
+ * What was lost, under the sentence about it.
+ *
+ * Monospaced and quiet: it is not for the reader, it is for whoever they send
+ * it to, and it must not compete with the control beside it that gets their
+ * pick back.
+ */
+.mock-trace {
+  display: block;
+  margin-top: var(--sp-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.mock-trace-line {
+  display: block;
+}
+
+/*
+ * The star's slot, carrying a `+`.
+ *
+ * Same geometry as `.star-btn` because it *is* one — only the glyph and what it
+ * means have changed. The accent is what says this control does something to
+ * the draft rather than to a bookmark.
+ */
+.pick-btn .control-glyph {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.pick-btn:active:not(:disabled) .control-glyph {
+  opacity: 0.6;
+}

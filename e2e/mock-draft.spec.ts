@@ -70,6 +70,42 @@ function recommendation(i: number) {
     tierContext: null,
     injuryLine: null,
     nextPick: null,
+    /*
+      The rest of the contract, because the rehearsal draws the real board's row
+      now and the real board's row reads all of it.
+
+      This double used to describe only what a simplified compact row looked at,
+      which meant the fixture and `DraftRecommendation` had quietly drifted
+      apart — and the first thing the shared row did was dereference a field
+      that was not here. A double that is not the shape of the thing it stands
+      in for is a test that cannot fail for the right reason.
+    */
+    tierCliff: {
+      severity: 'none' as const,
+      tierIndex: null,
+      remainingInTier: 0,
+      tierSize: 0,
+      tierEndsAtCliff: false,
+      tierEndsAtBoundary: false,
+      tierGapBefore: null,
+      gapToNextTier: null,
+      survivingTierMates: 0,
+      gapToNext: null,
+      gapRatio: null,
+      localMedianGap: null,
+      positionMedianGap: null,
+      score: 0,
+      message: null,
+    },
+    marketHeadline: null,
+    avoid: { active: false, lifetimeNet: 0, score: 0, message: '', trendNote: null },
+    myGuy: { level: 0 as const, label: '', marks: '', score: 0 },
+    wait: {
+      state: 'unknown' as const,
+      label: '',
+      detail: '',
+      survivalProbability: null,
+    },
   };
 }
 
@@ -230,6 +266,20 @@ async function openDraft(page: Page) {
   await expect(page.getByTestId('board-list')).toBeVisible();
 }
 
+/**
+ * The `+` on a row, which is how a pick is made in a rehearsal.
+ *
+ * The list draws the real Draft screen's cards now, so the row's own button
+ * opens the card — tapping that is *reading about* a player, not taking him.
+ * The action lives in the slot the star occupies on the live board.
+ */
+function pickControl(page: Page, playerId?: string) {
+  const row = playerId
+    ? page.getByTestId(`mock-row-${playerId}`)
+    : page.locator('[data-testid^="mock-row-"]').first();
+  return row.getByTestId('mock-pick-control');
+}
+
 async function openMock(page: Page, seat?: number) {
   await page.getByTestId('draft-board-open').click();
   await page.getByTestId('go-mock-draft').click();
@@ -379,7 +429,7 @@ test.describe('a mock draft', () => {
 
     const first = page.locator('[data-testid^="mock-row-"]').first();
     const taken = (await first.getAttribute('data-testid'))!.replace('mock-row-', '');
-    await first.getByRole('button').first().click();
+    await pickControl(page).click();
 
     await expect(page.getByTestId('mock-since')).toBeVisible();
     await expect(page.getByTestId('mock-roster')).toContainText('Mock Player');
@@ -409,11 +459,11 @@ test.describe('a mock draft', () => {
     await openMock(page);
 
     await page.evaluate(() => {
-      const rows = [...document.querySelectorAll('[data-testid^="mock-row-"]')];
+      const picks = [...document.querySelectorAll('[data-testid="mock-pick-control"]')];
       // Same task, no await between them: the frame a thumb — or a browser that
       // fires click twice — can actually produce.
-      for (const row of rows.slice(0, 2)) {
-        (row.querySelector('button') ?? row).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      for (const pick of picks.slice(0, 2)) {
+        pick.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });
 
@@ -459,7 +509,7 @@ test.describe('a mock draft', () => {
 
     const first = page.locator('[data-testid^="mock-row-"]').first();
     const taken = (await first.getAttribute('data-testid'))!.replace('mock-row-', '');
-    await first.getByRole('button').first().click();
+    await pickControl(page).click();
 
     /* One tap, and the pick is on the board — the reader never sees the loss. */
     await expect(page.getByTestId('mock-since')).toBeVisible();
@@ -487,7 +537,7 @@ test.describe('a mock draft', () => {
 
     await openDraft(page);
     await openMock(page);
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await pickControl(page).click();
 
     await expect(page.getByTestId('mock-error')).toContainText('Try again in a moment');
     /*
@@ -501,12 +551,107 @@ test.describe('a mock draft', () => {
     await expect(page.getByTestId('mock-error')).toHaveCount(0);
   });
 
+  /**
+   * The lockout, which the first fix caused.
+   *
+   * Retrying a lost pick was right; serialising three unbounded attempts behind
+   * a guard that swallowed every tap was not. The owner reported having to wait
+   * "roughly 10+ seconds" before the app would let him tap another player —
+   * which is exactly three requests with no deadline, plus their backoffs, with
+   * nothing on screen admitting it.
+   *
+   * Measured rather than reasoned about: a request that never answers at all is
+   * the worst case, and the screen has to hand the decision back long before a
+   * person would give up on it.
+   */
+  test('a request that never answers does not lock the screen', async ({ page }) => {
+    await installMockDouble(page);
+
+    /* Registered after the double, so it runs first: this take never answers. */
+    let hang = true;
+    await page.route('**/mock/board', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as { action?: { kind?: string } };
+      if (body.action?.kind === 'take' && hang) return; // never fulfilled, never aborted
+      await route.fallback();
+    });
+
+    await openDraft(page);
+    await openMock(page);
+
+    const began = Date.now();
+    await pickControl(page).click();
+
+    /*
+     * The reader is told, and given the control back. Seven seconds is the
+     * assertion's headroom over a four-second deadline plus a budget that
+     * cannot afford a second attempt after one; the lockout this replaces had
+     * no ceiling at all.
+     */
+    await expect(page.getByTestId('mock-error')).toBeVisible({ timeout: 7_000 });
+    expect(Date.now() - began, 'the screen came back well inside the old lockout').toBeLessThan(7_000);
+
+    /* And the trace says what was lost, which is what makes it reportable. */
+    await expect(page.getByTestId('mock-trace')).toContainText('timeout');
+
+    /* The pick is still available, on a route that now answers. */
+    hang = false;
+    await page.getByTestId('mock-retry').click();
+    await expect(page.getByTestId('mock-since')).toBeVisible();
+  });
+
+  /**
+   * A tap is never swallowed for longer than a double-tap lasts.
+   *
+   * The other half of the lockout: while a slow request was in the air, every
+   * tap was a silent no-op. Past the double-tap window a tap now cancels what
+   * is in the air and takes its place, so the screen is always answering
+   * somebody who is asking again.
+   */
+  test('tapping again during a slow pick takes over rather than doing nothing', async ({ page }) => {
+    const double = await installMockDouble(page);
+
+    let stall = true;
+    await page.route('**/mock/board', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as { action?: { kind?: string } };
+      if (body.action?.kind === 'take' && stall) {
+        stall = false; // only the first take stalls; the reader's second lands
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openDraft(page);
+    await openMock(page);
+
+    const rows = page.locator('[data-testid^="mock-row-"]');
+    await pickControl(page).click();
+
+    /* Past the double-tap window, and on a different player. */
+    await page.waitForTimeout(900);
+    const second = rows.nth(1);
+    const wanted = (await second.getAttribute('data-testid'))!.replace('mock-row-', '');
+    await second.getByTestId('mock-pick-control').click();
+
+    /*
+     * The player they asked for *second* is the one taken. A stalled first
+     * request must not leave their later tap unanswered, and must not be
+     * allowed to answer over it either.
+     */
+    await expect(page.getByTestId(`mock-row-${wanted}`), 'the second tap is the pick that lands')
+      .toHaveCount(0, { timeout: 7_000 });
+    await expect(page.getByTestId('mock-roster')).toContainText('Mock Player');
+    /* Two takes were asked for; only one of them was ever answered. */
+    expect(double.requests().filter((r) => r.action === 'take')).toHaveLength(1);
+    await expect(page.getByTestId('mock-error'), 'and no failure is reported for the one abandoned')
+      .toHaveCount(0);
+  });
+
   test('resets to a fresh run, as many times as asked', async ({ page }) => {
     const double = await installMockDouble(page);
     await openDraft(page);
     await openMock(page);
 
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await pickControl(page).click();
     await expect(page.getByTestId('mock-since')).toBeVisible();
 
     /*
@@ -590,7 +735,7 @@ test.describe('a mock draft', () => {
     await openDraft(page);
     await openMock(page);
 
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await pickControl(page).click();
     await expect(page.getByTestId('mock-since')).toBeVisible();
 
     await page.getByTestId('mock-team-open').click();
@@ -604,6 +749,60 @@ test.describe('a mock draft', () => {
       'still to fill',
     );
     await expect(page.getByTestId('mock-team-note')).toHaveCount(0);
+  });
+
+  /**
+   * The rehearsal's list is the Draft screen's list.
+   *
+   * It used to be a compact row with three numbers on it: no expansion, no
+   * Insight, no news, no outlook. A reader practising on that was practising
+   * against a board they would not be looking at on the day, which is the one
+   * thing this feature exists not to do. The rows are `RecommendationRow` now —
+   * the live screen's own component, imported rather than reimplemented.
+   */
+  test('draws the real Draft card, and opens it the same way', async ({ page }) => {
+    await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    const row = page.locator('[data-testid^="mock-row-"]').first();
+    await expect(row.getByTestId('recommendation-row')).toBeVisible();
+    await expect(page.getByTestId('player-detail')).toHaveCount(0);
+
+    /* The row's own button opens the card — reading about him, not taking him. */
+    await row.getByRole('button', { expanded: false }).first().click();
+    await expect(page.getByTestId('player-detail')).toBeVisible();
+
+    /* And opening a card is not a pick. */
+    await expect(page.getByTestId('mock-roster')).toContainText('No picks yet');
+  });
+
+  /**
+   * The star's slot, meaning the opposite thing.
+   *
+   * A bookmark is "remind me later" and there is no later in a rehearsal — the
+   * reader is the one picking, now. So the slot carries a `+`, and the queue
+   * control is not on this screen at all: a mock cannot write to the queue, and
+   * offering a control that would be refused twice is offering nothing.
+   */
+  test('carries a + that drafts, and no star that queues', async ({ page }) => {
+    await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    /* Scoped to the layer: the Draft page underneath still has its own stars. */
+    await expect(
+      page.getByTestId('mock-draft').getByTestId('queue-control'),
+      'no bookmark in a rehearsal',
+    ).toHaveCount(0);
+    const first = page.locator('[data-testid^="mock-row-"]').first();
+    const taken = (await first.getAttribute('data-testid'))!.replace('mock-row-', '');
+    const control = first.getByTestId('mock-pick-control');
+    await expect(control).toHaveAttribute('aria-label', /Draft .* in this mock draft/);
+
+    await control.click();
+    await expect(page.getByTestId(`mock-row-${taken}`), 'the + is the pick').toHaveCount(0);
+    await expect(page.getByTestId('mock-roster')).toContainText('Mock Player');
   });
 
   test('draws the rehearsal on the production draft board', async ({ page }) => {
@@ -632,7 +831,7 @@ test.describe('a mock draft', () => {
     await openMock(page);
     const baseline = double.writes().length;
 
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await pickControl(page).click();
     await expect(page.getByTestId('mock-since')).toBeVisible();
     /*
      * Longer than two poll intervals on the clock, had the loop not been
@@ -710,7 +909,7 @@ test.describe('a mock draft', () => {
       }),
     );
 
-    await row.getByRole('button').first().click();
+    await row.getByTestId('mock-pick-control').click();
     await expect(page.getByTestId('mock-voided')).toContainText('no longer exists');
     expect(
       await page.evaluate(() => Object.keys(window.localStorage).filter((k) => k.startsWith('fa.mock.'))),
@@ -722,7 +921,7 @@ test.describe('a mock draft', () => {
     await installMockDouble(page);
     await openDraft(page);
     await openMock(page);
-    await page.locator('[data-testid^="mock-row-"]').first().getByRole('button').first().click();
+    await pickControl(page).click();
     await expect(page.getByTestId('mock-since')).toBeVisible();
 
     const stored = await page.evaluate(() =>

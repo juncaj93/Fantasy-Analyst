@@ -147,9 +147,27 @@ export const api = {
    * another means; see the sync in DraftScreen, which re-reads the board with
    * `fresh: true` in the same beat.
    */
-  post: async <T,>(path: string, body?: unknown, options: { invalidates?: boolean } = {}) => {
+  post: async <T,>(
+    path: string,
+    body?: unknown,
+    /**
+     * `signal` is for a caller that can say when it has waited long enough.
+     *
+     * There is deliberately no timeout here and no default one: this app runs
+     * on a phone, and a blanket deadline over every write would abandon a
+     * lineup being saved on a train for the sake of endpoints that were never
+     * slow. A caller that knows what its own request costs, and what waiting
+     * costs the person holding the phone, can bound it — see `postMockBoard` in
+     * `components/mockDraft.tsx`, which is currently the only one that does.
+     */
+    options: { invalidates?: boolean; signal?: AbortSignal } = {},
+  ) => {
     try {
-      return await request<T>(path, { method: 'POST', body: body == null ? undefined : JSON.stringify(body) });
+      return await request<T>(path, {
+        method: 'POST',
+        body: body == null ? undefined : JSON.stringify(body),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     } finally {
       if (options.invalidates !== false) clearSessionCache();
     }
