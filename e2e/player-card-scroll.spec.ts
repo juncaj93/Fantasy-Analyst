@@ -577,4 +577,97 @@ test.describe('scrolling an expanded player card', () => {
     // And it is still a sheet: the same finger on the grip closes it.
     await expect(page.getByTestId('player-sheet')).toBeVisible();
   });
+
+  /**
+   * The other direction, under the same finger: what a downward flick on the
+   * card's own content actually does.
+   *
+   * This is the rule from the other side — a drag that begins in the scrolling
+   * body is a scroll and never a dismissal — and it is here rather than in
+   * `sheet-interaction.spec.ts` for one reason: **these are touches.** That
+   * suite drives pointer events, which obey no `touch-action` and never ask the
+   * engine whether it would rather pan, so it can only say that the app declines
+   * the gesture. What it cannot say is the thing that matters, which is that the
+   * engine never offers it in the first place.
+   *
+   * It does not. Under real touch points the sequence delivered to the sheet is
+   * `pointerdown`, **one** `pointermove`, `pointercancel` — on a card that
+   * overflows and on one that does not alike, because `.sheet-body` declares
+   * `pan-y` and is a scroll container, so a vertical touch on it is the engine's
+   * before the app has enough of the gesture to have an opinion. That single
+   * move can carry hundreds of pixels of accumulated travel, which is what makes
+   * this worth pinning: a rule that took a body drag would move the card by
+   * whatever that move reports and then spring it back when the cancel arrived,
+   * every time the reader flicks a card they are reading. Measured at 351px on
+   * an attempt at exactly that.
+   *
+   * So the assertion is the transform, sampled every frame, and it is nought.
+   * That is the difference between *the app declines this gesture* and *the
+   * reader's flick costs them nothing*, and only the second one is a promise.
+   *
+   * Chromium only, the protocol being Chromium's. It is not a substitute for
+   * the WebKit shards or the phone — but WebKit is the stricter of the two here
+   * (it fixes the decision on the first `touchmove` and never revisits it), so a
+   * body drag that cannot be claimed in Chromium cannot be claimed there either.
+   */
+  test('is not moved at all by a downward flick on its content, under a real touch', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'real touch injection is a Chromium DevTools protocol capability');
+
+    await withLongOutlook(page);
+    await page.goto('/');
+    await page.getByTestId('tab-players').click();
+    await openPlayer(page, '1001');
+    await expect(page.getByTestId('outlook')).toBeVisible();
+    await settled(page);
+    expect((await bodyState(page)).overflows, 'the card is not tall enough to be the case under test').toBe(true);
+
+    // Every frame of the gesture, not just the end of it: a card that moves and
+    // comes back is invisible to an assertion made once the finger has lifted.
+    await page.evaluate(() => {
+      const sheet = document.querySelector('.sheet') as HTMLElement;
+      const w = window as unknown as { __shift: number; __events: string[] };
+      w.__shift = 0;
+      w.__events = [];
+      for (const type of ['pointerdown', 'pointermove', 'pointercancel', 'pointerup']) {
+        sheet.addEventListener(type, () => w.__events.push(type), { capture: true });
+      }
+      const tick = () => {
+        const transform = getComputedStyle(sheet).transform;
+        if (transform && transform !== 'none') {
+          const shift = new DOMMatrixReadOnly(transform).m42;
+          if (shift > w.__shift) w.__shift = shift;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    const box = (await page.locator('.sheet-body').boundingBox())!;
+    const x = Math.round(box.x + box.width / 2);
+    const from = Math.round(box.y + 60);
+    const at = (y: number) => [{ x, y: Math.round(y), id: 1, radiusX: 14, radiusY: 14, force: 1 }];
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(from) });
+    for (let i = 1; i <= 14; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(from + i * 16) });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(700);
+
+    const seen = await page.evaluate(() => {
+      const w = window as unknown as { __shift: number; __events: string[] };
+      return { shift: Math.round(w.__shift), events: w.__events };
+    });
+
+    expect(
+      seen.shift,
+      'the card moved under a flick meant for its content, and will spring back when the engine cancels the pointer',
+    ).toBe(0);
+    expect(
+      seen.events,
+      'the engine stopped handing this touch to the scroller, which is the assumption the rule rests on',
+    ).toContain('pointercancel');
+    await expect(page.getByTestId('player-sheet'), 'the flick dismissed the card').toBeVisible();
+  });
 });

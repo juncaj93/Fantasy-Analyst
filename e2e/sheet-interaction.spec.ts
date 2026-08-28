@@ -42,7 +42,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview } from './helpers.ts';
+import { openReview, pastTheSettle } from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -167,6 +167,8 @@ test.describe('pulling a sheet down', () => {
     const body = (await page.locator('.sheet-body').boundingBox())!;
     const x = body.x + body.width / 2;
     await drag(page, { x, y: body.y + 40 }, { x, y: body.y + 40 + 400 });
+    // A dismissal that fired would still be on screen right now. See the helper.
+    await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
 
     /*
@@ -204,6 +206,8 @@ test.describe('pulling a sheet down', () => {
     const body = (await page.locator('.sheet-body').boundingBox())!;
     const x = body.x + body.width / 2;
     await drag(page, { x, y: body.y + 40 }, { x, y: body.y + 40 + 400 });
+    // A dismissal that fired would still be on screen right now. See the helper.
+    await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
   });
 

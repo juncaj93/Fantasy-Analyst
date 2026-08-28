@@ -68,6 +68,33 @@ export async function openReview(page: Page): Promise<void> {
 }
 
 /**
+ * Wait long enough for a dismissal or a navigation that was going to happen to
+ * have happened.
+ *
+ * **For the assertions that say a gesture did *nothing*, and they are worthless
+ * without it.** Neither of this app's two gestures acts when the finger lifts:
+ * a dismissed sheet and a completed back-swipe both animate off the screen
+ * first and call their handler on `transitionend`, with a 400ms fallback behind
+ * it for the case where the transition never fires. So for something like half a
+ * second after a gesture that *did* fire, the thing it is taking away is still
+ * in the document — and `expect(surface).toBeVisible()` asserted at that moment
+ * is true whether the gesture fired or not.
+ *
+ * That is not hypothetical. Three tests across two suites — the ones holding the
+ * line that a *scrolled* card keeps its drag, which is the half of that rule
+ * that protects a reader from having the thing they are reading thrown away —
+ * were passing against a build with the rule deliberately removed. They were
+ * measuring the settle animation.
+ *
+ * The positive assertions never needed this: `toHaveCount(0)` and `toBeVisible`
+ * on the screen behind both retry until the animation has resolved. It is only
+ * "nothing happened" that has to wait to be sure.
+ */
+export async function pastTheSettle(page: Page): Promise<void> {
+  await page.waitForTimeout(700);
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one
