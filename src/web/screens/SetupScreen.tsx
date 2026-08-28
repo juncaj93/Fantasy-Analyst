@@ -349,18 +349,19 @@ export function SetupScreen({
         ))}
       </ListGroup>
 
-      {/*
-        Below the five steps, deliberately.
-
-        Settings' first screen belongs to the checklist — `shell.spec.ts`
-        measures that every step is reachable without a scroll, on the shortest
-        phone this app supports — and a preference is not a step. This is
-        something to come back to once the app works, so it sits after the work.
-      */}
-      <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
-
       <ListGroup header="This app">
         <InstallPanel />
+        {/*
+          Below the five steps, deliberately, and inside this group.
+
+          Settings' first screen belongs to the checklist — `shell.spec.ts`
+          measures that every step is reachable without a scroll, on the
+          shortest phone this app supports — and a preference is not a step. It
+          sits with the other two rows that open in place rather than standing
+          alone above them, because a preference nobody is looking for should
+          read as one row among the rest until it is asked for.
+        */}
+        <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
         <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
         <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
         {/*
@@ -779,37 +780,52 @@ function DraftBalanceCard({ current, unlocked }: { current: SignalBalance; unloc
   };
 
   const index = Math.max(0, SIGNAL_BALANCE_ORDER.indexOf(balance));
+  const position = `${BALANCE_LABELS[balance]}${balance === 'balanced' ? ' (default)' : ''}`;
 
   return (
-    <div data-testid="draft-balance">
-      <div className="section-title">Draft board weighting</div>
-      <input
-        className="slider"
-        type="range"
-        min={0}
-        max={SIGNAL_BALANCE_ORDER.length - 1}
-        step={1}
-        value={index}
-        disabled={!unlocked}
-        aria-label="How much your own research counts against the draft market"
-        aria-valuetext={BALANCE_LABELS[balance]}
-        data-testid="draft-balance-slider"
-        onChange={(e) => choose(SIGNAL_BALANCE_ORDER[Number(e.target.value)] ?? 'balanced')}
-      />
-      <div className="slider-ends">
-        <span>Market consensus</span>
-        <span>My own research</span>
+    <details className="list-details" data-testid="draft-balance">
+      {/*
+        The row says where the control is pointing, so opening it is a choice.
+
+        Closed, this is one line: the name of the setting and the position it is
+        in. That is the whole of what somebody scrolling Settings needs from it,
+        and the slider, the two ends and the sentence explaining them are three
+        more things to read for a control most readers will never move. The same
+        disclosure the two panels below it use, and the same one Demo Mode uses
+        at the foot of this screen — a `<details>`, so the open state needs no
+        React state of its own and the keyboard and screen reader get it free.
+      */}
+      <summary data-testid="draft-balance-summary">
+        Draft board weighting
+        <span className="faint" style={{ marginLeft: 'auto' }} data-testid="draft-balance-label">
+          {position}
+        </span>
+      </summary>
+      <div className="list-details-body" data-testid="draft-balance-body">
+        <input
+          className="slider"
+          type="range"
+          min={0}
+          max={SIGNAL_BALANCE_ORDER.length - 1}
+          step={1}
+          value={index}
+          disabled={!unlocked}
+          aria-label="How much your own research counts against the draft market"
+          aria-valuetext={position}
+          data-testid="draft-balance-slider"
+          onChange={(e) => choose(SIGNAL_BALANCE_ORDER[Number(e.target.value)] ?? 'balanced')}
+        />
+        <div className="slider-ends">
+          <span>Market consensus</span>
+          <span>My own research</span>
+        </div>
+        <div className="faint" style={{ marginTop: 10 }}>
+          {BALANCE_NOTES[balance]}
+          {unlocked ? null : ' Unlock with your passphrase to change this.'}
+        </div>
+        {error ? <Notice tone="error">{error}</Notice> : null}
       </div>
-      <div className="slider-value" data-testid="draft-balance-label">
-        {BALANCE_LABELS[balance]}
-        {balance === 'balanced' ? ' (default)' : null}
-      </div>
-      <div className="faint" style={{ margin: '2px 4px 14px' }}>
-        {BALANCE_NOTES[balance]}
-        {unlocked ? null : ' Unlock with your passphrase to change this.'}
-      </div>
-      {error ? <Notice tone="error">{error}</Notice> : null}
-    </div>
+    </details>
   );
 }
 

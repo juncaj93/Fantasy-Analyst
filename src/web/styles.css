@@ -4284,14 +4284,6 @@ input[type='file'] {
   color: var(--text-faint);
 }
 
-/* Where the thumb is now, in the same words the ends are written in. */
-.slider-value {
-  margin: var(--sp-2) 4px 2px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
 textarea {
   min-height: 110px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
