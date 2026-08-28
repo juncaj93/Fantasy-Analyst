@@ -109,9 +109,16 @@ function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike): VegasProvide
  * global `fetch`, because a budget belongs to an invocation and an invocation
  * serving one API call has no ceiling worth defending.
  */
-function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike): AppEnv {
+function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task: Promise<unknown>): void }): AppEnv {
   return {
     db: env.DB,
+    /*
+     * The platform's own answer to "finish this, but not while they are
+     * waiting". Passed only on the request path: a scheduled run is already
+     * allowed to take its time, and handing a cron a way to defer work past its
+     * own invocation would hide it from the budget that bounds it.
+     */
+    ...(ctx ? { waitUntil: (task: Promise<unknown>) => ctx.waitUntil(task) } : {}),
     sleeper: fetchImpl ? new SleeperClient({ fetch: fetchImpl }) : new SleeperClient(),
     vegas: buildVegasProvider(env, fetchImpl),
     APP_PASSPHRASE: env.APP_PASSPHRASE,
@@ -122,7 +129,20 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike): AppEnv {
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  /**
+   * `ctx` is here for `waitUntil`, and for nothing else.
+   *
+   * Cloudflare has always passed it; this Worker simply never took it. It is
+   * what keeps an invocation alive after the response has been sent, which is
+   * what lets a cold player-card outlook be fetched *around* the reader rather
+   * than in front of them. Without it the fetch would be a promise nobody is
+   * holding, cancelled the moment the response goes out.
+   */
+  async fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx?: { waitUntil(task: Promise<unknown>): void },
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
       /*
@@ -142,7 +162,7 @@ export default {
        * reading the source. What is *not* included is anything from `env`.
        */
       try {
-        return await app(request, toAppEnv(env));
+        return await app(request, toAppEnv(env, undefined, ctx));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return new Response(JSON.stringify({ error: message }), {

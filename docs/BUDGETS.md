@@ -59,6 +59,52 @@ whatever needed the room, with the reason in the commit message. A budget
 raised on its own, to turn a red build green, is a budget that has stopped
 meaning anything.
 
+## API payloads and query waves — `npm run perf:budget`
+
+Page weight is what a phone downloads once. This is what it downloads on every
+tap — and, more importantly, how many times the server had to wait for the
+database before it could answer.
+
+| endpoint | payload (gzip) | budget | waves | budget |
+| --- | --- | --- | --- | --- |
+| `GET /api/players/:id/detail` | 0.5 kB | 1.2 kB | 3 | 5 |
+| `GET /api/drafts/:id/board` | 11.0 kB | 14 kB | 17 | 20 |
+
+**A wave is a statement that had to wait for a previous one.** Statements
+issued together — anything inside one `Promise.all` — share a wave, because on
+D1 they share a round trip's worth of latency rather than paying for one each.
+So the count is not "how many queries" but "how deep the dependency chain is",
+which is the number latency multiplies.
+
+That distinction is the whole reason this budget exists. The player-detail
+endpoint reached **seventeen serialized statements** to assemble under a
+kilobyte: four of them re-read the same player row, six were draft provenance
+for a line behind a further tap, and every one of them waited for the one above
+it because it was written on the line below it. None of it was a slow query.
+Nothing in this repository would have failed if it had reached thirty, which is
+exactly how it got to seventeen.
+
+`scripts/measure-api-budgets.ts` does the measuring, against an in-memory
+database built from the committed migrations and the demo dataset — no network,
+no deployment, no `dist/`, and the same answer on a laptop and on a runner. Run
+it directly for a report that includes modelled wall clock:
+
+```
+node --experimental-transform-types scripts/measure-api-budgets.ts
+```
+
+The milliseconds it prints are a real measurement of a *modelled* database:
+in-memory SQLite answers in microseconds, so `FA_MEASURE_LATENCY_MS` (default 2)
+injects a per-round-trip cost and `FA_MEASURE_OUTLOOK_MS` (default 250) a cost
+for the Sleeper call behind a cold outlook. Compare two runs of the script;
+do not compare its numbers to production. The budget check itself runs with both
+set to zero, because bytes and waves are counts and a clock would only add
+noise to them.
+
+`tests/playerDetailWaves.test.ts` asserts the same shape from the unit suite,
+using the same counter, so a regression fails in seconds rather than at the end
+of a build.
+
 ## Flow timing — `e2e/performance.spec.ts`
 
 The flows §9 of the resilience brief names, measured in a real WebKit iPhone
