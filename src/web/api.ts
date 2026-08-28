@@ -916,6 +916,9 @@ export interface AiTallyApplyOutcome {
  * two have to account for. Type-only, so nothing reaches the bundle.
  */
 export type { DataHealthView, RunHealth, SourceHealth } from '../core/health/model.ts';
+/** The five positions of the draft board's weighting control. Type-only. */
+import type { SignalBalance } from '../core/draft/signalBalance.ts';
+export type { SignalBalance };
 
 export interface SetupStatus {
   steps: SetupStep[];
@@ -1113,6 +1116,14 @@ export interface SetupStatus {
     writesToday: number;
     writeCeiling: number;
   };
+  /**
+   * Where the draft board's market-vs-my-research control is pointing.
+   *
+   * Optional because Demo Mode answers this endpoint from fixtures written
+   * before the control existed, and the honest reading of a missing field is
+   * the default position rather than an error on the Settings screen.
+   */
+  draftBalance?: SignalBalance;
 }
 
 export interface LeagueSummary {

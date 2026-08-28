@@ -36,6 +36,7 @@ import {
 } from './mockDraft.ts';
 import { mockCandidatePool, mockDraftBoardSources, readMockRoom } from './mockSources.ts';
 import { hashString } from './nextpick/rng.ts';
+import type { SignalBalance } from './signalBalance.ts';
 
 /**
  * What the reader just did.
@@ -66,6 +67,13 @@ export interface MockBoardRequest {
   limit?: number;
   position?: string | null;
   queuedOnly?: boolean;
+  /**
+   * The Settings position for market-vs-own-research weighting.
+   *
+   * Carried through so a rehearsal ranks the way the real board ranks. Absent
+   * is the default position, which is the board this app has always built.
+   */
+  signalBalance?: SignalBalance;
 }
 
 export interface MockBoardResult {
@@ -185,6 +193,7 @@ export async function buildMockBoard(
       ...(request.limit != null ? { limit: request.limit } : {}),
       position: request.position ?? null,
       queuedOnly: request.queuedOnly === true,
+      ...(request.signalBalance === undefined ? {} : { signalBalance: request.signalBalance }),
     },
   );
 

@@ -98,6 +98,7 @@
       "src/core/draft/nextpick/ownership.ts",
       "src/core/draft/provenance.ts",
       "src/core/draft/scoreBand.ts",
+    "src/core/draft/signalBalance.ts",
       "src/core/draft/survival.ts",
       "src/core/draft/tierBoard.ts",
       "src/core/dst/weeks.ts",

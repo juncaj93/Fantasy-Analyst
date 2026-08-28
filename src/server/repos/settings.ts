@@ -67,6 +67,17 @@ export const SETTING_KEYS = {
    * put a network call in front of every render of the toolbar.
    */
   nflState: 'sleeper.nflState',
+  /**
+   * How loudly the owner's own research argues with the market on the draft
+   * board — one of the five positions in `core/draft/signalBalance.ts`.
+   *
+   * Kept on the account rather than on the phone, unlike Appearance, because
+   * the board it changes is built on the server: a preference in `localStorage`
+   * could only reach the ranking by riding on every board request, so a
+   * rehearsal and a second phone would each have to remember to carry it — and
+   * whoever forgot would be silently ranking on the default.
+   */
+  draftSignalBalance: 'draft.signalBalance',
   vegasProvider: 'vegas.provider',
   lastVegasRefresh: 'vegas.lastRefresh',
   /**

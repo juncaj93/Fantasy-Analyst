@@ -17,11 +17,14 @@
 
 import { rosterAlerts, type MyGuyLevel, type RosterAlert } from './decisions.ts';
 import {
+  DEFAULT_WEIGHTS,
   DEFENCE_WEIGHTS,
   rankAvailablePlayers,
   type DraftRecommendation,
   type MarketPoolPlayer,
 } from './engine.ts';
+import { SIGNAL_BALANCE_DEFAULT, type SignalBalance } from './signalBalance.ts';
+import { personalScale, weightsForSignalBalance } from './signalWeights.ts';
 import { computeNeed } from './need.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -602,6 +605,14 @@ export async function buildDraftBoard(
      * captured from. See `nextpick/simulate.ts`.
      */
     nextPickSeed?: number;
+    /**
+     * How loudly the owner's own research argues with the market price.
+     *
+     * Absent means `balanced`, which returns `DEFAULT_WEIGHTS` itself — so a
+     * caller that does not know this exists builds the board this app has
+     * always built. See `signalBalance.ts`.
+     */
+    signalBalance?: SignalBalance;
   } = {},
 ): Promise<DraftBoardState> {
   const draft = await sources.leagues.getDraft(draftId);
@@ -1179,6 +1190,28 @@ export async function buildDraftBoard(
   };
 
   /*
+   * The owner's own reading, at whatever volume he set in Settings.
+   *
+   * `balanced` hands `rankAvailablePlayers` the same `DEFAULT_WEIGHTS` object
+   * its own default parameter would have supplied, so the default position is
+   * not a near-miss of today's board — it is today's board.
+   *
+   * The defence pass below is deliberately not given this: a defence is ranked
+   * on the market and nothing else, so there is nothing here to turn up.
+   */
+  const balance = opts.signalBalance ?? SIGNAL_BALANCE_DEFAULT;
+  const fieldWeights = weightsForSignalBalance(balance, DEFAULT_WEIGHTS);
+  if (personalScale(balance) !== 1) {
+    warnings.push(
+      personalScale(balance) > 1
+        ? 'your own research is set louder than usual in Settings, so your ♥, AVOIDs and newsletter tally ' +
+          'move these rankings further than the board’s default'
+        : 'your own research is set quieter than usual in Settings, so your ♥, AVOIDs and newsletter tally ' +
+          'move these rankings less than the board’s default',
+    );
+  }
+
+  /*
    * DEFENCES ARE RANKED APART, ON THE MARKET AND NOTHING ELSE.
    *
    * The board used to score them like everybody else and then apologise for it
@@ -1212,6 +1245,7 @@ export async function buildDraftBoard(
   const rankedField = rankAvailablePlayers(
     candidates.filter((player) => player.position !== DEFENCE).map(rankInput),
     rankingContext,
+    fieldWeights,
   );
 
   const rankedDefence = rankAvailablePlayers(
