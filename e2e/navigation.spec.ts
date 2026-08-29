@@ -657,6 +657,37 @@ test.describe('sheets', () => {
       }
     }
 
+    /*
+     * The layer has somewhere to scroll, and the zone above the card is a whole
+     * screen tall.
+     *
+     * This is the shape of the layer rather than a behaviour, and it is asserted
+     * because getting it wrong is silent. The scroller sized itself from `top`
+     * and `bottom` insets once, which is not the same as having a height: a
+     * percentage height on a child resolves against the parent's *height*, and
+     * WebKit read that as `auto`, so the dismiss zone collapsed to nothing.
+     * There was then nothing to scroll and no distance to push the card
+     * through — and the failures it produced were five different assertions in
+     * two files, none of which said the layer had no room in it. This one would
+     * have.
+     */
+    const room = await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      const zone = document.querySelector('.sheet-dismiss') as HTMLElement;
+      return {
+        scrollable: el.scrollHeight - el.clientHeight,
+        zone: Math.round(zone.getBoundingClientRect().height),
+        port: el.clientHeight,
+      };
+    });
+    expect(room.zone, 'the zone above the card collapsed, so there is nothing to push it into').toBeGreaterThan(
+      room.port * 0.9,
+    );
+    expect(
+      room.scrollable,
+      'the layer has nowhere to scroll, so the card can be neither read past its detent nor pushed away',
+    ).toBeGreaterThan(0);
+
     // And the layer is a scroller that snaps, which is what does the dismissing.
     expect(declared.overflowY, 'the layer is not a scroller, so nothing can be scrolled away').toMatch(/auto|scroll/);
     /*

@@ -6328,12 +6328,25 @@ table.compact tr:last-child td {
   right: 0;
   top: 0;
   /*
-   * Above the keyboard rather than under it. iOS shrinks the visual viewport
-   * and not the layout one, so a scroller pinned to the bottom of the layout
-   * viewport puts its last inch under the keyboard — and every percentage below
-   * resolves against this box, so shortening it moves the card up with it.
+   * An explicit height, not a pair of insets — and that distinction is the
+   * whole layer working or not working.
+   *
+   * This used to be `top: 0; bottom: <keyboard>`, which sizes the box correctly
+   * in every engine and is *not* the same thing as having a height. A
+   * percentage height on a child resolves against its parent's `height`, and a
+   * height that came from insets is `auto` for that purpose in some engines. So
+   * `.sheet-dismiss { height: 100% }` collapsed to nothing in WebKit: no
+   * dismiss zone, therefore nothing to scroll, therefore a card that could not
+   * be read past its detent — and a dismissal mark sitting near the top of a
+   * layer that never moved, which fired the observer and closed cards on their
+   * own. Five WebKit failures, one cause, and Chromium showed none of it.
+   *
+   * Stated as a height, every percentage in this layer has something definite
+   * to resolve against. The keyboard inset is subtracted here instead: iOS
+   * shrinks the visual viewport and not the layout one, so a layer as tall as
+   * the layout viewport puts its last inch under the keyboard.
    */
-  bottom: var(--sheet-keyboard, 0px);
+  height: calc(100dvh - var(--sheet-keyboard, 0px));
   z-index: calc(41 + var(--overlay-lift, 0));
   overflow-y: auto;
   overscroll-behavior: contain;
