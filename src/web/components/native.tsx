@@ -11,9 +11,9 @@
  * may not fetch, compute, rank or decide — it arranges what it is handed.
  */
 
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useEdgeSwipeBack, usePullToRefresh, useSheetDrag, useStandaloneMode } from '../gestures.ts';
+import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
 import { BackChevronIcon, ChevronIcon } from './icons.tsx';
@@ -456,17 +456,25 @@ export function SearchFilterRow({
 /**
  * A modal sheet.
  *
- * Rises from the bottom, dims what is behind it, and can be pulled back down by
- * its chrome — the grip and the header. Its body is the browser's, so that a
- * card can always be scrolled; Escape, the backdrop and Done close it too,
- * because a gesture must never be the only way out of anything.
+ * Rises from the bottom, dims what is behind it, and can be pulled back down
+ * from anywhere on it — the grip, the header, or the middle of what you are
+ * reading, as long as that content is already at its top. Escape, a tap above
+ * it and Done close it too, because a gesture must never be the only way out of
+ * anything.
  *
  * Everything a covering layer owes the app — the page behind held still, the
  * app behind taken out of the reading order, focus in and focus back, Escape
  * reaching the top layer and no other — belongs to `useOverlay` and is
- * identical here, on the draft board, and on anything added later. The gesture
- * itself belongs to `useSheetDrag`. This component is the arrangement of a
- * grip, a title and a body, and nothing else.
+ * identical here, on the draft board, and on anything added later.
+ *
+ * **There is no dismiss gesture in this file, and none in `gestures.ts`
+ * either.** The layer is a scroller whose two ends are the card in place and
+ * the card gone, so pulling it down is a scroll and the engine does all of it:
+ * the tracking, the momentum, the snap back from a drag too small to count, and
+ * the reader's ability to catch it halfway and change their mind. What is left
+ * here is the arrangement of a grip, a title and a body, one scroll to open and
+ * one observer to notice it has been closed. See `.sheet-scroller` in the
+ * stylesheet for why, and for the two mechanisms this replaced.
  *
  * Nothing destructive is ever put in one of these: a sheet that can be flicked
  * away is for reference and for choices that can be made again.
@@ -502,8 +510,19 @@ export function Sheet({
   testId?: string;
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
-  const drag = useSheetDrag({ onDismiss: onClose });
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const detent = useRef<HTMLDivElement | null>(null);
+  const mark = useRef<HTMLDivElement | null>(null);
   const { lift } = useOverlay({ container: surface, onDismiss: onClose });
+  /*
+   * The latest `onClose`, for an observer that is attached once.
+   *
+   * The observer must outlive re-renders — re-attaching it on every one would
+   * make it fire again on whatever the layer happened to be doing at the time —
+   * so it closes over this rather than over the prop.
+   */
+  const onDismiss = useRef(onClose);
+  onDismiss.current = onClose;
   /*
    * The keyboard, and the room it takes.
    *
@@ -511,11 +530,80 @@ export function Sheet({
    * shrink that for the keyboard — it shrinks the visual one. So a sheet with a
    * field in it, which is two of Setup's, drew its own action button underneath
    * the keyboard the moment the reader tapped into the box: visible in a
-   * screenshot, unreachable by a thumb. The inset is nought on anything without
-   * a software keyboard, which is every browser this app is tested in, so this
-   * costs nothing anywhere it is not needed.
+   * screenshot, unreachable by a thumb. The inset shortens the scroller, and
+   * every percentage in the layer resolves against that box, so the card comes
+   * up with it. Nought on anything without a software keyboard, which is every
+   * browser this app is tested in.
    */
   const keyboard = useKeyboardInset();
+
+  /*
+   * Opening puts the layer at the card's detent, in one step and before paint.
+   *
+   * **Instant, and the rise is a keyframe rather than a smooth scroll.** Scrolling
+   * the detent into view *is* the card coming up, so animating that scroll looks
+   * like the obvious way to do the entrance — and it oscillates. A programmatic
+   * smooth scroll and `scroll-snap-type: mandatory` are two things steering the
+   * same box: the snap corrects the animation, the animation resumes, and the
+   * layer never settles. Playwright's word for what that does to anything inside
+   * the card is *not stable*, which it stayed for thirty seconds; a reader's
+   * word for it would be less kind.
+   *
+   * So the two are kept apart. The scroll is a position, set once with nothing
+   * animating it, and the entrance is an animation on the card that moves no
+   * scroller at all. Reduced motion is honoured by the stylesheet, where the
+   * rest of this app's motion is already answered.
+   */
+  useLayoutEffect(() => {
+    detent.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, []);
+
+  /*
+   * And closing is a scroll arriving at the other end of the same box.
+   *
+   * The mark is two pixels inside the top of the detent; when the card has been
+   * scrolled away it sits below the scrollport and stops intersecting. That
+   * costs nothing per frame — which is the property this layer was rebuilt to
+   * have, and the reason this is an observer rather than a `scroll` listener.
+   *
+   * **Which way it left is the whole of it, and leaving that out closed cards
+   * the reader was reading.** A mark at the top of the card goes out of view in
+   * both directions: downwards when the card is pushed away, and *upwards* the
+   * moment somebody scrolls far enough down a long one. Asking only whether it
+   * still intersects cannot tell those apart, so a card with more in it than
+   * fits shut itself as soon as it was read past its own height.
+   *
+   * The entry already carries the answer, so this needs no extra reading of the
+   * DOM: the mark has gone *below* the scrollport exactly when the card has
+   * gone with it.
+   *
+   * `seen` is the other guard, and it makes this a *dismissal* rather than a
+   * description of where the layer starts: the mark is out of view at mount,
+   * because a sheet opens from its dismissed position, and only a departure
+   * after an arrival means the reader pushed the card away.
+   */
+  useEffect(() => {
+    const root = scroller.current;
+    const target = mark.current;
+    if (!root || !target) return;
+    let seen = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            seen = true;
+            continue;
+          }
+          if (!seen) continue;
+          const below = entry.rootBounds ? entry.boundingClientRect.top >= entry.rootBounds.bottom : false;
+          if (below) onDismiss.current();
+        }
+      },
+      { root, threshold: 0 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
 
   return createPortal(
     <>
@@ -523,50 +611,51 @@ export function Sheet({
         className="sheet-backdrop"
         data-testid="sheet-backdrop"
         style={{ ['--overlay-lift' as string]: String(lift) }}
-        onClick={onClose}
+        aria-hidden="true"
       />
       <div
-        className="sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label={accessibleLabel ?? (typeof title === 'string' ? title : undefined)}
-        data-testid={testId ?? 'sheet'}
-        data-dragging={drag.dragging ? 'yes' : 'no'}
+        className="sheet-scroller"
+        data-testid="sheet-scroller"
+        ref={scroller}
         style={{
           ['--overlay-lift' as string]: String(lift),
           ['--sheet-keyboard' as string]: `${keyboard}px`,
         }}
-        /*
-         * Focusable by `useOverlay` and by nothing else. A dialog that takes
-         * focus on its own container is announced as the dialog, with its
-         * label; one that focuses its first button is announced as that button,
-         * and the reader arrives without being told what has opened.
-         */
-        tabIndex={-1}
-        ref={(node) => {
-          surface.current = node;
-          drag.sheetRef(node);
-        }}
-        {...drag.handlers}
       >
-        <div className="sheet-grip" aria-hidden="true" data-testid="sheet-grip" />
-        <div className="sheet-header">
-          <div className="sheet-title">{title}</div>
-          <button type="button" className="btn btn-sm" onClick={onClose} data-testid="sheet-close">
-            Done
-          </button>
-        </div>
         {/*
-          The body, and nothing measuring it.
-
-          It used to be wrapped in a bare block so a `ResizeObserver` could
-          watch the content grow and keep `touch-action` up to date as the card
-          filled in. Nothing asks that question any more — the body declares
-          `pan-y` for its whole life — so the wrapper, the observer and the
-          scroll listener are gone with it. See `useSheetDrag`, rule 1.
+          The screen-tall transparent zone above the card, and the tap that
+          closes from outside it. This is what the backdrop's click handler used
+          to be: the backdrop is underneath the scroller now and cannot be
+          reached, so the part of the scroller you can see through is the part
+          that answers a tap. Same gesture for the reader, same outcome.
         */}
-        <div className="sheet-body" ref={drag.bodyRef}>
-          {children}
+        <div className="sheet-dismiss" data-testid="sheet-dismiss" onClick={onClose} />
+        <div className="sheet-snap" ref={detent}>
+          <div className="sheet-dismissed-mark" ref={mark} aria-hidden="true" />
+          <div
+            className="sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={accessibleLabel ?? (typeof title === 'string' ? title : undefined)}
+            data-testid={testId ?? 'sheet'}
+            /*
+             * Focusable by `useOverlay` and by nothing else. A dialog that takes
+             * focus on its own container is announced as the dialog, with its
+             * label; one that focuses its first button is announced as that
+             * button, and the reader arrives without being told what has opened.
+             */
+            tabIndex={-1}
+            ref={surface}
+          >
+            <div className="sheet-grip" aria-hidden="true" data-testid="sheet-grip" />
+            <div className="sheet-header">
+              <div className="sheet-title">{title}</div>
+              <button type="button" className="btn btn-sm" onClick={onClose} data-testid="sheet-close">
+                Done
+              </button>
+            </div>
+            <div className="sheet-body">{children}</div>
+          </div>
         </div>
       </div>
     </>,

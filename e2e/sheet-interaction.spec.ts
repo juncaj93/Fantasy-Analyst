@@ -1,48 +1,44 @@
 /**
- * Dismissing a sheet, and everything that must survive it.
+ * Pushing a sheet away, and everything that must survive it.
  *
- * Two complaints, a release apart, pulling in opposite directions — and the
- * line between them is what this suite now pins.
+ * Three complaints across as many releases, pulling in opposite directions, and
+ * the line between them is what this suite pins.
  *
- * The first was that popup cards were hard to swipe away: a sheet tall enough
- * to scroll declares `touch-action: pan-y` on its body, so the browser had
- * classified a downward drag as a scroll before the app saw an event, and the
- * only place the gesture worked was the grip. That was answered by claiming a
- * downward drag on content sitting at its top, through a non-passive
- * `touchmove` listener.
+ * Cards were hard to swipe away, so the app claimed a downward drag on content
+ * at its top with a non-passive `touchmove`. That made the same cards hard to
+ * *scroll*, which is the worse of the two — a card you cannot dismiss can still
+ * be read — so the claim moved to `touch-action`, published ahead of the finger.
+ * That failed for a different reason: a card does not know how tall it is while
+ * its requests are in flight, so it refused the reader the scroll they had
+ * already started. Both were withdrawn, and dismissal shrank to the chrome.
  *
- * The second was that those same cards were hard to *scroll*, which is the
- * price of the first answer and is the worse of the two: a card you cannot
- * dismiss can still be read, and a card you cannot scroll cannot. WebKit fixes
- * whether a touch sequence may scroll on its first `touchmove`, so the claim
- * had to be staked on a pixel or two of movement — and an upward flick that
- * starts with a pixel of downward drift is not distinguishable, at that
- * instant, from a pull. So the reader's first swipe did nothing and their third
- * worked.
+ * The measurement that ended the argument: `.sheet-body` was a scroll container
+ * declaring `pan-y`, so a vertical touch on it belonged to the engine after a
+ * single `pointermove`. No threshold could have helped. The app was not being
+ * outvoted; it was not being asked.
  *
- * The rule that settles it: **a box with somewhere to scroll owns every
- * vertical gesture on it.** Dismissal keeps everything that does not scroll —
- * the grip, the header, the backdrop, Done, Escape — and keeps the content of
- * the many sheets that are shorter than the screen, where nothing is being
- * taken away. `useSheetDrag` calls `preventDefault` on no touch at all.
+ * **So the sheet stopped asking.** It is a scroller whose two ends are the card
+ * in place and the card gone, and its dismissal is a scroll. What that buys, and
+ * what this suite checks:
  *
- * What is checked here, and what is deliberately not:
+ *  - a card is pushed away from *anywhere* on it, including the middle of what
+ *    you are reading — the thing three attempts could not deliver;
+ *  - content that has been scrolled keeps the gesture, for free, because the
+ *    card's own top is a snap position rather than a rule somebody wrote;
+ *  - the tracking, the momentum, the spring back from a push too small and the
+ *    ability to catch it halfway all belong to the engine.
  *
- *  - **Checked.** The pointer state machine — which drags dismiss, which spring
- *    back, which are handed to the scroller, and what is left behind after each
- *    — plus the focus lifecycle, the page lock and the reading order. All of it
- *    is engine-independent and all of it was broken in some way.
- *
- *  - **Not checked, and cannot be.** Whether iOS Safari actually yields the
- *    gesture. Every drag below is synthesised from pointer events, which are
- *    not touches: `touch-action` governs *touch* input only, and no synthetic
- *    sequence exercises it. That is why the declarations are asserted directly
- *    in `navigation.spec.ts` and in `player-card-scroll.spec.ts`, and why the
- *    physical-device list in the handoff is not optional.
+ * **The drags in this file are wheels now, and that is a real improvement.** A
+ * wheel is a scroll, so these tests exercise the same mechanism a thumb does, in
+ * every engine — where the pointer gesture they replaced was visible only to a
+ * synthetic mouse, and passed twelve green WebKit shards while doing nothing at
+ * all under a finger. A mouse *drag* now expresses nothing a scroller can hear,
+ * which is why the few that remain below are the ones about something else: a
+ * sideways swipe, and a drag inside a text field.
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle } from './helpers.ts';
+import { openReview, pastTheSettle, scrollSheetContent, sheetScroll, swipeSheetAway } from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -111,215 +107,150 @@ async function openPlayerCard(page: Page) {
   await settled(page.getByTestId('sheet-grip'));
 }
 
-test.describe('pulling a sheet down', () => {
+test.describe('pushing a sheet away', () => {
   /**
-   * The contract, stated as a test — and it is the opposite of what it was.
+   * The headline, and the thing three earlier attempts could not deliver: **a
+   * card is pushed away from the middle of what you are reading.**
    *
-   * A drag on the *content* of a sheet whose content scrolls belongs to the
-   * content, from the first pixel, whether or not that content has been
-   * scrolled yet. It used to belong to the sheet while the content sat at its
-   * top, on the reasoning that a downward drag there has nothing to scroll —
-   * which is true, and which WebKit cannot act on: it decides whether a touch
-   * sequence may scroll from the first `touchmove` and never revisits it, so
-   * the sheet had to claim the gesture on a pixel or two of movement. A pixel
-   * or two of a thumb landing is noise, and an upward flick that began with a
-   * pixel of drift was refused its scroll for the whole swipe. That is the
-   * reported defect: the card does not move, and then it does on the third try.
-   *
-   * So the sheet no longer claims anything a scroller could have wanted, and
-   * `useSheetDrag` calls `preventDefault` on no touch at all. Dismissal lives
-   * on the parts that do not scroll — the grip, the header, the backdrop, Done
-   * and Escape — all of which are covered below.
-   *
-   * And it no longer depends on how much the sheet is holding. The body used to
-   * take `touch-action: none` while it had nothing to scroll, so a short sheet
-   * could be dragged shut from its content too; a card cannot know how tall it
-   * is while its requests are in flight, and a body that says `none` in that
-   * window costs the reader the whole gesture they started in it. The
-   * permission is a constant now — see `player-card-scroll.spec.ts`, which
-   * reproduces what the measurement cost.
+   * Driven by a wheel rather than a drag, and that is not a convenience. The
+   * dismissal is a scroll now, so a wheel exercises the very mechanism a thumb
+   * does — in every engine, including the one this behaviour has only ever
+   * failed on. The drags these tests used to use expressed nothing a scroller
+   * can hear, which is the same lesson as before with the sign flipped: a
+   * synthetic mouse is not a finger, and where they differ it is the mouse that
+   * is wrong.
    */
-  test('leaves a drag on the content of a scrolling sheet to the content', async ({ page }) => {
+  test('is pushed away by a scroll that starts in the middle of the card', async ({ page }) => {
     await openPlayerCard(page);
+    const opened = await sheetScroll(page);
+    expect(opened.top, 'the card did not come up to its detent').toBeGreaterThan(0);
 
-    /*
-     * The tall case, constructed rather than hoped for.
-     *
-     * Whether a given card overflows depends on how much this deployment
-     * happens to know about the player, and the demo league is thin — so a test
-     * that opened one and assumed it would scroll would pass or fail on the
-     * fixture rather than on the behaviour. Capping the body makes the body
-     * scroll, which is the only property that matters here: it is what puts
-     * `touch-action: pan-y` on the element under the finger.
-     */
-    await page.evaluate(() => {
-      (document.querySelector('.sheet-body') as HTMLElement).style.maxHeight = '160px';
-    });
-    await expect
-      .poll(async () =>
-        page.evaluate(() => {
-          const body = document.querySelector('.sheet-body') as HTMLElement;
-          return { overflows: body.scrollHeight > body.clientHeight + 1, top: body.scrollTop };
-        }),
-      )
-      .toEqual({ overflows: true, top: 0 });
-
-    const body = (await page.locator('.sheet-body').boundingBox())!;
-    const x = body.x + body.width / 2;
-    await drag(page, { x, y: body.y + 40 }, { x, y: body.y + 40 + 400 });
-    // A dismissal that fired would still be on screen right now. See the helper.
-    await pastTheSettle(page);
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-
-    /*
-     * A mouse dragged across text selects it, and a second drag that begins on
-     * a live selection is a drag-and-drop rather than a gesture — the browser
-     * cancels the pointer stream and the sheet correctly does nothing with it.
-     * That is an artefact of driving this with a mouse and not something a
-     * thumb can produce, so it is cleared rather than asserted about.
-     */
-    await page.evaluate(() => window.getSelection()?.removeAllRanges());
-
-    // And the sheet is still a sheet: the grip, which never scrolls, closes it.
-    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const gx = grip.x + grip.width / 2;
-    await drag(page, { x: gx, y: grip.y + 4 }, { x: gx, y: grip.y + 460 });
+    await swipeSheetAway(page);
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
   });
 
   /**
-   * And the same drag, once the content has actually been scrolled.
+   * And the other half of the same rule, which is the half that protects the
+   * reader: **content that has been scrolled keeps the gesture.**
    *
-   * The pair is the contract: a scroller keeps its gestures at its top and
-   * away from it alike, so the answer never depends on where the reader
-   * happened to be when they put their thumb down.
+   * Nobody wrote this rule. The card and its content are one scroller, and the
+   * card's own top is a snap position, so pulling down from halfway through a
+   * long card scrolls it back to that top and stops there. Getting it for free
+   * from the same mechanism that does the dismissal is the whole argument for
+   * the rebuild — the two behaviours cannot drift apart, because they are one
+   * behaviour.
    */
-  test('hands the same drag to the content once the content is scrolled', async ({ page }) => {
+  test('scrolls back to the top of the card and stops, rather than dismissing', async ({ page }) => {
     await openPlayerCard(page);
+    const detent = (await sheetScroll(page)).top;
+
+    // Read further into the card. Only a card with more in it than fits can
+    // show this, so it is made to have more rather than hoped to.
     await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
-      body.style.maxHeight = '160px';
-      body.scrollTop = 60;
+      const filler = document.createElement('div');
+      filler.style.height = '1400px';
+      body.append(filler);
     });
-    await expect.poll(async () => page.evaluate(() => (document.querySelector('.sheet-body') as HTMLElement).scrollTop)).toBeGreaterThan(0);
+    await scrollSheetContent(page, 600);
+    const read = await sheetScroll(page);
+    expect(read.top, 'the card would not scroll to set the case up').toBeGreaterThan(detent);
 
-    const body = (await page.locator('.sheet-body').boundingBox())!;
-    const x = body.x + body.width / 2;
-    await drag(page, { x, y: body.y + 40 }, { x, y: body.y + 40 + 400 });
-    // A dismissal that fired would still be on screen right now. See the helper.
+    /*
+     * Now pull back down, past the card's own top but not wildly past it.
+     *
+     * That distinction is the rule, and it is the reader's momentum that draws
+     * it rather than a threshold in this repository: an overshoot settles back
+     * onto the card's top, and a long continuous haul from the middle of a card
+     * carries through into a dismissal — which is what a finger does on iOS,
+     * where one drag can scroll to the top and keep going.
+     */
+    await swipeSheetAway(page, { ticks: 700 });
     await pastTheSettle(page);
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    await expect(
+      page.getByTestId('player-sheet'),
+      'a card the reader was part-way through was thrown away by one pull',
+    ).toBeVisible();
+    expect(
+      (await sheetScroll(page)).top,
+      'the card did not come to rest at its own top',
+    ).toBe(detent);
   });
 
-  test('dismisses from the grip, as it always did', async ({ page }) => {
+  test('is pushed away from the grip, as it always was', async ({ page }) => {
     await openScoringKey(page);
-    const box = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 4 }, { x, y: box.y + 420 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
   /**
-   * A sideways swipe is not a dismissal, however much it drifts.
+   * A short push comes back, and the engine decides that rather than a constant.
    *
-   * The sheet used to ask only "has this moved eight pixels, and not upwards",
-   * which is true of almost every horizontal gesture on a phone. A swipe across
-   * a card threw it away.
+   * There used to be two numbers here — 28% of the sheet's height, or half a
+   * pixel per millisecond — and a hand-written spring back when neither was
+   * met. Scroll-snap answers the same question with the reader's actual
+   * momentum, so what is checked is the outcome: a small push leaves the card
+   * exactly where it was.
+   */
+  test('comes back from a small push, and rests where it started', async ({ page }) => {
+    await openScoringKey(page);
+    const detent = (await sheetScroll(page)).top;
+
+    await swipeSheetAway(page, { ticks: 40 });
+    await pastTheSettle(page);
+    await expect(page.getByTestId('scoring-key')).toBeVisible();
+    expect((await sheetScroll(page)).top, 'the card was left resting between its two positions').toBe(detent);
+  });
+
+  /**
+   * A sideways swipe is not a dismissal, and now cannot be one.
+   *
+   * The sheet used to ask "has this moved eight pixels, and not upwards", which
+   * is true of almost every horizontal gesture on a phone, and a swipe across a
+   * card threw it away. The layer only scrolls on one axis, so a sideways
+   * movement has nowhere to go — the rule is the geometry rather than a ratio.
    */
   test('ignores a sideways swipe that drifts downwards', async ({ page }) => {
     await openPlayerCard(page);
     const box = (await page.getByTestId('player-sheet').boundingBox())!;
-    await drag(
-      page,
-      { x: box.x + 24, y: box.y + 140 },
-      { x: box.x + box.width - 24, y: box.y + 160 },
-    );
+    await drag(page, { x: box.x + 24, y: box.y + 140 }, { x: box.x + box.width - 24, y: box.y + 160 });
+    await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
   });
 
-  test('springs back from a short pull, leaving nothing behind it', async ({ page }) => {
+  /** A tap on what you can see through above the card closes it. */
+  test('closes on a tap above it, where the backdrop shows through', async ({ page }) => {
     await openScoringKey(page);
-    const box = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 4 }, { x, y: box.y + 24 }, { hold: 200 });
-    await expect(page.getByTestId('scoring-key')).toBeVisible();
+    await page.getByTestId('sheet-dismiss').click({ position: { x: 40, y: 20 } });
+    await expect(page.getByTestId('scoring-key')).toHaveCount(0);
+  });
 
-    // No stuck transform, and no class left claiming a gesture is in flight.
-    await expect
-      .poll(async () =>
-        page.evaluate(() => {
-          const sheet = document.querySelector('.sheet') as HTMLElement;
-          return {
-            transform: sheet.style.transform,
-            dragging: sheet.dataset['dragging'],
-            classes: sheet.className,
-          };
-        }),
-      )
-      .toEqual({ transform: '', dragging: 'no', classes: 'sheet' });
-
-    // And it is still a working sheet rather than a picture of one.
+  test('leaves the controls inside it tappable', async ({ page }) => {
+    await openScoringKey(page);
     await page.getByTestId('sheet-close').click();
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
-  /**
-   * A drag is not a tap.
-   *
-   * Letting go over Done at the end of a pull that sprang back used to activate
-   * it, so a reader who had just decided *not* to dismiss the sheet watched it
-   * close anyway — which reads as the threshold being random rather than as a
-   * misfire, and is worse than a gesture that does nothing.
-   */
-  test('does not activate the control a cancelled drag ended on', async ({ page }) => {
-    await openScoringKey(page);
-    const done = (await page.getByTestId('sheet-close').boundingBox())!;
-    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
-    await drag(
-      page,
-      { x: done.x + done.width / 2, y: grip.y + 2 },
-      { x: done.x + done.width / 2, y: done.y + done.height / 2 },
-      { hold: 200 },
-    );
-    await expect(page.getByTestId('scoring-key')).toBeVisible();
-  });
-
-  test('leaves the controls inside it tappable', async ({ page }) => {
-    // A tap is not a drag either: the arbitration must not cost a button.
-    await openPlayerCard(page);
-    await page.getByTestId('player-full-profile').click();
-    await expect(page.getByTestId('player-page')).toBeVisible();
-  });
-
-  /**
-   * Nothing is left over the page once the sheet has gone.
-   *
-   * A sheet is animated off the bottom of the screen and *then* unmounted, and
-   * a layer that outlives its own animation — or a backdrop that is not taken
-   * down with it — swallows the first tap the reader makes afterwards. That
-   * reads as the app having frozen, which is a worse outcome than a sheet that
-   * would not close in the first place.
-   */
   test('intercepts nothing once it has been dismissed', async ({ page }) => {
     await openPlayerCard(page);
-    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const x = grip.x + grip.width / 2;
-    await drag(page, { x, y: grip.y + 4 }, { x, y: grip.y + 460 });
+    await swipeSheetAway(page);
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     await expect(page.getByTestId('sheet-backdrop')).toHaveCount(0);
+    await expect(page.getByTestId('sheet-scroller')).toHaveCount(0);
 
     // The list underneath takes the very next tap, with nothing in between.
-    await page.getByTestId('player-search-row').nth(1).click();
+    const rows = page.getByTestId('player-search-row');
+    await rows.first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
   });
 
   /**
-   * A drag inside a text field belongs to the field.
+   * A drag inside a text field still belongs to the text field.
    *
-   * Dragging in a box you can type into moves the caret and selects; a sheet
-   * that read that as a dismissal would take the reader's text away mid-edit.
-   * Setup's two paste boxes are the whole of this case, and they are the two
-   * places in the app where a sheet holds something a thumb drags *within*.
+   * Setup's two paste boxes are the case: dragging in one moves the caret and
+   * selects, and must not move the card. Nothing arbitrates this any more and
+   * nothing needs to — a field inside a scroller keeps its own gestures the way
+   * a field anywhere else does.
    */
   test('leaves a drag inside a text field to the text field', async ({ page }) => {
     await page.goto('/');
@@ -335,34 +266,22 @@ test.describe('pulling a sheet down', () => {
     const box = (await page.getByTestId('projection-paste-input').boundingBox())!;
     const x = box.x + box.width / 2;
     await drag(page, { x, y: box.y + 8 }, { x, y: box.y + 8 + 400 });
+    await pastTheSettle(page);
     await expect(page.getByTestId('projection-paste-sheet')).toBeVisible();
 
-    // And the sheet is still a sheet: its own grip closes it.
-    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const gx = grip.x + grip.width / 2;
-    await drag(page, { x: gx, y: grip.y + 4 }, { x: gx, y: grip.y + 420 });
+    // And it is still a sheet: a scroll on it still takes it away.
+    await swipeSheetAway(page, { over: '.sheet-grip' });
     await expect(page.getByTestId('projection-paste-sheet')).toHaveCount(0);
   });
 
-  test('still dismisses with reduced motion asked for', async ({ page }) => {
+  test('still goes away with reduced motion asked for', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openScoringKey(page);
-    const box = (await page.getByTestId('sheet-grip').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 4 }, { x, y: box.y + 420 });
-    // It arrives instead of travelling; it still arrives.
+    await swipeSheetAway(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 });
 
-/**
- * The focus lifecycle — the known A-01 gap, and the shared primitive owns it.
- *
- * The sheet claimed `aria-modal="true"` and then did none of what that claims:
- * focus stayed on the row behind it, Tab walked straight out into a list the
- * reader could not see, and closing dropped focus on the document, which sends
- * the next Tab back to the top of the page.
- */
 test.describe('focus, while a sheet is open', () => {
   test('enters the dialog itself rather than its first control', async ({ page }) => {
     await openScoringKey(page);
@@ -417,9 +336,14 @@ test.describe('focus, while a sheet is open', () => {
     await expect(page.getByTestId('scoring-key-open')).toBeFocused();
   });
 
-  test('comes back to it when the backdrop closes it too', async ({ page }) => {
+  /*
+   * The backdrop is colour now and nothing else — the scroller covers it, and
+   * the transparent zone above the card is what a tap outside actually lands
+   * on. Same gesture for the reader, same outcome, different element.
+   */
+  test('comes back to it when a tap above the card closes it too', async ({ page }) => {
     await openScoringKey(page);
-    await page.getByTestId('sheet-backdrop').click({ position: { x: 10, y: 10 } });
+    await page.getByTestId('sheet-dismiss').click({ position: { x: 10, y: 10 } });
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
     await expect(page.getByTestId('scoring-key-open')).toBeFocused();
   });

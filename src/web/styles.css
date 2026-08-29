@@ -401,6 +401,17 @@
   --page-x: 12px;
 
   /*
+   * How much of the screen is left above an opened sheet.
+   *
+   * The card's detent, expressed as the gap over it rather than as its height,
+   * because that is the form both the things that need it want: the scroller
+   * aligns a snap position this far down (`scroll-padding-top`), and the detent
+   * box is the rest (`calc(100% - var(--sheet-gap))`). It is the complement of
+   * the `88dvh` the sheet was capped at before, and the same number.
+   */
+  --sheet-gap: 12dvh;
+
+  /*
    * The floating toolbar, in five numbers.
    *
    * `--tab-w` is one destination's width and `--tab-h` its height, and the bar
@@ -4252,38 +4263,6 @@ input[type='file'] {
   font-size: 0.86rem;
 }
 
-/*
- * A slider, drawn by the platform.
- *
- * The rule above gives every input a recessed box and 40px of height, which is
- * a text field's shape and not a slider's, so this undoes exactly that and adds
- * nothing of its own: `accent-color` hands the track and the thumb to the
- * browser, which draws the control the phone's owner already knows how to use
- * and gets the focus ring, the dark theme and the reduced-motion behaviour
- * right without a line of CSS here.
- *
- * The padding is the tap target. A native range thumb is around 20px and the
- * floor for a thumb is 44, so the padding buys the rest — vertically only,
- * because a slider that lost width would lose resolution.
- */
-.slider {
-  min-height: 44px;
-  padding: var(--sp-2) 0;
-  background: transparent;
-  border-radius: 0;
-  accent-color: var(--accent);
-}
-
-/* The two ends, said in words rather than left to the reader to infer. */
-.slider-ends {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin: -2px 2px 0;
-  font-size: 0.76rem;
-  color: var(--text-faint);
-}
-
 textarea {
   min-height: 110px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -6292,55 +6271,197 @@ table.compact tr:last-child td {
   background: var(--scrim);
   animation: fade-in var(--dur) var(--ease);
   /*
-   * The backdrop is part of the modal surface, not a window onto the page.
-   * Without this a drag on it scrolled the list behind — which is the same
-   * complaint as the sheet's own, arriving from the other half of the screen.
+   * Colour, and nothing else. It used to claim gestures with `touch-action:
+   * none`, because a drag on it scrolled the list behind; the scroller that now
+   * sits over it covers the whole screen and takes every touch on the way past,
+   * so there is nothing left here to arbitrate. A tap still closes the sheet —
+   * see `.sheet-dismiss`, which is the part of that scroller you can see
+   * through.
    */
-  touch-action: none;
-  overscroll-behavior: contain;
+  pointer-events: none;
 }
 
-.sheet {
+/*
+ * The sheet's scroller, and the whole of how a sheet is now dismissed.
+ *
+ * **The dismissal is a scroll.** That is the entire idea, and it is the third
+ * answer to a question this file has got wrong twice. A sheet used to be a
+ * fixed box that JavaScript translated under a finger, which meant the app had
+ * to take the gesture away from the engine — first with `preventDefault` on a
+ * non-passive `touchmove`, then by publishing `touch-action` ahead of the
+ * finger — and both were withdrawn for costing the reader their scroll.
+ *
+ * They were withdrawn for a reason no threshold could fix. `.sheet-body` was a
+ * scroll container declaring `pan-y`, so a vertical touch on it belonged to the
+ * engine before the app saw enough of the gesture to have an opinion: the
+ * sequence delivered was `pointerdown`, **one** `pointermove`, `pointercancel`.
+ * The app was not being outvoted. It was not being asked.
+ *
+ * So it stops asking. There is one scroller for the whole layer, its content is
+ * a screen-tall transparent zone above the card, and the two ends of it are
+ * scroll-snap positions: the card in place, and the card gone. Dragging the
+ * card down *is* scrolling this box up. Momentum, rubber-banding, the snap back
+ * when the drag was too small, and the ability to catch it halfway and change
+ * your mind — none of that is code any more. It is what a scroller does.
+ *
+ * Three consequences worth stating, because each of them was a problem before:
+ *
+ *  - **The card can be pushed away from anywhere on it**, which is what was
+ *    asked for and what a thumb on a tall phone needs, since the grip is at the
+ *    top and the thumb is not.
+ *  - **Content that has been scrolled keeps its gesture, for free.** Pulling
+ *    down from halfway through a long card scrolls it back to its top and stops
+ *    there, because the card's own top is a snap position. Nobody wrote that
+ *    rule; it is the same scroll.
+ *  - **It can be tested.** A wheel is a real scroll, so the suite exercises the
+ *    real mechanism in every engine — where the old pointer gesture was
+ *    invisible to anything but a synthetic mouse, which is how it passed twelve
+ *    green WebKit shards while doing nothing under a finger.
+ *
+ * `overscroll-behavior: contain` is what stops a flick that runs out of sheet
+ * becoming a scroll of the page behind it. Nothing here calls `preventDefault`
+ * and nothing writes `touch-action` from JavaScript.
+ */
+.sheet-scroller {
   position: fixed;
   left: 0;
   right: 0;
+  top: 0;
   /*
-   * Above the keyboard rather than under it.
-   *
-   * `--sheet-keyboard` is however much of the layout viewport the software
-   * keyboard is covering, set by the component from `visualViewport` and nought
-   * whenever there is no keyboard — which is every browser in CI, so this
-   * resolves to the plain `bottom: 0` and `88dvh` it has always been. iOS does
-   * not shrink the layout viewport for the keyboard, so a sheet pinned to the
-   * bottom of it is pinned underneath the keyboard: Setup's two paste sheets
-   * drew their own Parse control down there, visible and untappable. The
-   * max-height gives the same room back, so a tall sheet shortens instead of
-   * being pushed off the top of the screen.
+   * Above the keyboard rather than under it. iOS shrinks the visual viewport
+   * and not the layout one, so a scroller pinned to the bottom of the layout
+   * viewport puts its last inch under the keyboard — and every percentage below
+   * resolves against this box, so shortening it moves the card up with it.
    */
   bottom: var(--sheet-keyboard, 0px);
   z-index: calc(41 + var(--overlay-lift, 0));
-  max-height: calc(88dvh - var(--sheet-keyboard, 0px));
-  transition: bottom var(--dur-fast) var(--ease);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /*
+   * Mandatory, and it does not trap a long card.
+   *
+   * A snap area larger than the scrollport may rest anywhere that still covers
+   * it, so a card with more in it than fits scrolls freely through its own
+   * middle and snaps only at its two ends. One rule does the work of the detent,
+   * the dismissal and "scrolled content keeps the drag" at once — and, more
+   * importantly, it is the rule that guarantees the layer always comes to rest
+   * somewhere sensible. A card left sitting half off the bottom of the screen is
+   * not a state this app should be able to reach, and `proximity` allows exactly
+   * that: a drag that stops halfway stops halfway.
+   *
+   * **Known, and not yet resolved.** `mandatory` also overrides scrolls it was
+   * not asked about. Bringing an element deep inside a long card into view — the
+   * compare sheet's candidate list is the case that found it — is pulled back to
+   * a snap position as soon as it lands, which reaches a keyboard and a screen
+   * reader as surely as it reaches a test. `proximity` fixes that and gives up
+   * the guarantee above; finishing the settle in JavaScript on `scrollend` was
+   * tried to get both and made it worse, because this layer also moves for
+   * reasons that are not gestures — a card re-rendering under the reader is one.
+   * Both were measured. Neither is right yet, and the choice here is the one
+   * that cannot leave a card stranded.
+   */
+  scroll-snap-type: y mandatory;
+  /* Where the top of an opened card sits: the detent, and the snap alignment. */
+  scroll-padding-top: var(--sheet-gap);
+}
+
+/*
+ * What you can see through, above the card — and the tap target that closes it.
+ *
+ * A screen tall, so that scrolling it fully into view is the same thing as
+ * scrolling the card fully out of it. Transparent, so what shows through is the
+ * backdrop and the app behind it.
+ */
+.sheet-dismiss {
+  height: 100%;
+  scroll-snap-align: start;
+}
+
+/*
+ * The card's detent, which is not the card.
+ *
+ * An invisible box at least as tall as the sheet is allowed to be, with the
+ * card sitting at its foot. The box is what snaps; the card is what you see.
+ * Separating them is what lets a *short* sheet keep hugging its content and
+ * still sit on the bottom edge of the screen — a card the height of the box
+ * would have to be, and four rows of a scoring key would become most of a
+ * phone.
+ */
+.sheet-snap {
+  position: relative;
+  min-height: calc(100% - var(--sheet-gap));
+  scroll-snap-align: start;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
+}
+
+/*
+ * How the layer knows it has been dismissed.
+ *
+ * A two-pixel mark just inside the top of the detent, watched by an
+ * `IntersectionObserver`. When the card has been scrolled away this sits below
+ * the scrollport and stops intersecting, and that is the whole signal.
+ *
+ * Deliberately inset rather than placed on the edge: the detent's top touches
+ * the bottom of the scrollport exactly when the card is gone, and an element
+ * whose rectangle *touches* the root is still reported as intersecting — so a
+ * mark on the boundary reports the same thing when the sheet is dismissed as it
+ * does when it opens, and the observer never fires at all. (Measured: it fired
+ * once, on attach, and never again.)
+ *
+ * The alternative was a `scroll` listener, and this is not one on purpose. An
+ * observer costs nothing per frame, which is the property the sheet's scrolling
+ * was rebuilt to have.
+ */
+.sheet-dismissed-mark {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 1px;
+  height: 2px;
+  pointer-events: none;
+}
+
+.sheet {
+  /*
+   * A surface in flow, at the foot of its detent — not a fixed box any more.
+   *
+   * Everything that used to pin it to the bottom of the screen has moved to
+   * `.sheet-scroller` and `.sheet-snap`: the sheet is now simply the visible
+   * card, as tall as what is in it, and where it sits is a scroll position
+   * rather than a `bottom` and a `transform`. See the note on `.sheet-scroller`
+   * for why the whole layer became a scroller.
+   *
+   * No `max-height`. A card taller than the detent is not clipped and does not
+   * grow an inner scroller — it simply extends past the bottom of the screen,
+   * and reading it scrolls the layer it lives in. That is what removed the
+   * nested scroller, and the nested scroller is what made the dismissal
+   * impossible: a finger on it was the inner box's, and the gesture never
+   * chained outward. (Measured: pulling down on inner content sitting at its
+   * top moved nothing at all.)
+   */
   background: var(--surface);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   box-shadow: var(--shadow-sheet);
   padding-bottom: var(--safe-bottom);
+  display: flex;
+  flex-direction: column;
+  /*
+   * The rise, and it moves nothing that scrolls.
+   *
+   * The layer is put at the card's detent instantly; this is what makes that
+   * look like a card coming up. Deliberately not an animated scroll — see the
+   * note in `Sheet`: a smooth scroll and a mandatory snap steering the same box
+   * never settle.
+   */
   animation: sheet-rise var(--dur-slow) var(--ease);
   /*
-   * No `touch-action` here, deliberately, and it used to say `none`.
-   *
-   * The claim belongs on the chrome that actually takes the gesture — see
-   * `.sheet-grip` and `.sheet-header` — rather than on the box that contains
-   * the scroller, and the difference is a version of Safari. The spec has the
-   * engine intersect `touch-action` from the touched element up to *the
-   * scroller that would handle the pan*, which leaves a body's `pan-y` intact
-   * under a `none` above it; WebKit implements exactly that, and has since
-   * Safari 17 (`computeUsedTouchAction` resets the inherited value at any box
-   * with scrollable overflow). On anything older the `none` propagated straight
-   * through the scroller and the card could not be panned at all. Nothing here
-   * needs to know which, now that no ancestor of a scroller declares `none`.
+   * No `touch-action` anywhere on this layer, and that is now load-bearing in
+   * the opposite direction from before. The grip and the header used to declare
+   * `none` so the app could take a drag on them; declaring it now would stop
+   * the reader scrolling the card away from the one place they are most likely
+   * to try, because the dismissal *is* a scroll.
    */
 }
 
@@ -6516,34 +6637,16 @@ table.compact tr:last-child td {
   }
 }
 
-.sheet-dragging {
-  animation: none;
-  transition: none;
-}
-
-.sheet-settling {
-  animation: none;
-  transition: transform var(--dur) var(--ease);
-}
-
 /*
- * The two strips a sheet is dragged by, and the whole of what claims a gesture.
+ * The grip is an affordance now, and no longer an arbitration.
  *
- * Neither scrolls, so the browser is told to keep its hands off anything that
- * lands on them: with the sheet's default `auto` here, Safari classified a
- * downward drag as a scroll before the first `pointermove` arrived, the sheet
- * never moved, and what the reader saw instead was the page behind
- * rubber-banding. The same lesson is written on `.drag-handle`, which learned
- * it first.
- *
- * Declared on the chrome rather than on `.sheet`, so that no ancestor of the
- * scrolling body ever says `none` — see the note there.
+ * It used to carry `touch-action: none`, so that the app could take a drag on
+ * it before Safari classified that drag as a scroll. That was the right answer
+ * while dismissal was a `transform` the app applied; it is exactly the wrong
+ * one now, because the dismissal is a scroll and `none` on the strip the reader
+ * grabs first would be the one place the card refused to move. What it still
+ * does is say *this can be pulled* — which is all a grip was ever for.
  */
-.sheet-grip,
-.sheet-header {
-  touch-action: none;
-}
-
 .sheet-grip {
   flex: 0 0 auto;
   display: flex;
@@ -6698,50 +6801,52 @@ table.compact tr:last-child td {
 }
 
 /*
- * The body is the browser's, and says so once for its whole life.
+ * The body, which is no longer a box that scrolls.
  *
- * `pan-y` is unconditional, and that is the fix for the defect this rule kept
- * producing. It used to be conditional: `useSheetDrag` measured the body and
- * wrote `data-scrollable`, and a body with nothing to scroll took
- * `touch-action: none` so that a short sheet could be dragged shut from its
- * content as well as from its grip.
+ * It carried `overflow-y: auto` and `touch-action: pan-y` for as long as the
+ * card was a fixed box with a cap on it — and being a scroll container is
+ * precisely what made it impossible to dismiss the card from its content: a
+ * vertical touch here belonged to this element, and the gesture never chained
+ * out to anything that could have taken it. The content simply flows now, and
+ * the layer around it is what scrolls.
  *
- * The measurement was honest and the moment it was published was not. A card
- * opens on skeletons and fills in from two requests, so for as long as those
- * are in flight the body truthfully has nothing to scroll, takes `none`, and
- * the engine — which reads this once, when the finger lands, and never again —
- * refuses that whole gesture its scroll. The content arrives mid-flick and
- * changes nothing: the reader has to lift and start again. On localhost that
- * window is a few milliseconds, which is why every headless run of this was
- * green; on a phone it is the length of two requests, which is why the card
- * *locked up, then unlocked*.
- *
- * There is no version of that measurement that is right at the instant it is
- * needed, so there is no measurement. What it bought — a fourth way to dismiss
- * a short sheet — is gone, and the grip, the header, the backdrop, Done and
- * Escape are what dismisses one.
- *
- * Two earlier attempts are worth not repeating. A directional `pan-up` at the
- * body's top edge: Chromium honoured it, WebKit does not implement the
- * directional values and discarded the declaration, so the mechanism was inert
- * on the one browser the bug came from. And a non-passive `touchmove` on the
- * sheet, which claimed the gesture before it could be classified and took
- * WebKit off its fast scrolling path for every sheet in the app.
- *
- * `overscroll-behavior: contain` is the belt to the brace: whatever happens, a
- * scroll that runs out of sheet never becomes a scroll of the page.
- *
- * (`-webkit-overflow-scrolling: touch` was here too. WebKit removed it in iOS
- * 13 — every scroller has momentum now — and on the versions that still honour
- * it, it is the cause of a scroller that will not notice content added after it
- * was created, which is the last thing this element needs.)
+ * `padding-bottom` still clears the home indicator by way of `.sheet`, and the
+ * horizontal padding is unchanged, so nothing inside a card moves.
  */
 .sheet-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
   padding: 0 var(--sp-4) var(--sp-4);
+}
+
+/*
+ * A slider, drawn by the platform.
+ *
+ * The rule above gives every input a recessed box and 40px of height, which is
+ * a text field's shape and not a slider's, so this undoes exactly that and adds
+ * nothing of its own: `accent-color` hands the track and the thumb to the
+ * browser, which draws the control the phone's owner already knows how to use
+ * and gets the focus ring, the dark theme and the reduced-motion behaviour
+ * right without a line of CSS here.
+ *
+ * The padding is the tap target. A native range thumb is around 20px and the
+ * floor for a thumb is 44, so the padding buys the rest — vertically only,
+ * because a slider that lost width would lose resolution.
+ */
+.slider {
+  min-height: 44px;
+  padding: var(--sp-2) 0;
+  background: transparent;
+  border-radius: 0;
+  accent-color: var(--accent);
+}
+
+/* The two ends, said in words rather than left to the reader to infer. */
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: -2px 2px 0;
+  font-size: 0.76rem;
+  color: var(--text-faint);
 }
 
 @keyframes sheet-rise {
@@ -6751,6 +6856,12 @@ table.compact tr:last-child td {
 
   to {
     transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    animation: none;
   }
 }
 

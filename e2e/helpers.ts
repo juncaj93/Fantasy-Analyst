@@ -95,6 +95,68 @@ export async function pastTheSettle(page: Page): Promise<void> {
 }
 
 /**
+ * Push an open sheet away, the way a thumb does — with a scroll.
+ *
+ * **A mouse drag cannot do this any more, and that is the point.** A sheet is a
+ * scroller whose two ends are the card in place and the card gone, so dismissing
+ * one *is* scrolling it; `page.mouse.down()` and a series of moves is not a
+ * scroll and never was, so the drags these specs used to use now express
+ * nothing. A wheel is a real scroll, which means it exercises the same mechanism
+ * a finger does, in every engine — where the old pointer gesture was visible
+ * only to a synthetic mouse, and passed twelve green WebKit shards while doing
+ * nothing at all under a thumb.
+ *
+ * `over` is where to put the pointer first: the middle of the card by default,
+ * which is the case worth checking most often, because it is the one the old
+ * gesture could not do.
+ */
+export async function swipeSheetAway(
+  page: Page,
+  { over = '.sheet', ticks = 1200 }: { over?: string; ticks?: number } = {},
+): Promise<void> {
+  await wheelOverSheet(page, over, -ticks);
+}
+
+/**
+ * Put the pointer somewhere on the open sheet and turn the wheel.
+ *
+ * The aim is clamped into the scrollport, and that is not defensive tidiness: a
+ * card taller than the screen has its top *above* the viewport once the reader
+ * has scrolled into it, so a point measured from the card's own box lands off
+ * screen and the wheel is delivered to nothing at all. Which looks exactly like
+ * the app ignoring the gesture.
+ */
+async function wheelOverSheet(page: Page, over: string, by: number): Promise<void> {
+  const target = (await page.locator(over).first().boundingBox())!;
+  const port = (await page.locator('.sheet-scroller').boundingBox())!;
+  const wanted = target.y + Math.min(target.height / 2, 120);
+  const y = Math.min(Math.max(wanted, port.y + 8), port.y + port.height - 8);
+  await page.mouse.move(target.x + target.width / 2, y);
+  await page.mouse.wheel(0, by);
+  await page.waitForTimeout(700);
+}
+
+/**
+ * Scroll the content of an open sheet, without going near either end of it.
+ *
+ * The card and its content share one scroller now, so "read further down the
+ * card" and "push the card away" are the same axis — which is exactly the
+ * property that makes a sheet feel native, and exactly the thing a test has to
+ * be careful to tell apart.
+ */
+export async function scrollSheetContent(page: Page, by: number): Promise<void> {
+  await wheelOverSheet(page, '.sheet', by);
+}
+
+/** How far the open sheet's layer is scrolled, and how far it could be. */
+export async function sheetScroll(page: Page): Promise<{ top: number; max: number }> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.sheet-scroller') as HTMLElement;
+    return { top: Math.round(el.scrollTop), max: Math.round(el.scrollHeight - el.clientHeight) };
+  });
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one

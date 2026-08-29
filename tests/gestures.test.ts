@@ -25,8 +25,6 @@ import {
   completesBack,
   dimOpacity,
   engageDecision,
-  sheetDecision,
-  sheetDismisses,
   startsAtEdge,
   velocityOver,
 } from '../src/web/gestures.ts';
@@ -104,55 +102,19 @@ describe('when a swipe completes the navigation', () => {
   });
 });
 
-describe('when a sheet is dismissed', () => {
-  const height = 400;
-
-  it('dismisses on a long pull', () => {
-    expect(sheetDismisses(height * 0.5, height, 0)).toBe(true);
-  });
-
-  it('dismisses on a fast flick down', () => {
-    expect(sheetDismisses(40, height, 1.2)).toBe(true);
-  });
-
-  it('springs back from a small pull', () => {
-    expect(sheetDismisses(20, height, 0.05)).toBe(false);
-  });
-});
-
-/**
- * The rule that decides whether a movement on a sheet is a dismissal.
+/*
+ * The sheet's own arithmetic used to live here — how far down was far enough,
+ * how fast was a flick, and whether a movement counted as a dismissal at all.
  *
- * One question now, not two. There used to be a weaker one asked on the very
- * first pixel, because a non-passive `touchmove` listener had to tell WebKit
- * immediately whether to scroll — and a pixel of a thumb landing is not enough
- * to tell an upward flick from a downward pull, so the first swipe of a scroll
- * was regularly refused. The listener is gone and the question with it: content
- * that can scroll keeps its gestures, and this decides the rest.
+ * All of it is gone, and not because it was wrong. A sheet is a scroller now
+ * and its dismissal is a scroll, so the thresholds are the engine's: how far a
+ * flick carries, where it settles, and whether letting go halfway springs back
+ * or completes are answered by scroll-snap rather than by three constants and a
+ * ratio. There is no arithmetic left to test without a browser, and what there
+ * is to check — that the card goes when pushed and stays when the content under
+ * the finger was scrolled — is checked with real scrolls in
+ * `e2e/sheet-interaction.spec.ts`.
  */
-describe('what a movement on a sheet is', () => {
-  it('waits while there is not enough of it to tell', () => {
-    expect(sheetDecision(0, 0)).toBe('wait');
-    expect(sheetDecision(ENGAGE_DISTANCE - 1, ENGAGE_DISTANCE - 1)).toBe('wait');
-  });
-
-  it('is a drag once downward clearly beats sideways', () => {
-    expect(sheetDecision(4, 40)).toBe('drag');
-    expect(sheetDecision(0, 20)).toBe('drag');
-  });
-
-  it('releases a sideways swipe that happened to drift downwards', () => {
-    // The reported bug: a swipe across a row of chips threw the sheet away.
-    expect(sheetDecision(180, 9)).toBe('release');
-    expect(sheetDecision(-180, 9)).toBe('release');
-    expect(sheetDecision(20, 20 / DIRECTION_RATIO)).toBe('release');
-  });
-
-  it('never reads an upward drag as a dismissal, however large', () => {
-    expect(sheetDecision(0, -300)).toBe('release');
-    expect(sheetDecision(2, -40)).toBe('release');
-  });
-});
 
 describe('how fast the finger was going', () => {
   it('is nothing at all when there is only one reading', () => {
