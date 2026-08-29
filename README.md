@@ -237,17 +237,18 @@ Week 1+ recommendation can be diagnosed from the file rather than from
 Cloudflare, GitHub and D1. Reading it runs no cron, refreshes no provider and
 writes nothing. See [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md).
 
-**Flagged** — the third row in the same group, and the only one that holds
-something from before you got there. A small flag sits in the corner of every
-screen: tap it and the screen is flagged, with a one-line note if you have one
-and nothing at all if you do not — the flag is written down before the strip
-appears, so ignoring it keeps it. **Setup → This app → Flagged** lists
-everything, newest first, deletes them one at a time, and copies the whole queue
-as plain text ready to paste into a chat — then *asks* whether to clear it,
-because you may have copied it only to look at it. It records the destination,
-the recommendation you had last looked at, live or demo, the theme, the width
-and the shell; it deliberately does not read the screen's own title, because one
-of those titles is your league's name. Nothing is uploaded. See
+**Feedback** — the last two rows in the same group, and the only part of the
+support loop that is just words. **Add feedback** unfolds a one-line field:
+type what looks wrong, press Save, and the row hands your own sentence back
+while the **Feedback** row underneath counts one higher. That row opens the
+list — every note, newest first, deletable one at a time, with **Copy all** to
+put the whole queue on the clipboard as plain text ready to paste into a chat;
+it then *asks* whether to clear it, because you may have copied it only to look
+at it. A note carries your words, the time, and four session facts — live or
+demo, the theme, the width, and Home Screen app or browser tab. It records
+nothing about which screen you were on, because nothing asks you to be on one:
+there is no per-screen trigger and nothing persistent anywhere in the app.
+Nothing is uploaded. See
 [docs/FEEDBACK_CAPTURE.md](docs/FEEDBACK_CAPTURE.md).
 
 **Setup** — the whole configuration experience in plain language: connect
@@ -351,7 +352,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/MOCK_DRAFT.md](docs/MOCK_DRAFT.md) | the practice draft: how a bot manager picks, where the state lives, the two refusals, and what deletes it |
 | [docs/SUPPORT_SNAPSHOT.md](docs/SUPPORT_SNAPSHOT.md) | capturing the state behind a recommendation, replaying it deterministically, and turning a real case into a regression fixture |
 | [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md) | whether what the app knew was healthy and current: the source inventory, the freshness policy, the scheduled-run ledger and what a support snapshot carries |
-| [docs/FEEDBACK_CAPTURE.md](docs/FEEDBACK_CAPTURE.md) | flagging a screen from anywhere in the app: what one tap records, what it refuses to record, where the control lives and every place it does not |
+| [docs/FEEDBACK_CAPTURE.md](docs/FEEDBACK_CAPTURE.md) | writing feedback down from Settings: what a note records, what it refuses to record, and why there is nothing persistent anywhere in the app |
 | [docs/MODEL_INTEGRITY.md](docs/MODEL_INTEGRITY.md) | the correctness audit: findings, invariants, anomaly detection |
 | [docs/PROJECTION_V2.md](docs/PROJECTION_V2.md) | the market-anchored usage model, evaluated side by side and consumed by nothing |
 | [docs/STATUS.md](docs/STATUS.md) | what is built, limitations, what is next |

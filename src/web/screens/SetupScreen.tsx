@@ -26,7 +26,7 @@ import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
-import { FlaggedRow, FlaggedScreen } from '../components/feedbackQueue.tsx';
+import { FeedbackRows, FlaggedScreen } from '../components/feedbackQueue.tsx';
 
 import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
@@ -109,7 +109,7 @@ const PANEL_TITLES: Record<Exclude<Panel, null>, string> = {
   repair: 'Help my scores',
   review: 'Review',
   'data-health': 'Data health',
-  flagged: 'Flagged',
+  flagged: 'Feedback',
 };
 
 export function SetupScreen({
@@ -275,10 +275,11 @@ export function SetupScreen({
   }
 
   /*
-   * The flag queue draws its own pushed screen, for the reason the two above
-   * do: its subtitle counts what is in it, and the count changes underneath as
-   * entries are deleted — so the generic `PushScreen` below would mean passing
-   * a live number up through a component with no business knowing about it.
+   * The feedback queue draws its own pushed screen, for the reason the two
+   * above do: its subtitle counts what is in it, and the count changes
+   * underneath as entries are deleted — so the generic `PushScreen` below would
+   * mean passing a live number up through a component with no business knowing
+   * about it.
    */
   if (open === 'flagged') {
     return <FlaggedScreen onBack={() => setOpen(null)} />;
@@ -424,17 +425,20 @@ export function SetupScreen({
         <DataHealthRow onOpen={() => setOpen('data-health')} />
         <SupportSnapshotRow leagues={leagues} />
         {/*
-          Everything flagged from the floating control, last of the three.
+          Writing something down, and the list of what has been written.
 
-          The support loop reads downwards: whether the data was healthy, the
-          state behind one recommendation, and then the list of everything that
-          looked wrong in passing. This one is last because it is the only one
-          that holds something from before the reader arrived here — it is the
-          inbox, and an inbox belongs at the bottom of the tools rather than
-          above them. Never in the taskbar, for the same reason as the two
-          above it — §9.
+          The support loop reads downwards and ends here: whether the data was
+          healthy, the state behind one recommendation, and then the plain words
+          for everything those two cannot express. Last because it is the only
+          part of the loop that holds something from before the reader arrived,
+          and because it is the one they will use without a complaint in hand.
+
+          The action is a row on this screen and nowhere else — no per-screen
+          trigger, nothing floating over the app, and never in the taskbar (§9,
+          §16). Feedback is a thing the owner sits down to write, in the place
+          the app keeps its tools, next to the list it goes into.
         */}
-        <FlaggedRow onOpen={() => setOpen('flagged')} />
+        <FeedbackRows onOpen={() => setOpen('flagged')} />
       </ListGroup>
 
       {/*

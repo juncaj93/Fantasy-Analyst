@@ -18,7 +18,6 @@ import {
   WaiverIcon,
 } from './components/icons.tsx';
 import { InstallPrompt } from './components/install.tsx';
-import { FeedbackCapture } from './components/feedbackCapture.tsx';
 import { CONTEXT_BY_TAB, readSupportContext, rememberSupportContext } from './supportContext.ts';
 import { DemoIndicator, useDemoWorld } from './demo/DemoIndicator.tsx';
 import { useKeyboardOpen } from './viewport.ts';
@@ -358,19 +357,6 @@ export function App() {
           />
         ) : null}
       </main>
-
-      {/*
-        Flagging something, from wherever the reader was standing.
-
-        Drawn here for the reason the demo indicator is: it belongs to every
-        screen, so no screen should have to know about it and no screen can
-        forget it. It is handed the destination's own word rather than reading
-        the screen, because that word is the one thing about "where was I" that
-        is an enum in this repository and can therefore never turn into an
-        identity — `TeamScreen` heads itself with the league's name. See
-        `components/feedbackCapture.tsx` for why it floats where it does.
-      */}
-      <FeedbackCapture screen={TABS.find((t) => t.id === tab)?.label ?? 'Fantasy Analyst'} />
 
       <FloatingToolbar
         tabs={tabs}

@@ -19,7 +19,6 @@ import {
   clearQueue,
   describeWhen,
   formatQueue,
-  noteFlag,
   readQueue,
   removeFlag,
   writeQueue,
@@ -63,8 +62,7 @@ const AUGUST = Date.UTC(2026, 7, 28, 20, 41, 7);
 const env = (over: Partial<CaptureEnv> = {}): CaptureEnv => ({
   id: 'flag-1',
   now: AUGUST,
-  screen: 'Team',
-  decision: 'Waivers',
+  note: 'the bench total reads higher than the starters',
   world: 'Live',
   theme: 'Dark',
   width: 390,
@@ -73,60 +71,70 @@ const env = (over: Partial<CaptureEnv> = {}): CaptureEnv => ({
   ...over,
 });
 
-const flag = (over: Partial<FlagEntry> = {}): FlagEntry => ({ ...buildFlag(env()), ...over });
+const flag = (over: Partial<FlagEntry> = {}): FlagEntry => ({ ...buildFlag(env())!, ...over });
 
-describe('what one tap writes down', () => {
-  it('records where the reader was, and how they were looking at it', () => {
+describe('what a saved note is', () => {
+  it('records the words and the session they were written in', () => {
     const entry = buildFlag(env());
 
     expect(entry).toEqual({
       id: 'flag-1',
       at: AUGUST,
-      screen: 'Team',
-      decision: 'Waivers',
       world: 'Live',
       theme: 'Dark',
       viewport: '390×844',
       display: 'Home Screen app',
-      note: null,
+      note: 'the bench total reads higher than the starters',
     });
   });
 
-  it('starts with no note, because the tap is the whole of the interaction', () => {
-    expect(buildFlag(env()).note).toBeNull();
-  });
-
-  it('says which shell it was in, since half of what only happens to one person is that', () => {
-    expect(buildFlag(env({ standalone: false })).display).toBe('Browser tab');
-  });
-
-  it('rounds the glass to whole pixels, because a fractional viewport is a zoom artefact', () => {
-    expect(buildFlag(env({ width: 389.6, height: 843.2 })).viewport).toBe('390×843');
-  });
-
-  it('has no decision when the reader had not looked at one', () => {
-    expect(buildFlag(env({ decision: null })).decision).toBeNull();
-    expect(buildFlag(env({ decision: undefined })).decision).toBeNull();
-  });
-
   /*
-   * The property the whole design rests on: nothing that could identify a
-   * league, a manager or a person can reach this record, because every field is
-   * either a number about the glass or a word the app chose for itself.
+   * The whole shape of the redesign, stated as an assertion: nothing about
+   * where in the app the owner was standing reaches the record, because the
+   * action is on the Settings page and nothing asks them to be anywhere.
    */
-  it('carries no identity, because there is no field an identity could arrive in', () => {
-    const entry = buildFlag(env());
+  it('records nothing about which screen anybody was on', () => {
+    const entry = buildFlag(env())!;
     expect(Object.keys(entry).sort()).toEqual([
       'at',
-      'decision',
       'display',
       'id',
       'note',
-      'screen',
       'theme',
       'viewport',
       'world',
     ]);
+    /*
+     * The keys above are the whole record, so this is the second half of the
+     * same claim rather than a broader one: nothing the app calls a
+     * destination reaches any field but the owner's own sentence. `display`
+     * legitimately says `Home Screen app`, so the note is set aside and
+     * everything else is read.
+     */
+    const { note: _note, ...rest } = entry;
+    expect(JSON.stringify(rest)).not.toMatch(/\b(Draft|Team|Waivers|Matchup|Trades|Players|Setup)\b/);
+  });
+
+  it('refuses a note with nothing in it, so the queue can never hold an empty entry', () => {
+    expect(buildFlag(env({ note: '' }))).toBeNull();
+    expect(buildFlag(env({ note: '   ' }))).toBeNull();
+    expect(buildFlag(env({ note: '\n\t ' }))).toBeNull();
+  });
+
+  it('stores the note cleaned, not raw', () => {
+    expect(buildFlag(env({ note: '  two   words\nover lines  ' }))!.note).toBe('two words over lines');
+  });
+
+  it('says which shell it was in, since half of what only happens to one person is that', () => {
+    expect(buildFlag(env({ standalone: false }))!.display).toBe('Browser tab');
+  });
+
+  it('rounds the glass to whole pixels, because a fractional viewport is a zoom artefact', () => {
+    expect(buildFlag(env({ width: 389.6, height: 843.2 }))!.viewport).toBe('390×843');
+  });
+
+  it('names a demo world as one, so a note about fixtures reads as one', () => {
+    expect(buildFlag(env({ world: 'Demo: sunday-morning' }))!.world).toBe('Demo: sunday-morning');
   });
 });
 
@@ -135,7 +143,7 @@ describe('the note', () => {
     expect(cleanNote('the top of\nthe board\tlooks wrong')).toBe('the top of the board looks wrong');
   });
 
-  it('is null when it is empty, so skipping and typing spaces read the same', () => {
+  it('is null when it is empty, so typing nothing and typing spaces read the same', () => {
     expect(cleanNote('')).toBeNull();
     expect(cleanNote('   ')).toBeNull();
     expect(cleanNote(null)).toBeNull();
@@ -146,32 +154,10 @@ describe('the note', () => {
     expect(cleanNote('x'.repeat(1_000))).toHaveLength(MAX_NOTE);
   });
 
-  it('is attached after the fact, to a flag that is already saved', () => {
-    const storage = new FakeStorage();
-    addFlag(flag({ id: 'a' }), storage);
-
-    expect(readQueue(storage)[0]?.note).toBeNull();
-    noteFlag('a', '  DOG column is blank  ', storage);
-    expect(readQueue(storage)[0]?.note).toBe('DOG column is blank');
-  });
-
-  it('can be taken off again', () => {
-    const storage = new FakeStorage();
-    addFlag(flag({ id: 'a', note: 'wrong' }), storage);
-    noteFlag('a', '', storage);
-    expect(readQueue(storage)[0]?.note).toBeNull();
-  });
-
-  it('leaves the other flags alone', () => {
-    const storage = new FakeStorage();
-    addFlag(flag({ id: 'a', at: 1_000 }), storage);
-    addFlag(flag({ id: 'b', at: 2_000 }), storage);
-    noteFlag('b', 'this one', storage);
-
-    expect(readQueue(storage).map((e) => [e.id, e.note])).toEqual([
-      ['b', 'this one'],
-      ['a', null],
-    ]);
+  it('keeps the punctuation somebody typed, because it is their sentence', () => {
+    expect(cleanNote('why is "Ike" ranked below him? — 3rd week running')).toBe(
+      'why is "Ike" ranked below him? — 3rd week running',
+    );
   });
 });
 
@@ -182,7 +168,7 @@ describe('the queue', () => {
     expect(readQueue(storage).map((e) => e.id)).toEqual(['new', 'old']);
   });
 
-  it('puts the newest flag at the front', () => {
+  it('puts the newest note at the front', () => {
     const storage = new FakeStorage();
     addFlag(flag({ id: 'a', at: 1_000 }), storage);
     addFlag(flag({ id: 'b', at: 2_000 }), storage);
@@ -242,11 +228,11 @@ describe('the queue', () => {
 
   it('replaces an entry rather than doubling it, if an id somehow repeats', () => {
     const storage = new FakeStorage();
-    addFlag(flag({ id: 'a', screen: 'Team' }), storage);
-    addFlag(flag({ id: 'a', screen: 'Waivers' }), storage);
+    addFlag(flag({ id: 'a', note: 'first' }), storage);
+    addFlag(flag({ id: 'a', note: 'second' }), storage);
 
     expect(readQueue(storage)).toHaveLength(1);
-    expect(readQueue(storage)[0]?.screen).toBe('Waivers');
+    expect(readQueue(storage)[0]?.note).toBe('second');
   });
 });
 
@@ -271,24 +257,54 @@ describe('the queue can never take the screen down with it', () => {
 
   it('throws away an envelope whose entries are not a list', () => {
     const storage = new FakeStorage();
-    storage.setItem(KEY, JSON.stringify({ schema: 1, entries: { a: 1 } }));
+    storage.setItem(KEY, JSON.stringify({ schema: 2, entries: { a: 1 } }));
     expect(readQueue(storage)).toEqual([]);
   });
 
   /*
-   * One bad row must not cost the reader every flag they have made — which is
-   * exactly what refusing the whole envelope on one malformed entry would do.
+   * One bad row must not cost the reader every note they have written — which
+   * is exactly what refusing the whole envelope on one malformed entry would do.
    */
   it('drops a malformed entry and keeps the ones around it', () => {
     const storage = new FakeStorage();
     storage.setItem(
       KEY,
       JSON.stringify({
-        schema: 1,
+        schema: 2,
         entries: [flag({ id: 'good', at: 2_000 }), { id: 'bad' }, flag({ id: 'also-good', at: 1_000 })],
       }),
     );
     expect(readQueue(storage).map((e) => e.id)).toEqual(['good', 'also-good']);
+  });
+
+  /*
+   * The reason the schema moved. An entry written before the redesign carries a
+   * screen name and a note that may be absent, and a queue that half-read one
+   * would show a row with no words in it — the one thing an entry cannot be.
+   */
+  it('drops the whole queue when it was written under the previous shape', () => {
+    const storage = new FakeStorage();
+    storage.setItem(
+      KEY,
+      JSON.stringify({
+        schema: 1,
+        entries: [{ id: 'old', at: 1_000, screen: 'Team', decision: null, world: 'Live', theme: 'Dark', viewport: '390×844', display: 'Browser tab', note: null }],
+      }),
+    );
+    expect(readQueue(storage)).toEqual([]);
+    expect(storage.raw()).toBeNull();
+  });
+
+  it('drops an entry that has lost its note, because the note is the entry', () => {
+    const storage = new FakeStorage();
+    storage.setItem(
+      KEY,
+      JSON.stringify({
+        schema: 2,
+        entries: [{ ...flag({ id: 'x' }), note: null }, { ...flag({ id: 'y' }), note: '' }],
+      }),
+    );
+    expect(readQueue(storage)).toEqual([]);
   });
 
   it('drops an entry whose theme or display is not one of the two it may be', () => {
@@ -296,7 +312,7 @@ describe('the queue can never take the screen down with it', () => {
     storage.setItem(
       KEY,
       JSON.stringify({
-        schema: 1,
+        schema: 2,
         entries: [{ ...flag({ id: 'x' }), theme: 'Sepia' }, { ...flag({ id: 'y' }), display: 'Kiosk' }],
       }),
     );
@@ -354,58 +370,63 @@ describe('the whole queue, as one block of text', () => {
     flag({
       id: 'zzq-alpha',
       at: AUGUST,
-      screen: 'Team',
-      decision: 'Waivers',
       note: 'the projection under Ike looks low',
     }),
     flag({
       id: 'zzq-beta',
       at: AUGUST - 60 * 60_000,
-      screen: 'Players',
-      decision: null,
       world: 'Demo: sunday-morning',
       theme: 'Light',
       viewport: '360×800',
       display: 'Browser tab',
-      note: null,
+      note: 'the waiver card wraps at this width',
     }),
   ];
 
   it('says what it is, where it came from, and that nothing was uploaded', () => {
     const text = formatQueue(two, now);
-    expect(text).toContain('Fantasy Analyst — 2 things flagged while using the app');
+    expect(text).toContain('Fantasy Analyst — 2 notes from the owner');
     expect(text).toContain('nothing was uploaded');
   });
 
   it('numbers them in the order they are given, which is newest first', () => {
     const text = formatQueue(two, now);
-    expect(text.indexOf('1. Team')).toBeGreaterThan(-1);
-    expect(text.indexOf('2. Players')).toBeGreaterThan(text.indexOf('1. Team'));
+    expect(text.indexOf('1. 2026-08-28 20:41 UTC')).toBeGreaterThan(-1);
+    expect(text.indexOf('2. 2026-08-28 19:41 UTC')).toBeGreaterThan(text.indexOf('1. 2026-08-28'));
   });
 
-  it('stamps each one in UTC, with the age beside it', () => {
-    expect(formatQueue(two, now)).toContain('1. Team — 2026-08-28 20:41 UTC (1 hour ago)');
+  it('heads each entry with its stamp in UTC and the age beside it', () => {
+    expect(formatQueue(two, now)).toContain('1. 2026-08-28 20:41 UTC (1 hour ago)');
   });
 
-  it('quotes the note, and says out loud when there is not one', () => {
+  it('quotes the note, which is the whole of the entry', () => {
     const text = formatQueue(two, now);
     expect(text).toContain('"the projection under Ike looks low"');
-    expect(text).toContain('No note.');
+    expect(text).toContain('"the waiver card wraps at this width"');
   });
 
-  it('prints the context on one line, and leaves out the decision when there was none', () => {
+  it('prints the session on one line, and names a demo as one', () => {
     const text = formatQueue(two, now);
-    expect(text).toContain('Last recommendation: Waivers · Live · Dark · 390×844 · Home Screen app');
+    expect(text).toContain('Live · Dark · 390×844 · Home Screen app');
     expect(text).toContain('Demo: sunday-morning · Light · 360×800 · Browser tab');
-    expect(text).not.toContain('Last recommendation: null');
+  });
+
+  /*
+   * The redesign's promise, held at the one place it could leak: the text that
+   * leaves the phone. No screen was recorded, so no screen can be printed.
+   */
+  it('never names a screen, because no screen was ever recorded', () => {
+    const text = formatQueue(two, now);
+    expect(text).not.toMatch(/Last recommendation/);
+    expect(text).not.toMatch(/\b(Draft|Team|Waivers|Matchup|Trades|Players|Setup)\b/);
   });
 
   it('says so plainly when there is nothing in it', () => {
-    expect(formatQueue([], now)).toBe('Fantasy Analyst — nothing is flagged.');
+    expect(formatQueue([], now)).toBe('Fantasy Analyst — there is no feedback saved.');
   });
 
-  it('counts one thing as one thing', () => {
-    expect(formatQueue([two[0]!], now)).toContain('1 thing flagged');
+  it('counts one note as one note', () => {
+    expect(formatQueue([two[0]!], now)).toContain('1 note from the owner');
   });
 
   /*
@@ -424,8 +445,7 @@ describe('the whole queue, as one block of text', () => {
   it('carries nothing that is not in the entries themselves', () => {
     const text = formatQueue(two, now);
     // The ids are bookkeeping for the delete control and have no business here.
-    expect(text).not.toContain('flag-1');
-    expect(text).not.toContain(two[0]!.id);
+    expect(text).not.toContain('zzq-alpha');
     expect(text).not.toContain('zzq-beta');
   });
 });

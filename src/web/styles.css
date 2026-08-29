@@ -9282,177 +9282,22 @@ div.matchup-result {
 }
 
 /*
- * ========================================================== flagging a screen
+ * ================================================== feedback, inside Settings
  *
- * A control that belongs to the shell rather than to any screen, and the strip
- * that follows a tap on it. `components/feedbackCapture.tsx` carries the
- * argument for it floating here at all; this is the arithmetic.
- *
- * The layer is the whole page's width and takes no pointer events, so the only
- * things on screen that can be tapped are the control itself and, while it is
- * up, the strip. A fixed band that swallowed taps across the bottom of every
- * screen would be a far worse trade than the corner this actually spends.
+ * Two rows and a composer between them, all inside the grouped list Settings
+ * already draws. There is no floating control and nothing persistent anywhere
+ * else in the app — the whole surface of this feature is here, which is why it
+ * needs almost no stylesheet of its own.
  */
-.flag-layer {
-  position: fixed;
-  left: var(--page-x);
-  right: var(--page-x);
-  /*
-   * Above the toolbar's reservation, and above the keyboard when there is one.
-   *
-   * `--content-inset` is where the page's own content stops, so at the bottom
-   * of a fully scrolled screen the control sits in the strip already left
-   * clear rather than over the last row. The `max` is the keyboard: this is
-   * pinned to the bottom of the *layout* viewport and iOS shrinks only the
-   * visual one, so a composer with a field in it would otherwise draw its own
-   * field underneath the keyboard the moment it was tapped into — the same
-   * arithmetic `.sheet` does, for the same reason.
-   */
-  bottom: max(var(--content-inset), calc(var(--flag-keyboard, 0px) + var(--sp-2)));
-  /* Under the toolbar's own layer, and far under anything that covers the app. */
-  z-index: 29;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
-  pointer-events: none;
-  transition:
-    transform var(--dur) var(--ease),
-    opacity var(--dur) var(--ease),
-    visibility 0s,
-    bottom var(--dur-fast) var(--ease);
-}
 
 /*
- * Out of the way while the keyboard is up and there is nothing to type into.
+ * The field the note is typed into.
  *
- * The same exit the toolbar makes, and `visibility` is what takes it out of the
- * tab order and off the screen reader's map while it is gone — delayed by the
- * length of the transition so the exit is still seen.
+ * It sits inside `.list-row-actions`, which already owns the padding and the
+ * hairline that attaches it to the row above. All this adds is a full-width
+ * one-line box at the height every other field in the app uses.
  */
-.flag-layer[data-hidden='yes'] {
-  transform: translateY(calc(100% + var(--content-inset)));
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    transform var(--dur) var(--ease),
-    opacity var(--dur) var(--ease),
-    visibility 0s var(--dur);
-}
-
-/*
- * The control: the toolbar's material, at a quarter of its size.
- *
- * The same capsule, blur, hairline and shadow the navigation uses, because it
- * floats over the page in the same way and a second floating material would be
- * a second design. What it does not take is the accent: this is not a primary
- * action and a filled circle in the corner of every screen would read as one.
- *
- * 40px drawn, 44px reached — §5, the mark and the target are two boxes. The
- * target grows in both directions here rather than only downwards, because
- * unlike `.icon-btn` this control has no neighbour to reach under.
- */
-.flag-button {
-  position: relative;
-  pointer-events: auto;
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--toolbar-border);
-  background: var(--toolbar-surface);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--shadow-toolbar);
-  color: var(--text-dim);
-  cursor: pointer;
-  transition:
-    opacity var(--dur-fast) ease,
-    color var(--dur-fast) ease;
-}
-
-.flag-button::after {
-  content: '';
-  position: absolute;
-  inset: -2px;
-}
-
-.flag-button:active {
-  opacity: 0.55;
-  color: var(--accent);
-}
-
-.flag-glyph {
-  display: inline-flex;
-  line-height: 0;
-}
-
-/*
- * The strip: what was just flagged, and the one line that may qualify it.
- *
- * A card rather than a sheet. Nothing here is modal — the screen being flagged
- * stays visible and stays scrollable, which is the point: a note about what is
- * on screen is easier to write with it still on screen.
- */
-.flag-strip {
-  pointer-events: auto;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3) var(--sp-3);
-  border-radius: var(--radius);
-  border: 1px solid var(--toolbar-border);
-  background: var(--toolbar-surface);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--shadow-2);
-  animation: flag-strip-in var(--dur) var(--ease);
-}
-
-@keyframes flag-strip-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.flag-strip-said {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-
-.flag-strip-what {
-  font-size: 0.86rem;
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * Done is a full target even though it is a `.btn-sm`.
- *
- * It is one of two controls on a strip that appears under a thumb, and §5 does
- * not have an exception for a control that happens to be small.
- */
-.flag-done {
-  min-height: var(--tap);
-  flex: 0 0 auto;
-}
-
-/* One line, at the field height everything else in the app uses. */
-.flag-note {
+.feedback-note {
   width: 100%;
   min-height: var(--tap);
   padding: var(--sp-2) var(--sp-3);
@@ -9464,29 +9309,65 @@ div.matchup-result {
   font-size: 0.88rem;
 }
 
+/*
+ * Save and Cancel, at a thumb's height.
+ *
+ * `.btn` is 36px, which is right for a control among several in a panel and
+ * short of §5's floor for the only two controls in front of somebody who has
+ * just finished typing. They split the width rather than sitting left-aligned,
+ * so at 360px they are still two targets and not two words.
+ *
+ * **Qualified by the element, because `button.btn` sets the 36px.** A bare
+ * `.feedback-action` is one specificity point short of it and loses silently —
+ * the rule reads correctly, the button stays 36px, and nothing says so. This
+ * was measured at 36 before it was fixed, which is why `e2e/feedback.spec.ts`
+ * now measures it rather than trusting the stylesheet.
+ */
+button.feedback-action {
+  min-height: var(--tap);
+  flex: 1 1 0;
+}
+
+/*
+ * The queue's mark when the queue is empty.
+ *
+ * The same glyph either way — it names the row's subject rather than its state
+ * — but quieter with nothing behind it, so a full list and an empty one are
+ * distinguishable without the row having to say so twice.
+ */
+.feedback-state-empty {
+  opacity: 0.45;
+}
+
 /* ------------------------------------------------- the queue, inside Setup */
 
 /*
- * The reader's own sentence, in the app's voice for the row and in theirs for
- * the note. Two lines rather than one because the note is the thing being read
- * and the context under it is the thing being checked, and a single run-on line
- * makes the reader find the quotation marks to tell them apart.
+ * The note itself, as the row's heading.
+ *
+ * `.list-row-label` is a title weight and a title size, and a note is a
+ * sentence — often a long one. So it keeps the label's slot and gives up the
+ * emphasis: a shade smaller, an ordinary weight, and free to wrap onto a second
+ * line rather than being clipped. What the reader came to read is the words.
  */
 .flagged-note {
   display: block;
+  font-size: 0.88rem;
+  font-weight: 450;
+  line-height: 1.35;
   color: var(--text);
-  font-size: 0.82rem;
 }
 
+/* When it was written, and the demo scenario if it was not the live app. */
 .flagged-when {
   display: block;
-  margin-top: 1px;
+  margin-top: 2px;
   color: var(--text-faint);
   font-size: 0.75rem;
+  font-weight: 450;
 }
 
 /*
- * Forget one flag: a quiet mark with a full target under it.
+ * Delete one note: a quiet mark with a full target under it.
  *
  * A sibling of the row's body rather than something nested inside a row that
  * leads somewhere — §6 — which is why the row it sits on is a static container
