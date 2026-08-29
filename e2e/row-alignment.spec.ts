@@ -21,7 +21,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, inSeason } from './helpers.ts';
+import { clearMyGuys, emptyQueue, exploreMarket, inSeason } from './helpers.ts';
 
 async function openDraft(page: Page) {
   await page.goto('/');
@@ -1017,6 +1017,18 @@ test.describe('the AVOID tag', () => {
  * because this file's projects are those four widths.
  */
 test.describe('a row and its own control', () => {
+  /*
+   * These tests act on the control to prove it is separate from the row, and
+   * both controls they act on write to a database four projects share: the ★ to
+   * the demo draft's queue, the ♥ to the player. Put back after every test
+   * rather than at the end of the ones that pass, so a failure here cannot
+   * leave a mark on a board another spec is about to read.
+   */
+  test.afterEach(async ({ page }) => {
+    await emptyQueue(page);
+    await clearMyGuys(page);
+  });
+
   /** Everything a browser, a keyboard or a screen reader treats as an action. */
   const INTERACTIVE =
     'button, a[href], input, select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="switch"], [tabindex]';
@@ -1244,15 +1256,10 @@ test.describe('a row and its own control', () => {
       await expect(opened(page)).toBeVisible();
       await expect(button, 'opening the row moved the control').toHaveAttribute(state, afterTap!);
 
-      // Put the screen, and the shared dev server, back as they were found.
+      // Put the screen back as it was found; the shared server is answered by
+      // `afterEach`, which runs whether or not the assertions above passed.
       await close(page);
       await expect(opened(page)).toHaveCount(0);
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if ((await button.getAttribute(state)) === before) break;
-        await button.click();
-        await page.waitForTimeout(150);
-      }
-      await expect(button).toHaveAttribute(state, before!);
     });
 
     /**
@@ -1294,12 +1301,6 @@ test.describe('a row and its own control', () => {
 
       await close(page);
       await expect(opened(page)).toHaveCount(0);
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if ((await button.getAttribute(state)) === before) break;
-        await button.click();
-        await page.waitForTimeout(150);
-      }
-      await expect(button).toHaveAttribute(state, before!);
     });
 
     /**

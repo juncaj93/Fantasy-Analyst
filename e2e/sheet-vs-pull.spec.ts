@@ -34,7 +34,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, inSeason } from './helpers.ts';
+import { exploreMarket, inSeason, pastTheSettle } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -307,6 +307,8 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     const from = await contentGrip(page, 'player-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
 
+    // A dismissal that fired would still be on screen right now. See the helper.
+    await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     expectNothingPulled(await pullsSeen(page), requests);
   });
@@ -400,17 +402,47 @@ test.describe('and gives it straight back', () => {
    * standing, and what is being proved is that the gesture still reaches the
    * server, not what the roster says.
    *
-   * It is also the only test in this file that fires a real refresh on Team,
-   * and `inSeason` cannot survive one. Refreshing re-requests the roster, which
-   * re-enters that helper's route handler, and the racing response is disposed
-   * under it — `apiResponse.json: Response has been disposed`, which fails the
-   * test from inside the interceptor and says nothing about the gesture. Not
-   * asking for the interception is better than making the gesture tolerate it.
+   * It also does not let the refresh reach the feeds, and that is not caution
+   * about speed. Team's refresh is the all-source orchestrator: it syncs the
+   * league, re-ingests injuries and usage and asks the odds provider for lines,
+   * all of it written to the one database every project on this server shares.
+   * Left real, it recorded a `not_published` injury run over the seeded `ok`
+   * one — nflverse publishes no report for a season that has not started — and
+   * `app.spec.ts`'s `shows no roster percentage, and says why in Setup`, which
+   * asserts that seeded run, then failed at every width after this one. The
+   * same trap is documented in `team-startsit.spec.ts`, where the response is
+   * stubbed for the same reason; this test was the one place still firing it.
+   *
+   * Nothing about what is being proved changes. The request is still made by
+   * the gesture and still counted at the network, which is the claim; only the
+   * answer is canned. The orchestrator's own behaviour — dedupe, budget
+   * refusal, partial failure — is covered against a real database in
+   * `tests/startsit.refresh.test.ts`.
+   *
+   * `inSeason` stays off for a second reason: refreshing re-requests the
+   * roster, which re-enters that helper's route handler, and the racing
+   * response is disposed under it — `apiResponse.json: Response has been
+   * disposed`, which fails the test from inside the interceptor and says
+   * nothing about the gesture.
    */
   test('Team still pulls to refresh when no sheet is open', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-team').click();
     await expect(page.getByTestId('team-pull')).toBeVisible();
+    await page.route('**/api/startsit/refresh', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          deduped: false,
+          sources: [{ source: 'sleeper', outcome: 'current', detail: 'checked just now', freshAt: null }],
+          headline: 'Already current',
+          complete: true,
+        }),
+      });
+    });
     const requests = watchRequests(page, '/api/startsit/refresh');
     await watchPulls(page);
     await pullScreen(page, 'team-pull');

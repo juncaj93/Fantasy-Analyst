@@ -68,6 +68,33 @@ export async function openReview(page: Page): Promise<void> {
 }
 
 /**
+ * Wait long enough for a dismissal or a navigation that was going to happen to
+ * have happened.
+ *
+ * **For the assertions that say a gesture did *nothing*, and they are worthless
+ * without it.** Neither of this app's two gestures acts when the finger lifts:
+ * a dismissed sheet and a completed back-swipe both animate off the screen
+ * first and call their handler on `transitionend`, with a 400ms fallback behind
+ * it for the case where the transition never fires. So for something like half a
+ * second after a gesture that *did* fire, the thing it is taking away is still
+ * in the document — and `expect(surface).toBeVisible()` asserted at that moment
+ * is true whether the gesture fired or not.
+ *
+ * That is not hypothetical. Three tests across two suites — the ones holding the
+ * line that a *scrolled* card keeps its drag, which is the half of that rule
+ * that protects a reader from having the thing they are reading thrown away —
+ * were passing against a build with the rule deliberately removed. They were
+ * measuring the settle animation.
+ *
+ * The positive assertions never needed this: `toHaveCount(0)` and `toBeVisible`
+ * on the screen behind both retry until the animation has resolved. It is only
+ * "nothing happened" that has to wait to be sure.
+ */
+export async function pastTheSettle(page: Page): Promise<void> {
+  await page.waitForTimeout(700);
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one
@@ -83,4 +110,49 @@ export async function pullToRefresh(page: Page, testId: string): Promise<void> {
   await page.mouse.down();
   for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
   await page.mouse.up();
+}
+
+/**
+ * Empty the demo draft's ★ queue.
+ *
+ * The dev server keeps one database for the whole run and every project runs
+ * against it, so a star left behind is a star every later spec — and every
+ * later width — has to cope with, and several of them reasonably assume the
+ * list starts empty. Done through the API rather than the UI because it is a
+ * teardown, not a thing being tested, and it must not fail a passing test by
+ * being slow.
+ *
+ * Call it from `test.afterEach`, never as the last line of a test body: a
+ * teardown that only runs when every assertion before it passed is a teardown
+ * that is missing exactly when it is needed.
+ */
+export async function emptyQueue(page: Page): Promise<void> {
+  const res = await page.request.get('/api/drafts/demo-draft/board?limit=200&queued=1');
+  if (!res.ok()) return;
+  const board = (await res.json()) as { recommendations: { playerId: string }[] };
+  for (const rec of board.recommendations ?? []) {
+    await page.request.post('/api/drafts/demo-draft/queue', {
+      data: { playerId: rec.playerId, queued: false },
+    });
+  }
+}
+
+/**
+ * Clear every ♥ the specs can have set.
+ *
+ * The heart outlives the draft the ★ belongs to — it is stored per player, not
+ * per draft — so it is the other half of the same hygiene problem, and it gets
+ * the same answer. The sweep is bounded to the first page of the players list
+ * because that is the only part of it a browser test can reach: the rows these
+ * specs act on are the ones the screen draws first.
+ */
+export async function clearMyGuys(page: Page): Promise<void> {
+  const res = await page.request.get('/api/players?limit=200');
+  if (!res.ok()) return;
+  const body = (await res.json()) as { players: { id: string; myGuy?: { level: number } }[] };
+  for (const player of body.players ?? []) {
+    if ((player.myGuy?.level ?? 0) > 0) {
+      await page.request.post(`/api/players/${player.id}/my-guy`, { data: { level: 0 } });
+    }
+  }
 }
