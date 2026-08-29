@@ -1359,7 +1359,7 @@ function CompareSheet({
       ) : results.length === 0 ? (
         <Empty>Nobody matching that search.</Empty>
       ) : (
-        <div role="list" aria-label="Players to compare">
+        <div className="compare-candidates" role="list" aria-label="Players to compare">
           {results.map((p) => {
             const chosen = ids.includes(p.id);
             return (

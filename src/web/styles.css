@@ -6849,6 +6849,38 @@ table.compact tr:last-child td {
   color: var(--text-faint);
 }
 
+/*
+ * The compare sheet's candidate list: the one thing inside a sheet with a
+ * scroller of its own.
+ *
+ * A sheet's card and its content are one scroller now, which is what lets the
+ * card be pushed away from anywhere on it. That is right for a card, which is
+ * prose the reader moves through once — and wrong for this, which is a list of
+ * every player they might compare. Left to flow, it makes the card as tall as
+ * the roster and the layer inherits the problem: `scroll-snap-type: mandatory`
+ * holds the layer at a position that covers the scrollport, so a candidate deep
+ * in the list could not be brought into view by anything that scrolls to it —
+ * a keyboard, a screen reader, or a test. That was reproducible and is what this
+ * bounds.
+ *
+ * The cost is the one a nested scroller always has here, and it is the right way
+ * round: a drag that begins *in the list* is the list's and does not push the
+ * card away, because a gesture on an inner scroller never chains outward
+ * (measured). Everywhere else on the card — the grip, the header, the filter,
+ * the button row, the comparison itself — still dismisses. Which is what iOS
+ * does with a list inside a sheet, and what a reader expects of something that
+ * plainly scrolls on its own.
+ *
+ * `overscroll-behavior: contain` keeps a flick that runs out of list from
+ * becoming a scroll of the layer, so running off the end of the names cannot
+ * throw the card away underneath them.
+ */
+.compare-candidates {
+  max-height: 44dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 @keyframes sheet-rise {
   from {
     transform: translate3d(0, 100%, 0);
