@@ -187,9 +187,29 @@ in `tests/gestures.test.ts`:
 | Before any decision is made | 8px of movement |
 | To count as a swipe rather than a scroll | horizontal > vertical × 1.4 |
 | To complete the navigation | 32% of the layer's width, **or** 0.45 px/ms |
+| Speed is measured over | the last 120ms of movement |
 | Otherwise | springs back |
 
-Two properties matter more than the numbers:
+**Three things refuse the gesture before any of that is asked**, and each was a
+defect first. A touch in the strip is not a back swipe when:
+
+- **a layer is over the app.** `useAppIsCovered()`, the same signal
+  `usePullToRefresh` refuses on (§10). Review renders the scoring key as a sheet
+  *inside its own pushed screen*, and React portals move a layer's elements to
+  the end of the document while leaving its events propagating up the component
+  tree — so a finger on that card arrived at the pushed screen's handlers as
+  though it had landed on the screen behind it. A sideways drag on an open sheet
+  is not a dismissal (a dismissal must be downward), so it navigated instead, and
+  the reader was left holding a card over the wrong page.
+- **it landed in a horizontal scroller that has been scrolled.** A pushed screen
+  is full-bleed and gives the page gutter back as padding, so a segmented control
+  inside one starts 12px from the glass — inside the 28px strip. Swiping the
+  position filter back along was also starting a navigation. The question asked
+  is `scrollLeft > 0`, not "is this a carousel": a scroller already at its start
+  has nothing to lose and hands the gesture over, which is what iOS does too.
+- **it landed in a text field**, where dragging moves the caret and selects.
+
+Two properties matter more than any of the numbers:
 
 - **Scrolling wins.** The layer carries `touch-action: pan-y`, so the browser
   arbitrates: a vertical drag scrolls and cancels the gesture through
@@ -200,6 +220,15 @@ Two properties matter more than the numbers:
   Back control calls. It cannot undo a draft selection, a My Guy level, a
   filter or anything else that is stored, and it pushes no history state of its
   own — opening and leaving a detail screen leaves `history.length` unchanged.
+
+One more thing that is not a threshold: **a swipe that springs back does not eat
+the reader's next tap.** The gesture suppresses the click at the end of a drag so
+that letting go over a control does not also press it; that suppression is armed
+and cleared at `pointerdown`. It used to be cleared only by the click it
+swallowed — which is the difference between a mouse and a thumb, because a touch
+drag that springs back produces no click at all. The flag stayed raised and ate a
+real tap seconds later. Nothing in a mouse-driven suite can see this; the test
+that holds it injects real touch points (`navigation.spec.ts`).
 
 There is deliberately **no swipe between the bottom tabs**: they sit above
 horizontal controls (the position filter, the metric rows) and an accidental
@@ -288,6 +317,43 @@ happened to be right, and the price of the guess being wrong was the card.
 the engine stop intersecting at the scroller that would handle the pan, and
 WebKit has done that since Safari 17, but nothing here needs to depend on which
 version is running. Covered by `e2e/player-card-scroll.spec.ts`.
+
+**A fourth attempt was made and withdrawn, and this is what it measured.** The
+ask was the native affordance: dismiss the card from anywhere on it, treating a
+downward drag as a dismissal only while the content is at its top — which is the
+rule iOS uses, and the answer to a real complaint, because the grip on an `88dvh`
+sheet is out of a thumb's reach one-handed. It was written to avoid both
+withdrawn mechanisms: no `preventDefault`, no `touch-action` written from
+JavaScript, and the scroller's *position* (`scrollTop === 0`) read at the instant
+the drag is classified rather than its *capacity* published ahead of the finger.
+Mouse-driven, it worked and its tests were green.
+
+Under real touch points it cannot work at all, and the reason is one measurement.
+The sequence the engine delivers to the sheet for a downward flick on the body
+is:
+
+```
+pointerdown → pointermove (one) → pointercancel
+```
+
+One move, then the touch is gone — on a card that overflows and on one that does
+not alike, because `.sheet-body` declares `pan-y` and *is* a scroll container, so
+a vertical touch on it belongs to the engine before the app has enough of the
+gesture to have an opinion. There is no threshold that helps: the app is not
+being outvoted, it is not being asked. And that single `pointermove` carries the
+finger's accumulated travel, so a rule that acted on it moved the card by
+hundreds of pixels and then sprang it back when the cancel arrived — **351px on a
+card at its top, 743px on the full attempt, against 0px shipped.** Every flick on
+a card the reader is reading, for an affordance that never once completed.
+
+So the price of this affordance is exactly the two mechanisms already withdrawn,
+and it is not available at any other price. What would be a real answer is a
+different sheet primitive — one where the sheet is a scroll-snap position inside
+its own scroller, so that dismissal *is* a scroll and the engine's decision costs
+nothing — which is a rebuild of the primitive rather than a gesture change, and
+is not attempted here. `e2e/player-card-scroll.spec.ts` now pins the measurement
+as a guard: the card's transform stays at nought for the whole of a downward
+flick on its content, sampled every frame.
 
 **What a sheet owes the app while it is up** — the page behind held still, the
 app behind out of the reading order, focus in and focus back, Escape reaching

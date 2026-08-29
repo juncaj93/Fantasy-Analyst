@@ -34,7 +34,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, inSeason } from './helpers.ts';
+import { exploreMarket, inSeason, pastTheSettle } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -307,6 +307,8 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     const from = await contentGrip(page, 'player-sheet');
     await drag(page, from, { x: from.x, y: from.y + 420 });
 
+    // A dismissal that fired would still be on screen right now. See the helper.
+    await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     expectNothingPulled(await pullsSeen(page), requests);
   });

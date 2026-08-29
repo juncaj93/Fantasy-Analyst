@@ -15,7 +15,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview } from './helpers.ts';
+import { openReview, pastTheSettle } from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -296,6 +296,252 @@ test.describe('the back gesture, as a Home Screen app', () => {
     await drag(page, { x: 4, y: 420 }, { x: 330, y: 430 });
     await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
+
+  /**
+   * A swipe the reader thought better of costs them nothing afterwards.
+   *
+   * The gesture suppresses the click at the end of a drag, so that letting go
+   * over a control does not also press it — on a detail screen that could mean
+   * flipping a flag on the way out. The suppression was armed when the drag
+   * engaged and disarmed only by the click it swallowed, and **that is a
+   * difference between a mouse and a thumb**: a mouse drag ends in a click, so
+   * the flag was always cleared; a touch drag that springs back produces no
+   * click at all, so it stayed raised and ate the reader's *next* tap — a real
+   * one, seconds later, on a screen they had decided to stay on. One dead tap
+   * after every abandoned swipe.
+   *
+   * Which is why this test is the only one in the file that does not use
+   * `drag`. Driven by the mouse it passes against the defect, because the mouse
+   * hands back the very click the defect depends on being absent; the touch
+   * points below are what tell the two apart. The same lesson
+   * `player-card-scroll.spec.ts` learned about `touch-action`, arriving from a
+   * different direction: a synthetic mouse is not a finger, and where the two
+   * differ it is always the mouse that is wrong.
+   *
+   * Back is the control to check it with because its outcome is unambiguous,
+   * and because a reader who has just decided not to swipe out is rather likely
+   * to reach for it.
+   */
+  test('an abandoned swipe does not swallow the next tap', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'real touch injection is a Chromium DevTools protocol capability');
+    await openSetupArea(page);
+
+    /*
+     * Far enough to engage the gesture, nowhere near far enough to complete it
+     * — and then a pause before letting go, which is what makes it an abandoned
+     * swipe rather than a short flick. A flick is judged over the last 120ms of
+     * movement, so a longer hold leaves nothing in that window and the release
+     * is decided on distance alone: fifty-six points, against the hundred and
+     * twenty-five this width asks for. Exactly the reader who starts to swipe
+     * out, changes their mind, and stops.
+     */
+    const cdp = await page.context().newCDPSession(page);
+    const at = (x: number) => [{ x, y: 420, id: 1, radiusX: 14, radiusY: 14, force: 1 }];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(4) });
+    for (const x of [12, 24, 38, 52, 60]) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(x) });
+      await page.waitForTimeout(16);
+    }
+    await page.waitForTimeout(250);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
+    await settled(page.getByTestId('setup-detail-vegas'));
+
+    await page.getByTestId('back-button').click();
+    await expect(
+      page.getByTestId('setup-step-vegas'),
+      'the tap after an abandoned swipe was eaten by the click suppression that swipe left armed',
+    ).toBeVisible();
+  });
+});
+
+/**
+ * The gesture, against the one thing on a pushed screen that also moves
+ * sideways.
+ *
+ * A pushed screen is full-bleed and gives the page gutter back as padding, so a
+ * segmented control inside one begins twelve points from the glass — inside the
+ * twenty-eight point strip that starts a back swipe. Both the player's page and
+ * Review carry one. A reader who has scrolled that control along and swipes
+ * right to bring it back was making the back gesture's movement, in the back
+ * gesture's strip, and got both: the chips slid under the finger and the screen
+ * slid off it.
+ *
+ * The rule is the sheet's, turned on its side — a scroller that has somewhere to
+ * scroll back to keeps the gesture, and one already at its start has nothing to
+ * lose and hands it over. So the pair below is the contract, and the second half
+ * is what stops the fix being a blanket refusal that quietly kills the gesture
+ * on the two screens that have a filter on them.
+ */
+test.describe('the back gesture, against a sideways scroller', () => {
+  test.use({ userAgent: IPHONE_UA });
+
+  /** The player's own page: a pushed screen with a segmented control on it. */
+  async function openPlayerPage(page: Page) {
+    await page.getByTestId('tab-players').click();
+    const rows = page.getByTestId('player-search-row');
+    await expect(rows.first()).toBeVisible();
+    await rows.first().click();
+    await page.getByTestId('player-full-profile').click();
+    await expect(page.getByTestId('player-page')).toBeVisible();
+    await settled(page.getByTestId('player-page').locator('.filter-row').first());
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await asHomeScreenApp(page);
+    await page.goto('/');
+    await expect(page.getByTestId('tab-draft')).toBeVisible();
+    await openPlayerPage(page);
+  });
+
+  /** Where the control actually is, which is the whole reason for this suite. */
+  test('the filter really does start inside the activation strip', async ({ page }) => {
+    const box = (await page.getByTestId('player-page').locator('.filter-row').first().boundingBox())!;
+    expect(
+      box.x,
+      'the control moved out of the edge strip, and this suite is now proving nothing',
+    ).toBeLessThan(28);
+  });
+
+  test('a scrolled-along filter keeps the swipe that brings it back', async ({ page }) => {
+    const filter = page.getByTestId('player-page').locator('.filter-row').first();
+    /*
+     * Made to overflow, rather than hoped to.
+     *
+     * How many segments this control carries depends on how many positions the
+     * league runs, and the demo league is thin enough that at 390 the row fits
+     * — so a test that scrolled it and assumed it moved would pass or fail on
+     * the fixture rather than on the behaviour. Narrowing the track makes it a
+     * scroller, which is the only property under test, and is the same
+     * construction `sheet-interaction.spec.ts` uses to make a body scroll.
+     */
+    const scrolled = await filter.evaluate((el) => {
+      el.style.maxWidth = '96px';
+      el.scrollLeft = 40;
+      return el.scrollLeft;
+    });
+    expect(scrolled, 'the filter was not made to scroll, so nothing here is being tested').toBeGreaterThan(0);
+
+    const box = (await filter.boundingBox())!;
+    await drag(page, { x: box.x + 2, y: box.y + box.height / 2 }, { x: box.x + 300, y: box.y + box.height / 2 });
+
+    /*
+     * The wait is the test, and without it this passes against the defect.
+     *
+     * A completed swipe does not navigate when the finger lifts: it animates the
+     * layer off the screen and calls Back on `transitionend`, with a 400ms
+     * fallback behind it in case the transition never fires. So for something
+     * like half a second after a swipe that *did* navigate, the screen is still
+     * in the document — and an assertion made at that moment that it is still
+     * visible is true either way, which is worth stating plainly because it is
+     * exactly what this test did on its first pass.
+     */
+    await page.waitForTimeout(700);
+    await expect(
+      page.getByTestId('player-page'),
+      'swiping the filter back along navigated the screen away as well',
+    ).toBeVisible();
+  });
+
+  test('and hands it over once the filter is back at its start', async ({ page }) => {
+    const filter = page.getByTestId('player-page').locator('.filter-row').first();
+    await filter.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+
+    const box = (await filter.boundingBox())!;
+    await drag(page, { x: box.x + 2, y: box.y + box.height / 2 }, { x: box.x + 320, y: box.y + box.height / 2 });
+
+    await expect(
+      page.getByTestId('player-page'),
+      'a filter with nothing to scroll back to kept a gesture it had no use for',
+    ).toHaveCount(0);
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+  });
+});
+
+/**
+ * The two gestures, both live, on the same screen at the same time.
+ *
+ * Review is a pushed screen — so it carries the back gesture — and it opens the
+ * scoring key as a sheet *from inside its own tree*. React portals move a
+ * layer's elements to the end of the document and leave its events propagating
+ * up the **component** tree, so a finger on that sheet arrives at the pushed
+ * screen's handlers as though it had landed on the screen behind it. This is the
+ * same mechanism that once had a sheet's dismissal fighting pull-to-refresh on
+ * Trades and Team, arriving at the third gesture in the app.
+ *
+ * The axes do most of the work: a dismissal has to be dominantly downward and a
+ * back swipe dominantly rightward, so neither can be mistaken for the other and
+ * a drag cannot engage both. What the axes cannot do anything about is a
+ * *sideways* drag on an open sheet that happens to start near the leading edge —
+ * which is not a dismissal, correctly, but was a back navigation: the screen
+ * underneath slid away while the card the reader was actually touching stayed
+ * exactly where it was.
+ *
+ * So a covered screen does not own the gesture at all, which is the rule
+ * `usePullToRefresh` already keeps for the same reason and by the same signal.
+ */
+test.describe('the back gesture, under an open sheet', () => {
+  test.use({ userAgent: IPHONE_UA });
+
+  test.beforeEach(async ({ page }) => {
+    await asHomeScreenApp(page);
+    await page.goto('/');
+    await openReview(page);
+    await page.getByTestId('scoring-key-open').click();
+    await expect(page.getByTestId('scoring-key')).toBeVisible();
+    await settled(page.getByTestId('sheet-grip'));
+  });
+
+  test('a sideways drag on the card does not navigate the screen behind it', async ({ page }) => {
+    const sheet = (await page.getByTestId('scoring-key').boundingBox())!;
+    await drag(page, { x: 4, y: sheet.y + 60 }, { x: 330, y: sheet.y + 66 });
+
+    await pastTheSettle(page);
+    await expect(
+      page.getByTestId('setup-detail-review'),
+      'a sideways drag on an open card navigated the screen underneath it away',
+    ).toBeVisible();
+    await expect(page.getByTestId('scoring-key'), 'and it took the card with it').toBeVisible();
+  });
+
+  /**
+   * And the dismissal itself, started at the very edge of the glass — the case
+   * where a reader's thumb is furthest from the grip and most likely to be
+   * somewhere the back gesture is also listening.
+   */
+  test('dismissing the card from the leading edge dismisses only the card', async ({ page }) => {
+    /*
+     * Anchored on the grip rather than on an offset from the top of the sheet.
+     * A sheet is a grip, a header and then its content, and where a fixed offset
+     * lands among those three depends on the width — sixty points was the header
+     * at 390 and the body at 430, and a drag from the body correctly dismisses
+     * nothing, so the test failed on the widest phone while testing nothing on
+     * the others. What is under test is a dismissal that starts at the far left
+     * of the glass, so it starts on the chrome that dismisses, at x = 6.
+     */
+    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
+    await drag(page, { x: 6, y: grip.y + 4 }, { x: 10, y: grip.y + 460 });
+
+    await expect(page.getByTestId('scoring-key')).toHaveCount(0);
+    await expect(
+      page.getByTestId('setup-detail-review'),
+      'dismissing the card also navigated the screen behind it',
+    ).toBeVisible();
+  });
+
+  /** And the gesture comes straight back once the card has gone. */
+  test('and the screen can be swiped away again once the card has gone', async ({ page }) => {
+    await page.getByTestId('sheet-close').click();
+    await expect(page.getByTestId('scoring-key')).toHaveCount(0);
+
+    await drag(page, { x: 4, y: 420 }, { x: 330, y: 430 });
+    await expect(
+      page.getByTestId('setup-detail-review'),
+      'the gesture was left switched off after the card closed',
+    ).toHaveCount(0);
+  });
 });
 
 test.describe('the back gesture in a browser tab', () => {
@@ -434,13 +680,26 @@ test.describe('sheets', () => {
   test('scrolled content keeps the gesture until it is back at the top', async ({ page }) => {
     // Force the body to be scrolled: a sheet that dismissed from here would be
     // taking a scroll away from the reader.
-    await page.evaluate(() => {
+    const scrolled = await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
       body.style.maxHeight = '80px';
       body.scrollTop = 40;
+      return body.scrollTop;
     });
-    const box = (await page.getByTestId('scoring-key').boundingBox())!;
-    await drag(page, { x: box.x + box.width / 2, y: box.y + 120 }, { x: box.x + box.width / 2, y: box.y + 500 });
+    expect(scrolled, 'the body was not made to scroll, so nothing here is being tested').toBeGreaterThan(0);
+
+    /*
+     * Measured off the body rather than off the sheet, which is what this used
+     * to do. A sheet is a grip, a header and then its content, so an offset
+     * taken from the top of the *sheet* lands wherever those two happen to add
+     * up to — and this one was landing outside the scroller, which made the test
+     * pass against a build with the rule it names deliberately removed.
+     */
+    const body = (await page.locator('.sheet-body').boundingBox())!;
+    const x = body.x + body.width / 2;
+    await drag(page, { x, y: body.y + 20 }, { x, y: body.y + 420 });
+    // A dismissal that fired would still be on screen right now. See the helper.
+    await pastTheSettle(page);
     await expect(page.getByTestId('scoring-key')).toBeVisible();
     await page.getByTestId('sheet-close').click();
   });

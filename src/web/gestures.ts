@@ -213,6 +213,15 @@ export function sheetDecision(dx: number, dy: number): 'wait' | 'drag' | 'releas
 export const VELOCITY_WINDOW = 120;
 
 /**
+ * How many recent positions are kept to judge a flick by.
+ *
+ * Up here with the window it serves rather than beside one of its two callers:
+ * the sheet and the back swipe judge a flick the same way, and the edge swipe
+ * spent a while not doing so — see {@link useEdgeSwipeBack}.
+ */
+const SAMPLE_LIMIT = 12;
+
+/**
  * How fast the finger was travelling at the end, in pixels per millisecond.
  *
  * Over a window rather than between the last two events, which is what this
@@ -281,8 +290,40 @@ interface Drag {
   startX: number;
   startY: number;
   engaged: boolean;
-  last: Sample;
-  previous: Sample;
+  samples: Sample[];
+}
+
+/**
+ * Whether something between the finger and the layer wants this drag itself.
+ *
+ * Two things do, and the first is the reason this exists. **A horizontal
+ * scroller that has been scrolled off its start is going back, not the screen.**
+ * A pushed screen is full-bleed and gives its gutter back as padding, so a
+ * segmented control inside one begins twelve points from the glass — well
+ * inside the {@link EDGE_ZONE}. A reader who has scrolled the position filter
+ * along and swipes right to bring it back was starting a back gesture with the
+ * same movement, and got both: the chips slid under the finger while the screen
+ * slid off it.
+ *
+ * What is asked is not *is this a carousel* — which needs geometry and a
+ * computed overflow — but *has it somewhere to scroll back to*, which
+ * `scrollLeft` answers on its own and answers truthfully at the instant it is
+ * read. A carousel already at its start has nothing to take, so the gesture is
+ * the screen's, which is what iOS does too.
+ *
+ * The second is a control where dragging means something else entirely — a text
+ * field, where it moves the caret and selects. {@link ownsItsOwnDrag} is the
+ * sheet's own test for that, asked here for the same reason.
+ */
+function swipeIsClaimed(target: EventTarget | null, layer: HTMLElement | null): boolean {
+  let node: Element | null = target instanceof Element ? target : null;
+  while (node) {
+    if (node.scrollLeft > 0) return true;
+    if (node instanceof HTMLElement && ownsItsOwnDrag(node)) return true;
+    if (node === layer) break;
+    node = node.parentElement;
+  }
+  return false;
 }
 
 export interface EdgeSwipeBack {
@@ -308,6 +349,29 @@ export interface EdgeSwipeBack {
  * `onBack` is the screen's existing Back action and nothing else — the gesture
  * has no navigation model of its own, which is what guarantees a swipe and a
  * tap on Back cannot ever disagree about where they lead.
+ *
+ * Four things beyond the thresholds, each of them a defect first:
+ *
+ *  - **A covered screen does not own the gesture at all.** The same rule
+ *    `usePullToRefresh` keeps as its rule 6, by the same signal, and it is here
+ *    for the same reason: React portals move a layer's *elements* to the end of
+ *    the document and leave its *events* propagating up the component tree, and
+ *    Review renders the scoring key inside its own pushed screen. So a finger on
+ *    that card arrived here as though it had landed on the screen behind it, and
+ *    a sideways drag on an open sheet — not a dismissal, correctly, since a
+ *    dismissal must be downward — navigated the screen out from under it. The
+ *    reader was left holding a card over the wrong page. `useAppIsCovered` is
+ *    the layer announcing itself, so nothing screen-specific has to opt in and
+ *    no sheet added later can reintroduce this.
+ *  - **A horizontal scroller with somewhere to go back to keeps the gesture.**
+ *    See {@link swipeIsClaimed}.
+ *  - **A flick is judged over the window**, like the sheet's, rather than
+ *    between the last two moves — which made it a function of the phone's event
+ *    rate. See {@link velocityOver}.
+ *  - **A drag that is abandoned does not eat the next tap.** The click
+ *    suppression is armed at `pointerdown` and cleared there too; it used to be
+ *    cleared only by the click it swallowed, and a sprung-back swipe on a touch
+ *    screen produces no click to clear it with.
  */
 export function useEdgeSwipeBack({
   enabled,
@@ -322,6 +386,10 @@ export function useEdgeSwipeBack({
   const moved = useRef(false);
   const [dragging, setDragging] = useState(false);
   const reduced = useReducedMotion();
+  /** Whether a layer is over the app right now — read in this render. */
+  const covered = useAppIsCovered();
+  /** What the gesture is actually allowed to do, from both halves of that. */
+  const live = enabled && !covered;
 
   const paint = useCallback((distance: number) => {
     const el = layer.current;
@@ -345,28 +413,73 @@ export function useEdgeSwipeBack({
 
   useEffect(() => () => reset(), [reset]);
 
+  /*
+   * A gesture in flight when the gesture is taken away.
+   *
+   * A sheet can open under a finger that is already swiping — a row tapped near
+   * the leading edge is exactly that — and the screen must not carry on sliding
+   * behind it. Dropping the drag alone would leave the layer held wherever it
+   * had reached, so `reset` puts it back as well.
+   */
+  useEffect(() => {
+    if (live) return;
+    reset();
+  }, [live, reset]);
+
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
-      if (!enabled) return;
+      /*
+       * The suppression the *last* gesture may have left armed, cleared before
+       * anything is asked about this one.
+       *
+       * `moved` exists to stop a drag also landing as a tap, and it was cleared
+       * only by the click it suppressed — so a swipe that engaged and sprang
+       * back, which produces no click at all on a touch screen, left it raised.
+       * The reader's next tap on the pushed screen was then eaten by a gesture
+       * they had already abandoned: one dead tap after every partial swipe.
+       *
+       * **Above every refusal below, and that is the whole of it.** The tap that
+       * has to clear the flag is by definition not the one that set it: it lands
+       * wherever the reader is going next, which is almost never the few points
+       * of edge that can begin a swipe. Cleared after those guards, this fixes
+       * only the case where the dead tap happens to fall in the strip — which is
+       * to say, hardly ever, and never the one that was reported.
+       */
+      moved.current = false;
+      if (!live) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (!startsAtEdge(e.clientX)) return;
-      const sample = { x: e.clientX, t: e.timeStamp };
+      /*
+       * Asked only of a touch that landed in the strip, which is a few pixels
+       * of a screen and correspondingly rare — so the walk costs nothing on the
+       * taps and scrolls that make up the rest of a reader's day.
+       */
+      if (swipeIsClaimed(e.target, layer.current)) return;
       drag.current = {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
         engaged: false,
-        last: sample,
-        previous: sample,
+        samples: [{ x: e.clientX, t: e.timeStamp }],
       };
     },
-    [enabled],
+    [live],
   );
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
       const state = drag.current;
       if (!state || state.pointerId !== e.pointerId) return;
+      /*
+       * And again here, because a layer can open between two moves and the
+       * effect above lands a render later — by which time this has already
+       * dragged the screen out from under the sheet by a frame's worth of
+       * finger. The same third place `usePullToRefresh` checks it.
+       */
+      if (covered) {
+        reset();
+        return;
+      }
       const dx = e.clientX - state.startX;
       const dy = e.clientY - state.startY;
 
@@ -388,11 +501,11 @@ export function useEdgeSwipeBack({
         }
       }
 
-      state.previous = state.last;
-      state.last = { x: e.clientX, t: e.timeStamp };
+      state.samples.push({ x: e.clientX, t: e.timeStamp });
+      if (state.samples.length > SAMPLE_LIMIT) state.samples.shift();
       paint(Math.max(0, dx));
     },
-    [paint],
+    [covered, paint, reset],
   );
 
   const finish = useCallback(
@@ -400,14 +513,28 @@ export function useEdgeSwipeBack({
       const state = drag.current;
       if (!state || state.pointerId !== e.pointerId) return;
       const el = layer.current;
-      if (!state.engaged || !el) {
+      // And the last place a covered screen could still navigate: a layer that
+      // opened after the finger did leaves a swipe engaged, and letting go of it
+      // would take the page out from under the sheet that had just opened.
+      if (covered || !state.engaged || !el) {
         reset();
         return;
       }
 
       const distance = Math.max(0, e.clientX - state.startX);
-      const elapsed = Math.max(1, state.last.t - state.previous.t);
-      const velocity = (state.last.x - state.previous.x) / elapsed;
+      /*
+       * Over the window, not between the last two events.
+       *
+       * The same correction {@link velocityOver} was written for and the sheet
+       * has had since; this was left measuring the gap between whichever two
+       * moves happened to arrive last, so a flick's fate depended on the phone's
+       * event rate — two samples a millisecond apart report an enormous
+       * velocity, two in the same millisecond report none — and a reader who
+       * drew the screen most of the way across and paused before letting go was
+       * read as flicking it.
+       */
+      state.samples.push({ x: e.clientX, t: e.timeStamp });
+      const velocity = velocityOver(state.samples);
       const width = el.getBoundingClientRect().width || 1;
 
       if (!cancelled && completesBack(distance, width, velocity)) {
@@ -456,7 +583,7 @@ export function useEdgeSwipeBack({
       drag.current = null;
       setDragging(false);
     },
-    [onBack, reduced, reset],
+    [covered, onBack, reduced, reset],
   );
 
   const onPointerUp = useCallback((e: ReactPointerEvent) => finish(e, false), [finish]);
@@ -554,9 +681,6 @@ interface SheetGesture {
   engaged: boolean;
   samples: Sample[];
 }
-
-/** How many recent positions are kept to judge a flick by. */
-const SAMPLE_LIMIT = 12;
 
 /**
  * Pull a sheet down to dismiss it.
