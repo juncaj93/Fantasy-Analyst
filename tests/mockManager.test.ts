@@ -24,7 +24,9 @@ import {
   mockManagerMultipliers,
   pickForMockManager,
   type MockCandidate,
+  reachTolerance,
 } from '../src/core/draft/mockManager.ts';
+import { advanceMockDraft, createMockDraft, type MockRoom } from '../src/core/draft/mockDraft.ts';
 import { MANAGER_PRIOR } from '../src/core/draft/nextpick/managerPrior.ts';
 import { buildRosterShape } from '../src/core/sleeper/scoring.ts';
 import type { ManagerTendencies, PositionTendency } from '../src/core/managers/managerTendencies.ts';
@@ -126,6 +128,121 @@ describe('the market is the anchor', () => {
     ];
     expect(bestAvailable(a, 2).map((c) => c.playerId)).toEqual(['a', 'b']);
     expect(bestAvailable([...a].reverse(), 2).map((c) => c.playerId)).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * What the market anchor is actually worth, in the unit that matters.
+ *
+ * The old model decayed over a candidate's *index* in the best-available list,
+ * which cannot tell a near-tie from a chasm: the top player carried 25.7% of the
+ * mass whether he was one pick clear of the field or thirteen. Over four hundred
+ * seeded rooms the consensus number-one went first 30% of the time and fell past
+ * pick nine in 7% of them — one room in fourteen, which is how the owner met it
+ * (Gibbs, ADP 1, gone at pick 10).
+ *
+ * Every test in the block above passed before that was fixed and passes after,
+ * which is why it survived: "takes best available more often than anybody else"
+ * is true at 25.7% and at 69%. These are the assertions that tell them apart.
+ */
+describe('the market anchor holds', () => {
+  /** How much of the draw space one player owns. */
+  const massOf = (candidates: MockCandidate[], playerId: string): number => {
+    const counts = distribution({ candidates });
+    return (counts.get(playerId) ?? 0) / 1000;
+  };
+
+  it('gives the best available most of the board at the top of the draft', () => {
+    // Not "more than anyone else" — most of it. A coin that comes up tails
+    // three times in four is what let nine managers in a row pass the same man.
+    expect(massOf(board(), 'p1')).toBeGreaterThan(0.6);
+  });
+
+  it('treats a player the market rates a round higher as near-certain', () => {
+    /*
+     * The near-tie clause, stated as its opposite. Thirteen picks of daylight
+     * between the top player and the rest is not a decision a room agonises
+     * over, and randomness has no business overriding it.
+     */
+    const gapped: MockCandidate[] = [
+      { playerId: 'clear', position: 'RB', marketRank: 1 },
+      ...Array.from({ length: 20 }, (_, i) => ({
+        playerId: `p${i + 2}`,
+        position: (['RB', 'WR', 'QB', 'TE'] as const)[i % 4]!,
+        marketRank: 14 + i,
+      })),
+    ];
+    expect(massOf(gapped, 'clear')).toBeGreaterThan(0.98);
+  });
+
+  it('still shares a genuine near-tie, because that is what the draw is for', () => {
+    // Four players the market cannot separate. Nobody owns this pick.
+    const tied: MockCandidate[] = ['a', 'b', 'c', 'd'].map((id, i) => ({
+      playerId: id,
+      position: 'RB',
+      marketRank: 20 + i * 0.2,
+    }));
+    const best = massOf(tied, 'a');
+    expect(best, 'the best of four alike is not a foregone conclusion').toBeLessThan(0.5);
+    expect(massOf(tied, 'b'), 'and the next one is a real possibility').toBeGreaterThan(0.15);
+  });
+
+  it('loosens as the board gets deeper, because the market does', () => {
+    // Nobody reaches at 1.01; everybody reaches in the fourteenth round.
+    expect(reachTolerance(1)).toBeLessThan(reachTolerance(25));
+    expect(reachTolerance(25)).toBeLessThan(reachTolerance(120));
+    // The fifth round is where the old flat constant sat, and it stays there.
+    expect(reachTolerance(60)).toBeCloseTo(3.5, 2);
+  });
+
+  it('is not tighter late than the model it replaced', () => {
+    const deep = (rank0: number): MockCandidate[] =>
+      Array.from({ length: 20 }, (_, i) => ({
+        playerId: `d${i}`,
+        position: (['RB', 'WR', 'QB', 'TE'] as const)[i % 4]!,
+        marketRank: rank0 + i,
+      }));
+    // Deep in the draft the whole window is genuinely in play, as before.
+    const counts = distribution({ candidates: deep(150) });
+    expect(counts.size).toBeGreaterThan(8);
+  });
+
+  it('does not let the consensus number one slide, over a whole room', () => {
+    const room: MockRoom = { teams: 12, rounds: 2, type: 'snake', mySlot: null, shape: SHAPE };
+    const slots: number[] = [];
+    for (let seed = 1; seed <= 120; seed++) {
+      const advanced = advanceMockDraft(
+        createMockDraft({ draftId: 'dr', seed, startedAt: '2026-08-30T00:00:00.000Z' }),
+        room,
+        board(80),
+      );
+      const at = advanced.state.picks.findIndex((pick) => pick.playerId === 'p1');
+      expect(at, 'the top of the market is drafted inside two rounds').toBeGreaterThanOrEqual(0);
+      slots.push(at + 1);
+    }
+    /*
+     * The assertion the reported defect fails. Before the fix the worst slot
+     * over four hundred rooms was 18 and 7% of rooms went past pick nine.
+     */
+    expect(Math.max(...slots), 'the number one never slides out of the first round').toBeLessThanOrEqual(6);
+    const topThree = slots.filter((slot) => slot <= 3).length / slots.length;
+    expect(topThree, 'and is almost always gone inside three picks').toBeGreaterThan(0.95);
+  });
+
+  it('leaves an unpriced player unreachable early and ordinary late', () => {
+    const withUnpriced = (rank0: number): MockCandidate[] => [
+      ...Array.from({ length: 6 }, (_, i) => ({
+        playerId: `p${i}`,
+        position: 'WR',
+        marketRank: rank0 + i,
+      })),
+      { playerId: 'unpriced', position: 'RB', marketRank: null },
+    ];
+    expect(massOf(withUnpriced(1), 'unpriced'), 'nobody reaches a round for an unknown at pick one').toBe(0);
+    expect(
+      massOf(withUnpriced(180), 'unpriced'),
+      'and in the last rounds a real draft is taking players off nobody\u2019s board',
+    ).toBeGreaterThan(0);
   });
 });
 
