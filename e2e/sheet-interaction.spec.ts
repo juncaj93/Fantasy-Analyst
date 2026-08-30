@@ -17,16 +17,24 @@
  * single `pointermove`. No threshold could have helped. The app was not being
  * outvoted; it was not being asked.
  *
- * **So the sheet stopped asking.** It is a scroller whose two ends are the card
- * in place and the card gone, and its dismissal is a scroll. What that buys, and
- * what this suite checks:
+ * **So the sheet stopped asking.** Its layer is a scroller whose two ends are
+ * the card in place and the card gone, its dismissal is a scroll, and the card's
+ * content is a scroller nested inside it. What that buys, and what this suite
+ * checks:
  *
  *  - a card is pushed away from *anywhere* on it, including the middle of what
  *    you are reading — the thing three attempts could not deliver;
- *  - content that has been scrolled keeps the gesture, for free, because the
- *    card's own top is a snap position rather than a rule somebody wrote;
+ *  - content that has been scrolled keeps the gesture, for free, because a
+ *    scroll only passes outward once the inner box has nowhere to put it —
+ *    which is scroll chaining, and not a rule anybody wrote;
  *  - the tracking, the momentum, the spring back from a push too small and the
  *    ability to catch it halfway all belong to the engine.
+ *
+ * The one thing the layer must never do is let a snap area outgrow it. WebKit
+ * stops scrolling a snapping scroller entirely once that happens, which is how
+ * an earlier version of this design made long cards unreadable in Safari at
+ * every width. `.sheet-snap` is bounded for that reason and `navigation.spec.ts`
+ * holds it there.
  *
  * **The drags in this file are wheels now, and that is a real improvement.** A
  * wheel is a scroll, so these tests exercise the same mechanism a thumb does, in
@@ -38,7 +46,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle, scrollSheetContent, sheetScroll, swipeSheetAway } from './helpers.ts';
+import { openReview, pastTheSettle, scrollSheetContent, sheetBodyScroll, sheetScroll, swipeSheetAway, tapAboveCard } from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -133,12 +141,15 @@ test.describe('pushing a sheet away', () => {
    * And the other half of the same rule, which is the half that protects the
    * reader: **content that has been scrolled keeps the gesture.**
    *
-   * Nobody wrote this rule. The card and its content are one scroller, and the
-   * card's own top is a snap position, so pulling down from halfway through a
-   * long card scrolls it back to that top and stops there. Getting it for free
-   * from the same mechanism that does the dismissal is the whole argument for
-   * the rebuild — the two behaviours cannot drift apart, because they are one
-   * behaviour.
+   * Nobody wrote this rule either. The card's content is a scroller inside the
+   * layer, so a pull on content that has somewhere to go scrolls the content,
+   * and the scroll only passes outward — to the layer, and so to the
+   * dismissal — once the content has nowhere left to put it. The browser
+   * decides that, at the moment it becomes true, and it is the same decision it
+   * makes for every nested scroller on the web.
+   *
+   * Getting both halves out of one mechanism is the argument for the rebuild:
+   * they cannot drift apart, because neither is a rule this repository states.
    */
   test('scrolls back to the top of the card and stops, rather than dismissing', async ({ page }) => {
     await openPlayerCard(page);
@@ -153,17 +164,19 @@ test.describe('pushing a sheet away', () => {
       body.append(filler);
     });
     await scrollSheetContent(page, 600);
-    const read = await sheetScroll(page);
-    expect(read.top, 'the card would not scroll to set the case up').toBeGreaterThan(detent);
+    expect((await sheetBodyScroll(page)).top, 'the card would not scroll to set the case up').toBeGreaterThan(0);
 
     /*
-     * Now pull back down, past the card's own top but not wildly past it.
+     * Now pull back down, hard, from the middle of the card.
      *
-     * That distinction is the rule, and it is the reader's momentum that draws
-     * it rather than a threshold in this repository: an overshoot settles back
-     * onto the card's top, and a long continuous haul from the middle of a card
-     * carries through into a dismissal — which is what a finger does on iOS,
-     * where one drag can scroll to the top and keep going.
+     * Deliberately more than enough to reach the top and carry on, because the
+     * claim is that it *cannot* carry on: measured, a pull of any size that
+     * starts with the content off its top spends itself returning the content
+     * to the top and stops there. Reaching the layer takes a fresh gesture. So
+     * the reader who is halfway through a card and pulls down to re-read the
+     * start of it never loses the card, however hard they pull — and that is
+     * the whole of the protection, drawn by the browser rather than by a
+     * threshold in this repository.
      */
     await swipeSheetAway(page, { ticks: 700 });
     await pastTheSettle(page);
@@ -172,8 +185,12 @@ test.describe('pushing a sheet away', () => {
       'a card the reader was part-way through was thrown away by one pull',
     ).toBeVisible();
     expect(
+      (await sheetBodyScroll(page)).top,
+      'the content did not come to rest at its own top',
+    ).toBe(0);
+    expect(
       (await sheetScroll(page)).top,
-      'the card did not come to rest at its own top',
+      'the card moved while its content was being pulled back',
     ).toBe(detent);
   });
 
@@ -221,7 +238,7 @@ test.describe('pushing a sheet away', () => {
   /** A tap on what you can see through above the card closes it. */
   test('closes on a tap above it, where the backdrop shows through', async ({ page }) => {
     await openScoringKey(page);
-    await page.getByTestId('sheet-dismiss').click({ position: { x: 40, y: 20 } });
+    await tapAboveCard(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
@@ -343,7 +360,7 @@ test.describe('focus, while a sheet is open', () => {
    */
   test('comes back to it when a tap above the card closes it too', async ({ page }) => {
     await openScoringKey(page);
-    await page.getByTestId('sheet-dismiss').click({ position: { x: 10, y: 10 } });
+    await tapAboveCard(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
     await expect(page.getByTestId('scoring-key-open')).toBeFocused();
   });

@@ -15,7 +15,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle, sheetScroll, swipeSheetAway } from './helpers.ts';
+import { openReview, pastTheSettle, sheetBodyScroll, sheetScroll, swipeSheetAway, tapAboveCard } from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -685,18 +685,54 @@ test.describe('sheets', () => {
     );
     expect(
       room.scrollable,
-      'the layer has nowhere to scroll, so the card can be neither read past its detent nor pushed away',
+      'the layer has nowhere to scroll, so the card cannot be pushed away',
     ).toBeGreaterThan(0);
+
+    /*
+     * Neither snap area is taller than the scrollport, and that is the guard
+     * this file was missing.
+     *
+     * Snapping of either kind stops a WebKit scroller dead once the area under
+     * it outgrows the scrollport — measured in isolation, with none of this app
+     * in it: a 200px scroller, `scroll-snap-type: y mandatory`, one 900px snap
+     * child, and a scroll that moves it nowhere at all. `proximity` behaves the
+     * same and only `none` scrolls freely, so there is no setting that makes an
+     * oversized snap area safe.
+     *
+     * While the card *was* the snap area it grew with its own content, so a
+     * player with a long enough newsletter entry had a card that could not be
+     * scrolled — in Safari, at every width, silently. The card is bounded to its
+     * detent now and its overflow scrolls in `.sheet-body`. This says so out
+     * loud, because the failure it prevents reads as nine unrelated assertions
+     * in four files and not one of them mentions a snap area.
+     */
+    const areas = await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      const boxes = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
+      return {
+        port: el.clientHeight,
+        tallest: Math.max(...boxes.map((b) => Math.round(b.getBoundingClientRect().height))),
+      };
+    });
+    expect(
+      areas.tallest,
+      'a snap area outgrew the scrollport, which stops WebKit scrolling the layer at all',
+    ).toBeLessThanOrEqual(areas.port);
 
     // And the layer is a scroller that snaps, which is what does the dismissing.
     expect(declared.overflowY, 'the layer is not a scroller, so nothing can be scrolled away').toMatch(/auto|scroll/);
     /*
-     * The axis, which is all the computed value carries: `proximity` is the
-     * default strictness, so `y proximity` computes to `y`. What matters here is
-     * that the layer snaps vertically at all — the two positions it snaps to are
-     * the card's detent and the card gone, and both are checked by using them.
+     * And it does *not* snap, which is asserted rather than left to drift back.
+     *
+     * Snapping is the obvious way to give this layer two resting places and it
+     * is wrong here three separate ways, each measured in WebKit: while the card
+     * was a snap area taller than the scrollport, either setting stopped the
+     * layer scrolling at all; `mandatory` then advances a whole step however
+     * small the scroll, so a ten-pixel nudge dismissed the card; and `proximity`
+     * never settles, parking the card partway down the screen. Where the layer
+     * comes to rest is decided in `Sheet`, once, when the reader stops.
      */
-    expect(declared.snap, 'the card has no detent to rest at or return to').toMatch(/^y\b/);
+    expect(declared.snap, 'the layer snaps again, which has no setting that behaves here').toBe('none');
     expect(
       declared.overscroll,
       'a flick that runs out of sheet would carry on into the page behind it',
@@ -734,19 +770,27 @@ test.describe('sheets', () => {
     await page.mouse.move(195, 400);
     await page.mouse.wheel(0, 500);
     await page.waitForTimeout(500);
-    expect((await sheetScroll(page)).top, 'the card would not scroll to set the case up').toBeGreaterThan(detent);
+    expect((await sheetBodyScroll(page)).top, 'the card would not scroll to set the case up').toBeGreaterThan(0);
 
-    // Pull back past its top: it settles on the top rather than carrying on out.
+    /*
+     * Pull back past its top: it settles on the top rather than carrying on out.
+     *
+     * Two readings, because there are two scrollers and the claim is about both.
+     * The content came back to its own top and stopped, and the card did not
+     * move an inch while it did — a scroll only passes outward to the layer on a
+     * gesture that starts with the content already there.
+     */
     await swipeSheetAway(page, { ticks: 600 });
     await pastTheSettle(page);
     await expect(page.getByTestId('scoring-key')).toBeVisible();
-    expect((await sheetScroll(page)).top, 'the card did not come to rest at its own top').toBe(detent);
+    expect((await sheetBodyScroll(page)).top, 'the content did not come to rest at its own top').toBe(0);
+    expect((await sheetScroll(page)).top, 'the card moved while its content was being pulled back').toBe(detent);
     await page.getByTestId('sheet-close').click();
   });
 
   test('a tap above the card closes it, and nothing behind it changed', async ({ page }) => {
     const before = await page.getByTestId('review-card').count();
-    await page.getByTestId('sheet-dismiss').click({ position: { x: 10, y: 10 } });
+    await tapAboveCard(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
     await expect(page.getByTestId('review-card')).toHaveCount(before);
   });

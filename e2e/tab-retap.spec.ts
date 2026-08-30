@@ -19,7 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { emptyQueue, exploreMarket } from './helpers.ts';
+import { emptyQueue, exploreMarket, tapAboveCard } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -180,7 +180,7 @@ test.describe('a retap returns the screen home', () => {
     // …and it goes away without one, by the backdrop.
     // The see-through zone above the card, which is what a tap outside lands on
     // now that the backdrop is colour and the scroller covers it.
-    await page.getByTestId('sheet-dismiss').click({ position: { x: 5, y: 5 } });
+    await tapAboveCard(page);
     await expect(sheet).toHaveCount(0);
 
     /*

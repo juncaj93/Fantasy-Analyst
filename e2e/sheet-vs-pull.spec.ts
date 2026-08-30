@@ -271,8 +271,14 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     /*
      * A card with more in it than fits, scrolled into — so that the pull below
      * is the content's rather than the card's. Made rather than hoped for.
+     *
+     * The layer and the content are two scrollers, and it matters which one this
+     * reads. The layer only ever holds two positions, the card in place and the
+     * card gone; reading further down a long card moves `.sheet-body`. So what
+     * is set up here is the *body* off its top, which is the state that decides
+     * where the pull below goes.
      */
-    const detent = await page.evaluate(() => {
+    const layer = await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
       const filler = document.createElement('div');
       filler.style.height = '1200px';
@@ -283,8 +289,10 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(400);
     await expect
-      .poll(async () => page.evaluate(() => Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop)))
-      .toBeGreaterThan(detent);
+      .poll(async () => page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop)))
+      .toBeGreaterThan(0);
+    // And the card itself did not move while its content did.
+    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop))).toBe(layer);
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
@@ -293,6 +301,14 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     // A dismissal that fired would still be on screen right now. See the helper.
     await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
+    /*
+     * And the pull spent itself returning the content to its top, rather than
+     * carrying on into the card. Measured: a pull of any size from content that
+     * is not at its top stops at the top and goes no further — the scroll only
+     * passes outward to the layer on a *fresh* gesture, which is why reading a
+     * card and dismissing it can never be the same movement.
+     */
+    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop))).toBe(0);
     expectNothingPulled(await pullsSeen(page), requests);
   });
 

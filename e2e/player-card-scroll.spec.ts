@@ -95,33 +95,34 @@ async function openPlayer(page: Page, playerId: string): Promise<void> {
 }
 
 /**
- * What the card's layer is, as the browser sees it.
+ * What the card's content is, as the browser sees it.
  *
- * Read off `.sheet-scroller` rather than `.sheet-body`, because the body stopped
- * being a scroller: the card and the space above it are one box now, and *that*
- * is what a finger moves. `scrollTop` is therefore measured from the layer's
- * dismissed position, so an opened card sits at its detent rather than at
- * nought — every reading below is relative to `detent`, never to zero.
+ * Read off `.sheet-body`, which is the scroller a reader moves when they read
+ * further down a card. There are two on this layer and the distinction is the
+ * whole subject of this file: `.sheet-scroller` holds the card's *position* and
+ * has exactly two of them, the card in place and the card gone, while
+ * everything that happens inside a long card happens here. A card that will not
+ * scroll is this box refusing, and a card that is thrown away by a scroll is
+ * that one taking it.
+ *
+ * `overscroll` is read here rather than assumed: `contain` on this box is an
+ * instruction not to chain outward, and it is exactly what made an earlier
+ * sheet impossible to push away from its own content.
  */
 async function bodyState(page: Page) {
   return page.evaluate(() => {
-    const el = document.querySelector('.sheet-scroller') as HTMLElement;
+    const el = document.querySelector('.sheet-body') as HTMLElement;
+    const layer = document.querySelector('.sheet-scroller') as HTMLElement;
     return {
       scrollTop: Math.round(el.scrollTop),
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
-      /*
-       * Whether the card has more in it than its detent can show.
-       *
-       * The layer's content is a screen-tall dismiss zone plus the card's
-       * detent, so a card that fits can be scrolled by exactly one screen and no
-       * more. Anything past that is card the reader has to scroll to reach —
-       * which is the property every caller here means by "a scrolling card", and
-       * it needs neither the gap nor a computed style to say so.
-       */
-      overflows: el.scrollHeight - el.clientHeight > el.clientHeight,
+      /** Whether the card has more in it than the card can show. */
+      overflows: el.scrollHeight - el.clientHeight > 0,
       touchAction: getComputedStyle(el).touchAction,
       overscroll: getComputedStyle(el).overscrollBehaviorY,
+      layerTop: Math.round(layer.scrollTop),
+      layerOverscroll: getComputedStyle(layer).overscrollBehaviorY,
     };
   });
 }
@@ -154,17 +155,27 @@ async function settled(page: Page, tries = 20): Promise<void> {
  * to be. Nothing here retries the *assertion* a caller makes about the result —
  * only the aim.
  */
-/** Where an opened card rests: the top of its detent, not the top of the layer. */
+/**
+ * Where an opened card rests, which is the furthest this layer scrolls.
+ *
+ * Not a measurement of the card, and deliberately not one: the zone above the
+ * card is exactly one screen and the card's own box is exactly one screen less
+ * the gap, so the bottom of the layer *is* the card's position. `Sheet` puts it
+ * there on open by the same arithmetic, and a reading taken any other way would
+ * be a second opinion about a number that has only one source.
+ */
 async function detentOf(page: Page): Promise<number> {
   return page.evaluate(() => {
     const el = document.querySelector('.sheet-scroller') as HTMLElement;
-    const snap = document.querySelector('.sheet-snap') as HTMLElement;
-    return Math.round(el.scrollTop + snap.getBoundingClientRect().top - parseFloat(getComputedStyle(el).scrollPaddingTop || '0'));
+    return Math.round(el.scrollHeight - el.clientHeight);
   });
 }
 
 async function wheelOverBody(page: Page, dy: number): Promise<void> {
   await settled(page);
+  // Aimed at the middle of the layer, which is inside the card whenever a card
+  // is open — the same point a reader's thumb lands on, and deliberately not a
+  // point measured from `.sheet-body`, whose box can extend past the screen.
   const box = (await page.locator('.sheet-scroller').boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, dy);
@@ -355,21 +366,27 @@ test.describe('scrolling an expanded player card', () => {
     const opened = await bodyState(page);
     expect(opened.touchAction, 'the browser was not given permission to scroll the card').not.toBe('none');
     /*
-     * Polled, and against the detent rather than nought.
+     * The layer comes to rest at the card's detent, and the content at nought.
      *
-     * A card opens by *scrolling* now — the rise is the layer travelling from
-     * its dismissed position to the card's — so a reading taken the instant the
-     * sheet appears catches that animation half way. And the card's top is the
-     * detent, which is where the layer rests when the card is fully up; nought
-     * is where it rests when the card has gone.
+     * Two readings for two scrollers. A card opens by *scrolling* — the rise is
+     * the layer travelling from its dismissed position to the card's — so a
+     * reading taken the instant the sheet appears catches that animation half
+     * way, and both are polled rather than sampled.
      */
     const detentTop = await detentOf(page);
     expect(detentTop, 'the card has no detent to rest at').toBeGreaterThan(0);
     await expect
-      .poll(async () => (await bodyState(page)).scrollTop, { message: 'the card did not come to rest at its top' })
+      .poll(async () => (await bodyState(page)).layerTop, { message: 'the card did not come to rest at its top' })
       .toBe(detentTop);
-    // A scroll that runs out of card never becomes a scroll of the page.
-    expect(opened.overscroll).toBe('contain');
+    expect((await bodyState(page)).scrollTop, 'the card opened part-way down its own content').toBe(0);
+    /*
+     * A scroll that runs out of *card* passes outward to the layer, which is the
+     * dismissal — so this box must not say `contain`. A scroll that then runs
+     * out of *layer* stops there and never reaches the page, which is what the
+     * layer's own `contain` is for. One box out, and no further.
+     */
+    expect(opened.overscroll, 'the card cannot be pushed away from its own content').not.toBe('contain');
+    expect(opened.layerOverscroll, 'a flick that runs out of sheet would carry on into the page behind').toBe('contain');
 
     /*
      * 2. Nothing takes the gesture off the browser.
@@ -435,7 +452,8 @@ test.describe('scrolling an expanded player card', () => {
     const detent = await detentOf(page);
     await wheelOverBody(page, 400);
     const first = await bodyState(page);
-    expect(first.scrollTop, 'the card did not move under a scroll').toBeGreaterThan(detent);
+    expect(first.scrollTop, 'the card did not move under a scroll').toBeGreaterThan(0);
+    expect(first.layerTop, 'the card itself moved when only its content should have').toBe(detent);
 
     await wheelOverBody(page, 400);
     const second = await bodyState(page);
@@ -454,25 +472,25 @@ test.describe('scrolling an expanded player card', () => {
     ).toBeGreaterThanOrEqual(bottom.scrollHeight - bottom.clientHeight - 2);
 
     /*
-     * 5. And so is the top again — in steps, because the top is now a detent
-     *    with a dismissal on the other side of it.
+     * 5. And so is the top again, and the card is still there when it arrives.
      *
-     *    A single huge wheel up used to be the quickest way back; it now carries
-     *    straight through the card's resting position and takes the card with
-     *    it, which is the affordance working rather than a defect. So this walks
-     *    back in wheels smaller than the distance left, and the last one lands
-     *    on the detent because that is what the snap position is for.
+     *    One wheel is enough and it cannot overshoot into a dismissal: a scroll
+     *    that starts with the content off its top spends itself returning the
+     *    content to the top and stops, however large it is. Reaching the layer —
+     *    and so the dismissal — takes a fresh gesture, which is the protection
+     *    the reader gets for free from nesting one scroller in the other.
      */
-    for (let i = 0; i < 20; i++) {
-      const { scrollTop } = await bodyState(page);
-      if (scrollTop <= detent) break;
-      await wheelOverBody(page, -Math.min(300, Math.max(60, scrollTop - detent)));
-    }
+    await wheelOverBody(page, -4000);
     await expect
       .poll(async () => (await bodyState(page)).scrollTop, {
         message: 'the top of the card could not be reached again',
       })
-      .toBe(detent);
+      .toBe(0);
+    await expect(
+      page.getByTestId('player-sheet'),
+      'a pull back to the top of the card carried on and threw the card away',
+    ).toBeVisible();
+    expect((await bodyState(page)).layerTop, 'the card moved while its content was returning to its top').toBe(detent);
 
     // 6. None of that moved the list underneath, which is pinned where it was.
     expect(await page.evaluate(() => document.body.style.position)).toBe('fixed');
@@ -556,10 +574,11 @@ test.describe('scrolling an expanded player card', () => {
      * a reader's thumb is already on a card that is still two requests from
      * being the size it will end up.
      *
-     * Measured as the layer getting longer rather than as the card crossing some
-     * height, because a card is no longer capped at its detent — it is as tall
-     * as what is in it, and what is in it before the outlook lands is already
-     * more than one screen on some fixtures. What must be true is that it grew.
+     * Measured as the content getting longer rather than as the card crossing
+     * some height. The card *is* capped at its detent — it has to be, because a
+     * snap area taller than the scrollport stops WebKit scrolling the layer at
+     * all — so its own box tells you nothing about how much arrived. What grows
+     * is what it holds, and what must be true is that it grew.
      */
     await expect(page.getByTestId('outlook')).toBeVisible();
     await expect
@@ -571,10 +590,9 @@ test.describe('scrolling an expanded player card', () => {
 
     const detent = await detentOf(page);
     await wheelOverBody(page, 400);
-    expect(
-      (await bodyState(page)).scrollTop,
-      'the card that grew late could not be scrolled',
-    ).toBeGreaterThan(detent);
+    const grown = await bodyState(page);
+    expect(grown.scrollTop, 'the card that grew late could not be scrolled').toBeGreaterThan(0);
+    expect(grown.layerTop, 'the card that grew late was moved instead of scrolled').toBe(detent);
   });
 
   /**
@@ -623,10 +641,10 @@ test.describe('scrolling an expanded player card', () => {
 
     /** One flick, optionally preceded by `drift` pixels the wrong way. */
     const flick = async (drift: number) => {
-      await page.evaluate(
-        (top) => ((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top),
-        detent,
-      );
+      await page.evaluate((top) => {
+        (document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top;
+        (document.querySelector('.sheet-body') as HTMLElement).scrollTop = 0;
+      }, detent);
       await page.waitForTimeout(120);
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(from) });
       if (drift > 0) {
@@ -642,11 +660,11 @@ test.describe('scrolling an expanded player card', () => {
       return (await bodyState(page)).scrollTop;
     };
 
-    expect(await flick(0), 'a clean upward flick did not move the card').toBeGreaterThan(detent);
+    expect(await flick(0), 'a clean upward flick did not move the card').toBeGreaterThan(0);
     expect(
       await flick(2),
       'an upward flick that began with two pixels of downward drift lost its scroll — the original defect, back',
-    ).toBeGreaterThan(detent);
+    ).toBeGreaterThan(0);
 
     // And it is still a sheet: the same finger on the grip closes it.
     await expect(page.getByTestId('player-sheet')).toBeVisible();
@@ -668,12 +686,14 @@ test.describe('scrolling an expanded player card', () => {
    * There is nothing left to take. The dismissal is a scroll, so the engine
    * doing what it always wanted to do with this touch is the feature.
    *
-   * Both halves of the rule are checked with the same flick from the same place,
-   * because the whole claim is that only the scroller's position decides:
+   * Both halves of the rule are checked with the identical flick from the same
+   * place, because the whole claim is that only the content's scroll position
+   * decides which box hears it:
    *
-   *  - at the card's own top, the card goes;
-   *  - scrolled down into it, the identical flick is the content's — the card
-   *    stays, and comes to rest on its top rather than carrying on out.
+   *  - with the content at its top, it has nowhere to put the scroll, so the
+   *    scroll passes outward to the layer and the card goes;
+   *  - scrolled down into it, the same flick is the content's — the card stays,
+   *    and no size of flick can carry through into a dismissal.
    *
    * Chromium only, the protocol being Chromium's; the WebKit shards in CI are
    * what say this holds on the engine it has always failed on. A wheel exercises
@@ -711,35 +731,34 @@ test.describe('scrolling an expanded player card', () => {
     /*
      * Scrolled into the card first: the same flick is the content's.
      *
-     * A short push, and the length is the point rather than an accident. One
-     * long continuous haul from the middle of a card *does* carry through into a
-     * dismissal — on iOS as here, where a single drag can reach the top and keep
-     * going — so what is checked with a finger is the part only a finger can
-     * show: that a flick on scrolled content moves the content and takes nothing
-     * away. Exactly where an overshoot settles is momentum, and momentum injected
-     * through a protocol is not the reader's; the boundary itself is pinned with
-     * a wheel in `sheet-interaction.spec.ts`, where it is deterministic.
+     * A long push, deliberately — long enough that if the gesture *could* run
+     * past the card's top and carry on into a dismissal, this is where it would.
+     * It cannot: the content is a scroller of its own, and a scroll only passes
+     * outward to the layer on a gesture that begins with the content already at
+     * its top. So the reader part-way through a card can pull as hard as they
+     * like and keep the card.
      */
-    await page.evaluate(
-      (top) => ((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top + 600),
-      detent,
-    );
+    await page.evaluate((top) => {
+      (document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top;
+      (document.querySelector('.sheet-body') as HTMLElement).scrollTop = 600;
+    }, detent);
     await page.waitForTimeout(200);
     const readAt = (await bodyState(page)).scrollTop;
-    await push(6);
+    expect(readAt, 'the card would not scroll to set the case up').toBeGreaterThan(0);
+    await push(14);
     await expect(
       page.getByTestId('player-sheet'),
       'a card the reader was part-way through reading was thrown away by one flick',
     ).toBeVisible();
-    const afterFlick = (await bodyState(page)).scrollTop;
-    expect(afterFlick, 'the flick did not move the content it was made on').toBeLessThan(readAt);
-    expect(afterFlick, 'the flick ran past the card’s top instead of scrolling its content').toBeGreaterThanOrEqual(detent);
+    const afterFlick = await bodyState(page);
+    expect(afterFlick.scrollTop, 'the flick did not move the content it was made on').toBeLessThan(readAt);
+    expect(afterFlick.layerTop, 'the flick moved the card instead of its content').toBe(detent);
 
     // And from the card's own top, the same finger takes it away.
-    await page.evaluate(
-      (top) => ((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top),
-      detent,
-    );
+    await page.evaluate((top) => {
+      (document.querySelector('.sheet-scroller') as HTMLElement).scrollTop = top;
+      (document.querySelector('.sheet-body') as HTMLElement).scrollTop = 0;
+    }, detent);
     await page.waitForTimeout(200);
     await push(14);
     await expect(

@@ -512,7 +512,6 @@ export function Sheet({
   const surface = useRef<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   const detent = useRef<HTMLDivElement | null>(null);
-  const mark = useRef<HTMLDivElement | null>(null);
   const { lift } = useOverlay({ container: surface, onDismiss: onClose });
   /*
    * The latest `onClose`, for an observer that is attached once.
@@ -540,12 +539,16 @@ export function Sheet({
   /*
    * Opening puts the layer at the card's detent, in one step and before paint.
    *
-   * **Instant, and the rise is a keyframe rather than a smooth scroll.** Scrolling
-   * the detent into view *is* the card coming up, so animating that scroll looks
-   * like the obvious way to do the entrance — and it oscillates. A programmatic
-   * smooth scroll and `scroll-snap-type: mandatory` are two things steering the
-   * same box: the snap corrects the animation, the animation resumes, and the
-   * layer never settles. Playwright's word for what that does to anything inside
+   * **The card's position is simply the bottom of the layer**, which is why this
+   * needs no measuring: the zone above the card is one screen and the card's own
+   * box is one screen less the gap, so the furthest this box scrolls *is* where
+   * the card belongs.
+   *
+   * **Instant, and the rise is a keyframe rather than a smooth scroll.** Putting
+   * the card in place by animating this scroll looks like the obvious way to do
+   * the entrance, and it fights whatever else is steering the box — it did so
+   * visibly against a mandatory snap, where the two corrected each other and the
+   * layer never settled. Playwright's word for what that does to anything inside
    * the card is *not stable*, which it stayed for thirty seconds; a reader's
    * word for it would be less kind.
    *
@@ -555,54 +558,73 @@ export function Sheet({
    * rest of this app's motion is already answered.
    */
   useLayoutEffect(() => {
-    detent.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    const root = scroller.current;
+    if (root) root.scrollTop = root.scrollHeight;
   }, []);
 
   /*
-   * And closing is a scroll arriving at the other end of the same box.
+   * Where the layer comes to rest, decided once, when it stops moving.
    *
-   * The mark is two pixels inside the top of the detent; when the card has been
-   * scrolled away it sits below the scrollport and stops intersecting. That
-   * costs nothing per frame — which is the property this layer was rebuilt to
-   * have, and the reason this is an observer rather than a `scroll` listener.
+   * The engine still owns the part that has to feel right — the card tracks the
+   * finger, carries its momentum, rubber-bands, and can be caught halfway and
+   * sent back — and this owns only the question the engine answers badly: given
+   * that the reader has stopped, does the card stay or go?
    *
-   * **Which way it left is the whole of it, and leaving that out closed cards
-   * the reader was reading.** A mark at the top of the card goes out of view in
-   * both directions: downwards when the card is pushed away, and *upwards* the
-   * moment somebody scrolls far enough down a long one. Asking only whether it
-   * still intersects cannot tell those apart, so a card with more in it than
-   * fits shut itself as soon as it was read past its own height.
+   * **`scroll-snap` was supposed to answer it and cannot.** Both settings were
+   * measured on the layer, in WebKit, at the sizes this app runs at:
    *
-   * The entry already carries the answer, so this needs no extra reading of the
-   * DOM: the mark has gone *below* the scrollport exactly when the card has
-   * gone with it.
+   *  - `mandatory` advances a whole snap step whatever the scroll's size, so a
+   *    ten-pixel nudge threw the card away — a sheet that cannot survive being
+   *    brushed;
+   *  - `proximity` moves proportionally and then never settles, leaving the card
+   *    parked ten, forty, a hundred pixels down the screen.
    *
-   * `seen` is the other guard, and it makes this a *dismissal* rather than a
-   * description of where the layer starts: the mark is out of view at mount,
-   * because a sheet opens from its dismissed position, and only a departure
-   * after an arrival means the reader pushed the card away.
+   * Neither is a resting place worth having, so the resting places are named
+   * here instead: the card in place, or the card gone, and nothing between.
+   * `HOLD` is how much of the push has to be given before it counts as one —
+   * short of it the card comes back, past it the card goes. It is one number and
+   * it is meant to be turned by feel on a real phone, which is the only place
+   * the question can honestly be asked.
+   *
+   * Debounced on `scroll` rather than waiting for `scrollend`, which Safari only
+   * learned recently and which this cannot be the first thing to require.
    */
   useEffect(() => {
     const root = scroller.current;
-    const target = mark.current;
-    if (!root || !target) return;
-    let seen = false;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            seen = true;
-            continue;
-          }
-          if (!seen) continue;
-          const below = entry.rootBounds ? entry.boundingClientRect.top >= entry.rootBounds.bottom : false;
-          if (below) onDismiss.current();
-        }
-      },
-      { root, threshold: 0 },
-    );
-    observer.observe(target);
-    return () => observer.disconnect();
+    if (!root) return;
+    /** Fraction of the way to dismissed a push must reach to be a dismissal. */
+    const HOLD = 0.4;
+    let timer: number | undefined;
+    let settling = false;
+    const settle = () => {
+      const detentTop = root.scrollHeight - root.clientHeight;
+      if (detentTop <= 0) return;
+      if (root.scrollTop <= detentTop * (1 - HOLD)) {
+        onDismiss.current();
+        return;
+      }
+      if (root.scrollTop >= detentTop) return;
+      /*
+       * Back to the card's own position, smoothly — and flagged while it runs,
+       * because a smooth scroll is itself a stream of `scroll` events and
+       * without this the settle would keep re-arming on its own movement.
+       */
+      settling = true;
+      root.scrollTo({ top: detentTop, behavior: 'smooth' });
+      window.setTimeout(() => {
+        settling = false;
+      }, 400);
+    };
+    const onScroll = () => {
+      if (settling) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(settle, 110);
+    };
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.clearTimeout(timer);
+      root.removeEventListener('scroll', onScroll);
+    };
   }, []);
 
   return createPortal(
@@ -631,7 +653,6 @@ export function Sheet({
         */}
         <div className="sheet-dismiss" data-testid="sheet-dismiss" onClick={onClose} />
         <div className="sheet-snap" ref={detent}>
-          <div className="sheet-dismissed-mark" ref={mark} aria-hidden="true" />
           <div
             className="sheet"
             role="dialog"

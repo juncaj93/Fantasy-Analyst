@@ -6297,12 +6297,17 @@ table.compact tr:last-child td {
  * sequence delivered was `pointerdown`, **one** `pointermove`, `pointercancel`.
  * The app was not being outvoted. It was not being asked.
  *
- * So it stops asking. There is one scroller for the whole layer, its content is
- * a screen-tall transparent zone above the card, and the two ends of it are
- * scroll-snap positions: the card in place, and the card gone. Dragging the
- * card down *is* scrolling this box up. Momentum, rubber-banding, the snap back
- * when the drag was too small, and the ability to catch it halfway and change
- * your mind — none of that is code any more. It is what a scroller does.
+ * So it stops asking. This layer is a scroller, its content is a screen-tall
+ * transparent zone above the card, and its two ends are the card in place and
+ * the card gone. Dragging the card down *is* scrolling this box up. Tracking the
+ * finger, momentum, rubber-banding, and the ability to catch it halfway and
+ * change your mind are none of them code any more; they are what a scroller
+ * does. Only the last question — having stopped, does it stay or go — is
+ * answered in `Sheet`, because the engine's own answer to it is `scroll-snap`
+ * and `scroll-snap` gets it wrong three different ways here.
+ *
+ * The card's *content* is a second scroller nested in this one, and the
+ * relationship between the two is the rest of the behaviour: see `.sheet-body`.
  *
  * Three consequences worth stating, because each of them was a problem before:
  *
@@ -6351,31 +6356,23 @@ table.compact tr:last-child td {
   overflow-y: auto;
   overscroll-behavior: contain;
   /*
-   * Mandatory, and it does not trap a long card.
+   * No snapping, and that is a measurement rather than a preference.
    *
-   * A snap area larger than the scrollport may rest anywhere that still covers
-   * it, so a card with more in it than fits scrolls freely through its own
-   * middle and snaps only at its two ends. One rule does the work of the detent,
-   * the dismissal and "scrolled content keeps the drag" at once — and, more
-   * importantly, it is the rule that guarantees the layer always comes to rest
-   * somewhere sensible. A card left sitting half off the bottom of the screen is
-   * not a state this app should be able to reach, and `proximity` allows exactly
-   * that: a drag that stops halfway stops halfway.
+   * Both settings were tried on this layer, in WebKit, at the sizes this app
+   * runs at. `mandatory` advances a whole snap step however small the scroll
+   * was, so a ten-pixel nudge dismissed the card. `proximity` moves
+   * proportionally and then never settles, parking the card partway down the
+   * screen. And while the card itself was a snap area larger than this box,
+   * *either* setting stopped the layer scrolling at all — which is what made
+   * long cards unreadable in Safari. Snapping had three ways to be wrong here
+   * and no way to be right.
    *
-   * **Known, and not yet resolved.** `mandatory` also overrides scrolls it was
-   * not asked about. Bringing an element deep inside a long card into view — the
-   * compare sheet's candidate list is the case that found it — is pulled back to
-   * a snap position as soon as it lands, which reaches a keyboard and a screen
-   * reader as surely as it reaches a test. `proximity` fixes that and gives up
-   * the guarantee above; finishing the settle in JavaScript on `scrollend` was
-   * tried to get both and made it worse, because this layer also moves for
-   * reasons that are not gestures — a card re-rendering under the reader is one.
-   * Both were measured. Neither is right yet, and the choice here is the one
-   * that cannot leave a card stranded.
+   * What it was for is done in `Sheet` instead: the layer free-scrolls, so the
+   * card tracks the finger and carries its momentum, and where it comes to rest
+   * is decided once, when the reader stops. The card's own position is simply
+   * the bottom of this box, which is why nothing has to compute it.
    */
-  scroll-snap-type: y mandatory;
-  /* Where the top of an opened card sits: the detent, and the snap alignment. */
-  scroll-padding-top: var(--sheet-gap);
+  scroll-snap-type: none;
 }
 
 /*
@@ -6387,7 +6384,6 @@ table.compact tr:last-child td {
  */
 .sheet-dismiss {
   height: 100%;
-  scroll-snap-align: start;
 }
 
 /*
@@ -6402,38 +6398,50 @@ table.compact tr:last-child td {
  */
 .sheet-snap {
   position: relative;
-  min-height: calc(100% - var(--sheet-gap));
-  scroll-snap-align: start;
+  /*
+   * A *fixed* height, and that is the difference between this layer scrolling
+   * and not scrolling in Safari.
+   *
+   * It used to be `min-height`, so a card with more in it than fits grew this
+   * box past the scrollport — and the design leant on the rule that a snap area
+   * larger than its scrollport may rest anywhere still covering it, which is
+   * what was supposed to let a long card scroll freely through its own middle.
+   *
+   * **WebKit does not implement that rule.** Measured in isolation, with
+   * nothing of this app in it: a 200px scroller, `scroll-snap-type: y
+   * mandatory`, one 900px snap child. Sitting on that child's snap offset, a
+   * scroll moves it nowhere at all — and `proximity` behaves identically, while
+   * `none` scrolls freely. `scroll-padding` and `scroll-margin` make no
+   * difference either way. So any snap area taller than the scrollport is a
+   * scroller that has stopped, and a player's card is taller than the screen
+   * whenever the newsletter has much to say about him.
+   *
+   * Bounded here instead: the card's detent is exactly one screen less the gap,
+   * always, so neither snap area is ever oversized and the engine's snapping
+   * works as it does everywhere else. What overflows is the card's own body,
+   * which is a scroller of its own — see `.sheet-body`.
+   */
+  height: calc(100% - var(--sheet-gap));
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-}
-
-/*
- * How the layer knows it has been dismissed.
- *
- * A two-pixel mark just inside the top of the detent, watched by an
- * `IntersectionObserver`. When the card has been scrolled away this sits below
- * the scrollport and stops intersecting, and that is the whole signal.
- *
- * Deliberately inset rather than placed on the edge: the detent's top touches
- * the bottom of the scrollport exactly when the card is gone, and an element
- * whose rectangle *touches* the root is still reported as intersecting — so a
- * mark on the boundary reports the same thing when the sheet is dismissed as it
- * does when it opens, and the observer never fires at all. (Measured: it fired
- * once, on attach, and never again.)
- *
- * The alternative was a `scroll` listener, and this is not one on purpose. An
- * observer costs nothing per frame, which is the property the sheet's scrolling
- * was rebuilt to have.
- */
-.sheet-dismissed-mark {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  width: 1px;
-  height: 2px;
-  pointer-events: none;
+  /*
+   * Clipped, because the card's entrance would otherwise lengthen the layer.
+   *
+   * `sheet-rise` brings the card up from `translateY(100%)`, and a transformed
+   * box contributes to its scroll container's scrollable overflow — so the layer
+   * measured a whole extra card's height of room that nothing occupies, the
+   * card's resting position stopped being the bottom of the box, and it opened
+   * part-way up its own dismiss zone. (Measured: 2329px of scroll height for
+   * 1587px of content, the difference being the card exactly.)
+   *
+   * `clip` rather than `hidden` on purpose: `hidden` would make this a scroll
+   * container of its own, and a third scroller on this layer is the last thing
+   * it needs. Nothing is lost visually — this box ends at the bottom edge of the
+   * screen when the card is in place, so what is clipped is what would have been
+   * off-screen anyway.
+   */
+  overflow: clip;
 }
 
 .sheet {
@@ -6446,13 +6454,17 @@ table.compact tr:last-child td {
    * rather than a `bottom` and a `transform`. See the note on `.sheet-scroller`
    * for why the whole layer became a scroller.
    *
-   * No `max-height`. A card taller than the detent is not clipped and does not
-   * grow an inner scroller — it simply extends past the bottom of the screen,
-   * and reading it scrolls the layer it lives in. That is what removed the
-   * nested scroller, and the nested scroller is what made the dismissal
-   * impossible: a finger on it was the inner box's, and the gesture never
-   * chained outward. (Measured: pulling down on inner content sitting at its
-   * top moved nothing at all.)
+   * A card taller than the detent stops at it and scrolls inside, because the
+   * layer cannot carry that overflow itself: a snap area taller than the
+   * scrollport stops a WebKit scroller dead (see `.sheet-snap`).
+   *
+   * The inner scroller was once blamed for making the dismissal impossible —
+   * measured, a pull down on inner content sitting at its top moved nothing at
+   * all. That measurement was right and the conclusion drawn from it was wrong:
+   * the box was carrying `overscroll-behavior: contain`, which is an
+   * instruction not to chain, and it was the `contain` rather than the nesting.
+   * Without it the same gesture chains outward and dismisses. See
+   * `.sheet-body`.
    */
   background: var(--surface);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
@@ -6460,6 +6472,18 @@ table.compact tr:last-child td {
   padding-bottom: var(--safe-bottom);
   display: flex;
   flex-direction: column;
+  /*
+   * Never taller than its detent, and allowed to shrink to it.
+   *
+   * A short card still hugs what is in it and sits on the bottom edge — that is
+   * `justify-content: flex-end` on the detent, and it is why the detent and the
+   * card are two boxes rather than one. A tall card stops here and hands its
+   * overflow to `.sheet-body`. `min-height: 0` is what lets a flex item shrink
+   * below its content at all; without it the card would grow the detent again
+   * and put the layer straight back into WebKit's oversized-snap-area hole.
+   */
+  max-height: 100%;
+  min-height: 0;
   /*
    * The rise, and it moves nothing that scrolls.
    *
@@ -6826,8 +6850,41 @@ table.compact tr:last-child td {
  * `padding-bottom` still clears the home indicator by way of `.sheet`, and the
  * horizontal padding is unchanged, so nothing inside a card moves.
  */
+/*
+ * The card's content, and the scroller whose *boundary* is the dismissal.
+ *
+ * This is a scroll container again, and the reason is not the one it was before.
+ * The card cannot own the layer's whole scroll — WebKit stops scrolling
+ * altogether once a snap area outgrows the scrollport (see `.sheet-snap`) — so
+ * what overflows a tall card scrolls here.
+ *
+ * **The dismissal is what this box does when it runs out.** Scroll chaining is
+ * the whole of "push the card away from anywhere on it": a drag on content that
+ * has somewhere to go scrolls the content, and a drag on content already at its
+ * top has nowhere to go, so the scroll passes outward to `.sheet-scroller` and
+ * moves the card instead. Nobody arbitrates that and no threshold decides it;
+ * it is one continuous gesture that changes which box it belongs to at the
+ * moment the inner one is done — which is exactly the rule the brief asked for,
+ * and it costs nothing per frame.
+ *
+ * So `overscroll-behavior` is deliberately `auto` here and must stay that way.
+ * `contain` on this box is what made the old sheet impossible to push away from
+ * its content, and it read as "the card ignores my thumb": measured, a pull
+ * down on inner content sitting at its top moved nothing at all, because
+ * `contain` is precisely an instruction not to chain. The layer outside *does*
+ * say `contain`, so the chain stops at the sheet and never reaches the page
+ * behind it — one box out, and no further.
+ *
+ * No `touch-action` here, ever. Declaring `none` on a body that had nothing to
+ * scroll yet is the defect in `player-card-scroll.spec.ts`: WebKit reads it
+ * once, when the finger lands, and a card still waiting on its two requests
+ * would refuse the reader their first flick.
+ */
 .sheet-body {
   padding: 0 var(--sp-4) var(--sp-4);
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior-y: auto;
 }
 
 /*
@@ -6860,38 +6917,6 @@ table.compact tr:last-child td {
   margin: -2px 2px 0;
   font-size: 0.76rem;
   color: var(--text-faint);
-}
-
-/*
- * The compare sheet's candidate list: the one thing inside a sheet with a
- * scroller of its own.
- *
- * A sheet's card and its content are one scroller now, which is what lets the
- * card be pushed away from anywhere on it. That is right for a card, which is
- * prose the reader moves through once — and wrong for this, which is a list of
- * every player they might compare. Left to flow, it makes the card as tall as
- * the roster and the layer inherits the problem: `scroll-snap-type: mandatory`
- * holds the layer at a position that covers the scrollport, so a candidate deep
- * in the list could not be brought into view by anything that scrolls to it —
- * a keyboard, a screen reader, or a test. That was reproducible and is what this
- * bounds.
- *
- * The cost is the one a nested scroller always has here, and it is the right way
- * round: a drag that begins *in the list* is the list's and does not push the
- * card away, because a gesture on an inner scroller never chains outward
- * (measured). Everywhere else on the card — the grip, the header, the filter,
- * the button row, the comparison itself — still dismisses. Which is what iOS
- * does with a list inside a sheet, and what a reader expects of something that
- * plainly scrolls on its own.
- *
- * `overscroll-behavior: contain` keeps a flick that runs out of list from
- * becoming a scroll of the layer, so running off the end of the names cannot
- * throw the card away underneath them.
- */
-.compare-candidates {
-  max-height: 44dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 @keyframes sheet-rise {
