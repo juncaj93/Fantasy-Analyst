@@ -64,8 +64,6 @@ import { describeAge, recallBoard, rememberBoardSoon } from '../offlineCache.ts'
  * be computed from two different rules.
  */
 import { survivalBand } from '../../core/draft/survival.ts';
-/* One answer to "is every pick in", shared with the server and the toolbar. */
-import { isDraftComplete } from '../../core/sleeper/phase.ts';
 /*
  * The two tier decisions the board draws: where a line goes, and who is worth
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
@@ -1047,6 +1045,24 @@ export function DraftScreen({
    * instead of the gap in a dataset that it is.
    */
   const ptsPresent = hasPreseasonPointsCoverage(board.recommendations);
+  /*
+   * Whether there is a next pick to enter at all.
+   *
+   * The question the pick-entry controls actually have, and deliberately asked
+   * of the board rather than of the draft's Sleeper status. A finished draft is
+   * a full one, so the two agree wherever it matters — but this is the more
+   * precise statement (`nextManualPick` refuses a pick past the final round on
+   * exactly this arithmetic, `rounds: 0` meaning "no limit published"), and it
+   * is answered from fields the board already carries.
+   *
+   * **That last part is load-bearing.** Reading `isDraftComplete` here instead
+   * would import `core/sleeper/phase.ts` from a screen, and a module the entry
+   * reaches is placed in the entry chunk however many lazy chunks also reach
+   * it — so one import here drags the season phase, and everything behind it,
+   * out of the demo bundle and into the shell every page load fetches. The
+   * chunk-ownership budget caught it; see perf-budgets.json.
+   */
+  const draftFull = board.rounds > 0 && board.picksMade >= board.teams * board.rounds;
   const rows = withTierDividers(ordered, isSinglePosition && !searching && sort === DEFAULT_SORT_MODE);
   const visible = searching ? rankByQuery(rows, query, (item) => item.rec.name) : rows;
 
@@ -1232,7 +1248,7 @@ export function DraftScreen({
               Hidden on a locked session, where nothing can be written anyway,
               and on a finished draft, where there is no next pick to record.
             */}
-            {unlocked && !isDraftComplete(board.status) ? (
+            {unlocked && !draftFull ? (
               <button
                 type="button"
                 className={`icon-btn${entering ? ' icon-btn-on' : ''}`}
@@ -1282,7 +1298,7 @@ export function DraftScreen({
         seated there is no seating to derive it from, so the reader is the only
         source — see `pickIsMine`.
       */}
-      {entering && unlocked && !isDraftComplete(board.status) ? (
+      {entering && unlocked && !draftFull ? (
         <div className="draft-entry-bar" data-testid="draft-entry-bar" role="status">
           <span className="draft-entry-next">
             Next pick <strong>#{board.currentPick}</strong> · R{board.round}
