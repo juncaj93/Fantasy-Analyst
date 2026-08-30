@@ -27,6 +27,7 @@ import { importAdpSnapshot } from '../src/core/adp/import.ts';
 import { clearNextPickCache } from '../src/core/draft/nextpick/index.ts';
 import { draftBoardSourcesFromDatabase } from '../src/server/services/draftBoard.ts';
 import { buildMockBoard } from '../src/core/draft/mockBoard.ts';
+import { buildDraftBoard } from '../src/core/draft/boardBuilder.ts';
 import { MockDraftVoidError } from '../src/core/draft/mockSources.ts';
 import { readSnapshot, replayDraftSnapshot } from '../src/core/support/replay.ts';
 import type { MockDraftState } from '../src/core/draft/mockDraft.ts';
@@ -637,5 +638,171 @@ describe('a mock can be drafted from a seat that is not yours', () => {
     expect(draft?.slotToRosterId, 'the stored seating is untouched').toEqual(
       Object.fromEntries(Array.from({ length: TEAMS }, (_, i) => [String(i + 1), rosterOf(i + 1)])),
     );
+  });
+});
+
+/**
+ * The slots a rehearsal is played into are the league's own.
+ *
+ * The reported symptom was that Mock Draft's `Team` sheet did not follow the
+ * owner's league — a one-quarterback league drawing two quarterback slots. This
+ * is the measurement that half of the report needed: the mock's board and the
+ * real board are asked for the same thing at the same moment, and both are
+ * checked against `roster_positions` rather than against each other, so a
+ * shared wrong answer could not pass either.
+ *
+ * `ROSTER` above is deliberately not a default shape — one quarterback, two
+ * backs, three receivers, one tight end and a flex — so a hardcoded
+ * "2 QB / 3 RB / 3 WR / 1 FLX" anywhere on this path would fail here.
+ */
+describe('the roster slots a rehearsal reports', () => {
+  let db: NodeSqliteDatabase;
+
+  beforeEach(async () => {
+    clearNextPickCache();
+    db = await createTestDb();
+    await seedPreDraft(db, { league: 'lg', draft: 'dr' });
+    await new LeagueRepo(db).selectLeague('lg');
+  });
+
+  /** `slot → required`, which is what the Team sheet and the strip both draw. */
+  const slotsOf = (progress: { slot: string; required: number }[]): Record<string, number> =>
+    Object.fromEntries(progress.map((row) => [row.slot, row.required]));
+
+  it('are the league’s own, and the same ones the real board reports', async () => {
+    const sources = draftBoardSourcesFromDatabase(db);
+    const real = await buildDraftBoard(sources, 'dr', { limit: 10 });
+    const mock = await buildMockBoard(sources, {
+      draftId: 'dr',
+      state: null,
+      action: { kind: 'start', seed: 4242, startedAt: '2026-08-27T12:00:00.000Z' },
+      limit: 10,
+    });
+
+    // Read off `ROSTER` rather than restated, so the two cannot drift apart.
+    const expected: Record<string, number> = { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, BN: 4 };
+    expect(slotsOf(mock.board.rosterProgress)).toEqual(expected);
+    expect(slotsOf(real.rosterProgress)).toEqual(expected);
+  });
+
+  it('fill in as the rehearsal is drafted, and only for the reader’s own picks', async () => {
+    const sources = draftBoardSourcesFromDatabase(db);
+    let result = await buildMockBoard(sources, {
+      draftId: 'dr',
+      state: null,
+      action: { kind: 'start', seed: 4242, startedAt: '2026-08-27T12:00:00.000Z' },
+      limit: 40,
+    });
+    const qb = result.board.recommendations.find((r) => r.position === 'QB');
+    expect(qb, 'the fixture board offers a quarterback to take').toBeDefined();
+    const filledOf = (progress: { slot: string; filled: number }[], slot: string) =>
+      progress.find((row) => row.slot === slot)?.filled ?? 0;
+    expect(filledOf(result.board.rosterProgress, 'QB')).toBe(0);
+
+    result = await buildMockBoard(sources, {
+      draftId: 'dr',
+      state: result.state,
+      action: { kind: 'take', playerId: qb!.playerId },
+      limit: 40,
+    });
+    expect(result.refused).toBeNull();
+    /*
+     * One quarterback, one filled quarterback slot — and the whole round of bot
+     * picks that came with it changed nothing about it. This is the reading the
+     * engine's roster need is computed from, so it is also the half of the
+     * scoring report that had to be ruled out first.
+     */
+    expect(filledOf(result.board.rosterProgress, 'QB')).toBe(1);
+    expect(result.board.rosterCounts['QB']).toBe(1);
+  });
+});
+
+/**
+ * The position chips, over a rehearsal's board.
+ *
+ * Mock Draft narrows through the same route parameter the live board narrows
+ * through, which is the whole of the reuse: `buildDraftBoard` does the cut, so
+ * the filtered rehearsal is the filtered Draft page with a different pick
+ * stream in it. The tier assertions are `#222`'s invariant, checked here
+ * because this lane is the second caller to reach that code with a filter set.
+ */
+describe('a rehearsal can be narrowed to one position', () => {
+  let db: NodeSqliteDatabase;
+
+  beforeEach(async () => {
+    clearNextPickCache();
+    db = await createTestDb();
+    await seedPreDraft(db, { league: 'lg', draft: 'dr' });
+    await new LeagueRepo(db).selectLeague('lg');
+  });
+
+  const start = (position?: string) =>
+    buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: null,
+      action: { kind: 'start', seed: 4242, startedAt: '2026-08-27T12:00:00.000Z' },
+      limit: 40,
+      ...(position ? { position } : {}),
+    });
+
+  it('returns only that position, and the same rehearsal', async () => {
+    const all = await start();
+    const wrs = await start('WR');
+    expect(wrs.board.recommendations.length).toBeGreaterThan(3);
+    expect(wrs.board.recommendations.every((r) => r.position === 'WR')).toBe(true);
+    // The chip narrows the view. It does not draft, re-seed or advance anything.
+    expect(wrs.state.picks).toEqual(all.state.picks);
+    expect(wrs.board.currentPick).toBe(all.board.currentPick);
+  });
+
+  it('keeps every row’s own score and rank exactly as the whole board had them', async () => {
+    const all = await start();
+    const wrs = await start('WR');
+    const scoreOf = new Map(all.board.recommendations.map((r) => [r.playerId, r.score]));
+    for (const rec of wrs.board.recommendations) {
+      // Only rows the unfiltered board also carried can be compared; the filter
+      // reaches deeper into the pool than the top forty do.
+      if (!scoreOf.has(rec.playerId)) continue;
+      expect(rec.score, rec.playerId).toBe(scoreOf.get(rec.playerId));
+    }
+  });
+
+  /**
+   * `#222`, on this lane: a tier is a fact about the draft, not about the chip.
+   *
+   * The ladders are built from the pool the *unfiltered* board is built from,
+   * so a receiver's tier index and the gap below him are the same numbers
+   * whether or not the reader tapped WR. If Mock Draft's board building ever
+   * diverged from the Draft page's, this is what would catch it.
+   */
+  it('reports the same tier for a player whether or not the chip is tapped', async () => {
+    const all = await start();
+    const wrs = await start('WR');
+    const cliffOf = new Map(all.board.recommendations.map((r) => [r.playerId, r.tierCliff]));
+    let compared = 0;
+    for (const rec of wrs.board.recommendations) {
+      const cliff = cliffOf.get(rec.playerId);
+      if (!cliff) continue;
+      compared++;
+      expect(rec.tierCliff.tierIndex, `${rec.playerId} tier`).toBe(cliff.tierIndex);
+      expect(rec.tierCliff.gapToNext, `${rec.playerId} gap`).toBe(cliff.gapToNext);
+      expect(rec.tierCliff.score, `${rec.playerId} cliff score`).toBe(cliff.score);
+    }
+    expect(compared, 'the two boards overlap, or this proves nothing').toBeGreaterThan(3);
+  });
+
+  it('is carried through a pick, so the chip survives taking a player', async () => {
+    const opened = await start('RB');
+    const target = opened.board.recommendations[0]!.playerId;
+    const after = await buildMockBoard(draftBoardSourcesFromDatabase(db), {
+      draftId: 'dr',
+      state: opened.state,
+      action: { kind: 'take', playerId: target },
+      limit: 40,
+      position: 'RB',
+    });
+    expect(after.refused).toBeNull();
+    expect(after.board.recommendations.every((r) => r.position === 'RB')).toBe(true);
+    expect(after.board.myRoster.map((p) => p.playerId)).toContain(target);
   });
 });

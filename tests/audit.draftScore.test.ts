@@ -351,15 +351,53 @@ describe('positional structure is bounded', () => {
     const empty = rankAvailablePlayers(sparseQbBoard(), ctx({ currentPick: 12, nextPick: 24, rosterCounts: { QB: 0, RB: 0, WR: 0, TE: 0 } }));
     const filled = rankAvailablePlayers(sparseQbBoard(), ctx({ currentPick: 12, nextPick: 24, rosterCounts: { QB: 1, RB: 0, WR: 0, TE: 0 } }));
     const qbOf = (rows: typeof empty) => rows.find((r) => r.position === 'QB')!;
+    const needOf = (rec: { components: ComponentScore[] }): number =>
+      rec.components.find((c) => c.key === 'need')?.contribution ?? 0;
     /*
-     * Roster need is not the QB problem, and this is the measurement that says
-     * so: filling the slot moves the best quarterback's composite by about
-     * five hundredths, which is one pick of ADP — exactly what
-     * `DEFAULT_WEIGHTS.need` documents. The inflation was elsewhere.
+     * Roster need is not the QB problem, and this is still the measurement that
+     * says so: the `need` *component* moves by about five hundredths when the
+     * slot is filled, which is one pick of ADP — exactly what
+     * `DEFAULT_WEIGHTS.need` documents. The inflation was elsewhere, and this
+     * assertion is about the place it was not.
      */
-    expect(Math.abs(qbOf(empty).total - qbOf(filled).total)).toBeLessThan(0.1);
+    expect(Math.abs(needOf(qbOf(empty)) - needOf(qbOf(filled)))).toBeLessThan(0.1);
     // And in round one the board is still a market: the best players lead.
     expect(empty[0]!.position).not.toBe('QB');
+  });
+
+  /**
+   * The other half of the same finding, and the one the owner reported from a
+   * rehearsal of his own league: he took a quarterback in round two and the top
+   * of the list was quarterbacks again by round seven.
+   *
+   * The four sparsity components are what was carrying that, and none of them
+   * had any way to know the slot was closed — "there is nothing left like him
+   * at quarterback" is a true sentence about a player who cannot start for you.
+   * `structureVoice` lowers their joint ceiling once a position can no longer
+   * reach the lineup, so filling the slot is now worth about eight picks of ADP
+   * against a position that is still open, rather than one.
+   *
+   * The composite is what moves. Every component keeps its own measurement:
+   * see `tests/draft.filledPosition.test.ts` for the ceiling itself.
+   */
+  it('stops leading with a quarterback once the quarterback slot is closed', () => {
+    const open = ctx({ currentPick: 60, nextPick: 72, rosterCounts: { QB: 0, RB: 0, WR: 0, TE: 0 } });
+    const closed = ctx({ currentPick: 60, nextPick: 72, rosterCounts: { QB: 1, RB: 0, WR: 0, TE: 0 } });
+    const empty = rankAvailablePlayers(sparseQbBoard(), open);
+    const filled = rankAvailablePlayers(sparseQbBoard(), closed);
+    const qbOf = (rows: typeof empty) => rows.find((r) => r.position === 'QB')!;
+
+    // The same board, at the same pick, with the same market: the only
+    // difference is whether the reader has a quarterback.
+    expect(empty[0]!.position, 'he genuinely is the value here').toBe('QB');
+    expect(filled[0]!.position, 'and he is no longer the pick once you have one').not.toBe('QB');
+
+    // He falls, and he falls by a bounded amount rather than off the board.
+    expect(qbOf(filled).total).toBeLessThan(qbOf(empty).total);
+    expect(structureOf(qbOf(filled))).toBeLessThanOrEqual(
+      POSITIONAL_STRUCTURE.cap * POSITIONAL_STRUCTURE.filledVoice.single + 0.002,
+    );
+    expect(qbOf(filled).score, 'still scored, still comparable, still draftable').not.toBeNull();
   });
 
   it('a quarterback still leads when he is the genuine value', () => {

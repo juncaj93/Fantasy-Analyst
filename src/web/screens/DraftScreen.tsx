@@ -161,7 +161,16 @@ import {
  * defence slot looked exactly like a bug in the board.
  */
 const QUEUE_FILTER = '★';
-const ALL_FILTER = 'ALL';
+/**
+ * Exported for Mock Draft, which draws this same row over a rehearsal's board.
+ *
+ * The constant travels rather than being restated there for the reason
+ * `orderFilterChips` is shared: two screens spelling "everybody" differently
+ * would be two screens that could disagree about what an untouched filter is.
+ * `QUEUE_FILTER` deliberately does not travel: a rehearsal has no queue to
+ * filter to, and the note on the mock's own row says why.
+ */
+export const ALL_FILTER = 'ALL';
 
 /**
  * How many ranked rows the board asks for.

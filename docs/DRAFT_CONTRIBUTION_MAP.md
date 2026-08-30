@@ -143,6 +143,47 @@ on at least the markets he has.
 
 ---
 
+## A position you have finished with speaks more quietly
+
+The four scarcity components — `scarcity`, `tier_cliff`, `separation`,
+`opportunity` — are held to a joint ceiling (`POSITIONAL_STRUCTURE.cap`, 0.5)
+because they all rise together for the same reason. What nothing decided until
+now is **whether the answer is worth anything to this roster**.
+
+Reported from a rehearsal of a one-quarterback league: a quarterback taken in
+round two, and by round seven the top of the recommendation list was
+quarterbacks again. The board knew the slot was closed — `need` said so, in
+words, on the card — and the knowledge was worth `-0.009` against `+0.289` of
+structure for the same player at the same pick.
+
+So the ceiling is scaled by what the position can still do (`structureVoice`):
+
+| the position can still… | ceiling | why |
+|---|---|---|
+| fill its own slot, or a flex it is eligible for | `cap` (0.5) | it can start for you; nothing changes |
+| nothing — a **depth** position (2+ starters) that is full | `cap × 0.85` | backs and receivers keep being drafted all afternoon |
+| nothing — a **single-slot** position (QB, TE, DEF) that is full | `cap × 0.3` | one slot, filled, done |
+
+The two discounts are `DEMAND.depthFilled` and `DEMAND.singleFilled`, imported
+from `nextpick/demand.ts` rather than restated: the *room* model has discounted
+a simulated manager's appetite by exactly those numbers since it was written,
+and the reader's own board having no equivalent was the asymmetry. One tuning,
+one meaning, both sides of the same draft.
+
+Three things it deliberately does not do. It never raises a contribution — the
+ceiling only falls. It never touches a component's own score, only the weight,
+so `score × weight = contribution` still checks out on the card. And it does not
+reach `survival`, which is signed both ways: a filled quarterback who is likely
+to *last* carries a negative survival contribution, and turning that down would
+raise him.
+
+Measured on the audit board in `tests/audit.draftScore.test.ts` (twelve
+quarterbacks in bands against forty dense backs), at pick 60: with the slot open
+the best quarterback leads the board, and with it filled a receiver does. He
+falls by about eight picks of ADP and stays on the board, scored and comparable.
+
+---
+
 ## The one second-order path, and why it is not a duplicate
 
 `separation` and `opportunity` are computed from the composite, which already

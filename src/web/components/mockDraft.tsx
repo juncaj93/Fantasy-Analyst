@@ -28,8 +28,9 @@ import { useOverlay } from '../overlay.ts';
 import { Empty, Loading, Notice } from './common.tsx';
 import { CloseIcon } from './icons.tsx';
 import { DraftBoardOverlay } from './draftBoard.tsx';
-import { RecommendationRow, withTierDividers } from '../screens/DraftScreen.tsx';
-import { Sheet } from './native.tsx';
+import { ALL_FILTER, RecommendationRow, withTierDividers } from '../screens/DraftScreen.tsx';
+import { Sheet, SegmentedControl } from './native.tsx';
+import { FLX_FILTER, orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import { fillSlotRows } from '../../core/draft/liveRoster.ts';
 import { enterMock, exitMock, forgetMock, readMock, writeMock } from '../mock/session.ts';
 import type { MockDraftState } from '../../core/draft/mockDraft.ts';
@@ -235,6 +236,27 @@ export function MockDraftScreen({
   const [seat, setSeat] = useState<number | null>(null);
   /** Which card is open. The same one-at-a-time rule the live board uses. */
   const [expanded, setExpanded] = useState<string | null>(null);
+  /**
+   * Which chip is pressed, and it narrows the same way the live board narrows.
+   *
+   * The rehearsal was the one board in this app with no way to ask "who is the
+   * best receiver left", which on a phone mid-round means scrolling forty mixed
+   * rows to find out. The row below is `SegmentedControl` over
+   * `orderFilterChips` — the live screen's own control over the live screen's
+   * own ordering — and the narrowing itself is `position` on the board request,
+   * which is the same parameter the Draft page sends. Nothing here filters a
+   * list on the client: `buildDraftBoard` cuts the pool, so the rehearsal's
+   * filtered board *is* the Draft page's filtered board.
+   */
+  const [position, setPosition] = useState(ALL_FILTER);
+  /**
+   * The filter every request carries, read synchronously.
+   *
+   * Same reason `stateRef` exists: a pick taken while a chip is pressed has to
+   * post the chip that is pressed *now*, not the one the last render saw.
+   */
+  const positionRef = useRef(position);
+  positionRef.current = position;
 
   /**
    * The rehearsal, and the one place it is kept.
@@ -316,6 +338,17 @@ export function MockDraftScreen({
    */
   const trace = useRef<MockAttemptRecord[]>([]);
 
+  /**
+   * The chip the board on screen was actually built for.
+   *
+   * A tap on a chip does not itself make a request. It moves this away from
+   * `position`, and the effect below closes the gap the moment nothing is in
+   * flight — which is what stops a chip tapped while a pick is in the air from
+   * cancelling that pick. The rehearsal's whole recent history is lost picks;
+   * a filter is not worth another one.
+   */
+  const applied = useRef(ALL_FILTER);
+
   const apply = useCallback((next: MockBoardResponse) => {
     stateRef.current = next.state;
     writeMock(next.state);
@@ -351,10 +384,29 @@ export function MockDraftScreen({
        * apologise for having lost it. See `mock-retry`.
        */
       lastAction.current = action;
+      /*
+       * The chip this request is being made under, captured before the trip.
+       *
+       * What comes back is a board for *this* filter, and `applied` is how the
+       * screen knows whether the chip has moved on since — see the effect below
+       * that re-asks. Reading it at apply time instead would read whatever the
+       * reader had tapped by then and conclude the board already matched.
+       */
+      const requested = positionRef.current;
       try {
         const next = await postMockBoard(
           draftId,
-          { state: stateRef.current, action, limit: MOCK_ROWS },
+          {
+            state: stateRef.current,
+            action,
+            limit: MOCK_ROWS,
+            /*
+             * `ALL` is the absence of a filter rather than a value: the route
+             * reads `null` as "the whole board", which is byte-identical to the
+             * request every rehearsal made before this row existed.
+             */
+            position: requested === ALL_FILTER ? null : requested,
+          },
           {
             signal: abort.signal,
             onAttempt: (record) => {
@@ -363,6 +415,7 @@ export function MockDraftScreen({
           },
         );
         if (mine !== generation.current) return;
+        applied.current = requested;
         apply(next);
       } catch (err) {
         if (mine !== generation.current || abort.signal.aborted) return;
@@ -420,20 +473,44 @@ export function MockDraftScreen({
     };
   }, [draftId, ask]);
 
+  /*
+   * The board catches up with the chip, once there is nothing in the air.
+   *
+   * `ready` is the only phase in which a request is not outstanding, so this
+   * waits for a pick to land rather than racing it, and runs again if the
+   * reader tapped a third chip while the second was travelling. It cannot
+   * loop: a board that arrives for the chip that is pressed leaves the two
+   * equal, and the effect does nothing.
+   */
+  useEffect(() => {
+    if (phase !== 'ready' || applied.current === position) return;
+    void ask({ kind: 'resume' });
+  }, [phase, position, ask]);
+
   const board: DraftBoard | null = result?.board ?? null;
+
+  /**
+   * Which of the two tier treatments this list gets — the live screen's rule,
+   * applied to the same question.
+   *
+   * Filtered to one position the board is a ladder and the breaks in it can be
+   * drawn where they fall. `ALL` and `FLX` are mixed-position lists, where a
+   * line across two rows would claim a boundary that does not exist, so those
+   * get the proximity tag on the players it is about instead. This used to be
+   * hardcoded off, because a rehearsal had no filter to be single-position.
+   */
+  const isSinglePosition = position !== ALL_FILTER && position !== FLX_FILTER;
 
   /**
    * The live screen's own row annotations, over the rehearsal's board.
    *
-   * Tier dividers are **off**, for the same reason the live screen turns them
-   * off on its mixed board: a divider says "the market's next tier starts
-   * here", and there is no single position for that boundary to be about. A
-   * rehearsal has no position filter, so its list is always the mixed one.
-   *
-   * `showCliffProximity` is the other half of that same answer and is on, which
-   * is exactly what the live screen passes as `!isSinglePosition`.
+   * `isSinglePosition` decides, exactly as it does on the live screen, and
+   * `showCliffProximity` below is the same `!isSinglePosition` it passes.
    */
-  const rows = useMemo(() => withTierDividers(board?.recommendations ?? [], false), [board?.recommendations]);
+  const rows = useMemo(
+    () => withTierDividers(board?.recommendations ?? [], isSinglePosition),
+    [board?.recommendations, isSinglePosition],
+  );
 
   const capture = async () => {
     if (!stateRef.current) return;
@@ -487,6 +564,13 @@ export function MockDraftScreen({
   const reset = () => {
     forgetMock(draftId);
     stateRef.current = null;
+    /*
+     * A new rehearsal opens on the whole board, and `applied` moves with it so
+     * the first board of the new run is not immediately asked for again.
+     */
+    setPosition(ALL_FILTER);
+    positionRef.current = ALL_FILTER;
+    applied.current = ALL_FILTER;
     setResult(null);
     setError(null);
     setSnapshotNote(null);
@@ -657,12 +741,48 @@ export function MockDraftScreen({
         {board ? <MockRoster board={board} /> : null}
         {result && result.made.length > 0 ? <RoomSince made={result.made} /> : null}
 
+        {/*
+          The Draft page's filter row, over the rehearsal's board.
+
+          Drawn only once there is a board, because the chips are the league's
+          own — `startablePositions` and `offersFlex` come down with the board
+          rather than from a list here, so a league with no defence slot draws
+          no DEF chip in a rehearsal either.
+
+          The ★ queue chip is deliberately absent, and it is the one difference
+          from the live row. A star is "remind me later" and there is no later
+          in a rehearsal — the reader is the one picking, now, which is why the
+          star's slot on these rows carries a `+` instead. A chip filtering to a
+          list nobody can add to from this screen would be a control with no
+          way to satisfy it.
+        */}
+        {board && phase !== 'setup' && !result?.complete ? (
+          <SegmentedControl
+            label="Filter by position"
+            value={position}
+            onChange={setPosition}
+            segments={[ALL_FILTER, ...orderFilterChips(board.startablePositions ?? [], board.offersFlex === true)].map(
+              (p) => ({
+                id: p,
+                label: p,
+                ...(p === FLX_FILTER
+                  ? {
+                      ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends',
+                      testId: 'mock-flx-filter',
+                    }
+                  : { testId: `mock-filter-${p}` }),
+              }),
+            )}
+            testId="mock-filters"
+          />
+        ) : null}
+
         {phase === 'setup' ? null : phase === 'loading' ? (
           <Loading what="the room" />
         ) : board == null ? null : result?.complete ? (
           <Empty>This mock draft is finished. Reset to run it again.</Empty>
         ) : board.recommendations.length === 0 ? (
-          <Empty>Nobody left to draft.</Empty>
+          <Empty>{position === ALL_FILTER ? 'Nobody left to draft.' : 'No available players match this filter.'}</Empty>
         ) : (
           <div className="mock-list" data-testid="mock-list" aria-busy={phase === 'thinking'}>
             {/*
@@ -690,7 +810,7 @@ export function MockDraftScreen({
                   level={item.level}
                   levelRun={item.levelRun}
                   band={item.band}
-                  showCliffProximity
+                  showCliffProximity={!isSinglePosition}
                   ptsPresent={false}
                   horizonPick={board.waitHorizonPick}
                   currentPick={board.currentPick}

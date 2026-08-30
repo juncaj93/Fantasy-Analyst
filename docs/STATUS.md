@@ -505,6 +505,13 @@ suggestions).
    same board twice with and without the flags rather than by comparing a
    filtered board to an unfiltered one.
 
+   **Mock Draft's position chips are the second caller to reach this**, and they
+   reach it through the same route parameter and the same `buildDraftBoard`, so
+   the tier half is fixed there for free — `tests/mock.board.test.ts` asserts a
+   rehearsal's tier index, gap and cliff score are identical filtered and
+   unfiltered. The `scarcity` and `separation` caveat above applies to a
+   rehearsal exactly as it applies to the live board, and is the same deferral.
+
 12. **The browser suite shares one dev server across all three viewports, and
    reuses one across runs.** `reuseExistingServer` is on outside CI, so a server
    left behind by an interrupted run is picked up by the next one with its state
