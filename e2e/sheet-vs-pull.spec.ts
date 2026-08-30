@@ -34,7 +34,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, inSeason, pastTheSettle } from './helpers.ts';
+import { exploreMarket, inSeason, pastTheSettle, swipeSheetAway } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -139,28 +139,6 @@ async function pullScreen(page: Page, testId: string): Promise<void> {
   await drag(page, { x, y: box.y + 40 }, { x, y: box.y + 240 });
 }
 
-/** Where a drag on a sheet's *content* — not its grip, not its header — starts. */
-async function contentGrip(page: Page, sheet: string): Promise<{ x: number; y: number }> {
-  const body = (await page.locator(`[data-testid="${sheet}"] .sheet-body`).boundingBox())!;
-  return { x: body.x + body.width / 2, y: body.y + 24 };
-}
-
-/**
- * Where a dismissal actually starts: the sheet's grip.
- *
- * These specs used to pull sheets down by their *content*, which worked here
- * and does not work under a thumb — the body declares `touch-action: pan-y`
- * for its whole life now, so a real finger there scrolls or does nothing, and a
- * mouse-driven test that dismissed from it was passing for a reason no reader
- * has. The arbitration under test is unchanged by the move: the grip is inside
- * the sheet, the sheet is rendered inside the screen's pull surface, and every
- * pointer it receives still propagates to `usePullToRefresh` through the
- * portal exactly as one from the body did.
- */
-async function chromeGrip(page: Page, sheet: string): Promise<{ x: number; y: number }> {
-  const grip = (await page.locator(`[data-testid="${sheet}"] .sheet-grip`).boundingBox())!;
-  return { x: grip.x + grip.width / 2, y: grip.y + 4 };
-}
 
 /** Record every request the screen makes to its own endpoint, until read. */
 function watchRequests(page: Page, endpoint: string): string[] {
@@ -231,8 +209,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const from = await chromeGrip(page, 'player-sheet');
-    await drag(page, from, { x: from.x, y: from.y + 420 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     expectNothingPulled(await pullsSeen(page), requests);
@@ -246,8 +223,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/startsit/refresh');
     await watchPulls(page);
-    const from = await chromeGrip(page, 'weekly-sheet');
-    await drag(page, from, { x: from.x, y: from.y + 420 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
 
     await expect(page.getByTestId('weekly-sheet')).toHaveCount(0);
     expectNothingPulled(await pullsSeen(page), requests);
@@ -273,8 +249,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
 
     const requests = watchRequests(page, '/api/players?');
     await watchPulls(page);
-    const from = await chromeGrip(page, 'player-sheet');
-    await drag(page, from, { x: from.x, y: from.y + 420 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     expectNothingPulled(await pullsSeen(page), requests);
@@ -293,23 +268,47 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await settled(page, 'sheet-grip');
 
-    await page.evaluate(() => {
+    /*
+     * A card with more in it than fits, scrolled into — so that the pull below
+     * is the content's rather than the card's. Made rather than hoped for.
+     *
+     * The layer and the content are two scrollers, and it matters which one this
+     * reads. The layer only ever holds two positions, the card in place and the
+     * card gone; reading further down a long card moves `.sheet-body`. So what
+     * is set up here is the *body* off its top, which is the state that decides
+     * where the pull below goes.
+     */
+    const layer = await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
-      body.style.maxHeight = '160px';
-      body.scrollTop = 60;
+      const filler = document.createElement('div');
+      filler.style.height = '1200px';
+      body.append(filler);
+      return Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop);
     });
+    await page.mouse.move(195, 400);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(400);
     await expect
-      .poll(async () => page.evaluate(() => (document.querySelector('.sheet-body') as HTMLElement).scrollTop))
+      .poll(async () => page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop)))
       .toBeGreaterThan(0);
+    // And the card itself did not move while its content did.
+    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop))).toBe(layer);
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const from = await contentGrip(page, 'player-sheet');
-    await drag(page, from, { x: from.x, y: from.y + 420 });
+    await swipeSheetAway(page, { ticks: 500 });
 
     // A dismissal that fired would still be on screen right now. See the helper.
     await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
+    /*
+     * And the pull spent itself returning the content to its top, rather than
+     * carrying on into the card. Measured: a pull of any size from content that
+     * is not at its top stops at the top and goes no further — the scroll only
+     * passes outward to the layer on a *fresh* gesture, which is why reading a
+     * card and dismissing it can never be the same movement.
+     */
+    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop))).toBe(0);
     expectNothingPulled(await pullsSeen(page), requests);
   });
 
@@ -356,8 +355,7 @@ test.describe('and gives it straight back', () => {
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await settled(page, 'sheet-grip');
-    const from = await chromeGrip(page, 'player-sheet');
-    await drag(page, from, { x: from.x, y: from.y + 420 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
 
     const requests = watchRequests(page, '/api/trades');
@@ -479,30 +477,18 @@ test.describe('under touch-typed pointers', () => {
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    const from = await chromeGrip(page, 'player-sheet');
 
-    await page.evaluate(({ x, y }) => {
-      const target = document.elementFromPoint(x, y);
-      if (!target) throw new Error('nothing under the point the drag starts at');
-      const fire = (type: string, clientY: number, buttons: number) =>
-        target.dispatchEvent(
-          new PointerEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            pointerId: 1,
-            pointerType: 'touch',
-            isPrimary: true,
-            button: type === 'pointermove' ? -1 : 0,
-            buttons,
-            clientX: x,
-            clientY,
-          }),
-        );
-      fire('pointerdown', y, 1);
-      for (let step = 20; step <= 420; step += 20) fire('pointermove', y + step, 1);
-      fire('pointerup', y + 420, 0);
-    }, from);
+    /*
+     * A real scroll, where this used to synthesise a pointer sequence by hand.
+     *
+     * The point of the test is unchanged and is the half that matters: pushing a
+     * card away must not arm the pull on the screen underneath it. What has
+     * changed is that there is no longer a pointer gesture to forge — the
+     * dismissal is a scroll, and the layer that takes it covers the screen, so
+     * the events never reach the pull surface at all rather than reaching it and
+     * being refused. The assertion below is the same either way.
+     */
+    await swipeSheetAway(page);
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     expectNothingPulled(await pullsSeen(page), requests);

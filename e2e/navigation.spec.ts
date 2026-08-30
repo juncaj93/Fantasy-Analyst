@@ -15,7 +15,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle } from './helpers.ts';
+import { openReview, pastTheSettle, sheetBodyScroll, sheetScroll, swipeSheetAway, tapAboveCard } from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -521,8 +521,7 @@ test.describe('the back gesture, under an open sheet', () => {
      * the others. What is under test is a dismissal that starts at the far left
      * of the glass, so it starts on the chrome that dismisses, at x = 6.
      */
-    const grip = (await page.getByTestId('sheet-grip').boundingBox())!;
-    await drag(page, { x: 6, y: grip.y + 4 }, { x: 10, y: grip.y + 460 });
+    await swipeSheetAway(page, { over: '.sheet-grip' });
 
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
     await expect(
@@ -589,15 +588,14 @@ test.describe('sheets', () => {
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
-  test('a downward pull dismisses it', async ({ page }) => {
-    const box = (await page.getByTestId('sheet-grip').boundingBox())!;
-    await drag(page, { x: box.x + box.width / 2, y: box.y + 4 }, { x: box.x + box.width / 2, y: box.y + 420 });
+  test('a downward push dismisses it', async ({ page }) => {
+    await swipeSheetAway(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
-  test('a short pull springs back rather than dismissing', async ({ page }) => {
-    const box = (await page.getByTestId('sheet-grip').boundingBox())!;
-    await drag(page, { x: box.x + box.width / 2, y: box.y + 4 }, { x: box.x + box.width / 2, y: box.y + 24 });
+  test('a short push comes back rather than dismissing', async ({ page }) => {
+    await swipeSheetAway(page, { ticks: 40 });
+    await pastTheSettle(page);
     await expect(page.getByTestId('scoring-key')).toBeVisible();
   });
 
@@ -619,44 +617,126 @@ test.describe('sheets', () => {
    * it by WebKit before Safari 17, and the sheet has no reason to find out
    * which version the reader is on.
    */
-  test('lets the browser scroll the body, and keeps the drag for itself', async ({ page }) => {
-    const claimed = await page.evaluate(() => {
+  /**
+   * What the layer declares, read straight out of the stylesheet.
+   *
+   * This is the one property in this file that no synthesised gesture can
+   * check, and the reason a real defect lived here through several passes:
+   * `touch-action` governs *touch* input, and a mouse obeys none of it. So what
+   * is asserted is the declaration rather than the outcome.
+   *
+   * Every line here is the inverse of what it used to be, and deliberately.
+   * The grip and the header carried `touch-action: none` so the app could take
+   * a drag on them before Safari classified it as a scroll; the dismissal *is*
+   * a scroll now, so `none` on the strip a reader grabs first would be the one
+   * place the card refused to move. Nothing on this layer may claim a touch.
+   */
+  test('claims no touch anywhere on the layer, so every part of it can be pushed', async ({ page }) => {
+    const declared = await page.evaluate(() => {
       const read = (selector: string) => {
         const el = document.querySelector(selector) as HTMLElement;
-        return getComputedStyle(el).touchAction;
+        return el ? getComputedStyle(el).touchAction : 'missing';
       };
-      const body = document.querySelector('.sheet-body') as HTMLElement;
+      const scroller = document.querySelector('.sheet-scroller') as HTMLElement;
+      const style = getComputedStyle(scroller);
       return {
+        scroller: style.touchAction,
+        overflowY: style.overflowY,
+        snap: style.scrollSnapType,
+        overscroll: style.overscrollBehaviorY,
         sheet: read('.sheet'),
         grip: read('.sheet-grip'),
         header: read('.sheet-header'),
         body: read('.sheet-body'),
-        scrollable: body.dataset['scrollable'],
       };
     });
 
-    // The chrome — grip, header — claims every gesture that lands on it.
-    expect(claimed.grip, 'the browser will take a drag on the grip before the sheet sees it').toBe('none');
-    expect(claimed.header, 'the browser will take a drag on the header before the sheet sees it').toBe('none');
+    for (const [part, value] of Object.entries(declared)) {
+      if (part === 'scroller' || part === 'sheet' || part === 'grip' || part === 'header' || part === 'body') {
+        expect(value, `${part} claims a touch, so the card cannot be pushed away from it`).not.toBe('none');
+      }
+    }
 
     /*
-     * And the body's permission is unconditional, for the whole life of the
-     * sheet.
+     * The layer has somewhere to scroll, and the zone above the card is a whole
+     * screen tall.
      *
-     * It used to depend on `data-scrollable`, measured from the content — which
-     * is a promise the app cannot keep, because a card opens before its two
-     * requests have answered and the engine reads this once, when the finger
-     * lands. A body that says `none` while its content is still arriving costs
-     * the reader that entire gesture. There is nothing to measure now, so the
-     * attribute must be gone as well as the branch.
+     * This is the shape of the layer rather than a behaviour, and it is asserted
+     * because getting it wrong is silent. The scroller sized itself from `top`
+     * and `bottom` insets once, which is not the same as having a height: a
+     * percentage height on a child resolves against the parent's *height*, and
+     * WebKit read that as `auto`, so the dismiss zone collapsed to nothing.
+     * There was then nothing to scroll and no distance to push the card
+     * through — and the failures it produced were five different assertions in
+     * two files, none of which said the layer had no room in it. This one would
+     * have.
      */
-    expect(claimed.body, 'the body did not hand the scroll to the browser').toBe('pan-y');
-    expect(claimed.scrollable, 'the body is measuring itself again').toBeUndefined();
-    expect(claimed.sheet, 'an ancestor of the scroller claims the gesture').not.toBe('none');
+    const room = await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      const zone = document.querySelector('.sheet-dismiss') as HTMLElement;
+      return {
+        scrollable: el.scrollHeight - el.clientHeight,
+        zone: Math.round(zone.getBoundingClientRect().height),
+        port: el.clientHeight,
+      };
+    });
+    expect(room.zone, 'the zone above the card collapsed, so there is nothing to push it into').toBeGreaterThan(
+      room.port * 0.9,
+    );
     expect(
-      ['pan-up', 'pan-down', 'pan-left', 'pan-right'],
-      'a directional touch-action is silently ignored by WebKit',
-    ).not.toContain(claimed.body);
+      room.scrollable,
+      'the layer has nowhere to scroll, so the card cannot be pushed away',
+    ).toBeGreaterThan(0);
+
+    /*
+     * Neither snap area is taller than the scrollport, and that is the guard
+     * this file was missing.
+     *
+     * Snapping of either kind stops a WebKit scroller dead once the area under
+     * it outgrows the scrollport — measured in isolation, with none of this app
+     * in it: a 200px scroller, `scroll-snap-type: y mandatory`, one 900px snap
+     * child, and a scroll that moves it nowhere at all. `proximity` behaves the
+     * same and only `none` scrolls freely, so there is no setting that makes an
+     * oversized snap area safe.
+     *
+     * While the card *was* the snap area it grew with its own content, so a
+     * player with a long enough newsletter entry had a card that could not be
+     * scrolled — in Safari, at every width, silently. The card is bounded to its
+     * detent now and its overflow scrolls in `.sheet-body`. This says so out
+     * loud, because the failure it prevents reads as nine unrelated assertions
+     * in four files and not one of them mentions a snap area.
+     */
+    const areas = await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      const boxes = [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
+      return {
+        port: el.clientHeight,
+        tallest: Math.max(...boxes.map((b) => Math.round(b.getBoundingClientRect().height))),
+      };
+    });
+    expect(
+      areas.tallest,
+      'a snap area outgrew the scrollport, which stops WebKit scrolling the layer at all',
+    ).toBeLessThanOrEqual(areas.port);
+
+    // And the layer is a scroller that snaps, which is what does the dismissing.
+    expect(declared.overflowY, 'the layer is not a scroller, so nothing can be scrolled away').toMatch(/auto|scroll/);
+    /*
+     * And it does *not* snap, which is asserted rather than left to drift back.
+     *
+     * Snapping is the obvious way to give this layer two resting places and it
+     * is wrong here three separate ways, each measured in WebKit: while the card
+     * was a snap area taller than the scrollport, either setting stopped the
+     * layer scrolling at all; `mandatory` then advances a whole step however
+     * small the scroll, so a ten-pixel nudge dismissed the card; and `proximity`
+     * never settles, parking the card partway down the screen. Where the layer
+     * comes to rest is decided in `Sheet`, once, when the reader stops.
+     */
+    expect(declared.snap, 'the layer snaps again, which has no setting that behaves here').toBe('none');
+    expect(
+      declared.overscroll,
+      'a flick that runs out of sheet would carry on into the page behind it',
+    ).toBe('contain');
   });
 
   /**
@@ -677,36 +757,40 @@ test.describe('sheets', () => {
     ).not.toBe('hidden');
   });
 
-  test('scrolled content keeps the gesture until it is back at the top', async ({ page }) => {
-    // Force the body to be scrolled: a sheet that dismissed from here would be
-    // taking a scroll away from the reader.
-    const scrolled = await page.evaluate(() => {
+  test('scrolled content comes back to the card’s top and stops there', async ({ page }) => {
+    const detent = (await sheetScroll(page)).top;
+
+    // A card with more in it than fits, made rather than hoped for.
+    await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
-      body.style.maxHeight = '80px';
-      body.scrollTop = 40;
-      return body.scrollTop;
+      const filler = document.createElement('div');
+      filler.style.height = '1200px';
+      body.append(filler);
     });
-    expect(scrolled, 'the body was not made to scroll, so nothing here is being tested').toBeGreaterThan(0);
+    await page.mouse.move(195, 400);
+    await page.mouse.wheel(0, 500);
+    await page.waitForTimeout(500);
+    expect((await sheetBodyScroll(page)).top, 'the card would not scroll to set the case up').toBeGreaterThan(0);
 
     /*
-     * Measured off the body rather than off the sheet, which is what this used
-     * to do. A sheet is a grip, a header and then its content, so an offset
-     * taken from the top of the *sheet* lands wherever those two happen to add
-     * up to — and this one was landing outside the scroller, which made the test
-     * pass against a build with the rule it names deliberately removed.
+     * Pull back past its top: it settles on the top rather than carrying on out.
+     *
+     * Two readings, because there are two scrollers and the claim is about both.
+     * The content came back to its own top and stopped, and the card did not
+     * move an inch while it did — a scroll only passes outward to the layer on a
+     * gesture that starts with the content already there.
      */
-    const body = (await page.locator('.sheet-body').boundingBox())!;
-    const x = body.x + body.width / 2;
-    await drag(page, { x, y: body.y + 20 }, { x, y: body.y + 420 });
-    // A dismissal that fired would still be on screen right now. See the helper.
+    await swipeSheetAway(page, { ticks: 600 });
     await pastTheSettle(page);
     await expect(page.getByTestId('scoring-key')).toBeVisible();
+    expect((await sheetBodyScroll(page)).top, 'the content did not come to rest at its own top').toBe(0);
+    expect((await sheetScroll(page)).top, 'the card moved while its content was being pulled back').toBe(detent);
     await page.getByTestId('sheet-close').click();
   });
 
-  test('the backdrop closes it, and nothing behind it changed', async ({ page }) => {
+  test('a tap above the card closes it, and nothing behind it changed', async ({ page }) => {
     const before = await page.getByTestId('review-card').count();
-    await page.getByTestId('sheet-backdrop').click({ position: { x: 10, y: 10 } });
+    await tapAboveCard(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
     await expect(page.getByTestId('review-card')).toHaveCount(before);
   });

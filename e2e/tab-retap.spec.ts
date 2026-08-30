@@ -19,7 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { emptyQueue, exploreMarket } from './helpers.ts';
+import { emptyQueue, exploreMarket, tapAboveCard } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -171,14 +171,16 @@ test.describe('a retap returns the screen home', () => {
       const hit = document.elementFromPoint(tab.left + tab.width / 2, tab.top + tab.height / 2);
       return {
         isTab: hit?.closest('[data-testid="tab-trades"]') != null,
-        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-backdrop"]') != null,
+        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-scroller"]') != null,
       };
     });
     expect(overBar.isTab, 'the tab bar is tappable through an open sheet').toBe(false);
     expect(overBar.isModal, 'something that is neither the sheet nor its backdrop is over the bar').toBe(true);
 
     // …and it goes away without one, by the backdrop.
-    await page.getByTestId('sheet-backdrop').click({ position: { x: 5, y: 5 } });
+    // The see-through zone above the card, which is what a tap outside lands on
+    // now that the backdrop is colour and the scroller covers it.
+    await tapAboveCard(page);
     await expect(sheet).toHaveCount(0);
 
     /*
