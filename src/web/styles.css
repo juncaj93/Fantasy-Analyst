@@ -9228,6 +9228,20 @@ div.matchup-result {
   gap: var(--sp-2);
 }
 
+/*
+ * The position chips keep their height in a column that scrolls.
+ *
+ * `.filter-row` carries `overflow-x: auto` so a long chip set can be swiped
+ * sideways, and an overflow container's automatic minimum size is zero. As a
+ * direct flex child of `.mock-body`, with forty rows underneath it asking for
+ * room, that is exactly what it was given: present in the DOM, focusable, and
+ * nought pixels tall. The live board never hit this because its own copy of
+ * this row sits inside `SearchFilterRow` rather than in a scrolling column.
+ */
+.mock-body > .filter-row {
+  flex: 0 0 auto;
+}
+
 /* What the reader has built, as chips rather than as a second list. */
 .mock-roster {
   display: flex;

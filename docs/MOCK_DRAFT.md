@@ -123,6 +123,65 @@ configured bench so the strip never reads `9/6 BN`; the team sheet draws every
 player regardless, because a pick vanishing off your own roster is worse than a
 row with more names than spaces.
 
+### The slots are the league's, and it was checked rather than assumed
+
+Reported after a rehearsal: that this sheet did not follow the league's roster
+settings — a one-quarterback league drawing two quarterback slots. It does
+follow them, and the check is recorded because "it looked wrong" deserves a
+measurement rather than a reassurance.
+
+There is one source. The mock's board is built by `buildDraftBoard` over
+substituted picks, and `rosterProgress` there comes from
+`buildRosterShape(league.rosterPositions)` — the league's own `roster_positions`
+as Sleeper published them. `mockSources.ts` substitutes `listPicks` and
+`getDraft` and nothing else, so the league, and therefore the shape, is read
+exactly as the live board reads it. There is no second shape on this path and
+no default to fall back to.
+
+`tests/mock.board.test.ts` holds it from both ends: the rehearsal's slots and
+the real board's slots are asked for at the same moment and both are checked
+against `roster_positions` rather than against each other, so a shared wrong
+answer could not pass. Confirmed in the browser too, against a pre-draft league
+shaped `QB/RB/RB/WR/WR/WR/FLEX/FLEX`: the Draft page's strip read
+`0/1 QB · 1/2 RB · 1/3 WR · 2/2 FLX · 1/7 BN` and this sheet drew the same five
+rows.
+
+What the report *did* find is real and lives in the engine rather than here: a
+position whose starting slots are full was still collecting the full positional
+scarcity premium, so quarterbacks stayed near the top of a rehearsal after the
+one quarterback slot was filled. See `docs/DRAFT_CONTRIBUTION_MAP.md`, "A
+position you have finished with speaks more quietly".
+
+## Narrowing the board
+
+The rehearsal draws the Draft page's own position chips: `SegmentedControl` over
+`orderFilterChips`, the same control in the same order over the same
+league-derived set, so a league with no defence slot draws no `DEF` chip in a
+rehearsal either.
+
+**It narrows through the route, not through the list.** The chip travels as
+`position` on the mock board request — the same parameter the live board sends —
+and `buildDraftBoard` does the cut. So the filtered rehearsal *is* the filtered
+Draft page, which is also how `#222` is inherited rather than re-implemented: a
+tier is built from the pool the unfiltered board is built from, filtered or not.
+
+Two things about it are particular to a rehearsal:
+
+- **There is no ★ chip.** A star is "remind me later" and there is no later
+  here — the reader is the one picking, now, which is why the star's slot on
+  these rows carries the `+` that takes the player. A chip filtering to a list
+  nobody can add to from this screen would be a control with no way to satisfy
+  it.
+- **A tap on a chip does not itself make a request.** It moves the chip away
+  from `applied`, and an effect closes the gap once the phase is `ready` — which
+  is to say, once nothing is in flight. That is what stops a chip tapped while a
+  pick is travelling from bumping the generation counter and discarding the
+  pick's answer. This screen's history is lost picks; a filter is not worth
+  another one.
+
+The chip rides on every request, the `take` included, so a rehearsal can be run
+inside one position. A reset opens the next run on the whole board.
+
 ## What ends it
 
 **The first real pick for that `draft_id` deletes the mock outright.** Not
@@ -383,7 +442,9 @@ what makes the reuse real today; the extraction is worth doing next.
 | `tests/mock.isolation.test.ts` | both refusals, mutation-tested; the seam is structural |
 | `tests/mock.board.test.ts` | end to end over the real router: the board is real, the real draft is untouched, the 409, the snapshot round-trip |
 | `tests/liveRoster.test.ts` | `fillSlotRows`: the team sheet cannot disagree with the header strip |
-| `e2e/mock-draft.spec.ts` | the menu's shape and the nav height, the setup step and the seat, the team sheet, the draft order's striping, the double-tap guard, the retry and the recovery, and that no write leaves the browser while one is open |
+| `tests/mock.board.test.ts` | also: the rehearsal's roster slots are the league's own and the real board's, and the position chips narrow without moving a score or a tier |
+| `tests/draft.filledPosition.test.ts` | the structure ceiling for a position that can no longer reach the lineup |
+| `e2e/mock-draft.spec.ts` | the menu's shape and the nav height, the setup step and the seat, the team sheet, the position chips, the draft order's striping, the double-tap guard, the retry and the recovery, and that no write leaves the browser while one is open |
 
 ## Deliberately not built
 

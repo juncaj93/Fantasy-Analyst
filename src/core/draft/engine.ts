@@ -26,6 +26,16 @@ import { SEPARATION, draftScore, separationScore } from './score.ts';
 import { CONCENTRATION, assessConcentration, type ConcentrationResult, type RosteredPlayer } from './concentration.ts';
 import { OPPORTUNITY, evaluateOpportunity, type OpportunityResult } from './opportunity.ts';
 import { computeNeed, computeScarcity, type NeedBreakdown, type RosterCounts } from './need.ts';
+/*
+ * The room model's own constants, read rather than restated.
+ *
+ * `demand.ts` decides how much a *simulated* manager still wants a position
+ * he has filled; the ceiling below decides how loudly the same fact may speak
+ * on the reader's own board. They are the same judgement about the same
+ * league, so a second set of numbers here would mean the room and the board
+ * disagreed about whether a quarterback slot was closed.
+ */
+import { DEMAND } from './nextpick/demand.ts';
 import { marketStrategyNote, type MarketStrategyNote } from './marketStrategy.ts';
 import { estimateSurvival } from './survival.ts';
 import {
@@ -1154,7 +1164,7 @@ export function rankAvailablePlayers(
     } satisfies DraftRecommendation;
   });
 
-  applyBoardComponents(recommendations, { needs, nextPick: ctx.nextPick });
+  applyBoardComponents(recommendations, { needs, nextPick: ctx.nextPick, shape: ctx.shape });
 
   /*
    * Priced players first, then by total, then by ADP, then by name.
@@ -1217,7 +1227,7 @@ export function rankAvailablePlayers(
  */
 function applyBoardComponents(
   recommendations: DraftRecommendation[],
-  ctx: { needs: Record<string, NeedBreakdown>; nextPick: number | null },
+  ctx: { needs: Record<string, NeedBreakdown>; nextPick: number | null; shape: RosterShape },
 ): void {
   /*
    * Only priced players are comparable, either as a subject or as an alternative.
@@ -1300,7 +1310,7 @@ function applyBoardComponents(
 
     rec.components.push(component, opportunityComponent);
     sealComponents([component, opportunityComponent]);
-    capPositionalStructure(rec.components);
+    capPositionalStructure(rec.components, structureVoice(ctx.needs[rec.position], ctx.shape, rec.position));
     // Re-summed rather than added to, because the cap above can have changed a
     // component that was counted on the first pass.
     rec.total = round3(rec.components.reduce((a, c) => a + c.contribution, 0));
@@ -1394,10 +1404,67 @@ export const POSITIONAL_STRUCTURE = {
    * the point is that they are not independent.
    */
   cap: 0.5,
+  /**
+   * How much of that ceiling a position may claim once it can no longer
+   * improve the starting lineup.
+   *
+   * The four components above all answer "how thin is this position", and the
+   * cap decides how loudly they may say it. What nothing decided was **whether
+   * the answer is worth anything to this roster**: with a quarterback already
+   * taken in a one-quarterback league, "there is nothing left like him at QB"
+   * is a true sentence about a player who cannot start for you, and it was
+   * being paid at full volume. Measured on a rehearsal of the owner's own
+   * league — one quarterback slot, filled in round two — the best available
+   * quarterback was still collecting `+0.289` of structure at pick 27 while
+   * `need`, the one component that knew the slot was full, was worth `-0.009`.
+   * That ratio is the defect: the board knew, and the knowledge could not be
+   * heard over the four components that did not.
+   *
+   * So the ceiling itself is scaled by what the position can still do. The
+   * numbers are `demand.ts`'s, deliberately and by name: the *room* model has
+   * discounted a manager's appetite for a filled single slot to `singleFilled`
+   * (0.3) and a filled depth position to `depthFilled` (0.85) since it was
+   * written, and the reader's own board having no equivalent was the
+   * asymmetry. One tuning, one meaning, both sides of the same draft.
+   *
+   * A position that can still fill a starting slot — its own or a flex — is
+   * untouched at 1, which is every position on an unfinished roster. Nothing
+   * here can raise a contribution: the ceiling only ever falls.
+   */
+  filledVoice: { single: DEMAND.singleFilled, depth: DEMAND.depthFilled },
 } as const;
 
 /**
+ * The share of the positional-structure ceiling this position may claim.
+ *
+ * Reads the need breakdown the engine has already computed, so "can he still
+ * start for me" is answered in exactly one place: an unfilled dedicated slot or
+ * an open flex slot he is eligible for means yes, and there is no second
+ * eligibility rule here to disagree with `computeNeed`.
+ *
+ * The two filled cases are told apart the way `demand.ts` tells them apart: a
+ * league that starts two or more of a position keeps drafting it all afternoon
+ * for the bench and the bye weeks, so its structure still means something; a
+ * position the league starts one of is finished the moment it is filled.
+ */
+export function structureVoice(
+  need: NeedBreakdown | undefined,
+  shape: RosterShape,
+  position: string,
+): number {
+  if (!need) return 1;
+  if (need.startersUnfilled > 0 || need.flexOpen > 0) return 1;
+  const required = shape.starters[position] ?? 0;
+  return required >= DEMAND.depthThreshold
+    ? POSITIONAL_STRUCTURE.filledVoice.depth
+    : POSITIONAL_STRUCTURE.filledVoice.single;
+}
+
+/**
  * Hold the positional-structure family to its joint ceiling.
+ *
+ * `voice` is that ceiling's share for this position — 1 wherever the position
+ * can still improve the lineup, and lower once it cannot. See `structureVoice`.
  *
  * Symmetric, though only the positive side can reach the cap in practice — a
  * dense position's worst case is `scarcity` alone at −0.2. Written symmetrically
@@ -1414,13 +1481,14 @@ export const POSITIONAL_STRUCTURE = {
  * this engine's judgement about what that measurement is worth, which is
  * exactly what the cap is revising.
  */
-export function capPositionalStructure(components: ComponentScore[]): void {
+export function capPositionalStructure(components: ComponentScore[], voice = 1): void {
   const family = components.filter(
     (c) => (POSITIONAL_STRUCTURE.keys as readonly string[]).includes(c.key) && !c.unknown,
   );
   const total = family.reduce((a, c) => a + c.contribution, 0);
-  if (total === 0 || Math.abs(total) <= POSITIONAL_STRUCTURE.cap) return;
-  const scale = POSITIONAL_STRUCTURE.cap / Math.abs(total);
+  const cap = POSITIONAL_STRUCTURE.cap * voice;
+  if (total === 0 || Math.abs(total) <= cap) return;
+  const scale = cap / Math.abs(total);
   for (const component of family) {
     component.weight = round3(component.weight * scale);
     component.contribution = round3(component.score * component.weight);

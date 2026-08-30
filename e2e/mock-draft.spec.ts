@@ -111,7 +111,7 @@ function recommendation(i: number) {
 
 interface MockDouble {
   /** Mock board requests the app has made. */
-  requests(): { action: string; picks: number; slot?: number | null }[];
+  requests(): { action: string; picks: number; slot?: number | null; position?: string | null }[];
   /** Writes the app attempted while the rehearsal was up. Should stay empty. */
   writes(): string[];
 }
@@ -124,7 +124,7 @@ interface MockDouble {
  * deliberately.
  */
 async function installMockDouble(page: Page, options: { realPicks?: number } = {}): Promise<MockDouble> {
-  const requests: { action: string; picks: number; slot?: number | null }[] = [];
+  const requests: { action: string; picks: number; slot?: number | null; position?: string | null }[] = [];
   const writes: string[] = [];
   let picks: { pickNo: number; slot: number; playerId: string; by: 'you' | 'bot' }[] = [];
 
@@ -160,12 +160,14 @@ async function installMockDouble(page: Page, options: { realPicks?: number } = {
     const body = JSON.parse(route.request().postData() ?? '{}') as {
       action?: { kind?: string; playerId?: string; slot?: number | null };
       state?: { picks?: unknown[] } | null;
+      position?: string | null;
     };
     const action = body.action?.kind ?? 'resume';
     requests.push({
       action,
       picks: body.state?.picks?.length ?? 0,
       ...(body.action?.slot === undefined ? {} : { slot: body.action.slot }),
+      position: body.position ?? null,
     });
 
     if (options.realPicks) {
@@ -236,9 +238,16 @@ async function installMockDouble(page: Page, options: { realPicks?: number } = {
           offersFlex: true,
           rosterAlerts: [],
           warnings: [],
-          recommendations: Array.from({ length: 12 }, (_, i) => recommendation(i)).filter(
-            (r) => !taken.has(r.playerId),
-          ),
+          /*
+           * The chip is honoured here, because the real route honours it: the
+           * mock board is built by `buildDraftBoard` with the same `position`
+           * the live board sends, so a double that returned the whole board
+           * whatever was asked for would let a screen that never sent the chip
+           * pass. `tests/mock.board.test.ts` holds the server half.
+           */
+          recommendations: Array.from({ length: 12 }, (_, i) => recommendation(i))
+            .filter((r) => !taken.has(r.playerId))
+            .filter((r) => !body.position || r.position === body.position),
         },
         onTheClock: MY_SLOT,
         yourTurn: true,
@@ -929,5 +938,114 @@ test.describe('a mock draft', () => {
     );
     expect(stored, 'kept under the draft it rehearses, and no other key').toHaveLength(1);
     expect(stored[0]).toMatch(/^fa\.mock\..+/);
+  });
+});
+
+/**
+ * The Draft page's position filters, over a rehearsal.
+ *
+ * The rehearsal was the one board in this app with no way to ask "who is the
+ * best receiver left". These are the live screen's own chips — the same
+ * control, the same ordering, the same league-derived set — narrowing through
+ * the same `position` parameter the live board sends, so the assertions here
+ * are about the wire and the row treatment rather than about a second
+ * implementation.
+ */
+test.describe('mock draft: position filters', () => {
+  test('draws the league’s own chips, and not the star', async ({ page }) => {
+    await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    const row = page.getByTestId('mock-filters');
+    await expect(row).toBeVisible();
+    const chips = await row.locator('button').allTextContents();
+    /*
+     * `ALL` then the league's positions then `FLX`, which is
+     * `orderFilterChips` — the same order the live row draws and the players
+     * list draws, from the same helper.
+     */
+    expect(chips).toEqual(['ALL', 'QB', 'RB', 'WR', 'TE', 'FLX']);
+    /*
+     * The one difference from the live row, and it is deliberate: a star is
+     * "remind me later" and there is no later in a rehearsal — the star's slot
+     * on these rows carries the `+` that takes the player.
+     */
+    expect(chips).not.toContain('★');
+  });
+
+  test('narrows the board through the same parameter the live board sends', async ({ page }) => {
+    const double = await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    // Unfiltered, the rehearsal asks for the whole board, exactly as before.
+    expect(double.requests().every((r) => r.position == null)).toBe(true);
+    const mixed = await page.locator('[data-testid^="mock-row-"]').count();
+    expect(mixed).toBeGreaterThan(3);
+
+    await page.getByTestId('mock-filter-RB').click();
+    await expect
+      .poll(() => double.requests().filter((r) => r.position === 'RB').length)
+      .toBeGreaterThan(0);
+    await expect(page.getByTestId('mock-filters').getByRole('button', { name: 'RB' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // Only backs are left, and the list is genuinely shorter than the mixed one.
+    await expect.poll(async () => page.locator('[data-testid^="mock-row-"]').count()).toBeLessThan(mixed);
+    /*
+     * The double's positions cycle `QB RB WR TE` over `mock-0…mock-11`, so the
+     * backs are exactly the rows whose index is one more than a multiple of
+     * four. Asserting the ids rather than the drawn glyph keeps this about what
+     * the filter returned rather than about how a row draws a position.
+     */
+    const rows = await page.locator('[data-testid^="mock-row-"]').evaluateAll((nodes) =>
+      nodes.map((n) => n.getAttribute('data-testid')),
+    );
+    for (const id of rows) expect(Number(id!.replace('mock-row-mock-', '')) % 4).toBe(1);
+  });
+
+  test('the chip survives a pick, so a rehearsal can be run inside one position', async ({ page }) => {
+    const double = await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    await page.getByTestId('mock-filter-WR').click();
+    await expect.poll(() => double.requests().filter((r) => r.position === 'WR').length).toBeGreaterThan(0);
+
+    await pickControl(page).click();
+    await expect(page.getByTestId('mock-since')).toBeVisible();
+    /*
+     * The pick itself carried the chip. That is what stops the board coming
+     * back mixed under a chip that still reads WR — and it is the same ref the
+     * state travels in, for the same reason.
+     */
+    expect(double.requests().find((r) => r.action === 'take')?.position).toBe('WR');
+    await expect(page.getByTestId('mock-filters').getByRole('button', { name: 'WR' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('a reset opens the next rehearsal on the whole board again', async ({ page }) => {
+    const double = await installMockDouble(page);
+    await openDraft(page);
+    await openMock(page);
+
+    await page.getByTestId('mock-filter-QB').click();
+    await expect.poll(() => double.requests().filter((r) => r.position === 'QB').length).toBeGreaterThan(0);
+
+    await page.getByTestId('mock-reset').click();
+    await expect(page.getByTestId('mock-setup')).toBeVisible();
+    await page.getByTestId('mock-start').click();
+    await expect(page.getByTestId('mock-list')).toBeVisible();
+
+    const started = double.requests().filter((r) => r.action === 'start');
+    expect(started[started.length - 1]!.position, 'a new rehearsal is not still wearing the last chip').toBeNull();
+    await expect(page.getByTestId('mock-filters').getByRole('button', { name: 'ALL' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 });
