@@ -1065,33 +1065,49 @@ test.describe('the deployed app', () => {
     });
 
     /*
-     * The grip, not the body — the same correction `sheet-vs-pull.spec.ts`
-     * already carries and this file was left behind by.
+     * A scroll, not a drag — and this file was left behind by that change for
+     * the second time.
      *
-     * `useSheetDrag` rule 1 changed underneath both of them: a sheet is now
-     * dismissed by its chrome, and *any* pointerdown inside the scrolling body
-     * is a scroll, whatever the body happens to be holding. The local suite was
-     * moved onto its own `chromeGrip` in the same change; this one still
-     * grabbed the body, and `ci.yml` does not run `e2e-production/`, so the
-     * mismatch could only ever surface after a deploy — which is how it did.
+     * A sheet's layer is a scroller now, and dismissing a card *is* scrolling
+     * that layer to its other end. `page.mouse.down()` and a series of moves is
+     * not a scroll and never was, so the drag this test used to make expressed
+     * nothing the layer could hear: it passed against a build where the
+     * dismissal was a transform the app applied, and failed the moment the
+     * deploy carried a build where it is not. `ci.yml` does not run
+     * `e2e-production/`, so the mismatch could only ever surface after a
+     * deploy — which is how it surfaced last time too, and the note that used to
+     * be here said so.
      *
      * What the test is for is unchanged and is the half that matters: the card
      * goes, and the pull surface behind it neither arms, moves, nor fetches.
-     * Which part of the card the finger starts on was never the subject.
+     * Which part of the card the finger starts on was never the subject — the
+     * middle of it is now a fair place to start, which is the whole point of the
+     * rebuild, so that is where this starts.
      *
-     * The settle is not decoration. A body drag could start anywhere in a large
-     * box and did not care that the sheet was still rising; the grip is a few
-     * points tall, so a box measured mid-animation puts the press above or
-     * below it and the drag lands on nothing.
+     * Delivered as a run of wheels rather than one large one. The rAF sampler
+     * above forces a style recalculation every frame, and a synthetic wheel
+     * scrolls markedly less under it — measured, the same wheel that moves the
+     * layer 675px moves it 50 — so a single one is a nudge, and a nudge
+     * correctly springs back. They have to arrive closer together than the
+     * settle waits, which is also what a finger does.
+     *
+     * The settle before it is not decoration: a box measured while the sheet is
+     * still rising puts the pointer somewhere the card no longer is.
      */
     await stopsMoving(page, 'sheet-grip');
-    const grip = (await page.locator('[data-testid="player-sheet"] .sheet-grip').boundingBox())!;
-    const x = grip.x + grip.width / 2;
-    const y = grip.y + 4;
+    const card = (await page.getByTestId('player-sheet').boundingBox())!;
+    const port = (await page.locator('.sheet-scroller').boundingBox())!;
+    const x = card.x + card.width / 2;
+    const y = Math.min(
+      Math.max(card.y + Math.min(card.height / 2, 120), port.y + 8),
+      port.y + port.height - 8,
+    );
     await page.mouse.move(x, y);
-    await page.mouse.down();
-    for (let i = 1; i <= 14; i++) await page.mouse.move(x, y + (420 * i) / 14);
-    await page.mouse.up();
+    for (let i = 0; i < 10; i++) {
+      if ((await page.locator('.sheet-scroller').count()) === 0) break;
+      await page.mouse.wheel(0, -400);
+      await page.waitForTimeout(30);
+    }
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     const seen = await page.evaluate(() => {
