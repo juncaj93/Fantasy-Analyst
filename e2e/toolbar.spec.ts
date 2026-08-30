@@ -734,13 +734,22 @@ test.describe('modal layering', () => {
     await page.getByTestId('scoring-key-open').click();
     await expect(page.getByTestId('scoring-key')).toBeVisible();
 
+    /*
+     * The layer that carries the depth is the scroller, not the card.
+     *
+     * A sheet used to be a fixed box with a `z-index` of its own; it is a
+     * surface in flow inside its scroller now, and the scroller is what is
+     * positioned, what covers the screen and what takes every touch on the way
+     * past. So that is what has to be above the bar — asking the card would ask
+     * an element with no stacking of its own and get `auto`.
+     */
     const order = await page.evaluate(() => ({
       bar: Number.parseInt(getComputedStyle(document.querySelector('.tabbar')!).zIndex, 10),
       backdrop: Number.parseInt(getComputedStyle(document.querySelector('.sheet-backdrop')!).zIndex, 10),
-      sheet: Number.parseInt(getComputedStyle(document.querySelector('.sheet')!).zIndex, 10),
+      layer: Number.parseInt(getComputedStyle(document.querySelector('.sheet-scroller')!).zIndex, 10),
     }));
     expect(order.bar).toBeLessThan(order.backdrop);
-    expect(order.backdrop).toBeLessThan(order.sheet);
+    expect(order.backdrop).toBeLessThan(order.layer);
 
     /*
      * And the arithmetic is not the claim — what is on top at the pixel is.

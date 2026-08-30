@@ -20,17 +20,19 @@
  *     pan-y` on the layer is what makes that arbitration the browser's rather
  *     than ours: no `preventDefault` is called on any touch region anywhere.
  *
- *     The sheet drag stopped being the exception to that. It briefly held a
- *     non-passive `touchmove` listener so it could claim a downward drag on
- *     content sitting at its top, and the claim had to be made on the first
- *     move — before there was enough of the gesture to tell an upward scroll
- *     from a thumb landing. WebKit decides once, so guessing wrong cost the
- *     reader the whole swipe. It then tried to publish the same claim ahead of
- *     the finger, as `touch-action` on the body — and a card that has not
- *     finished arriving cannot say how tall it is going to be, so the claim was
- *     wrong for exactly as long as the reader was waiting for the card. A
- *     scrolling region now declares one thing for its whole life. See
- *     {@link useSheetDrag}.
+ *     The sheet used to be the exception, and is now the strongest case for the
+ *     rule. It held a non-passive `touchmove` so it could claim a downward drag
+ *     on content at its top; then it published the same claim ahead of the
+ *     finger as `touch-action`. Both were withdrawn for costing the reader their
+ *     scroll, and the third attempt measured why no version of that could work:
+ *     the body was a scroll container, so the engine took every vertical touch
+ *     on it after a single `pointermove`. The app was not outvoted — it was not
+ *     asked.
+ *
+ *     So the sheet stopped asking, and left this file entirely. A sheet is a
+ *     scroller whose two ends are the card in place and the card gone, its
+ *     dismissal is a scroll, and there is no sheet gesture here to read. See
+ *     `.sheet-scroller` in the stylesheet, and `Sheet` in `components/native`.
  *
  *  3. **Back is navigation, never undo.** The gesture calls exactly the same
  *     function the Back control calls. It cannot reach a draft pick, a My Guy
@@ -62,10 +64,6 @@ export const COMPLETE_FRACTION = 0.32;
 
 /** …or how fast it must be travelling, in px/ms, to navigate on a flick. */
 export const COMPLETE_VELOCITY = 0.45;
-
-/** The same two questions for a sheet, measured downwards. */
-export const SHEET_DISMISS_FRACTION = 0.28;
-export const SHEET_DISMISS_VELOCITY = 0.5;
 
 /* ------------------------------------------------------- pull to refresh */
 
@@ -175,38 +173,6 @@ export function completesBack(distance: number, width: number, velocity: number)
   if (width <= 0) return false;
   if (distance >= width * COMPLETE_FRACTION) return true;
   return velocity >= COMPLETE_VELOCITY && distance > ENGAGE_DISTANCE * 2;
-}
-
-/** The same judgement for a sheet being pulled down. */
-export function sheetDismisses(distance: number, height: number, velocity: number): boolean {
-  if (height <= 0) return false;
-  if (distance >= height * SHEET_DISMISS_FRACTION) return true;
-  return velocity >= SHEET_DISMISS_VELOCITY && distance > ENGAGE_DISTANCE * 2;
-}
-
-/**
- * What a movement on a sheet is, once there is enough of it to say.
- *
- * The mirror of {@link engageDecision}, measured downwards, and it is new: the
- * sheet drag used to ask only "has the finger moved eight pixels, and not
- * upwards". That is true of a swipe across a row of chips with nine pixels of
- * downward drift in two hundred of sideways, and true of the first moments of
- * almost every diagonal gesture on a phone — so a sheet could be flicked away
- * by a horizontal swipe that was never about the sheet at all.
- *
- * The vertical component now has to beat the horizontal one by the same ratio
- * the back-swipe asks of its own axis, which is what the interaction contract
- * means by *horizontal gestures must not accidentally dismiss*.
- *
- * `release` is final: a gesture given up on must not be reclaimed halfway down
- * the screen.
- */
-export function sheetDecision(dx: number, dy: number): 'wait' | 'drag' | 'release' {
-  const ax = Math.abs(dx);
-  const ay = Math.abs(dy);
-  if (ax < ENGAGE_DISTANCE && ay < ENGAGE_DISTANCE) return 'wait';
-  if (dy > 0 && ay > ax * DIRECTION_RATIO) return 'drag';
-  return 'release';
 }
 
 /** How much recent movement a flick is judged on, in milliseconds. */
@@ -616,344 +582,21 @@ export function useEdgeSwipeBack({
 }
 
 /**
- * The attribute a control inside a sheet uses to say "this drag is mine".
- *
- * The sheet's counterpart to {@link NO_PULL_ATTRIBUTE}, and it exists for the
- * same reason: a control that reorders, scrubs or draws under the finger starts
- * exactly the way a dismissal does, and nothing arbitrates that after the fact.
- * A pointer that goes down inside one of these never starts a sheet drag.
- */
-export const NO_SHEET_DRAG_ATTRIBUTE = 'data-no-sheet-drag';
-
-export interface SheetDrag {
-  /** Put on the sheet itself — the element that moves. */
-  sheetRef: (node: HTMLElement | null) => void;
-  /** Put on the sheet's scrolling body — the region a drag never comes from. */
-  bodyRef: (node: HTMLElement | null) => void;
-  handlers: {
-    onPointerDown: (e: ReactPointerEvent) => void;
-    onPointerMove: (e: ReactPointerEvent) => void;
-    onPointerUp: (e: ReactPointerEvent) => void;
-    onPointerCancel: (e: ReactPointerEvent) => void;
-    onClickCapture: (e: ReactMouseEvent) => void;
-  };
-  /** True while a finger is actually moving the sheet. */
-  dragging: boolean;
-}
-
-/**
  * Controls where a drag means something else entirely.
  *
  * Dragging inside a text field moves the caret and selects — it is not a
- * gesture the sheet may take, however downward it is, and Setup's two paste
+ * gesture a navigation may take, however sideways it is, and Setup's two paste
  * boxes are exactly this case. Asked of the element rather than declared on it,
- * because it is true of every field in every sheet and always will be;
- * {@link NO_SHEET_DRAG_ATTRIBUTE} is for the controls a primitive cannot guess.
+ * because it is true of every field in every screen and always will be.
+ *
+ * The sheet used to ask this too, of a drag that might have dismissed a card.
+ * It no longer has a drag to ask about: a sheet is a scroller now, and a field
+ * inside one keeps its own gestures the way a field anywhere else does, with
+ * nobody arbitrating. {@link swipeIsClaimed} is the last caller.
  */
 function ownsItsOwnDrag(el: HTMLElement): boolean {
   if (el.isContentEditable) return true;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
-}
-
-/**
- * Whether a control between the finger and the sheet has claimed this drag.
- *
- * Walked once from the target upwards, because the pointer arrives at the sheet
- * having bubbled all the way up it and `e.target` is the only record left of
- * where the finger actually landed.
- */
-function dragIsClaimed(target: EventTarget | null, sheet: HTMLElement): boolean {
-  let node: Element | null = target instanceof Element ? target : null;
-  while (node) {
-    if (node instanceof HTMLElement && (node.hasAttribute(NO_SHEET_DRAG_ATTRIBUTE) || ownsItsOwnDrag(node))) {
-      return true;
-    }
-    if (node === sheet) break;
-    node = node.parentElement;
-  }
-  return false;
-}
-
-interface SheetGesture {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  engaged: boolean;
-  samples: Sample[];
-}
-
-/**
- * Pull a sheet down to dismiss it.
- *
- * Four rules, in this order, and every one of them is a bug that was reported:
- *
- *  1. **A sheet is dismissed by its chrome. Its body belongs to the browser,
- *     always.** A drag that begins anywhere in the scrolling body is a scroll
- *     and is never taken, whatever that body happens to be holding at the time.
- *     Dismissal lives on the grip, the header, the backdrop, Done and Escape —
- *     none of which scroll, and the first two of which claim their gestures
- *     through `touch-action: none` in the stylesheet.
- *
- *     This rule has been narrowed twice, and the second narrowing is the one
- *     worth writing down because it cost a release each time.
- *
- *     It began as *scrolled* content owning the gesture, so content sitting at
- *     `scrollTop: 0` was fair game for a dismissal — on the grounds that a
- *     downward drag there has nowhere to scroll. WebKit decides whether a touch
- *     sequence may scroll **once**, from the first `touchmove`, so the sheet had
- *     to stake that claim on one or two pixels of movement; one or two pixels of
- *     a thumb landing is noise, and an upward flick that began with a pixel of
- *     downward drift lost its scroll for the whole swipe.
- *
- *     It then became *scrollable* content owning the gesture, asked at
- *     `pointerdown` — which is a question the DOM can answer honestly. But the
- *     answer had to be published to the engine **before** the finger landed, as
- *     `touch-action` on the body: `none` while there was nothing to scroll, so a
- *     short sheet could still be dragged shut from its content. And a card does
- *     not know how tall it is when it opens. A player's card opens on skeletons
- *     and fills in from two requests; for as long as those are in flight the
- *     body honestly reports *nothing to scroll*, takes `touch-action: none`, and
- *     the reader's first flick — the one they start while the card is still
- *     arriving — is refused its scroll for the whole gesture, even though the
- *     content lands halfway through it. Lift, flick again, and it works. *Locks
- *     up, then unlocks.* On a phone that window is the length of two requests;
- *     on a test runner against localhost it is a few milliseconds, which is why
- *     no headless suite ever saw it.
- *
- *     So the body no longer answers the question at all. There is no
- *     measurement left to be stale, no attribute for the engine to read at the
- *     wrong moment, and no state in which a card cannot be scrolled. What that
- *     costs is the fourth way of dismissing a short sheet — dragging its middle
- *     — and it is worth saying plainly that this is a real loss and a
- *     deliberate one: the affordance was only ever available when a guess about
- *     unarrived content happened to be right, and the price of the guess being
- *     wrong was the card.
- *
- *  2. **Nothing calls `preventDefault` on a touch.** A non-passive `touchmove`
- *     on an ancestor of the scroller takes WebKit off its fast scrolling path,
- *     which is the other half of "the interaction feels buggy": every frame of
- *     every scroll waiting on the main thread to be asked. The arbitration is
- *     the browser's, through `touch-action`, exactly as it is for the back
- *     gesture and pull-to-refresh.
- *
- *  3. **A gesture has to be vertical to be a dismissal.** See
- *     {@link sheetDecision}. A sideways swipe with a few pixels of drift used to
- *     throw the sheet away.
- *
- *  4. **A drag is not a tap.** Letting go over Done at the end of a drag that
- *     sprang back used to activate it, so a cancelled gesture closed the sheet
- *     anyway — which reads as the threshold being random rather than as a
- *     misfire. The same click suppression the back gesture has.
- */
-export function useSheetDrag({ onDismiss }: { onDismiss: () => void }): SheetDrag {
-  const sheet = useRef<HTMLElement | null>(null);
-  const body = useRef<HTMLElement | null>(null);
-  const drag = useRef<SheetGesture | null>(null);
-  const moved = useRef(false);
-  const settleTimer = useRef<number | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const reduced = useReducedMotion();
-
-  /** Everything back where it was, whether it dismissed or not. */
-  const reset = useCallback(() => {
-    drag.current = null;
-    moved.current = false;
-    setDragging(false);
-    if (settleTimer.current !== null) {
-      window.clearTimeout(settleTimer.current);
-      settleTimer.current = null;
-    }
-    const el = sheet.current;
-    if (!el) return;
-    el.classList.remove('sheet-dragging', 'sheet-settling');
-    el.style.transform = '';
-  }, []);
-
-  /* A sheet taken away mid-gesture must not leave a transform behind it. */
-  useEffect(() => () => reset(), [reset]);
-
-  const onPointerDown = useCallback((e: ReactPointerEvent) => {
-    const el = sheet.current;
-    if (!el) return;
-    /*
-     * A second finger is a pinch, a zoom or a stray thumb — never a dismissal.
-     * Whatever the first one had started is given up rather than fought over.
-     */
-    if (drag.current) {
-      reset();
-      return;
-    }
-    moved.current = false;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-
-    if (dragIsClaimed(e.target, el)) return;
-    /*
-     * Rule 1. The body is the browser's, whatever it is holding — see the note
-     * on this hook for why "it has nothing to scroll *yet*" is not the safe
-     * case it looks like, and what asking it cost twice.
-     */
-    const scrolling = body.current;
-    if (scrolling && e.target instanceof Node && scrolling.contains(e.target)) return;
-
-    drag.current = {
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      engaged: false,
-      samples: [{ x: e.clientY, t: e.timeStamp }],
-    };
-  }, [reset]);
-
-  const onPointerMove = useCallback((e: ReactPointerEvent) => {
-    const state = drag.current;
-    if (!state || state.pointerId !== e.pointerId) return;
-    const dx = e.clientX - state.startX;
-    const dy = e.clientY - state.startY;
-
-    if (!state.engaged) {
-      const decision = sheetDecision(dx, dy);
-      if (decision === 'release') {
-        drag.current = null;
-        return;
-      }
-      if (decision === 'wait') return;
-
-      state.engaged = true;
-      moved.current = true;
-      setDragging(true);
-      sheet.current?.classList.add('sheet-dragging');
-      try {
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      } catch {
-        /* capture is an optimisation; the gesture works without it */
-      }
-    }
-
-    state.samples.push({ x: e.clientY, t: e.timeStamp });
-    if (state.samples.length > SAMPLE_LIMIT) state.samples.shift();
-    /*
-     * One to one, and deliberately undamped. A sheet being pulled down is the
-     * one gesture on iOS that tracks the finger exactly — the resistance curve
-     * belongs to pull-to-refresh, where the surface is being stretched past
-     * where it can go. Upward is clamped rather than rubber-banded: a sheet at
-     * rest is already at its top.
-     */
-    const el = sheet.current;
-    if (el) el.style.transform = dy > 0 ? `translate3d(0, ${dy}px, 0)` : '';
-  }, []);
-
-  const finish = useCallback(
-    (e: ReactPointerEvent, cancelled: boolean) => {
-      const state = drag.current;
-      const el = sheet.current;
-      drag.current = null;
-      if (!state || !el || !state.engaged) {
-        setDragging(false);
-        return;
-      }
-      setDragging(false);
-
-      state.samples.push({ x: e.clientY, t: e.timeStamp });
-      const distance = Math.max(0, e.clientY - state.startY);
-      const velocity = velocityOver(state.samples);
-      const height = el.getBoundingClientRect().height || 1;
-
-      el.classList.remove('sheet-dragging');
-
-      if (!cancelled && sheetDismisses(distance, height, velocity)) {
-        if (reduced) {
-          el.style.transform = '';
-          onDismiss();
-          return;
-        }
-        el.classList.add('sheet-settling');
-        el.style.transform = `translate3d(0, ${Math.round(height)}px, 0)`;
-        const close = () => {
-          if (settleTimer.current !== null) {
-            window.clearTimeout(settleTimer.current);
-            settleTimer.current = null;
-          }
-          el.removeEventListener('transitionend', onSettled);
-          el.classList.remove('sheet-settling');
-          el.style.transform = '';
-          onDismiss();
-        };
-        /*
-         * This sheet's own transform, and nothing else.
-         *
-         * `transitionend` bubbles, and a sheet is full of things that
-         * transition — a chip settling out of its pressed state during the
-         * animation would otherwise end the animation, and the sheet would
-         * vanish from wherever it had got to.
-         */
-        const onSettled = (event: TransitionEvent) => {
-          if (event.target !== el || event.propertyName !== 'transform') return;
-          close();
-        };
-        el.addEventListener('transitionend', onSettled);
-        /*
-         * A transition that never fires — a backgrounded tab, an engine that
-         * skipped it — must not strand the reader behind a sheet that has left
-         * the frame and cannot be tapped through.
-         */
-        settleTimer.current = window.setTimeout(() => {
-          if (el.classList.contains('sheet-settling')) close();
-        }, 400);
-        return;
-      }
-
-      // Not far enough, or the browser took the gesture back: spring home.
-      el.classList.add('sheet-settling');
-      el.style.transform = '';
-      settleTimer.current = window.setTimeout(() => {
-        settleTimer.current = null;
-        el.classList.remove('sheet-settling');
-      }, 300);
-    },
-    [onDismiss, reduced],
-  );
-
-  /**
-   * A drag must not also be a tap.
-   *
-   * Rule 4. Without this, letting go over Done at the end of a drag that sprang
-   * back closed the sheet anyway, and a reader who had just decided *not* to
-   * dismiss it watched it go — which is worse than a gesture that does nothing,
-   * because it looks like the app disagreeing with them.
-   */
-  const onClickCapture = useCallback((e: ReactMouseEvent) => {
-    if (!moved.current) return;
-    moved.current = false;
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
-  return {
-    sheetRef: useCallback((node: HTMLElement | null) => {
-      sheet.current = node;
-    }, []),
-    /*
-     * Where the body is, and nothing else about it.
-     *
-     * This used to measure it — on attach, on every `scroll`, and through a
-     * `ResizeObserver` on the box and on its content — and publish the answer
-     * as `data-scrollable`, which the stylesheet turned into `touch-action`.
-     * All of that is gone with rule 1. The body's permission is a constant now,
-     * so there is nothing to keep up to date and nothing that can be stale at
-     * the one instant the engine reads it.
-     */
-    bodyRef: useCallback((node: HTMLElement | null) => {
-      body.current = node;
-    }, []),
-    handlers: {
-      onPointerDown,
-      onPointerMove,
-      onPointerUp: useCallback((e: ReactPointerEvent) => finish(e, false), [finish]),
-      onPointerCancel: useCallback((e: ReactPointerEvent) => finish(e, true), [finish]),
-      onClickCapture,
-    },
-    dragging,
-  };
 }
 
 export interface PullToRefresh {
