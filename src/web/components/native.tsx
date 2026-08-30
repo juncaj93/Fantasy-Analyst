@@ -595,7 +595,6 @@ export function Sheet({
     /** Fraction of the way to dismissed a push must reach to be a dismissal. */
     const HOLD = 0.4;
     let timer: number | undefined;
-    let settling = false;
     const settle = () => {
       const detentTop = root.scrollHeight - root.clientHeight;
       if (detentTop <= 0) return;
@@ -603,20 +602,28 @@ export function Sheet({
         onDismiss.current();
         return;
       }
-      if (root.scrollTop >= detentTop) return;
-      /*
-       * Back to the card's own position, smoothly — and flagged while it runs,
-       * because a smooth scroll is itself a stream of `scroll` events and
-       * without this the settle would keep re-arming on its own movement.
-       */
-      settling = true;
+      // Already where it belongs. A pixel of tolerance because a smooth scroll
+      // lands on a fraction and `scrollTop` is not obliged to be an integer.
+      if (root.scrollTop >= detentTop - 1) return;
       root.scrollTo({ top: detentTop, behavior: 'smooth' });
-      window.setTimeout(() => {
-        settling = false;
-      }, 400);
     };
+    /*
+     * Every scroll re-arms, including the ones this makes itself.
+     *
+     * The obvious economy is to ignore movement while the settle's own smooth
+     * scroll is running, and it is a bug: a reader who pushes the card, lets the
+     * spring-back begin and pushes again lands inside that window, and the
+     * second push is the one nobody is watching. The card then comes to rest at
+     * the dismissed position *without being dismissed* — scrolled entirely off
+     * the screen, still open, still holding the page behind it still. An
+     * invisible modal is a worse outcome than any amount of redundant work.
+     *
+     * Re-arming unconditionally costs nothing because the settle is idempotent:
+     * during its own animation it finds the layer at the card's position and
+     * returns, and if the reader has pushed again it finds where *they* left it.
+     * The timer is only ever reset, so it fires once, after everything stops.
+     */
     const onScroll = () => {
-      if (settling) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(settle, 110);
     };
