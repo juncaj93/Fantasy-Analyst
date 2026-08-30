@@ -346,14 +346,41 @@ hundreds of pixels and then sprang it back when the cancel arrived — **351px o
 card at its top, 743px on the full attempt, against 0px shipped.** Every flick on
 a card the reader is reading, for an affordance that never once completed.
 
-So the price of this affordance is exactly the two mechanisms already withdrawn,
-and it is not available at any other price. What would be a real answer is a
-different sheet primitive — one where the sheet is a scroll-snap position inside
-its own scroller, so that dismissal *is* a scroll and the engine's decision costs
-nothing — which is a rebuild of the primitive rather than a gesture change, and
-is not attempted here. `e2e/player-card-scroll.spec.ts` now pins the measurement
-as a guard: the card's transform stays at nought for the whole of a downward
-flick on its content, sampled every frame.
+So the price of that affordance was exactly the two mechanisms already withdrawn,
+and it was not available at any other price. **The answer was a different sheet
+primitive**, and it is what ships now: the sheet's *layer* is a scroller a screen
+taller than the card, so dismissing the card is scrolling that layer, and the
+engine's decision costs nothing because the engine was going to make it anyway.
+
+Two things had to be true for that to work on WebKit, and both were found the
+hard way:
+
+- **No `scroll-snap` anywhere on the layer.** Snapping is the obvious way to give
+  it two resting places and it is wrong here three separate ways, each measured
+  in Safari at the four widths this app runs at. While the card was itself a snap
+  area taller than the scrollport, *either* setting stopped the layer scrolling
+  at all — the "a snap area larger than the scrollport may rest anywhere covering
+  it" rule is not implemented, so a long player card could not be read past its
+  own top. With that bounded, `mandatory` advances a whole snap step however
+  small the scroll was, so a ten-pixel nudge threw the card away; and `proximity`
+  moves proportionally and then never settles, parking the card partway down the
+  screen. The layer free-scrolls instead, and where it comes to rest is decided
+  once, when the reader stops moving, in `Sheet`.
+- **The card's content is a scroller of its own, and it must not say
+  `overscroll-behavior: contain`.** That is what makes "push it away from
+  anywhere" and "content you have scrolled keeps the gesture" the same rule
+  rather than two: a drag on content that has somewhere to go scrolls the
+  content, and a drag on content already at its top has nowhere to put the
+  scroll, so it chains outward to the layer and the card moves. `contain` on that
+  inner box is an instruction not to chain, and it is precisely what made the
+  earlier sheet feel like it was ignoring a thumb. The layer *does* say
+  `contain`, so the chain stops at the sheet and never reaches the page behind:
+  one box out, and no further.
+
+Measured in Safari: a pull of any size that starts with the content off its top
+spends itself returning the content to the top and stops there — reaching the
+layer takes a fresh gesture — so a reader part-way through a card cannot lose it
+however hard they pull.
 
 **What a sheet owes the app while it is up** — the page behind held still, the
 app behind out of the reading order, focus in and focus back, Escape reaching

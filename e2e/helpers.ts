@@ -95,6 +95,150 @@ export async function pastTheSettle(page: Page): Promise<void> {
 }
 
 /**
+ * Push an open sheet away, the way a thumb does — with a scroll.
+ *
+ * **A mouse drag cannot do this any more, and that is the point.** A sheet's
+ * layer is a scroller whose two ends are the card in place and the card gone, so
+ * dismissing one *is* scrolling it; `page.mouse.down()` and a series of moves is
+ * not a scroll and never was, so the drags these specs used to use now express
+ * nothing. A wheel is a real scroll, which means it exercises the same mechanism
+ * a finger does, in every engine — where the old pointer gesture was visible
+ * only to a synthetic mouse, and passed twelve green WebKit shards while doing
+ * nothing at all under a thumb.
+ *
+ * `over` is where to put the pointer first: the middle of the card by default,
+ * which is the case worth checking most often, because it is the one the old
+ * gesture could not do.
+ */
+export async function swipeSheetAway(
+  page: Page,
+  { over = '.sheet', ticks }: { over?: string; ticks?: number } = {},
+): Promise<void> {
+  if (ticks !== undefined) {
+    // A push of a stated size, for the specs whose subject is the size.
+    await wheelOverSheet(page, over, -ticks);
+    return;
+  }
+  /*
+   * Otherwise: one continuous push, delivered as a run of wheels close together.
+   *
+   * Not a single large one, and the reason is a measurement rather than caution.
+   * How far a synthetic wheel actually scrolls depends on what else the page is
+   * doing: with the per-frame `requestAnimationFrame` watcher the
+   * pull-to-refresh specs install before they swipe, the *same* wheel that moves
+   * this layer 675px moves it 50 — WebKit's wheel scrolling is starved by the
+   * style recalculation it forces. Fifty pixels is a nudge, and a nudge
+   * correctly springs back, so the spec was reporting the settle working as a
+   * dismissal failing.
+   *
+   * Repeating them further apart does not help either: the settle returns each
+   * abandoned nudge to the card's position, so nothing accumulates. They have to
+   * arrive closer together than the settle waits — which is also what a finger
+   * does, a drag being many small movements rather than one large one — and then
+   * the settle sees where the whole push got to.
+   */
+  const at = await aimAt(page, over);
+  if (!at) return;
+  await page.mouse.move(at.x, at.y);
+  for (let i = 0; i < 10; i++) {
+    if ((await page.locator('.sheet-scroller').count()) === 0) return;
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(30);
+  }
+  await page.waitForTimeout(700);
+}
+
+/**
+ * Put the pointer somewhere on the open sheet and turn the wheel.
+ *
+ * The aim is clamped into the scrollport, and that is not defensive tidiness: a
+ * card taller than the screen has its top *above* the viewport once the reader
+ * has scrolled into it, so a point measured from the card's own box lands off
+ * screen and the wheel is delivered to nothing at all. Which looks exactly like
+ * the app ignoring the gesture.
+ */
+async function wheelOverSheet(page: Page, over: string, by: number): Promise<void> {
+  const at = await aimAt(page, over);
+  if (!at) return;
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.wheel(0, by);
+  await page.waitForTimeout(700);
+}
+
+/** The point on `over` to deliver a scroll to, clamped into the scrollport. */
+async function aimAt(page: Page, over: string): Promise<{ x: number; y: number } | null> {
+  const target = await page.locator(over).first().boundingBox();
+  const port = await page.locator('.sheet-scroller').boundingBox();
+  if (!target || !port) return null;
+  const wanted = target.y + Math.min(target.height / 2, 120);
+  return {
+    x: target.x + target.width / 2,
+    y: Math.min(Math.max(wanted, port.y + 8), port.y + port.height - 8),
+  };
+}
+
+/**
+ * Scroll the content of an open sheet, without going near either end of it.
+ *
+ * The same wheel, over the same place, as the one that pushes the card away —
+ * and which of the two happens is decided by the browser rather than by this
+ * helper. A card whose content has somewhere to go scrolls its content; a card
+ * whose content is already at its top has nowhere to put the scroll, so it
+ * chains outward to the layer and the card moves instead. Telling those two
+ * apart is the whole of what the sheet specs are for, so the aim deliberately
+ * does not differ between them.
+ */
+export async function scrollSheetContent(page: Page, by: number): Promise<void> {
+  await wheelOverSheet(page, '.sheet', by);
+}
+
+/** How far the open sheet's layer is scrolled, and how far it could be. */
+export async function sheetScroll(page: Page): Promise<{ top: number; max: number }> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.sheet-scroller') as HTMLElement;
+    return { top: Math.round(el.scrollTop), max: Math.round(el.scrollHeight - el.clientHeight) };
+  });
+}
+
+/**
+ * How far the open card's own content is scrolled, and how far it could be.
+ *
+ * Distinct from `sheetScroll`, and the distinction is the fix for the defect
+ * that took the sheet apart twice. The layer moves between two positions only —
+ * the card in place and the card gone — and everything a reader does *inside* a
+ * long card moves this instead. A spec that means "the reader read further down
+ * the card" must read this one; a spec that means "the card was pushed away"
+ * must read the layer.
+ */
+export async function sheetBodyScroll(page: Page): Promise<{ top: number; max: number }> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.sheet-body') as HTMLElement;
+    return { top: Math.round(el.scrollTop), max: Math.round(el.scrollHeight - el.clientHeight) };
+  });
+}
+
+/**
+ * Tap the see-through gap above an open card, which is how a sheet is closed
+ * from outside it.
+ *
+ * Aimed at a *viewport* point inside the gap rather than at a position on
+ * `.sheet-dismiss`, and the difference is not cosmetic. That element is a whole
+ * screen tall and all but its last inch is scrolled up out of view, so asking
+ * for a point near its top makes Playwright scroll the layer to reveal it —
+ * and scrolling this layer to its top is precisely what dismisses the sheet.
+ * The card then vanishes mid-click and the click fails on a detached element,
+ * which is a test dismissing a sheet by accident and then reporting that it
+ * could not be dismissed. Four specs did exactly that.
+ *
+ * The gap is what the reader can see of the backdrop, so a point near the top
+ * of the screen is both inside it and the honest description of the gesture.
+ */
+export async function tapAboveCard(page: Page): Promise<void> {
+  const port = (await page.locator('.sheet-scroller').boundingBox())!;
+  await page.mouse.click(port.x + port.width / 2, port.y + 20);
+}
+
+/**
  * Pull a screen down far enough to refresh it.
  *
  * The gesture replaced the refresh buttons, so the specs that used to tap one
