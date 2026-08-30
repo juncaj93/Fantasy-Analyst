@@ -404,10 +404,10 @@
    * How much of the screen is left above an opened sheet.
    *
    * The card's detent, expressed as the gap over it rather than as its height,
-   * because that is the form both the things that need it want: the scroller
-   * aligns a snap position this far down (`scroll-padding-top`), and the detent
-   * box is the rest (`calc(100% - var(--sheet-gap))`). It is the complement of
-   * the `88dvh` the sheet was capped at before, and the same number.
+   * because that is the form the one place that needs it wants: the detent box
+   * is the rest of the screen, `calc(100% - var(--sheet-gap))`. It is the
+   * complement of the `88dvh` the sheet was capped at before, and the same
+   * number.
    */
   --sheet-gap: 12dvh;
 

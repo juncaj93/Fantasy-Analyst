@@ -112,9 +112,40 @@ export async function pastTheSettle(page: Page): Promise<void> {
  */
 export async function swipeSheetAway(
   page: Page,
-  { over = '.sheet', ticks = 1200 }: { over?: string; ticks?: number } = {},
+  { over = '.sheet', ticks }: { over?: string; ticks?: number } = {},
 ): Promise<void> {
-  await wheelOverSheet(page, over, -ticks);
+  if (ticks !== undefined) {
+    // A push of a stated size, for the specs whose subject is the size.
+    await wheelOverSheet(page, over, -ticks);
+    return;
+  }
+  /*
+   * Otherwise: one continuous push, delivered as a run of wheels close together.
+   *
+   * Not a single large one, and the reason is a measurement rather than caution.
+   * How far a synthetic wheel actually scrolls depends on what else the page is
+   * doing: with the per-frame `requestAnimationFrame` watcher the
+   * pull-to-refresh specs install before they swipe, the *same* wheel that moves
+   * this layer 675px moves it 50 — WebKit's wheel scrolling is starved by the
+   * style recalculation it forces. Fifty pixels is a nudge, and a nudge
+   * correctly springs back, so the spec was reporting the settle working as a
+   * dismissal failing.
+   *
+   * Repeating them further apart does not help either: the settle returns each
+   * abandoned nudge to the card's position, so nothing accumulates. They have to
+   * arrive closer together than the settle waits — which is also what a finger
+   * does, a drag being many small movements rather than one large one — and then
+   * the settle sees where the whole push got to.
+   */
+  const at = await aimAt(page, over);
+  if (!at) return;
+  await page.mouse.move(at.x, at.y);
+  for (let i = 0; i < 10; i++) {
+    if ((await page.locator('.sheet-scroller').count()) === 0) return;
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(30);
+  }
+  await page.waitForTimeout(700);
 }
 
 /**
@@ -127,13 +158,23 @@ export async function swipeSheetAway(
  * the app ignoring the gesture.
  */
 async function wheelOverSheet(page: Page, over: string, by: number): Promise<void> {
-  const target = (await page.locator(over).first().boundingBox())!;
-  const port = (await page.locator('.sheet-scroller').boundingBox())!;
-  const wanted = target.y + Math.min(target.height / 2, 120);
-  const y = Math.min(Math.max(wanted, port.y + 8), port.y + port.height - 8);
-  await page.mouse.move(target.x + target.width / 2, y);
+  const at = await aimAt(page, over);
+  if (!at) return;
+  await page.mouse.move(at.x, at.y);
   await page.mouse.wheel(0, by);
   await page.waitForTimeout(700);
+}
+
+/** The point on `over` to deliver a scroll to, clamped into the scrollport. */
+async function aimAt(page: Page, over: string): Promise<{ x: number; y: number } | null> {
+  const target = await page.locator(over).first().boundingBox();
+  const port = await page.locator('.sheet-scroller').boundingBox();
+  if (!target || !port) return null;
+  const wanted = target.y + Math.min(target.height / 2, 120);
+  return {
+    x: target.x + target.width / 2,
+    y: Math.min(Math.max(wanted, port.y + 8), port.y + port.height - 8),
+  };
 }
 
 /**
