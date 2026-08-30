@@ -241,6 +241,19 @@ export class LeagueRepo {
     return { inserted: picks.length };
   }
 
+  /**
+   * Remove one pick by number.
+   *
+   * The undo behind hand-entered picks, and deliberately as narrow as it can
+   * be: one draft, one pick number, no cascade. The caller decides *which* —
+   * and refuses to name a pick Sleeper published — because "is this row ours to
+   * delete" is a question about the pick's provenance and belongs beside the
+   * rule that wrote it. See `core/draft/manualPick.ts`.
+   */
+  async deletePick(draftId: string, pickNo: number): Promise<void> {
+    await this.db.prepare('DELETE FROM draft_picks WHERE draft_id = ? AND pick_no = ?').bind(draftId, pickNo).run();
+  }
+
   async listPicks(draftId: string): Promise<DraftPickRecord[]> {
     const rows = await this.db
       .prepare('SELECT * FROM draft_picks WHERE draft_id = ? ORDER BY pick_no')

@@ -5118,6 +5118,74 @@ table.compact tr:last-child td {
   white-space: nowrap;
 }
 
+/*
+ * The line the reader works from while they are the one recording the picks.
+ *
+ * Three things on one row: which pick the next tap writes, whose it is, and a
+ * way back. It is deliberately the width of the content and one row tall —
+ * a draft screen's spare vertical space is a player, and this is a mode that
+ * stays on for three hours, so it cannot cost two.
+ *
+ * Tinted with the accent rather than the warning colour beneath it, because
+ * this is a mode the reader chose and is working in, not a complaint. Its two
+ * controls are full tap targets: they are pressed across a table, in a room,
+ * usually one-handed.
+ */
+.draft-entry-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--accent-text);
+  background: var(--accent-tint);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.draft-entry-next {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.draft-entry-bar .chip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+/* The pressed state of a two-state chip: filled, not merely outlined. */
+.draft-entry-bar .chip-on {
+  background: var(--accent-text);
+  color: var(--bg);
+  border-color: var(--accent-text);
+}
+
+.draft-entry-bar .chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
+ * A header glyph that is currently *on*.
+ *
+ * The pick-entry switch is the only control in that group with a state, and it
+ * has to read as held down rather than merely tapped — a reader glancing at the
+ * header mid-round is asking "is it recording", and an icon that looks the same
+ * either way does not answer.
+ */
+.icon-btn-on {
+  background: var(--accent-tint);
+}
+
 .draft-refresh-note {
   font-size: 0.74rem;
   color: var(--text-faint);

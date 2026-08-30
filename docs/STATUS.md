@@ -433,8 +433,13 @@ suggestions).
    view-only reader's refresh rebuilds the board from stored state and never
    starts a background write loop.
 8. **The draft board lives on the Draft screen, and only there.** Once the
-   season is under way the Draft tab leaves the toolbar (`core/sleeper/phase.ts`),
-   and the board leaves with it — the board itself is happy to render a
+   season is under way the Draft tab leaves the toolbar (`core/sleeper/phase.ts`)
+   — and "under way" is Sleeper's published `season_start_date`, not its
+   `season_type`, which flips to `regular` well over a week early; a draft
+   Sleeper says is unfinished keeps the board regardless. See
+   [`docs/IN_PERSON_DRAFT.md`](IN_PERSON_DRAFT.md), which also covers entering a
+   room's picks by hand when Sleeper is not being updated. The board leaves with
+   the tab — the board itself is happy to render a
    completed draft as read-only history, but nothing else in the app currently
    routes to it. A second entry point from a league or history context is a
    navigation decision this workstream deliberately did not take on its own.

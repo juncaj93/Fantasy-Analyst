@@ -106,6 +106,16 @@ export class SleeperSyncService {
         season: state.season ?? null,
         seasonType: state.season_type ?? null,
         week: typeof state.week === 'number' ? state.week : null,
+        /*
+         * The one field that dates week one.
+         *
+         * `season_type` flips to `regular` more than a week before any game is
+         * played and `week` reads 1 from that moment, so without this the app
+         * cannot tell "week one is next" from "week one is happening" — and it
+         * did not, which is what took the Draft tab away from leagues still to
+         * draft in 2026. See core/sleeper/phase.ts.
+         */
+        seasonStartDate: state.season_start_date ?? null,
         leg: typeof state.leg === 'number' ? state.leg : null,
         fetchedAt: nowIso(),
       };

@@ -64,6 +64,8 @@ import { describeAge, recallBoard, rememberBoardSoon } from '../offlineCache.ts'
  * be computed from two different rules.
  */
 import { survivalBand } from '../../core/draft/survival.ts';
+/* One answer to "is every pick in", shared with the server and the toolbar. */
+import { isDraftComplete } from '../../core/sleeper/phase.ts';
 /*
  * The two tier decisions the board draws: where a line goes, and who is worth
  * marking. Both are pure arithmetic over what `tiers.ts` already computed, and
@@ -128,6 +130,8 @@ import { DraftBoardOverlay } from '../components/draftBoard.tsx';
 import { DraftDestinationsMenu, DraftOrderSheet, type DraftDestination } from '../components/draftDestinations.tsx';
 import { MenuChevronIcon } from '../components/icons.tsx';
 import { forgetMock } from '../mock/session.ts';
+/* Whether this browser is recording the picks itself. See pickEntry.ts. */
+import { readPickEntry, writePickEntry } from '../pickEntry.ts';
 
 import { unwindOne } from '../tabReset.ts';
 /*
@@ -285,6 +289,39 @@ export function DraftScreen({
    */
   const [destination, setDestination] = useState<DraftDestination>('none');
   const boardOpen = destination === 'board';
+  /**
+   * Whether the reader is entering this draft's picks by hand.
+   *
+   * On for a league that drafts in a room: Sleeper hears nothing all afternoon,
+   * so the pick stream every model on this screen is built over stays empty and
+   * the board goes on ranking players who were taken an hour ago. With it on,
+   * each row's bookmark becomes a `+` that records the pick.
+   *
+   * Off by default and remembered per draft, so a draft that *is* on Sleeper —
+   * which is most of them — renders exactly the screen it always did, and a
+   * reader three hours into an in-person one does not lose the mode to a locked
+   * phone. See `pickEntry.ts`.
+   */
+  const [entering, setEntering] = useState(() => readPickEntry(draftId));
+  /**
+   * Whether the pick about to be recorded is the reader's own.
+   *
+   * It has to be asked rather than derived, and only because of the rooms this
+   * feature exists for. Sleeper publishes `slot_to_roster_id` when a
+   * commissioner seats a draft and leaves it empty otherwise, so a draft nobody
+   * has opened often has no seating at all — and with no seating there is no
+   * arithmetic that can say whose turn pick 14 was. Without an answer the app
+   * would know twenty-three players are gone and not that six of them are on
+   * the reader's team, which is the half that matters on the Team screen.
+   *
+   * It follows the board whenever the board knows: `onTheClock` is a real
+   * answer in a seated draft and the toggle simply agrees with it. The reader
+   * can disagree, and the next pick's answer comes from the board again — a
+   * correction is about one pick, not about the rest of the afternoon.
+   */
+  const [pickIsMine, setPickIsMine] = useState(false);
+  /** One pick in flight, so the same name cannot be entered twice by a double tap. */
+  const [recording, setRecording] = useState(false);
   /**
    * Whether a rehearsal is up, where something outside React's render cycle can
    * read it.
@@ -639,6 +676,85 @@ export function DraftScreen({
     },
     [draftId, load, position, searching],
   );
+
+  /*
+   * The mode follows the draft it was turned on for.
+   *
+   * Switching leagues mid-session must not carry one draft's mode into
+   * another's, and the stored answer is the authority rather than whatever was
+   * on screen a moment ago.
+   */
+  useEffect(() => {
+    setEntering(readPickEntry(draftId));
+  }, [draftId]);
+
+  /*
+   * And the board's answer to "is it your turn" is the toggle's default.
+   *
+   * Re-read after every board change rather than once, because every recorded
+   * pick advances the clock by one seat: the answer for pick 15 is a different
+   * answer from the one for pick 14, and a toggle that kept the reader's last
+   * correction would put the whole rest of the round on the wrong team.
+   */
+  useEffect(() => {
+    setPickIsMine(board?.onTheClock === true);
+  }, [board?.onTheClock, board?.currentPick]);
+
+  const toggleEntering = useCallback(() => {
+    setEntering((on) => {
+      const next = !on;
+      writePickEntry(draftId, next);
+      return next;
+    });
+  }, [draftId]);
+
+  /**
+   * Record a pick the room just made.
+   *
+   * Straight to the server and then a full reload of the board, deliberately —
+   * this is the opposite of the star above, which flips one row locally because
+   * a bookmark changes nothing. A pick changes *everything*: who is left, the
+   * runs, the tiers, what survives to the reader's next turn, what they hold,
+   * and whose turn it is now. There is no correct local edit, so the board is
+   * rebuilt from the picks the server now has.
+   */
+  const recordPick = useCallback(
+    async (playerId: string) => {
+      if (!draftId || recording) return;
+      setRecording(true);
+      try {
+        await api.post<{ pickNo: number }>(`/api/drafts/${draftId}/picks`, { playerId, mine: pickIsMine });
+        await load(position, { quiet: true });
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setRecording(false);
+      }
+    },
+    [draftId, load, pickIsMine, position, recording],
+  );
+
+  /**
+   * Take the last hand-entered pick back.
+   *
+   * The wrong name gets called out across a room and somebody taps it before
+   * the correction lands. The server refuses to remove a pick Sleeper
+   * published, so this can only ever undo the reader's own — see the route.
+   */
+  const undoPick = useCallback(async () => {
+    if (!draftId || recording) return;
+    setRecording(true);
+    try {
+      await api.post<{ undone: number }>(`/api/drafts/${draftId}/picks/undo`, {});
+      await load(position, { quiet: true });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecording(false);
+    }
+  }, [draftId, load, position, recording]);
 
   /**
    * Persist a drag, and keep the list where the reader dropped it meanwhile.
@@ -1104,6 +1220,31 @@ export function DraftScreen({
             >
               <MenuChevronIcon size={19} />
             </button>
+            {/*
+              The switch into recording the room's own picks.
+
+              It sits with the other board-wide controls rather than in the
+              destinations menu, because a draft that needs it needs it for
+              three hours and a mode you have to go two taps into is a mode you
+              turn on once and cannot see the state of. `aria-pressed` carries
+              that state, and the bar it opens below says it again in words.
+
+              Hidden on a locked session, where nothing can be written anyway,
+              and on a finished draft, where there is no next pick to record.
+            */}
+            {unlocked && !isDraftComplete(board.status) ? (
+              <button
+                type="button"
+                className={`icon-btn${entering ? ' icon-btn-on' : ''}`}
+                data-testid="draft-entry-toggle"
+                aria-pressed={entering}
+                aria-label={entering ? 'Stop entering picks by hand' : 'Enter this draft’s picks by hand'}
+                title={entering ? 'Entering picks by hand' : 'Enter picks by hand'}
+                onClick={toggleEntering}
+              >
+                <span className="control-glyph">{entering ? '⊕' : '⊙'}</span>
+              </button>
+            ) : null}
             <SortControl
               value={sort}
               onChange={setSort}
@@ -1127,6 +1268,45 @@ export function DraftScreen({
           </span>
         }
       />
+
+      {/*
+        The state of the room, while the reader is the one recording it.
+
+        One line, and it earns the row it costs: it says which pick the next tap
+        will write, whose it is, and how to take the last one back. Without the
+        first two the reader is tapping names into a list and hoping the app
+        agrees with them about where the draft has got to, which is precisely
+        the doubt this mode exists to remove.
+
+        `Mine` is a real control rather than a readout. In a draft Sleeper never
+        seated there is no seating to derive it from, so the reader is the only
+        source — see `pickIsMine`.
+      */}
+      {entering && unlocked && !isDraftComplete(board.status) ? (
+        <div className="draft-entry-bar" data-testid="draft-entry-bar" role="status">
+          <span className="draft-entry-next">
+            Next pick <strong>#{board.currentPick}</strong> · R{board.round}
+          </span>
+          <button
+            type="button"
+            className={`chip${pickIsMine ? ' chip-on' : ''}`}
+            data-testid="draft-entry-mine"
+            aria-pressed={pickIsMine}
+            onClick={() => setPickIsMine((mine) => !mine)}
+          >
+            {pickIsMine ? 'Mine' : 'Theirs'}
+          </button>
+          <button
+            type="button"
+            className="chip"
+            data-testid="draft-entry-undo"
+            disabled={recording || board.picksMade < 1}
+            onClick={() => void undoPick()}
+          >
+            Undo
+          </button>
+        </div>
+      ) : null}
 
       {refreshNote ? (
         <div className="draft-refresh-note" data-testid="draft-refresh-note" role="status">
@@ -1327,7 +1507,14 @@ export function DraftScreen({
                 expanded={expanded === item.rec.playerId}
                 onToggle={() => setExpanded(expanded === item.rec.playerId ? null : item.rec.playerId)}
                 onQueue={setQueued}
-                busy={flagging === item.rec.playerId}
+                /*
+                  The bookmark becomes the pick, but only in a room that is
+                  entering its own picks. Off, this is `undefined` and the row
+                  is the row it has always been.
+                */
+                onPick={entering && unlocked ? recordPick : undefined}
+                pickMode="live"
+                busy={flagging === item.rec.playerId || (entering && recording)}
                 /*
                   The drag, and where this row currently sits because of it.
 
@@ -1963,6 +2150,7 @@ export function RecommendationRow({
   onToggle,
   onQueue,
   onPick,
+  pickMode = 'mock',
   busy,
   reorderable = false,
   onReorderStart,
@@ -1993,13 +2181,17 @@ export function RecommendationRow({
   onToggle: () => void;
   onQueue: (playerId: string, queued: boolean) => void;
   /**
-   * Present only in a rehearsal, where the row's action is the pick itself.
+   * Present when the row's action is the pick itself.
    *
-   * The star's slot is a bookmark on the live board and a `+` in a mock — see
-   * `PickControl`. Absent everywhere else, so the real board renders exactly
-   * the row it rendered before this existed.
+   * The star's slot is a bookmark on the live board, and a `+` in the two
+   * places the reader is the one recording picks: a rehearsal, and a live
+   * draft in a room that is not on Sleeper — see `PickControl` and
+   * `pickMode`. Absent everywhere else, so a board nobody is entering picks
+   * into renders exactly the row it rendered before this existed.
    */
   onPick?: (playerId: string) => void;
+  /** Which draft that `+` writes to. See `PickControl`. */
+  pickMode?: 'mock' | 'live';
   busy: boolean;
   /** True only inside the ★ filter, where the order is the reader's own. */
   reorderable?: boolean;
@@ -2368,7 +2560,7 @@ export function RecommendationRow({
       */}
       <span className="row-action">
         {onPick ? (
-          <PickControl name={rec.name} busy={busy} onPick={() => onPick(rec.playerId)} />
+          <PickControl name={rec.name} mode={pickMode} busy={busy} onPick={() => onPick(rec.playerId)} />
         ) : (
           <QueueControl queued={rec.queued} busy={busy} onChange={(queued) => onQueue(rec.playerId, queued)} />
         )}

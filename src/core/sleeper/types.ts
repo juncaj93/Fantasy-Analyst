@@ -109,6 +109,17 @@ export interface SleeperState {
   display_week?: number;
   /** Sleeper's own week counter across the whole season. */
   leg?: number;
+  /**
+   * The calendar day week one kicks off, `YYYY-MM-DD`.
+   *
+   * The only field on this object that separates "week one is next" from "week
+   * one is happening". Sleeper flips `season_type` to `regular` and `week` to
+   * `1` more than a week before any game is played — on 2026-08-30 it was
+   * already reporting `regular` / week 1 against a `season_start_date` of
+   * `2026-09-09` — so the two fields above cannot tell those apart on their
+   * own. See `core/sleeper/phase.ts`.
+   */
+  season_start_date?: string | null;
 }
 
 /**

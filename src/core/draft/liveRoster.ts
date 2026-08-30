@@ -67,7 +67,28 @@ export interface LiveRosterInput {
   draftStatus: string;
 }
 
-const IN_PROGRESS = new Set(['drafting', 'paused']);
+/**
+ * The draft statuses that mean Sleeper's roster is not the answer yet.
+ *
+ * `pre_draft` belongs here and its absence was a real defect. Sleeper's roster
+ * endpoint becomes authoritative at the final pick and not before, so a league
+ * that has not drafted has an *empty* roster there, not a wrong one — and
+ * reading it as authoritative made the Team screen draw a lineup: a
+ * `Recommended starters` heading over eight `Nobody eligible yet` rows and a
+ * `Bench (0)`, which is what a reader sees the morning of their draft and reads
+ * as "the app has lost my team".
+ *
+ * It is also the status an in-person draft never leaves. A league that meets in
+ * a room and enters its picks by hand is `pre_draft` from the day it is created
+ * to the day somebody marks it done, so without this the whole of draft day
+ * would be drawn as a season that had already started.
+ *
+ * The reader loses nothing by it: a squad held before a draft — a dynasty
+ * roster, a keeper list — is still drawn in full, as players *held*, which is
+ * the only honest description of them. What goes is the lineup furniture, and
+ * nobody sets a lineup before a draft.
+ */
+const IN_PROGRESS = new Set(['pre_draft', 'predraft', 'drafting', 'paused']);
 
 /** Did this pick belong to the user? */
 function isMine(

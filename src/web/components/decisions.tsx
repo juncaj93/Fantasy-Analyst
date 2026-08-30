@@ -137,35 +137,47 @@ export function MyGuyControl({
  * the engine is allowed to hear; queueing him is a note to yourself.
  */
 /**
- * The same slot, in a rehearsal, meaning something else entirely.
+ * The same slot, when the reader is the one recording picks.
  *
- * A star is a bookmark — "remind me later" — and there is no later in a mock
- * draft: the reader is the one picking, right now, and a shortlist they will
- * never come back to is a control that does nothing. So the slot carries a `+`
- * instead, and it takes the player.
+ * A star is a bookmark — "remind me later" — and there is no later in either of
+ * the two places this appears: the reader is entering a pick that is happening
+ * now, and a shortlist they will never come back to is a control that does
+ * nothing. So the slot carries a `+` instead, and it takes the player.
  *
  * Deliberately the same size, the same position and the same slot as the star
- * it replaces, so a row in a rehearsal is the row from the real board with one
- * glyph changed rather than a second kind of row.
+ * it replaces, so a row here is the row from the real board with one glyph
+ * changed rather than a second kind of row.
+ *
+ * **Two meanings, and the control says which.** In a rehearsal the `+` takes a
+ * player in a draft that is not happening; on the live board with pick entry
+ * turned on it takes a player in one that is, in a room where Sleeper is not
+ * being updated. They are the same gesture over different stakes, and the
+ * difference belongs in what the button announces rather than in a second
+ * component: `mode` chooses the label, the tooltip and the test id, and
+ * nothing else about the row changes.
  */
 export function PickControl({
   onPick,
   busy,
   name,
+  mode = 'mock',
 }: {
   onPick: () => void;
   busy?: boolean;
   /** Whose row this is, so the control says what it will do to whom. */
   name: string;
+  /** Whether this `+` writes a rehearsal's pick or the real draft's. */
+  mode?: 'mock' | 'live';
 }) {
+  const live = mode === 'live';
   return (
     <button
       type="button"
       className="star-btn pick-btn"
       disabled={busy}
-      aria-label={`Draft ${name} in this mock draft`}
-      title="Draft him — practice only"
-      data-testid="mock-pick-control"
+      aria-label={live ? `Record ${name} as the next pick in this draft` : `Draft ${name} in this mock draft`}
+      title={live ? 'Record him as the next pick' : 'Draft him — practice only'}
+      data-testid={live ? 'live-pick-control' : 'mock-pick-control'}
       /* A sibling of the row's own button, not a child of it — see `QueueControl`. */
       onClick={onPick}
     >
