@@ -43,9 +43,11 @@ import { ACCEPT_ANY_SENDER } from '../core/newsletter/pipeline.ts';
 import { looksLikeBounceAddress, toEmailMessage } from '../core/newsletter/source.ts';
 import { SleeperClient } from '../core/sleeper/client.ts';
 import { positionMatchesFilter, resolveComparisonSlot } from '../core/sleeper/eligibility.ts';
-import { resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
+import { isDraftComplete, resolveSeasonPhase, type NflState } from '../core/sleeper/phase.ts';
 /* The same decision at the resolution draft-shaped features need. */
 import { resolveLifecycle } from '../core/season/lifecycle.ts';
+/* One tap per name called, when the room is not on Sleeper. */
+import { ManualPickRefused, isManualPick, nextManualPick } from '../core/draft/manualPick.ts';
 import { buildRolloverReport } from './services/rolloverService.ts';
 import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositions } from '../core/sleeper/scoring.ts';
 /*
@@ -1700,6 +1702,102 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const service = new SleeperSyncService(ctx.env.db, ctx.env.sleeper);
     const result = await service.syncDraft(ctx.params['id']!);
     return jsonResponse({ ...result, pollIntervalSeconds: SleeperSyncService.pollIntervalSeconds(result.status) });
+  });
+
+  /**
+   * A pick the reader entered by hand, because the room is not on Sleeper.
+   *
+   * An in-person draft publishes nothing: the draft object stays `pre_draft`
+   * all afternoon and the pick stream stays empty, so every model in this app
+   * spends the draft ranking a pool nobody has been taken out of. This is the
+   * way the room reaches it — one tap per name called — and the picks land in
+   * the same table Sleeper's would, so the board, the tiers, `Next%`, survival,
+   * roster need and the Team screen read them through the path they already
+   * have and cannot tell the difference.
+   *
+   * It writes, so it is behind the passphrase, refused during a demo and
+   * refused while a mock draft is running — all three by the method-based
+   * guards at the top of this file rather than by anything here. That last one
+   * matters most: a rehearsal must never be able to put a pick in the real
+   * draft, and now that the real draft accepts picks at all, that guard is
+   * carrying weight it was not carrying before.
+   *
+   * The arithmetic — which pick number, which round, which seat — is
+   * `nextManualPick`, which is pure and tested. This route reads what the draft
+   * already holds, asks it, and stores the answer.
+   */
+  router.post('/api/drafts/:id/picks', async (ctx) => {
+    const leagues = new LeagueRepo(ctx.env.db);
+    const draft = await leagues.getDraft(ctx.params['id']!);
+    if (!draft) return errorResponse('draft not found', 404);
+    if (isDraftComplete(draft.status)) {
+      return errorResponse('this draft is finished, so there is no pick to enter', 409);
+    }
+
+    const body = await ctx.json<{ playerId?: string; mine?: boolean }>();
+    if (!body?.playerId) return errorResponse('playerId required', 400);
+    const player = await new PlayerRepo(ctx.env.db).getById(body.playerId);
+    if (!player) return errorResponse('player not found', 404);
+
+    const league = await leagues.getLeague(draft.leagueId);
+    const rosters = await leagues.listRosters(draft.leagueId);
+    const mineRoster = rosters.find((r) => r.isMine) ?? null;
+
+    try {
+      const record = nextManualPick({
+        draftId: draft.id,
+        teams: draft.teams || league?.totalRosters || rosters.length,
+        type: draft.type,
+        rounds: draft.rounds,
+        existing: await leagues.listPicks(draft.id),
+        playerId: player.id,
+        slotToRosterId: draft.slotToRosterId,
+        myRosterId: mineRoster?.rosterId ?? null,
+        mine: body.mine === true,
+      });
+      await leagues.upsertPicks([record]);
+      return jsonResponse({
+        pickNo: record.pickNo,
+        round: record.round,
+        draftSlot: record.draftSlot,
+        playerId: record.playerId,
+        name: player.fullName,
+        mine: record.rosterId != null && record.rosterId === mineRoster?.rosterId,
+      });
+    } catch (err) {
+      if (err instanceof ManualPickRefused) return errorResponse(err.message, 409);
+      throw err;
+    }
+  });
+
+  /**
+   * Undo the last hand-entered pick.
+   *
+   * The wrong name gets called out at a live draft and somebody taps it before
+   * the correction lands; without an undo the only repair is a pick that is
+   * wrong for the rest of the afternoon, in the table every model reads.
+   *
+   * **It will only ever delete a pick this app wrote.** A row Sleeper published
+   * is the record of what actually happened and is not this control's to
+   * remove — so the last pick is checked for the marker `nextManualPick` stamps
+   * on its own rows, and a Sleeper row is refused rather than quietly skipped
+   * over to find a hand-entered one underneath it. Skipping would delete a pick
+   * the reader was not looking at.
+   */
+  router.post('/api/drafts/:id/picks/undo', async (ctx) => {
+    const leagues = new LeagueRepo(ctx.env.db);
+    const draft = await leagues.getDraft(ctx.params['id']!);
+    if (!draft) return errorResponse('draft not found', 404);
+
+    const picks = await leagues.listPicks(draft.id);
+    const last = picks.reduce<(typeof picks)[number] | null>((max, p) => (max && max.pickNo >= p.pickNo ? max : p), null);
+    if (!last) return errorResponse('there are no picks to undo', 409);
+    if (!isManualPick(last.raw)) {
+      return errorResponse('the last pick came from Sleeper, so it is not this app\u2019s to remove', 409);
+    }
+
+    await leagues.deletePick(draft.id, last.pickNo);
+    return jsonResponse({ undone: last.pickNo, playerId: last.playerId });
   });
 
   router.post('/api/drafts/:id/adp-snapshot', async (ctx) => {

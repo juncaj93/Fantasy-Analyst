@@ -83,6 +83,8 @@ export interface LifecycleInput {
   state?: NflState | null;
   league?: { season?: string | null; status?: string | null } | null;
   draft?: { status?: string | null; season?: string | null } | null;
+  /** The clock, passed straight through to the phase. See `resolveSeasonPhase`. */
+  now?: Date | string | null;
 }
 
 /** Sleeper draft statuses, lower-cased, that mean picks are being made. */
@@ -105,6 +107,7 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
     state: input.state,
     league: input.league,
     draft: input.draft ? { status: input.draft.status } : null,
+    now: input.now,
   });
 
   const draftStatus = (input.draft?.status ?? '').trim().toLowerCase();
@@ -113,11 +116,22 @@ export function resolveLifecycle(input: LifecycleInput): LifecycleResolution {
    * A live draft outranks every other witness.
    *
    * Not a stylistic preference — a correctness one. Sleeper flips
-   * `season_type` to `regular` a little before week one, and leagues that draft
+   * `season_type` to `regular` well before week one, and leagues that draft
    * late are still drafting when it does. If the regular-season witness won
    * there, the board would vanish out from under a user mid-pick, which is the
    * single worst thing this app can do. A draft that is actively taking picks
    * is proof the draft has not happened yet, whatever the calendar says.
+   *
+   * **This rule was right and its reach was too short**, which is the 2026
+   * defect. `drafting` is a state a draft is only ever in because somebody
+   * opened Sleeper's own draft room; a league that meets in a room and enters
+   * its picks afterwards is `pre_draft` from the day it is created until the
+   * day it is marked done, and so had nothing standing between it and a
+   * calendar that had already declared the regular season under way. That case
+   * is now held one level down, in `resolveSeasonPhase`, which is where every
+   * consumer of either answer reaches it — see `isDraftPending`. What is left
+   * here is the distinction this function exists for: a draft taking picks
+   * right now is `draft_live`, and one waiting to is `draft_open`.
    */
   if (LIVE_DRAFT_STATUSES.has(draftStatus)) {
     return {
