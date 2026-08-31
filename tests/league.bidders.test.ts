@@ -237,6 +237,7 @@ describe('the summary never contradicts the aggregate', () => {
       confidence: 'medium' as const,
       tendency: null,
       caveat: null,
+      participation: 1,
       display: displayName,
     }));
     const line = summarize(named, {
@@ -244,14 +245,66 @@ describe('the summary never contradicts the aggregate', () => {
       label: 'Likely 2–3 bidders',
       detail: null,
       needyTeams: 3,
-      bidders: named.map((n) => ({ rosterId: n.rosterId, displayName: n.displayName, need: n.need, remaining: 40 })),
+      bidders: named.map((n) => ({
+        rosterId: n.rosterId,
+        displayName: n.displayName,
+        need: n.need,
+        remaining: 40,
+        participation: 1,
+      })),
+      effectiveBidders: 3,
     });
     expect(line).toBe('3 likely bidders · Joe, Ryan +1');
   });
 
+  /*
+   * The two-number form, which only appears when the room's own record says
+   * fewer of the needy will act. Three managers who each have a hole and $40,
+   * of whom one bids: the names must still list three real people and the
+   * count beside them must not claim three bidders.
+   */
+  it('separates who needs him from who is likely to bid', () => {
+    const named = ['Joe', 'Ryan', 'Sam'].map((displayName, i) => ({
+      rosterId: i + 2,
+      displayName,
+      need: 'urgent' as const,
+      needReason: 'needs RB1',
+      remaining: 40,
+      estimate: { low: 6, high: 20 },
+      basis: 'league_price' as const,
+      confidence: 'medium' as const,
+      tendency: null,
+      caveat: null,
+      participation: 0.3,
+      display: displayName,
+    }));
+    const line = summarize(named, {
+      level: 'low',
+      label: 'Low competition',
+      detail: null,
+      needyTeams: 3,
+      bidders: named.map((n) => ({
+        rosterId: n.rosterId,
+        displayName: n.displayName,
+        need: n.need,
+        remaining: 40,
+        participation: 0.3,
+      })),
+      effectiveBidders: 1,
+    });
+    expect(line).toBe('3 need him · ~1 likely to bid · Joe, Ryan +1');
+  });
+
   it('says nothing at all when nobody is bidding', () => {
     expect(
-      summarize([], { level: 'low', label: 'Nobody else needs him', detail: null, needyTeams: 0, bidders: [] }),
+      summarize([], {
+        level: 'low',
+        label: 'Nobody else needs him',
+        detail: null,
+        needyTeams: 0,
+        bidders: [],
+        effectiveBidders: 0,
+      }),
     ).toBeNull();
   });
 });
