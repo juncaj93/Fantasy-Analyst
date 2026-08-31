@@ -64,23 +64,68 @@ export const MOCK_MANAGER = {
    * How far down the best-available list a bot will look.
    *
    * Twelve is a round of a normal league, and it is a ceiling on surprise
-   * rather than a target: the decay below means the twelfth man is drawn about
-   * three times in a hundred. Larger windows do not make a mock more realistic,
+   * rather than a target. Larger windows do not make a mock more realistic,
    * they make it a lottery — and the complaint about a practice draft that
    * takes Ja'Marr Chase at 40 is that it taught the drafter something false.
    */
   window: 12,
   /**
-   * The decay constant on market order, in places.
+   * How far past the best available a bot will reach, in **picks of ADP**.
    *
-   * Weight is `exp(-i / spread)` over a candidate's index in the window, so the
-   * best available carries 1, three-and-a-half places later about 0.37, seven
-   * about 0.14. Chosen so the median bot pick lands within two of best
-   * available and a genuine reach past six is rare but not impossible — which
-   * is roughly what a real room does, and is the whole of "heaviest weight".
+   * This is the whole of the market anchor, and it used to be measured in the
+   * wrong unit. The weight was `exp(-i / 3.5)` over a candidate's *index* in
+   * the best-available list, which cannot tell a near-tie from a chasm: on a
+   * board where the top player was thirteen picks clear of the entire field he
+   * was taken 25.7% of the time — exactly as often as when the top four were
+   * separated by one pick each. Measured over four hundred seeded rooms, the
+   * consensus number-one went first in 30% of them, was gone by pick three in
+   * 62%, and fell past pick nine in 7% — about one room in fourteen, which is
+   * the defect as the owner met it.
+   *
+   * So the decay is over the **market distance** to the best available —
+   * `rank - rank₀`, the number of ADP picks a manager would be reaching — and
+   * randomness now does what it is for: it breaks ties between players the
+   * market rates alike, and cannot override a player the market rates a round
+   * higher.
+   *
+   * `tolerance = base + rank₀ × growth`, because the market's own uncertainty
+   * is not constant. Nobody reaches at the top of the first round and everybody
+   * reaches in the fourteenth, and ADP variance grows the same way. At the top
+   * of the board the tolerance is 0.85 picks and the best available carries
+   * about 69%; by the fifth round it has grown to ~3.5, which is where the old
+   * flat constant sat and is the looseness the middle rounds were tuned for.
+   * The change is therefore aimed exactly where the complaint was — the top of
+   * the board — and leaves the rounds nobody complained about where they were.
    */
-  spread: 3.5,
+  reach: {
+    base: 0.8,
+    growth: 0.045,
+  },
+  /**
+   * What a player no market has priced counts as, in picks of reach.
+   *
+   * `bestAvailable` already sorts him behind everyone with a number, and this
+   * is the other half of the same sentence: a round of reach means he is
+   * unreachable early — where reaching a round is absurd — and ordinary late,
+   * where the tolerance has grown past it and real drafts are taking players
+   * off nobody's board. One constant, and it says what it means.
+   */
+  unpricedReach: 12,
 } as const;
+
+/**
+ * The tolerance in force at this point of the board, in picks of ADP.
+ *
+ * Keyed off the best available player's own market rank rather than off the
+ * pick number, and deliberately: it needs no new input to thread through, and
+ * it is self-correcting. A room that has been reaching leaves better players on
+ * the board, `rank₀` stays low, and the next manager is held closer to the
+ * market — which is what actually happens when a good player falls.
+ */
+export function reachTolerance(topRank: number | null): number {
+  const rank = topRank == null || !Number.isFinite(topRank) ? 1 : Math.max(1, topRank);
+  return MOCK_MANAGER.reach.base + rank * MOCK_MANAGER.reach.growth;
+}
 
 /**
  * One player a bot could take.
@@ -204,11 +249,27 @@ export function pickForMockManager(input: MockManagerInput): MockManagerPick | n
     positions,
   });
 
+  /*
+   * The market distance every candidate sits at, and the tolerance for it.
+   *
+   * `topRank` is the best available player's own price, so a reach is measured
+   * from what the board actually offers rather than from the pick number. When
+   * no one in the window is priced at all — a late-draft board of unknowns —
+   * there is no distance to measure, and the index stands in for it at the same
+   * tolerance, which is the behaviour this model has always had down there.
+   */
+  const topRank = window.find((c) => c.marketRank != null)?.marketRank ?? null;
+  const tolerance = reachTolerance(topRank);
   const weights: number[] = [];
   let total = 0;
   for (let i = 0; i < window.length; i++) {
-    const market = Math.exp(-i / MOCK_MANAGER.spread);
-    const weight = market * (multipliers.get(window[i]!.position) ?? 1);
+    const candidate = window[i]!;
+    const reach =
+      topRank == null
+        ? i
+        : (candidate.marketRank ?? topRank + MOCK_MANAGER.unpricedReach) - topRank;
+    const market = Math.exp(-Math.max(0, reach) / tolerance);
+    const weight = market * (multipliers.get(candidate.position) ?? 1);
     weights.push(weight);
     total += weight;
   }

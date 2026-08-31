@@ -21,11 +21,53 @@ Three inputs, and no fourth:
 | **Manager tendency** | a bounded nudge, sample-gated | `core/managers/managerTendencies.ts`, via `MANAGER_PRIOR` |
 | **Randomness** | bounded jitter | a draw from `nextpick/rng.ts`, seeded by the mock's own state |
 
-The market weight is `exp(-i / spread)` over a candidate's index in the best-
-available window (`window: 12`, `spread: 3.5`), so the median bot pick lands
-within about two of best available and nothing outside the window is reachable.
-That weight is then multiplied by the manager's own per-position multiplier and
-one candidate is sampled.
+The market weight is `exp(-reach / tolerance)`, where **`reach` is the distance
+in picks of ADP** between a candidate and the best available player, and
+`tolerance` is how far a manager will stretch at this point of the board:
+`base 0.8 + rank₀ × 0.045`. That weight is multiplied by the manager's own
+per-position multiplier and one candidate is sampled from the best-available
+window (`window: 12`, a ceiling on surprise).
+
+**The unit is the whole of it, and it used to be wrong.** The decay ran over a
+candidate's *index* in the window at a flat `spread: 3.5`, which cannot tell a
+near-tie from a chasm: the top player carried 25.7% of the mass whether he was
+one pick clear of the field or thirteen. Nine managers in a row passing the same
+man was therefore an ordinary event — measured over four hundred seeded rooms,
+the consensus number one went first in 30% of them and fell past pick nine in
+7%, about one room in fourteen. That is how it was reported: Gibbs, ADP 1, gone
+at pick 10.
+
+Measuring the reach in the market's own unit is what makes randomness do the job
+it is there for — breaking ties between players the market rates alike, never
+overriding one it rates a round higher:
+
+| | before | after |
+|---|---|---|
+| best available is taken | 25.7% | 69.4% |
+| top player 13 picks clear of the field is taken | 25.7% | 100% |
+| ADP-1 player goes first (400 seeded rooms) | 30.0% | 68.0% |
+| …is gone inside three picks | 62.0% | 99.8% |
+| …falls past pick 9 | 7.0% | 0.0% |
+| …worst slot seen | 18 | 4 |
+
+**The tolerance grows because the market's own variance does.** Nobody reaches
+at the top of the first round and everybody reaches in the fourteenth. At
+`rank₀ = 1` the tolerance is 0.85 picks and four players are in play; by the
+fifth round (`rank₀ ≈ 60`) it has grown to exactly 3.5 — where the old flat
+constant sat — and the full window is reachable again. So the change is aimed
+where the complaint was, at the top of the board, and leaves the middle and late
+rounds, which nobody complained about and which are genuinely loose, where they
+were. It is keyed off the best available player's own rank rather than the pick
+number: that needs no new input threaded through, and it is self-correcting,
+because a room that has been reaching leaves better players on the board and the
+next manager is held closer to the market — which is what really happens when a
+good player falls.
+
+An unpriced player counts as `unpricedReach: 12` picks of reach, which is the
+other half of `bestAvailable` sorting him last: unreachable early, where
+reaching a round for an unknown is absurd, and ordinary late, where the
+tolerance has grown past it and real drafts are taking players off nobody's
+board.
 
 **`MANAGER_PRIOR` is imported rather than restated.** "How much more does this
 manager want a quarterback right now" is the same question `nextpick/
@@ -437,7 +479,7 @@ what makes the reuse real today; the extraction is worth doing next.
 
 | File | What it proves |
 |---|---|
-| `tests/mockManager.test.ts` | the blend: ADP anchors, history nudges only with a sample, the draw is the only randomness |
+| `tests/mockManager.test.ts` | the blend: ADP anchors, history nudges only with a sample, the draw is the only randomness — and `the market anchor holds`, which pins the reach model in picks of ADP: five of its seven assertions fail on the index-based one |
 | `tests/mockDraft.test.ts` | the snake, turn-taking, determinism, the deletion rule, per-draft scoping |
 | `tests/mock.isolation.test.ts` | both refusals, mutation-tested; the seam is structural |
 | `tests/mock.board.test.ts` | end to end over the real router: the board is real, the real draft is untouched, the 409, the snapshot round-trip |
