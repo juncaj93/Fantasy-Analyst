@@ -1515,13 +1515,24 @@ test.describe('the season features', () => {
      * Team draws the drafted roster instead, and that is the intended state
      * rather than a missing one. Asserted rather than skipped past, the same way
      * the Start/Sit test above handles it: during a draft the starters are gone
-     * *and* the drafted roster is there, and only a deployment with neither is
-     * genuinely nothing to check.
+     * *and* the roster below says where the draft has got to, and only a
+     * deployment with neither is genuinely nothing to check.
+     *
+     * **A draft that has not started yet is one of these, and used to be
+     * unreachable.** `live` covers `pre_draft` now — Sleeper's roster is not
+     * authoritative until the final pick, and reading it as though it were is
+     * what drew eight `Nobody eligible yet` rows over an undrafted league the
+     * morning of a real draft. So a deployment can legitimately be live with
+     * nothing taken, and the screen says so in a sentence rather than with a
+     * row. Both are the roster reporting the draft's state; neither is an empty
+     * screen, which is the thing this test exists to catch.
      */
     const drafting = await midDraft(page);
     if (drafting) {
       await expect(page.getByTestId('starter-row')).toHaveCount(0);
-      await expect(page.getByTestId('drafted-line').first()).toBeVisible();
+      const drafted = page.getByTestId('drafted-line');
+      if ((await drafted.count()) > 0) await expect(drafted.first()).toBeVisible();
+      else await expect(page.getByText('Nothing drafted yet')).toBeVisible();
       return;
     }
 
