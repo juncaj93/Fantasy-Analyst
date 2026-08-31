@@ -240,8 +240,9 @@ writes nothing. See [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md).
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
 tell the app which sender to trust. No commands, no jargon. Appearance lives
-here too: **System** (the default, following the phone), **Light** or **Dark**,
-kept on the device and applied before the first paint.
+here too — three glyphs in the corner of the bar: **Light**, **Dark**, or
+**System** (the default, following the phone), kept on the device and applied
+before the first paint.
 
 ## League intelligence
 

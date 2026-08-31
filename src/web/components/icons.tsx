@@ -207,6 +207,42 @@ export function GearIcon({ size = 24, className }: IconProps) {
   );
 }
 
+/*
+ * Light and Dark, as the two things everybody already draws them as.
+ *
+ * They sit beside {@link GearIcon} in the Setup bar, where the gear is not the
+ * tab's glyph but the third appearance — "whatever this phone is set to". Three
+ * shapes rather than three words because the control is in a navigation bar and
+ * the words were costing a section of the screen underneath it; what each one
+ * means is on the button as an `aria-label`, which is the only place a shape
+ * can honestly be explained.
+ */
+
+/** Light: a sun. */
+export function SunIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="4.1" />
+      <path d="M12 2.6v2.3M12 19.1v2.3M4.35 4.35l1.63 1.63M18.02 18.02l1.63 1.63M2.6 12h2.3M19.1 12h2.3M4.35 19.65l1.63-1.63M18.02 5.98l1.63-1.63" />
+    </svg>
+  );
+}
+
+/**
+ * Dark: a crescent.
+ *
+ * One closed path rather than a circle with a circle knocked out of it, because
+ * these glyphs are stroked and not filled — a mask would draw the bite as a
+ * second outline sitting inside the first.
+ */
+export function MoonIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M20.1 14.6A8.4 8.4 0 0 1 9.4 3.9a8.4 8.4 0 1 0 10.7 10.7Z" />
+    </svg>
+  );
+}
+
 /** The trailing mark on a row that leads somewhere. */
 export function ChevronIcon({ size = 16, className }: IconProps) {
   return (

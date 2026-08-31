@@ -6,7 +6,16 @@
  * here; this screen only shows what the user can do from their phone.
  */
 
-import { Fragment, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+} from 'react';
 import {
   api,
   type LeagueSummary,
@@ -22,7 +31,14 @@ import {
 } from '../api.ts';
 import { SIGNAL_BALANCE_ORDER } from '../../core/draft/signalBalance.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
-import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from '../components/icons.tsx';
+import {
+  AlertCircleIcon,
+  CheckCircleIcon,
+  EmptyCircleIcon,
+  GearIcon,
+  MoonIcon,
+  SunIcon,
+} from '../components/icons.tsx';
 import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
@@ -38,7 +54,6 @@ import {
   type SupportContext,
 } from '../supportContext.ts';
 import {
-  APPEARANCES,
   APPEARANCE_LABELS,
   applyAppearance,
   readAppearance,
@@ -276,14 +291,23 @@ export function SetupScreen({
 
   return (
     <>
-      <NavBar
-        title="Setup"
-        subtitle={
-          status.readyForDraft
-            ? 'Everything needed for draft day is ready'
-            : 'Work through anything marked below'
-        }
-      />
+      {/*
+        The screen's name, and the one preference that belongs beside it.
+
+        The subtitle under the title used to say whether everything needed for
+        draft day was ready. It restated, as one sentence, what the marks down
+        the list already say a row at a time — and it went on saying "draft day"
+        into September, which is the failure mode of any copy that summarises a
+        state it does not itself hold. The marks are the answer and they cannot
+        go stale.
+
+        Appearance is the bar's trailing control rather than a card above the
+        checklist: it is a preference of this phone that is set once and then
+        never looked for again, and the first screen of Settings belongs to the
+        steps — `shell.spec.ts` measures that every one of them is reachable
+        without a scroll on the shortest phone this app supports.
+      */}
+      <NavBar title="Setup" trailing={<AppearanceToggle />} />
 
       {error ? <Notice tone="error">{error}</Notice> : null}
 
@@ -294,8 +318,6 @@ export function SetupScreen({
           This site is view-only: no passphrase has been set up, so settings cannot be changed here.
         </Notice>
       )}
-
-      <AppearanceCard />
 
       <ListGroup header="Your league">
         {status.steps.map((step) => (
@@ -533,10 +555,21 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
     }
   };
 
-  const detailFor = (): string => {
+  /*
+   * What just happened, or why it cannot happen — and otherwise nothing.
+   *
+   * The idle line used to describe what the row does: the exact state behind a
+   * recommendation, for an AI assistant, uploaded nowhere. That is worth
+   * knowing once and it is written down in docs/SUPPORT_SNAPSHOT.md; on the
+   * screen it was a permanent three lines under a row whose label already says
+   * "Copy support snapshot". The two lines that are not decoration stay: the
+   * blocker, which is the reader being told the tap would produce an empty
+   * file, and the outcome, which is the size and where it went.
+   */
+  const detailFor = (): string | undefined => {
     if (detail) return detail;
     if (reason) return reason;
-    return 'The exact state behind that recommendation, to send to an AI assistant. Nothing is uploaded.';
+    return undefined;
   };
 
   return (
@@ -633,15 +666,53 @@ function downloadJson(filename: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/** The shape each appearance is drawn as, in the order they are offered. */
+const APPEARANCE_ICONS: Record<Appearance, ComponentType<{ size?: number }>> = {
+  light: SunIcon,
+  dark: MoonIcon,
+  system: GearIcon,
+};
+
 /**
- * Appearance: System, Light or Dark.
+ * All three, in the order they are drawn: sun, moon, gear.
+ *
+ * Not the order the type declares them in. System is the default and the least
+ * interesting of the three to a reader who has an opinion, so it is last rather
+ * than first, and the two that are a straight choice sit together.
+ */
+const APPEARANCE_ORDER: readonly Appearance[] = ['light', 'dark', 'system'];
+
+/**
+ * Appearance: System, Light or Dark, in the corner of the bar.
  *
  * A preference of this phone rather than of the account, so it is kept on the
  * device: it works for a view-only reader, needs no passphrase, and costs no
  * request. Choosing one applies immediately — no reload, and nothing else on
  * screen changes state.
+ *
+ * ## Why three glyphs and not a segmented control
+ *
+ * It was a titled card at the top of Settings: a section heading, a full-width
+ * segmented control and two lines explaining what System meant. That is about
+ * ninety points of the first screen spent on a setting that is chosen once, and
+ * the screen it was spending them on is the one measured for whether every step
+ * of the checklist is reachable without a scroll. Three glyphs at the trailing
+ * end of the navigation bar cost no rows at all.
+ *
+ * ## Why not one glyph that cycles
+ *
+ * A single button rotating System → Light → Dark would be smaller still, and it
+ * would hide two of the three states behind taps: the reader could not see what
+ * the app was set to without changing it, which is exactly the thing a
+ * preference control must not do. All three are on screen, one of them held
+ * down, and each is a full 44px target.
+ *
+ * The words are not gone — they are the `aria-label` on each button and its
+ * tooltip, which is where the meaning of a shape belongs. A screen reader hears
+ * "Light, Dark, System" in a group called Appearance, exactly as it did when
+ * they were chips.
  */
-function AppearanceCard() {
+function AppearanceToggle() {
   const [mode, setMode] = useState<Appearance>(() => readAppearance());
 
   useEffect(() => {
@@ -652,30 +723,28 @@ function AppearanceCard() {
   }, [mode]);
 
   return (
-    <div data-testid="appearance">
-      <div className="section-title">Appearance</div>
-      {/*
-        The same control the board filters use, rather than a second opinion
-        about what a segmented control looks like. It was drawn by hand here,
-        which is how one of the two ended up 42px tall and the other 44.
-      */}
-      <SegmentedControl
-        label="Appearance"
-        value={mode}
-        onChange={(option) => {
-          storeAppearance(option);
-          setMode(option);
-        }}
-        segments={APPEARANCES.map((option) => ({
-          id: option,
-          label: APPEARANCE_LABELS[option],
-          testId: `appearance-${option}`,
-        }))}
-      />
-      <div className="faint" style={{ margin: '-2px 4px 14px' }}>
-        System follows your phone, and keeps following it when your phone changes at sunset. Light and
-        Dark stay exactly as you set them here, on this phone.
-      </div>
+    <div className="appearance-toggle" role="group" aria-label="Appearance" data-testid="appearance">
+      {APPEARANCE_ORDER.map((option) => {
+        const Glyph = APPEARANCE_ICONS[option];
+        const selected = option === mode;
+        return (
+          <button
+            key={option}
+            type="button"
+            className={selected ? 'icon-btn icon-btn-on' : 'icon-btn'}
+            aria-pressed={selected}
+            aria-label={APPEARANCE_LABELS[option]}
+            title={APPEARANCE_LABELS[option]}
+            data-testid={`appearance-${option}`}
+            onClick={() => {
+              storeAppearance(option);
+              setMode(option);
+            }}
+          >
+            <Glyph size={19} />
+          </button>
+        );
+      })}
     </div>
   );
 }

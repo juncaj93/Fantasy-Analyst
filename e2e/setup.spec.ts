@@ -45,6 +45,29 @@ test.describe('setup overview', () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
   });
+
+  /**
+   * The screen does not explain what its own rows already say.
+   *
+   * Three paragraphs used to sit here: a subtitle summarising whether the app
+   * was ready for draft day, two lines on what System meant, and a description
+   * of what a support snapshot is. Each of them restated something the reader
+   * can see — the marks down the checklist, the state of the control, the label
+   * on the row — and between them they cost about a third of the first screen.
+   *
+   * The first one is the reason this is a test rather than a preference: it
+   * said "draft day" on a screen that was still being opened in September,
+   * because copy that summarises a state it does not hold cannot go stale
+   * loudly. Anything that puts a standing explanation back on this screen
+   * should have to argue with a failing assertion first.
+   */
+  test('does not carry standing explanations of what its rows already say', async ({ page }) => {
+    await page.getByTestId('setup-support-snapshot').scrollIntoViewIfNeeded();
+    const text = await page.locator('main').innerText();
+    for (const blurb of ['draft day', 'System follows your phone', 'Nothing is uploaded']) {
+      expect(text, `Setup should no longer say "${blurb}"`).not.toContain(blurb);
+    }
+  });
 });
 
 /**
@@ -281,8 +304,36 @@ test.describe('setup with a populated newsletter', () => {
  * The preference lives on the device, so these run against a fresh context's
  * empty storage: System until somebody chooses otherwise, and the choice
  * applied before the first paint on the next visit.
+ *
+ * It is three glyphs at the trailing end of the navigation bar rather than a
+ * titled card above the checklist. What that has to keep is everything below:
+ * all three states offered, one of them visibly held down, the choice applied
+ * at once and still applied after a reload — a smaller control that could only
+ * do two of the three, or that hid which one was current, would be a worse
+ * setting drawn in less space.
  */
 test.describe('appearance', () => {
+  test('sits in the navigation bar as three named, full-size targets', async ({ page }) => {
+    await openSetup(page);
+
+    // In the bar, not in a card above the first step of the checklist.
+    await expect(page.locator('.nav-bar [data-testid="appearance"]')).toBeVisible();
+    await expect(page.getByTestId('appearance')).toHaveAttribute('aria-label', 'Appearance');
+
+    for (const { mode, label } of [
+      { mode: 'light', label: 'Light' },
+      { mode: 'dark', label: 'Dark' },
+      { mode: 'system', label: 'System' },
+    ]) {
+      const button = page.getByTestId(`appearance-${mode}`);
+      // The word is not on the screen any more; it is still on the button.
+      await expect(button).toHaveAttribute('aria-label', label);
+      const box = (await button.boundingBox())!;
+      expect(box.width, `${mode} is only ${box.width}px wide`).toBeGreaterThanOrEqual(44);
+      expect(box.height, `${mode} is only ${box.height}px tall`).toBeGreaterThanOrEqual(36);
+    }
+  });
+
   test('offers System, Light and Dark, and starts on System', async ({ page }) => {
     await openSetup(page);
     await expect(page.getByTestId('appearance')).toBeVisible();

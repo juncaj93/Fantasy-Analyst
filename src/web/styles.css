@@ -3976,6 +3976,38 @@ button:disabled {
 }
 
 /*
+ * Appearance, as three glyphs at the trailing end of the Setup bar.
+ *
+ * It replaces a titled card with a full-width segmented control and two lines
+ * of explanation, which is roughly ninety points of the one screen that is
+ * measured for whether the whole checklist fits without a scroll.
+ *
+ * Nothing here shrinks the buttons. They are ordinary `.icon-btn`s at the full
+ * 44px width, sitting flush with no gap, so three of them are 132px of bar and
+ * every one of them is a whole thumb — a control small enough to mis-tap is not
+ * a saving, it is a setting the reader has to undo. What the group does change
+ * is colour: an unselected glyph is faint rather than accent-coloured, because
+ * three identical blue icons with one of them tinted reads as three actions
+ * rather than one choice with a position.
+ *
+ * The negative margin is optical, not spatial: an `.icon-btn` carries about
+ * thirteen points of dead space either side of a 19px glyph, so without it the
+ * last icon appears to float well inside the page inset that the title on the
+ * other end sits against.
+ */
+.appearance-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin-right: -6px;
+}
+.appearance-toggle .icon-btn {
+  color: var(--text-faint);
+}
+.appearance-toggle .icon-btn-on {
+  color: var(--accent-text);
+}
+
+/*
  * Score / ADP / DOG.
  *
  * A segmented control at the smallest size that is still a control: three
