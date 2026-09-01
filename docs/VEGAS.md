@@ -195,6 +195,24 @@ Roster first, never the slate.
    carries the odds too — there is no schedule-only request — so this *is* the
    week's first fetch, and what it learns is stored in `vegas_events` so the
    next refresh does not pay to find the same games again.
+
+   **The eight days stretch to reach the roster's next fixture, and only when
+   there is not one inside them.** Between a finished draft and week one there
+   is no game within eight days, so discovery found nothing, stored no line, and
+   every model that runs on the market — the head-to-head forecast, the lineup
+   ranking, the defence outlook — answered with a blank or with the sum of its
+   own nudges. Reported live on 31 August 2026, nine days out. The extension is
+   measured against the nflverse fixture list this app already stores rather
+   than against a date, so no preseason window is written down anywhere and 2027
+   needs no edit; it is capped at 28 days, it never *narrows* the ordinary
+   horizon, and an unreadable schedule falls back to the eight days rather than
+   widening a paid query on a guess.
+
+   Whatever the window, **only each team's next fixture is stored.**
+   `PropsRepo.latestForPlayers` returns the newest snapshot per *event*, so a
+   player quoted in two stored games comes back with two lines for one week and
+   the expectation reads them as one. An eight-day window made that rare by
+   accident; it is now enforced where the rows are written.
 2. **Targeted refreshes afterwards.** `buildFetchPlan` starts from the players
    whose week is still undecided, maps them to events, deduplicates (two
    rostered players in one game is one fetch), drops games that have kicked off,
@@ -214,6 +232,7 @@ reported as a single book rather than dressed up as agreement.
 | | Entities |
 |---|---|
 | Weekly discovery (8 roster teams) | 9 |
+| Preseason discovery, once, reaching the first slate | up to 32 |
 | Two scheduled refreshes (8 games each) | 16 |
 | Near-kickoff top-ups for close calls | 3 |
 | **Per week** | **28** |
