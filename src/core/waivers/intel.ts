@@ -33,6 +33,7 @@ import {
   waiverManagerPressure,
   type WaiverManagerPressure,
 } from './managerPressure.ts';
+import { bidLikelihoodByRoster, type RivalBidLikelihood } from './bidLikelihood.ts';
 import type { LeagueTransactionBaseline, ManagerTransactionProfile } from '../managers/transactionProfile.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
@@ -89,6 +90,8 @@ export function waiverLeagueIntel(opts: {
   competition: Map<string, CompetitionAssessment>;
   bidders: Map<string, BidderIntel>;
   pressure: Map<string, WaiverManagerPressure>;
+  /** How much of a bidder each rival is, by roster id. Empty without history. */
+  likelihood: Map<number, RivalBidLikelihood>;
 } {
   const competition = new Map<string, CompetitionAssessment>();
   const bidders = new Map<string, BidderIntel>();
@@ -135,6 +138,31 @@ export function waiverLeagueIntel(opts: {
   const bidding = opts.budgets?.rule.usesFaab === true;
   const needsByPosition = new Map<string, ReturnType<typeof teamNeedsFor>>();
 
+  /*
+   * How much of a bidder each rival actually is, once for the whole board.
+   *
+   * Same managers and same numbers whatever position is being priced, so this
+   * belongs beside the tendency translation above rather than inside the
+   * candidate loop. Empty without a backfilled history, and an empty map means
+   * every rival counts whole — which is what `assessCompetition` does when no
+   * participation is supplied, so the two agree by construction rather than by
+   * a default repeated in two places.
+   */
+  const likelihood = opts.history
+    ? bidLikelihoodByRoster({
+        rosterIds: opts.rosters.filter((r) => !r.isMine).map((r) => r.rosterId),
+        profiles: opts.history.profiles,
+        budgets: budgetByRoster,
+        baseline: opts.history.baseline,
+        budgetTotal: opts.budgets?.rule.total ?? null,
+        week: opts.history.week,
+        finalWeek: opts.history.finalWeek,
+      })
+    : new Map<number, RivalBidLikelihood>();
+
+  const participationOf = (rosterId: number): number =>
+    likelihood.get(rosterId)?.participation ?? 1;
+
   for (const upgrade of opts.advice.upgrades) {
     for (const candidate of upgrade.candidates) {
       if (!needsByPosition.has(candidate.position)) {
@@ -155,6 +183,7 @@ export function waiverLeagueIntel(opts: {
               expectedLow: opts.prices?.low ?? null,
               bidding,
               position: candidate.position,
+              participationOf,
             });
       competition.set(candidate.playerId, assessed);
 
@@ -206,7 +235,7 @@ export function waiverLeagueIntel(opts: {
     }
   }
 
-  return { competition, bidders, pressure };
+  return { competition, bidders, pressure, likelihood };
 }
 
 /**

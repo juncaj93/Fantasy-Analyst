@@ -95,6 +95,17 @@ export interface NamedBidder {
   tendency: string | null;
   /** The sample caveat, when one is owed. */
   caveat: string | null;
+  /**
+   * How much of a bidder his record says he is, in [0,1]. 1 when unknown.
+   *
+   * Carried from `competition.ts` so the ranking and the card can use it. It
+   * deliberately does **not** move {@link NamedBidder.estimate}: this is a
+   * reading about *whether* he bids, and the amount is a reading about *how
+   * much*. Letting one drive the other would price a quiet manager's rare bid
+   * as a small one, which his record does not say — a manager who claims twice
+   * a year may well pay up on both.
+   */
+  participation: number;
   /** `Joe · likely $17–22 · $41 left · needs RB2 · bids big on scarce backs` */
   display: string;
 }
@@ -295,11 +306,23 @@ function toNamed(
         ? 'low'
         : 'medium';
 
+  /*
+   * A rival his own record says rarely claims is qualified on the card.
+   *
+   * The estimate stays as it is — it answers a different question — so without
+   * this the row would read `Joe · likely $17–22 · $89 left · needs RB2` for a
+   * manager who has placed one bid in two seasons, and every word of it would
+   * be true while the row as a whole was misleading. The phrase is the shortest
+   * one that fixes it, and it is the same fact the price is now using.
+   */
+  const quiet = quietPhrase(bidder.participation);
+
   const parts = [bidder.displayName];
   if (estimate) parts.push(`likely $${estimate.low}–${estimate.high}`);
   else if (ctx.bidding) parts.push('amount unknown');
   if (bidder.remaining != null) parts.push(`$${bidder.remaining} left`);
   parts.push(needReason);
+  if (quiet) parts.push(quiet);
   if (ctx.tendency.note && ctx.tendency.confident) parts.push(ctx.tendency.note);
 
   return {
@@ -313,8 +336,22 @@ function toNamed(
     confidence,
     tendency: ctx.tendency.confident ? ctx.tendency.note : null,
     caveat,
+    participation: bidder.participation,
     display: parts.join(' · '),
   };
+}
+
+/**
+ * How a low participation reads on a card, or null when there is nothing to say.
+ *
+ * Two bands and no numbers. `0.31 of a bidder` is a developer's phrasing of a
+ * shrunk ratio and means nothing to a person deciding what to bid; "rarely
+ * claims" is the same evidence in the words he would use himself.
+ */
+function quietPhrase(participation: number): string | null {
+  if (participation <= 0.4) return 'rarely claims';
+  if (participation <= 0.7) return 'claims less than the room';
+  return null;
 }
 
 /**
@@ -394,17 +431,32 @@ function estimateFor(
  * Most dangerous first.
  *
  * Urgency leads, because a manager who cannot field the position is the one who
- * bids past sense. Then the top of his range, then his wallet: between two
- * rivals who will pay the same, the one with more left is the one who can go
- * again.
+ * bids past sense. Then how likely he is to bid at all, then the top of his
+ * range, then his wallet: between two rivals who will pay the same, the one with
+ * more left is the one who can go again.
+ *
+ * Participation sits above the amount rather than below it because the list is
+ * cut to {@link MAX_NAMED}, and a manager who has bid once in three seasons
+ * taking a slot from one who bids weekly is the version of this list that
+ * misleads. Banded rather than compared outright — a 0.82 and a 0.79 are the
+ * same manager as far as this evidence goes, and sorting on the third decimal
+ * would reorder the card on noise.
  */
 function compareBidders(a: NamedBidder, b: NamedBidder): number {
   return (
     Number(b.need === 'urgent') - Number(a.need === 'urgent') ||
+    participationBand(b.participation) - participationBand(a.participation) ||
     (b.estimate?.high ?? -1) - (a.estimate?.high ?? -1) ||
     (b.remaining ?? -1) - (a.remaining ?? -1) ||
     a.displayName.localeCompare(b.displayName)
   );
+}
+
+/** Coarse enough that only a real difference in record reorders the list. */
+function participationBand(participation: number): number {
+  if (participation >= 0.85) return 2;
+  if (participation >= 0.55) return 1;
+  return 0;
 }
 
 /**
@@ -414,18 +466,43 @@ function compareBidders(a: NamedBidder, b: NamedBidder): number {
  * count always agrees with the aggregate label, because both are taken from the
  * same bidder list — a card reading `High pressure · 1 likely bidder` is the
  * kind of self-contradiction that costs a feature its credibility.
+ *
+ * Since the label started following `effectiveBidders`, keeping that promise
+ * takes two numbers rather than one whenever the room's own record says fewer
+ * of the needy will actually act. `4 need him · ~2 likely bidders · Joe, Ryan +2`
+ * is longer than the line it replaces and it is the only version that is not
+ * lying about one of the two: the names enumerate four real people who each
+ * have a hole and the money to fix it, and the level beside them is a claim
+ * about how many will use it. Collapsing to either number alone contradicts
+ * something the reader can see.
+ *
+ * `likely bidders` rather than the more natural `likely to bid`, and the
+ * reason is a real constraint rather than a preference: this line renders
+ * inside the waiver card's own button, and the browser suite asserts that no
+ * *control* offers to transact by matching `\bbid\b` against every visible
+ * button's text. `bid` as a bare verb trips it; `bidders` is a noun about
+ * people and does not. The guard is right and the phrasing gives way to it —
+ * describing a bid and offering one are opposite things, and the check cannot
+ * tell them apart from inside a button.
  */
 export function summarize(named: NamedBidder[], competition: CompetitionAssessment): string | null {
   const total = competition.bidders.length;
   if (total === 0) return null;
+  const effective = competition.effectiveBidders;
 
   const plural = total === 1 ? 'bidder' : 'bidders';
-  if (named.length === 0) return `${total} likely ${plural}`;
+  const effectivePlural = effective === 1 ? 'bidder' : 'bidders';
+  const count =
+    effective < total
+      ? `${total} need him · ~${effective} likely ${effectivePlural}`
+      : `${total} likely ${plural}`;
+
+  if (named.length === 0) return count;
 
   const shown = named.slice(0, 2).map((b) => b.displayName);
   const rest = total - shown.length;
   const names = rest > 0 ? `${shown.join(', ')} +${rest}` : shown.join(', ');
-  return `${total} likely ${plural} · ${names}`;
+  return `${count} · ${names}`;
 }
 
 function median(sorted: number[]): number {
