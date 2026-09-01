@@ -35,11 +35,43 @@ async function openTab(page: Page, tab: 'draft' | 'team' | 'players' | 'setup') 
   await page.getByTestId(`tab-${tab}`).click();
 }
 
-/** Pick one player in the open comparison sheet. */
+/**
+ * Pick one player in the open comparison sheet.
+ *
+ * Clicked under a retry, because the list underneath is debounced and this is
+ * racing it. The sheet's candidate list is loaded by a 200ms-debounced effect
+ * in `TeamScreen.tsx`; opening the sheet and choosing immediately — which is
+ * what every caller does, and what a fast reader does — lands the click inside
+ * the window before that first load resolves. When it resolves, `setResults`
+ * replaces the array and the row unmounts underneath the click. Playwright
+ * reports it exactly: `element is not stable`, then `element was detached from
+ * the DOM, retrying`, then the test times out.
+ *
+ * It is a real race rather than a slow runner, and it moved around to prove it:
+ * one width out of four on any given run, a different width each time, and a
+ * different test in this file each time — 1572 twice, then 1660. It has failed
+ * CI on two unrelated pull requests and, once, on `main` itself, where it
+ * stopped a merged revision from being deployed at all.
+ *
+ * The retry is deliberately **idempotent** rather than a plain re-click. The
+ * row's handler is `toggle`, so a blind retry after a click that did register
+ * would deselect the player and leave the test failing for a new reason. So the
+ * click only happens when the row is not already chosen, and the assertion is
+ * what the retry waits on. Selection lives in `ids`, separate from `results`,
+ * so a chosen row stays chosen across the refresh that detached it.
+ *
+ * Nothing here is forced or skipped: a row that never becomes selectable still
+ * fails, and it fails on the assertion rather than on a click that could not
+ * find its element.
+ */
 async function choose(page: Page, playerId: string) {
   const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${playerId}"]`);
-  await row.click();
-  await expect(row).toHaveAttribute('data-chosen', 'true');
+  await expect(async () => {
+    if ((await row.getAttribute('data-chosen')) !== 'true') {
+      await row.click({ timeout: 5_000 });
+    }
+    await expect(row).toHaveAttribute('data-chosen', 'true', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 test.describe('shell', () => {
