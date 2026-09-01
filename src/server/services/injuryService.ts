@@ -370,16 +370,35 @@ export class InjuryService {
     const latestStored = state?.caughtUpThrough ?? null;
     if (latestStored == null) return null;
 
-    const coverage = await this.repo.coverage(season).catch(() => ({ players: 0, latestWeek: null }));
-    const haveThrough = coverage.latestWeek ?? 0;
+    /*
+     * The question this tick would ask, if it has already been answered.
+     *
+     * `missingWeekBefore` reads every row the season holds to report which
+     * weeks are present, and once the last gap is filled the answer is "none"
+     * forever. Asking it every five minutes is 288 full-season scans a day for
+     * a fact that cannot have changed: no gap can open *below* a point already
+     * verified, because nothing deletes stored weeks.
+     *
+     * The watermark is only trusted while the feed has not moved past it. A new
+     * week advances `caughtUpThrough` beyond it and the scan runs again — the
+     * one case that can create a gap, and so the one case worth paying for.
+     */
+    if (state?.gapsCheckedThrough != null && state.gapsCheckedThrough >= latestStored) return null;
+
     /*
      * The gap is between the oldest week the store is missing and the newest it
      * has. `caught_up_through` is the file's latest week at the last successful
      * ingest; anything below it that is absent is a week nobody read.
      */
     const missing = await this.repo.missingWeekBefore(season, latestStored).catch(() => null);
-    if (missing == null || missing >= latestStored) return null;
-    void haveThrough;
+    if (missing == null || missing >= latestStored) {
+      /*
+       * Nothing missing. Remember that, so the scan above does not run again
+       * until the feed moves. Recorded after the answer, never before it.
+       */
+      await this.source.recordNoGapsThrough(INJURY_SOURCE, season, latestStored).catch(() => {});
+      return null;
+    }
 
     const fetched = await fetchInjuryReport(season, {
       fetch: this.deps.fetch,

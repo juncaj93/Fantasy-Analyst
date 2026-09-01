@@ -316,8 +316,24 @@ export class UsageService {
     const latestStored = state?.caughtUpThrough ?? null;
     if (latestStored == null) return null;
 
+    /*
+     * Already answered, so not asked again. The same watermark the injury feed
+     * keeps, for the same reason and with the same bound: trusted only while
+     * the feed has not moved past the point that was verified.
+     *
+     * This one rides the daily tick rather than the five-minute one, so it was
+     * never the expensive half of the pair — a scan a day rather than 288. It
+     * is here because it is the same scan asking the same settled question, and
+     * a fix that left one of the two behind would be waiting to be rediscovered
+     * the next time a cadence changed.
+     */
+    if (state?.gapsCheckedThrough != null && state.gapsCheckedThrough >= latestStored) return null;
+
     const missing = await this.repo.missingWeekBefore(season, latestStored).catch(() => null);
-    if (missing == null || missing >= latestStored) return null;
+    if (missing == null || missing >= latestStored) {
+      await this.source.recordNoGapsThrough(USAGE_SOURCE, season, latestStored).catch(() => {});
+      return null;
+    }
 
     const fetched = await fetchWeeklyUsage(season, {
       fetch: this.deps.fetch,
