@@ -13,12 +13,19 @@
  * So the list is now a list — a hundred rows in fixed columns, on one grouped
  * surface, separated by hairlines — and the file is now a *destination*, pushed
  * on top with a Back control (see `components/playerPage.tsx`). The reader's
- * place in the list, what they typed, and which position they had narrowed it
- * to all survive the round trip, which is the whole point of pushing rather
- * than replacing.
+ * place in the list, what they typed, which position they had narrowed it to
+ * and whose team they were browsing all survive the round trip, which is the
+ * whole point of pushing rather than replacing.
  *
  * Nothing about the data changed. The same two endpoints answer the same two
  * questions, and every number on the row is the number that was on the card.
+ *
+ * One row of controls narrows it: the position chips, and beside them a picker
+ * for who holds a player — anyone, available, or one manager's team. Both
+ * narrow on the *server*, before the page is cut, because `hasMore` and the
+ * next page's offset are counted off the filtered list; a client filtering the
+ * hundred rows it was sent would show three of them and then fetch a hundred
+ * more that were already excluded.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -26,9 +33,17 @@ import { api, type LeagueSummary, type MyGuyFlag, type PlayerSignal } from '../a
 import type { CacheOptions } from '../sessionCache.ts';
 import { FLX_FILTER } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
-import { ALL_FILTER, playerFilterChips } from '../playerFilters.ts';
+import { ANYONE_OWNER, ownerFilterParam, parseOwnerFilter, type OwnerTeam } from '../../core/roster/ownership.ts';
+import {
+  ALL_FILTER,
+  ownerButtonLabel,
+  ownerFilterOptions,
+  playerFilterChips,
+  playersEmptyLine,
+  teamLabel,
+} from '../playerFilters.ts';
 import { Empty, SignedValue } from '../components/common.tsx';
-import { NavBar, SearchField, SegmentedControl, SkeletonRows } from '../components/native.tsx';
+import { ListGroup, ListRow, NavBar, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
 import { MyGuyControl } from '../components/decisions.tsx';
@@ -61,6 +76,15 @@ interface PlayersPage {
   /** Absent on an older deployment; the caller falls back to a full page. */
   hasMore?: boolean;
   total?: number;
+  /**
+   * The league's teams, for the ownership picker to offer.
+   *
+   * Absent when no league was named and on a deployment that predates the
+   * filter, which the screen reads the same way: no control. It arrives with
+   * every page rather than once, so a filter that emptied the list cannot take
+   * away the control that would undo it.
+   */
+  teams?: OwnerTeam[];
 }
 
 /**
@@ -85,6 +109,19 @@ const LOAD_MORE_MARGIN = '600px';
 export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState(ALL_FILTER);
+  /**
+   * Who holds them: anyone, nobody, or one manager.
+   *
+   * Held as the option's own id rather than as a parsed filter, because that is
+   * what the control compares against and what the URL is built from; the two
+   * conversions are one call each and neither can drift. See
+   * `core/roster/ownership.ts` for why this is one piece of state and not two.
+   */
+  const [owner, setOwner] = useState<string>(ANYONE_OWNER);
+  /** The league's teams, as the last response reported them. */
+  const [teams, setTeams] = useState<OwnerTeam[]>([]);
+  /** Whether the ownership picker is open over the list. */
+  const [ownerOpen, setOwnerOpen] = useState(false);
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState<string | null>(null);
@@ -143,16 +180,57 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     return playerFilterChips(startablePositions(buildRosterShape(selected.rosterPositions)));
   }, [selected]);
 
+  /*
+   * The ownership picker, and the two things the rest of the screen needs from
+   * what it is set to.
+   *
+   * The options come from the response's teams rather than from the league
+   * prop, because the league summary does not carry a room — the rosters are
+   * read on the server anyway to tag availability, so they travel with the
+   * list.
+   */
+  const ownerOptions = useMemo(() => ownerFilterOptions(teams), [teams]);
+  const ownerFilter = parseOwnerFilter(owner);
+  /*
+   * What to call the manager in an empty list, taken from the option that was
+   * chosen so the two cannot say different names for one seat.
+   */
+  const ownerLabel =
+    ownerFilter.kind === 'roster'
+      ? (() => {
+          const team = teams.find((t) => t.rosterId === ownerFilter.rosterId);
+          return team ? teamLabel(team) : null;
+        })()
+      : null;
+  /** What the shut control says, which is the answer once there is one. */
+  const ownerCurrentLabel = ownerButtonLabel(ownerFilter, ownerLabel);
+
+  /*
+   * The league the ownership picker is about.
+   *
+   * Sent on every page rather than only when a filter is in force, because it
+   * is what the *teams* come back with — without it there is no control to
+   * draw at all, and the reader would have to already be filtering to discover
+   * they could. It costs the server no extra round trip: the rosters are read
+   * alongside the ranking snapshot, not after it.
+   */
+  const leagueId = selected?.id ?? null;
+
   /** One page of the list. `offset` 0 replaces; anything else appends. */
   const fetchPage = useCallback(
     async (offset: number, options: CacheOptions<PlayersPage> = {}): Promise<PlayersPage> => {
       const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
+      const league = leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : '';
+      // `anyone` is the absent parameter, so an unfiltered list asks for the
+      // same URL it always did — and reads the same session cache entry.
+      const held = ownerFilterParam(parseOwnerFilter(owner));
+      const by = held ? `&owner=${encodeURIComponent(held)}` : '';
       return api.get<PlayersPage>(
-        `/api/players?q=${encodeURIComponent(query)}${filter}&limit=${PAGE_SIZE}&offset=${offset}`,
+        `/api/players?q=${encodeURIComponent(query)}${filter}${league}${by}&limit=${PAGE_SIZE}&offset=${offset}`,
         options,
       );
     },
-    [query, position],
+    [query, position, leagueId, owner],
   );
 
   /**
@@ -163,6 +241,15 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    */
   const applyFirstPage = useCallback((res: PlayersPage) => {
     setPlayers(res.players);
+    /*
+     * The picker's own options, refreshed with every first page.
+     *
+     * Set from the response rather than kept from the first one so that a
+     * league switch replaces them; a deployment that does not send the field
+     * takes the control away, which is the correct reading of "this deployment
+     * has no ownership to filter by".
+     */
+    setTeams(res.teams ?? []);
     // Older deployments send neither field; treating a full page as "there
     // may be more" degrades to one extra request rather than to a truncated
     // list, which is the right way round.
@@ -232,6 +319,18 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       setLoadingMore(false);
     }
   }, [fetchPage, hasMore, loadingMore, players.length]);
+
+  /*
+   * A different league is a different room, and roster 3 is a different person.
+   *
+   * The options are rebuilt from the new league's teams either way; what this
+   * prevents is the *selection* surviving — sitting on "roster 3" while the
+   * list quietly shows a stranger's bench. Ownership is the only filter that
+   * has to be dropped: a position means the same thing in every league.
+   */
+  useEffect(() => {
+    setOwner(ANYONE_OWNER);
+  }, [leagueId]);
 
   /*
    * Tapping Players while already on Players clears the search.
@@ -334,35 +433,97 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           />
         }
       />
-      {segments.length > 0 ? (
+      {segments.length > 0 || ownerOptions.length > 0 ? (
         <div className="control-row" data-testid="players-controls">
-          <SegmentedControl
-            label="Filter by position"
-            value={position}
-            onChange={setPosition}
-            segments={segments.map((p) => ({
-              id: p,
-              label: p,
-              ...(p === FLX_FILTER
-                ? {
-                    ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends',
-                    testId: 'flx-filter',
-                  }
-                : {}),
-            }))}
-          />
+          {segments.length > 0 ? (
+            <SegmentedControl
+              label="Filter by position"
+              value={position}
+              onChange={setPosition}
+              /*
+                Compact, because it now shares its row. The chips give up a few
+                points of horizontal padding and keep every one of their 44
+                vertical pixels — see `.filter-row-compact`, which is the same
+                trade the Team screen's mode control makes beside Compare.
+              */
+              compact
+              segments={segments.map((p) => ({
+                id: p,
+                label: p,
+                ...(p === FLX_FILTER
+                  ? {
+                      ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends',
+                      testId: 'flx-filter',
+                    }
+                  : {}),
+              }))}
+            />
+          ) : null}
+          {/*
+            Who holds them: anyone, nobody, or one manager.
+
+            **Beside the positions rather than under them, and that is a
+            measured constraint rather than a preference.** This was a second
+            chip row, and the second row cost the list its tenth player on a
+            360px phone — the density this screen is measured against and the
+            whole reason its cards became rows. A button that says the current
+            answer and opens the rest costs nothing vertically, and it is the
+            right shape for the league it is for anyway: two chips plus twelve
+            managers is a track a thumb drags through to reach a name.
+
+            The two questions the brief asks for — "only what I can add" and
+            "only Joe's team" — are both inside this one control and cannot be
+            asked at once, which is the point: they are two readings of one
+            fact. See `ownerFilterOptions`.
+
+            Drawn only when the response named some teams, on the same rule the
+            position chips follow: with no league there is nothing to derive it
+            from, and "available" in no league at all is not a question.
+          */}
+          {ownerOptions.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-compact"
+              data-testid="players-owner-open"
+              aria-haspopup="dialog"
+              aria-expanded={ownerOpen}
+              aria-label={`Filter by who holds them: ${ownerFilter.kind === 'anyone' ? 'anyone' : ownerCurrentLabel}`}
+              onClick={() => setOwnerOpen(true)}
+            >
+              {ownerCurrentLabel}
+            </button>
+          ) : null}
         </div>
+      ) : null}
+      {ownerOpen ? (
+        <Sheet title="Who holds them" onClose={() => setOwnerOpen(false)} testId="players-owner-sheet">
+          {/*
+            A list of exclusive answers, with a mark against the one in force —
+            the shape a reader has seen in every settings screen they have ever
+            used, and the reason `ListRow` exists. Choosing closes the sheet:
+            there is one decision in here and nothing to confirm.
+          */}
+          <ListGroup testId="players-owner-options">
+            {ownerOptions.map((option) => (
+              <ListRow
+                key={option.id}
+                label={option.label}
+                testId="players-owner-option"
+                dataState={option.id === owner ? 'chosen' : 'other'}
+                {...(option.id === owner ? { value: <span aria-label="Chosen">✓</span> } : {})}
+                onClick={() => {
+                  setOwner(option.id);
+                  setOwnerOpen(false);
+                }}
+              />
+            ))}
+          </ListGroup>
+        </Sheet>
       ) : null}
       {loading && players.length === 0 ? (
         <SkeletonRows rows={8} testId="players-skeleton" />
       ) : players.length === 0 ? (
-        <Empty>
-          {query
-            ? `Nobody matching “${query}”${position === ALL_FILTER ? '' : ` under ${position}`}.`
-            : position === ALL_FILTER
-              ? 'No players found. Run a Sleeper player sync from the Team screen.'
-              : `No ${position} players found.`}
-        </Empty>
+        <Empty>{playersEmptyLine({ query, position, owner: ownerFilter, ownerLabel })}</Empty>
       ) : (
         <>
           <div className="dense-group" role="list" aria-label="Players, best first" data-testid="players-list">

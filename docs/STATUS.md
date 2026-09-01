@@ -3457,3 +3457,73 @@ against 160.0 kB (−0.2 kB), CSS **14.4 kB** against 20.0 kB and Demo Mode's la
 chunks **150.9 kB** against 156.0 kB, both unchanged. The same deletion measured
 0.2 kB against `9b271a4` and against `46b8098` as well; Mock Draft and the trade
 ladder are the difference between those baselines, not this change.
+
+## Milestone — the Players list narrows by who holds a player (done)
+
+Two questions the Players tab could not answer: *show me only the players I
+could actually add*, and *show me one manager's team without leaving this
+screen*. Both are now answers inside one control beside the position chips.
+
+**They are one filter, not two.** The brief asked for an availability toggle and
+a team filter, and noted that "Available" plus a named team can only ever return
+nothing — offering the disabled state as one way out. Both are answers to the
+same fact: which roster in this league holds this player. A player nobody
+rosters is not on Joe's team, and a player on Joe's team is not available. So
+ownership is a single exclusive choice — `Anyone · Available · <each team>` —
+and the impossible combination is unrepresentable rather than handled: no
+disabled chip to explain, no rule about which filter wins, no empty list to
+account for. The orthogonal combination is the one that was actually wanted and
+it works: available running backs, or every quarterback on one manager's team.
+
+**It is a picker, and it was a chip row until the density gate said otherwise.**
+The second chip row cost the Players list its tenth player on a 360px phone —
+the number `e2e/density.spec.ts` measures and the whole reason that screen's
+cards became rows. It would also have been the wrong shape for the league it is
+for: two chips plus twelve managers is fourteen pills in a track a thumb has to
+drag through to reach a name. So ownership is a `btn-compact` button sharing the
+existing control row — the same arrangement Team uses for Compare beside its
+mode control — that says the answer in force (`Owner`, then `Available` or
+`Rival`) and opens a sheet listing the rest. Zero vertical pixels, and it reads
+the same at two teams as at twelve. The position chips went `compact` to share
+the row, which costs padding and not one pixel of their 44px targets.
+
+**It narrows on the server, before the page is cut.** `/api/players` takes one
+new parameter, `owner` — absent, `available`, or a roster id — applied to the
+pool *before* `total`, `hasMore` and the page slice are taken off it. A client
+filtering the hundred rows it was sent would have shown three of them under a
+total of three thousand and then fetched a page that was already excluded. The
+end-of-list line is the visible half of that claim: filtered to the rival's team
+it reads `1 player — that is all of them.`
+
+**No new wave.** The filter needs the league's rosters and so does the
+`availability` tag the comparison picker already reads; they are one map now,
+and the roster read was moved to run alongside the ranking-snapshot lookup
+rather than after it. On D1 a statement that waits for a previous one is a
+network round trip, so ownership costs the list none. The teams themselves ride
+back with every page — not once — so a filter that empties the list cannot take
+its own chip away with it.
+
+**The rule is in core, applied by both handlers.** `core/roster/ownership.ts` is
+what the live handler and Demo Mode's `/api/players` both call, for the reason
+the position filter lives in `sleeper/eligibility.ts`: a filter implemented
+twice means two things by the third change to it. A demo that answered `owner`
+differently from the app it demonstrates would be worse than one that did not
+answer it at all, and `tests/playersOwnership.test.ts` asserts the two agree
+against the availability tag rather than against a fixture's roster ids.
+
+**Two things it deliberately does not do.** An `owner` sent without a `leagueId`
+opens the list rather than emptying it — ownership is a fact about a league, and
+an empty list reads as missing data rather than as an unanswerable question. And
+a seat Sleeper has never named is drawn as `Team 4`, which says which roster
+without claiming to know whose it is; no stand-in name is invented anywhere on
+the path.
+
+No budget raised, and no stylesheet rule was added at all: the control is the
+existing `.control-row`, `button.btn-compact`, `Sheet` and `ListRow`. App
+JavaScript **139.1 kB** against its 148.0 kB ceiling, everything the browser
+must fetch **155.9 kB** against 168.0 kB, CSS **15.3 kB** against 20.0 kB and
+Demo Mode's lazy chunks **154.1 kB** against 156.0 kB, unchanged. One line
+was added to `chunkOwnership.renderPath`: `core/roster/ownership.ts` is a
+dependency-free leaf that the Players screen genuinely needs on the render
+path — it builds the picker's options and the request URL — so it is declared
+rather than split.

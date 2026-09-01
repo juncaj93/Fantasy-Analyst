@@ -49,6 +49,13 @@ import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from 
 import { evaluateBench } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { FREE_AGENTS_PER_POSITION } from '../../roster/freeAgents.ts';
+import {
+  matchesOwner,
+  narrowsByOwner,
+  ownerTeams,
+  parseOwnerFilter,
+  rosterOwnership,
+} from '../../roster/ownership.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
 import { assembleSmartTrades } from '../../trades/assemble.ts';
 import { buildLadderFor } from '../../trades/ladderInputs.ts';
@@ -634,7 +641,15 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
   const limit = Math.min(Math.max(Number(params.get('limit') ?? 100) || 100, 1), 200);
   const offset = Math.max(Number(params.get('offset') ?? 0) || 0, 0);
   const position = params.get('position');
-  const availabilityLeagueId = params.get('leagueId');
+  /*
+   * The same two parameters the live handler reads, through the same parser.
+   *
+   * A demo that answers `owner` differently from the app it demonstrates is
+   * worse than a demo that does not answer it at all, which is why the filter
+   * itself is in core rather than in either handler.
+   */
+  const leagueId = params.get('leagueId');
+  const owner = parseOwnerFilter(params.get('owner'));
 
   /*
    * The same matcher the live handler ranks with, for the same reason.
@@ -650,13 +665,19 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
    */
   const active = data.players.filter((p) => p.active);
   const pool = q ? rankByNormalized(active, q, (p) => p.normalizedName) : active;
-  const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
+  const byPosition = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
+
+  /*
+   * Ownership, narrowed before the page is cut, exactly as the live handler
+   * does it — `hasMore` and `total` below are counted off the filtered list.
+   */
+  const rosters = leagueId ? data.rosters : [];
+  const owned = rosterOwnership(rosters);
+  const filtered = narrowsByOwner(owner) ? byPosition.filter((p) => matchesOwner(p.id, owner, owned)) : byPosition;
 
   const availability = new Map<string, 'mine' | 'rostered' | 'available'>();
-  if (availabilityLeagueId) {
-    for (const roster of data.rosters) {
-      for (const id of roster.playerIds) availability.set(id, roster.isMine ? 'mine' : 'rostered');
-    }
+  for (const roster of rosters) {
+    for (const id of roster.playerIds) availability.set(id, roster.isMine ? 'mine' : 'rostered');
   }
 
   /*
@@ -692,6 +713,8 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
     offset,
     hasMore: filtered.length > offset + page.length,
     total: filtered.length,
+    /* The picker's teams, on every page and for the same reason. */
+    ...(leagueId ? { teams: ownerTeams(rosters) } : {}),
     players: page.map(({ player: row, draftRank, adjustedRank, movement }) => ({
       id: row.player.id,
       name: row.player.fullName,
@@ -703,9 +726,7 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
       movement,
       signal: data.signals.get(row.player.id) ?? null,
       myGuy: myGuy(data.flags.get(row.player.id)?.level ?? 0),
-      ...(availabilityLeagueId
-        ? { availability: availability.get(row.player.id) ?? ('available' as const) }
-        : {}),
+      ...(leagueId ? { availability: availability.get(row.player.id) ?? ('available' as const) } : {}),
     })),
   };
 }
