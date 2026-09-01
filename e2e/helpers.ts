@@ -192,6 +192,39 @@ export async function scrollSheetContent(page: Page, by: number): Promise<void> 
   await wheelOverSheet(page, '.sheet', by);
 }
 
+/**
+ * Put a hand on the open card and keep it there, so that what the test does to
+ * the layer next counts as the reader doing it.
+ *
+ * **For the specs whose subject is a *stated* push.** A wheel is the honest
+ * gesture and `swipeSheetAway` is how most of this suite pushes a card, but how
+ * far one wheel scrolls is the browser's business and varies with what else the
+ * page is doing — no use to a spec that means "exactly seven tenths of the way
+ * out, and read the scrim there". Those set `scrollTop` directly, and the layer
+ * no longer treats a scroll as a dismissal unless a hand made it: a scroll with
+ * no pointer behind it is put back at the card's position, which is the whole
+ * point of that rule and would otherwise make these specs measure it instead of
+ * their own subject.
+ *
+ * So the pointer is real — Playwright's mouse, not a dispatched event — and the
+ * drag is real; only the push's *distance* is delivered by the test. Aimed at
+ * the grip, which is decorative and has nothing under it to press, and moved far
+ * enough to be a drag rather than a tap.
+ */
+export async function handOnCard(page: Page): Promise<void> {
+  const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
+  const x = Math.round(grip.x + grip.width / 2);
+  const y = Math.round(grip.y + grip.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 24);
+}
+
+/** Take the hand off again. Tolerant, because the card may already have gone. */
+export async function handOffCard(page: Page): Promise<void> {
+  await page.mouse.up().catch(() => {});
+}
+
 /** How far the open sheet's layer is scrolled, and how far it could be. */
 export async function sheetScroll(page: Page): Promise<{ top: number; max: number }> {
   return page.evaluate(() => {
