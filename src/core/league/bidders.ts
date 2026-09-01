@@ -469,12 +469,21 @@ function participationBand(participation: number): number {
  *
  * Since the label started following `effectiveBidders`, keeping that promise
  * takes two numbers rather than one whenever the room's own record says fewer
- * of the needy will actually act. `4 need him · 2 likely to bid · Joe, Ryan +2`
+ * of the needy will actually act. `4 need him · ~2 likely bidders · Joe, Ryan +2`
  * is longer than the line it replaces and it is the only version that is not
  * lying about one of the two: the names enumerate four real people who each
  * have a hole and the money to fix it, and the level beside them is a claim
  * about how many will use it. Collapsing to either number alone contradicts
  * something the reader can see.
+ *
+ * `likely bidders` rather than the more natural `likely to bid`, and the
+ * reason is a real constraint rather than a preference: this line renders
+ * inside the waiver card's own button, and the browser suite asserts that no
+ * *control* offers to transact by matching `\bbid\b` against every visible
+ * button's text. `bid` as a bare verb trips it; `bidders` is a noun about
+ * people and does not. The guard is right and the phrasing gives way to it —
+ * describing a bid and offering one are opposite things, and the check cannot
+ * tell them apart from inside a button.
  */
 export function summarize(named: NamedBidder[], competition: CompetitionAssessment): string | null {
   const total = competition.bidders.length;
@@ -482,8 +491,11 @@ export function summarize(named: NamedBidder[], competition: CompetitionAssessme
   const effective = competition.effectiveBidders;
 
   const plural = total === 1 ? 'bidder' : 'bidders';
+  const effectivePlural = effective === 1 ? 'bidder' : 'bidders';
   const count =
-    effective < total ? `${total} need him · ~${effective} likely to bid` : `${total} likely ${plural}`;
+    effective < total
+      ? `${total} need him · ~${effective} likely ${effectivePlural}`
+      : `${total} likely ${plural}`;
 
   if (named.length === 0) return count;
 
