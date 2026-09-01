@@ -25,6 +25,28 @@ const eventIdFor = (season: string) => `season:${season}`;
 /** `manual:` is what makes "a person pasted this" queryable forever after. */
 export const importProviderFor = (source: string) => `manual:${source.trim().toLowerCase()}`;
 
+/**
+ * The import clock, never at or before the last import of the same season.
+ *
+ * `prop_snapshots` is unique on `(provider, event_id, fetched_at)`, which is a
+ * *fetch's* identity — the thing the table was built for. An import's identity
+ * is `(season, source, capturedAt)`, as the note at the top of this file says,
+ * and for one season and source the provider and the event id are both
+ * constant. So the only thing left holding two captures apart in that
+ * constraint is the millisecond they happened to be imported in, and two
+ * imports inside one tick collided: the second failed on the constraint, with a
+ * raw SQLite error and nothing said about captures.
+ *
+ * Imports are ordered, so the clock is made to say so. This still means "when
+ * this was imported" — to the resolution a millisecond clock can honestly
+ * offer, which is the only thing that was ever wrong here.
+ */
+export function importClock(now: string, previous: string | null): string {
+  if (!previous || previous < now) return now;
+  const after = new Date(previous).getTime();
+  return Number.isNaN(after) ? now : new Date(after + 1).toISOString();
+}
+
 export interface PreseasonSnapshotMeta {
   id: number;
   season: string;
@@ -87,6 +109,18 @@ export class PreseasonSnapshotsRepo {
       .bind(input.season, input.source, input.capturedAt)
       .first<{ id: number }>();
 
+    /*
+     * The newest import already recorded for this provider and event, which is
+     * what the clock below is kept after. Read for the revision too: a
+     * re-imported capture keeps its own row, and its own reading is in this
+     * maximum, so a clock that has moved on returns the honest `now`.
+     */
+    const latest = await this.db
+      .prepare('SELECT MAX(fetched_at) AS at FROM prop_snapshots WHERE provider = ? AND event_id = ?')
+      .bind(provider, eventId)
+      .first<{ at: string | null }>();
+    const fetchedAt = importClock(input.importedAt, latest?.at ?? null);
+
     let snapshotId: number;
     if (existing) {
       snapshotId = Number(existing.id);
@@ -96,7 +130,7 @@ export class PreseasonSnapshotsRepo {
               SET raw_json = ?, fetched_at = ?, capture_label = ?, provider = ?
             WHERE id = ?`,
         )
-        .bind(payload, input.importedAt, label, provider, snapshotId)
+        .bind(payload, fetchedAt, label, provider, snapshotId)
         .run();
     } else {
       await this.db
@@ -110,7 +144,7 @@ export class PreseasonSnapshotsRepo {
           provider,
           eventId,
           '',
-          input.importedAt,
+          fetchedAt,
           payload,
           input.season,
           input.source,
