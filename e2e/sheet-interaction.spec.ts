@@ -46,7 +46,17 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle, scrollSheetContent, sheetBodyScroll, sheetScroll, swipeSheetAway, tapAboveCard } from './helpers.ts';
+import {
+  handOffCard,
+  handOnCard,
+  openReview,
+  pastTheSettle,
+  scrollSheetContent,
+  sheetBodyScroll,
+  sheetScroll,
+  swipeSheetAway,
+  tapAboveCard,
+} from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -223,6 +233,7 @@ test.describe('pushing a sheet away', () => {
      * inside the page, two frames after the push, rather than over a round trip
      * whose latency is not bounded by anything this test controls.
      */
+    await handOnCard(page);
     const part = await page.evaluate(async () => {
       const el = document.querySelector('.sheet-scroller') as HTMLElement;
       const back = document.querySelector('.sheet-backdrop') as HTMLElement;
@@ -234,6 +245,7 @@ test.describe('pushing a sheet away', () => {
     expect(part, 'the screen behind was uncovered faster than the card moved').toBeGreaterThan(0.5);
 
     // Let go: it comes back, and so does the scrim.
+    await handOffCard(page);
     await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     expect(await scrim(), 'the card came back and the screen behind stayed uncovered').toBeGreaterThan(0.9);
@@ -273,6 +285,7 @@ test.describe('pushing a sheet away', () => {
       return box ? Math.round(box.y) : null;
     };
 
+    await handOnCard(page);
     const started = Date.now();
     await page.evaluate(() => {
       const el = document.querySelector('.sheet-scroller') as HTMLElement;
@@ -302,12 +315,88 @@ test.describe('pushing a sheet away', () => {
       Date.now() - started,
       'the card took too long to finish leaving after the push had already won',
     ).toBeLessThan(900);
+    await handOffCard(page);
   });
 
   test('is pushed away from the grip, as it always was', async ({ page }) => {
     await openScoringKey(page);
     await swipeSheetAway(page, { over: '.sheet-grip' });
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
+  });
+
+  /**
+   * **A scroll nobody made is not a push, and the card comes straight back.**
+   *
+   * The dismissal is a scroll, and the browser scrolls things for its own
+   * reasons: revealing a control it has just focused, satisfying a
+   * `scrollIntoView` on something deep in a card, re-laying the layer out under
+   * an opening keyboard. Each of those moves the *nearest* ancestor that can
+   * satisfy it, and when the card's body is already at its top that ancestor is
+   * this layer — so the card could be parked most of the way out with nobody
+   * having touched it, and whether it survived was then a race between the
+   * settle timer and whatever scrolled it back next.
+   *
+   * Measured rather than supposed: on the compare sheet, one click on a
+   * candidate row moved this layer from its detent at 704 to 369 — past the
+   * threshold — on four clicks in ten, and the sheet died in the middle of the
+   * click on nine of twelve WebKit shards. The layer now asks who moved it.
+   *
+   * The push here is delivered the same way the two scrim tests above deliver
+   * theirs, and the only difference is the missing hand. That is the whole
+   * subject: identical movement, opposite outcome.
+   */
+  test('is not thrown away by a scroll nobody made', async ({ page }) => {
+    await openPlayerCard(page);
+    const detent = (await sheetScroll(page)).top;
+    expect(detent, 'the layer has nowhere to be pushed, so this proves nothing').toBeGreaterThan(0);
+
+    const parked = await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      // A fifth of the way from gone: well past `HOLD`, and a dismissal under
+      // any hand at all.
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
+      return Math.round(el.scrollTop);
+    });
+    expect(parked, 'the layer would not move, so the case under test never happened').toBeLessThan(detent * 0.6);
+
+    await pastTheSettle(page);
+    await expect(
+      page.getByTestId('player-sheet'),
+      'a scroll with no hand behind it threw the card away',
+    ).toBeVisible();
+    expect(
+      (await sheetScroll(page)).top,
+      'the card was left parked where the stray scroll put it',
+    ).toBe(detent);
+  });
+
+  /**
+   * And a tap is not a hand for this purpose either.
+   *
+   * The real-reader version of the case above, and the reason the rule is
+   * "a pointer that has *moved*" rather than "a pointer": the browser's
+   * scroll-to-reveal on focus arrives on the heels of the tap that caused it,
+   * so a rule satisfied by a bare `pointerdown` would hand the stray scroll the
+   * credentials of the tap. Tapping a field near the top of a long card would
+   * then throw the card away, which is the same defect wearing a different hat.
+   */
+  test('does not lend a tap to the scroll that follows it', async ({ page }) => {
+    await openPlayerCard(page);
+    const detent = (await sheetScroll(page)).top;
+    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
+
+    await page.mouse.click(Math.round(grip.x + grip.width / 2), Math.round(grip.y + grip.height / 2));
+    await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
+    });
+
+    await pastTheSettle(page);
+    await expect(
+      page.getByTestId('player-sheet'),
+      'a tap lent its authority to a scroll it did not make, and the card went',
+    ).toBeVisible();
+    expect((await sheetScroll(page)).top).toBe(detent);
   });
 
   /**

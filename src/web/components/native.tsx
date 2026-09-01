@@ -605,8 +605,107 @@ export function Sheet({
      * threshold on the gesture, only on the silence after it.
      */
     const SETTLE = 70;
+    /** How far a pointer must travel before it is a drag rather than a tap. */
+    const SLOP = 4;
+    /*
+     * How long after the reader's last input a scroll is still theirs.
+     *
+     * Momentum outlives the finger and arrives as bare scroll events with no
+     * input beside them, so this covers the gap between two of them rather than
+     * the length of a flick — every scroll that qualifies pushes the window out
+     * again, so a long one stays the reader's for as long as it keeps moving. A
+     * frame is 16ms and a loaded CI shard is slower than a frame, hence the
+     * margin.
+     */
+    const HANDS_OFF = 300;
+    /** The keys that scroll a box, and so can push this one. */
+    const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
     let timer: number | undefined;
     let leaving = false;
+
+    /*
+     * Whether the movement in front of us was made by a hand.
+     *
+     * The dismissal is a scroll, and scrolls are not made only by thumbs. Any
+     * `scrollIntoView` — the browser revealing a focused control, a harness
+     * bringing a row into view before clicking it, a reflow under an opening
+     * keyboard — scrolls the nearest ancestor that can satisfy it, and when the
+     * card's own body is already at its top that ancestor is this layer. So the
+     * layer can be parked past `HOLD` with nobody having touched it, and then
+     * whether the card survives is a race between the settle timer and whatever
+     * scrolls it back. Measured on the compare sheet: one click on a candidate
+     * moved this layer from its detent at 704 to 369, four times in ten.
+     *
+     * A gesture is therefore a precondition of a dismissal rather than an
+     * assumption about one. What counts as a hand:
+     *
+     *  - a pointer that is down **and has moved** — a tap that lands and lets go
+     *    is not a push, and the browser's scroll-to-reveal on focus arrives
+     *    inside one, so a tap on a field near the top of a long card would
+     *    otherwise throw the card away;
+     *  - a pointer the engine took off us to pan with, which is what a
+     *    `pointercancel` says and is the clearest statement of a drag WebKit
+     *    makes — it sends one in place of the moves it would otherwise deliver;
+     *  - a wheel, which is the same scroll a finger makes and the only one a
+     *    desktop browser has;
+     *  - the keys that scroll a box.
+     *
+     * Anything else is a scroll nobody asked for, and the answer to those is to
+     * put the card back rather than to decide anything about it.
+     */
+    let pointerAt: { x: number; y: number } | null = null;
+    let dragging = false;
+    let handsOn = 0;
+    /*
+     * Until when the settle's own smooth scroll is expected to still be running.
+     *
+     * A deadline rather than a flag, and the difference matters: a flag left
+     * standing by an animation that was interrupted rather than finished would
+     * make every later stray scroll look like this one's, and the correction
+     * below would stop happening — which is the invisible-modal outcome the note
+     * on re-arming calls worse than any amount of redundant work. A smooth
+     * scroll across this layer takes a few hundred milliseconds; past the
+     * deadline, whatever is moving the layer is somebody else's.
+     */
+    const SPRING = 700;
+    let springUntil = 0;
+    const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
+    const gestured = () => {
+      handsOn = stamp();
+    };
+    const hands = () => dragging || stamp() - handsOn < HANDS_OFF;
+    /** The point a pointer or touch event happened at, whichever kind it is. */
+    const pointOf = (event: Event) => {
+      const touch = 'touches' in event ? (event as TouchEvent).touches[0] : (event as PointerEvent);
+      return touch ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const onDown = (event: Event) => {
+      pointerAt = pointOf(event);
+      dragging = false;
+    };
+    const onMove = (event: Event) => {
+      const at = pointOf(event);
+      if (!pointerAt || !at) return;
+      if (Math.abs(at.x - pointerAt.x) + Math.abs(at.y - pointerAt.y) < SLOP) return;
+      dragging = true;
+      gestured();
+    };
+    const onUp = () => {
+      pointerAt = null;
+      // The momentum this left behind is still the reader's; the window says
+      // for how long, and each scroll it covers renews it.
+      if (dragging) gestured();
+      dragging = false;
+    };
+    const onTaken = () => {
+      gestured();
+      dragging = false;
+      pointerAt = null;
+    };
+    const onWheel = () => gestured();
+    const onKey = (event: Event) => {
+      if (SCROLL_KEYS.has((event as KeyboardEvent).key)) gestured();
+    };
 
     /*
      * The screen behind the card comes back as the card goes, rather than after.
@@ -647,6 +746,7 @@ export function Sheet({
     const leave = () => {
       if (leaving) return;
       leaving = true;
+      springUntil = 0;
       window.clearTimeout(timer);
       const remaining = root.scrollTop;
       const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -686,6 +786,7 @@ export function Sheet({
       // Already where it belongs. A pixel of tolerance because a smooth scroll
       // lands on a fraction and `scrollTop` is not obliged to be an integer.
       if (root.scrollTop >= detentTop - 1) return;
+      springUntil = stamp() + SPRING;
       root.scrollTo({ top: detentTop, behavior: 'smooth' });
     };
 
@@ -716,6 +817,38 @@ export function Sheet({
       if (leaving) return;
       const detentTop = root.scrollHeight - root.clientHeight;
       const top = root.scrollTop;
+      if (hands()) {
+        // A push in progress outranks the spring-back it may have interrupted.
+        springUntil = 0;
+        gestured();
+      } else if (stamp() < springUntil) {
+        /*
+         * The settle's own smooth scroll, on its way back to the card's
+         * position. Neither a gesture to act on nor a stray to correct — the
+         * scrim tracks it home and nothing else here touches it. A second push
+         * arriving mid-animation is a gesture and takes the branch above, which
+         * is the case the note below is about.
+         */
+        if (detentTop > 0) paint(top / detentTop);
+        if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
+        return;
+      } else {
+        /*
+         * A scroll nobody made: put the card back where it belongs and decide
+         * nothing.
+         *
+         * Instantly rather than smoothly, because this is a correction and not
+         * a movement the reader began — and because a smooth one leaves a
+         * window in which a second scroll-into-view can chain onto the first.
+         * The write is a no-op when the layer is already at the detent, which
+         * is what the entrance's own scroll is, so opening a sheet costs
+         * nothing here.
+         */
+        window.clearTimeout(timer);
+        if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
+        paint(1);
+        return;
+      }
       if (detentTop > 0) paint(top / detentTop);
       /*
        * A card that has arrived at gone does not wait to be told.
@@ -753,9 +886,28 @@ export function Sheet({
       timer = window.setTimeout(settle, SETTLE);
     };
     root.addEventListener('scroll', onScroll, { passive: true });
+    /*
+     * The input listeners sit on the layer, which every part of a sheet is
+     * inside — including `.sheet-body`, whose own scroll chains outward to this
+     * one. Passive throughout: none of them cancels anything, they only watch.
+     */
+    const watched: [string, EventListener][] = [
+      ['pointerdown', onDown],
+      ['pointermove', onMove],
+      ['pointerup', onUp],
+      ['pointercancel', onTaken],
+      ['touchstart', onDown],
+      ['touchmove', onMove],
+      ['touchend', onUp],
+      ['touchcancel', onTaken],
+      ['wheel', onWheel],
+      ['keydown', onKey],
+    ];
+    for (const [type, listener] of watched) root.addEventListener(type, listener, { passive: true });
     return () => {
       window.clearTimeout(timer);
       root.removeEventListener('scroll', onScroll);
+      for (const [type, listener] of watched) root.removeEventListener(type, listener);
     };
   }, []);
 
