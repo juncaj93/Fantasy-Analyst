@@ -64,6 +64,15 @@ export interface LikelyBidder {
   need: NeedLevel;
   /** Dollars left, or null when the league has no budget or it is unknown. */
   remaining: number | null;
+  /**
+   * How much of a bidder his own record says he is, in [0,1]. 1 when unknown.
+   *
+   * From `core/waivers/bidLikelihood.ts`, which reads how often he has actually
+   * claimed and how much of his budget he has touched. A hole at the position
+   * and money to fill it is what makes somebody a *possible* bidder; this is
+   * what separates the manager who acts on both from the one who never has.
+   */
+  participation: number;
 }
 
 export interface CompetitionAssessment {
@@ -75,6 +84,20 @@ export interface CompetitionAssessment {
   needyTeams: number;
   /** Teams with a need who can also afford the going rate. */
   bidders: LikelyBidder[];
+  /**
+   * The bidder count with each rival weighted by how likely he is to bid at all.
+   *
+   * The number that should price a claim. `bidders.length` counts heads and is
+   * still what the card names and lists; this counts *expected* bidders, so a
+   * needy rival who has bid once in three seasons stops contributing as much
+   * expected competition as one who bids weekly.
+   *
+   * Equal to `bidders.length` whenever no participation is known, which is the
+   * case for a first-season league, a league mid-backfill, and any caller that
+   * does not supply the reading — so nothing that existed before this field
+   * changes behaviour by default.
+   */
+  effectiveBidders: number;
 }
 
 /**
@@ -137,6 +160,17 @@ export function assessCompetition(opts: {
    * looking at. Optional because the phrase still works without it.
    */
   position?: string | null;
+  /**
+   * How much of a bidder each rival's own record says he is, in [0,1].
+   *
+   * Optional, and its absence is a real answer rather than a missing feature:
+   * without it every rival counts whole and this function behaves exactly as it
+   * did before the reading existed. Supplied, it weights
+   * {@link CompetitionAssessment.effectiveBidders} and nothing else — no rival
+   * is dropped from the list, renamed, or hidden, because "unlikely to bid" is
+   * not "cannot bid" and the card still has to show him.
+   */
+  participationOf?: (rosterId: number) => number;
 }): CompetitionAssessment {
   const needy = opts.needs.filter((n) => n.level !== 'covered');
 
@@ -149,6 +183,7 @@ export function assessCompetition(opts: {
       displayName: need.displayName,
       need: need.level,
       remaining,
+      participation: clamp01(opts.participationOf?.(need.rosterId) ?? 1),
     });
   }
 
@@ -175,11 +210,36 @@ export function assessCompetition(opts: {
         ? `${needy.length} of ${opts.needs.length} teams ${what}; ${priced} cannot afford the going rate`
         : `${needy.length} of ${opts.needs.length} teams ${what}`;
 
+  /*
+   * The expected field, rather than the headcount.
+   *
+   * Summed and then rounded rather than rounded per rival, so three managers at
+   * 0.4 come to one bidder instead of to nothing. Never rounded below 1 while
+   * anybody at all is in the list: somebody has a hole at the position and the
+   * money to fix it, and "0 bidders" is a claim about the world that this
+   * evidence cannot support — it would also collide with the `bidders === 0`
+   * branch in `bidders.ts`, which means "nobody needs him" and is a different
+   * fact entirely.
+   */
+  const effectiveBidders =
+    bidders.length === 0
+      ? 0
+      : Math.max(1, Math.round(bidders.reduce((sum, b) => sum + b.participation, 0)));
+
   return {
-    ...levelFor(bidders.length),
+    /*
+     * The label follows the expected field, not the headcount.
+     *
+     * A card reading `High demand` over four rivals who have between them
+     * placed two bids in two seasons is the specific failure this pass exists
+     * to fix, and leaving the label on `bidders.length` would have fixed the
+     * price while leaving the sentence beside it saying the opposite.
+     */
+    ...levelFor(effectiveBidders),
     detail,
     needyTeams: needy.length,
     bidders,
+    effectiveBidders,
   };
 }
 
@@ -211,4 +271,10 @@ export const COMPETITION_UNKNOWN: CompetitionAssessment = {
   detail: null,
   needyTeams: 0,
   bidders: [],
+  effectiveBidders: 0,
 };
+
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 1;
+  return Math.min(1, Math.max(0, v));
+}

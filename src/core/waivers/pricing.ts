@@ -83,10 +83,17 @@ export function priceWaiverUpgrades(opts: {
    * the blunt funded-roster count otherwise. Capped at four either way, because
    * the demand input saturates and a league of twelve is not three times as
    * contested as a league of four.
+   *
+   * `effectiveBidders` rather than `bidders.length`: the two differ only when
+   * the manager-history pass has established that some of those rivals do not
+   * actually bid, and in that case the weighted number is the one that belongs
+   * in a price. It falls back to the headcount by construction — see
+   * `core/league/competition.ts` — so a league with no backfilled history
+   * prices exactly as it did before.
    */
   const rivalsFor = (playerId: string): number | null => {
     const assessed = opts.competition?.get(playerId);
-    if (assessed) return assessed.bidders.length > 0 ? Math.min(assessed.bidders.length, 4) : null;
+    if (assessed) return assessed.effectiveBidders > 0 ? Math.min(assessed.effectiveBidders, 4) : null;
     return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
   };
 
