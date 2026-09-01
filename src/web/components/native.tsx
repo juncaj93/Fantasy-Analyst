@@ -712,32 +712,32 @@ export function Sheet({
      * second of grey with nothing happening in it. That was most of what a
      * dismissal felt like.
      */
-    let previous = Number.POSITIVE_INFINITY;
     const onScroll = () => {
       if (leaving) return;
       const detentTop = root.scrollHeight - root.clientHeight;
       const top = root.scrollTop;
       if (detentTop > 0) paint(top / detentTop);
-      const outward = top < previous;
-      previous = top;
       /*
-       * A push that has won is finished now, rather than whenever the scroll
-       * happens to run out.
+       * A card that has arrived at gone does not wait to be told.
        *
-       * How long a scroll takes belongs to the reader's flick, and a gentle push
-       * past the point of no return has almost no momentum behind it — so the
-       * card drifts the rest of a screen's height at walking pace while the
-       * outcome has already been decided. That drift was most of what "the
-       * dismissal is slow" meant. Once the card is far enough out and still
-       * going, there is nothing left to learn by watching it.
+       * The debounce is there to find out where a movement ended, and a layer
+       * scrolled to its far end has answered that already — there is no coming
+       * back from a card entirely off the screen, and waiting to confirm it is a
+       * tenth of a second of grey with nothing happening in it.
        *
-       * `outward` is what keeps the reader's mind changeable: a card being
-       * pulled *back* toward its place is not a dismissal however far out it
-       * currently is, so dragging past the threshold and hauling it back still
-       * keeps the card. Only a card that is both far enough and still leaving
-       * goes.
+       * **Anything short of that end waits, and that is not caution.** Deciding
+       * the moment the card passes the threshold was tried, to save a gentle
+       * push the slow drift down the rest of the screen — and it hands the
+       * dismissal to anything that scrolls this layer, not just a thumb.
+       * `scrollIntoView` is the case that found it: bringing a candidate deep in
+       * the compare sheet's list into view scrolls the layer, which crossed the
+       * threshold and took the card away mid-click. A keyboard moving focus
+       * through that list, or a screen reader, would have done the same. The
+       * debounce is what makes the difference, because a programmatic scroll is
+       * over in one event and the settle that follows finds the layer already
+       * put back.
        */
-      if (top < 1 || (outward && top <= detentTop * (1 - HOLD))) {
+      if (top < 1) {
         leave();
         return;
       }
