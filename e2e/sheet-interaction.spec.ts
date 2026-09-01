@@ -194,6 +194,116 @@ test.describe('pushing a sheet away', () => {
     ).toBe(detent);
   });
 
+  /**
+   * The screen behind comes back *as* the card goes, not after it.
+   *
+   * The complaint this holds: dismissing a card left almost a second of grey
+   * with nothing on it. Two causes, and this covers both ends of them. The scrim
+   * held full strength for the whole of a dismissal and vanished only when the
+   * sheet unmounted, so once the card had slid past there was nothing to look at
+   * but a grey screen; and the layer waited for every last scroll to stop before
+   * it would even decide, so the grey outlasted the gesture.
+   *
+   * Asserted as a relationship rather than a duration, because a duration here
+   * would be measuring the harness: the scrim's strength tracks how far the card
+   * has been pushed, so a card halfway out has a screen half back.
+   */
+  test('lets the screen behind back as the card is pushed away', async ({ page }) => {
+    await openPlayerCard(page);
+    const scrim = async () =>
+      Number(await page.evaluate(() => getComputedStyle(document.querySelector('.sheet-backdrop')!).opacity));
+    expect(await scrim(), 'the card is up and the screen behind is not covered').toBeGreaterThan(0.9);
+
+    /*
+     * Pushed part of the way out and read in the same breath.
+     *
+     * Deliberately short of the point of no return, so what is measured is the
+     * push rather than the dismissal — which also means the settle is about to
+     * pull the card back, and the reading has to happen before it does. Taken
+     * inside the page, two frames after the push, rather than over a round trip
+     * whose latency is not bounded by anything this test controls.
+     */
+    const part = await page.evaluate(async () => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      const back = document.querySelector('.sheet-backdrop') as HTMLElement;
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.7;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return Number(getComputedStyle(back).opacity);
+    });
+    expect(part, 'the screen behind stayed covered while the card was pushed out').toBeLessThan(0.85);
+    expect(part, 'the screen behind was uncovered faster than the card moved').toBeGreaterThan(0.5);
+
+    // Let go: it comes back, and so does the scrim.
+    await pastTheSettle(page);
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+    expect(await scrim(), 'the card came back and the screen behind stayed uncovered').toBeGreaterThan(0.9);
+  });
+
+  /**
+   * And a push that has won finishes as an exit, rather than as a disappearance.
+   *
+   * The other half of the same complaint, and the half a stopwatch cannot hold.
+   * The card used to leave by *scrolling*, so how long it took belonged to the
+   * reader's flick — a gentle push past the point of no return has almost no
+   * momentum behind it and drifted the rest of a screen's height at walking
+   * pace, with the outcome already decided. Taking it over means the card
+   * covers whatever distance is left on a clock of its own.
+   *
+   * What is asserted is that the card **moves** after the push has won: sampled
+   * while it leaves, its top edge is further down the screen than where the push
+   * left it, and lower again after that. A dismissal that simply unmounted the
+   * card — which is what this looked like before, and what a shortened timeout
+   * would also produce — never places the card anywhere in between, so it
+   * cannot satisfy this.
+   */
+  test('finishes a won push as an exit the reader can see', async ({ page }) => {
+    await openPlayerCard(page);
+    const card = page.getByTestId('player-sheet');
+    /*
+     * `null` the moment the card is gone, and quickly.
+     *
+     * `boundingBox()` waits for its element, so calling it on a card that has
+     * just left blocks for the whole action timeout and then fails the test on a
+     * timeout rather than on its subject. Counting first, and capping the wait,
+     * keeps this a sampler.
+     */
+    const topOf = async () => {
+      if ((await card.count()) === 0) return null;
+      const box = await card.boundingBox({ timeout: 250 }).catch(() => null);
+      return box ? Math.round(box.y) : null;
+    };
+
+    const started = Date.now();
+    await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      // Past the point of no return and still leaving, with travel left to make.
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.35;
+    });
+
+    const seen: number[] = [];
+    for (let i = 0; i < 14; i++) {
+      const y = await topOf();
+      if (y === null) break;
+      seen.push(y);
+      await page.waitForTimeout(25);
+    }
+
+    await expect(card, 'the card never left').toHaveCount(0);
+    await expect(page.getByTestId('sheet-backdrop'), 'the screen behind stayed covered').toHaveCount(0);
+    expect(
+      seen.length,
+      'the card was never observed on its way out — it disappeared rather than left',
+    ).toBeGreaterThan(1);
+    expect(
+      Math.max(...seen),
+      'the card did not travel downwards on its way out',
+    ).toBeGreaterThan(seen[0]!);
+    expect(
+      Date.now() - started,
+      'the card took too long to finish leaving after the push had already won',
+    ).toBeLessThan(900);
+  });
+
   test('is pushed away from the grip, as it always was', async ({ page }) => {
     await openScoringKey(page);
     await swipeSheetAway(page, { over: '.sheet-grip' });
