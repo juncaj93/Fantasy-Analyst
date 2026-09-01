@@ -378,8 +378,14 @@ describe('the waiver scenarios price a bid with the real engine', () => {
      * `withCompetition` replaces the bare count with the named summary exactly
      * when `waiverLeagueIntel` was able to name anybody — so this asserting a
      * count would be asserting the state the demo used to be stuck in.
+     *
+     * The count itself is deliberately not pinned. `summarize` reports either
+     * `N likely bidders` or, once the ledger says fewer of the needy actually
+     * claim, `N need him · ~M likely bidders` — and which of the two a fixture
+     * lands on is a property of that fixture's transaction history rather than
+     * of the naming this case is about.
      */
-    expect(te!.competition!.detail).toMatch(/likely bidders ·/);
+    expect(te!.competition!.detail).toMatch(/likely bidders? · /);
 
     // And the multi-week supplier answers for both, off measured usage.
     for (const c of [te!, wr!]) {

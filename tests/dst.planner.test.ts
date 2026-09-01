@@ -101,12 +101,56 @@ describe('activation is decided on game state, never on a calendar date', () => 
     expect(plan.headline).toBe('');
   });
 
-  it('waits when the draft is done but the next kickoff is a fortnight away', () => {
-    const plan = planDst(input({ nextKickoff: FAR, available: [option('PIT', 9)] }));
+  it('waits when the draft is done, the kickoff is a fortnight away and the slot would cost a drop', () => {
+    const plan = planDst(
+      input({
+        nextKickoff: FAR,
+        available: [option('PIT', 9)],
+        // The bench spot the wait is buying. Without one there is nothing to
+        // buy and the empty slot is filled — see the test below.
+        roster: { openSpots: 0, dropCandidate: { playerId: 'wr9', name: 'Deep Flier', position: 'WR', surplus: 1.2 } },
+      }),
+    );
 
     expect(plan.decision).toBe('wait');
     expect(plan.activation).toBe('outside_window');
-    expect(plan.headline).toMatch(/no DST needed yet/i);
+    expect(plan.headline).toMatch(/your DEF slot is empty/i);
+    expect(plan.why.join(' ')).toMatch(/would cost/i);
+  });
+
+  /*
+   * The post-draft report this rule came from: an empty DEF slot, room on the
+   * roster, and a card reading "no DST needed yet" nine days before week one.
+   */
+  it('fills an empty DEF slot before the window when it costs no drop', () => {
+    const plan = planDst(input({ nextKickoff: FAR, available: [option('PIT', 9)] }));
+
+    expect(plan.activation).toBe('active');
+    expect(plan.decision).toBe('add');
+    expect(plan.headline).toMatch(/Add PIT/);
+    expect(plan.why.join(' ')).toMatch(/Nothing is in the DEF slot/i);
+  });
+
+  it('names the empty slot even when the wire cannot be ranked', () => {
+    /*
+     * The state between a draft and the first priced slate: the window is open
+     * because the slot is empty and free, and nothing in the pool has a number
+     * on it yet. "DST outlook unavailable" alone describes what the app could
+     * not do; the reader needs the slot first.
+     */
+    const plan = planDst(input({ nextKickoff: FAR, available: [option('PIT', null)] }));
+
+    expect(plan.activation).toBe('active');
+    expect(plan.decision).toBe('unknown');
+    expect(plan.why.join(' ')).toMatch(/nothing is in your DEF slot/i);
+  });
+
+  it('still waits on an empty slot when no kickoff is known at all', () => {
+    const plan = planDst(input({ nextKickoff: null, available: [option('PIT', 9)] }));
+
+    expect(plan.decision).toBe('wait');
+    expect(plan.activation).toBe('outside_window');
+    expect(plan.headline).toMatch(/your DEF slot is empty/i);
   });
 
   it('activates inside the window', () => {

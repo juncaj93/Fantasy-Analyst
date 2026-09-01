@@ -870,10 +870,30 @@ export function scoreOf(args: {
   const user = clamp01(args.user.starterGain / REFERENCE_GAIN);
 
   /*
-   * An edge to the user is not worse than an even deal — §8 permits seeking one
-   * — but paying over the odds is worse than not, so the discount is one-sided.
+   * An edge to the user is *better* than an even deal, and paying over the odds
+   * is worse than either.
+   *
+   * The previous reading scored `even` and `edge_user` identically at 1 — an
+   * edge was permitted but never preferred, so between a dead-even package and
+   * one that captured real surplus the composite was indifferent and the
+   * ordering fell through to the alphabetical tiebreak. §8 permits seeking an
+   * edge; this is the smallest change that actually seeks one.
+   *
+   * The gap between the two bands is deliberately narrow. At a weight of
+   * {@link RANK_WEIGHTS.fairness} it is worth 0.024 of the composite — less
+   * than {@link MANAGER_FIT_CAP}, and far less than a point of lineup gain — so
+   * it settles offers that are otherwise level and cannot promote a worse deal
+   * past a better one. Seeking an edge is a tiebreak, not an objective.
+   *
+   * Nothing here can surface a lopsided trade: `outside_range` is rejected at
+   * gate 1 before any of this runs, and gate 3 still requires the partner keep
+   * a legal lineup, lose no material points, and have roster logic of their
+   * own. The band this now prefers is bounded by {@link FAIRNESS_BANDS.edge} on
+   * one side and by those gates on the other, which is what makes "favour the
+   * user where it is still fair" a safe thing to ask for.
    */
-  const fairness = args.fairness.band === 'edge_opponent' ? 0.55 : 1;
+  const fairness =
+    args.fairness.band === 'edge_user' ? 1 : args.fairness.band === 'even' ? 0.88 : 0.55;
 
   /*
    * Their side: lineup points, then roster logic, each worth half.
@@ -924,6 +944,21 @@ export function compareOffers(a: OfferEvaluation, b: OfferEvaluation): number {
   return (
     b.score - a.score ||
     b.user.starterGain - a.user.starterGain ||
+    /*
+     * Then the surplus, before their gain rather than after it.
+     *
+     * Two offers that move the user's lineup by the same amount are the case
+     * where "fair but favours you where it can" is decided, and the value gap
+     * is the only thing separating them. Ordering their gain first would spend
+     * that tie making the *partner* better off, which is generous rather than
+     * fair — their side is already protected by gate 3, and the band this can
+     * reach is already bounded by `FAIRNESS_BANDS.edge`.
+     *
+     * Their gain still breaks the tie after it, so between two packages that
+     * are equally good for the user and equally priced, the one they are more
+     * likely to take is the one that surfaces.
+     */
+    b.fairness.gap - a.fairness.gap ||
     b.counterparty.starterGain - a.counterparty.starterGain ||
     a.give.length + a.get.length - (b.give.length + b.get.length) ||
     a.id.localeCompare(b.id)
