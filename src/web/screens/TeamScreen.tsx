@@ -845,9 +845,30 @@ function StarterCard({
               Locked
             </span>
           ) : null}
+          {/*
+            `Not in Sleeper` was the words here, and they were read as the app
+            recommending somebody the reader does not own.
+
+            Reported post-draft against a real league: three players named as
+            "tagged Not in Sleeper elsewhere on the same screen — meaning he
+            isn't on my roster". Every one of them was on the roster; this
+            endpoint reads nothing else. The tag has only ever meant the
+            narrower thing the row's own accessible name has always said — that
+            the *lineup* Sleeper holds does not have him in this slot — and on a
+            screen whose whole subject is a Sleeper roster, "not in Sleeper" is
+            a sentence about the roster.
+
+            `On your bench` says the same fact from the reader's side and cannot
+            be read as a claim about who they own. The `data-testid` is
+            unchanged: it names the condition, which has not moved.
+          */}
           {!slot.alreadyStarting && !slot.locked ? (
-            <span className="tag tag-warn tag-mini" data-testid="not-in-lineup-tag">
-              Not in Sleeper
+            <span
+              className="tag tag-warn tag-mini"
+              data-testid="not-in-lineup-tag"
+              title="On your bench in Sleeper — this is a change to make there"
+            >
+              On your bench
             </span>
           ) : null}
         </span>
@@ -952,7 +973,7 @@ function BenchCard({
           Against the name, exactly as on a starter — a direct child of the row
           rather than wrapped, so the seam either side of it is the row's own gap
           on both. There is no `.row-tags` here because there is nothing to put
-          in it: `Locked` and `Not in Sleeper` are facts about a lineup slot, and
+          in it: `Locked` and `On your bench` are facts about a lineup slot, and
           a bench player has none.
         */}
         <InjuryTag status={player.status} />

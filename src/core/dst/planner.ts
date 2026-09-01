@@ -319,7 +319,7 @@ export function planDst(input: DstPlanInput): DstPlan {
    */
   if (slots > 1) return multiDefence({ slots, rostered, available, cost, playoffWeeks, input });
 
-  const window = activationWindow(input, current);
+  const window = activationWindow(input, current, cost);
   const streamable = available.filter((o) => o.thisWeek != null && !o.unavailable);
   const best = streamable[0] ?? null;
 
@@ -327,21 +327,46 @@ export function planDst(input: DstPlanInput): DstPlan {
 
   if (!current) {
     if (!window.active) {
+      /*
+       * The slot is empty, and the card says so.
+       *
+       * `no DST needed yet` was the old headline here and it was false in the
+       * only way that matters: the reader *does* need a defence — the slot is a
+       * guaranteed zero in the next game this league plays — and what is not
+       * yet needed is the move that fills it. Reaching this branch now means
+       * one of two specific things, and the sentence names which: filling the
+       * slot would cost somebody a roster spot, or no kickoff is known at all.
+       */
       return {
         ...base(playoffWeeks),
         decision: 'wait',
         activation: window.activation,
         surface: true,
-        headline: 'Wait — no DST needed yet',
+        headline: 'Wait — your DEF slot is empty',
         why: [
           window.reason,
-          'A defence is a two-dollar add in the week it is needed, and the bench spot is worth more until then.',
+          cost.needsDrop
+            ? `Filling it would cost ${cost.label}, and a defence is a two-dollar add in the week it is needed.`
+            : 'A defence is a two-dollar add in the week it is needed.',
         ],
         cost,
       };
     }
     if (!best) {
-      return unavailablePlan(playoffWeeks, cost, 'no available defence can be scored this week');
+      /*
+       * The slot is named even when the pool cannot be ranked.
+       *
+       * `DST outlook unavailable` on its own describes what the app could not
+       * do; what the reader needs first is that a starting slot of theirs is
+       * empty, which is true whether or not a line exists to rank the wire
+       * with. The two are said in that order, and the second half is the
+       * ordinary unavailability sentence unchanged.
+       */
+      return unavailablePlan(
+        playoffWeeks,
+        cost,
+        'nothing is in your DEF slot, and no available defence can be scored this week',
+      );
     }
 
     /*
@@ -606,6 +631,7 @@ export function planDst(input: DstPlanInput): DstPlan {
 function activationWindow(
   input: DstPlanInput,
   current: DstOption | null,
+  cost: DstRosterCost,
 ): { active: boolean; activation: DstActivation; reason: string } {
   const now = new Date(input.now).getTime();
   const kickoff = input.nextKickoff == null ? null : new Date(input.nextKickoff).getTime();
@@ -624,6 +650,34 @@ function activationWindow(
      */
     if (current && upcomingBye(current, input.currentWeek) != null) {
       return { active: true, activation: 'active', reason: 'a bye is close enough to need covering' };
+    }
+    /*
+     * And an empty starting slot with room to fill it, which the window was
+     * never about.
+     *
+     * The wait exists to buy something: the bench spot a defence would occupy,
+     * held for a skill-position flier until the week the defence is actually
+     * needed. That is a genuine trade and this planner makes it deliberately.
+     * It is not a trade when the spot is *empty* — nothing is being kept in it,
+     * so waiting buys nothing and costs the top of a pool that empties fastest
+     * in the days after a draft, while the slot itself is a guaranteed zero in
+     * the next game this league plays.
+     *
+     * Reported post-draft on a real league: a roster with no defence at all, an
+     * empty DEF slot, and a card reading `Wait — no DST needed yet` nine days
+     * before week one. The slot was needed; only the spending was not urgent.
+     *
+     * Deliberately conditioned on the cost rather than on the calendar. Where
+     * filling the slot *would* cost a drop, the original trade is back on and
+     * the wait stands — see the headline below, which says which of the two
+     * this is.
+     */
+    if (!current && !cost.needsDrop) {
+      return {
+        active: true,
+        activation: 'active',
+        reason: 'your DEF slot is empty and there is room to fill it without dropping anybody',
+      };
     }
     return {
       active: false,

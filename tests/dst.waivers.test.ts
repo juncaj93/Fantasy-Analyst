@@ -3,8 +3,8 @@
  *
  * Team and Waivers draw the same recommendation from the same response, so the
  * failure this file exists to prevent is two of them: a board offering `Add
- * Pittsburgh` while the planner says `Wait — no DST needed yet`, or a defence
- * ranked on a board with no sense of what the roster spot costs.
+ * Pittsburgh` while the planner says `Wait — your DEF slot is empty`, or a
+ * defence ranked on a board with no sense of what the roster spot costs.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
