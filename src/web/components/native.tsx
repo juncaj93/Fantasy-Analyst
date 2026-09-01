@@ -726,18 +726,26 @@ export function Sheet({
        * tenth of a second of grey with nothing happening in it.
        *
        * **Anything short of that end waits, and that is not caution.** Deciding
-       * the moment the card passes the threshold was tried, to save a gentle
-       * push the slow drift down the rest of the screen — and it hands the
-       * dismissal to anything that scrolls this layer, not just a thumb.
-       * `scrollIntoView` is the case that found it: bringing a candidate deep in
-       * the compare sheet's list into view scrolls the layer, which crossed the
-       * threshold and took the card away mid-click. A keyboard moving focus
-       * through that list, or a screen reader, would have done the same. The
-       * debounce is what makes the difference, because a programmatic scroll is
-       * over in one event and the settle that follows finds the layer already
-       * put back.
+       * the moment the card passes the threshold was tried, to spare a gentle
+       * push the slow drift down the rest of the screen. It took the compare
+       * sheet's card away in the middle of a click on one of its candidates, on
+       * nine of twelve WebKit shards, and putting the wait back is what fixed
+       * them. What exactly moved the layer far enough was never pinned down —
+       * measured directly, bringing a candidate into view scrolls `.sheet-body`
+       * and leaves this alone — so the honest statement is the narrow one: a
+       * dismissal decided inside a single scroll event has nothing left that can
+       * put the layer back, and this layer is scrolled by more things than a
+       * thumb.
+       *
+       * **And a layer with nowhere to scroll has not arrived anywhere.** Nought
+       * is the dismissed position only once there is a journey to have made:
+       * while a card is still being laid out this box briefly has no travel in
+       * it, and `scrollTop` is nought because it has never been anywhere else.
+       * Reading that as "the card is gone" dismisses a sheet as it opens —
+       * rarely, and only where a scroll event lands inside that window, which is
+       * why it showed on one loaded CI shard and never once in isolation.
        */
-      if (top < 1) {
+      if (detentTop > 0 && top < 1) {
         leave();
         return;
       }
