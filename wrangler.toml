@@ -70,15 +70,25 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #                    same name, so it does not need putting by hand)
 
 [triggers]
-# Every 5 minutes -> injury check. Almost always a conditional 304 with no body
-#   and no database write; see migrations/0013 and core/injury/nflverse.ts. A
-#   flat cadence rather than fixed windows because kickoff is 9:30am for London
-#   games, Thursday night, Friday on holidays and Saturday in December, and a
-#   player is ruled out ninety minutes before any of them.
+# The five-minute injury check is OFF, deliberately, while the D1 daily
+# row-read quota is being brought back under control. It has been exhausted
+# three times in two days, and an app that answers every read with an error
+# until midnight UTC is worse off than one whose injury feed is a day old.
+#
+#   "*/5 * * * *"   <- injury check. Restore this entry to turn it back on.
+#
+# Nothing else was removed: `scheduled()` still carries its `*/5` branch, so
+# putting the string back is the whole of the change. The measured evidence
+# says this tick is NOT the query burning the quota -- `d1 insights` attributes
+# 0.4% of a day's reads to the injury path and 97.5% to four read-path queries
+# -- so this is a tourniquet applied while those are fixed, not the fix. It
+# costs injury freshness between the 09:00 ticks, and Data Health will say so
+# rather than pretend otherwise.
+#
 # Saturday 23:00 UTC and Sunday 15:00 UTC -> Vegas refresh.
 # Daily 09:00 UTC -> Sleeper player dictionary sync + last season's statistics.
 # Day-of-week must be named or 1-7 here: Cloudflare rejects "0" for Sunday.
-crons = ["*/5 * * * *", "0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
+crons = ["0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
 
 [observability]
 enabled = true
