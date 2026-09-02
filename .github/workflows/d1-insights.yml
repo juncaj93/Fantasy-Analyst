@@ -93,6 +93,14 @@ jobs:
           # Rendered rather than dumped: the raw payload is one long line, and
           # the number that matters — a query's share of 5,000,000 — is not in
           # it at all. `avg` guards against reading a total as a per-call cost.
+          #
+          # The metric field is FOUND, never assumed. The first run of this
+          # printed a column of zeroes beside real call counts, because it
+          # guessed at `rowsRead`/`sumRowsRead`/`rows_read` and the payload uses
+          # none of them. Guessing a field name is the same mistake as guessing
+          # a row count, one layer down — so the keys are matched by pattern and
+          # the ones actually present are printed, which makes a future rename
+          # visible instead of silent.
           node -e "
             const fs = require('fs');
             const raw = fs.readFileSync('insights.json', 'utf8');
@@ -103,27 +111,49 @@ jobs:
               console.log(raw);
               process.exit(0);
             }
+            if (rows.length === 0) { console.log('No query insights returned for this window.'); process.exit(0); }
             const LIMIT_ROWS = 5000000;
             const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-            const readsOf = (r) => num(r.rowsRead ?? r.sumRowsRead ?? r.rows_read ?? 0);
-            const callsOf = (r) => num(r.count ?? r.numberOfTimesRun ?? r.executionCount ?? 0);
-            if (rows.length === 0) { console.log('No query insights returned for this window.'); process.exit(0); }
-            const total = rows.reduce((a, r) => a + readsOf(r), 0);
+            const keys = Object.keys(rows[0]);
+            console.log('fields returned: ' + keys.join(', '));
+            // A total if one is offered, otherwise an average multiplied back up
+            // by the call count. Never a bare 'rowsRead' guess.
+            const pick = (re, prefer) => keys.filter((k) => re.test(k)).sort((a, b) =>
+              (prefer.test(b) ? 1 : 0) - (prefer.test(a) ? 1 : 0))[0] ?? null;
+            const totalReadKey = pick(/rows?_?read/i, /^(total|sum)/i);
+            const avgReadKey = keys.filter((k) => /rows?_?read/i.test(k) && /^avg/i.test(k))[0] ?? null;
+            const callKey = pick(/count|numberoftimesrun|executions?/i, /^(count|number)/i);
+            console.log('using: reads=' + totalReadKey + ' avgReads=' + avgReadKey + ' calls=' + callKey);
+            const callsOf = (r) => (callKey ? num(r[callKey]) : 0);
+            const readsOf = (r) => {
+              const direct = totalReadKey && !/^avg/i.test(totalReadKey) ? num(r[totalReadKey]) : 0;
+              if (direct > 0) return direct;
+              return avgReadKey ? Math.round(num(r[avgReadKey]) * callsOf(r)) : direct;
+            };
+            const listed = rows.map((r) => ({ reads: readsOf(r), calls: callsOf(r),
+              q: String(r.query ?? r.queryString ?? '').replace(/\s+/g, ' ').trim().slice(0, 100) }))
+              .sort((a, b) => b.reads - a.reads);
+            const total = listed.reduce((a, r) => a + r.reads, 0);
+            console.log('');
             console.log('rows read   % of 5M   calls   avg/call   query');
             console.log('---------------------------------------------------------------');
-            for (const r of rows) {
-              const reads = readsOf(r), calls = callsOf(r);
-              const q = String(r.query ?? r.queryString ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+            for (const r of listed) {
               console.log(
-                String(reads).padStart(9) +
-                (100 * reads / LIMIT_ROWS).toFixed(1).padStart(9) + '%' +
-                String(calls).padStart(8) +
-                (calls > 0 ? Math.round(reads / calls) : 0).toString().padStart(11) +
-                '   ' + q,
+                String(r.reads).padStart(9) +
+                (100 * r.reads / LIMIT_ROWS).toFixed(1).padStart(9) + '%' +
+                String(r.calls).padStart(8) +
+                (r.calls > 0 ? Math.round(r.reads / r.calls) : 0).toString().padStart(11) +
+                '   ' + r.q,
               );
             }
             console.log('---------------------------------------------------------------');
             console.log('listed total: ' + total + ' rows (' + (100 * total / LIMIT_ROWS).toFixed(1) + '% of the daily allowance)');
+            if (total === 0) {
+              console.log('');
+              console.log('Every row reported zero reads. The first record verbatim, so the');
+              console.log('field carrying them can be named rather than guessed at again:');
+              console.log(JSON.stringify(rows[0], null, 1));
+            }
           " | tee summary.txt
 
           {
