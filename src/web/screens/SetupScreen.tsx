@@ -2824,18 +2824,10 @@ function VegasPanel({ status }: { status: SetupStatus }) {
       <div className="faint" style={{ marginTop: 8 }}>
         {status.vegas.note}
       </div>
-      {/*
-        Left over from before a provider was connected, and wrong once one was.
-
-        It said real betting lines were "switched on later, once a free source
-        has been confirmed" while this app was fetching them twice a week from a
-        confirmed one — so a reader whose lines were nine days old was told, on
-        the screen reporting them, that they were never expected to arrive.
-      */}
       <div className="faint" style={{ marginTop: 6 }}>
-        {status.vegas.live
-          ? 'Lines are refreshed on the weekend clocks. To ask for them now, use "Refresh now" on Setup → Data health. Where a line is missing, start/sit says so rather than guessing.'
-          : 'No odds provider is connected, so start/sit advice runs on your news signal and clearly says when a line is missing rather than guessing.'}
+        Nothing to do here yet. Real betting lines are switched on later, once a free source has been
+        confirmed. Until then, start/sit advice uses your news signal and clearly says when a line is
+        missing rather than guessing.
       </div>
       {status.vegas.lastRefreshedAt ? (
         <div className="faint" style={{ marginTop: 6 }}>
