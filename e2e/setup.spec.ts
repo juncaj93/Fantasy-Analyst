@@ -767,7 +767,16 @@ test.describe('vegas', () => {
     await page.getByTestId('setup-step-vegas').click();
     const panel = page.getByTestId('panel-vegas');
     await expect(panel).toContainText('Not connected yet');
-    await expect(panel).toContainText('Nothing to do here yet');
+    /*
+     * The sentence this used to assert said the opposite of the truth once a
+     * provider was connected: "Real betting lines are switched on later, once a
+     * free source has been confirmed" was left over from before one was, and it
+     * told a reader looking at nine-day-old lines that they were never expected
+     * to arrive. The panel now answers for the state it is actually in, so this
+     * asserts the not-connected half — which is the case the demo seeds, and the
+     * one this test is named for.
+     */
+    await expect(panel).toContainText('No odds provider is connected');
   });
 
   /**
