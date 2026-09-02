@@ -4,6 +4,7 @@ import { EXCLUDED_POSITIONS } from '../../core/sleeper/transform.ts';
 import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { SlowRead } from './slowRead.ts';
 /* The one player matcher, and the recall rule that keeps SQL in step with it. */
 import { hasWiderRecall, rankByNormalized, recallTerms } from '../../core/search/players.ts';
 
@@ -83,20 +84,63 @@ const PLAYER_COLUMNS: string = Object.keys({
   years_exp: true,
 } satisfies Record<keyof PlayerRow, true>).join(', ');
 
+/*
+ * The three reads on this repo that `d1 insights` caught spending the daily
+ * allowance, and the only three here that are both expensive and stale-safe.
+ *
+ * `DICTIONARY` holds the *rows*, not the `CanonicalPlayer` objects built from
+ * them. The mapping is re-run per call, which costs microseconds and means no
+ * caller can be handed an object another caller has since sorted, filtered in
+ * place or otherwise adjusted — the aliasing bug this would otherwise be one
+ * refactor away from. The read is what was expensive; the mapping never was.
+ *
+ * See `slowRead.ts` for the measurements and the argument.
+ */
+const DICTIONARY = new SlowRead<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }>();
+const TOTAL = new SlowRead<number>();
+const RANKED = new SlowRead<number>();
+
+/** Drop every memo for this database. Exported for tests. */
+export function forgetPlayerReads(db: Database): void {
+  DICTIONARY.forget(db);
+  TOTAL.forget(db);
+  RANKED.forget(db);
+}
+
 export class PlayerRepo {
   constructor(private readonly db: Database) {}
 
+  /**
+   * How many players are stored.
+   *
+   * A `COUNT(*)` with no `WHERE` is a full pass over the table — SQLite has no
+   * stored row count to consult, and D1 bills every row it walks — so this is
+   * 3,300 rows to render one number on the overview. It was asked 433 times in
+   * the day that ran the allowance out, for 28.6% of it. Memoised, because the
+   * count changes when `upsertMany` runs and at no other time.
+   */
   async count(): Promise<number> {
-    const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
-    return Number(row?.n ?? 0);
+    return TOTAL.get(this.db, 'all', async () => {
+      const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+      return Number(row?.n ?? 0);
+    });
   }
 
-  /** How many active players Sleeper gives a draft-order rank. */
+  /**
+   * How many active players Sleeper gives a draft-order rank.
+   *
+   * Another full pass — neither column is indexed, and indexing them would not
+   * help much on a table this small where most rows match. Memoised on the
+   * same terms as {@link count}: a Setup diagnostic, refreshed by the write
+   * that can change it.
+   */
   async countRanked(): Promise<number> {
-    const row = await this.db
-      .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
-      .first<{ n: number }>();
-    return Number(row?.n ?? 0);
+    return RANKED.get(this.db, 'all', async () => {
+      const row = await this.db
+        .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
+        .first<{ n: number }>();
+      return Number(row?.n ?? 0);
+    });
   }
 
   /**
@@ -121,23 +165,33 @@ export class PlayerRepo {
    *     of them.
    */
   async listAll(): Promise<CanonicalPlayer[]> {
-    const [players, aliases] = await Promise.all([
-      this.db
-        .prepare(
-          `SELECT ${PLAYER_COLUMNS} FROM players
-            WHERE active = 1 AND position NOT IN (${EXCLUDED_PLACEHOLDERS})`,
-        )
-        .bind(...EXCLUDED_LIST)
-        .all<PlayerRow>(),
-      this.db.prepare('SELECT player_id, alias FROM player_aliases').all<{ player_id: string; alias: string }>(),
-    ]);
+    /*
+     * Memoised, and this is the one that mattered: 687 calls and 2.27 million
+     * rows in a day, 45.4% of the whole allowance, because the Draft board is
+     * built from this list and the Draft screen re-asks for the board every
+     * five seconds. The dictionary it re-reads was last written at 09:00.
+     */
+    const { players, aliases } = await DICTIONARY.get(this.db, 'active', async () => {
+      const [rows, aliasRows] = await Promise.all([
+        this.db
+          .prepare(
+            `SELECT ${PLAYER_COLUMNS} FROM players
+              WHERE active = 1 AND position NOT IN (${EXCLUDED_PLACEHOLDERS})`,
+          )
+          .bind(...EXCLUDED_LIST)
+          .all<PlayerRow>(),
+        this.db.prepare('SELECT player_id, alias FROM player_aliases').all<{ player_id: string; alias: string }>(),
+      ]);
+      return { players: rows.results, aliases: aliasRows.results };
+    });
+
     const aliasesByPlayer = new Map<string, string[]>();
-    for (const a of aliases.results) {
+    for (const a of aliases) {
       const list = aliasesByPlayer.get(a.player_id);
       if (list) list.push(a.alias);
       else aliasesByPlayer.set(a.player_id, [a.alias]);
     }
-    return players.results.map((r) => toPlayer(r, aliasesByPlayer.get(r.id) ?? []));
+    return players.map((r) => toPlayer(r, aliasesByPlayer.get(r.id) ?? []));
   }
 
   async buildIndex(): Promise<PlayerIndex> {
@@ -256,6 +310,13 @@ export class PlayerRepo {
       await this.db.batch(statements);
       written += batch.length;
     }
+    /*
+     * The dictionary and both counts are now whatever this just wrote, so the
+     * memo is dropped rather than left to expire. This is what makes a manual
+     * re-sync from Setup show its result immediately instead of up to five
+     * minutes later, and it is why the window is safe to have at all.
+     */
+    forgetPlayerReads(this.db);
     return { written };
   }
 
@@ -270,6 +331,8 @@ export class PlayerRepo {
       )
       .bind(playerId, alias, normalizedAlias, source, confidence, nowIso())
       .run();
+    // `listAll` joins the aliases in, so a new nickname invalidates it too.
+    forgetPlayerReads(this.db);
   }
 
   /**
@@ -298,6 +361,7 @@ export class PlayerRepo {
       .prepare('DELETE FROM player_aliases WHERE player_id = ? AND normalized_alias = ?')
       .bind(playerId, normalizedAlias)
       .run();
+    forgetPlayerReads(this.db);
   }
 
   /** Search by name fragment for the Players screen. */
