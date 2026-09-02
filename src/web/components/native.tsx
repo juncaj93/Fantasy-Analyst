@@ -693,7 +693,25 @@ export function Sheet({
     const SPRING = 700;
     let springUntil = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
+    /*
+     * Real input: the reader has done something the layer can act on.
+     *
+     * **Only this cancels a spring-back, and that distinction is load-bearing.**
+     * A second push arriving while the card is on its way home must be watched —
+     * the note on re-arming below is about the invisible modal that results when
+     * it is not — and a second push is *input*, not merely more scrolling. The
+     * spring-back's own animation fires scroll events inside the window too, and
+     * letting those count as a new push made `settle` re-issue its smooth scroll
+     * every seventy milliseconds, restarting the ease from the top each time.
+     * The card then crawled instead of springing, and stopped where it was left:
+     * the scrim reading 0.699 on a push made to 0.7.
+     */
     const gestured = () => {
+      springUntil = 0;
+      handsOn = stamp();
+    };
+    /** A scroll that belongs to a movement already under way. */
+    const refresh = () => {
       handsOn = stamp();
     };
     const hands = () => dragging || stamp() - handsOn < HANDS_OFF;
@@ -840,21 +858,25 @@ export function Sheet({
       if (leaving) return;
       const detentTop = root.scrollHeight - root.clientHeight;
       const top = root.scrollTop;
-      if (hands()) {
-        // A push in progress outranks the spring-back it may have interrupted.
-        springUntil = 0;
-        gestured();
-      } else if (stamp() < springUntil) {
+      if (stamp() < springUntil) {
         /*
          * The settle's own smooth scroll, on its way back to the card's
          * position. Neither a gesture to act on nor a stray to correct — the
-         * scrim tracks it home and nothing else here touches it. A second push
-         * arriving mid-animation is a gesture and takes the branch above, which
-         * is the case the note below is about.
+         * scrim tracks it home and nothing else here touches it, least of all
+         * another `scrollTo`.
+         *
+         * **Asked first, and not last.** A reader who pushes again mid-flight is
+         * still watched, because pushing is input and input clears `springUntil`
+         * before the scroll it causes ever arrives here. What this order stops
+         * is the animation being mistaken for that second push by nothing more
+         * than its own scroll events landing inside the reader's window.
          */
         if (detentTop > 0) paint(top / detentTop);
         if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
         return;
+      } else if (hands()) {
+        // A movement already under way, which keeps its window open as it goes.
+        refresh();
       } else {
         /*
          * A scroll nobody made: put the card back where it belongs and decide
