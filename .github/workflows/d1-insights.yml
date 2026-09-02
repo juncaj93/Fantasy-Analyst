@@ -1,0 +1,143 @@
+name: D1 read insights
+
+# Which queries are actually spending the daily row-read allowance.
+#
+# D1's free plan allows 5,000,000 rows read a day and answers everything with an
+# error once that is gone, so a single expensive query on a frequent path takes
+# the whole app down until midnight UTC. It has happened twice: on 2026-09-01,
+# and again on 2026-09-02 while the fix for the first was already live.
+#
+# The second time is why this exists. That fix (#239) was reasoned about rather
+# than measured — its arithmetic multiplied an assumed row count by an assumed
+# tick count to land almost exactly on 5,000,000, which is the shape of a number
+# fitted to its conclusion. It was also correct, deployed, and apparently not the
+# thing burning the quota. Two days went into narrowing that down by reading code
+# and query plans, and none of it can say which query actually read the rows.
+#
+# `d1 insights` can: Cloudflare attributes rows read to the query that read them.
+# One dispatch replaces the guessing.
+#
+# Read-only, and doubly so — `insights` is a metrics API that touches no user
+# data, and nothing here executes SQL against the database at all. Safe to run
+# during an incident, which is exactly when it is wanted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      time_period:
+        description: 'Window to report on (e.g. 1d, 7d)'
+        required: false
+        default: '1d'
+      limit:
+        description: 'How many queries to list'
+        required: false
+        default: '20'
+
+jobs:
+  insights:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The committed wrangler.toml carries a placeholder database id so the
+      # repository stays deployable by anyone; a remote command needs the real
+      # one patched in or the binding resolves to nothing. Same discovery the
+      # release and inspection workflows do.
+      - name: Point the config at the database
+        run: |
+          set -euo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then
+            echo "::error::No database called $DATABASE_NAME."
+            exit 1
+          fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      # Sorted by rows read rather than by time, because the quota is counted in
+      # rows. A query that is slow and reads three rows cannot exhaust anything;
+      # a fast one reading thirty thousand on a five-minute cron will.
+      - name: Queries by rows read
+        env:
+          PERIOD: ${{ inputs.time_period }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 insights "$DATABASE_NAME" \
+            --time-period "$PERIOD" --sort-by reads --sort-type sum \
+            --sort-direction DESC --limit "$LIMIT" --json > insights.json || {
+              echo "::error::d1 insights failed"; cat insights.json 2>/dev/null || true; exit 1;
+            }
+
+          # Rendered rather than dumped: the raw payload is one long line, and
+          # the number that matters — a query's share of 5,000,000 — is not in
+          # it at all. `avg` guards against reading a total as a per-call cost.
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('insights.json', 'utf8');
+            const start = raw.indexOf('[');
+            let rows = [];
+            try { rows = JSON.parse(start === -1 ? '[]' : raw.slice(start)); } catch (e) {
+              console.log('Could not parse the response as JSON. Raw output follows.');
+              console.log(raw);
+              process.exit(0);
+            }
+            const LIMIT_ROWS = 5000000;
+            const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+            const readsOf = (r) => num(r.rowsRead ?? r.sumRowsRead ?? r.rows_read ?? 0);
+            const callsOf = (r) => num(r.count ?? r.numberOfTimesRun ?? r.executionCount ?? 0);
+            if (rows.length === 0) { console.log('No query insights returned for this window.'); process.exit(0); }
+            const total = rows.reduce((a, r) => a + readsOf(r), 0);
+            console.log('rows read   % of 5M   calls   avg/call   query');
+            console.log('---------------------------------------------------------------');
+            for (const r of rows) {
+              const reads = readsOf(r), calls = callsOf(r);
+              const q = String(r.query ?? r.queryString ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+              console.log(
+                String(reads).padStart(9) +
+                (100 * reads / LIMIT_ROWS).toFixed(1).padStart(9) + '%' +
+                String(calls).padStart(8) +
+                (calls > 0 ? Math.round(reads / calls) : 0).toString().padStart(11) +
+                '   ' + q,
+              );
+            }
+            console.log('---------------------------------------------------------------');
+            console.log('listed total: ' + total + ' rows (' + (100 * total / LIMIT_ROWS).toFixed(1) + '% of the daily allowance)');
+          " | tee summary.txt
+
+          {
+            echo '### D1 queries by rows read'
+            echo ''
+            echo "Window: \`$PERIOD\`. The daily free-plan allowance is 5,000,000 rows."
+            echo ''
+            echo '```'
+            cat summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d1-insights
+          path: insights.json
+          if-no-files-found: warn
