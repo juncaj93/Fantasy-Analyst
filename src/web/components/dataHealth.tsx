@@ -37,9 +37,9 @@
  * monochrome, at any contrast setting, and to a screen reader.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { api, type DataHealthView, type SourceHealth } from '../api.ts';
+import { api, type DataHealthView, type SourceHealth, type StartSitRefreshReport } from '../api.ts';
 import { Loading, Notice } from './common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from './icons.tsx';
 import { ListGroup, ListRow, PushScreen } from './native.tsx';
@@ -103,7 +103,7 @@ function StateMark({ state }: { state: string }) {
  * source reads whether or not anybody looked.
  */
 export function DataHealthRow({ onOpen }: { onOpen: () => void }) {
-  const health = useDataHealth();
+  const { health } = useDataHealth();
 
   return (
     <ListRow
@@ -127,8 +127,51 @@ export function DataHealthRow({ onOpen }: { onOpen: () => void }) {
  * never have to scroll past.
  */
 export function DataHealthScreen({ onBack }: { onBack: () => void }) {
-  const health = useDataHealth();
+  const { health, reload } = useDataHealth();
   const [technical, setTechnical] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [report, setReport] = useState<StartSitRefreshReport | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  /**
+   * The control this screen did not have.
+   *
+   * Every source above was refreshable only by a clock. Vegas lines run on two
+   * weekend crons, so a fix deployed on a Monday cannot reach a screen until
+   * Saturday; the roster ran on no clock at all until this release. In between,
+   * the only way to ask was a pull down the Team or Waivers screen — a gesture
+   * on a different screen from the one reporting the staleness, and one an
+   * earlier session told the owner was a button in Setup that has never
+   * existed. This is that button, on the screen naming the stale rows.
+   *
+   * It calls the orchestrator the pull gesture calls and no endpoint of its own.
+   * That matters more than the saving: `/api/startsit/refresh` is where the
+   * dedupe, the per-source age gates and the odds budget's refusal all live, so
+   * a second entry point with its own idea of any of them is exactly how a
+   * screen starts disagreeing with the one next door. What is new here is the
+   * caller, not the behaviour.
+   *
+   * It never claims more than it did. `report.sources` is the orchestrator's own
+   * per-source outcome, printed verbatim — including `blocked`, which is the
+   * answer a reader needs when the month's odds allowance is spent and the
+   * lines on screen are the last ones this app is going to buy.
+   */
+  const refreshNow = useCallback(async () => {
+    setRefreshing(true);
+    setFailure(null);
+    try {
+      setReport(await api.post<StartSitRefreshReport>('/api/startsit/refresh', {}));
+    } catch (err) {
+      setReport(null);
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+      // The rows are re-read whatever happened: a refresh that failed half way
+      // still moved the sources it reached, and leaving the old ages on screen
+      // would misreport the ones that did land.
+      await reload();
+    }
+  }, [reload]);
 
   return (
     <PushScreen
@@ -162,6 +205,47 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
               deliberately running in the background. Nothing needs you.
             </Notice>
           )}
+
+          {/*
+            And directly under them, the way to act on them.
+
+            Above the full list rather than at the bottom of the screen: a reader
+            who has just been told two inputs are stale should not have to scroll
+            past ten healthy rows to find the thing that fixes them.
+          */}
+          <ListGroup header="Refresh">
+            <ListRow
+              testId="data-health-refresh"
+              label={refreshing ? 'Refreshing…' : 'Refresh now'}
+              detail={
+                refreshing
+                  ? 'Asking Sleeper for your roster, then the injury, usage and Vegas feeds.'
+                  : 'Re-reads your roster from Sleeper and asks for fresh injury, usage and Vegas lines. Games already priced this month are not bought again.'
+              }
+              value={refreshing ? undefined : 'Run'}
+              onClick={refreshing ? undefined : () => void refreshNow()}
+            />
+            {failure ? (
+              <ListRow
+                testId="data-health-refresh-failed"
+                dataState="failed"
+                state={<StateMark state="failed" />}
+                label="The refresh did not finish"
+                detail={failure}
+              />
+            ) : null}
+            {report?.sources.map((source) => (
+              <ListRow
+                key={source.source}
+                testId={`data-health-refresh-${source.source}`}
+                dataState={source.outcome}
+                state={<StateMark state={source.outcome === 'updated' ? 'current' : source.outcome} />}
+                label={REFRESH_SOURCE_LABELS[source.source] ?? source.source}
+                detail={source.detail}
+                value={source.outcome}
+              />
+            ))}
+          </ListGroup>
 
           {/*
             Everything else, once each.
@@ -221,6 +305,21 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
     </PushScreen>
   );
 }
+
+/**
+ * What the refresh calls each source, in the words the rows above already use.
+ *
+ * `sleeper` is the one that has to be renamed rather than title-cased: the
+ * orchestrator names it for the provider it talks to, and every other surface in
+ * this app names it for the thing it fetched.
+ */
+const REFRESH_SOURCE_LABELS: Record<string, string> = {
+  sleeper: 'Your roster',
+  injury: 'Injuries',
+  usage: 'Usage',
+  vegas: 'Vegas lines',
+  weather: 'Weather',
+};
 
 function subtitleFor(health: DataHealthView): string {
   const age = describeAge(minutesSince(health.overall.refreshedAt, new Date()));
@@ -308,8 +407,17 @@ function TechnicalPanel({ health }: { health: DataHealthView }) {
  * convenience beside the support tools, and a red banner in Setup because a
  * diagnostic read failed would be the tail wagging the dog.
  */
-function useDataHealth(): DataHealthView | null {
+function useDataHealth(): { health: DataHealthView | null; reload: () => Promise<void> } {
   const [health, setHealth] = useState<DataHealthView | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      setHealth(await api.get<DataHealthView>('/api/data-health', { fresh: true }));
+    } catch {
+      /* Left as it was; the row keeps saying whatever it last knew. */
+    }
+  }, []);
+
   useEffect(() => {
     let live = true;
     api
@@ -324,5 +432,6 @@ function useDataHealth(): DataHealthView | null {
       live = false;
     };
   }, []);
-  return health;
+
+  return { health, reload };
 }

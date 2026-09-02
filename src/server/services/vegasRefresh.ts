@@ -141,7 +141,11 @@ export class VegasRefreshService {
 
     // Discovery, only when the schedule is genuinely unknown or old. This is
     // the fetch as well: the provider has no schedule-only request.
-    const discovery = await this.discoverIfNeeded(players, budget, now, { errors, blocked });
+    const discovery = await this.discoverIfNeeded(players, budget, now, {
+      errors,
+      blocked,
+      manual: opts.manual ?? false,
+    });
     let spent = discovery.entities;
     let requests = discovery.requests;
     let fetched = discovery.events;
@@ -268,7 +272,7 @@ export class VegasRefreshService {
     players: PlannedPlayer[],
     budget: BudgetView,
     now: number,
-    sink: { errors: string[]; blocked: string[] },
+    sink: { errors: string[]; blocked: string[]; manual?: boolean },
   ): Promise<{ entities: number; requests: number; events: number }> {
     /*
      * At most one discovery per TTL, whatever the roster looks like.
@@ -277,10 +281,25 @@ export class VegasRefreshService {
      * a player on a bye has no game this week and will still have none in an
      * hour, so it would re-buy the schedule on every single pass. What decides
      * is when we last *asked*, not whether the answer covered everybody.
+     *
+     * **A person asking is allowed past it, and has to be.** The stamp below is
+     * written *before* the provider is called, so a discovery that came back
+     * with nothing — which is every discovery run in the fortnight between a
+     * draft and week one, before the window learned to stretch — locks the app
+     * out of retrying for three days. That is correct for a clock, which will
+     * come round again on its own, and wrong for a person, who has looked at a
+     * stale screen and pressed the one control that is supposed to fix it. A
+     * manual pass that could not re-ask would be a button that does nothing for
+     * up to seventy-two hours and gives no reason.
+     *
+     * It buys nothing extra. `canSpend` below is untouched and still has the
+     * final say on the month's allowance, so what this bypasses is the
+     * politeness interval and never the budget.
      */
-    const attempted = await new SettingsRepo(this.db).get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
+    const settings = new SettingsRepo(this.db);
+    const attempted = await settings.get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
     const attemptedAge = attempted ? (now - Date.parse(attempted)) / 3_600_000 : Infinity;
-    if (attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
+    if (!sink.manual && attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
 
     const unmapped = players.filter((p) => !p.eventId).length;
     const lastSeen = await this.events.lastSeenAt();
@@ -313,7 +332,7 @@ export class VegasRefreshService {
     const to = await this.discoveryWindowEnd(now, teams);
     // Stamped before the call, not after: a discovery that fails halfway must
     // not become a discovery that retries on every pass for the rest of the day.
-    await new SettingsRepo(this.db).set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
+    await settings.set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
     try {
       const result = await fetchTeams.call(this.provider, teams.slice(0, decision.entities), {
         from,

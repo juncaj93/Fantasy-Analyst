@@ -242,8 +242,23 @@ function budgetUsedFromLog(logs: string[]): number | null {
 }
 
 /** The manager backfill's own traffic, which is the traffic that must yield. */
+/**
+ * The backfill's own requests, told apart from the daily league sync above it.
+ *
+ * The two overlap in shape and no longer in subject, which is what this had to
+ * be rewritten to notice. The daily tick now re-reads the *selected* league —
+ * its settings, rosters, users and drafts, all under `/league/tony/…` — so a
+ * pattern matching any `/rosters` or `/drafts` counted that read as history and
+ * duly reported the backfill running before the feeds it is supposed to yield
+ * to.
+ *
+ * What actually identifies the backfill is the season chain: it walks
+ * `previous_league_id` back through `L2025`, `L2024` and so on, and it walks
+ * transactions and draft picks. None of those is reachable from a sync of the
+ * league the user has selected today.
+ */
 function historyCalls(urls: string[]): string[] {
-  return urls.filter((u) => /\/drafts$|\/draft\/|\/transactions\/|\/rosters$/.test(u) || /\/league\/L20\d\d$/.test(u));
+  return urls.filter((u) => /\/transactions\//.test(u) || /\/draft\//.test(u) || /\/league\/L20\d\d(\/|$)/.test(u));
 }
 
 const DAILY = { cron: '0 9 * * *' };

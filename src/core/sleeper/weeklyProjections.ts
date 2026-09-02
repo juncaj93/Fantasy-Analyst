@@ -154,6 +154,69 @@ export function sleeperScoringKey(
   return null;
 }
 
+/**
+ * Why this league may not read a published total for this position, in one
+ * clause a reader can act on — or null when it may.
+ *
+ * The silent half of {@link sleeperScoringKey} said out loud. That function
+ * returns null for two quite different reasons and a screen showing a dash
+ * cannot tell them apart: *nobody published a number for him*, and *a number was
+ * published and this app will not quote it, because it was computed under
+ * scoring this league does not use*.
+ *
+ * The second is the one that looks like a bug and is not. In a league scoring
+ * six-point passing touchdowns, every running back, receiver and tight end gets
+ * Rotowire's number and the quarterback gets a dash — correctly, because the
+ * published total would understate him by roughly two points a touchdown — and
+ * from the outside that is indistinguishable from the feed having skipped him.
+ * Reported as exactly that on 2 September 2026: "projections show for most
+ * players but not for QB Joe Burrow specifically."
+ *
+ * Naming the settings rather than saying "scoring differs" is deliberate. The
+ * reader can check the two named values against his league in Sleeper and
+ * satisfy himself in ten seconds; "differs" would send him looking through
+ * thirty of them.
+ */
+export function publishedRefusal(
+  profile: ScoringProfile | null | undefined,
+  position: string | null | undefined,
+): string | null {
+  if (!profile) return null;
+  if (sleeperScoringKey(profile, position) != null) return null;
+
+  const pos = String(position ?? '').trim().toUpperCase();
+  const differing = (RELEVANT[pos] ?? EVERYTHING).filter(
+    (key) => !same(profile[key] as number, PUBLISHED_ASSUMPTIONS[key]),
+  );
+
+  if (profile.teBonus !== 0 && (pos === '' || pos === 'TE')) {
+    differing.push('teBonus' as AssumedSetting);
+  }
+
+  if (differing.length === 0) {
+    // Everything checked matches, so what disqualified the league is its
+    // per-reception value — the one setting that picks between the three
+    // published totals rather than being compared against a single assumption.
+    return `no published projection is quoted here: this league scores ${profile.ppr} per reception, and the published feed only publishes totals for 0, 0.5 and 1.`;
+  }
+
+  const named = differing.map((key) => SETTING_WORDS[key]).join(' and ');
+  return `no published projection is quoted for ${pos || 'this position'}: the feed assumes ${named}, and this league does not.`;
+}
+
+/** What each assumed setting is called in a sentence a user reads. */
+const SETTING_WORDS: Record<string, string> = {
+  pointsPerPassYard: '0.04 points per passing yard',
+  pointsPerRushYard: '0.1 points per rushing yard',
+  pointsPerRecYard: '0.1 points per receiving yard',
+  passTd: '4 points per passing touchdown',
+  rushTd: '6 points per rushing touchdown',
+  recTd: '6 points per receiving touchdown',
+  interception: '-1 per interception',
+  fumbleLost: '-2 per fumble lost',
+  teBonus: 'no tight-end premium',
+};
+
 /** One player's published week, as this app stores it. */
 export interface SleeperWeeklyProjection {
   playerId: string;

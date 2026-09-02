@@ -516,7 +516,16 @@ export function describeVegas(input: {
     return {
       state: 'warn',
       summary: `${input.provider} connected — no lines stored yet`,
-      action: 'Lines arrive on the scheduled refresh, or from "Refresh Vegas lines".',
+      /*
+       * Named for a control that now exists.
+       *
+       * This used to point at a "Refresh Vegas lines" button, and there has
+       * never been one — an earlier support conversation read this string, told
+       * the owner to press it in Setup, and he went looking for a button that
+       * was not there and never had been. The action is now on Data health,
+       * beside the row that reports the staleness, and this says so.
+       */
+      action: 'Lines arrive on the scheduled refresh, or from "Refresh now" on Setup → Data health.',
       note: 'Connected, but nothing has been stored yet. Anything without a line is shown as unknown rather than as a zero.',
     };
   }
@@ -525,7 +534,7 @@ export function describeVegas(input: {
     return {
       state: 'warn',
       summary: `${input.provider} connected — ${input.events} game(s) stored, last updated ${describeAge(ageHours)}`,
-      action: 'The next scheduled refresh will update them.',
+      action: 'The next scheduled refresh will update them, or ask now from Setup → Data health.',
       note: 'These lines are old enough to be treated as stale, and start/sit lowers its confidence accordingly.',
     };
   }

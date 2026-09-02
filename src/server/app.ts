@@ -854,7 +854,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
       throw err;
     }
-    const { league, mine, shape, profile, inputs, published, unknownPlayers, props } = gathered;
+    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props } = gathered;
 
     /*
      * The whole decision, in one call.
@@ -877,6 +877,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       currentStarterIds: mine.starterIds,
       mode,
       published,
+      publishedRefusal,
       unknownPlayers,
     });
 
