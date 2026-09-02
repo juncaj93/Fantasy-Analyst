@@ -371,6 +371,45 @@ test.describe('pushing a sheet away', () => {
   });
 
   /**
+   * A push the engine is slow to deliver is still the reader's push.
+   *
+   * The regression this exists for, and the mirror of the one above. The first
+   * version of this rule sized the reader's window at a frame and asked whether
+   * a scroll fell inside it — which is a question about the *engine's*
+   * promptness rather than about who pushed. WebKit's wheel scrolling is
+   * starved by a page doing per-frame work: the pull-to-refresh specs install a
+   * watcher before they swipe, and `swipeSheetAway`'s own note records the same
+   * wheel moving this layer 675px in one case and 50 in the other. Under that,
+   * the push arrived after its own window had closed, the layer read the
+   * reader's own movement as a stray and put the card back, and two dismissal
+   * specs failed on the widest phone — the one with the furthest to scroll, and
+   * only there.
+   *
+   * The window covers delivery lag now, so: asked for by a wheel, delivered in
+   * one lump the better part of a second later, and still a dismissal.
+   */
+  test('honours a push the engine delivers late', async ({ page }) => {
+    await openPlayerCard(page);
+    expect((await sheetScroll(page)).top, 'the layer has nowhere to be pushed').toBeGreaterThan(0);
+    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
+
+    await page.mouse.move(Math.round(grip.x + grip.width / 2), Math.round(grip.y + grip.height / 2));
+    await page.mouse.wheel(0, -20);
+    // Far longer than the window this replaced, and far longer than a starved
+    // engine has ever taken to deliver a push: slow, not absent.
+    await page.waitForTimeout(900);
+    await page.evaluate(() => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
+    });
+
+    await expect(
+      page.getByTestId('player-sheet'),
+      'a push the engine was slow to deliver was disowned, and the card came back',
+    ).toHaveCount(0);
+  });
+
+  /**
    * And a tap is not a hand for this purpose either.
    *
    * The real-reader version of the case above, and the reason the rule is

@@ -610,14 +610,28 @@ export function Sheet({
     /*
      * How long after the reader's last input a scroll is still theirs.
      *
+     * **This measures how late the engine may be, not how long a gesture is.**
      * Momentum outlives the finger and arrives as bare scroll events with no
-     * input beside them, so this covers the gap between two of them rather than
-     * the length of a flick — every scroll that qualifies pushes the window out
-     * again, so a long one stays the reader's for as long as it keeps moving. A
-     * frame is 16ms and a loaded CI shard is slower than a frame, hence the
-     * margin.
+     * input beside them, and every scroll that qualifies pushes the window out
+     * again, so a movement stays the reader's for as long as it keeps moving.
+     * What the window has to cover, then, is the gap before the *first* of
+     * those — the delay between asking the layer to move and the layer moving.
+     *
+     * Sized at a frame, generously, it was too small by an order of magnitude.
+     * WebKit's wheel scrolling is starved by a page doing per-frame work: the
+     * pull-to-refresh specs install a watcher before they swipe, and the same
+     * wheel that moves this layer 675px moves it 50 while that watcher runs.
+     * The push then arrived after its own window had closed, the layer read the
+     * reader's own movement as a stray and put the card back, and two dismissal
+     * specs failed on the widest phone — the one with the furthest to scroll,
+     * and only there.
+     *
+     * A second and more than covers that. It can be this generous because a tap
+     * does not open it: the click case this whole rule exists for never gets a
+     * window at all, however fast the clicks come, so nothing here has to
+     * separate one click from the next.
      */
-    const HANDS_OFF = 300;
+    const HANDS_OFF = 1500;
     /** The keys that scroll a box, and so can push this one. */
     const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
     let timer: number | undefined;
@@ -655,7 +669,16 @@ export function Sheet({
      */
     let pointerAt: { x: number; y: number } | null = null;
     let dragging = false;
-    let handsOn = 0;
+    /*
+     * When the reader last did something the layer could act on.
+     *
+     * Minus infinity rather than nought, and that is not decoration: `stamp()`
+     * is time since the page loaded, so nought means "at load", and a sheet
+     * opened inside the window would read the beginning of time as input that
+     * had just happened — every stray scroll on it credited to a hand that was
+     * never there. The honest initial value is that it has not happened.
+     */
+    let handsOn = Number.NEGATIVE_INFINITY;
     /*
      * Until when the settle's own smooth scroll is expected to still be running.
      *
