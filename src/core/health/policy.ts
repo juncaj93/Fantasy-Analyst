@@ -44,6 +44,7 @@ import { boundedNote, type FreshnessMeasure, type Severity, type SourceHealth, t
  * the order they would want to be told.
  */
 export type SourceId =
+  | 'roster'
   | 'injuries'
   | 'vegas'
   | 'nfl-state'
@@ -198,6 +199,32 @@ export const CRON_LABELS: Record<string, string> = {
 };
 
 export const SOURCE_POLICIES: readonly SourcePolicy[] = [
+  /*
+   * First, because it is the subject every other row is about.
+   *
+   * It was absent from this list entirely until a defence claimed off waivers
+   * failed to appear on the Team page for two days. Nothing was broken in the
+   * roster path; nothing had *read* it. `syncLeague` was reachable from
+   * selecting a league, from a pull down the Team or Waivers screen, and from
+   * the one-shot post-draft adoption — and from no clock at all, so a roster
+   * that changed in Sleeper stayed wrong in this app until somebody happened to
+   * pull. Meanwhile this screen reported eleven feeds as Current and said
+   * nothing about the one fact all eleven are describing, which is how a stale
+   * roster came to look like healthy data.
+   *
+   * `attempt` rather than `data`: Sleeper always answers, so what is worth
+   * measuring is when this app last asked. A roster that came back identical is
+   * a successful read and not a stale one.
+   */
+  {
+    id: 'roster',
+    label: 'Your roster',
+    severity: 'critical',
+    measure: 'attempt',
+    cadence: 'Synced daily, and on every pull to refresh',
+    impact:
+      'Adds, drops and waiver claims made in Sleeper are missing, so every screen is reasoning about a squad you no longer have.',
+  },
   {
     id: 'injuries',
     label: 'Injuries',

@@ -130,6 +130,47 @@ describe('a weekly refresh', () => {
     expect(report.spent).toBe(0);
   });
 
+  /**
+   * The discovery interval is a politeness rule, and a person may skip it.
+   *
+   * `lastVegasSchedule` is stamped *before* the provider is called, so a
+   * discovery that came back with nothing — which is every discovery run in the
+   * fortnight between a draft and week one, before the window learned to stretch
+   * to the next slate — locks the app out of re-asking for three days. For a
+   * clock that is correct; it comes round again on its own. For somebody looking
+   * at a screen that says the lines are nine days old, it makes the refresh
+   * control a button that does nothing and gives no reason.
+   */
+  it('lets a person re-ask for the schedule inside the interval a clock must wait out', async () => {
+    await new VegasRefreshService(db, new CountingProvider()).refresh();
+
+    const scheduled = new CountingProvider();
+    await new VegasRefreshService(db, scheduled).refresh();
+    expect(scheduled.teamCalls, 'a scheduled pass still waits out the interval').toHaveLength(0);
+
+    const manual = new CountingProvider();
+    await new VegasRefreshService(db, manual).refresh({ manual: true });
+    expect(manual.teamCalls, 'a person asking gets a fresh discovery').toHaveLength(1);
+  });
+
+  /**
+   * And it skips the interval, never the ceiling.
+   *
+   * The one way this change could have been wrong: a manual refresh that also
+   * walked past `canSpend` would let a frustrated owner tapping a button spend
+   * a month's allowance in an afternoon. The budget is the invariant; the
+   * interval is a courtesy.
+   */
+  it('still refuses a person when the month’s allowance is gone', async () => {
+    const provider = new CountingProvider(2500);
+    const report = await new VegasRefreshService(db, provider).refresh({ manual: true });
+
+    expect(provider.teamCalls).toHaveLength(0);
+    expect(provider.asked).toHaveLength(0);
+    expect(report.spent).toBe(0);
+    expect(report.budget.state).toBe('hard_stop');
+  });
+
   it('carries on when the provider will not say what has been spent', async () => {
     const provider = new CountingProvider(null);
     const report = await new VegasRefreshService(db, provider).refresh();

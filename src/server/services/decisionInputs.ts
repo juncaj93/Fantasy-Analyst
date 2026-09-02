@@ -28,7 +28,13 @@ import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
 import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION } from '../../core/roster/freeAgents.ts';
 import { AdpRepo } from '../repos/adp.ts';
-import { buildRosterShape, buildScoringProfile, startablePositions } from '../../core/sleeper/scoring.ts';
+import {
+  buildRosterShape,
+  buildScoringProfile,
+  startablePositions,
+  type ScoringProfile,
+} from '../../core/sleeper/scoring.ts';
+import { publishedRefusal } from '../../core/sleeper/weeklyProjections.ts';
 import { detectBestBall } from '../../core/sleeper/bestBall.ts';
 import { isDraftComplete } from '../../core/season/lifecycle.ts';
 import { resolveWeek } from '../../core/matchup/build.ts';
@@ -98,6 +104,8 @@ export interface LineupDecisionInputs extends LeagueDecisionBase {
   inputs: StartSitInput[];
   mode: StartSitMode;
   published: Map<string, number>;
+  /** One sentence naming a position this league may not read a published total for. */
+  publishedRefusal: string | null;
   unknownPlayers: number;
 }
 
@@ -143,8 +151,53 @@ export async function gatherLineupInputs(
     inputs,
     mode,
     published,
+    publishedRefusal: publishedRefusalNote(base.profile, positions),
     unknownPlayers: base.mine.playerIds.length - inputs.length,
   };
+}
+
+/**
+ * The positions this league may not read a published total for, said once.
+ *
+ * A league fact, not a player fact, which is why it becomes one note beside the
+ * lineup rather than a mark on sixteen rows. In a league scoring six-point
+ * passing touchdowns, every running back, receiver and tight end gets
+ * Rotowire's number and the quarterback gets a dash — correctly, because that
+ * total was computed under four-point passing touchdowns and would understate
+ * him — and from the outside those two facts are one screen that looks
+ * half-broken. Reported as exactly that on 2 September 2026: "projections show
+ * for most players but not for QB Joe Burrow specifically."
+ *
+ * Composed here because this file is one of the few sanctioned to import the
+ * published feed at all, and it hands `assembleLineup` a finished sentence. The
+ * optimiser never sees the assumptions it was built from, which is the boundary
+ * `tests/sleeperProjectionFallback.test.ts` exists to hold.
+ *
+ * Only positions actually on the roster are named. A rule about tight ends is
+ * not worth a sentence to somebody who does not have one.
+ */
+function publishedRefusalNote(
+  profile: ScoringProfile,
+  positions: ReadonlyMap<string, string | null>,
+): string | null {
+  const distinct = [...new Set([...positions.values()].map((p) => (p ?? '').toUpperCase()).filter(Boolean))];
+  const refused = distinct
+    .map((position) => ({ position, reason: publishedRefusal(profile, position) }))
+    .filter((r): r is { position: string; reason: string } => r.reason != null);
+  if (refused.length === 0) return null;
+
+  /*
+   * One reason, when every refused position shares it — the ordinary case,
+   * because a single non-default setting disqualifies a single position.
+   * Otherwise the positions are named and the detail is left to Setup: three
+   * explanations joined together is not a sentence anybody finishes.
+   */
+  const reasons = new Set(refused.map((r) => r.reason));
+  const only = [...reasons][0];
+  if (reasons.size === 1 && only) return `Published projections — ${only}`;
+  return `Published projections are not quoted for ${refused
+    .map((r) => r.position)
+    .join(', ')} in this league: its scoring for those positions differs from what the published feed assumes.`;
 }
 
 // ------------------------------------------------------------------ waivers
