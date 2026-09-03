@@ -65,6 +65,48 @@ export const COMPLETE_FRACTION = 0.32;
 /** …or how fast it must be travelling, in px/ms, to navigate on a flick. */
 export const COMPLETE_VELOCITY = 0.45;
 
+/* --------------------------------------------------------- sheet dismissal */
+
+/** How much of the push has to be given before a sheet counts it at all. */
+export const DISMISS_HOLD = 0.4;
+
+/** …and how much of it makes the distance the whole of the answer. */
+export const DISMISS_COMMIT = 0.75;
+
+/**
+ * The speed, in px/ms, that settles the band between those two.
+ *
+ * Where the number came from, measured on the sheet's own layer at 430×932: a
+ * crawl peaked at 0.17, an unhurried pull at 0.30, a deliberate one at 0.40, a
+ * brisk one at 1.06, a flick at 2.68. It sits below the deliberate pull with
+ * room to spare rather than splitting the close pair, because the two mistakes
+ * do not cost the same: a dismissal wrongly withheld springs back and can be
+ * made again, and a card wrongly thrown away cannot be.
+ */
+export const DISMISS_VELOCITY = 0.25;
+
+/**
+ * Far enough, or fast enough, to let a sheet go.
+ *
+ * `given` is the fraction of the way to dismissed the push reached; `velocity`
+ * is how fast it ever travelled, in px/ms. `measured` is whether a speed was
+ * ever readable at all — a movement delivered as a single jump has a distance
+ * and no speed, and withholding a dismissal on evidence that was never
+ * collected would be a guess rather than a judgement. So an unmeasured push is
+ * answered on distance, the way every push was answered before speed was asked.
+ *
+ * Distinct from {@link completesBack} in one way that matters: a back swipe
+ * reads the finger as it lifts, and a sheet reads the layer once it has come to
+ * rest — a scroller always decelerates to a stop, so there is no release
+ * velocity left to read by then. Hence a peak over the movement rather than a
+ * window at the end of it.
+ */
+export function dismissesSheet(given: number, velocity: number, measured: boolean): boolean {
+  if (given >= DISMISS_COMMIT) return true;
+  if (given < DISMISS_HOLD) return false;
+  return !measured || velocity >= DISMISS_VELOCITY;
+}
+
 /* ------------------------------------------------------- pull to refresh */
 
 /** How far the finger has to travel before the page reloads. */
@@ -181,9 +223,11 @@ export const VELOCITY_WINDOW = 120;
 /**
  * How many recent positions are kept to judge a flick by.
  *
- * Up here with the window it serves rather than beside one of its two callers:
- * the sheet and the back swipe judge a flick the same way, and the edge swipe
- * spent a while not doing so — see {@link useEdgeSwipeBack}.
+ * Up here with the window it serves rather than inside the hook that uses it.
+ * It once served two: the sheet judged a flick this way too, until the
+ * dismissal became a scroll and there stopped being a finger to sample — see
+ * {@link dismissesSheet} for what the sheet reads instead, and why a window at
+ * the end of a movement cannot tell it anything.
  */
 const SAMPLE_LIMIT = 12;
 

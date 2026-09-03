@@ -13,7 +13,7 @@
 
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
+import { dismissesSheet, useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
 import { BackChevronIcon, ChevronIcon } from './icons.tsx';
@@ -581,10 +581,41 @@ export function Sheet({
    *
    * Neither is a resting place worth having, so the resting places are named
    * here instead: the card in place, or the card gone, and nothing between.
-   * `HOLD` is how much of the push has to be given before it counts as one —
-   * short of it the card comes back, past it the card goes. It is one number and
-   * it is meant to be turned by feel on a real phone, which is the only place
-   * the question can honestly be asked.
+   *
+   * **How far is not on its own enough, and that is the complaint this answers.**
+   * A distance is all a scroll leaves behind once it has stopped, so a card
+   * pushed slowly and uncertainly to the middle of the screen and one thrown
+   * there arrived at the same place and were read the same way: measured on the
+   * widest phone, a pull taking two and a half seconds to travel half the layer
+   * dismissed the card exactly as a pull taking a sixth of a second did. A
+   * dismissal is a thing a reader *means*, and a movement that never once got
+   * above a walking pace is somebody deciding, not somebody deciding to leave.
+   *
+   * So a push is answered by how far it went **and** how fast it ever went, and
+   * the three numbers are read together:
+   *
+   *  - short of `DISMISS_HOLD`, the card comes back, whatever the speed — the same
+   *    "that was a nudge" it has always been;
+   *  - past `DISMISS_COMMIT`, the card goes, whatever the speed. A card three-quarters
+   *    off the screen is not an accident, and a reader who cannot flick — or
+   *    who simply prefers to place it — must still be able to finish. Nothing
+   *    in here may become the only way out of anything;
+   *  - between the two, the card goes only if the movement reached
+   *    `DISMISS_VELOCITY` at some point in it. That is the band where intent is
+   *    genuinely ambiguous, and speed is what resolves it.
+   *
+   * The three numbers live with the app's other gesture thresholds, in
+   * `gestures.ts`, where {@link dismissesSheet} states the rule and records what
+   * each of them was measured at. They are meant to be turned by feel on a real
+   * phone, which is the only place the question can honestly be asked; what is
+   * owed here is the measuring, which is the part a scroller makes awkward.
+   *
+   * **The speed is a peak over the movement, not a reading at the end of it.**
+   * A scroller always decelerates to a stop — that is what momentum is — so by
+   * the time the debounce below has decided a movement is over, whatever speed
+   * it had is gone. A hand that means to throw a card away is quick *somewhere*
+   * in the push even when it starts gently and lands softly; a hand still making
+   * its mind up never is. So the fastest moment is what is kept.
    *
    * Debounced on `scroll` rather than waiting for `scrollend`, which Safari only
    * learned recently and which this cannot be the first thing to require.
@@ -592,8 +623,6 @@ export function Sheet({
   useEffect(() => {
     const root = scroller.current;
     if (!root) return;
-    /** Fraction of the way to dismissed a push must reach to be a dismissal. */
-    const HOLD = 0.4;
     /** How long the card takes to finish leaving once the outcome is settled. */
     const EXIT = 180;
     /*
@@ -645,8 +674,8 @@ export function Sheet({
      * bringing a row into view before clicking it, a reflow under an opening
      * keyboard — scrolls the nearest ancestor that can satisfy it, and when the
      * card's own body is already at its top that ancestor is this layer. So the
-     * layer can be parked past `HOLD` with nobody having touched it, and then
-     * whether the card survives is a race between the settle timer and whatever
+     * layer can be parked past `DISMISS_HOLD` with nobody having touched it, and
+     * then whether the card survives is a race between the settle timer and what
      * scrolls it back. Measured on the compare sheet: one click on a candidate
      * moved this layer from its detent at 704 to 369, four times in ten.
      *
@@ -694,6 +723,48 @@ export function Sheet({
     let springUntil = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
     /*
+     * The fastest this movement has travelled toward gone, and where it was
+     * last seen, so the next scroll can be turned into a speed.
+     *
+     * **`sampled` is the honest answer to "and if we never found out?"** A speed
+     * needs two positions and the gap between them, and there are movements this
+     * layer is given only one position for: a single `scrollTop` write moves it
+     * a whole screen inside one event, which is what a test does when its
+     * subject is a stated distance, and what a page can do to itself. Guessing
+     * "slow" there would withhold a dismissal on no evidence at all. So an
+     * unmeasured movement is judged the way it was judged before any of this —
+     * on distance — and the speed may only ever *withhold* a dismissal it has
+     * actually watched being slow.
+     */
+    let peak = 0;
+    let sampled = false;
+    let lastTop = 0;
+    let lastAt = 0;
+    /** Begin reading a fresh movement, from wherever the layer is now. */
+    const rewind = () => {
+      peak = 0;
+      sampled = false;
+      lastTop = root.scrollTop;
+      lastAt = stamp();
+    };
+    /**
+     * One scroll's worth of speed.
+     *
+     * Only movement toward gone counts. A push that wanders back up the layer
+     * mid-gesture is a reader changing their mind, and the speed of the changing
+     * has nothing to say about whether they meant to leave.
+     */
+    const sample = (top: number) => {
+      const at = stamp();
+      const gap = at - lastAt;
+      const travelled = lastTop - top;
+      lastTop = top;
+      lastAt = at;
+      if (gap <= 0 || travelled <= 0) return;
+      sampled = true;
+      peak = Math.max(peak, travelled / gap);
+    };
+    /*
      * Real input: the reader has done something the layer can act on.
      *
      * **Only this cancels a spring-back, and that distinction is load-bearing.**
@@ -707,6 +778,9 @@ export function Sheet({
      * the scrim reading 0.699 on a push made to 0.7.
      */
     const gestured = () => {
+      // A movement that begins out of stillness is a new one, and starts its
+      // speed over. One already under way keeps the peak it has earned.
+      if (!hands()) rewind();
       springUntil = 0;
       handsOn = stamp();
     };
@@ -723,6 +797,10 @@ export function Sheet({
     const onDown = (event: Event) => {
       pointerAt = pointOf(event);
       dragging = false;
+      // A hand arriving on the layer starts a movement, and a movement's speed
+      // is its own. Without this, two pushes a moment apart would share a peak
+      // and the second would inherit whatever the first had earned.
+      rewind();
     };
     const onMove = (event: Event) => {
       const at = pointOf(event);
@@ -820,15 +898,22 @@ export function Sheet({
       if (leaving) return;
       const detentTop = root.scrollHeight - root.clientHeight;
       if (detentTop <= 0) return;
-      if (root.scrollTop <= detentTop * (1 - HOLD)) {
+      // How much of the push was given, and whether it was ever given quickly.
+      if (dismissesSheet(1 - root.scrollTop / detentTop, peak, sampled)) {
         leave();
         return;
       }
       // Already where it belongs. A pixel of tolerance because a smooth scroll
       // lands on a fraction and `scrollTop` is not obliged to be an integer.
-      if (root.scrollTop >= detentTop - 1) return;
+      if (root.scrollTop >= detentTop - 1) {
+        rewind();
+        return;
+      }
       springUntil = stamp() + SPRING;
       root.scrollTo({ top: detentTop, behavior: 'smooth' });
+      // The push has been answered. What the spring-back does from here is the
+      // layer's own movement, and the next push starts its speed from nothing.
+      rewind();
     };
 
     /*
@@ -873,10 +958,16 @@ export function Sheet({
          */
         if (detentTop > 0) paint(top / detentTop);
         if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
+        // Not the reader's movement, so it earns no speed — but it does move the
+        // layer, and a stale position would turn the next real push's first
+        // scroll into a speed measured across the spring's travel as well.
+        lastTop = top;
+        lastAt = stamp();
         return;
       } else if (hands()) {
         // A movement already under way, which keeps its window open as it goes.
         refresh();
+        sample(top);
       } else {
         /*
          * A scroll nobody made: put the card back where it belongs and decide
@@ -892,6 +983,9 @@ export function Sheet({
         window.clearTimeout(timer);
         if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
         paint(1);
+        // Corrected, not travelled. The layer is back at the card's position and
+        // whatever a hand does next starts from there.
+        rewind();
         return;
       }
       if (detentTop > 0) paint(top / detentTop);
@@ -930,6 +1024,7 @@ export function Sheet({
       window.clearTimeout(timer);
       timer = window.setTimeout(settle, SETTLE);
     };
+    rewind();
     root.addEventListener('scroll', onScroll, { passive: true });
     /*
      * The input listeners sit on the layer, which every part of a sheet is

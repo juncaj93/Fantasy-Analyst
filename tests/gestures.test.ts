@@ -19,11 +19,15 @@ import {
   COMPLETE_FRACTION,
   COMPLETE_VELOCITY,
   DIRECTION_RATIO,
+  DISMISS_COMMIT,
+  DISMISS_HOLD,
+  DISMISS_VELOCITY,
   EDGE_ZONE,
   ENGAGE_DISTANCE,
   VELOCITY_WINDOW,
   completesBack,
   dimOpacity,
+  dismissesSheet,
   engageDecision,
   startsAtEdge,
   velocityOver,
@@ -168,5 +172,46 @@ describe('the screen behind a half-completed push', () => {
     expect(dimOpacity(-100, 390)).toBeLessThanOrEqual(0.18);
     expect(dimOpacity(10_000, 390)).toBe(0);
     expect(dimOpacity(50, 0)).toBe(0);
+  });
+});
+
+/**
+ * When a push takes a sheet away.
+ *
+ * The complaint these hold: a card pulled down slowly and uncertainly to the
+ * middle of the screen went away exactly as one thrown there did, because a
+ * distance is all a scroll leaves behind once it has stopped. Measured on the
+ * layer at 430×932, a two-and-a-half second crawl peaked at 0.17px/ms and a
+ * flick at 2.68, and both dismissed.
+ */
+describe('when a push takes a sheet away', () => {
+  it('lets a card go when it was pushed far and fast', () => {
+    expect(dismissesSheet(0.55, 1.06, true)).toBe(true);
+    expect(dismissesSheet(DISMISS_HOLD, DISMISS_VELOCITY, true)).toBe(true);
+  });
+
+  it('brings back a slow crawl that got past the distance anyway', () => {
+    // The measured crawl: half the layer, and never above a walking pace.
+    expect(dismissesSheet(0.53, 0.17, true)).toBe(false);
+    expect(dismissesSheet(0.74, 0.24, true)).toBe(false);
+  });
+
+  it('lets a slow push go once it has gone far enough to only be meant', () => {
+    // Nothing here may become the only way out: a reader who cannot flick, or
+    // would rather place the card, must still be able to finish.
+    expect(dismissesSheet(DISMISS_COMMIT, 0, true)).toBe(true);
+    expect(dismissesSheet(0.95, 0.01, true)).toBe(true);
+  });
+
+  it('brings back a nudge however fast it was', () => {
+    expect(dismissesSheet(0.2, 5, true)).toBe(false);
+    expect(dismissesSheet(0, 5, true)).toBe(false);
+  });
+
+  it('judges an unmeasured push on distance, rather than guessing it was slow', () => {
+    // A movement delivered as one jump has a distance and no speed. Withholding
+    // a dismissal there would be a guess about evidence never collected.
+    expect(dismissesSheet(0.55, 0, false)).toBe(true);
+    expect(dismissesSheet(0.2, 0, false)).toBe(false);
   });
 });
