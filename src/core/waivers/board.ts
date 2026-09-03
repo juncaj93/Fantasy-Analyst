@@ -166,8 +166,17 @@ export interface WaiverUnknownLike {
   trending?: string | null;
   /** Adds across Sleeper in the published window, for the row's one number. */
   adds?: number | null;
-  /** 0–1 attention, for ordering this tier. */
+  /** 0–1 attention, kept for anything that wants one number. */
   heat?: number | null;
+  /**
+   * Sleeper's published position in the adds list, which orders this tier.
+   *
+   * Carried as a rank because that is what `compareRows` already sorts on, and
+   * because for these rows it is literally the only ranking available: every
+   * one of them has a null score, so gain cannot separate them and the
+   * alphabet is not an order anybody asked for.
+   */
+  leagueRank?: number | null;
 }
 
 export interface WaiverAdviceLike {
@@ -745,7 +754,7 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
     ],
     statusFlag: unknown.statusFlag ?? null,
     score: null,
-    leagueRank: null,
+    leagueRank: unknown.leagueRank ?? null,
     bid: null,
   };
 }

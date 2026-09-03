@@ -385,6 +385,27 @@ describe('the three tiers', () => {
     expect(row.reasons.join(' ')).toContain('Unknown, not ruled out');
   });
 
+  /*
+   * The order this tier is actually read in.
+   *
+   * Every unknown row has a null score, so `gain` cannot separate them and the
+   * fallback is the alphabet — which would put the fortieth-most-added player
+   * above the first for no reason a reader could guess. Sleeper's own rank is
+   * the order, and this asserts it survives the board's sort rather than only
+   * the assembly's.
+   */
+  it('orders the unscorable by how hard the room is chasing them', () => {
+    const board = buildWaiverBoard({
+      upgrades: [],
+      unknowns: [
+        { playerId: 'z', name: 'Aaron Alphabetical', position: 'RB', team: 'CHI', leagueRank: 9, adds: 400 },
+        { playerId: 'a', name: 'Zeke Zulu', position: 'RB', team: 'GB', leagueRank: 1, adds: 40000 },
+      ],
+    });
+
+    expect(board.rows.map((r) => r.name)).toEqual(['Zeke Zulu', 'Aaron Alphabetical']);
+  });
+
   it('never gives one player two rows across tiers', () => {
     const board = buildWaiverBoard({
       upgrades: [
