@@ -1,0 +1,106 @@
+name: D1 query plans
+
+# Does production actually use the index, in SQLite's own words.
+#
+# `d1 insights` reports a rolling 24-hour window, and a rolling window is a bad
+# instrument for answering "did the thing I just shipped work". Its call counts
+# move for two reasons at once -- new calls arriving and old calls ageing out --
+# and the two are not separable from the outside. I read a net change of
+# +12 calls / +12 rows as "twelve calls costing one row each" and told the owner
+# the index was proven. It was not: the next reading showed the window shedding
+# old calls at 412 rows apiece, which is exactly the arithmetic that could have
+# produced that net on its own.
+#
+# So this asks the question directly instead of inferring it. `EXPLAIN QUERY
+# PLAN` is SQLite describing what it will do with a statement, against the real
+# production database:
+#
+#   USE TEMP B-TREE FOR ORDER BY   -- the whole table is read and sorted
+#   USING INDEX idx_..._latest     -- the index answers the ORDER BY
+#
+# There is no window, no averaging and nothing to misread. It is also honest
+# about the negative case: if the migration did not create the index, or SQLite
+# declines to use it, this says so in one line.
+#
+# Read-only and cheap. `EXPLAIN QUERY PLAN` executes nothing -- it returns the
+# plan, not the rows -- and `PRAGMA index_list` reads schema. Safe to run at any
+# time, including while the quota is exhausted.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  explain:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # The committed wrangler.toml carries a placeholder database id, as in
+      # every other remote workflow here.
+      - name: Point the config at the database
+        run: |
+          set -euo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then echo "::error::No database called $DATABASE_NAME."; exit 1; fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      # Fixed statements, not an input. A workflow that runs arbitrary SQL
+      # against production because someone typed it into a box is a different
+      # and much worse tool than this one.
+      - name: What the indexes are, and what the planner does with them
+        run: |
+          set -euo pipefail
+          ask() {
+            echo ""
+            echo "--- $1"
+            npx wrangler d1 execute "$DATABASE_NAME" --remote --command "$2" 2>&1 \
+              | grep -v '^$' || true
+          }
+
+          {
+            ask "indexes on injury_source_runs" "PRAGMA index_list('injury_source_runs')"
+            ask "indexes on usage_source_runs"  "PRAGMA index_list('usage_source_runs')"
+            ask "plan: injury latestRun()" \
+              "EXPLAIN QUERY PLAN SELECT * FROM injury_source_runs ORDER BY fetched_at DESC, id DESC LIMIT 1"
+            ask "plan: usage latestRun()" \
+              "EXPLAIN QUERY PLAN SELECT * FROM usage_source_runs ORDER BY fetched_at DESC, id DESC LIMIT 1"
+          } | tee plans.txt
+
+          echo ""
+          if grep -qi 'TEMP B-TREE' plans.txt; then
+            echo "::error::A latest-run read is still sorting the whole table. The index is not being used."
+          else
+            echo "No TEMP B-TREE in any plan: the ORDER BY is answered from an index."
+          fi
+
+          {
+            echo '### D1 query plans'
+            echo ''
+            echo 'A `TEMP B-TREE FOR ORDER BY` means the whole table is read and sorted to'
+            echo 'return one row. `USING INDEX` means it is not.'
+            echo ''
+            echo '```'
+            cat plans.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
