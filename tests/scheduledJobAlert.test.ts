@@ -45,12 +45,19 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
   });
 
   it('finds the scheduled workflows', () => {
-    // The two ADP refreshes, and now smoke.yml: the full production sweep
+    // The two ADP refreshes, and smoke-daily.yml: the full production sweep
     // moved off every deploy and onto a daily schedule when 150 test
-    // executions a deploy were found to be spending the D1 row quota. A new
-    // one that forgets the alert fails the assertions below rather than going
-    // unnoticed for twelve days, which is the whole point.
-    expect(scheduled).toEqual(['refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke.yml']);
+    // executions a deploy were found to be spending the D1 row quota.
+    //
+    // The sweep is a wrapper around `smoke.yml` rather than a schedule inside
+    // it, and this list is why the difference is load-bearing: the alarm needs
+    // `issues: write`, `smoke.yml` is called by `deploy.yml`, and a called
+    // workflow cannot hold permissions its caller lacks. Putting the schedule
+    // in `smoke.yml` failed every Deploy at startup.
+    //
+    // A new scheduled workflow that forgets the alert fails the assertions
+    // below rather than going unnoticed for twelve days, which is the point.
+    expect(scheduled).toEqual(['refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke-daily.yml']);
   });
 
   it.each(scheduled)('%s calls the alert', (name) => {
