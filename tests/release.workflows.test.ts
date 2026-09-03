@@ -252,14 +252,36 @@ describe('Smoke reports on the revision it was told about', () => {
   const inputs = asMap(call['inputs']);
 
   it('is called with the revision the release published', () => {
-    expect(Object.keys(inputs).sort()).toEqual(['expected_sha', 'url']);
+    /*
+     * `full` joined `expected_sha` and `url` when the deploy gate was split
+     * from the daily sweep. It is deliberately absent from what the callers
+     * pass: a deploy wants the gate, and the gate is the default. Asserting
+     * the exact set still catches an input added and never wired up.
+     */
+    expect(Object.keys(inputs).sort()).toEqual(['expected_sha', 'full', 'url']);
     for (const caller of ['deploy.yml', 'rollback.yml']) {
       const { yaml: callerYaml } = readWorkflow(caller);
       const smoke = job(callerYaml, 'smoke');
       expect(smoke['uses'], `${caller} should call smoke`).toBe('./.github/workflows/smoke.yml');
       expect(asMap(smoke['with'])['expected_sha']).toBe('${{ needs.release.outputs.sha }}');
       expect(asMap(smoke['with'])['url']).toBe('${{ needs.release.outputs.url }}');
+      expect(
+        asMap(smoke['with'])['full'],
+        `${caller} must not ask for the full sweep: 150 test executions against the live database on every deploy is what exhausted the D1 row quota`,
+      ).toBeUndefined();
     }
+  });
+
+  /**
+   * The depth that left the deploy path has to still happen somewhere.
+   *
+   * Moving the full sweep off every deploy is only defensible because it runs
+   * daily instead. If that schedule is ever dropped, the widths and the
+   * screenshots stop running at all and nothing else would say so.
+   */
+  it('still runs the full sweep daily, now that deploys only run the gate', () => {
+    expect(Object.keys(triggers(yaml))).toContain('schedule');
+    expect(text, 'the deploy gate selects the @critical specs').toContain('--grep @critical');
   });
 
   /*

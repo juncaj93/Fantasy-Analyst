@@ -377,7 +377,7 @@ async function present(page: Page, rowTestId: string): Promise<number> {
 }
 
 test.describe('the deployed app', () => {
-  test('loads, and lands on a floating toolbar with every destination the season has', async ({ page }) => {
+  test('loads, and lands on a floating toolbar with every destination the season has @critical', async ({ page }) => {
     await page.goto('/');
     const expected = await expectedTabs(page);
     for (const tab of expected) {
@@ -1433,7 +1433,7 @@ test.describe('the deployed app', () => {
     test.skip(checked === 0, 'no player on this board has last-season injury history');
   });
 
-  test('is installable, and still refuses a write from a stranger', async ({ page, request }) => {
+  test('is installable, and still refuses a write from a stranger @critical', async ({ page, request }) => {
     await page.goto('/');
     const manifest = await request.get('/manifest.webmanifest');
     expect(manifest.status()).toBe(200);
@@ -1459,7 +1459,7 @@ test.describe('the deployed app', () => {
    * The probe's absence is the assertion: it is installed by the controller and
    * removed with it, so "no probe" is exactly "no loop running".
    */
-  test('does not poll Sleeper for a reader with no session', async ({ page }) => {
+  test('does not poll Sleeper for a reader with no session @critical', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('draft'), 'Draft is out of season on this deployment');
@@ -1513,7 +1513,7 @@ test.describe('the season features', () => {
       .toEqual(['RB', 'TE', 'WR']);
   });
 
-  test('Team shows the league title alone, above starters by slot', async ({ page }) => {
+  test('Team shows the league title alone, above starters by slot @critical', async ({ page }) => {
     await page.goto('/');
     await open(page, 'team');
     const header = page.getByTestId('league-card').first();
@@ -2030,7 +2030,7 @@ test.describe('the decision intelligence', () => {
    * closed to somebody with no session. Whether the gesture *arms* at 68px is
    * settled in `tests/pullToRefresh.test.ts` and does not need a live site.
    */
-  test('the refresh is reachable, and refuses a stranger', async ({ page, request }) => {
+  test('the refresh is reachable, and refuses a stranger @critical', async ({ page, request }) => {
     await page.goto('/');
     await open(page, 'team');
     await expect(page.getByTestId('team-pull')).toBeVisible();
@@ -2528,7 +2528,7 @@ test.describe('the decision intelligence', () => {
  * because a local dev server is not a release. The workflow always sets it.
  */
 test.describe('the deployed revision', () => {
-  test('says which revision it is running, and it is the released one', async ({ request }) => {
+  test('says which revision it is running, and it is the released one @critical', async ({ request }) => {
     const res = await request.get('/api/health');
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { ok: boolean; release?: { gitSha?: string } };
@@ -2553,7 +2553,7 @@ test.describe('the deployed revision', () => {
 test.describe('the API boundary', () => {
   const isJson = (contentType: string | null) => /^application\/json/.test(contentType ?? '');
 
-  test('answers every /api/ path in JSON, including the refusals', async ({ request }) => {
+  test('answers every /api/ path in JSON, including the refusals @critical', async ({ request }) => {
     const cases = [
       { what: 'health', res: await request.get('/api/health', { failOnStatusCode: false }) },
       { what: 'overview', res: await request.get('/api/overview', { failOnStatusCode: false }) },
@@ -2581,7 +2581,7 @@ test.describe('the API boundary', () => {
     expect([401, 503]).toContain(cases[3]!.res.status());
   });
 
-  test('never shows a reader a parser error on a first, cold load', async ({ page }) => {
+  test('never shows a reader a parser error on a first, cold load @critical', async ({ page }) => {
     /*
      * A fresh context against the deployed site: the first load is the one the
      * original symptom was reported for, because it is the one that can meet a
