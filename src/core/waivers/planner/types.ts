@@ -31,6 +31,7 @@
 
 import type { RosterShape, ScoringProfile } from '../../sleeper/scoring.ts';
 import type { StartSitInput } from '../../startsit/engine.ts';
+import { ROSTER_SPOT_GAIN } from '../../startsit/waivers.ts';
 import type { HeldPlayer } from '../../roster/bench.ts';
 
 /**
@@ -266,15 +267,21 @@ export const DEFAULT_LIMITS: WaiverPlannerLimits = {
   maxClaims: 4,
   maxOutcomes: 6,
   /*
-   * Half a point of roster utility.
+   * Half a point of roster utility, and now the board's number too.
    *
    * Deliberately far below the start/sit engine's own `MIN_SWAP_GAIN` of 0.75,
    * because these are different transactions: a lineup swap that gains half a
    * point is noise the reader should not be asked to act on, and a waiver claim
    * that gains half a point is a free upgrade to a bench slot that was doing
    * nothing. What stops trivial claims being recommended is the bid, not this.
+   *
+   * It used to be a number this file owned alone, and that was the bug: the
+   * planner takes its targets from the board, and the board admitted nobody
+   * under a much higher bar, so this threshold could never actually be reached.
+   * Reading the shared constant is what keeps the two from drifting apart
+   * again — see `ROSTER_SPOT_GAIN`.
    */
-  minNetGain: 0.5,
+  minNetGain: ROSTER_SPOT_GAIN,
 };
 
 /**

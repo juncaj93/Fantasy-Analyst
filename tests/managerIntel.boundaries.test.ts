@@ -56,7 +56,8 @@ const PLAYERS = [
   player('rival-rb', 'RB'),
 ];
 
-const ADVICE: WaiverAdvice = {
+/* Only the slot-shaped half, which is all the competition read consumes. */
+const ADVICE: Pick<WaiverAdvice, 'upgrades'> = {
   upgrades: [
     {
       slot: 'RB',
@@ -92,11 +93,6 @@ const ADVICE: WaiverAdvice = {
       ],
     },
   ],
-  headline: null,
-  notes: [],
-  considered: 2,
-  skipped: 0,
-  threshold: 1.5,
 };
 
 const ROSTERS = [

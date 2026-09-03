@@ -14,7 +14,12 @@
 import { describe, expect, it } from 'vitest';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { StartSitEvaluation } from '../src/core/startsit/engine.ts';
-import { recommendWaiverUpgrades, MEANINGFUL_UPGRADE_GAIN, upgradeBar } from '../src/core/startsit/waivers.ts';
+import {
+  recommendWaiverUpgrades,
+  MEANINGFUL_UPGRADE_GAIN,
+  ROSTER_SPOT_GAIN,
+  upgradeBar,
+} from '../src/core/startsit/waivers.ts';
 import { candidate, signalWithNet } from './helpers/startsit.ts';
 
 const HALF_PPR = buildScoringProfile(
@@ -81,6 +86,133 @@ describe('an unfilled slot', () => {
     // nowhere near worth a roster move.
     expect(advice.upgrades).toEqual([]);
     expect(advice.headline).toBe('Your current options grade better than available waivers.');
+  });
+});
+
+/**
+ * The second question the board asks, and the three ways it goes wrong.
+ *
+ * A value add beats nobody you start. It is measured against the weakest man on
+ * your bench, because that is who a claim actually costs, and every test here
+ * is about *which* man that is allowed to be — get the baseline wrong and the
+ * tier fills with adds that are only better than somebody who was not playing.
+ */
+describe('a value add', () => {
+  it('is offered when a free agent beats the last man on the bench', () => {
+    const advice = recommendWaiverUpgrades({
+      // Seven starters plus a weak but playable bench receiver.
+      roster: [...healthyRoster(), candidate('wr3', 'Fourth Catcher', 'WR', 4)],
+      candidates: [candidate('fa-wr', 'Free Catcher', 'WR', 8)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...MY_IDS, 'wr3'],
+    });
+
+    // He beats nobody in the starting lineup, so he is not an upgrade...
+    expect(advice.upgrades).toEqual([]);
+    // ...and he is still plainly worth the roster spot the bench is wasting.
+    expect(advice.valueAdds).toHaveLength(1);
+    expect(advice.valueAdds[0]!.name).toBe('Free Catcher');
+    expect(advice.valueAdds[0]!.overName).toBe('Fourth Catcher');
+    expect(advice.valueAdds[0]!.gain).toBeGreaterThanOrEqual(ROSTER_SPOT_GAIN);
+    expect(advice.valueAdds[0]!.reasons.join(' ')).toContain('last man on your bench');
+  });
+
+  it('is never the same player already offered as a starting upgrade', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: [...healthyRoster(), candidate('wr3', 'Fourth Catcher', 'WR', 4)],
+      // Good enough to beat a starter, so he belongs in the stronger tier only.
+      candidates: [candidate('fa-wr', 'Free Catcher', 'WR', 25)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...MY_IDS, 'wr3'],
+    });
+
+    const upgraded = advice.upgrades.flatMap((u) => u.candidates.map((c) => c.name));
+    expect(upgraded).toContain('Free Catcher');
+    expect(advice.valueAdds.map((v) => v.name)).not.toContain('Free Catcher');
+  });
+
+  /*
+   * The bug this tier shipped with, caught here so it cannot come back.
+   *
+   * A player who cannot play is driven deep negative by the availability gate —
+   * minus seventy-eight in the case that found this — so as a baseline he makes
+   * every free agent on the wire look ninety points better than the bench. He is
+   * also not the drop a claim makes.
+   */
+  it('is not measured against a man who cannot play', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: [...healthyRoster(), candidate('wr3', 'Injured Catcher', 'WR', 16, { status: 'Out' })],
+      candidates: [candidate('fa-wr', 'Free Catcher', 'WR', 8)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...MY_IDS, 'wr3'],
+    });
+
+    // The only bench player is ruled out, so there is no baseline and no claim.
+    expect(advice.valueAdds).toEqual([]);
+  });
+
+  /*
+   * And the bye-week version of the same mistake.
+   *
+   * A bench player nobody has priced scores near nothing, and measured against
+   * him the whole wire clears the bar. The floor is drawn from players the
+   * market has actually priced, so an unpriced bench yields no value adds.
+   */
+  it('is not measured against a man the market has not priced', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: [...healthyRoster(), candidate('wr3', 'Unpriced Catcher', 'WR', null)],
+      candidates: [candidate('fa-wr', 'Free Catcher', 'WR', 8)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...MY_IDS, 'wr3'],
+    });
+
+    expect(advice.valueAdds).toEqual([]);
+  });
+
+  it('shares one threshold with the planner that consumes it', async () => {
+    const { DEFAULT_LIMITS } = await import('../src/core/waivers/planner/types.ts');
+    /*
+     * The bug behind this assertion: the planner declared a half-point bar and
+     * took its targets from a board that admitted nobody under 2.5, so its own
+     * threshold could never be reached. One constant, read by both.
+     */
+    expect(DEFAULT_LIMITS.minNetGain).toBe(ROSTER_SPOT_GAIN);
+  });
+});
+
+/**
+ * The players the app could not score, reported rather than dropped.
+ *
+ * The engine names all of them; which are worth a reader's attention is a
+ * league-intelligence question answered in `core/waivers/assemble.ts`.
+ */
+describe('an unscorable free agent', () => {
+  it('is reported rather than silently dropped', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: healthyRoster(),
+      candidates: [candidate('fa-te', 'Unread End', 'TE', null)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS,
+    });
+
+    expect(advice.unknowns.map((u) => u.name)).toEqual(['Unread End']);
+  });
+
+  it('is not reported when he is ruled out, which is an answer and not an absence', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: healthyRoster(),
+      candidates: [candidate('fa-te', 'Injured End', 'TE', null, { status: 'IR' })],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS,
+    });
+
+    expect(advice.unknowns).toEqual([]);
   });
 });
 

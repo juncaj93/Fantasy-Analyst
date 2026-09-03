@@ -143,8 +143,39 @@ export interface WaiverBidLike {
   disagreement?: { line: string | null } | null;
 }
 
+/** A bench-value add as the engine produces him, plus whatever the passes added. */
+export interface WaiverValueAddLike extends WaiverCandidateLike {
+  overPlayerId?: string | null;
+  overName?: string | null;
+}
+
+/**
+ * A player nothing could be scored on, and the reason he is worth naming.
+ *
+ * `trending` is that reason and is not optional in spirit: the assembly step
+ * only forwards the unscored players the rest of Sleeper is actually adding,
+ * so a row here always has something to say beyond the absence.
+ */
+export interface WaiverUnknownLike {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+  statusFlag?: string | null;
+  /** Sleeper's own line: `#3 trending add`, `Add rate accelerated 6×`. */
+  trending?: string | null;
+  /** Adds across Sleeper in the published window, for the row's one number. */
+  adds?: number | null;
+  /** 0–1 attention, for ordering this tier. */
+  heat?: number | null;
+}
+
 export interface WaiverAdviceLike {
   upgrades: WaiverUpgradeLike[];
+  /** Worth a roster spot without beating a starter. Absent on an older payload. */
+  valueAdds?: WaiverValueAddLike[];
+  /** Named but unscored, already filtered to the ones worth naming. */
+  unknowns?: WaiverUnknownLike[];
   headline?: string | null;
   notes?: string[];
   considered?: number;
@@ -167,7 +198,16 @@ export interface WaiverAdviceLike {
   dst?: DstPlan | null;
 }
 
-export type WaiverStrength = 'strong' | 'solid' | 'speculative';
+/**
+ * How strongly a row is put, across all three questions the board answers.
+ *
+ * The first three are degrees of one claim — he beats the man in your slot, by
+ * this much against the bar. `value` is a different claim rather than a weaker
+ * one (he beats nobody you start, and is still worth the roster spot), and
+ * `unknown` is not a claim at all (nothing could be scored, and the row exists
+ * so a reader chasing the name is told that rather than shown an empty page).
+ */
+export type WaiverStrength = 'strong' | 'solid' | 'speculative' | 'value' | 'unknown';
 
 /** What a defence row is: the plan's decision, and which half of it this is. */
 export interface WaiverDstRole {
@@ -286,6 +326,35 @@ const STRENGTH_LABEL: Record<WaiverStrength, string> = {
   strong: 'Highly rated',
   solid: 'Recommended',
   speculative: 'Worth a look',
+  /*
+   * Not `Recommended`, which is the word above it and a stronger claim than
+   * this row makes. A value add is the best thing available rather than an
+   * answer to a hole, and the badge should not let the two read alike.
+   */
+  value: 'Value add',
+  /*
+   * Said as the app's own limitation, never as a judgement on the player.
+   * `Unrated` would read as a verdict; this reads as an absence, which is what
+   * it is.
+   */
+  unknown: 'No data yet',
+};
+
+/**
+ * The order the three questions are asked in, for sorting.
+ *
+ * A tier rather than a comparison on `gain`, because the gains are not measured
+ * against the same thing: an upgrade's gain is over a starter and a value add's
+ * is over the last man on the bench, so the larger number is not the better
+ * move. Tier first keeps a +0.8 starter upgrade above a +6.0 bench add, which
+ * is the correct reading of both.
+ */
+const STRENGTH_TIER: Record<WaiverStrength, number> = {
+  strong: 0,
+  solid: 0,
+  speculative: 0,
+  value: 1,
+  unknown: 2,
 };
 
 /**
@@ -326,6 +395,29 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
         existing.fit.alsoFits = dedupe([...existing.fit.alsoFits, upgrade.slot]);
       }
     }
+  }
+
+  /*
+   * The value adds, after the upgrades and never over them.
+   *
+   * A player already offered as the answer to a starting slot keeps that
+   * framing: it is the stronger and more specific claim about the same
+   * decision, and two rows for one player would be the board arguing with
+   * itself. The engine already excludes them, and this is the second guard,
+   * held here because this map is where "one row per player" is enforced.
+   */
+  for (const add of advice.valueAdds ?? []) {
+    if (byPlayer.has(add.playerId)) continue;
+    byPlayer.set(add.playerId, valueRow(add));
+  }
+
+  /*
+   * And the unscored, last, having been filtered upstream to the ones the rest
+   * of Sleeper is adding.
+   */
+  for (const unknown of advice.unknowns ?? []) {
+    if (byPlayer.has(unknown.playerId)) continue;
+    byPlayer.set(unknown.playerId, unknownRow(unknown));
   }
 
   /*
@@ -374,8 +466,14 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
    * and a DST does not arrive as one, and this lane deliberately did not build a
    * second auction model for a two-dollar add. Counting it would have the page
    * promise a column that will never arrive.
+   *
+   * An unknown row is excluded for the same reason and a stronger one. Nothing
+   * prices a player nothing can score, so his empty cost column is not a pass
+   * that has yet to run — and counting him would let one unscorable name turn
+   * `every row is missing a price` true on a board where every priced row has
+   * one, which is the page reporting a gap it does not have.
    */
-  const priced = rows.filter((r) => r.dst == null);
+  const priced = rows.filter((r) => r.dst == null && r.strength.level !== 'unknown');
   const pending: string[] = [];
   if (priced.length > 0) {
     if (priced.every((r) => r.faab == null)) pending.push('expected cost');
@@ -561,6 +659,95 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
 }
 
 /**
+ * A bench-value add, as a row.
+ *
+ * `fit` names the bench rather than a slot, because there is no slot: the whole
+ * point of the row is that he improves the roster without answering a hole, and
+ * labelling him `Upgrades FLEX` would claim a comparison the engine did not
+ * make. `over` is the man he is measured against, so the reader can see the
+ * move whole — this add, that drop.
+ */
+function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
+  return {
+    playerId: add.playerId,
+    name: add.name,
+    position: add.position,
+    team: add.team,
+    strength: { level: 'value', label: STRENGTH_LABEL.value },
+    fit: {
+      slot: add.position,
+      need: 'upgrade',
+      label: add.overName ? `Better than ${add.overName}` : 'Best available',
+      alsoFits: [],
+    },
+    shortTerm: {
+      gain: add.gain,
+      label: `+${add.gain.toFixed(1)} pts`,
+      over: add.overName ?? null,
+    },
+    multiWeek: add.multiWeek ?? null,
+    faab: add.faab ?? null,
+    competition: add.competition ?? null,
+    bidders: add.bidders ?? null,
+    why: add.reasons[0] ?? 'Worth a roster spot',
+    reasons: add.reasons ?? [],
+    statusFlag: add.statusFlag ?? null,
+    score: add.score,
+    leagueRank: add.leagueRank ?? null,
+    bid: null,
+  };
+}
+
+/**
+ * A player nothing could be scored on, as a row.
+ *
+ * Every points field is null and stays null. The row exists to say two true
+ * things — the rest of Sleeper is adding him, and this app cannot tell you
+ * whether they are right — and the moment it carries a gain it is claiming the
+ * second one is false. `shortTerm.gain` is zero because the type requires a
+ * number; `label` is the word, and the word is what the screen prints.
+ */
+function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
+  const adds = unknown.adds ?? null;
+  return {
+    playerId: unknown.playerId,
+    name: unknown.name,
+    position: unknown.position,
+    team: unknown.team,
+    strength: { level: 'unknown', label: STRENGTH_LABEL.unknown },
+    fit: {
+      slot: unknown.position,
+      need: 'upgrade',
+      label: 'Being added across Sleeper',
+      alsoFits: [],
+    },
+    shortTerm: {
+      gain: 0,
+      label: adds == null ? 'Not scored' : `${formatAdds(adds)} adds`,
+      over: null,
+    },
+    multiWeek: null,
+    faab: null,
+    competition: null,
+    bidders: null,
+    why: unknown.trending ?? 'Trending across Sleeper, with nothing here to score him on',
+    reasons: [
+      unknown.trending ?? 'Trending across Sleeper',
+      'No market, usage or news for him yet, so this app cannot rate him. Unknown, not ruled out.',
+    ],
+    statusFlag: unknown.statusFlag ?? null,
+    score: null,
+    leagueRank: null,
+    bid: null,
+  };
+}
+
+/** `18,400` rather than `18400`, which is a different number to read at a glance. */
+function formatAdds(count: number): string {
+  return count.toLocaleString('en-US');
+}
+
+/**
  * How strongly to put it, from how far past the bar he is.
  *
  * The bar is the engine's own — the points a claim has to be worth before it is
@@ -584,6 +771,17 @@ export function strengthOf(gain: number, bar: number, need: 'unfilled' | 'upgrad
  * stable between renders.
  */
 function compareRows(a: WaiverBoardRow, b: WaiverBoardRow): number {
+  /*
+   * Tier before everything, including the league's own ranking.
+   *
+   * The league rank is a ranking *of players*, and it would happily float a
+   * heavily-added unknown above a starter upgrade — which is the one ordering
+   * this board must not produce, because the two rows are answers to different
+   * questions and only the first is a recommendation.
+   */
+  const tier = STRENGTH_TIER[a.strength.level] - STRENGTH_TIER[b.strength.level];
+  if (tier !== 0) return tier;
+
   if (a.leagueRank != null && b.leagueRank != null && a.leagueRank !== b.leagueRank) {
     return a.leagueRank - b.leagueRank;
   }

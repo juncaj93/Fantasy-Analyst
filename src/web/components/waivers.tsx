@@ -250,6 +250,24 @@ function PlanSection({ label, lines, testId }: { label: string; lines: string[];
   );
 }
 
+/**
+ * Which tint each verdict wears.
+ *
+ * A map rather than the nested ternary this used to be, because there are five
+ * levels now and the last two are not weaker recommendations but different
+ * kinds of statement. `value` takes the calm tint: it is a real recommendation,
+ * just not one about a hole in the lineup. `unknown` takes no tint at all — the
+ * plain badge — because a colour here would be the page having an opinion about
+ * a player it has openly said it cannot rate.
+ */
+const STRENGTH_TAG: Record<WaiverBoardRow['strength']['level'], string> = {
+  strong: 'tag-take',
+  solid: 'tag-calm',
+  speculative: 'tag-risky',
+  value: 'tag-calm',
+  unknown: '',
+};
+
 export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => void }) {
   return (
     <button
@@ -282,7 +300,7 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
           keeps the floor that lets it shrink first.
         */}
         <span
-          className={`tag waiver-strength tag-${row.strength.level === 'strong' ? 'take' : row.strength.level === 'solid' ? 'calm' : 'risky'}`}
+          className={`tag waiver-strength ${STRENGTH_TAG[row.strength.level]}`}
           data-testid="waiver-strength"
           title={row.strength.label}
         >
