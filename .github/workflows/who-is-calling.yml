@@ -87,7 +87,35 @@ jobs:
           import { readFileSync } from 'node:fs';
 
           const raw = (() => { try { return readFileSync('tail.jsonl', 'utf8'); } catch { return ''; } })();
-          const lines = raw.split('\n').filter((l) => l.trim().startsWith('{'));
+
+          // Objects are found by brace depth, not by line.
+          //
+          // The first capture returned 1,224 lines and this reported zero of
+          // everything, because it split on newlines and assumed one JSON
+          // object per line. `wrangler tail --format json` pretty-prints, so
+          // every line was a fragment, every JSON.parse threw, and the catch
+          // skipped them silently -- a count of zero that meant "could not
+          // read" and was printed as "nothing happened". Depth-scanning reads
+          // either shape, and quotes and escapes are tracked so a brace inside
+          // a user-agent string cannot end an object early.
+          const objects = [];
+          let depth = 0, start = -1, inStr = false, esc = false;
+          for (let i = 0; i < raw.length; i += 1) {
+            const c = raw[i];
+            if (inStr) {
+              if (esc) esc = false;
+              else if (c === '\\') esc = true;
+              else if (c === '\"') inStr = false;
+              continue;
+            }
+            if (c === '\"') { inStr = true; continue; }
+            if (c === '{') { if (depth === 0) start = i; depth += 1; }
+            else if (c === '}') {
+              depth -= 1;
+              if (depth === 0 && start !== -1) { objects.push(raw.slice(start, i + 1)); start = -1; }
+            }
+          }
+          const lines = objects;
 
           if (lines.length === 0) {
             console.log('No events arrived in the listening window.');
@@ -116,12 +144,12 @@ jobs:
           const byAgent = new Map();
           const crons = new Map();
           const bump = (m, k) => m.set(k, (m.get(k) ?? 0) + 1);
-          let scheduled = 0, fetches = 0, other = 0;
+          let scheduled = 0, fetches = 0, other = 0, unparsed = 0;
           const unknown = [];
 
           for (const line of lines) {
             let e;
-            try { e = JSON.parse(line); } catch { continue; }
+            try { e = JSON.parse(line); } catch { unparsed += 1; continue; }
             const cron = pick(e, 'event', 'cron');
             const isScheduled = cron != null || pick(e, 'event', 'scheduledTime') != null;
             const req = pick(e, 'event', 'request');
@@ -161,7 +189,12 @@ jobs:
             }
           };
 
-          console.log('events: ' + lines.length + '  (requests ' + fetches + ', scheduled ' + scheduled + ', other ' + other + ')');
+          console.log('events: ' + lines.length + '  (requests ' + fetches + ', scheduled ' + scheduled + ', other ' + other + ', unreadable ' + unparsed + ')');
+          if (unparsed === lines.length && lines.length > 0) {
+            console.log('');
+            console.log('Every record failed to parse. The capture is not the shape this expects;');
+            console.log('the raw artifact is attached. Do not read the tables below as silence.');
+          }
           table('Requests, by endpoint', byRequest, 'none');
           table('Requests, by client', byAgent, 'none');
           table('Scheduled runs, by cron', crons, 'none - no cron fired while this listened');

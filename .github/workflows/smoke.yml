@@ -16,8 +16,18 @@ name: Smoke-test production
 # refuses to report on anything else.
 
 on:
+  # Daily, so the depth the deploy gate no longer pays for is still paid for
+  # once a day against whatever is live.
+  schedule:
+    - cron: '30 7 * * *'
+
   workflow_call:
     inputs:
+      full:
+        description: 'Run every width and photograph every screen, rather than the deploy gate'
+        required: false
+        default: false
+        type: boolean
       url:
         description: 'Site to check'
         required: false
@@ -30,6 +40,11 @@ on:
         type: string
   workflow_dispatch:
     inputs:
+      full:
+        description: 'Run every width and photograph every screen'
+        required: false
+        default: true
+        type: boolean
       url:
         description: 'Site to check (defaults to the live one)'
         required: false
@@ -54,7 +69,7 @@ jobs:
   smoke:
     # Which third of the suite, because that is what a red tick has to answer
     # first. GitHub would otherwise label these `smoke (1)`.
-    name: smoke (${{ matrix.shard }}/3)
+    name: smoke ${{ (inputs.full || github.event_name == 'schedule') && format('({0}/3)', matrix.shard) || '(deploy gate)' }}
     runs-on: ubuntu-latest
     # The browser and its system libraries arrive with the image, rather than
     # being installed onto a runner that is busy installing something else.
@@ -101,7 +116,20 @@ jobs:
         # project, and this suite's weight is one file across three widths — so
         # three shards is one width each, which is both the natural split and
         # the one that reads best when a tick goes red.
-        shard: [1, 2, 3]
+        #
+        # And why this is now an expression. Every deploy used to run all three
+        # widths across all three shards -- 50 specs x 3 projects = 150 test
+        # executions against the live database, plus a two-theme crawl of every
+        # screen, on every deploy AND every rollback. On 2 September that ran
+        # five times before lunch because we were shipping quota fixes, which
+        # made the quota incident partly self-inflicted.
+        #
+        # A deploy asks one question: did THIS deployment work. Cross-width
+        # rendering is a property of the code, and `ci.yml` already runs these
+        # same specs at four widths on every pull request against a local
+        # build. So the gate runs one shard of the `@critical` tests and the
+        # full sweep runs daily, or on demand.
+        shard: ${{ fromJSON((inputs.full || github.event_name == 'schedule') && '[1, 2, 3]' || '[1]') }}
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
@@ -188,10 +216,24 @@ jobs:
         # different list — so this number now covers a third of the work it used
         # to, and it means "stuck" again rather than "big".
         timeout-minutes: 20
+        env:
+          FULL: ${{ inputs.full || github.event_name == 'schedule' }}
         run: |
-          npx playwright test --config playwright.production.config.ts \
-            --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360 \
-            --shard=${{ matrix.shard }}/3
+          set -eu
+          if [ "$FULL" = "true" ]; then
+            # Every width, split three ways, exactly as before.
+            npx playwright test --config playwright.production.config.ts \
+              --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360 \
+              --shard=${{ matrix.shard }}/3
+          else
+            # The deploy gate: the `@critical` specs at one width, on one
+            # runner. Around eight executions rather than 150, and every one of
+            # them a question only a deployment can answer -- the revision that
+            # is live, a cold boot, the API's JSON boundary, a roster read, and
+            # a stranger's write being refused.
+            npx playwright test --config playwright.production.config.ts \
+              --project=webkit-iphone-390 --grep @critical
+          fi
 
       # Screenshots of every screen at 390, in both themes, so a visual
       # regression can be looked at rather than argued about.
@@ -200,12 +242,15 @@ jobs:
       # which is the same site from all three runners, and three copies would
       # race for one artifact name and cost three crawls of production to no
       # end.
+      # Only on a full pass. Two themes x every screen is a second crawl of
+      # production, and it answers a visual-regression question, not a "did
+      # this deploy work" one.
       - name: Photograph every screen
-        if: ${{ always() && matrix.shard == 1 }}
+        if: ${{ always() && matrix.shard == 1 && (inputs.full || github.event_name == 'schedule') }}
         run: node scripts/screenshot-production.mjs "$PRODUCTION_URL" screenshots
 
       - uses: actions/upload-artifact@v4
-        if: ${{ always() && matrix.shard == 1 }}
+        if: ${{ always() && matrix.shard == 1 && (inputs.full || github.event_name == 'schedule') }}
         with:
           name: production-screenshots
           path: screenshots/
@@ -239,3 +284,22 @@ jobs:
             echo "Screens photographed in Light and Dark are attached to shard 1"
             echo "as the \`production-screenshots\` artifact."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The alarm, because this now runs on a schedule.
+  #
+  # A workflow that only ever ran when a human asked reports itself by being
+  # watched. One that runs at 07:30 does not: `Refresh draft order` failed on
+  # every scheduled run for eleven days in August and was found by somebody
+  # going looking. `tests/scheduledJobAlert.test.ts` refuses a scheduled
+  # workflow without this block, which is how the omission was caught here
+  # before it shipped rather than eleven days after.
+  alert:
+    needs: smoke
+    if: always()
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Smoke-test production
+      result: ${{ needs.smoke.result }}

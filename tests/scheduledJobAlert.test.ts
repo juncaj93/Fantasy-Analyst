@@ -45,10 +45,12 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
   });
 
   it('finds the scheduled workflows', () => {
-    // refresh-adp.yml and refresh-underdog-adp.yml today. A new one that
-    // forgets the alert fails the assertions below rather than going unnoticed
-    // for twelve days, which is the whole point.
-    expect(scheduled).toEqual(['refresh-adp.yml', 'refresh-underdog-adp.yml']);
+    // The two ADP refreshes, and now smoke.yml: the full production sweep
+    // moved off every deploy and onto a daily schedule when 150 test
+    // executions a deploy were found to be spending the D1 row quota. A new
+    // one that forgets the alert fails the assertions below rather than going
+    // unnoticed for twelve days, which is the whole point.
+    expect(scheduled).toEqual(['refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke.yml']);
   });
 
   it.each(scheduled)('%s calls the alert', (name) => {
