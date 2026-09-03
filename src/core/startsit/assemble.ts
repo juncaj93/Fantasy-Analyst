@@ -66,6 +66,15 @@ export interface LineupAssemblyRequest {
    * roster had before `startSitInputsFor` dropped the ones it could not find.
    */
   unknownPlayers?: number;
+  /**
+   * Why a position on this roster is refused the published fallback, if one is.
+   *
+   * A finished sentence, composed by the caller. It arrives as text rather than
+   * as the profile it was derived from because composing it needs the published
+   * feed's own assumptions, and this module is on the wrong side of the line
+   * that keeps Rotowire's numbers out of a recommendation.
+   */
+  publishedRefusal?: string | null;
   now?: string | Date;
 }
 
@@ -134,9 +143,10 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
     starters,
     bench,
     undecidable,
-    notes: notesFor(recommendation, request.unknownPlayers ?? 0),
+    notes: notesFor(recommendation, request.unknownPlayers ?? 0, request.publishedRefusal ?? null),
   };
 }
+
 
 /**
  * The optimiser's notes, plus the three things only this layer can see.
@@ -146,7 +156,11 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
  * why it is a column of dashes reads as broken; with a sentence it reads as
  * honest, which is what it is.
  */
-function notesFor(recommendation: LineupRecommendation, unknownPlayers: number): string[] {
+function notesFor(
+  recommendation: LineupRecommendation,
+  unknownPlayers: number,
+  publishedRefusal?: string | null,
+): string[] {
   const notes = [...recommendation.notes];
   const filledSlots = recommendation.slots.filter((slot) => slot.playerId);
   const projectable = filledSlots.filter((slot) => slot.projection != null);
@@ -174,6 +188,22 @@ function notesFor(recommendation: LineupRecommendation, unknownPlayers: number):
       `${borrowed} projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.`,
     );
   }
+
+  /*
+   * And why one position's cell is blank when its neighbours are not.
+   *
+   * Written by the caller rather than here, and that boundary is the point: the
+   * sentence is composed in `services/decisionInputs.ts`, which is sanctioned to
+   * read the published feed, and arrives at this module as text. Nothing here
+   * can reach a Rotowire number to build it, which is the rule
+   * `tests/sleeperProjectionFallback.test.ts` keeps.
+   *
+   * Only said when the fallback is otherwise working — `borrowed > 0`. With no
+   * published number anywhere the note above has already explained the whole
+   * column, and adding "and especially not for your quarterback" to it would be
+   * answering a question nobody looking at that screen has.
+   */
+  if (publishedRefusal && borrowed > 0) notes.push(publishedRefusal);
 
   if (unknownPlayers > 0) {
     notes.push(`${unknownPlayers} roster spot(s) are not in the player list yet — update it in Setup.`);

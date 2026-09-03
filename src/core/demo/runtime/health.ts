@@ -121,6 +121,25 @@ export function buildDemoDataHealth(data: ScenarioData): DataHealthView {
   const weekly = scenario.week == null;
 
   const sources: SourceHealth[] = [
+    /*
+     * The roster, first, as it is in production.
+     *
+     * Derived from the scenario rather than declared: every scenario builds a
+     * squad, so the roster has by definition been read. `freshness.sleeper` is
+     * the right dial for it because it is the same connection — a scenario that
+     * declares Sleeper unreachable is one where this app could not have re-read
+     * the roster either, and the row says so instead of claiming a fresh squad
+     * behind a dead connection.
+     */
+    row(
+      data,
+      'roster',
+      toState(freshness.sleeper),
+      freshness.sleeper === 'unavailable' ? null : 3,
+      freshness.sleeper === 'unavailable'
+        ? 'Sleeper is unreachable, so adds and drops made since the last read are missing.'
+        : null,
+    ),
     row(
       data,
       'injuries',
@@ -266,6 +285,7 @@ function demoRun(data: ScenarioData, sources: readonly SourceHealth[]): RunHealt
     [
       'players',
       'nfl-state',
+      'roster',
       'injuries',
       'usage',
       'season-markets',

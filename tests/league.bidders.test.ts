@@ -237,6 +237,7 @@ describe('the summary never contradicts the aggregate', () => {
       confidence: 'medium' as const,
       tendency: null,
       caveat: null,
+      participation: 1,
       display: displayName,
     }));
     const line = summarize(named, {
@@ -244,14 +245,66 @@ describe('the summary never contradicts the aggregate', () => {
       label: 'Likely 2–3 bidders',
       detail: null,
       needyTeams: 3,
-      bidders: named.map((n) => ({ rosterId: n.rosterId, displayName: n.displayName, need: n.need, remaining: 40 })),
+      bidders: named.map((n) => ({
+        rosterId: n.rosterId,
+        displayName: n.displayName,
+        need: n.need,
+        remaining: 40,
+        participation: 1,
+      })),
+      effectiveBidders: 3,
     });
     expect(line).toBe('3 likely bidders · Joe, Ryan +1');
   });
 
+  /*
+   * The two-number form, which only appears when the room's own record says
+   * fewer of the needy will act. Three managers who each have a hole and $40,
+   * of whom one bids: the names must still list three real people and the
+   * count beside them must not claim three bidders.
+   */
+  it('separates who needs him from who is likely to bid', () => {
+    const named = ['Joe', 'Ryan', 'Sam'].map((displayName, i) => ({
+      rosterId: i + 2,
+      displayName,
+      need: 'urgent' as const,
+      needReason: 'needs RB1',
+      remaining: 40,
+      estimate: { low: 6, high: 20 },
+      basis: 'league_price' as const,
+      confidence: 'medium' as const,
+      tendency: null,
+      caveat: null,
+      participation: 0.3,
+      display: displayName,
+    }));
+    const line = summarize(named, {
+      level: 'low',
+      label: 'Low competition',
+      detail: null,
+      needyTeams: 3,
+      bidders: named.map((n) => ({
+        rosterId: n.rosterId,
+        displayName: n.displayName,
+        need: n.need,
+        remaining: 40,
+        participation: 0.3,
+      })),
+      effectiveBidders: 1,
+    });
+    expect(line).toBe('3 need him · ~1 likely bidder · Joe, Ryan +1');
+  });
+
   it('says nothing at all when nobody is bidding', () => {
     expect(
-      summarize([], { level: 'low', label: 'Nobody else needs him', detail: null, needyTeams: 0, bidders: [] }),
+      summarize([], {
+        level: 'low',
+        label: 'Nobody else needs him',
+        detail: null,
+        needyTeams: 0,
+        bidders: [],
+        effectiveBidders: 0,
+      }),
     ).toBeNull();
   });
 });
@@ -283,6 +336,112 @@ describe('the transaction-control check still catches controls', () => {
       'High pressure',
     ]) {
       expect(trips(label), label).toBe(false);
+    }
+  });
+});
+
+/*
+ * The waiver card renders `summarize`'s line and each named bidder's `display`
+ * inside its own button, and `e2e/waivers.spec.ts` asserts that no *control*
+ * offers to transact by matching `\badd\b`, `\bdrop\b`, `\bclaim\b`, `\bbid\b`
+ * and `\bsubmit\b` against every visible button's text.
+ *
+ * That guard is right and it cannot tell describing a bid from offering one, so
+ * the copy in this module has to stay clear of those words as bare verbs. It is
+ * a real constraint on the wording and it was found the expensive way — a
+ * `~2 likely to bid` reads perfectly and fails a browser suite eleven minutes
+ * later. Pinning it here means the next person to reword this line finds out in
+ * a second instead.
+ *
+ * Nouns are fine and deliberately still used: `bidders` and `claims` do not
+ * match a word-boundary search for `bid` or `claim`.
+ */
+describe('the copy stays clear of the transaction guard', () => {
+  const FORBIDDEN = ['add', 'drop', 'claim', 'bid', 'submit'];
+
+  function assertSafe(text: string) {
+    for (const word of FORBIDDEN) {
+      expect(
+        new RegExp(`\\b${word}\\b`).test(text.toLowerCase()),
+        `"${text}" contains the bare word "${word}", which the browser suite reads as a control that transacts`,
+      ).toBe(false);
+    }
+  }
+
+  it('never puts a transacting verb in the summary line', () => {
+    for (const [total, effective] of [
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [4, 2],
+      [6, 5],
+      [11, 3],
+    ] as const) {
+      const bidders = Array.from({ length: total }, (_, i) => ({
+        rosterId: i + 2,
+        displayName: `Manager ${i + 2}`,
+        need: 'urgent' as const,
+        remaining: 40,
+        participation: effective / total,
+      }));
+      const named = bidders.map((b) => ({
+        ...b,
+        needReason: 'needs RB1',
+        estimate: { low: 6, high: 20 },
+        basis: 'league_price' as const,
+        confidence: 'medium' as const,
+        tendency: null,
+        caveat: null,
+        display: b.displayName,
+      }));
+      const line = summarize(named, {
+        level: 'medium',
+        label: 'Likely 2–3 bidders',
+        detail: null,
+        needyTeams: total,
+        bidders,
+        effectiveBidders: effective,
+      });
+      expect(line).not.toBeNull();
+      assertSafe(line!);
+    }
+  });
+
+  it('never puts one in a named bidder’s own line', () => {
+    for (const participation of [1, 0.6, 0.3]) {
+      const intel = namedBidders({
+        competition: {
+          level: 'medium',
+          label: 'Likely 2–3 bidders',
+          detail: null,
+          needyTeams: 1,
+          bidders: [
+            {
+              rosterId: 2,
+              displayName: 'Joe',
+              need: 'urgent',
+              remaining: 41,
+              participation,
+            },
+          ],
+          effectiveBidders: 1,
+        },
+        needs: [
+          {
+            rosterId: 2,
+            displayName: 'Joe',
+            level: 'urgent',
+            healthy: 0,
+            required: 1,
+            flexEligible: false,
+          },
+        ],
+        observations: [],
+        prices: { low: 6, high: 20, median: 12, max: 30, sample: 9, confidence: 'high' } as never,
+        rule: { total: 100, usesFaab: true, provenance: 'league settings' },
+        position: 'RB',
+      });
+      for (const bidder of intel.named) assertSafe(bidder.display);
     }
   });
 });

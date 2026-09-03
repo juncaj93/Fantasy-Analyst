@@ -26,6 +26,7 @@ import {
   parseSleeperWeeklyProjections,
   sleeperProjectionPath,
   sleeperScoringKey,
+  publishedRefusal,
 } from '../src/core/sleeper/weeklyProjections.ts';
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
@@ -183,6 +184,48 @@ describe('which leagues may read a published total', () => {
     // whose source bag carries no positions.
     expect(sleeperScoringKey(premium, null)).toBeNull();
     expect(sleeperScoringKey(premium, '')).toBeNull();
+  });
+
+  /**
+   * The refusal, out loud.
+   *
+   * The rule above is right and it was invisible, which is a different defect
+   * with the same symptom. A half-PPR league scoring six-point passing
+   * touchdowns gives every pass-catcher a published number and its quarterback a
+   * dash, and from a phone that is one screen where the projections stopped
+   * working for one player. Reported as exactly that on 2 September 2026:
+   * "projections show for most players but not for QB Joe Burrow specifically."
+   */
+  describe('saying why', () => {
+    const live = buildScoringProfile({ rec: 0.5, pass_td: 6, pass_int: -2 }, []);
+
+    it('says nothing at all where the published total is served', () => {
+      for (const position of ['RB', 'WR', 'TE']) expect(publishedRefusal(live, position)).toBeNull();
+      expect(publishedRefusal(HALF_PPR, 'QB')).toBeNull();
+    });
+
+    it('names the settings that differ, so a reader can check them in Sleeper', () => {
+      const reason = publishedRefusal(live, 'QB');
+      expect(reason).not.toBeNull();
+      expect(reason).toContain('QB');
+      expect(reason).toContain('4 points per passing touchdown');
+      expect(reason).toContain('-1 per interception');
+    });
+
+    it('names the reception value when that is what disqualified the league', () => {
+      const reason = publishedRefusal(buildScoringProfile({ rec: 0.75 }, []), 'WR');
+      expect(reason).toContain('0.75 per reception');
+    });
+
+    it('names the premium for the tight ends it applies to', () => {
+      const premium = buildScoringProfile({ rec: 0.5, bonus_rec_te: 0.5 }, []);
+      expect(publishedRefusal(premium, 'TE')).toContain('tight-end premium');
+      expect(publishedRefusal(premium, 'WR')).toBeNull();
+    });
+
+    it('has no opinion without a profile', () => {
+      expect(publishedRefusal(null, 'QB')).toBeNull();
+    });
   });
 
   it('serves every position when the league is Sleeper’s own scoring throughout', () => {

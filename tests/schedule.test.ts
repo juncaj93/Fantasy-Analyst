@@ -382,11 +382,29 @@ describe('the free-tier promises, as facts about the wiring', () => {
   const worker = readFileSync(fileURLToPath(new URL('../src/worker/index.ts', import.meta.url)), 'utf8');
 
   it('adds no cron trigger', () => {
-    // Four, as before this lane: the five-minute tick, two game-day windows and
-    // the daily 09:00. The schedule rides the last of them.
+    // Three: two game-day windows and the daily 09:00, which the schedule
+    // rides. It was four until the five-minute injury tick was switched off
+    // during the D1 quota incident -- see the comment in `wrangler.toml`, and
+    // the test below, which is the one that would notice it coming back.
     const crons = /crons\s*=\s*\[(.*?)\]/s.exec(wrangler)?.[1] ?? '';
-    expect(crons.split(',').filter((c) => c.trim().length > 0)).toHaveLength(4);
+    expect(crons.split(',').filter((c) => c.trim().length > 0)).toHaveLength(3);
     expect(crons).toContain('0 9 * * *');
+  });
+
+  /*
+   * The tourniquet, asserted rather than remembered.
+   *
+   * A trigger removed from a config file is invisible: nothing fails, nothing
+   * logs, and the next person to read `crons` sees a list that looks
+   * deliberate. This says out loud that the five-minute tick is off on
+   * purpose, so restoring it is a decision someone makes here rather than a
+   * line that quietly reappears in a merge.
+   */
+  it('leaves the five-minute injury tick switched off, and keeps its branch', () => {
+    const crons = /crons\s*=\s*\[(.*?)\]/s.exec(wrangler)?.[1] ?? '';
+    expect(crons, 'the five-minute tick is disabled while the D1 quota is in hand').not.toContain('*/5');
+    // The handler stays, so re-enabling is one string in `wrangler.toml`.
+    expect(worker).toContain("event.cron.startsWith('*/5')");
   });
 
   /**

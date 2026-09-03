@@ -338,7 +338,16 @@ describe('the freshness policy is central and complete', () => {
    */
   it('reserves critical for the inputs that decide who plays', () => {
     const critical = SOURCE_POLICIES.filter((p) => p.severity === 'critical').map((p) => p.id);
-    expect(critical).toEqual(['injuries', 'vegas', 'nfl-state']);
+    /*
+     * `roster` earns it on the gate's own terms rather than in spite of them.
+     *
+     * The other three change what the app says about a player. This one changes
+     * *which players it is talking about*, so a stale roster does not degrade a
+     * recommendation, it aims it at somebody else's squad — which is what a
+     * defence claimed off waivers proved when the Waivers screen went on
+     * advising an empty DEF slot the owner had already filled.
+     */
+    expect(critical).toEqual(['roster', 'injuries', 'vegas', 'nfl-state']);
   });
 
   it('files background learning as background', () => {

@@ -11,6 +11,7 @@
 import type { SeasonStatLine } from '../../core/sleeper/seasonStats.ts';
 import type { PlayerOutlook } from '../../core/sleeper/outlook.ts';
 import { chunk, MAX_BOUND_PARAMS, type Database } from '../db.ts';
+import { SlowRead } from './slowRead.ts';
 
 export interface StoredSeasonStats {
   playerId: string;
@@ -34,6 +35,18 @@ export interface StatsRun {
 
 /** Bound parameters per row, for the D1 bound-parameter cap. */
 const STAT_COLUMNS = 8;
+
+/*
+ * The season-stat count, memoised per database and per season. See
+ * `slowRead.ts` — this was 13.5% of the reads on the day the allowance ran
+ * out, spent entirely on a diagnostics line.
+ */
+const SEASON_STAT_COUNTS = new SlowRead<number>();
+
+/** Drop the memoised season-stat counts. Exported for tests. */
+export function forgetSeasonStatCounts(db: Database): void {
+  SEASON_STAT_COUNTS.forget(db);
+}
 
 export class PlayerDetailRepo {
   constructor(private readonly db: Database) {}
@@ -80,6 +93,8 @@ export class PlayerDetailRepo {
         .bind(...binds)
         .run();
     }
+    // The count this season reports has just changed; do not serve the old one.
+    forgetSeasonStatCounts(this.db);
   }
 
   async recordStatsRun(run: StatsRun): Promise<void> {
@@ -166,13 +181,23 @@ export class PlayerDetailRepo {
     return (results ?? []).map((row) => ({ games: Number(row.games), players: Number(row.players) }));
   }
 
-  /** How many players a season actually covers, for the Setup diagnostics. */
+  /**
+   * How many players a season actually covers, for the Setup diagnostics.
+   *
+   * One number on a diagnostics screen, and a full pass over a season of
+   * `player_season_stats` to produce it: 3,305 rows a call, 204 calls, 13.5%
+   * of the day the D1 allowance ran out. Memoised per season — the table is
+   * written by the 09:00 tick and by a stats import, and both call
+   * {@link forgetSeasonStatCounts}.
+   */
   async countSeasonStats(season: string): Promise<number> {
-    const row = await this.db
-      .prepare(`SELECT COUNT(*) AS n FROM player_season_stats WHERE season = ?`)
-      .bind(season)
-      .first<{ n: number }>();
-    return Number(row?.n ?? 0);
+    return SEASON_STAT_COUNTS.get(this.db, season, async () => {
+      const row = await this.db
+        .prepare(`SELECT COUNT(*) AS n FROM player_season_stats WHERE season = ?`)
+        .bind(season)
+        .first<{ n: number }>();
+      return Number(row?.n ?? 0);
+    });
   }
 
   // ---------------------------------------------------------------- outlook

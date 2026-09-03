@@ -7,7 +7,7 @@
  * earlier one, and whether a preview leaves the database exactly as it found it.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerRepo } from '../src/server/repos/players.ts';
 import { NewsletterRepo } from '../src/server/repos/newsletter.ts';
 import { PreseasonSnapshotsRepo, captureLabel } from '../src/server/repos/preseasonSnapshots.ts';
@@ -32,6 +32,11 @@ beforeEach(async () => {
   db = await createTestDb();
   await new PlayerRepo(db).upsertMany(TEST_PLAYERS);
   service = new PreseasonImportService(db);
+});
+
+// Only two tests stop the clock, and neither may leave it stopped.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 async function storedRows(): Promise<number> {
@@ -134,6 +139,46 @@ Bijan Robinson,ATL,RB,Rushing Yards,1150.5`;
     expect(await storedSnapshots()).toBe(2);
     const snaps = await new PreseasonSnapshotsRepo(db).list('2026');
     expect(snaps.map((s) => s.capturedAt)).toEqual(['2026-08-28', '2026-08-20']);
+  });
+
+  /**
+   * Two captures imported inside one tick of the clock are still two captures.
+   *
+   * `prop_snapshots` is unique on `(provider, event_id, fetched_at)` — a
+   * *fetch's* identity — and for one season and source the provider and the
+   * event id are both constant. So the import time was the only thing holding
+   * two captures apart, and when both landed in the same millisecond the second
+   * insert died on the constraint: `UNIQUE constraint failed`, with nothing said
+   * about captures. It cost a deploy, which is where it surfaced: main's CI had
+   * passed on the same revision twenty-six minutes earlier.
+   *
+   * Held with the clock stopped rather than by importing quickly, because
+   * "quickly" is what made it a once-in-a-while failure in the first place. The
+   * test above is the same two captures and cannot pin this: it only collides
+   * when the machine is fast enough to do both inside a millisecond.
+   */
+  it('keeps both when the clock does not move between them', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
+
+    await service.apply({ ...REQ, content: AUG_20 });
+    await service.apply({ ...REQ, capturedAt: '2026-08-28', content: AUG_28 });
+
+    expect(await storedSnapshots(), 'a capture was lost to the clock').toBe(2);
+    const snaps = await new PreseasonSnapshotsRepo(db).list('2026');
+    expect(snaps.map((s) => s.capturedAt)).toEqual(['2026-08-28', '2026-08-20']);
+  });
+
+  /** And re-importing one of them still revises rather than stacking. */
+  it('still revises a re-imported capture when the clock does not move', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
+
+    await service.apply({ ...REQ, content: AUG_20 });
+    await service.apply({ ...REQ, capturedAt: '2026-08-28', content: AUG_28 });
+    await service.apply({ ...REQ, content: AUG_20 });
+
+    expect(await storedSnapshots(), 'the re-import stacked instead of revising').toBe(2);
   });
 
   it('tells a preview that it would revise an existing capture', async () => {

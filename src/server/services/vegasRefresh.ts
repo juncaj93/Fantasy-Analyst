@@ -26,6 +26,7 @@ import { buildConsensus } from '../../core/vegas/normalize.ts';
 import type { RawPropSet, VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
@@ -62,6 +63,35 @@ const SCHEDULE_TTL_HOURS = 72;
 
 /** How far ahead a refresh cares about. One NFL week, plus the Monday game. */
 const HORIZON_DAYS = 8;
+
+/**
+ * How far ahead discovery may look when the ordinary horizon holds no game.
+ *
+ * Eight days is right for every week of a season that is being played: the
+ * roster's next fixture is inside it, and looking further would buy the week
+ * after as well, at an entity per extra game and for lines that move before
+ * anybody reads them.
+ *
+ * It is wrong for exactly one stretch, and it is the stretch this app is most
+ * useful in. A draft finishes a week or two before kickoff; Sleeper flips its
+ * season type to `regular` and reports week one from that moment; every screen
+ * that runs on the market — the head-to-head forecast, the lineup ranking, the
+ * defence outlook — comes alive at the final pick. And there is no game within
+ * eight days, so nothing is discovered, no line is stored, and all three of them
+ * answer with a blank or with the sum of their own nudges.
+ *
+ * Reported post-draft on 31 August 2026, nine days out: both sides of the week
+ * one matchup at `0.00` with every starter row `0.0`, and a lineup card
+ * recommending a swap it had priced entirely from a news tally.
+ *
+ * So the window stretches to the roster's *next* fixture when there is not one
+ * inside the ordinary horizon, and no further — the extension is measured from
+ * the fixture list this app already stores, never from a fixed preseason date,
+ * so 2027 needs nothing written down. Twenty-eight days is the ceiling on that
+ * arithmetic and not a target: it is a bye plus a fortnight, which is further
+ * than any roster's next game can be while a season is running.
+ */
+const NEXT_SLATE_MAX_DAYS = 28;
 
 export class VegasRefreshService {
   private readonly usage: VegasUsageRepo;
@@ -111,7 +141,11 @@ export class VegasRefreshService {
 
     // Discovery, only when the schedule is genuinely unknown or old. This is
     // the fetch as well: the provider has no schedule-only request.
-    const discovery = await this.discoverIfNeeded(players, budget, now, { errors, blocked });
+    const discovery = await this.discoverIfNeeded(players, budget, now, {
+      errors,
+      blocked,
+      manual: opts.manual ?? false,
+    });
     let spent = discovery.entities;
     let requests = discovery.requests;
     let fetched = discovery.events;
@@ -238,7 +272,7 @@ export class VegasRefreshService {
     players: PlannedPlayer[],
     budget: BudgetView,
     now: number,
-    sink: { errors: string[]; blocked: string[] },
+    sink: { errors: string[]; blocked: string[]; manual?: boolean },
   ): Promise<{ entities: number; requests: number; events: number }> {
     /*
      * At most one discovery per TTL, whatever the roster looks like.
@@ -247,10 +281,25 @@ export class VegasRefreshService {
      * a player on a bye has no game this week and will still have none in an
      * hour, so it would re-buy the schedule on every single pass. What decides
      * is when we last *asked*, not whether the answer covered everybody.
+     *
+     * **A person asking is allowed past it, and has to be.** The stamp below is
+     * written *before* the provider is called, so a discovery that came back
+     * with nothing — which is every discovery run in the fortnight between a
+     * draft and week one, before the window learned to stretch — locks the app
+     * out of retrying for three days. That is correct for a clock, which will
+     * come round again on its own, and wrong for a person, who has looked at a
+     * stale screen and pressed the one control that is supposed to fix it. A
+     * manual pass that could not re-ask would be a button that does nothing for
+     * up to seventy-two hours and gives no reason.
+     *
+     * It buys nothing extra. `canSpend` below is untouched and still has the
+     * final say on the month's allowance, so what this bypasses is the
+     * politeness interval and never the budget.
      */
-    const attempted = await new SettingsRepo(this.db).get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
+    const settings = new SettingsRepo(this.db);
+    const attempted = await settings.get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
     const attemptedAge = attempted ? (now - Date.parse(attempted)) / 3_600_000 : Infinity;
-    if (attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
+    if (!sink.manual && attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
 
     const unmapped = players.filter((p) => !p.eventId).length;
     const lastSeen = await this.events.lastSeenAt();
@@ -280,10 +329,10 @@ export class VegasRefreshService {
     }
 
     const from = new Date(now).toISOString();
-    const to = new Date(now + HORIZON_DAYS * 86_400_000).toISOString();
+    const to = await this.discoveryWindowEnd(now, teams);
     // Stamped before the call, not after: a discovery that fails halfway must
     // not become a discovery that retries on every pass for the rest of the day.
-    await new SettingsRepo(this.db).set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
+    await settings.set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
     try {
       const result = await fetchTeams.call(this.provider, teams.slice(0, decision.entities), {
         from,
@@ -304,6 +353,16 @@ export class VegasRefreshService {
       }
 
       /*
+       * The next fixture each team plays, and only that one.
+       *
+       * Everything below this line — the event rows, the snapshots and the
+       * consensus — is built from this rather than from the whole answer. See
+       * `nextFixturePerTeam` for the invariant it is holding, and why a window
+       * that can reach two of a team's games makes it load-bearing.
+       */
+      const fixtures = nextFixturePerTeam(result.results);
+
+      /*
        * The team we asked about is the mapping.
        *
        * Reading it back out of the payload would work for one vendor and fail
@@ -314,7 +373,7 @@ export class VegasRefreshService {
        * at home.
        */
       const sides = new Map<string, { row: (typeof result.results)[number]; teams: string[] }>();
-      for (const entry of result.results) {
+      for (const entry of fixtures) {
         const bucket = sides.get(entry.set.eventId);
         if (bucket) {
           if (!bucket.teams.includes(entry.teamId)) bucket.teams.push(entry.teamId);
@@ -343,7 +402,7 @@ export class VegasRefreshService {
         })),
       );
 
-      for (const { set } of result.results) {
+      for (const { set } of fixtures) {
         await this.props.put({
           provider: set.provider,
           eventId: set.eventId,
@@ -359,15 +418,74 @@ export class VegasRefreshService {
         entities: result.entities,
         requests: result.requests,
         outcome: 'fetched',
-        reason: `${teams.length} roster team(s) -> ${result.results.length} game(s)`,
+        reason: `${teams.length} roster team(s) -> ${fixtures.length} game(s)`,
       });
 
-      return { entities: result.entities, requests: result.requests, events: result.results.length };
+      return { entities: result.entities, requests: result.requests, events: fixtures.length };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sink.errors.push(`schedule discovery failed: ${message}`);
       await this.usage.record({ source: 'schedule', entities: 1, requests: 1, outcome: 'failed', reason: message });
       return { entities: 1, requests: 1, events: 0 };
+    }
+  }
+
+  /**
+   * The day discovery's window closes on, as an ISO instant.
+   *
+   * The ordinary answer is eight days out and it is the answer in every week of
+   * a season being played. The exception is the one {@link NEXT_SLATE_MAX_DAYS}
+   * exists for: when the fixture list this app already stores says the roster
+   * has no game inside those eight days, the window stretches to the day after
+   * the roster's next fixture, so a discovery run between a draft and kickoff
+   * finds week one instead of finding nothing.
+   *
+   * Three properties worth stating, because each of them is a way this could
+   * have gone wrong:
+   *
+   *   - **It never narrows.** The extension is a `Math.max` against the
+   *     ordinary horizon, so an in-season week is exactly what it was.
+   *   - **It reads no clock but its own argument, and no calendar at all.** The
+   *     fixture it stretches to came from nflverse; nothing here knows what
+   *     month it is or when a season starts, which is what stops this needing a
+   *     date written down for 2027.
+   *   - **It cannot fail loudly.** No league, no schedule stored, no fixture
+   *     ahead — every one of them falls back to the ordinary horizon, because
+   *     an unreadable schedule is a reason to behave as before and never a
+   *     reason to widen a paid query.
+   */
+  private async discoveryWindowEnd(now: number, teams: readonly string[]): Promise<string> {
+    const ordinary = now + HORIZON_DAYS * 86_400_000;
+    if (teams.length === 0) return new Date(ordinary).toISOString();
+
+    try {
+      const league = await new LeagueRepo(this.db).getSelectedLeague();
+      if (!league?.season) return new Date(ordinary).toISOString();
+
+      /*
+       * The whole season for the roster's own teams — about a hundred and fifty
+       * rows for a twelve-team roster, on a path that runs twice a week.
+       * Bounded by team rather than by week deliberately: working out which
+       * weeks to ask about would mean deciding where the season is, which is
+       * the question this is trying not to have an opinion about.
+       */
+      const fixtures = await new NflScheduleRepo(this.db).forTeams(league.season, teams, { from: 1, to: 22 });
+      let earliest: number | null = null;
+      for (const fixture of fixtures) {
+        const kickoff = fixture.kickoff == null ? NaN : Date.parse(fixture.kickoff);
+        if (!Number.isFinite(kickoff) || kickoff <= now) continue;
+        if (earliest == null || kickoff < earliest) earliest = kickoff;
+      }
+      if (earliest == null || earliest <= ordinary) return new Date(ordinary).toISOString();
+
+      /*
+       * A day past the fixture, so a kickoff at the far edge is inside the
+       * window rather than on its boundary, and never past the ceiling.
+       */
+      const stretched = Math.min(earliest + 86_400_000, now + NEXT_SLATE_MAX_DAYS * 86_400_000);
+      return new Date(Math.max(ordinary, stretched)).toISOString();
+    } catch {
+      return new Date(ordinary).toISOString();
     }
   }
 
@@ -474,6 +592,55 @@ export class VegasRefreshService {
     for (const id of playerIds) if ((props.get(id)?.length ?? 0) > 0) out.set(id, ageMinutes);
     return out;
   }
+}
+
+/**
+ * One fixture per team: the next one each of them plays.
+ *
+ * The invariant every reader downstream already assumes and nothing used to
+ * enforce. `PropsRepo.latestForPlayers` returns the newest snapshot **per
+ * event**, so a player quoted in two stored games comes back carrying two
+ * receiving-yard lines, and `buildExpectation` reads them as one week. With an
+ * eight-day window that was rare enough to have never been seen; a window
+ * stretched to reach the next slate would have made it ordinary, and the
+ * failure would have been a silently doubled projection rather than an error.
+ *
+ * So it is enforced here, at the one place a discovery result becomes stored
+ * rows, rather than left to the width of a window. The entities are already
+ * billed by the time this runs — the provider charges per event returned, and
+ * asking for fewer is the only thing that saves quota — so this drops rows and
+ * never a request.
+ *
+ * Ordered by kickoff, with an unscheduled event last: a game with no start time
+ * is not evidence of being sooner than one that has one.
+ */
+function nextFixturePerTeam<T extends { teamId: string; set: { eventId: string; gameStart?: string | null } }>(
+  results: readonly T[],
+): T[] {
+  const byTeam = new Map<string, T>();
+  for (const entry of results) {
+    const held = byTeam.get(entry.teamId);
+    if (!held || startsBefore(entry.set.gameStart, held.set.gameStart)) byTeam.set(entry.teamId, entry);
+  }
+
+  // Deduplicated by event: two rostered teams playing each other is one game,
+  // and it must be stored once whichever of them reached it first.
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const entry of byTeam.values()) {
+    if (seen.has(entry.set.eventId)) continue;
+    seen.add(entry.set.eventId);
+    out.push(entry);
+  }
+  return out;
+}
+
+function startsBefore(candidate: string | null | undefined, held: string | null | undefined): boolean {
+  const a = candidate ? Date.parse(candidate) : NaN;
+  const b = held ? Date.parse(held) : NaN;
+  if (!Number.isFinite(a)) return false;
+  if (!Number.isFinite(b)) return true;
+  return a < b;
 }
 
 /**

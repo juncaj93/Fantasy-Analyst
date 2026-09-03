@@ -239,9 +239,9 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    *
    * The generic scan already refuses a DEF-over-DEF swap. What it does still
    * offer is a defence for an *empty* DEF slot, and the planner can say
-   * `Wait — no DST needed yet` about the same slot: two answers to one question
-   * on one screen. The planner wins wherever it has an opinion; the generic row
-   * survives only when the plan could not be computed at all.
+   * `Wait — your DEF slot is empty` about the same slot: two answers to one
+   * question on one screen. The planner wins wherever it has an opinion; the
+   * generic row survives only when the plan could not be computed at all.
    */
   const upgrades = withCompetition(upgradesWithValue, intel.competition, intel.bidders, intel.pressure).filter(
     (upgrade) => dst == null || !upgrade.accepts.every((p) => p === DEFENCE_POSITION),

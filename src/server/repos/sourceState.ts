@@ -46,6 +46,23 @@ export interface SourceState {
   failingSince: string | null;
   /** The highest week actually stored, so a gap against the source is visible. */
   caughtUpThrough: number | null;
+  /**
+   * The `caughtUpThrough` a gap scan last came back clean at, or null.
+   *
+   * `catchUpOneWeek` reads every row a season has to ask which weeks are
+   * present, and the answer is "none missing" almost always — and permanently,
+   * once the last gap is filled. On a five-minute tick that is 288 full-season
+   * scans a day for a question already answered, which is what exhausted D1's
+   * daily row-read budget. See migration 0036.
+   *
+   * Compared against {@link SourceState.caughtUpThrough} rather than trusted on
+   * its own: while the feed has not moved past the point that was verified, no
+   * gap can have opened below it. When a new week lands the feed advances, the
+   * watermark is behind again, and the scan runs — which is the case that
+   * matters, since a week arriving while an earlier one is missing is how a gap
+   * appears in the first place.
+   */
+  gapsCheckedThrough: number | null;
 }
 
 export class SourceStateRepo {
@@ -159,6 +176,28 @@ export class SourceStateRepo {
   }
 
   /**
+   * Record that a gap scan found nothing missing below `week`.
+   *
+   * Written only after a scan actually came back clean, never optimistically:
+   * the whole value of the watermark is that it stands in for a question that
+   * was really asked, so writing one on a tick that filled a gap — where more
+   * may remain below it — would skip the scan that finds the next one.
+   *
+   * Idempotent and monotonic in practice: the caller passes the feed's own
+   * `caughtUpThrough`, which only moves forward.
+   */
+  async recordNoGapsThrough(source: string, season: string, week: number): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE ${this.stateTable}
+            SET gaps_checked_through = ?
+          WHERE source = ? AND season = ?`,
+      )
+      .bind(week, source, season)
+      .run();
+  }
+
+  /**
    * Claim the right to ingest, or find out somebody else has it.
    *
    * A compare-and-swap, because D1 has no advisory locks: the UPDATE only
@@ -258,5 +297,12 @@ export function toSourceState(row: Record<string, unknown>): SourceState {
     consecutiveFailures: Number(row['consecutive_failures'] ?? 0),
     failingSince: text('failing_since'),
     caughtUpThrough: row['caught_up_through'] == null ? null : Number(row['caught_up_through']),
+    /*
+     * Absent as well as null, because the column arrives in a later migration
+     * than the row: a state written before 0036 has no such key at all, and
+     * `undefined` must read as "never checked" rather than as zero.
+     */
+    gapsCheckedThrough:
+      row['gaps_checked_through'] == null ? null : Number(row['gaps_checked_through']),
   };
 }

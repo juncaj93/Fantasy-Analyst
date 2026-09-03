@@ -511,7 +511,7 @@ export function Sheet({
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
-  const detent = useRef<HTMLDivElement | null>(null);
+  const backdrop = useRef<HTMLDivElement | null>(null);
   const { lift } = useOverlay({ container: surface, onDismiss: onClose });
   /*
    * The latest `onClose`, for an observer that is attached once.
@@ -594,36 +594,365 @@ export function Sheet({
     if (!root) return;
     /** Fraction of the way to dismissed a push must reach to be a dismissal. */
     const HOLD = 0.4;
+    /** How long the card takes to finish leaving once the outcome is settled. */
+    const EXIT = 180;
+    /*
+     * How long a stillness counts as the movement having ended.
+     *
+     * Momentum delivers a scroll event every frame or so, which is a wide
+     * margin, and this is time the reader spends looking at a card that has
+     * stopped and not yet been answered — so it is kept short. It is not a
+     * threshold on the gesture, only on the silence after it.
+     */
+    const SETTLE = 70;
+    /** How far a pointer must travel before it is a drag rather than a tap. */
+    const SLOP = 4;
+    /*
+     * How long after the reader's last input a scroll is still theirs.
+     *
+     * **This measures how late the engine may be, not how long a gesture is.**
+     * Momentum outlives the finger and arrives as bare scroll events with no
+     * input beside them, and every scroll that qualifies pushes the window out
+     * again, so a movement stays the reader's for as long as it keeps moving.
+     * What the window has to cover, then, is the gap before the *first* of
+     * those — the delay between asking the layer to move and the layer moving.
+     *
+     * Sized at a frame, generously, it was too small by an order of magnitude.
+     * WebKit's wheel scrolling is starved by a page doing per-frame work: the
+     * pull-to-refresh specs install a watcher before they swipe, and the same
+     * wheel that moves this layer 675px moves it 50 while that watcher runs.
+     * The push then arrived after its own window had closed, the layer read the
+     * reader's own movement as a stray and put the card back, and two dismissal
+     * specs failed on the widest phone — the one with the furthest to scroll,
+     * and only there.
+     *
+     * A second and more than covers that. It can be this generous because a tap
+     * does not open it: the click case this whole rule exists for never gets a
+     * window at all, however fast the clicks come, so nothing here has to
+     * separate one click from the next.
+     */
+    const HANDS_OFF = 1500;
+    /** The keys that scroll a box, and so can push this one. */
+    const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
     let timer: number | undefined;
-    let settling = false;
-    const settle = () => {
-      const detentTop = root.scrollHeight - root.clientHeight;
-      if (detentTop <= 0) return;
-      if (root.scrollTop <= detentTop * (1 - HOLD)) {
+    let leaving = false;
+
+    /*
+     * Whether the movement in front of us was made by a hand.
+     *
+     * The dismissal is a scroll, and scrolls are not made only by thumbs. Any
+     * `scrollIntoView` — the browser revealing a focused control, a harness
+     * bringing a row into view before clicking it, a reflow under an opening
+     * keyboard — scrolls the nearest ancestor that can satisfy it, and when the
+     * card's own body is already at its top that ancestor is this layer. So the
+     * layer can be parked past `HOLD` with nobody having touched it, and then
+     * whether the card survives is a race between the settle timer and whatever
+     * scrolls it back. Measured on the compare sheet: one click on a candidate
+     * moved this layer from its detent at 704 to 369, four times in ten.
+     *
+     * A gesture is therefore a precondition of a dismissal rather than an
+     * assumption about one. What counts as a hand:
+     *
+     *  - a pointer that is down **and has moved** — a tap that lands and lets go
+     *    is not a push, and the browser's scroll-to-reveal on focus arrives
+     *    inside one, so a tap on a field near the top of a long card would
+     *    otherwise throw the card away;
+     *  - a pointer the engine took off us to pan with, which is what a
+     *    `pointercancel` says and is the clearest statement of a drag WebKit
+     *    makes — it sends one in place of the moves it would otherwise deliver;
+     *  - a wheel, which is the same scroll a finger makes and the only one a
+     *    desktop browser has;
+     *  - the keys that scroll a box.
+     *
+     * Anything else is a scroll nobody asked for, and the answer to those is to
+     * put the card back rather than to decide anything about it.
+     */
+    let pointerAt: { x: number; y: number } | null = null;
+    let dragging = false;
+    /*
+     * When the reader last did something the layer could act on.
+     *
+     * Minus infinity rather than nought, and that is not decoration: `stamp()`
+     * is time since the page loaded, so nought means "at load", and a sheet
+     * opened inside the window would read the beginning of time as input that
+     * had just happened — every stray scroll on it credited to a hand that was
+     * never there. The honest initial value is that it has not happened.
+     */
+    let handsOn = Number.NEGATIVE_INFINITY;
+    /*
+     * Until when the settle's own smooth scroll is expected to still be running.
+     *
+     * A deadline rather than a flag, and the difference matters: a flag left
+     * standing by an animation that was interrupted rather than finished would
+     * make every later stray scroll look like this one's, and the correction
+     * below would stop happening — which is the invisible-modal outcome the note
+     * on re-arming calls worse than any amount of redundant work. A smooth
+     * scroll across this layer takes a few hundred milliseconds; past the
+     * deadline, whatever is moving the layer is somebody else's.
+     */
+    const SPRING = 700;
+    let springUntil = 0;
+    const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
+    /*
+     * Real input: the reader has done something the layer can act on.
+     *
+     * **Only this cancels a spring-back, and that distinction is load-bearing.**
+     * A second push arriving while the card is on its way home must be watched —
+     * the note on re-arming below is about the invisible modal that results when
+     * it is not — and a second push is *input*, not merely more scrolling. The
+     * spring-back's own animation fires scroll events inside the window too, and
+     * letting those count as a new push made `settle` re-issue its smooth scroll
+     * every seventy milliseconds, restarting the ease from the top each time.
+     * The card then crawled instead of springing, and stopped where it was left:
+     * the scrim reading 0.699 on a push made to 0.7.
+     */
+    const gestured = () => {
+      springUntil = 0;
+      handsOn = stamp();
+    };
+    /** A scroll that belongs to a movement already under way. */
+    const refresh = () => {
+      handsOn = stamp();
+    };
+    const hands = () => dragging || stamp() - handsOn < HANDS_OFF;
+    /** The point a pointer or touch event happened at, whichever kind it is. */
+    const pointOf = (event: Event) => {
+      const touch = 'touches' in event ? (event as TouchEvent).touches[0] : (event as PointerEvent);
+      return touch ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const onDown = (event: Event) => {
+      pointerAt = pointOf(event);
+      dragging = false;
+    };
+    const onMove = (event: Event) => {
+      const at = pointOf(event);
+      if (!pointerAt || !at) return;
+      if (Math.abs(at.x - pointerAt.x) + Math.abs(at.y - pointerAt.y) < SLOP) return;
+      dragging = true;
+      gestured();
+    };
+    const onUp = () => {
+      pointerAt = null;
+      // The momentum this left behind is still the reader's; the window says
+      // for how long, and each scroll it covers renews it.
+      if (dragging) gestured();
+      dragging = false;
+    };
+    const onTaken = () => {
+      gestured();
+      dragging = false;
+      pointerAt = null;
+    };
+    const onWheel = () => gestured();
+    const onKey = (event: Event) => {
+      if (SCROLL_KEYS.has((event as KeyboardEvent).key)) gestured();
+    };
+
+    /*
+     * The screen behind the card comes back as the card goes, rather than after.
+     *
+     * The scrim used to hold full strength for the whole of a dismissal and
+     * vanish with the sheet, so once the card had slid past you were looking at
+     * a solid grey screen with nothing on it — which reads as the app having
+     * stopped rather than as a card leaving. Tied to the scroll it is the same
+     * gesture as the card's: pull the card halfway down and the app behind is
+     * half back, change your mind and it darkens again.
+     *
+     * One opacity write per scroll event, which the compositor takes without a
+     * layout, and none at all while the layer is not moving.
+     */
+    const paint = (progress: number) => {
+      const back = backdrop.current;
+      if (back) back.style.opacity = String(Math.max(0, Math.min(1, progress)));
+    };
+
+    /*
+     * Finishing the dismissal, rather than waiting for the scroll to.
+     *
+     * A scroll's duration belongs to the reader's flick: push the card gently
+     * past the point of no return and it crawls the rest of a screen's height,
+     * because there is nothing left driving it but the little momentum the push
+     * had. The outcome is already decided by then, so what is left is not a
+     * decision but an exit, and an exit should take the time an exit takes.
+     *
+     * So the layer stops taking input and the card covers whatever distance is
+     * left under a transform, in `EXIT` milliseconds whatever that distance is.
+     * `scrollTop` is exactly that distance: the card sits one screen down the
+     * layer's content, so the amount it is still short of gone is how far the
+     * layer is still scrolled.
+     *
+     * Reduced motion gets no exit at all, which is the same answer the
+     * stylesheet gives the entrance.
+     */
+    const leave = () => {
+      if (leaving) return;
+      leaving = true;
+      springUntil = 0;
+      window.clearTimeout(timer);
+      const remaining = root.scrollTop;
+      const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      if (still || remaining < 1) {
+        paint(0);
         onDismiss.current();
         return;
       }
-      if (root.scrollTop >= detentTop) return;
+      root.style.pointerEvents = 'none';
       /*
-       * Back to the card's own position, smoothly — and flagged while it runs,
-       * because a smooth scroll is itself a stream of `scroll` events and
-       * without this the settle would keep re-arming on its own movement.
+       * The card moves, not its detent — and that distinction is the one this
+       * file already paid for once. A transformed box adds its travel to its
+       * scroll container's scrollable overflow, so translating the detent would
+       * lengthen the layer mid-dismissal, exactly as the entrance keyframe did
+       * before it was clipped. The card is *inside* the detent, and the detent
+       * clips, so its exit costs the layer nothing.
        */
-      settling = true;
-      root.scrollTo({ top: detentTop, behavior: 'smooth' });
-      window.setTimeout(() => {
-        settling = false;
-      }, 400);
+      const card = surface.current;
+      if (card) {
+        card.style.transition = `transform ${EXIT}ms var(--ease)`;
+        card.style.transform = `translate3d(0, ${remaining}px, 0)`;
+      }
+      const back = backdrop.current;
+      if (back) back.style.transition = `opacity ${EXIT}ms var(--ease)`;
+      paint(0);
+      window.setTimeout(() => onDismiss.current(), EXIT);
     };
+
+    const settle = () => {
+      if (leaving) return;
+      const detentTop = root.scrollHeight - root.clientHeight;
+      if (detentTop <= 0) return;
+      if (root.scrollTop <= detentTop * (1 - HOLD)) {
+        leave();
+        return;
+      }
+      // Already where it belongs. A pixel of tolerance because a smooth scroll
+      // lands on a fraction and `scrollTop` is not obliged to be an integer.
+      if (root.scrollTop >= detentTop - 1) return;
+      springUntil = stamp() + SPRING;
+      root.scrollTo({ top: detentTop, behavior: 'smooth' });
+    };
+
+    /*
+     * Every scroll re-arms, including the ones this makes itself.
+     *
+     * The obvious economy is to ignore movement while the settle's own smooth
+     * scroll is running, and it is a bug: a reader who pushes the card, lets the
+     * spring-back begin and pushes again lands inside that window, and the
+     * second push is the one nobody is watching. The card then comes to rest at
+     * the dismissed position *without being dismissed* — scrolled entirely off
+     * the screen, still open, still holding the page behind it still. An
+     * invisible modal is a worse outcome than any amount of redundant work.
+     *
+     * Re-arming unconditionally costs nothing because the settle is idempotent:
+     * during its own animation it finds the layer at the card's position and
+     * returns, and if the reader has pushed again it finds where *they* left it.
+     * The timer is only ever reset, so it fires once, after everything stops.
+     *
+     * **A card that has arrived at gone does not wait to be told.** The debounce
+     * is there to find out where a movement ended, and a layer scrolled to its
+     * far end has answered that already — there is no coming back from a card
+     * that is entirely off the screen, and waiting to confirm it is a tenth of a
+     * second of grey with nothing happening in it. That was most of what a
+     * dismissal felt like.
+     */
     const onScroll = () => {
-      if (settling) return;
+      if (leaving) return;
+      const detentTop = root.scrollHeight - root.clientHeight;
+      const top = root.scrollTop;
+      if (stamp() < springUntil) {
+        /*
+         * The settle's own smooth scroll, on its way back to the card's
+         * position. Neither a gesture to act on nor a stray to correct — the
+         * scrim tracks it home and nothing else here touches it, least of all
+         * another `scrollTo`.
+         *
+         * **Asked first, and not last.** A reader who pushes again mid-flight is
+         * still watched, because pushing is input and input clears `springUntil`
+         * before the scroll it causes ever arrives here. What this order stops
+         * is the animation being mistaken for that second push by nothing more
+         * than its own scroll events landing inside the reader's window.
+         */
+        if (detentTop > 0) paint(top / detentTop);
+        if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
+        return;
+      } else if (hands()) {
+        // A movement already under way, which keeps its window open as it goes.
+        refresh();
+      } else {
+        /*
+         * A scroll nobody made: put the card back where it belongs and decide
+         * nothing.
+         *
+         * Instantly rather than smoothly, because this is a correction and not
+         * a movement the reader began — and because a smooth one leaves a
+         * window in which a second scroll-into-view can chain onto the first.
+         * The write is a no-op when the layer is already at the detent, which
+         * is what the entrance's own scroll is, so opening a sheet costs
+         * nothing here.
+         */
+        window.clearTimeout(timer);
+        if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
+        paint(1);
+        return;
+      }
+      if (detentTop > 0) paint(top / detentTop);
+      /*
+       * A card that has arrived at gone does not wait to be told.
+       *
+       * The debounce is there to find out where a movement ended, and a layer
+       * scrolled to its far end has answered that already — there is no coming
+       * back from a card entirely off the screen, and waiting to confirm it is a
+       * tenth of a second of grey with nothing happening in it.
+       *
+       * **Anything short of that end waits, and that is not caution.** Deciding
+       * the moment the card passes the threshold was tried, to spare a gentle
+       * push the slow drift down the rest of the screen. It took the compare
+       * sheet's card away in the middle of a click on one of its candidates, on
+       * nine of twelve WebKit shards, and putting the wait back is what fixed
+       * them. What exactly moved the layer far enough was never pinned down —
+       * measured directly, bringing a candidate into view scrolls `.sheet-body`
+       * and leaves this alone — so the honest statement is the narrow one: a
+       * dismissal decided inside a single scroll event has nothing left that can
+       * put the layer back, and this layer is scrolled by more things than a
+       * thumb.
+       *
+       * **And a layer with nowhere to scroll has not arrived anywhere.** Nought
+       * is the dismissed position only once there is a journey to have made:
+       * while a card is still being laid out this box briefly has no travel in
+       * it, and `scrollTop` is nought because it has never been anywhere else.
+       * Reading that as "the card is gone" dismisses a sheet as it opens —
+       * rarely, and only where a scroll event lands inside that window, which is
+       * why it showed on one loaded CI shard and never once in isolation.
+       */
+      if (detentTop > 0 && top < 1) {
+        leave();
+        return;
+      }
       window.clearTimeout(timer);
-      timer = window.setTimeout(settle, 110);
+      timer = window.setTimeout(settle, SETTLE);
     };
     root.addEventListener('scroll', onScroll, { passive: true });
+    /*
+     * The input listeners sit on the layer, which every part of a sheet is
+     * inside — including `.sheet-body`, whose own scroll chains outward to this
+     * one. Passive throughout: none of them cancels anything, they only watch.
+     */
+    const watched: [string, EventListener][] = [
+      ['pointerdown', onDown],
+      ['pointermove', onMove],
+      ['pointerup', onUp],
+      ['pointercancel', onTaken],
+      ['touchstart', onDown],
+      ['touchmove', onMove],
+      ['touchend', onUp],
+      ['touchcancel', onTaken],
+      ['wheel', onWheel],
+      ['keydown', onKey],
+    ];
+    for (const [type, listener] of watched) root.addEventListener(type, listener, { passive: true });
     return () => {
       window.clearTimeout(timer);
       root.removeEventListener('scroll', onScroll);
+      for (const [type, listener] of watched) root.removeEventListener(type, listener);
     };
   }, []);
 
@@ -632,6 +961,7 @@ export function Sheet({
       <div
         className="sheet-backdrop"
         data-testid="sheet-backdrop"
+        ref={backdrop}
         style={{ ['--overlay-lift' as string]: String(lift) }}
         aria-hidden="true"
       />
@@ -652,7 +982,7 @@ export function Sheet({
           that answers a tap. Same gesture for the reader, same outcome.
         */}
         <div className="sheet-dismiss" data-testid="sheet-dismiss" onClick={onClose} />
-        <div className="sheet-snap" ref={detent}>
+        <div className="sheet-snap">
           <div
             className="sheet"
             role="dialog"

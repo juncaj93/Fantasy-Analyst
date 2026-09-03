@@ -118,6 +118,14 @@ import { NflScheduleRepo, ScheduleSourceRepo } from '../repos/nflSchedule.ts';
 type Window = number | null | ((now: Date) => number);
 
 const WINDOW_MINUTES: Record<SourceId, Window> = {
+  /*
+   * The daily window, because the daily cron is now what keeps it current.
+   *
+   * A pull down Team or Waivers refreshes it sooner and that is a bonus, never
+   * the expectation — the whole reason a claimed defence went missing for two
+   * days is that this app used to depend on somebody making that gesture.
+   */
+  roster: DAILY_ATTEMPT_STALE_MINUTES,
   injuries: FRESHNESS_HOURS.fresh * 60,
   vegas: (now) => vegasFreshWithinMinutes(now, VEGAS_STALE_HOURS * 60),
   'nfl-state': STATE_STALE_AFTER_DAYS * 24 * 60,
@@ -142,6 +150,7 @@ const WINDOW_MINUTES: Record<SourceId, Window> = {
  * by attempt age the two coincide, and this adds nothing.
  */
 const ATTEMPT_STALE_MINUTES: Record<SourceId, number | null> = {
+  roster: DAILY_ATTEMPT_STALE_MINUTES,
   injuries: FREQUENT_ATTEMPT_STALE_MINUTES,
   vegas: null,
   'nfl-state': DAILY_ATTEMPT_STALE_MINUTES,
@@ -252,6 +261,7 @@ export class DataHealthService {
     const runs = await new CronRunRepo(this.db).all().catch(() => [] as CronRunRecord[]);
 
     const settled = await Promise.all([
+      this.roster(),
       this.injuries(),
       this.vegas(),
       this.nflState(),
@@ -267,6 +277,49 @@ export class DataHealthService {
     ].map((p) => p.catch((): SourceReading | null => null)));
 
     return settled.filter((r): r is SourceReading => r != null);
+  }
+
+  /**
+   * When this app last asked Sleeper who is on the roster.
+   *
+   * `logSync('league', …)` is written by `SleeperSyncService.syncLeague`, which
+   * is the only thing that replaces roster rows — so this measures the exact
+   * event that matters and cannot drift from it.
+   *
+   * No league selected is `unknown` rather than a fault: there is nothing to
+   * sync and nothing has gone wrong. A league that has never synced at all is
+   * `missing`, which is a real problem and reads as one.
+   */
+  private async roster(): Promise<SourceReading> {
+    const league = await new LeagueRepo(this.db).getSelectedLeague().catch(() => null);
+    if (!league) {
+      return {
+        id: 'roster',
+        lastSuccessAt: null,
+        lastAttemptAt: null,
+        state: 'unknown',
+        note: 'No league selected yet. Open Setup to choose one.',
+        technical: { lastOutcome: null },
+      };
+    }
+
+    const last = await new SettingsRepo(this.db).lastSync('league');
+    const rosters = await new LeagueRepo(this.db).listRosters(league.id).catch(() => []);
+    const mine = rosters.find((r) => r.isMine) ?? null;
+    const held = mine?.playerIds.length ?? 0;
+    return {
+      id: 'roster',
+      lastSuccessAt: last?.status === 'ok' ? last.finishedAt || null : null,
+      lastAttemptAt: last?.finishedAt || null,
+      ...(last == null ? { state: 'missing' as const } : {}),
+      note:
+        last == null
+          ? `${league.name} has never been read from Sleeper.`
+          : last.status === 'error'
+            ? 'The last roster sync did not finish, so the squad below may be out of date.'
+            : `${held} player(s) on your squad in ${league.name}.`,
+      technical: { lastOutcome: last?.status ?? null },
+    };
   }
 
   private async injuries(): Promise<SourceReading> {

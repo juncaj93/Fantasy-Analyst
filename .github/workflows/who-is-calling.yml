@@ -1,0 +1,238 @@
+name: Who is calling production
+
+# Which client is making the requests, in its own words.
+#
+# `d1 insights` answers "which query read the rows". It cannot answer "which
+# request ran that query", and the difference matters: this incident was first
+# blamed on the injuries cron by arithmetic, then on the Draft board's poll by
+# me, on the strength of a five-second cadence matching a call count. The owner
+# then pointed out that both his drafts finished days ago and the Draft tab is
+# not even on screen — so the cadence matched a screen nobody had open, and the
+# attribution was a guess wearing a number's clothes.
+#
+# `wrangler tail` does not guess. It streams the Worker's live events and says,
+# per request, the method, the URL, the user agent and the outcome — and for a
+# scheduled run, which cron fired it. If something is polling unattended it
+# appears here within seconds, named.
+#
+# Two properties make this safe to run mid-incident, which is when it is
+# wanted:
+#
+#   - it reads no database. Tail is a log stream from the Worker runtime, so it
+#     works while D1 is refusing every query for exceeding its daily quota —
+#     the exact window in which `d1 execute` cannot answer anything.
+#   - it changes nothing. No SQL, no deploy, no write of any kind.
+#
+# Client IPs are truncated to two octets before printing. Distinguishing "the
+# owner's phone" from "a machine in a data centre" needs the shape of the
+# address, not the address.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'How long to listen for (seconds)'
+        required: false
+        default: '90'
+
+jobs:
+  listen:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: fantasy-analyst
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # `timeout` rather than a flag, because `wrangler tail` streams until it
+      # is stopped and has no duration of its own. 124 is timeout's own "I
+      # killed it", which is the expected ending here and not a failure.
+      - name: Listen
+        env:
+          SECONDS_TO_LISTEN: ${{ inputs.seconds }}
+        run: |
+          set -uo pipefail
+          echo "Listening to $WORKER_NAME for ${SECONDS_TO_LISTEN}s..."
+          # `|| code=$?` rather than a bare call: the step shell is `bash -e`,
+          # and timeout's 124 -- the expected ending, meaning "I stopped it
+          # after the window" -- would otherwise abort the step as a failure
+          # before the line that reads the code.
+          code=0
+          timeout "${SECONDS_TO_LISTEN}s" \
+            npx wrangler tail "$WORKER_NAME" --format json > tail.jsonl || code=$?
+          if [ "$code" -ne 0 ] && [ "$code" -ne 124 ]; then
+            echo "::error::wrangler tail failed with exit code $code"
+            head -50 tail.jsonl 2>/dev/null || true
+            exit 1
+          fi
+          echo "Captured $(wc -l < tail.jsonl) event lines."
+
+      # The renderer is written to a file rather than passed to `node -e`.
+      #
+      # The first run of this workflow died here: the script is embedded in a
+      # double-quoted shell string, and a line of prose inside it contained
+      # double quotes, which ended the string early and handed node a fragment.
+      # A quoted heredoc has no such edge -- the shell expands nothing inside
+      # it -- so the script means exactly what it says.
+      - name: What called, and how often
+        run: |
+          set -uo pipefail
+          cat > render.mjs <<'RENDER'
+          import { readFileSync } from 'node:fs';
+
+          const raw = (() => { try { return readFileSync('tail.jsonl', 'utf8'); } catch { return ''; } })();
+          const lines = raw.split('\n').filter((l) => l.trim().startsWith('{'));
+
+          if (lines.length === 0) {
+            console.log('No events arrived in the listening window.');
+            console.log('');
+            console.log('That is a finding rather than a blank: nothing reached the Worker while');
+            console.log('this listened. A poller still running would have appeared. To tell a');
+            console.log('quiet minute from a quiet app, re-run for longer, or while using the app.');
+            process.exit(0);
+          }
+
+          // Tail's shape has moved between wrangler versions, so every field is
+          // looked for rather than assumed -- the lesson #244 learned about the
+          // insights payload, applied before it costs a second run.
+          const pick = (o, ...path) => path.reduce((v, k) => (v == null ? v : v[k]), o);
+          const header = (h, name) => {
+            if (!h) return null;
+            if (Array.isArray(h)) {
+              const hit = h.find((x) => String(x?.name ?? '').toLowerCase() === name);
+              return hit ? hit.value : null;
+            }
+            const key = Object.keys(h).find((k) => k.toLowerCase() === name);
+            return key ? h[key] : null;
+          };
+
+          const byRequest = new Map();
+          const byAgent = new Map();
+          const crons = new Map();
+          const bump = (m, k) => m.set(k, (m.get(k) ?? 0) + 1);
+          let scheduled = 0, fetches = 0, other = 0;
+          const unknown = [];
+
+          for (const line of lines) {
+            let e;
+            try { e = JSON.parse(line); } catch { continue; }
+            const cron = pick(e, 'event', 'cron');
+            const isScheduled = cron != null || pick(e, 'event', 'scheduledTime') != null;
+            const req = pick(e, 'event', 'request');
+
+            if (req && req.url) {
+              fetches += 1;
+              let path = req.url;
+              try {
+                const u = new URL(req.url);
+                path = u.pathname + (u.search ? u.search.slice(0, 60) : '');
+              } catch { /* keep the raw url */ }
+              bump(byRequest, (req.method ?? '?') + ' ' + path);
+
+              const h = req.headers;
+              const ua = header(h, 'user-agent') ?? '(no user-agent reported)';
+              const ip = header(h, 'cf-connecting-ip');
+              // Two octets: enough to tell a phone from a data centre, and not
+              // an address.
+              const coarse = ip ? String(ip).split('.').slice(0, 2).join('.') + '.x.x' : '(no ip reported)';
+              bump(byAgent, ua.slice(0, 90) + '  from ' + coarse);
+            } else if (isScheduled) {
+              scheduled += 1;
+              bump(crons, String(cron ?? '(unnamed schedule)'));
+            } else {
+              other += 1;
+              if (unknown.length < 2) unknown.push(JSON.stringify(e).slice(0, 300));
+            }
+          }
+
+          const table = (title, map, note) => {
+            console.log('');
+            console.log(title);
+            console.log('-'.repeat(title.length));
+            if (map.size === 0) { console.log(note); return; }
+            for (const [k, n] of [...map.entries()].sort((a, b) => b[1] - a[1])) {
+              console.log(String(n).padStart(6) + '   ' + k);
+            }
+          };
+
+          console.log('events: ' + lines.length + '  (requests ' + fetches + ', scheduled ' + scheduled + ', other ' + other + ')');
+          table('Requests, by endpoint', byRequest, 'none');
+          table('Requests, by client', byAgent, 'none');
+          table('Scheduled runs, by cron', crons, 'none - no cron fired while this listened');
+          if (unknown.length) {
+            console.log('');
+            console.log('Unrecognised events, verbatim, so the shape can be named next time:');
+            for (const u of unknown) console.log('  ' + u);
+          }
+          RENDER
+
+          node render.mjs | tee summary.txt
+
+          {
+            echo '### Who called production'
+            echo ''
+            echo '```'
+            cat summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Question two, and it needs the database rather than the log stream: is a
+      # draft still sitting in a status that tells a poller to keep polling?
+      # `pollIntervalSeconds` returns 5 for `drafting`, 30 for `paused` and 60
+      # for `pre_draft`, and 0 -- stop -- for anything else. So a draft that
+      # finished days ago but is still recorded as `drafting` would keep any
+      # client that opened it asking every five seconds, forever.
+      #
+      # Allowed to fail, and reported rather than hidden: while the daily row
+      # quota is exhausted D1 refuses this too, and a tail result is worth
+      # having on its own.
+      - name: Draft records, if D1 will answer
+        id: drafts
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === 'fantasy_analyst');
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then echo "::warning::could not resolve the database id"; exit 1; fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+
+          echo "## Draft records" >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          npx wrangler d1 execute fantasy_analyst --remote --json --command \
+            "SELECT d.id, d.sleeper_draft_id, d.league_id, l.name AS league, d.status, d.season, d.last_synced_at, (SELECT COUNT(*) FROM draft_picks p WHERE p.draft_id = d.id) AS picks FROM drafts d LEFT JOIN leagues l ON l.id = d.league_id ORDER BY d.last_synced_at DESC" \
+            2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say so if the database could not be read
+        if: steps.drafts.outcome == 'failure'
+        run: |
+          echo "::warning::The draft-status query did not run. During the quota"
+          echo "::warning::incident D1 refuses every query, so this is expected"
+          echo "::warning::until the allowance resets at 00:00 UTC. The tail"
+          echo "::warning::result above stands on its own."
+
+      # `always()`, because the raw capture is the evidence. The first run
+      # failed in the renderer and threw away the events it had just collected.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: worker-tail
+          path: tail.jsonl
+          if-no-files-found: warn

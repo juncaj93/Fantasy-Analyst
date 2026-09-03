@@ -3457,3 +3457,201 @@ against 160.0 kB (−0.2 kB), CSS **14.4 kB** against 20.0 kB and Demo Mode's la
 chunks **150.9 kB** against 156.0 kB, both unchanged. The same deletion measured
 0.2 kB against `9b271a4` and against `46b8098` as well; Mock Draft and the trade
 ladder are the difference between those baselines, not this change.
+
+## Milestone — the week between a finished draft and a priced slate (done)
+
+Reported by the owner on 31 August 2026, hours after a real in-person draft
+finished and nine days before week one, against the live league. Three
+complaints, one screen each:
+
+1. **Matchup.** "Fantasy Analyst forecast temporarily unavailable." Both teams
+   `0.00`, every starter row `0.0`, both sides.
+2. **Waivers.** One card — `DEF · FA · Wait — no DST needed yet` — over a
+   starting DEF slot with nothing in it.
+3. **Team.** `Start Mark Andrews over Kenneth Walker (FLEX)` at the top of
+   "Changes to consider", with Andrews and two others carrying a `Not in
+   Sleeper` tag on the same screen.
+
+The obvious suspect was the draft-state repair that had landed the day before
+(`core/sleeper/phase.ts`, `core/season/lifecycle.ts`). It is not the cause and
+nothing in it is reverted. What it did was make these three screens *reachable*:
+`matchupVisible` turns on at the final pick, which is the first moment anybody
+had looked at any of them in this particular week.
+
+### One cause under the first and third
+
+**No betting market had priced week one, because nothing had asked for it**, and
+two separate gates account for that.
+
+`VegasRefreshService.refresh` returns at its first step — "no roster to price" —
+when the selected league's roster is empty, which it was for the whole of this
+league's life until the final pick. So no line had ever been fetched for any of
+these players, and the draft finishing is the first moment one could have been.
+
+The next chance is the cron, which runs Saturday 23:00 and Sunday 15:00 UTC, and
+discovery bounded its window to eight days. Saturday 5 September reaches
+13 September, so week one's Thursday and Sunday games are inside it — the app
+would have healed itself five days after the report, on its own, which is worth
+stating plainly. What it would not have done is anything at all in the five days
+between: the week a reader looks at their new team every day.
+
+Whichever gate you look through, the effect at the moment of the report is the
+same: no event discovered, no snapshot stored, no consensus row, and
+`buildExpectation` returning null for every player on both rosters.
+
+From there the two screens failed in two different ways, and the second one is
+the interesting failure:
+
+- **Matchup did the right thing.** `coverage < MIN_PROJECTED_SHARE` on both
+  sides, so the forecast degraded rather than simulating a team it could see
+  none of. The screen was correct and the data was missing.
+- **Team did not.** `evaluatePlayer` returns a non-null `score` whenever *any*
+  component is known — a newsletter tally is enough — so with no market the
+  score is the sum of the nudges alone. `projection.ts` already refuses to
+  *print* that number, after production showed `Jalen Hurts 3.15` against a
+  published 20.98. It was still deciding who started, and `buildSwaps` was
+  reporting the difference between two of them as `+1.6 pts`. Reproduced in
+  `tests/postDraftMarketGap.test.ts` on the reported roster shape: nine players,
+  no market, a news tally each, and the optimiser produced `Start KC Concepcion
+  over Kenneth Walker (RB) · +1.57 pts` with every projection on the screen
+  showing `—`. Different names from the report's own, same sentence, same
+  arithmetic over nothing.
+
+`Not in Sleeper` was a third, smaller thing: the tag has only ever meant "not in
+the *lineup* Sleeper holds", which is what the row's accessible name has always
+said, but on a screen whose whole subject is a Sleeper roster it reads as a
+claim about who the reader owns. Every player named in the report was on the
+roster — `/api/leagues/:id/lineup` reads `mine.playerIds` and nothing else.
+
+### The second is its own rule, and the owner's call
+
+The DST planner's activation window is 72 hours from the next kickoff, and it
+exists to buy something specific: the bench spot a defence would occupy, held
+for a skill-position flier until the week the defence is actually needed. That
+is a real trade and the planner makes it deliberately — the module is written
+for a manager who often drafts no defence at all.
+
+It is not a trade when the spot is *empty*. Nothing is being kept in it, so
+waiting buys nothing, and it costs the top of a pool that empties fastest in the
+days after a draft while the slot itself is a guaranteed zero in the next game
+the league plays. So an empty DEF slot that can be filled without dropping
+anybody now activates before the window. Where filling it *would* cost a drop
+the original trade is back on and the wait stands — and the headline says which
+of the two it is, because `no DST needed yet` was false in the only way that
+mattered.
+
+### What changed
+
+- `server/services/vegasRefresh.ts` — discovery's window stretches to the
+  roster's next fixture when there is not one inside the ordinary eight days,
+  measured against the stored nflverse fixture list rather than a date, capped
+  at 28 days, never narrowing, and falling back to eight days on anything it
+  cannot read. And only each team's *next* fixture is stored, which is the
+  invariant `PropsRepo.latestForPlayers` has always assumed and the eight-day
+  window used to provide by accident.
+- `core/startsit/lineup.ts` — no swap is proposed for a player no market has
+  priced (one-sided on purpose: benching a bye-week starter for somebody the
+  books have quoted is a real comparison and still happens), and with nothing
+  priced anywhere on a roster the lineup is not reordered at all — the reader's
+  own starters are kept and the card says why. Floor and Ceiling stand down in
+  the same state, for the same reason: their mechanism is "worth at most a tie",
+  and every unpriced pair is a tie, so without a market the shape preference
+  would quietly become the whole decision.
+- `core/dst/planner.ts` — the empty-slot activation above, and a headline that
+  describes the slot rather than denying the need. The empty slot is also named
+  in the state where the wire cannot be ranked at all, which is what this league
+  is in until the lines arrive.
+- `web/screens/TeamScreen.tsx` — `Not in Sleeper` becomes `On your bench`. The
+  `data-testid` is unchanged; it names the condition, which has not moved.
+- `docs/VEGAS.md` — the fetch strategy, and one line on the month's cost.
+
+### Verification
+
+`npm run typecheck` clean. `npm test` 5233 passed, 1 skipped, 267 files — nine
+of them new in `tests/postDraftMarketGap.test.ts`, six of which fail on
+`33a4434` and pass here; the three that pass on both are the negative controls
+(an in-season window is unchanged, a missing fixture list does not widen
+anything, and a bye-week swap still happens). `npm run e2e:chromium` at 430,
+390, 375 and 360. Perf budget within, unchanged: app JavaScript 138.2 kB of
+148.0, everything the browser must fetch 155.0 kB of 168.0.
+
+### What is not proved here
+
+That the provider answers with week-one *player* props ten days out. The repo's
+own probe record is the best evidence available without spending quota:
+`docs/VEGAS.md` records `passing_yards`, `rushing_yards`, `receiving_yards` and
+the rest read off "a live 10 September fixture" on 22 August 2026 — nineteen
+days ahead. If the lines turn out to be game-level only that early, the
+discovery still stores the total and the spread, the defence model still gets
+its anchor, and the skill-position forecast waits for the Saturday it would have
+waited for anyway. Nothing regresses either way.
+
+## Milestone — the Players list narrows by who holds a player (done)
+
+Two questions the Players tab could not answer: *show me only the players I
+could actually add*, and *show me one manager's team without leaving this
+screen*. Both are now answers inside one control beside the position chips.
+
+**They are one filter, not two.** The brief asked for an availability toggle and
+a team filter, and noted that "Available" plus a named team can only ever return
+nothing — offering the disabled state as one way out. Both are answers to the
+same fact: which roster in this league holds this player. A player nobody
+rosters is not on Joe's team, and a player on Joe's team is not available. So
+ownership is a single exclusive choice — `Anyone · Available · <each team>` —
+and the impossible combination is unrepresentable rather than handled: no
+disabled chip to explain, no rule about which filter wins, no empty list to
+account for. The orthogonal combination is the one that was actually wanted and
+it works: available running backs, or every quarterback on one manager's team.
+
+**It is a picker, and it was a chip row until the density gate said otherwise.**
+The second chip row cost the Players list its tenth player on a 360px phone —
+the number `e2e/density.spec.ts` measures and the whole reason that screen's
+cards became rows. It would also have been the wrong shape for the league it is
+for: two chips plus twelve managers is fourteen pills in a track a thumb has to
+drag through to reach a name. So ownership is a `btn-compact` button sharing the
+existing control row — the same arrangement Team uses for Compare beside its
+mode control — that says the answer in force (`Owner`, then `Available` or
+`Rival`) and opens a sheet listing the rest. Zero vertical pixels, and it reads
+the same at two teams as at twelve. The position chips went `compact` to share
+the row, which costs padding and not one pixel of their 44px targets.
+
+**It narrows on the server, before the page is cut.** `/api/players` takes one
+new parameter, `owner` — absent, `available`, or a roster id — applied to the
+pool *before* `total`, `hasMore` and the page slice are taken off it. A client
+filtering the hundred rows it was sent would have shown three of them under a
+total of three thousand and then fetched a page that was already excluded. The
+end-of-list line is the visible half of that claim: filtered to the rival's team
+it reads `1 player — that is all of them.`
+
+**No new wave.** The filter needs the league's rosters and so does the
+`availability` tag the comparison picker already reads; they are one map now,
+and the roster read was moved to run alongside the ranking-snapshot lookup
+rather than after it. On D1 a statement that waits for a previous one is a
+network round trip, so ownership costs the list none. The teams themselves ride
+back with every page — not once — so a filter that empties the list cannot take
+its own chip away with it.
+
+**The rule is in core, applied by both handlers.** `core/roster/ownership.ts` is
+what the live handler and Demo Mode's `/api/players` both call, for the reason
+the position filter lives in `sleeper/eligibility.ts`: a filter implemented
+twice means two things by the third change to it. A demo that answered `owner`
+differently from the app it demonstrates would be worse than one that did not
+answer it at all, and `tests/playersOwnership.test.ts` asserts the two agree
+against the availability tag rather than against a fixture's roster ids.
+
+**Two things it deliberately does not do.** An `owner` sent without a `leagueId`
+opens the list rather than emptying it — ownership is a fact about a league, and
+an empty list reads as missing data rather than as an unanswerable question. And
+a seat Sleeper has never named is drawn as `Team 4`, which says which roster
+without claiming to know whose it is; no stand-in name is invented anywhere on
+the path.
+
+No budget raised, and no stylesheet rule was added at all: the control is the
+existing `.control-row`, `button.btn-compact`, `Sheet` and `ListRow`. App
+JavaScript **139.1 kB** against its 148.0 kB ceiling, everything the browser
+must fetch **155.9 kB** against 168.0 kB, CSS **15.3 kB** against 20.0 kB and
+Demo Mode's lazy chunks **154.1 kB** against 156.0 kB, unchanged. One line
+was added to `chunkOwnership.renderPath`: `core/roster/ownership.ts` is a
+dependency-free leaf that the Players screen genuinely needs on the render
+path — it builds the picker's options and the request URL — so it is declared
+rather than split.

@@ -10,7 +10,7 @@
  * The third is the dangerous one, because it is the one a person would act on.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
@@ -99,6 +99,95 @@ describe('catching up after an outage', () => {
       /* fill it */
     }
     expect(await service.catchUpOneWeek(SEASON)).toBeNull();
+  });
+
+  /*
+   * The read that exhausted the database.
+   *
+   * `missingWeekBefore` reads every row a season holds. It rides the
+   * five-minute tick, so once the last gap is filled it asked a settled
+   * question 288 times a day — against a table the backfill had just filled
+   * with a whole season. On 2026-09-01 that reached D1's 5,000,000 daily
+   * row-read limit and the app began erroring on every request that touched
+   * the database.
+   *
+   * The count is the assertion, not the return value: `catchUpOneWeek` has
+   * always returned null here, and did so while scanning. Only the number of
+   * scans tells the two apart.
+   */
+  it('asks whether a week is missing once, not on every tick', async () => {
+    const db = await setup();
+    let body = through(3);
+    let version = 0;
+    const service = new InjuryService(db, {
+      log: () => {},
+      fetch: async () => new Response(body, { status: 200, headers: { etag: `"v${++version}"` } }),
+    });
+    await service.refresh(SEASON);
+    body = through(4);
+    await service.refresh(SEASON);
+
+    while (await service.catchUpOneWeek(SEASON)) {
+      /* fill it */
+    }
+
+    const scan = vi.spyOn(InjuryRepo.prototype, 'missingWeekBefore');
+    try {
+      for (let tick = 0; tick < 20; tick++) {
+        expect(await service.catchUpOneWeek(SEASON)).toBeNull();
+      }
+      expect(scan, 'twenty ticks, and the season is scanned at most once').toHaveBeenCalledTimes(0);
+    } finally {
+      scan.mockRestore();
+    }
+  });
+
+  /*
+   * And the case the watermark must not swallow.
+   *
+   * A gap is created by a week arriving while an earlier one is missing, so the
+   * feed moving past the verified point is exactly when the scan has to run
+   * again. A watermark that suppressed it would turn a cheap tick into a
+   * permanently blind one.
+   */
+  it('scans again once the feed moves past the point it verified', async () => {
+    const db = await setup();
+    let body = through(2);
+    let version = 0;
+    const service = new InjuryService(db, {
+      log: () => {},
+      fetch: async () => new Response(body, { status: 200, headers: { etag: `"v${++version}"` } }),
+    });
+    await service.refresh(SEASON);
+
+    while (await service.catchUpOneWeek(SEASON)) {
+      /* settle, and write the watermark */
+    }
+    expect(await service.catchUpOneWeek(SEASON)).toBeNull();
+
+    // The source jumps to week 5, leaving 3 and 4 behind it unread.
+    body = through(5);
+    await service.refresh(SEASON);
+
+    const scan = vi.spyOn(InjuryRepo.prototype, 'missingWeekBefore');
+    try {
+      expect(await service.catchUpOneWeek(SEASON), 'the hole is found again').toMatchObject({ week: 3 });
+      expect(scan).toHaveBeenCalled();
+    } finally {
+      scan.mockRestore();
+    }
+
+    while (await service.catchUpOneWeek(SEASON)) {
+      /* fill the rest */
+    }
+    /*
+     * Two, not one. The steady-state refresh stores the file's latest week
+     * only, so the first one stored week 2 and week 1 was never read — and
+     * catch-up fills *between* the weeks it holds rather than reaching below
+     * the oldest of them. The hole this closes is 3 and 4.
+     */
+    const filled = await new InjuryRepo(db).weeksFor('p-ann', SEASON, 10);
+    expect(filled.map((w) => w.week)).toEqual([2, 3, 4, 5]);
   });
 
   /** Catch-up is history. It must not move a card or spend an event. */

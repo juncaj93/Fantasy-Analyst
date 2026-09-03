@@ -159,7 +159,13 @@ in this app happens in Sleeper, by hand, on purpose.
 
 **Players** — searchable intelligence with tallies by window (7d / 30d / season
 / life), category breakdown, cached prop lines and the full evidence
-timeline. Every original excerpt is preserved.
+timeline. Every original excerpt is preserved. Two filters narrow it: the
+position chips, and beside them who holds a player — anyone, *available*
+(nobody in the league rosters him, so he is an add rather than a trade), or one
+manager's team. Those last two are one control and not two, because they are
+two readings of one fact and cannot both be true; both narrow on the server,
+before the page is cut, so the count at the end of the list is the count of what
+you are actually looking at.
 
 Each expanded card opens with an **Insight**: one sentence saying why the tally
 reads the way it does. It is chosen from evidence the ledger already holds,

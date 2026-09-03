@@ -59,6 +59,13 @@ import { buildRosterShape, buildScoringProfile, leagueFitNotes, startablePositio
 /* Still used directly by handlers in this file. */
 import { evaluatePlayer } from '../core/startsit/engine.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
+import {
+  matchesOwner,
+  narrowsByOwner,
+  ownerTeams,
+  parseOwnerFilter,
+  rosterOwnership,
+} from '../core/roster/ownership.ts';
 import { buildLadderFor } from '../core/trades/ladderInputs.ts';
 import type { ManagerTradeProfile } from '../core/managers/tradeProfile.ts';
 import { evaluateBench } from '../core/roster/bench.ts';
@@ -847,7 +854,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
       throw err;
     }
-    const { league, mine, shape, profile, inputs, published, unknownPlayers, props } = gathered;
+    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props } = gathered;
 
     /*
      * The whole decision, in one call.
@@ -870,6 +877,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       currentStarterIds: mine.starterIds,
       mode,
       published,
+      publishedRefusal,
       unknownPlayers,
     });
 
@@ -1952,6 +1960,21 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const limit = Math.min(Math.max(Number(ctx.url.searchParams.get('limit') ?? 100) || 100, 1), 200);
     const offset = Math.max(Number(ctx.url.searchParams.get('offset') ?? 0) || 0, 0);
     const position = ctx.url.searchParams.get('position');
+    /*
+     * Who holds them, when the caller says which league they mean.
+     *
+     * One parameter for what reads on screen as two questions — "only players I
+     * can add" and "only Joe's team" — because they are two answers to one
+     * fact and cannot both be true. See core/roster/ownership.ts for why that
+     * is a single filter rather than two that have to be told apart.
+     *
+     * Both the ownership filter and the availability tag below need the same
+     * roster rows, and neither means anything without a league: `leagueId` is
+     * what makes either of them answerable, and an `owner` sent without one is
+     * a question about a league nobody named.
+     */
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    const owner = parseOwnerFilter(ctx.url.searchParams.get('owner'));
     const repo = new PlayerRepo(ctx.env.db);
 
     // Draft order comes from an imported ranking. Sleeper's search_rank is NOT
@@ -1961,48 +1984,66 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     // The *platform* snapshot, not the newest of anything: this list shows one
     // ranking and calls it the draft order, and once an Underdog snapshot
     // exists "the newest" is the Underdog one on any day it was fetched last.
-    const snapshot = await new AdpRepo(ctx.env.db).latestPlatformSnapshot();
+    //
+    // The rosters ride along with the snapshot lookup rather than waiting for
+    // it: they depend on nothing this handler has read, and on D1 a statement
+    // that waits for a previous one is a network round trip. Issued together,
+    // ownership costs the list no wave at all.
+    const [snapshot, rosters] = await Promise.all([
+      new AdpRepo(ctx.env.db).latestPlatformSnapshot(),
+      leagueId ? new LeagueRepo(ctx.env.db).listRosters(leagueId) : Promise.resolve([]),
+    ]);
     const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
 
     /*
-     * A filter narrows what comes back, so the pool it narrows has to be wider.
+     * The pool a page is cut from has to be deeper than the page, and deeper
+     * again when something narrows it.
      *
-     * The search returns the best N matches for the text; filtering those to one
-     * position afterwards can leave a handful, which looks exactly like "there
-     * are no more players called that". Asking for more when a filter is on
-     * costs nothing when it is off.
-     */
-    /*
-     * The pool a page is cut from has to be deeper than the page.
+     * A search returns the best N matches for the text and a filter then cuts
+     * those down, so a shallow search pool looks exactly like "there are no
+     * more players called that". It also has to cover the offset: page three of
+     * a filtered search is only reachable if the search returned enough rows to
+     * have a page three. Asking for more when a filter is on costs nothing when
+     * it is off.
      *
-     * A search returns the best N matches for the text and the position filter
-     * then narrows those, so a shallow search pool looks exactly like "there
-     * are no more players called that". It also has to cover the offset: page
-     * three of a filtered search is only reachable if the search returned
-     * enough rows to have a page three.
+     * Ownership counts as a narrowing for the same reason as the position, and
+     * it narrows harder: a roster is about fifteen players out of thousands.
      */
-    const searchDepth = Math.max((position ? 400 : 200), offset + limit * 3);
+    const narrowed = position != null || narrowsByOwner(owner);
+    const searchDepth = Math.max((narrowed ? 400 : 200), offset + limit * 3);
     const pool = q ? await repo.search(q, searchDepth) : (await repo.listAll()).filter((p) => p.active);
     // `FLX` is a view over RB/WR/TE and is never a position on a player — see
     // core/sleeper/eligibility.ts, which every screen's filter goes through.
-    const filtered = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
+    const byPosition = position ? pool.filter((p) => positionMatchesFilter(p.position, position)) : pool;
 
     /*
-     * Who owns whom, when the caller says which league they mean.
+     * Who owns whom, from the roster rows read above.
      *
-     * The comparison picker needs it: comparing a bench player against a free
-     * agent is a real question, and comparing one against a player another
-     * manager owns is not a question at all. Sleeper's rosters are the whole
-     * answer, and the field is simply absent when no league was named.
+     * Two readers, one map. The comparison picker needs the *tag*: comparing a
+     * bench player against a free agent is a real question, and comparing one
+     * against a player another manager owns is not a question at all. The
+     * Players list needs the *filter*: only what Alex can add, or only one
+     * manager's team.
+     *
+     * Both are absent when no league was named, and deliberately — see the note
+     * on `leagueId` above.
      */
-    const availabilityLeagueId = ctx.url.searchParams.get('leagueId');
+    const owned = rosterOwnership(rosters);
     const availability = new Map<string, 'mine' | 'rostered' | 'available'>();
-    if (availabilityLeagueId) {
-      const rosters = await new LeagueRepo(ctx.env.db).listRosters(availabilityLeagueId);
-      for (const roster of rosters) {
-        for (const id of roster.playerIds) availability.set(id, roster.isMine ? 'mine' : 'rostered');
-      }
+    for (const roster of rosters) {
+      for (const id of roster.playerIds) availability.set(id, roster.isMine ? 'mine' : 'rostered');
     }
+
+    /*
+     * The narrowing happens here, before the page is cut, and that is the whole
+     * of why this is a server filter rather than a client one.
+     *
+     * `hasMore` and `total` are counted off this list and the page is sliced
+     * out of it. A client filtering the hundred rows it was sent would have
+     * shown three of them under a total of a hundred, with the next page
+     * arriving already filtered to nothing.
+     */
+    const filtered = narrowsByOwner(owner) ? byPosition.filter((p) => matchesOwner(p.id, owner, owned)) : byPosition;
 
     /*
      * Scored deep enough to serve this page, then some.
@@ -2047,6 +2088,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       offset,
       hasMore: filtered.length > offset + page.length,
       total: filtered.length,
+      /*
+       * The teams this list may be narrowed to, for the picker to offer.
+       *
+       * Sent with the list rather than fetched separately because the rosters
+       * are already in hand, and sent on *every* page because it is the answer
+       * to "which teams exist", not to "which teams are on this page" — a
+       * filter that emptied the list must not take away the control that would
+       * undo it. Absent when no league was named, which is the state where
+       * there is no such thing as a team to filter to.
+       */
+      ...(leagueId ? { teams: ownerTeams(rosters) } : {}),
       players: page.map(({ player: row, draftRank, adjustedRank: adjusted, movement }) => ({
         id: row.player.id,
         name: row.player.fullName,
@@ -2058,9 +2110,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         movement,
         signal: signals.get(row.player.id) ?? null,
         myGuy: myGuy(flags.get(row.player.id)?.level ?? 0),
-        ...(availabilityLeagueId
-          ? { availability: availability.get(row.player.id) ?? ('available' as const) }
-          : {}),
+        ...(leagueId ? { availability: availability.get(row.player.id) ?? ('available' as const) } : {}),
       })),
     });
   });

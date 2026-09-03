@@ -310,7 +310,9 @@ function competitionWith(rosterIds: number[]): CompetitionAssessment {
       displayName: `Roster ${rosterId}`,
       need: 'urgent' as const,
       remaining: 60,
+      participation: 1,
     })),
+    effectiveBidders: rosterIds.length,
   };
 }
 

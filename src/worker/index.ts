@@ -352,6 +352,42 @@ export default {
           : { outcome: 'succeeded' as const };
       });
       /*
+       * Who is actually on the roster, once a day.
+       *
+       * The gap this closes: `syncLeague` is the only thing that replaces roster
+       * rows, and until now no clock called it. It ran when a league was
+       * selected, when somebody pulled down on Team or Waivers, and once after a
+       * draft finished — so a squad that changed in Sleeper stayed wrong in this
+       * app indefinitely, and the Data Health screen could not say so because
+       * the roster was not one of the sources it reported on.
+       *
+       * Reported as a defence claimed off waivers on 1 September 2026 that never
+       * appeared on the Team page, while the Waivers screen went on advising him
+       * to fill a DEF slot he had already filled. Nothing in the roster path was
+       * broken; nothing had asked.
+       *
+       * 09:00 UTC is about 4am Eastern, which is after Sleeper processes waiver
+       * claims overnight — so the ordinary case is that a claim is on the Team
+       * page before the owner wakes up.
+       *
+       * Third on this tick, after the dictionary and the week, because a roster
+       * is hydrated against the players this app knows and every feed below is
+       * scoped to the squad this returns. Five subrequests: the league, its
+       * rosters, its users, its drafts, and the state check `syncLeague` makes
+       * on the way out. They come out of the manager backfill's allowance, which
+       * is what that step is designed to yield — a squad that is wrong today
+       * outranks a history that finishes a day later.
+       *
+       * Separately caught like everything else here, and a skip when no league
+       * is selected is not a failure: there is nothing to sync.
+       */
+      await run.step('roster', 'Your roster', async () => {
+        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
+        if (!selected) return { outcome: 'skipped' as const, note: 'no league selected' };
+        const result = await sleeperSync.syncLeague(selected.id);
+        return { outcome: 'succeeded' as const, items: result.rosters };
+      });
+      /*
        * Last season's line, on the same clock and deliberately after the
        * dictionary: the statistics are matched against the players this app
        * knows, so syncing them in the other order would report every new player

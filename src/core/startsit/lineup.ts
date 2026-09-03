@@ -11,6 +11,31 @@
  * Unknown stays unknown. A player the engine cannot score is not quietly
  * benched — they are listed separately as undecidable, and if one is currently
  * starting, no swap is proposed against them.
+ *
+ * ## A swap is a claim, and a claim needs a market
+ *
+ * `score` is the sum of whichever components were known, and the market
+ * expectation is the only one of them that is a forecast of a week of football
+ * — the rest are nudges measured in ones and twos. `core/startsit/projection.ts`
+ * already refuses to *print* a score with no market under it, after production
+ * showed `Jalen Hurts 3.15` against a published 20.98. The same number was
+ * still deciding who started.
+ *
+ * With no market anywhere on a roster — the ordinary state between a draft and
+ * the week the books price — every score is nudges, the ordering between them
+ * is noise, and the optimiser was reporting that noise as `Start Mark Andrews
+ * over Kenneth Walker · +1.6 pts`: a confident sentence with nothing behind it,
+ * about a lineup the reader would otherwise have left alone. Two rules follow,
+ * and they are deliberately different shapes:
+ *
+ *   1. **No swap is proposed for a player no market has priced.** One-sided on
+ *      purpose. Benching a bye-week player for somebody the books have quoted
+ *      is a real comparison and still happens; asking a reader to bench a
+ *      priced starter for an unpriced bench player is the failure above.
+ *   2. **With nothing priced at all, the lineup is not reordered.** There is no
+ *      ranking to apply, so the starters the reader already has are kept and
+ *      the reason is said out loud, rather than shuffling nine players on the
+ *      strength of a news tally.
  */
 
 import type { RosterShape } from '../sleeper/scoring.ts';
@@ -33,8 +58,17 @@ export interface LineupSlot {
    * The comparable start/sit score this slot was won with.
    *
    * A ranking number, and only that. It is the sum of whichever components were
-   * known, so with no market published it is a handful of adjustments — fine for
-   * deciding who starts, wrong to print as a forecast. See {@link projection}.
+   * known, so with no market published it is a handful of adjustments.
+   *
+   * **"Fine for deciding who starts" is what this used to say, and it is not
+   * true when the market is missing from every side of the comparison.** The
+   * nudges are bounded to ones and twos; the gap between a first-round back and
+   * a fifth receiver is ten points and more. With no base under either of them
+   * a friendlier newsletter tally inverts the pair, and in production it did —
+   * `Start KC Concepcion over Kenneth Walker (RB) · +1.57 pts`, every projection
+   * on the screen a dash. What the module now does about that is in its
+   * docblock; this field is unchanged and still means exactly what it says.
+   * See {@link projection} for the number a screen may print.
    */
   score: number | null;
   /**
@@ -190,6 +224,16 @@ export function recommendLineup(
   const scored = movable.filter((e) => e.score != null);
   const undecidable = movable.filter((e) => e.score == null);
 
+  /*
+   * Whether anything on this roster has a market underneath it.
+   *
+   * Not "is this player priced" — that question is asked per swap below. This
+   * is the whole-roster state: when no book has quoted anybody, there is no
+   * ranking to apply and the reader's own lineup is left where it is. See the
+   * module docblock.
+   */
+  const unpriced = movable.every((e) => !hasMarket(e));
+
   const slots = buildSlots(shape);
   const warnings: string[] = [];
   const notes: string[] = [];
@@ -244,7 +288,19 @@ export function recommendLineup(
   // left from the players who can still be moved.
   const reserved = reserveLockedSlots(lockedStarters, slots);
   const openSlots = slots.map((s, index) => ({ spec: s, index })).filter(({ index }) => !reserved.has(index));
-  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec));
+  /*
+   * With nothing priced, the incumbent holds the slot.
+   *
+   * The tie-break, not a second opinion: `assignBest` still fills every slot
+   * legally and optimally, it is only told which of two equally-unfounded
+   * orderings to prefer. In every week a market exists this argument is absent
+   * and the assignment is byte-for-byte what it was.
+   */
+  const openAssignment = assignBest(
+    playable,
+    openSlots.map((o) => o.spec),
+    unpriced ? currentStarters : null,
+  );
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
   for (const [openIndex, player] of openAssignment) {
@@ -259,7 +315,20 @@ export function recommendLineup(
    * pass never changes who starts at all — it only decides which slot each of
    * them occupies, which is free and is worth real money on a Sunday.
    */
-  const preferenceNotes = applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
+  /*
+   * Floor and Ceiling are preferences over a lineup that has already been
+   * ranked, so with nothing ranked there is nothing for them to prefer.
+   *
+   * The mechanism is "swap a starter for a bench player within
+   * {@link LINEUP_PREFERENCE_TOLERANCE} points of him, when the shape
+   * improves". With no market every pair of unpriced players is inside that
+   * tolerance — the scores are nudges a point apart — so the guard that makes
+   * this worth at most a tie stops holding, and Ceiling mode would stack a
+   * lineup on correlation alone while the card underneath stayed silent about
+   * it. Balanced already returns immediately; this makes the other two behave
+   * the same way for the same reason.
+   */
+  const preferenceNotes = unpriced ? [] : applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
   notes.push(...preferenceNotes, ...placementNotes);
 
@@ -296,6 +365,20 @@ export function recommendLineup(
   );
 
   const swaps = buildSwaps(filled, bench, currentStarters, evaluations, minGain);
+
+  /*
+   * Why the card above is quiet, said once rather than on nine rows.
+   *
+   * Only when the whole roster is unpriced: a note beside a mostly-priced
+   * lineup would be noise, and the per-swap rule already covers the odd
+   * unpriced player.
+   */
+  if (unpriced && scored.length > 0) {
+    notes.push(
+      'No betting market has priced this week yet, so there is nothing to rank these players against — ' +
+        'your Sleeper lineup is left as it is rather than reordered on news and usage alone.',
+    );
+  }
 
   // The current total is only meaningful when every current starter could be
   // scored; otherwise the comparison would silently treat unknown as zero.
@@ -660,9 +743,21 @@ function buildSlots(shape: RosterShape): SlotSpec[] {
 function assignBest(
   players: StartSitEvaluation[],
   slots: SlotSpec[],
+  /**
+   * The lineup already set, to break ties with when there is no ranking.
+   *
+   * Null in every ordinary week, and then this function is exactly what it
+   * was. Passed only when no player on the roster has a market — see the
+   * module docblock — where "highest score first" is an ordering over noise
+   * and preferring the reader's own starters is the one answer that asks
+   * nothing of them.
+   */
+  prefer: ReadonlySet<string> | null = null,
 ): Map<number, StartSitEvaluation> {
+  const incumbent = (e: StartSitEvaluation): number => (prefer?.has(e.playerId) ? 0 : 1);
   const order = [...players].sort(
-    (a, b) => (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name),
+    (a, b) =>
+      incumbent(a) - incumbent(b) || (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name),
   );
   // slot index -> player
   const bySlot = new Map<number, StartSitEvaluation>();
@@ -708,6 +803,15 @@ function tryAssign(
  * Only slots whose recommended player is not already starting produce a swap,
  * and only when the gain clears the threshold — a lineup churned for a tenth of
  * a point is worse advice than leaving it alone.
+ *
+ * And only when a market has priced the player being asked *in*. A gain
+ * measured between two scores that are both sums of nudges is arithmetic over
+ * noise, and printing it as `+1.6 pts` is the confident-wrong-answer failure
+ * `projection.ts` was written to stop at the display layer. The rule is
+ * deliberately one-sided: the outgoing player may be unpriced — a bye week is
+ * exactly that, and replacing him with somebody the books have quoted is a real
+ * comparison — but nobody is asked to bench a starter for a player nobody has
+ * put a number on.
  */
 function buildSwaps(
   filled: LineupSlot[],
@@ -735,6 +839,7 @@ function buildSwaps(
     if (slot.playerId == null || slot.alreadyStarting) continue;
     const incoming = byId.get(slot.playerId);
     if (!incoming) continue;
+    if (!hasMarket(incoming)) continue;
 
     const outgoing = sitting.find(
       (e) => !used.has(e.playerId) && slot.accepts.includes(e.position),
@@ -774,6 +879,19 @@ function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation):
     return `${incoming.name} carries the higher market expectation (${incoming.expectation.points.toFixed(1)} vs ${outgoing.expectation.points.toFixed(1)} pts)`;
   }
   return `${incoming.name} scores higher on the evidence available`;
+}
+
+/**
+ * Has a betting market priced this player's week?
+ *
+ * The same test `marketProjection` makes, asked of the evaluation rather than
+ * of the number it produces, because this module needs the answer before it has
+ * decided whether to print anything. `evaluatePlayer` already refuses to
+ * publish an expectation it cannot stand behind, so this reads that decision
+ * rather than inventing a second threshold beside it.
+ */
+function hasMarket(evaluation: StartSitEvaluation): boolean {
+  return evaluation.expectation?.points != null;
 }
 
 function worstConfidence(evaluations: StartSitEvaluation[]): 'high' | 'medium' | 'low' {
