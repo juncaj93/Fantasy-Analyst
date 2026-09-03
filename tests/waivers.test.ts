@@ -120,6 +120,91 @@ describe('who may be recommended', () => {
     expect(te!.candidates[0]!.reasons.join(' ')).toContain('Market rising');
   });
 
+  /*
+   * The empty board, and the difference between losing and not being read.
+   *
+   * A free agent with no market, no usage and no news scores `null` and is
+   * dropped before any slot compares him. On a real wire that is routinely most
+   * of the pool, and the page used to close over it with `Your current options
+   * grade better than available waivers.` — a verdict about players nobody
+   * graded. These three tests pin the three sentences apart.
+   */
+  describe('the sentence an empty board closes with', () => {
+    it('does not claim a verdict when nobody could be scored', () => {
+      const advice = recommendWaiverUpgrades({
+        roster: healthyRoster(),
+        // No market, no news, no status: nothing to score him on at all.
+        candidates: [candidate('fa-te', 'Unread End', 'TE', null)],
+        shape: SHAPE,
+        profile: HALF_PPR,
+        rosteredPlayerIds: MY_IDS,
+      });
+
+      expect(advice.upgrades).toEqual([]);
+      expect(advice.skipped).toBe(1);
+      expect(advice.headline).not.toContain('grade better');
+      expect(advice.headline).toContain('No free agent could be scored');
+      // He was not rejected, and the line may not let a reader think he was.
+      expect(advice.headline).toContain('Unknown, not ruled out.');
+    });
+
+    it('counts the unread beside the compared when there were both', () => {
+      const advice = recommendWaiverUpgrades({
+        roster: healthyRoster(),
+        candidates: [
+          candidate('fa-te', 'Marginal End', 'TE', 10),
+          candidate('fa-te2', 'Unread End', 'TE', null),
+          candidate('fa-wr', 'Unread Catcher', 'WR', null),
+        ],
+        shape: SHAPE,
+        profile: HALF_PPR,
+        rosteredPlayerIds: MY_IDS,
+      });
+
+      expect(advice.upgrades).toEqual([]);
+      expect(advice.skipped).toBe(2);
+      // The one that lost is claimed as a comparison; the two are not.
+      expect(advice.headline).toContain('better than the 1 free agent that could be scored');
+      expect(advice.headline).toContain('2 free agents had nothing to read');
+    });
+
+    it('counts only the unread, never the ruled out', () => {
+      const advice = recommendWaiverUpgrades({
+        roster: healthyRoster(),
+        candidates: [
+          candidate('fa-te', 'Marginal End', 'TE', 10),
+          candidate('fa-te2', 'Unread End', 'TE', null),
+          // Scorable and genuinely unavailable. Excluded on a fact, not on
+          // ignorance, so the sentence may not describe him as unknown.
+          candidate('fa-te3', 'Injured End', 'TE', 20, { status: 'IR' }),
+        ],
+        shape: SHAPE,
+        profile: HALF_PPR,
+        rosteredPlayerIds: MY_IDS,
+      });
+
+      expect(advice.upgrades).toEqual([]);
+      // Both were dropped from the comparison...
+      expect(advice.skipped).toBe(2);
+      // ...but only one of them is something the app failed to read.
+      expect(advice.headline).toContain('1 free agent had nothing to read');
+      expect(advice.headline).not.toContain('2 free agents had nothing to read');
+    });
+
+    it('is unchanged when the whole wire was actually compared', () => {
+      const advice = recommendWaiverUpgrades({
+        roster: healthyRoster(),
+        candidates: [candidate('fa-te', 'Marginal End', 'TE', 10)],
+        shape: SHAPE,
+        profile: HALF_PPR,
+        rosteredPlayerIds: MY_IDS,
+      });
+
+      expect(advice.skipped).toBe(0);
+      expect(advice.headline).toBe('Your current options grade better than available waivers.');
+    });
+  });
+
   it('says nothing about a trivial edge', () => {
     const advice = recommendWaiverUpgrades({
       roster: healthyRoster(),

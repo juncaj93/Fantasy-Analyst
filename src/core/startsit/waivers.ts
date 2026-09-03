@@ -86,7 +86,13 @@ export interface WaiverUpgrade {
 
 export interface WaiverAdvice {
   upgrades: WaiverUpgrade[];
-  /** Said plainly when nothing available beats what the roster already has. */
+  /**
+   * What an empty board means, said plainly. Null whenever there are rows.
+   *
+   * It distinguishes a wire that was read and lost from one that could not be
+   * read at all, because most of a real free-agent pool has nothing to score.
+   * See `emptyBoardHeadline`.
+   */
   headline: string | null;
   notes: string[];
   /** How many unrostered players were actually scored. */
@@ -152,6 +158,17 @@ export function recommendWaiverUpgrades(opts: {
    * user cannot take.
    */
   const playable = evaluated.filter((e) => e.score != null && !e.ruledOut && !e.lock.locked);
+  /*
+   * The ones there was nothing to read on, counted apart from the ones ruled out.
+   *
+   * `skipped` below is the whole of what the scan dropped, and it mixes three
+   * different facts: a player with no market, usage or news to score him on; a
+   * player who is genuinely unavailable; and a player whose game has started.
+   * Only the first is an admission of ignorance, and only the first may be
+   * described to a reader as unknown rather than rejected. The other two were
+   * correctly excluded and need no explaining. See `emptyBoardHeadline`.
+   */
+  const unscored = evaluated.filter((e) => e.score == null).length;
 
   const rosterEvaluations = new Map(opts.roster.map((i) => [i.player.id, evaluatePlayer(i, opts.profile)]));
 
@@ -256,15 +273,72 @@ export function recommendWaiverUpgrades(opts: {
 
   return {
     upgrades,
-    headline:
-      upgrades.length === 0 && evaluated.length > 0
-        ? 'Your current options grade better than available waivers.'
-        : null,
+    headline: emptyBoardHeadline({ upgrades: upgrades.length, playable: playable.length, unscored }),
     notes,
     considered: evaluated.length,
     skipped: evaluated.length - playable.length,
     threshold: base,
   };
+}
+
+/**
+ * What an empty board actually means, rather than the flattering version of it.
+ *
+ * This string is the whole of what the Waivers screen prints when nothing
+ * cleared, so it is the page's one statement about a wire the reader cannot
+ * see. It used to read `Your current options grade better than available
+ * waivers.` in every empty case, including the case where most of the wire was
+ * never compared at all: a free agent with no market, no usage and no news
+ * scores `null` and is dropped before any slot looks at him, and on a real
+ * scan that is routinely the majority of the pool. Telling a reader their
+ * roster graded better than players nobody graded is the one thing the rest of
+ * this codebase is built not to do, and it is worse here than a blank field
+ * would be, because it sounds like a finding.
+ *
+ * So the three cases are said apart:
+ *
+ *   - nobody was scorable, so there is no comparison to report and the sentence
+ *     may not imply one;
+ *   - everybody was scored and nobody was better, which is the original
+ *     sentence and stays word for word;
+ *   - some were scored and some could not be, which is the ordinary case, and
+ *     the count of the unread is the reader's cue that the wire is thin on data
+ *     rather than thin on players.
+ *
+ * The count is of players who could not be *scored*, never of everything the
+ * scan dropped: somebody on injured reserve, or somebody whose game has already
+ * started, was excluded on a fact rather than on ignorance, and folding him into
+ * this number would make the sentence claim the app knows less than it does.
+ *
+ * `unknown, not ruled out` is the phrase used deliberately: a player the app
+ * could not score has not been rejected, and a reader who wants him should not
+ * read this line as advice against him.
+ */
+function emptyBoardHeadline(counts: { upgrades: number; playable: number; unscored: number }): string | null {
+  if (counts.upgrades > 0) return null;
+  const { playable, unscored } = counts;
+
+  if (playable === 0) {
+    if (unscored === 0) return null;
+    const verb = unscored === 1 ? 'has' : 'have';
+    return `No free agent could be scored: ${freeAgents(unscored)} ${verb} no market, usage or news to read. Unknown, not ruled out.`;
+  }
+
+  if (unscored === 0) return 'Your current options grade better than available waivers.';
+
+  return (
+    `Your current options grade better than the ${freeAgents(playable)} that could be scored. ` +
+    `${cap(freeAgents(unscored))} had nothing to read: unknown, not ruled out.`
+  );
+}
+
+/** `1 free agent` / `14 free agents`. */
+function freeAgents(count: number): string {
+  return `${count} free agent${count === 1 ? '' : 's'}`;
+}
+
+function cap(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
