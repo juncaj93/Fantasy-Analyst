@@ -340,6 +340,17 @@ export async function replayWaiverSnapshot(
     season: inputs.season,
     strategy:
       inputs.strategy == null ? null : { ...inputs.strategy, trending: new Map(inputs.strategy.trending) },
+    /*
+     * The same capture, handed over as the surfacing signal as well.
+     *
+     * `trending` is its own request field rather than a reach into the pricing
+     * context, and it decides which unscorable players reach the board at all —
+     * so a replay that rebuilt the request without it would reproduce a board
+     * missing a whole tier, which is precisely the divergence this module
+     * exists to make impossible. Serialised once, inside the strategy, and read
+     * back into both places it is needed.
+     */
+    trending: inputs.strategy == null ? undefined : new Map(inputs.strategy.trending),
     budgets: inputs.budgets,
     prices: inputs.prices,
     observations: inputs.observations,

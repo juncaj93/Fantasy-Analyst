@@ -137,7 +137,7 @@ export interface WaiverAssembly extends WaiverAdvice {
   /** The board as drawn: competition folded on, the DEF row left to the planner. */
   upgrades: WaiverUpgrade[];
   /** Bench-value adds, with the multi-week read and any trending line attached. */
-  valueAdds: (WaiverValueAdd & { trendingRank?: number })[];
+  valueAdds: WaiverValueAdd[];
   /**
    * The unscored worth naming: those Sleeper is adding, most-added first.
    *
