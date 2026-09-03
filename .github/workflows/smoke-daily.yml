@@ -1,0 +1,58 @@
+name: Daily production sweep
+
+# The depth the deploy gate no longer pays for, paid for once a day.
+#
+# #248 split production checking in two. A deploy runs the eight `@critical`
+# specs at one width, because the questions a *deployment* can fail are about
+# the deployment: is the released revision live, does it boot cold, does the
+# API answer, can a roster be read, is a stranger's write refused. Cross-width
+# rendering is a property of the code, and `ci.yml` already asks that at four
+# widths on every pull request.
+#
+# This is where the rest went. Every width, every screen photographed in both
+# themes, against whatever is actually live.
+#
+# ## Why a wrapper rather than a `schedule:` inside `smoke.yml`
+#
+# It was inside `smoke.yml` for about twenty minutes, and it broke every
+# deploy. `smoke.yml` is a *reusable* workflow that `deploy.yml` and
+# `rollback.yml` call, and the alarm below needs `issues: write`. A called
+# workflow cannot hold permissions its caller does not, and the deploy job
+# calling smoke grants none -- so the whole Deploy run failed validation before
+# a single job started, with `startup_failure` and no logs to say why.
+#
+# Granting `issues: write` to the deploy path would have fixed the symptom by
+# letting a deployment write issues, which is not a permission a deployment
+# should carry. Owning the schedule here instead keeps `smoke.yml` a pure
+# reusable workflow with no ambient triggers, and puts the alarm in the same
+# file as the schedule it is the alarm for.
+
+on:
+  schedule:
+    # 07:30 UTC: after the daily 09:00 tick has not yet run and well clear of
+    # the game-day windows, so a sweep never competes with a refresh.
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    uses: ./.github/workflows/smoke.yml
+    with:
+      # The whole point of this workflow. Without it this would be the deploy
+      # gate again, on a timer, checking eight specs it already checked.
+      full: true
+
+  # Scheduled work that fails silently is scheduled work nobody is doing.
+  # `Refresh draft order` failed on every run for eleven days in August and was
+  # found by somebody going looking; `tests/scheduledJobAlert.test.ts` refuses a
+  # scheduled workflow that has no alarm.
+  alert:
+    needs: sweep
+    if: always()
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Daily production sweep
+      result: ${{ needs.sweep.result }}

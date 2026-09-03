@@ -16,11 +16,6 @@ name: Smoke-test production
 # refuses to report on anything else.
 
 on:
-  # Daily, so the depth the deploy gate no longer pays for is still paid for
-  # once a day against whatever is live.
-  schedule:
-    - cron: '30 7 * * *'
-
   workflow_call:
     inputs:
       full:
@@ -69,7 +64,7 @@ jobs:
   smoke:
     # Which third of the suite, because that is what a red tick has to answer
     # first. GitHub would otherwise label these `smoke (1)`.
-    name: smoke ${{ (inputs.full || github.event_name == 'schedule') && format('({0}/3)', matrix.shard) || '(deploy gate)' }}
+    name: smoke ${{ inputs.full && format('({0}/3)', matrix.shard) || '(deploy gate)' }}
     runs-on: ubuntu-latest
     # The browser and its system libraries arrive with the image, rather than
     # being installed onto a runner that is busy installing something else.
@@ -129,7 +124,7 @@ jobs:
         # same specs at four widths on every pull request against a local
         # build. So the gate runs one shard of the `@critical` tests and the
         # full sweep runs daily, or on demand.
-        shard: ${{ fromJSON((inputs.full || github.event_name == 'schedule') && '[1, 2, 3]' || '[1]') }}
+        shard: ${{ fromJSON(inputs.full && '[1, 2, 3]' || '[1]') }}
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
@@ -217,7 +212,7 @@ jobs:
         # to, and it means "stuck" again rather than "big".
         timeout-minutes: 20
         env:
-          FULL: ${{ inputs.full || github.event_name == 'schedule' }}
+          FULL: ${{ inputs.full }}
         run: |
           set -eu
           if [ "$FULL" = "true" ]; then
@@ -246,11 +241,11 @@ jobs:
       # production, and it answers a visual-regression question, not a "did
       # this deploy work" one.
       - name: Photograph every screen
-        if: ${{ always() && matrix.shard == 1 && (inputs.full || github.event_name == 'schedule') }}
+        if: ${{ always() && matrix.shard == 1 && inputs.full }}
         run: node scripts/screenshot-production.mjs "$PRODUCTION_URL" screenshots
 
       - uses: actions/upload-artifact@v4
-        if: ${{ always() && matrix.shard == 1 && (inputs.full || github.event_name == 'schedule') }}
+        if: ${{ always() && matrix.shard == 1 && inputs.full }}
         with:
           name: production-screenshots
           path: screenshots/
@@ -284,22 +279,3 @@ jobs:
             echo "Screens photographed in Light and Dark are attached to shard 1"
             echo "as the \`production-screenshots\` artifact."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # The alarm, because this now runs on a schedule.
-  #
-  # A workflow that only ever ran when a human asked reports itself by being
-  # watched. One that runs at 07:30 does not: `Refresh draft order` failed on
-  # every scheduled run for eleven days in August and was found by somebody
-  # going looking. `tests/scheduledJobAlert.test.ts` refuses a scheduled
-  # workflow without this block, which is how the omission was caught here
-  # before it shipped rather than eleven days after.
-  alert:
-    needs: smoke
-    if: always()
-    uses: ./.github/workflows/alert-on-failure.yml
-    permissions:
-      contents: read
-      issues: write
-    with:
-      workflow: Smoke-test production
-      result: ${{ needs.smoke.result }}

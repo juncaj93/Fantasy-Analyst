@@ -244,6 +244,58 @@ describe('the revision reaches the running Worker', () => {
   });
 });
 
+/* ------------------------------ D0 — a called workflow cannot out-permission its caller */
+
+/**
+ * A reusable workflow may not ask for more than the job calling it holds.
+ *
+ * This is not a style rule, it is the failure mode that broke every deploy on
+ * 3 September. A `schedule:` and its failure alarm were added *inside*
+ * `smoke.yml`, and the alarm needs `issues: write`. `deploy.yml` calls
+ * `smoke.yml` and grants it no permissions, so GitHub rejected the whole
+ * Deploy run at validation: `startup_failure`, zero jobs, and no log to say
+ * why — the schema is checked before anything runs, so nothing local caught
+ * it. Unit tests passed, the YAML parsed, and production silently did not get
+ * the migration it was waiting for.
+ *
+ * The fix was to move the schedule to a wrapper that owns it. This asserts the
+ * shape that made the fix necessary, so the next person to reach for
+ * `permissions:` in a called workflow is told here rather than by a dead
+ * deploy.
+ */
+describe('a workflow on the deploy path asks for no permission its caller lacks', () => {
+  const CALLERS = ['deploy.yml', 'rollback.yml'];
+
+  /** Every local workflow reached by `uses: ./…` from the callers above. */
+  const called = new Map<string, Record<string, YamlValue>>();
+  for (const caller of CALLERS) {
+    for (const spec of Object.values(jobs(readWorkflow(caller).yaml))) {
+      const uses = String(asMap(spec)['uses'] ?? '');
+      if (!uses.startsWith('./.github/workflows/')) continue;
+      called.set(uses.replace('./.github/workflows/', ''), asMap(spec));
+    }
+  }
+
+  it('finds the workflows the deploy path calls', () => {
+    expect([...called.keys()].sort()).toEqual(['release.yml', 'smoke.yml']);
+  });
+
+  it.each([...called.keys()])('%s requests no write scope the caller has not granted', (name) => {
+    const granted = asMap(called.get(name)?.['permissions']);
+    for (const [jobName, spec] of Object.entries(jobs(readWorkflow(name).yaml))) {
+      const wanted = asMap(asMap(spec)['permissions']);
+      for (const [scope, level] of Object.entries(wanted)) {
+        if (String(level) !== 'write') continue;
+        expect(
+          String(granted[scope] ?? ''),
+          `${name} job "${jobName}" wants ${scope}: write, which the calling job does not grant — ` +
+            'GitHub rejects the whole run at startup, with no logs',
+        ).toBe('write');
+      }
+    }
+  });
+});
+
 /* ------------------------------------------- D — smoke verifies the revision */
 
 describe('Smoke reports on the revision it was told about', () => {
@@ -280,8 +332,25 @@ describe('Smoke reports on the revision it was told about', () => {
    * screenshots stop running at all and nothing else would say so.
    */
   it('still runs the full sweep daily, now that deploys only run the gate', () => {
-    expect(Object.keys(triggers(yaml))).toContain('schedule');
     expect(text, 'the deploy gate selects the @critical specs').toContain('--grep @critical');
+
+    /*
+     * The sweep is a wrapper, and deliberately not a `schedule:` inside
+     * `smoke.yml`. The alarm it needs carries `issues: write`, `smoke.yml` is
+     * called by `deploy.yml`, and a called workflow cannot hold permissions
+     * its caller lacks -- so a schedule here failed every Deploy at startup,
+     * before any job ran. `smoke.yml` stays triggerless.
+     */
+    expect(Object.keys(triggers(yaml)).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
+
+    const { yaml: daily } = readWorkflow('smoke-daily.yml');
+    expect(Object.keys(triggers(daily))).toContain('schedule');
+    const sweep = job(daily, 'sweep');
+    expect(sweep['uses']).toBe('./.github/workflows/smoke.yml');
+    expect(
+      asMap(sweep['with'])['full'],
+      'without full: true the daily sweep is just the deploy gate on a timer',
+    ).toBe(true);
   });
 
   /*
