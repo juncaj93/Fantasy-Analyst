@@ -709,6 +709,7 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
  */
 function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
   const adds = unknown.adds ?? null;
+  const addLine = adds == null ? null : `${formatAdds(adds)} adds across Sleeper`;
   return {
     playerId: unknown.playerId,
     name: unknown.name,
@@ -721,18 +722,25 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
       label: 'Being added across Sleeper',
       alsoFits: [],
     },
-    shortTerm: {
-      gain: 0,
-      label: adds == null ? 'Not scored' : `${formatAdds(adds)} adds`,
-      over: null,
-    },
+    /*
+     * `Not scored`, and never the add count.
+     *
+     * This field is printed under `Proj.` on the card and under `This week` in
+     * the sheet, both of which are points about this Sunday. Eighteen thousand
+     * adds is neither, and putting it here would have the row read `Proj.
+     * 18,400 adds` — a popularity figure wearing a projection's label, which is
+     * the one confusion `core/market/trending.ts` is written to prevent. The
+     * count is a reason, and it is carried as one.
+     */
+    shortTerm: { gain: 0, label: 'Not scored', over: null },
     multiWeek: null,
     faab: null,
     competition: null,
     bidders: null,
-    why: unknown.trending ?? 'Trending across Sleeper, with nothing here to score him on',
+    why: unknown.trending ?? addLine ?? 'Being added across Sleeper, with nothing here to score him on',
     reasons: [
-      unknown.trending ?? 'Trending across Sleeper',
+      unknown.trending ?? 'Being added across Sleeper',
+      ...(addLine ? [addLine] : []),
       'No market, usage or news for him yet, so this app cannot rate him. Unknown, not ruled out.',
     ],
     statusFlag: unknown.statusFlag ?? null,

@@ -378,7 +378,9 @@ describe('the three tiers', () => {
     expect(row.score).toBeNull();
     expect(row.faab).toBeNull();
     expect(row.multiWeek).toBeNull();
-    expect(row.shortTerm.label).toBe('9,100 adds');
+    /* The add count is a reason, never a number under `Proj.` or `This week`. */
+    expect(row.shortTerm.label).toBe('Not scored');
+    expect(row.reasons.join(' · ')).toContain('9,100 adds across Sleeper');
     expect(row.strength.label).toBe('No data yet');
     expect(row.reasons.join(' ')).toContain('Unknown, not ruled out');
   });
