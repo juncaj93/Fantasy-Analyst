@@ -17,6 +17,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 
 const ROW = 'setup-data-health';
 const SCREEN = 'data-health-screen';
@@ -24,6 +25,8 @@ const SCREEN = 'data-health-screen';
 async function openSetup(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByTestId('tab-setup').click();
+  // Data health is in the Data group, which is shut on load like the other two.
+  await openSetupGroup(page, 'data');
   await page.getByTestId(ROW).waitFor();
 }
 
@@ -54,10 +57,19 @@ test.describe('the Setup row', () => {
     await expect(row).toContainText(/Healthy|Waiting on source|Some data stale|Degraded|Refresh problem|need/);
   });
 
-  /** Beside the support tools, and never in the taskbar — §9. */
-  test('sits next to the support snapshot, not on the toolbar', async ({ page }) => {
+  /**
+   * Last in the group that is about data, and never in the taskbar — §9.
+   *
+   * It used to be asserted as sitting beside the support snapshot, which was
+   * true when Settings was two lists and is not now: the snapshot is a support
+   * tool and lives in Account & support, and this row reports on the sources
+   * above it in Data. What survives unchanged is the half that matters — it is
+   * a Settings row and never a destination.
+   */
+  test('is the last row of the Data group, and never on the toolbar', async ({ page }) => {
     await openSetup(page);
-    await expect(page.getByTestId('setup-support-snapshot')).toBeVisible();
+    const rows = page.getByTestId('setup-group-data-body').locator('[data-testid^="setup-"], [data-testid^="help-"], [data-testid^="panel-"]');
+    await expect(rows.last()).toHaveAttribute('data-testid', ROW);
     await expect(page.locator('.tabbar')).not.toContainText('Data health');
   });
 

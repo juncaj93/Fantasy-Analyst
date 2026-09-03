@@ -33,7 +33,7 @@
 import { useState, type ReactNode } from 'react';
 import type { HeroInsight, LineupImpact, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
 import { TeamLogo } from './common.tsx';
-import { ChevronIcon } from './icons.tsx';
+import { ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
 
 /* --------------------------------------------------------------- score card */
 
@@ -876,7 +876,7 @@ export function BenchSection({
       >
         <span>Bench ({mine.length})</span>
         <span className="matchup-bench-chevron" aria-hidden="true">
-          {open ? '▴' : '▾'}
+          <DisclosureChevronIcon open={open} />
         </span>
       </button>
       {open ? (

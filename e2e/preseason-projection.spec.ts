@@ -13,10 +13,12 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 
 async function openPanel(page: Page) {
   await page.goto('/');
   await page.getByTestId('tab-setup').click();
+  await openSetupGroup(page, 'data');
   await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
   const panel = page.getByTestId('panel-preseason-projection');
   await panel.scrollIntoViewIfNeeded();

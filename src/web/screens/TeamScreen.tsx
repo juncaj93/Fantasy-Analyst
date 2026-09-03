@@ -52,6 +52,7 @@ import {
   positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
+import { DisclosureChevronIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
@@ -1041,7 +1042,7 @@ function BenchSection({
         <span className="bench-label">Bench ({players.length})</span>
         {summary ? <span className="bench-summary">{summary}</span> : null}
         <span className="bench-chevron" aria-hidden="true">
-          {open ? '▴' : '▾'}
+          <DisclosureChevronIcon open={open} />
         </span>
       </button>
       {open ? (

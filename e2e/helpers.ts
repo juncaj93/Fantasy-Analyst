@@ -53,6 +53,41 @@ export async function exploreMarket(page: Page): Promise<void> {
 }
 
 /**
+ * The three groups Settings is divided into, as their folds are named.
+ *
+ * `data` is sources, imports, Review, Help my scores and Data health;
+ * `behavior` is the draft board weighting, Install and Demo Mode; `support` is
+ * the snapshot and the context it is captured for. See `SettingsGroup` in
+ * `SetupScreen` for why each row is where it is.
+ */
+export type SettingsGroup = 'data' | 'behavior' | 'support';
+
+/**
+ * Open Settings, and the group holding the row a spec is about.
+ *
+ * **Every group is shut on load and its rows are not rendered while it is** —
+ * `Fold` does not draw its children when closed — so any spec that reads a
+ * Settings row has to ask for its group first. One helper rather than three
+ * lines in each of seventeen files, for the reason `exploreMarket` is one: the
+ * arrangement is a product decision, and a suite that spelled it out everywhere
+ * would be everywhere to edit when it changes again.
+ *
+ * Idempotent in both directions — a group that is already open is left alone,
+ * and opening a second group does not shut the first — so a spec may call it
+ * without knowing what the one before it did, and may call it twice for two
+ * rows in different groups.
+ */
+export async function openSetupGroup(page: Page, group: SettingsGroup): Promise<void> {
+  if ((await page.getByTestId(`setup-group-${group}`).count()) === 0) {
+    await page.getByTestId('tab-setup').click();
+  }
+  const toggle = page.getByTestId(`setup-group-${group}-toggle`);
+  await toggle.waitFor();
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await page.getByTestId(`setup-group-${group}-body`).waitFor();
+}
+
+/**
  * Open Review, which lives in Settings.
  *
  * It is not a destination on the toolbar and deliberately is not: it is
@@ -63,6 +98,7 @@ export async function exploreMarket(page: Page): Promise<void> {
  */
 export async function openReview(page: Page): Promise<void> {
   await page.getByTestId('tab-setup').click();
+  await openSetupGroup(page, 'data');
   await page.getByTestId('setup-review').click();
   await page.getByTestId('setup-detail-review').waitFor();
 }

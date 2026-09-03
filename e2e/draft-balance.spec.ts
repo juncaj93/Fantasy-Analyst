@@ -19,10 +19,13 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 
 async function openSetup(page: Page) {
   await page.goto('/');
   await page.getByTestId('tab-setup').click();
+  // The weighting is what the App behavior group is *for*, so it is in it.
+  await openSetupGroup(page, 'behavior');
   await expect(page.getByTestId('draft-balance')).toBeVisible();
 }
 
@@ -125,6 +128,7 @@ test.describe('draft board weighting', () => {
     // It really was saved, rather than only moved on screen.
     await page.reload();
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'behavior');
     await expect(page.getByTestId('draft-balance-label')).toContainText('My research first');
     // ...and a saved position does not force the row open on the next visit.
     await expect(page.getByTestId('draft-balance-body')).toBeHidden();
@@ -133,6 +137,7 @@ test.describe('draft board weighting', () => {
     await move('2');
     await page.reload();
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'behavior');
     await expect(page.getByTestId('draft-balance-label')).toContainText('Balanced (default)');
   });
 

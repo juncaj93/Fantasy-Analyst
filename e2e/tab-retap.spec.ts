@@ -19,7 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { emptyQueue, exploreMarket, tapAboveCard } from './helpers.ts';
+import { emptyQueue, exploreMarket, openSetupGroup, tapAboveCard } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -195,17 +195,30 @@ test.describe('a retap returns the screen home', () => {
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
   });
 
-  test('Setup: comes back out to the root of Settings', async ({ page }) => {
+  test('Setup: comes back out to the root of Settings, one step at a time', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+    await openSetupGroup(page, 'data');
 
     await page.getByTestId('setup-step-vegas').click();
     await expect(page.getByTestId('panel-vegas')).toBeVisible();
 
     await retap(page, 'setup');
 
+    /*
+     * One tap gives back the panel, not the group it was opened from.
+     *
+     * A reader who opened Data, went into Vegas and tapped Setup meant "come
+     * back out of Vegas" — coming back to three shut folds would throw away two
+     * steps of navigation for one tap, and make them find their place again.
+     */
     await expect(page.getByTestId('panel-vegas')).toHaveCount(0);
     await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
+
+    // The second tap is the one that folds the screen back to its three lines.
+    await retap(page, 'setup');
+    await expect(page.getByTestId('setup-step-vegas')).toHaveCount(0);
+    await expect(page.getByTestId('setup-group-data')).toBeVisible();
   });
 
   /**

@@ -14,7 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket } from './helpers.ts';
+import { exploreMarket, openSetupGroup } from './helpers.ts';
 
 const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 
@@ -224,9 +224,43 @@ test.describe('density', () => {
     expect(await rowsOnFirstScreen(page, 'player-search-row')).toBeGreaterThanOrEqual(7);
   });
 
-  test('Setup shows every step without scrolling', async ({ page }) => {
+  /**
+   * Settings' first screen is its three groups, and all three have to be on it.
+   *
+   * This used to measure the five checklist steps, because the five steps were
+   * the first screen. They are one fold deep now — see `SettingsGroup` — and
+   * the claim moves with them: what a reader must be able to take in without
+   * scrolling is every group there is, so that nothing on this screen can be
+   * missed by somebody who never scrolls.
+   *
+   * The bar is deliberately higher than "they fit". Three shut folds are about
+   * two hundred points on the shortest phone this app supports, and if that
+   * ever grows to fill the screen it will be because something was added to
+   * this level that belongs inside one of them.
+   */
+  test('Setup shows all three groups without scrolling, with room to spare', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+    const floor = await page.evaluate(() => document.querySelector('.tabbar')!.getBoundingClientRect().top);
+    for (const group of ['data', 'behavior', 'support']) {
+      const box = (await page.getByTestId(`setup-group-${group}`).boundingBox())!;
+      expect(box.y + box.height, `the ${group} group is below the fold`).toBeLessThanOrEqual(floor);
+    }
+    const last = (await page.getByTestId('setup-group-support').boundingBox())!;
+    expect(floor - (last.y + last.height), 'the shut screen has grown into the fold').toBeGreaterThan(200);
+  });
+
+  /**
+   * And every step is still one tap from it.
+   *
+   * The half of the old claim that survives folding: the checklist did not move
+   * to another screen, it moved behind one control, and opening that control
+   * has to put all five steps on the screen the way it always did.
+   */
+  test('opening Data shows every step without scrolling', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    await openSetupGroup(page, 'data');
     const floor = await page.evaluate(() => document.querySelector('.tabbar')!.getBoundingClientRect().top);
     const last = (await page.getByTestId('setup-step-vegas').boundingBox())!;
     expect(last.y + last.height).toBeLessThanOrEqual(floor);
@@ -245,6 +279,12 @@ test.describe('touch and reach', () => {
   test('a settings row is a full target', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+    // The group headers are controls too, and the first ones a thumb meets.
+    for (const group of ['data', 'behavior', 'support']) {
+      const box = (await page.getByTestId(`setup-group-${group}-toggle`).boundingBox())!;
+      expect(box.height, `the ${group} header is only ${box.height}px tall`).toBeGreaterThanOrEqual(44);
+    }
+    await openSetupGroup(page, 'data');
     for (const id of ['sleeper', 'league', 'adp', 'newsletter', 'vegas']) {
       const box = (await page.getByTestId(`setup-step-${id}`).boundingBox())!;
       expect(box.height).toBeGreaterThanOrEqual(44);
@@ -416,7 +456,9 @@ test.describe('the active tab, tapped again', () => {
     await page.goto('/');
     await open(page, 'setup');
     await page.getByTestId('tab-setup').click();
-    await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
+    // Settings with all three groups shut is a screen with nothing to unwind,
+    // and it is still the screen afterwards.
+    await expect(page.getByTestId('setup-group-data')).toBeVisible();
     await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
   });
 });

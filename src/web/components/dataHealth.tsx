@@ -41,7 +41,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, type DataHealthView, type SourceHealth, type StartSitRefreshReport } from '../api.ts';
 import { Loading, Notice } from './common.tsx';
-import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon } from './icons.tsx';
+import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon, PulseIcon } from './icons.tsx';
 import { ListGroup, ListRow, PushScreen } from './native.tsx';
 import {
   OVERALL_LABELS,
@@ -109,7 +109,13 @@ export function DataHealthRow({ onOpen }: { onOpen: () => void }) {
     <ListRow
       testId="setup-data-health"
       dataState={health?.overall.state ?? 'unknown'}
-      state={<StateMark state={health?.overall.state ?? 'unknown'} />}
+      /*
+        A glyph leading and the mark trailing, because this row lives in
+        Settings' Data group where every row leads with the kind of thing it is.
+        The mark is the same one, in the other corner — see `ListRow`.
+      */
+      icon={<PulseIcon />}
+      mark={<StateMark state={health?.overall.state ?? 'unknown'} />}
       label="Data health"
       detail={health?.overall.headline ?? 'Checking what the app is working from…'}
       chevron

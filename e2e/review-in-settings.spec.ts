@@ -23,7 +23,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { openReview } from './helpers.ts';
+import { openReview, openSetupGroup } from './helpers.ts';
 
 /** What the bar carries before a draft is finished, in order. */
 const PRIMARY = ['Draft', 'Team', 'Trades', 'Players', 'Setup'] as const;
@@ -164,6 +164,7 @@ test.describe('the Review row in Settings', () => {
   test('is there, and leads to the queue', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
 
     const row = page.getByTestId('setup-review');
     await expect(row).toBeVisible();
@@ -194,6 +195,7 @@ test.describe('the Review row in Settings', () => {
     });
 
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     const row = page.getByTestId('setup-review');
     if (pending === 0) {
       await expect(row).toContainText('Nothing waiting for you');
@@ -206,6 +208,7 @@ test.describe('the Review row in Settings', () => {
     await withPending(page, 1, 0);
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-review')).toContainText('1 item needs attention');
   });
 
@@ -213,6 +216,7 @@ test.describe('the Review row in Settings', () => {
     await withPending(page, 2, 3);
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-review')).toContainText('5 items need attention');
     await expect(page.getByTestId('setup-review')).toHaveAttribute('data-state', 'warn');
   });
@@ -235,6 +239,7 @@ test.describe('the Review row in Settings', () => {
     expect(label ?? '').not.toMatch(/review/i);
 
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     const row = page.getByTestId('setup-review');
     await expect(row).toContainText('Nothing waiting for you');
     await expect(row).toHaveAttribute('data-state', 'ok');

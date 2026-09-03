@@ -243,6 +243,192 @@ export function MoonIcon({ size = 20, className }: IconProps) {
   );
 }
 
+/* ------------------------------------------------------ the Settings glyphs */
+
+/*
+ * One glyph per row, and one per group, on the Settings screen.
+ *
+ * A settings list is the one screen in this app where every line is a different
+ * *kind* of thing — a connection, an import, a preference, a diagnostic — and a
+ * column of identical text is the hardest possible way to find the one you came
+ * for. A leading shape is what makes it scannable: the reader looks for the
+ * envelope rather than reading five labels.
+ *
+ * They are drawn to the same rule as everything above — one stroke weight,
+ * round joins, no fill, no platform icon set copied — and they are deliberately
+ * the most ordinary shape for each idea. A settings glyph that needs learning
+ * has failed at the only thing it is for.
+ */
+
+/** Data, as a group: a stack of records. */
+export function DatabaseIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+      <path d="M4.5 6v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V6" />
+      <path d="M4.5 12v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-6" />
+    </svg>
+  );
+}
+
+/** App behavior, as a group: the controls that tune it. */
+export function SlidersIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M4 8h10M18 8h2M4 16h4M12 16h8" />
+      <circle cx="16" cy="8" r="2.2" />
+      <circle cx="10" cy="16" r="2.2" />
+    </svg>
+  );
+}
+
+/** Account & support, as a group: the ring you are thrown when something sinks. */
+export function LifebuoyIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="8.6" />
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="m6 6 3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5" />
+    </svg>
+  );
+}
+
+/** A connection to somewhere else: two links of a chain. */
+export function LinkIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M10 13.5a3.6 3.6 0 0 0 5.3.4l2.6-2.6a3.65 3.65 0 0 0-5.16-5.16l-1.5 1.49" />
+      <path d="M14 10.5a3.6 3.6 0 0 0-5.3-.4l-2.6 2.6a3.65 3.65 0 0 0 5.16 5.16l1.49-1.49" />
+    </svg>
+  );
+}
+
+/** The newsletter: an envelope. */
+export function MailIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="2.75" y="5" width="18.5" height="14" rx="3" />
+      <path d="m3.5 7.5 7.36 5.15a2 2 0 0 0 2.28 0L20.5 7.5" />
+    </svg>
+  );
+}
+
+/** A market price, moving: the line the book is quoting. */
+export function TrendIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M3.5 16.5 9 11l3.5 3.5L20 7" />
+      <path d="M15.5 7H20v4.5" />
+    </svg>
+  );
+}
+
+/** A projection, stored: bars of it. */
+export function ChartIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M3.5 20.5h17" />
+      <path d="M7 20.5v-6M12 20.5V6.5M17 20.5v-9" />
+    </svg>
+  );
+}
+
+/** What the app knows about one player: a card with a face and two lines. */
+export function IdCardIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="2.75" y="4.75" width="18.5" height="14.5" rx="3" />
+      <circle cx="8.5" cy="11" r="2.1" />
+      <path d="M5.2 16.3a3.6 3.6 0 0 1 6.6 0M14.5 10h4M14.5 14h4" />
+    </svg>
+  );
+}
+
+/** A queue of decisions waiting: a list with a tick against it. */
+export function ChecklistIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M10 7h9.5M10 12h9.5M10 17h6" />
+      <path d="m4 6.6 1.5 1.6L8 5.6" />
+      <path d="M4.2 12h2.6M4.2 17h2.6" />
+    </svg>
+  );
+}
+
+/** A repair: the spanner. */
+export function WrenchIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M15.2 3.5a5.5 5.5 0 0 0-4.62 8.44L3.9 18.6a2 2 0 0 0 2.83 2.83l6.66-6.66A5.5 5.5 0 0 0 20.2 8.2l-2.9 2.9-2.4-2.4 2.9-2.9a5.5 5.5 0 0 0-2.6-2.3Z" />
+    </svg>
+  );
+}
+
+/** Whether the inputs are alive: a trace with a beat in it. */
+export function PulseIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M2.75 12.5h4l2-5.5 3.5 10 2.5-6 1.6 3h4.9" />
+    </svg>
+  );
+}
+
+/** How much your own research weighs against the market: a balance. */
+export function ScalesIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M12 4.5v15M7 20h10M4.5 8h15" />
+      <path d="M4.5 8 2 14h5ZM19.5 8 17 14h5Z" />
+    </svg>
+  );
+}
+
+/** Which recommendation a snapshot would be of: the thing being aimed at. */
+export function TargetIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="8.6" />
+      <circle cx="12" cy="12" r="4.4" />
+      <circle cx="12" cy="12" r="0.9" />
+    </svg>
+  );
+}
+
+/** Taking the state away with you: a clipboard. */
+export function ClipboardIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M9 4.75H7a2.25 2.25 0 0 0-2.25 2.25v12A2.25 2.25 0 0 0 7 21.25h10a2.25 2.25 0 0 0 2.25-2.25V7A2.25 2.25 0 0 0 17 4.75h-2" />
+      <rect x="9" y="2.75" width="6" height="4" rx="1.4" />
+    </svg>
+  );
+}
+
+/**
+ * The mark on a control that opens in place: a chevron, pointing at what it does.
+ *
+ * The last three `▾` in this app were here — the two benches and the generic
+ * fold — and a text character is exactly what this file exists to stop. On a
+ * phone the platform is free to resolve one to whatever font it likes, at
+ * whatever weight and size, next to a column of drawn glyphs that have already
+ * agreed on both; the fix for a gear was the fix for a triangle.
+ *
+ * Rotated rather than swapped for a second shape, so the transition between the
+ * two states is a movement instead of a substitution — the same chevron the
+ * pushed rows use, turned to face the way this one goes.
+ */
+export function DisclosureChevronIcon({ open, size = 15 }: IconProps & { open: boolean }) {
+  return (
+    <svg
+      {...svgProps(size)}
+      strokeWidth={2.4}
+      style={{ transform: `rotate(${open ? -90 : 90}deg)`, transition: 'transform var(--dur-fast) var(--ease)' }}
+    >
+      <path d="m9.5 5.5 6.5 6.5-6.5 6.5" />
+    </svg>
+  );
+}
+
 /** The trailing mark on a row that leads somewhere. */
 export function ChevronIcon({ size = 16, className }: IconProps) {
   return (

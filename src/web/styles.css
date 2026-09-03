@@ -1512,14 +1512,21 @@ body,
   display: none;
 }
 
+/*
+ * Sized against `.list-chevron`, which is the row immediately above and below.
+ *
+ * Two chevrons a row apart at different sizes and opacities is the kind of
+ * thing nobody names and everybody sees. This is the drawn one's dimensions in
+ * a border triangle, which is all a 45° chevron needs.
+ */
 .list-details > summary::after {
   content: '';
   margin-left: auto;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-right: 2px solid var(--text-faint);
   border-bottom: 2px solid var(--text-faint);
-  opacity: 0.55;
+  opacity: 0.45;
   transform: rotate(-45deg);
   transition: transform var(--dur-fast) var(--ease);
 }
@@ -1550,6 +1557,44 @@ body,
 }
 
 /* The leading mark on a settings row: a state, drawn as a state and not a word. */
+/*
+ * The leading shape on a settings row, and on a settings group's header.
+ *
+ * Quiet on purpose. It is there to be found at a glance and then ignored, so it
+ * takes the faint text colour rather than the accent — a column of blue icons
+ * would read as a column of links, and every row here already has a chevron
+ * saying which of them lead anywhere.
+ *
+ * It occupies the slot `.list-state` would, at the same width, so a group whose
+ * rows lead with a mark and a group whose rows lead with a glyph put their
+ * labels in the same place. Nothing in a list should have two leading columns.
+ */
+.list-icon,
+.fold-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+.list-icon svg,
+.fold-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/*
+ * The status of a row that leads with a glyph, on the other edge.
+ *
+ * `list-state` for the colours and the sizing, which are the same marks; this
+ * only moves it and gives it the air a trailing item needs so it does not sit
+ * against the chevron.
+ */
+.list-row-mark {
+  margin-left: calc(-1 * var(--sp-1));
+}
+
 .list-state {
   flex: 0 0 auto;
   width: 18px;
@@ -3976,6 +4021,36 @@ button:disabled {
 }
 
 /*
+ * A fold that holds a whole section of Settings, rather than a list of players.
+ *
+ * The affordance is unchanged — the same control the benches and the Trades
+ * market use, so Settings has not invented a fourth way to hide something. What
+ * changes is what happens to a card put inside one: a `.list-group` and a
+ * `.card` both carry their own surface, radius and shadow, and nesting one in
+ * the fold's surface draws a card inside a card with two shadows meeting along
+ * one edge. Inside a fold they give all of that up and become part of the
+ * surface that opened, so an open group reads as the fold having grown — which
+ * is the same rule `.bench` already applies to its rows, written once more for
+ * the two containers Settings puts in one.
+ *
+ * The last child loses its bottom margin as well, or every open group ends in a
+ * strip of the fold's own background below the final row.
+ */
+.fold > div > .list-group,
+.fold > div > .card {
+  border-radius: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+}
+
+/* A hairline between two containers in the same open fold, as between rows. */
+.fold > div > .list-group + .card,
+.fold > div > .card + .list-group,
+.fold > div > .card + .card {
+  border-top: 1px solid var(--separator-soft);
+}
+
+/*
  * Appearance, as three glyphs at the trailing end of the Setup bar.
  *
  * It replaces a titled card with a full-width segmented control and two lines
@@ -6147,11 +6222,21 @@ table.compact tr:last-child td {
   color: var(--text-faint);
 }
 
+/*
+ * The chevron on a disclosure, at the weight of every other glyph in the app.
+ *
+ * It was `▾` — a text character, at the mercy of whichever font the platform
+ * decided it belonged to, in a row of drawn shapes that had already agreed on a
+ * weight. `display: flex` because it holds an SVG now rather than a glyph on a
+ * text baseline, which is what was leaving it a pixel or two high.
+ */
 .bench-chevron,
 .fold-chevron {
   flex: none;
+  display: flex;
+  align-items: center;
   color: var(--text-faint);
-  font-size: 0.8rem;
+  opacity: 0.55;
 }
 
 /*

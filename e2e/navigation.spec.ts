@@ -15,7 +15,15 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openReview, pastTheSettle, sheetBodyScroll, sheetScroll, swipeSheetAway, tapAboveCard } from './helpers.ts';
+import {
+  openReview,
+  openSetupGroup,
+  pastTheSettle,
+  sheetBodyScroll,
+  sheetScroll,
+  swipeSheetAway,
+  tapAboveCard,
+} from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -76,6 +84,15 @@ async function drag(
  */
 async function openSetupArea(page: Page, area = 'vegas') {
   await page.getByTestId('tab-setup').click();
+  /*
+   * The steps are inside the Data fold, and the fold stays open behind a push.
+   *
+   * Which is why this is here once rather than after every Back below: the
+   * group's open state lives on `SetupScreen`, which is mounted the whole time
+   * a panel is showing, so coming back out lands on the screen the reader left
+   * rather than on three shut folds.
+   */
+  await openSetupGroup(page, 'data');
   await expect(page.getByTestId(`setup-step-${area}`)).toBeVisible();
   await page.getByTestId(`setup-step-${area}`).click();
   await expect(page.getByTestId(`setup-detail-${area}`)).toBeVisible();
@@ -120,6 +137,7 @@ test.describe('pushed detail screens', () => {
   test('Setup opens each area as a pushed screen with a way back', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await page.getByTestId('setup-step-newsletter').click();
 
     await expect(page.getByTestId('panel-newsletter')).toBeVisible();

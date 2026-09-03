@@ -15,7 +15,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { pullToRefresh } from './helpers.ts';
+import { openSetupGroup, pullToRefresh } from './helpers.ts';
 
 /** A thrown Worker, as Cloudflare answers it. */
 const CLOUDFLARE_HTML = `<!DOCTYPE html><html><head><title>fantasy-analyst.workers.dev | 502: Bad gateway</title></head><body><h1>Error 1101</h1><p>Worker threw exception</p></body></html>`;
@@ -151,6 +151,7 @@ test.describe('an API that answers with a page', () => {
 
     answer = 'live';
     await page.getByTestId('setup-error-retry').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
     await expect(page.getByTestId('setup-error')).toHaveCount(0);
   });

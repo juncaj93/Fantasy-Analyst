@@ -27,6 +27,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 import { openReview } from './helpers.ts';
 
 const DESTINATIONS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
@@ -37,7 +38,15 @@ const SCREEN_OF: Record<(typeof DESTINATIONS)[number], string> = {
   team: 'league-card',
   trades: 'trades-nav',
   players: 'players-nav',
-  setup: 'setup-step-sleeper',
+  /*
+   * Settings' first screen is its three groups, not the checklist.
+   *
+   * The steps are one fold deep now, so a marker that waited for
+   * `setup-step-sleeper` was waiting for a tap nobody in this file makes. The
+   * Data group is the first thing Settings draws and is drawn whatever state
+   * the deployment is in, which is exactly what this map wants.
+   */
+  setup: 'setup-group-data',
 };
 
 async function open(page: Page, tab: (typeof DESTINATIONS)[number]) {
@@ -151,6 +160,7 @@ test.describe('the active destination', () => {
   test('stays on the parent while a nested screen is open', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+    await openSetupGroup(page, 'data');
     await page.getByTestId('setup-step-vegas').click();
     await expect(page.getByTestId('setup-detail-vegas')).toBeVisible();
 
@@ -183,7 +193,7 @@ test.describe('the active destination', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
+    await expect(page.getByTestId('setup-group-data')).toBeVisible();
     await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
     expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
     await expect(page.getByTestId('tab-draft')).not.toHaveAttribute('aria-current', 'page');

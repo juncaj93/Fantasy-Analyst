@@ -50,6 +50,7 @@ import {
   handOffCard,
   handOnCard,
   openReview,
+  openSetupGroup,
   pastTheSettle,
   scrollSheetContent,
   sheetBodyScroll,
@@ -510,6 +511,7 @@ test.describe('pushing a sheet away', () => {
   test('leaves a drag inside a text field to the text field', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
     const panel = page.getByTestId('panel-preseason-projection');
     await panel.scrollIntoViewIfNeeded();

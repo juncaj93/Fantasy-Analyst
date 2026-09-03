@@ -14,6 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 
 /** The audit hook: open the app already inside a named scenario. */
 async function openScenario(page: Page, id: string) {
@@ -35,6 +36,8 @@ async function tab(page: Page, name: string) {
  * hand — and a blind click on the summary would close it.
  */
 async function openPicker(page: Page) {
+  // Demo Mode is inside the App behavior fold, which is shut on every load.
+  await openSetupGroup(page, 'behavior');
   const panel = page.getByTestId('demo-panel');
   await expect(panel).toBeVisible();
   if (!(await panel.evaluate((el) => (el as HTMLDetailsElement).open))) {

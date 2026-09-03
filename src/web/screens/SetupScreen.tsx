@@ -27,25 +27,42 @@ import {
   type ProjectionImportResult,
   type ProjectionStatus,
   type SetupStatus,
+  type SetupStep,
   type SignalBalance,
 } from '../api.ts';
 import { SIGNAL_BALANCE_ORDER } from '../../core/draft/signalBalance.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import {
   AlertCircleIcon,
+  BoardIcon,
+  ChartIcon,
+  ChecklistIcon,
   CheckCircleIcon,
+  ClipboardIcon,
+  DatabaseIcon,
   EmptyCircleIcon,
   GearIcon,
+  IdCardIcon,
+  LifebuoyIcon,
+  LinkIcon,
+  MailIcon,
   MoonIcon,
+  RosterIcon,
+  ScalesIcon,
+  SlidersIcon,
   SunIcon,
+  TargetIcon,
+  TrendIcon,
+  WrenchIcon,
 } from '../components/icons.tsx';
-import { ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
+import { Fold, ListGroup, ListRow, NavBar, PushScreen, SegmentedControl, Sheet } from '../components/native.tsx';
 import { InstallPanel } from '../components/install.tsx';
 import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
 
 import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import { unwindOne } from '../tabReset.ts';
+import { demoSession } from '../demo/session.ts';
 import {
   CONTEXT_LABELS,
   CONTEXT_ORDER,
@@ -71,7 +88,94 @@ import {
  */
 const DemoPanel = lazy(() => import('../demo/DemoPanel.tsx'));
 
+/*
+ * Read for one thing only: whether a demo is running, which decides whether the
+ * group holding the picker starts open. `demo/session.ts` is already on the
+ * render path — `main.tsx` restores a session before the first paint — so this
+ * costs the bundle nothing, and the panel itself stays lazy.
+ */
+
 type Panel = 'sleeper' | 'league' | 'adp' | 'newsletter' | 'vegas' | 'repair' | 'review' | 'data-health' | null;
+
+/**
+ * The three things a settings screen is for, and everything on it belongs to one.
+ *
+ * ## What the three are
+ *
+ * **Data** is where the numbers come from and whether they are any good: the
+ * five connection steps, the two imports, the queues that correct what the app
+ * has been told, and Data health, which reports on all of it.
+ *
+ * **App behavior** is what the app does with them, once they are in — how the
+ * board weighs your own research against the market, how the app is installed
+ * on this phone, and the read-only walk through states that are hard to reach.
+ * Appearance belongs to this group by meaning and is not drawn in it: it is the
+ * three glyphs in the navigation bar, where a preference that is set once and
+ * then never looked for again costs nothing.
+ *
+ * **Account & support** is the one thing this app can do when a recommendation
+ * looks wrong, which is hand you the exact state behind it.
+ *
+ * ## Why the screen opens with all three shut
+ *
+ * Because the alternative was a screen that opened with fourteen rows, some of
+ * them expanded and some not depending on which panel had decided its own
+ * default — the reader had to read the whole thing to find out there was
+ * nothing to do. Three shut folds is a first view that can be taken in without
+ * scrolling, on the shortest phone, in either theme; the counts on the folds
+ * are what say whether opening one is worth it, so nothing that needed
+ * attention has been hidden, only the detail of it.
+ */
+type SettingsGroup = 'data' | 'behavior' | 'support';
+
+/** What each group is called on its fold. */
+const GROUP_LABELS: Record<SettingsGroup, string> = {
+  data: 'Data',
+  behavior: 'App behavior',
+  support: 'Account & support',
+};
+
+/**
+ * And what each is drawn as.
+ *
+ * The shut screen is these three lines and nothing else, so the glyphs are
+ * doing the same work here that they do on the rows inside: telling a reader
+ * which of three things they are looking at before they have read a word.
+ */
+const GROUP_ICONS: Record<SettingsGroup, ComponentType<{ size?: number }>> = {
+  data: DatabaseIcon,
+  behavior: SlidersIcon,
+  support: LifebuoyIcon,
+};
+
+/**
+ * What each of the five connection steps is drawn as.
+ *
+ * A chain for the account this app reads through, people for the league, the
+ * ranked board for draft order, an envelope for the thing that arrives by
+ * email, and a moving line for a price. Each is the most ordinary shape for the
+ * idea; a settings glyph that needs learning has failed at the only thing it is
+ * for.
+ */
+const STEP_ICONS: Record<SetupStep['id'], ComponentType<{ size?: number }>> = {
+  sleeper: LinkIcon,
+  league: RosterIcon,
+  adp: BoardIcon,
+  newsletter: MailIcon,
+  vegas: TrendIcon,
+};
+
+/** The group's shape, from the map above. */
+function GroupGlyph({ group }: { group: SettingsGroup }) {
+  const Glyph = GROUP_ICONS[group];
+  return <Glyph />;
+}
+
+/** The step's shape, from the map above. */
+function StepGlyph({ id }: { id: SetupStep['id'] }) {
+  const Glyph = STEP_ICONS[id];
+  return <Glyph />;
+}
 
 /**
  * The state of a step, drawn rather than typed.
@@ -153,6 +257,44 @@ export function SetupScreen({
    * that, and is cleared when the reader leaves Setup or another issue arrives.
    */
   const [scored, setScored] = useState<string | null>(null);
+  /**
+   * Which of the three groups is open, and by default none of them is.
+   *
+   * The state is here rather than inside each `Fold` for the reason the market
+   * fold's is on `TradesScreen`: a panel is opened by *returning a different
+   * tree*, so a fold holding its own `useState` would come back shut from every
+   * Back — the reader would leave Settings' Data group to look at Vegas and
+   * return to a screen with nothing on it, having to find their place again.
+   *
+   * It is not remembered across a load, deliberately. The first view of this
+   * screen is three lines whatever happened last time, which is the whole point
+   * of the arrangement: a settings screen that reopens wherever it was left is
+   * a settings screen whose first view is different every time.
+   *
+   * ## The one exception, and why it is not one
+   *
+   * A running demo opens App behavior, because `DemoPanel` is inside it.
+   * Choosing a scenario replaces the world and the shell remounts every screen
+   * including this one, so without this a reader stepping through a progression
+   * would have the Previous and Next controls shut under their hand at every
+   * step — the same defect `DemoPanel` already guards against for its own
+   * disclosure, one level up, now that it has a fold above it.
+   *
+   * That is a control staying open while it is being used, not a section
+   * deciding it is important enough to start open. On an ordinary load, with no
+   * demo running, this is the empty set like everything else.
+   */
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<SettingsGroup>>(
+    () => new Set<SettingsGroup>(demoSession() == null ? [] : ['behavior']),
+  );
+
+  const toggleGroup = useCallback((group: SettingsGroup) => {
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (!next.delete(group)) next.add(group);
+      return next;
+    });
+  }, []);
 
   /*
    * Tapping Setup while already on Setup.
@@ -166,6 +308,16 @@ export function SetupScreen({
     if (resetNonce === 0) return;
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
+      /*
+       * A group the reader opened is a place they went, so it unwinds like one.
+       *
+       * After the pushed panel and before the transient notices: tapping Setup
+       * from inside Vegas should come back to the Data group they opened it
+       * from, and only a second tap should fold the screen back to its three
+       * lines. Anything else would make the gesture mean "throw away two steps
+       * of navigation", which is not what one tap has ever meant here.
+       */
+      { when: openGroups.size > 0, undo: () => setOpenGroups(new Set()) },
       { when: error != null, undo: () => setError(null) },
       { when: scored != null, undo: () => setScored(null) },
     ]);
@@ -319,125 +471,233 @@ export function SetupScreen({
         </Notice>
       )}
 
-      <ListGroup header="Your league">
-        {status.steps.map((step) => (
-          <Fragment key={step.id}>
-            <ListRow
-              testId={`setup-step-${step.id}`}
-              dataState={step.state}
-              state={<StateMark state={step.state} />}
-              label={step.title}
-              detail={
-                <>
-                  {step.summary}
-                  {step.action ? <div>{step.action}</div> : null}
-                </>
-              }
-              chevron
-              onClick={() => setOpen(step.id as Panel)}
-            />
-            {/*
-              The week's one job, where the week's one job is announced.
-
-              Copying an issue for ChatGPT and pasting the tally back used to be
-              four taps in — Setup, Newsletter, the issue, Copy — which is a lot
-              of navigation for the only thing anybody does with a newsletter.
-              So while an issue is waiting, the two controls are drawn directly
-              under the row that says it is waiting, and the Newsletter panel
-              stays exactly where it is for everything else.
-
-              They are workflow, not furniture: they exist only while there is
-              an unscored issue and they are gone the moment it is scored. If
-              this ever becomes a permanent pair of buttons on Setup, something
-              has gone wrong with the state behind it rather than with the
-              layout. Never in the taskbar — §16.
-            */}
-            {step.id === 'newsletter' && status.newsletter.pendingTally ? (
-              <PendingTallyRow
-                pending={status.newsletter.pendingTally}
-                unlocked={unlocked}
-                onDone={(detail) => {
-                  setScored(detail);
-                  refreshAll();
-                }}
-              />
-            ) : null}
-            {step.id === 'newsletter' && scored ? (
-              <div className="list-row-actions" data-testid="setup-tally-applied">
-                <Notice tone="ok">{scored}</Notice>
-              </div>
-            ) : null}
-          </Fragment>
-        ))}
-      </ListGroup>
-
-      <ListGroup header="This app">
-        <InstallPanel />
-        {/*
-          Below the five steps, deliberately, and inside this group.
-
-          Settings' first screen belongs to the checklist — `shell.spec.ts`
-          measures that every step is reachable without a scroll, on the
-          shortest phone this app supports — and a preference is not a step. It
-          sits with the other two rows that open in place rather than standing
-          alone above them, because a preference nobody is looking for should
-          read as one row among the rest until it is asked for.
-        */}
-        <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
-        <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
-        <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
-        {/*
-          Review, and how much of it is waiting.
-
-          One row, always present, saying the one thing somebody standing here
-          needs to know: whether there is anything to do. The count is in the
-          row's own words rather than in a badge beside it, because a row that
-          reads "3 items need attention" is already the whole announcement — a
-          numeral in a red circle next to it would be the same fact twice, once
-          silently. Nothing is drawn at zero beyond the row saying so.
-
-          This is not a Review dashboard and must not become one: what is in the
-          queue, and what to do about it, is the screen behind this row.
-        */}
-        <ListRow
-          testId="setup-review"
-          dataState={reviewPending > 0 ? 'warn' : 'ok'}
-          state={<StateMark state={reviewPending > 0 ? 'warn' : 'ok'} />}
-          label="Review"
-          detail={
-            reviewPending > 0
-              ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} attention`
-              : 'Nothing waiting for you'
-          }
-          chevron
-          onClick={() => setOpen('review')}
-        />
-        <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
-        {/*
-          Data health, immediately above the support tools it exists beside.
-
-          The pair is the support loop: this row says whether what the app knew
-          was healthy and current, and the row under it captures exactly what it
-          knew. Somebody diagnosing a questionable recommendation reads them in
-          that order, so they are drawn in it. Never in the taskbar — §9.
-        */}
-        <DataHealthRow onOpen={() => setOpen('data-health')} />
-        <SupportSnapshotRow leagues={leagues} />
-      </ListGroup>
-
       {/*
-        Demo Mode lives here rather than in the toolbar.
+        Three folds, all shut, and everything on this screen inside one of them.
 
-        Six destinations is already the most that strip of glass can carry, and
-        a seventh spent on a preview tool used once a month would be a poor
-        trade. It is last on this screen for the same reason: it is the least
-        often wanted thing on it.
+        The order is the order the questions get asked in: where the numbers
+        come from, what the app does with them, and — when the answer looks
+        wrong — how to send somebody the state behind it. See `SettingsGroup`
+        for what belongs in each and why the screen opens with none of them
+        open.
+
+        Each fold's summary is what makes the shut screen honest. A group that
+        hid two stale sources behind a word would be a screen that had traded
+        the reader's information for its own tidiness; the counts say what is
+        inside, so a fold is worth opening only when it says it is.
       */}
-      <Suspense fallback={null}>
-        <DemoPanel />
-      </Suspense>
+      <Fold
+        icon={<GroupGlyph group="data" />}
+        label={GROUP_LABELS.data}
+        summary={dataSummary(status, reviewPending)}
+        open={openGroups.has('data')}
+        onToggle={() => toggleGroup('data')}
+        testId="setup-group-data"
+      >
+        <ListGroup>
+          {status.steps.map((step) => (
+            <Fragment key={step.id}>
+              <ListRow
+                testId={`setup-step-${step.id}`}
+                dataState={step.state}
+                icon={<StepGlyph id={step.id} />}
+                mark={<StateMark state={step.state} />}
+                label={step.title}
+                detail={
+                  <>
+                    {step.summary}
+                    {step.action ? <div>{step.action}</div> : null}
+                  </>
+                }
+                chevron
+                onClick={() => setOpen(step.id as Panel)}
+              />
+              {/*
+                The week's one job, where the week's one job is announced.
+
+                Copying an issue for ChatGPT and pasting the tally back used to
+                be four taps in — Setup, Newsletter, the issue, Copy — which is
+                a lot of navigation for the only thing anybody does with a
+                newsletter. So while an issue is waiting, the two controls are
+                drawn directly under the row that says it is waiting, and the
+                Newsletter panel stays exactly where it is for everything else.
+
+                They are workflow, not furniture: they exist only while there is
+                an unscored issue and they are gone the moment it is scored. If
+                this ever becomes a permanent pair of buttons on Setup,
+                something has gone wrong with the state behind it rather than
+                with the layout. Never in the taskbar — §16.
+
+                That an unscored issue is now a fold deep is why the Data fold's
+                summary counts it: the shut screen still says there is a job.
+              */}
+              {step.id === 'newsletter' && status.newsletter.pendingTally ? (
+                <PendingTallyRow
+                  pending={status.newsletter.pendingTally}
+                  unlocked={unlocked}
+                  onDone={(detail) => {
+                    setScored(detail);
+                    refreshAll();
+                  }}
+                />
+              ) : null}
+              {step.id === 'newsletter' && scored ? (
+                <div className="list-row-actions" data-testid="setup-tally-applied">
+                  <Notice tone="ok">{scored}</Notice>
+                </div>
+              ) : null}
+            </Fragment>
+          ))}
+          <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
+          <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
+          {/*
+            Review, and how much of it is waiting.
+
+            One row, always present, saying the one thing somebody standing here
+            needs to know: whether there is anything to do. The count is in the
+            row's own words rather than in a badge beside it, because a row that
+            reads "3 items need attention" is already the whole announcement — a
+            numeral in a red circle next to it would be the same fact twice,
+            once silently. Nothing is drawn at zero beyond the row saying so.
+
+            In Data rather than in support because what is in that queue is a
+            correction to what the app has been told — a tally the newsletter
+            got wrong, a name matched to the wrong player. It is the data being
+            argued with, not the app.
+
+            This is not a Review dashboard and must not become one: what is in
+            the queue, and what to do about it, is the screen behind this row.
+          */}
+          <ListRow
+            testId="setup-review"
+            dataState={reviewPending > 0 ? 'warn' : 'ok'}
+            icon={<ChecklistIcon />}
+            mark={<StateMark state={reviewPending > 0 ? 'warn' : 'ok'} />}
+            label="Review"
+            detail={
+              reviewPending > 0
+                ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} attention`
+                : 'Nothing waiting for you'
+            }
+            chevron
+            onClick={() => setOpen('review')}
+          />
+          <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
+          {/*
+            Data health, last in the group that is about data.
+
+            It is the row that reports on every other row above it — whether
+            what the app knew was healthy and current, and, since the quota
+            work, the one control that goes and asks again. Reading it after the
+            sources it summarises is the order somebody diagnosing a
+            questionable recommendation actually reads them in. Never in the
+            taskbar — §9.
+          */}
+          <DataHealthRow onOpen={() => setOpen('data-health')} />
+        </ListGroup>
+      </Fold>
+
+      <Fold
+        icon={<GroupGlyph group="behavior" />}
+        label={GROUP_LABELS.behavior}
+        summary={behaviorSummary(status.draftBalance ?? 'balanced')}
+        open={openGroups.has('behavior')}
+        onToggle={() => toggleGroup('behavior')}
+        testId="setup-group-behavior"
+      >
+        <ListGroup>
+          <DraftBalanceCard current={status.draftBalance ?? 'balanced'} unlocked={unlocked} />
+          <InstallPanel />
+        </ListGroup>
+        {/*
+          Demo Mode is in this group rather than in the toolbar.
+
+          Six destinations is already the most that strip of glass can carry,
+          and a seventh spent on a preview tool used once a month would be a
+          poor trade. It is last inside the group for the same reason: it is the
+          least often wanted thing in it.
+
+          It is the one disclosure on this screen that opens itself, and it is
+          allowed to. Choosing a scenario remounts every screen including this
+          one, so a picker that did not reopen would snap shut under the hand of
+          somebody stepping through a progression — see `DemoPanel`. That is a
+          control staying open while it is being used, which is a different rule
+          from a section deciding it is important enough to start open; on an
+          ordinary load, with no demo running, it is shut like everything else.
+        */}
+        <Suspense fallback={null}>
+          <DemoPanel />
+        </Suspense>
+      </Fold>
+
+      <Fold
+        icon={<GroupGlyph group="support" />}
+        label={GROUP_LABELS.support}
+        summary={supportSummary()}
+        open={openGroups.has('support')}
+        onToggle={() => toggleGroup('support')}
+        testId="setup-group-support"
+      >
+        <ListGroup>
+          <SupportSnapshotRow leagues={leagues} />
+        </ListGroup>
+      </Fold>
     </>
   );
+}
+
+/* ------------------------------------------- what a shut fold is allowed to hide */
+
+/**
+ * What the Data fold says while it is shut.
+ *
+ * **This is the whole reason a collapsed Settings screen is honest.** Folding
+ * fourteen rows away is only tidying if nothing that needed attention went with
+ * them, so the count of what does comes back out onto the control: a step that
+ * is `warn` or `todo`, an unscored newsletter issue, and anything waiting in
+ * Review. A reader who opens Settings and reads "Data · all current" has been
+ * told the same thing the open screen would have told them, in one line.
+ *
+ * `off` is not counted, and that is the one judgement in here: Vegas sits at
+ * `off` in a deployment with no odds provider, which is a deliberate
+ * configuration rather than a thing to go and fix. Counting it would put a
+ * permanent "1 needs attention" on a screen where nothing does, which is how a
+ * badge stops being read at all.
+ */
+function dataSummary(status: SetupStatus, reviewPending: number): string {
+  const steps = status.steps.filter((step) => step.state === 'warn' || step.state === 'todo').length;
+  const tally = status.newsletter.pendingTally ? 1 : 0;
+  const waiting = steps + tally + reviewPending;
+  if (waiting === 0) return 'All sources current';
+  return `${waiting} ${waiting === 1 ? 'thing needs' : 'things need'} attention`;
+}
+
+/**
+ * What the App behavior fold says while it is shut.
+ *
+ * The one setting in it that changes what the app *recommends*, named in the
+ * words the control itself uses. Install and Demo Mode are not in the summary
+ * because neither has a state worth reporting from outside: one is instructions
+ * and the other says "ON" on its own badge when it is running.
+ */
+function behaviorSummary(balance: SignalBalance): string {
+  return `Weighting: ${BALANCE_LABELS[balance].toLowerCase()}`;
+}
+
+/**
+ * What the Account & support fold says while it is shut.
+ *
+ * The name of the one thing inside it, and nothing about its state. Whether a
+ * snapshot can be captured depends on a league and a draft this function is not
+ * given, so a summary that tried to report readiness would be a second, quieter
+ * copy of the row's own blocker, kept in step by hand. It says what is in the
+ * fold and lets the row say whether it can run.
+ *
+ * Short enough to survive a 360px phone, which every one of these has to be:
+ * `.fold-summary` ellipsises rather than wraps, so a sentence here is a
+ * sentence the narrowest reader sees the first four words of.
+ */
+function supportSummary(): string {
+  return 'Support snapshot';
 }
 
 /**
@@ -583,6 +843,7 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
       */}
       <ListRow
         testId="setup-support-context"
+        icon={<TargetIcon />}
         label="Current context"
         detail={
           chosen == null
@@ -624,7 +885,8 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
       <ListRow
         testId="setup-support-snapshot"
         dataState={state}
-        state={<StateMark state={state === 'failed' ? 'warn' : reason == null ? 'ok' : 'todo'} />}
+        icon={<ClipboardIcon />}
+        mark={<StateMark state={state === 'failed' ? 'warn' : reason == null ? 'ok' : 'todo'} />}
         label="Copy support snapshot"
         detail={detailFor()}
         value={
@@ -865,6 +1127,9 @@ function DraftBalanceCard({ current, unlocked }: { current: SignalBalance; unloc
         React state of its own and the keyboard and screen reader get it free.
       */}
       <summary data-testid="draft-balance-summary">
+        <span className="list-icon">
+          <ScalesIcon />
+        </span>
         Draft board weighting
         <span className="faint" style={{ marginLeft: 'auto' }} data-testid="draft-balance-label">
           {position}
@@ -992,7 +1257,12 @@ function PreseasonProjectionPanel({ unlocked, onDone }: { unlocked: boolean; onD
 
   return (
     <details className="list-details" data-testid="panel-preseason-projection">
-      <summary>Preseason market projection</summary>
+      <summary>
+        <span className="list-icon">
+          <ChartIcon />
+        </span>
+        Preseason market projection
+      </summary>
       <div className="list-details-body">
         {done ? <Notice tone="ok">{done}</Notice> : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
@@ -1242,7 +1512,8 @@ function HelpMyScores({
     return (
       <ListRow
         testId="help-my-scores"
-        state={<StateMark state="warn" />}
+        icon={<WrenchIcon />}
+        mark={<StateMark state="warn" />}
         label="Help my scores"
         detail={status!.summary.headline}
         chevron
@@ -1582,7 +1853,18 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
         </div>
       ) : null}
 
-      <details style={{ marginTop: 10 }} open={!status.adp.imported}>
+      {/*
+        Shut, like every other disclosure in Settings.
+
+        This one used to open itself whenever no rankings had been imported —
+        the last section on this screen that decided its own default, and the
+        inconsistency the group pass exists to end. What it was doing for the
+        reader is done better by the row that got them here: the Draft order
+        step already carries a `todo` mark and says what is missing, and the
+        Data fold counts it. A section that springs open is not the same as a
+        section that is worth opening.
+      */}
+      <details style={{ marginTop: 10 }}>
         <summary className="muted">Import rankings</summary>
         <div className="faint" style={{ margin: '6px 0' }}>
           A CSV with player names and a rank or ADP column. The newest import is the one used.
@@ -2525,7 +2807,12 @@ function PlayerDetailPanel({
 
   return (
     <details className="list-details" data-testid="panel-player-detail">
-      <summary>Player card data</summary>
+      <summary>
+        <span className="list-icon">
+          <IdCardIcon />
+        </span>
+        Player card data
+      </summary>
       <div className="list-details-body">
 
       <div className="section-title" style={{ marginTop: 8 }}>

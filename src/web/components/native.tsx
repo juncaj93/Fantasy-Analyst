@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom';
 import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
-import { BackChevronIcon, ChevronIcon } from './icons.tsx';
+import { BackChevronIcon, ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
 
 /* ---------------------------------------------------------- navigation bar */
 
@@ -167,20 +167,45 @@ export function ListGroup({
  * they have ever used, which is the entire argument for it.
  */
 export function ListRow({
+  icon,
   label,
   detail,
   value,
   state,
+  mark,
   chevron,
   onClick,
   expanded,
   testId,
   dataState,
 }: {
+  /**
+   * What kind of thing this row is, as a shape on the leading edge.
+   *
+   * For a list whose rows are each a different kind of thing — Settings, where
+   * a connection, an import and a preference sit in one column — the shape is
+   * what makes it scannable: the reader looks for the envelope rather than
+   * reading five labels. It is decoration in the strict sense and is drawn
+   * `aria-hidden` by every glyph in `icons.tsx`; the label is the row's name.
+   *
+   * A row has an `icon` or a `state`, never both. Two glyphs an inch apart on
+   * the leading edge of a 360px phone is not a hierarchy, it is a queue.
+   */
+  icon?: ReactNode;
   label: ReactNode;
   detail?: ReactNode;
   value?: ReactNode;
   state?: ReactNode;
+  /**
+   * How this row is doing, on the trailing edge, for the rows that lead with an
+   * `icon` and still have something to report.
+   *
+   * The same mark `state` draws, in the other corner. On a checklist row the
+   * status is the first thing to know and it leads; on a settings row the
+   * *kind* leads and the status qualifies it, which is the order the trailing
+   * edge is for — the same place a value goes, and for the same reason.
+   */
+  mark?: ReactNode;
   chevron?: boolean;
   onClick?: () => void;
   expanded?: boolean;
@@ -196,12 +221,14 @@ export function ListRow({
       data-state={dataState}
       {...(expanded === undefined ? {} : { 'aria-expanded': expanded })}
     >
+      {icon ? <span className="list-icon">{icon}</span> : null}
       {state ? <span className="list-state">{state}</span> : null}
       <span className="list-row-body">
         <span className="list-row-label">{label}</span>
         {detail ? <span className="list-row-detail">{detail}</span> : null}
       </span>
       {value ? <span className="list-row-value">{value}</span> : null}
+      {mark ? <span className="list-state list-row-mark">{mark}</span> : null}
       {chevron ? (
         <span className="list-chevron" aria-hidden="true">
           <ChevronIcon />
@@ -1123,6 +1150,7 @@ export function PullToRefresh({
  * controls: the whole row is the button, and everything inside it is text.
  */
 export function Fold({
+  icon,
   label,
   summary,
   open,
@@ -1130,6 +1158,16 @@ export function Fold({
   testId,
   children,
 }: {
+  /**
+   * What the group is, as a shape — for a fold that is a section of a screen
+   * rather than one more control on it.
+   *
+   * Settings opens as three of these and nothing else, so those three lines are
+   * the whole first view: an icon apiece is what stops them reading as three
+   * paragraphs. Decoration, like every other glyph in `icons.tsx`, and drawn
+   * `aria-hidden`; the label is the control's accessible name.
+   */
+  icon?: ReactNode;
   /** The affordance's own words, and its accessible name: `Explore the market`. */
   label: string;
   /** One short phrase about what is inside, in the quietest type on the control. */
@@ -1148,10 +1186,11 @@ export function Fold({
         aria-expanded={open}
         onClick={onToggle}
       >
+        {icon ? <span className="fold-icon">{icon}</span> : null}
         <span className="fold-label">{label}</span>
         {summary ? <span className="fold-summary">{summary}</span> : null}
         <span className="fold-chevron" aria-hidden="true">
-          {open ? '▴' : '▾'}
+          <DisclosureChevronIcon open={open} />
         </span>
       </button>
       {open ? <div data-testid={testId ? `${testId}-body` : undefined}>{children}</div> : null}
