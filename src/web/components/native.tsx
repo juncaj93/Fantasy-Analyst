@@ -13,7 +13,13 @@
 
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { dismissesSheet, useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
+import {
+  dismissesSheet,
+  resistedTravel,
+  useEdgeSwipeBack,
+  usePullToRefresh,
+  useStandaloneMode,
+} from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
 import { BackChevronIcon, ChevronIcon } from './icons.tsx';
@@ -512,6 +518,23 @@ export function Sheet({
   const surface = useRef<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
+  /*
+   * The card's detent, which is what the resistance moves.
+   *
+   * **Not the card, and this is the one place that distinction inverts.** The
+   * detent clips, and the card sits at its foot, so lifting the card inside it
+   * would cut the grip and the top corners off and leave a strip of nothing
+   * under them. Moving the detent takes the card and its clip together, so the
+   * card keeps its shape.
+   *
+   * The warning this file carries about transforming the detent is about the
+   * other direction: `sheet-rise` moved it *down*, past the end of the layer's
+   * content, and the layer measured a whole extra card of room. This only ever
+   * moves it up, and never above where it sits at rest — so the box stays
+   * inside the span it already occupied and the layer's scroll height cannot
+   * grow. Measured rather than assumed; see the note on `resist`.
+   */
+  const detent = useRef<HTMLDivElement | null>(null);
   const { lift } = useOverlay({ container: surface, onDismiss: onClose });
   /*
    * The latest `onClose`, for an observer that is attached once.
@@ -721,6 +744,8 @@ export function Sheet({
      */
     const SPRING = 700;
     let springUntil = 0;
+    /** How far behind the scroll the resistance is currently holding the card. */
+    let held = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
     /*
      * The fastest this movement has travelled toward gone, and where it was
@@ -845,6 +870,40 @@ export function Sheet({
     };
 
     /*
+     * The card gets heavier the further it is pulled.
+     *
+     * The engine moves this layer one pixel per pixel of thumb and there is no
+     * asking it not to — so the damping is put back on top: the detent is drawn
+     * *short* of where the scroll put it, by the difference between how far the
+     * layer went and how far {@link resistedTravel} says the card should have.
+     * Under the knee that difference is nought and this writes nothing but a
+     * cleared transform.
+     *
+     * **What the reader gets is the threshold, as a feeling.** The knee is the
+     * commit fraction, so the card starts resisting at the exact point where
+     * letting go would dismiss it. Pull past it and the card slows under the
+     * thumb; that is the app saying "this one counts" while there is still time
+     * to change your mind, which is the half of the complaint the speed rule
+     * could not answer.
+     *
+     * One transform write per scroll event, beside the scrim's one opacity
+     * write. Both are compositor properties, so neither costs a layout.
+     */
+    const resist = (progress: number) => {
+      const box = detent.current;
+      if (!box) return 0;
+      const journey = root.scrollHeight - root.clientHeight;
+      if (journey <= 0) {
+        box.style.transform = '';
+        return 0;
+      }
+      const given = Math.max(0, Math.min(1, 1 - progress));
+      const behind = (given - resistedTravel(given)) * journey;
+      box.style.transform = behind > 0.5 ? `translate3d(0, ${-behind}px, 0)` : '';
+      return behind;
+    };
+
+    /*
      * Finishing the dismissal, rather than waiting for the scroll to.
      *
      * A scroll's duration belongs to the reader's flick: push the card gently
@@ -867,9 +926,21 @@ export function Sheet({
       leaving = true;
       springUntil = 0;
       window.clearTimeout(timer);
-      const remaining = root.scrollTop;
+      /*
+       * How far the card still is from gone — the scroll, *plus* whatever the
+       * resistance is holding it back by.
+       *
+       * `scrollTop` alone was the whole answer while the card sat exactly where
+       * the layer put it. It no longer does: past the knee the card is drawn
+       * short of the scroll, so it has further to travel than the layer does,
+       * and an exit measured on the layer would stop the card a resistance short
+       * of gone and leave a strip of it on the screen.
+       */
+      const heldBack = held;
+      const remaining = root.scrollTop + heldBack;
       const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       if (still || remaining < 1) {
+        if (detent.current) detent.current.style.transform = '';
         paint(0);
         onDismiss.current();
         return;
@@ -887,6 +958,21 @@ export function Sheet({
       if (card) {
         card.style.transition = `transform ${EXIT}ms var(--ease)`;
         card.style.transform = `translate3d(0, ${remaining}px, 0)`;
+      }
+      /*
+       * And the resistance lets go over the same clock.
+       *
+       * Two transforms on two boxes, both easing to their ends together, so what
+       * the reader sees is one movement: the detent gives back the `heldBack` it
+       * was withholding while the card covers the scroll's own `remaining`, and
+       * the sum of the two is exactly the distance to gone. Clearing the detent
+       * outright instead would drop the card that distance in a single frame,
+       * before the exit had drawn anything.
+       */
+      const box = detent.current;
+      if (box && heldBack > 0.5) {
+        box.style.transition = `transform ${EXIT}ms var(--ease)`;
+        box.style.transform = '';
       }
       const back = backdrop.current;
       if (back) back.style.transition = `opacity ${EXIT}ms var(--ease)`;
@@ -956,7 +1042,10 @@ export function Sheet({
          * is the animation being mistaken for that second push by nothing more
          * than its own scroll events landing inside the reader's window.
          */
-        if (detentTop > 0) paint(top / detentTop);
+        if (detentTop > 0) {
+          paint(top / detentTop);
+          held = resist(top / detentTop);
+        }
         if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
         // Not the reader's movement, so it earns no speed — but it does move the
         // layer, and a stale position would turn the next real push's first
@@ -983,12 +1072,16 @@ export function Sheet({
         window.clearTimeout(timer);
         if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
         paint(1);
+        held = resist(1);
         // Corrected, not travelled. The layer is back at the card's position and
         // whatever a hand does next starts from there.
         rewind();
         return;
       }
-      if (detentTop > 0) paint(top / detentTop);
+      if (detentTop > 0) {
+        paint(top / detentTop);
+        held = resist(top / detentTop);
+      }
       /*
        * A card that has arrived at gone does not wait to be told.
        *
@@ -1077,7 +1170,7 @@ export function Sheet({
           that answers a tap. Same gesture for the reader, same outcome.
         */}
         <div className="sheet-dismiss" data-testid="sheet-dismiss" onClick={onClose} />
-        <div className="sheet-snap">
+        <div className="sheet-snap" ref={detent}>
           <div
             className="sheet"
             role="dialog"

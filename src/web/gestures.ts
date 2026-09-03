@@ -86,6 +86,46 @@ export const DISMISS_COMMIT = 0.75;
 export const DISMISS_VELOCITY = 0.25;
 
 /**
+ * How much of a push past the commit point the card actually takes.
+ *
+ * Under one, so the card gets heavier the further it is pulled — the same
+ * damping {@link PULL_RESISTANCE} gives the pull-to-refresh, and the same thing
+ * iOS does to every scroll view that reaches its end. A card that tracks a
+ * finger one-for-one all the way off the screen never tells the reader they
+ * have done enough, which is most of what "it dismisses when I did not mean it
+ * to" is: not a threshold in the wrong place, but no answer from the card while
+ * the threshold went past.
+ */
+export const DISMISS_RESISTANCE = 0.35;
+
+/**
+ * How far the card has moved, given how far the layer has scrolled.
+ *
+ * Both are fractions of the whole journey from the card in place to the card
+ * gone, which keeps this independent of how tall the phone is. One-for-one up
+ * to the knee, damped after it.
+ *
+ * **The knee is {@link DISMISS_HOLD}, and sharing that number is the point.**
+ * The card gets heavy at exactly the moment letting go would dismiss it, so the
+ * threshold stops being invisible: a reader feels where it is instead of
+ * discovering it afterwards. Below the knee nothing is damped, because
+ * everything down there is still a scroll that might yet be scrolled back.
+ *
+ * The card can no longer be dragged fully off the screen, and that is the same
+ * bargain every rubber-banded surface makes: past the knee the pull stops
+ * buying distance and starts only confirming intent. What covers the rest is
+ * the exit, which is a better-looking way to travel it anyway.
+ */
+export function resistedTravel(
+  given: number,
+  knee = DISMISS_HOLD,
+  slope = DISMISS_RESISTANCE,
+): number {
+  if (given <= knee) return given;
+  return knee + (given - knee) * slope;
+}
+
+/**
  * Far enough, or fast enough, to let a sheet go.
  *
  * `given` is the fraction of the way to dismissed the push reached; `velocity`
