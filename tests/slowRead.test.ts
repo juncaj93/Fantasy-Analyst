@@ -12,9 +12,9 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { TEST_PLAYERS, player } from './helpers/players.ts';
-import { PlayerRepo } from '../src/server/repos/players.ts';
+import { PlayerRepo, COUNT_TTL_MS } from '../src/server/repos/players.ts';
 import { PlayerDetailRepo } from '../src/server/repos/playerDetail.ts';
-import { SlowRead } from '../src/server/repos/slowRead.ts';
+import { SlowRead, SLOW_READ_TTL_MS } from '../src/server/repos/slowRead.ts';
 import type { Database } from '../src/server/db.ts';
 
 /** A database that writes down every statement prepared through it. */
@@ -116,6 +116,104 @@ describe('the counts behind the diagnostics', () => {
     // `/api/setup/status` asks for these inside one `Promise.all`.
     await Promise.all([repo.count(), repo.count(), repo.count(), repo.count()]);
     expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(1);
+  });
+
+  /*
+   * The hour-long window, and the one answer it must not apply to.
+   *
+   * These two counts were the largest queries left on the account once the
+   * dictionary was fixed -- 1,018,556 rows across 308 calls in a day, 20.4% of
+   * the allowance, for two integers. The memo had capped how often they ran;
+   * only the window caps what that costs, because a `COUNT` with nothing to
+   * narrow it walks every row every time.
+   */
+  it('holds the counts longer than the poll-shaped default', () => {
+    expect(
+      COUNT_TTL_MS,
+      'the five-minute default is sized against a five-second poll, not against a count the 09:00 sync rewrites',
+    ).toBeGreaterThan(SLOW_READ_TTL_MS);
+    expect(COUNT_TTL_MS).toBe(60 * 60 * 1_000);
+  });
+
+  it('honours a window longer than the default, and asks again past it', async () => {
+    const clock = { now: 0 };
+    const memo = new SlowRead<number>(60 * 60 * 1_000, () => clock.now);
+    const db = await createTestDb();
+
+    let reads = 0;
+    const countingRead = async () => {
+      reads += 1;
+      return 7;
+    };
+
+    await memo.get(db, 'all', countingRead);
+    clock.now = 45 * 60 * 1_000; // 45 minutes: past the old window, inside this one
+    await memo.get(db, 'all', countingRead);
+    expect(reads, 'a non-zero count stands for the whole hour').toBe(1);
+
+    clock.now = 61 * 60 * 1_000;
+    await memo.get(db, 'all', countingRead);
+    expect(reads, 'and is asked again once the hour is up').toBe(2);
+  });
+
+  /*
+   * Zero is the state somebody is standing on Setup trying to leave: it is what
+   * makes the screen say the player list has not been downloaded. Holding it
+   * for an hour would mean an app insisting a sync never happened. It is also
+   * free to re-ask -- counting an empty table reads no rows -- so there is
+   * nothing on the other side of the trade.
+   */
+  it('never sits on an empty player table', async () => {
+    const { db, asked } = counting(await createTestDb());
+    const repo = new PlayerRepo(db);
+
+    expect(await repo.count()).toBe(0);
+    expect(await repo.count()).toBe(0);
+    expect(await repo.count()).toBe(0);
+    expect(
+      times(asked, 'COUNT(*) AS n FROM players'),
+      'a zero total is re-read every time: it costs nothing, and it goes stale the moment a sync lands',
+    ).toBe(3);
+  });
+
+  /*
+   * The asymmetry, asserted, because it is the part that is easy to get wrong.
+   *
+   * The first draft of this change re-read *both* counts on zero, on the
+   * reasoning that counting nothing costs nothing. That is true of `count()`,
+   * which only returns zero for an empty table. It is false of `countRanked()`:
+   * a filtered COUNT returning zero has still walked every row to establish it,
+   * so a dictionary synced but not yet given an ADP import answers zero at the
+   * cost of the whole table -- and re-reading on zero would have switched the
+   * memo off in the one state it matters most.
+   */
+  it('keeps memoising a zero ranked count, because that zero was not free', async () => {
+    const { db, asked } = counting(await createTestDb());
+    const repo = new PlayerRepo(db);
+    // Players, but nothing with a draft rank: the no-ADP-imported-yet state.
+    await repo.upsertMany(TEST_PLAYERS);
+    asked.length = 0;
+
+    expect(await repo.countRanked()).toBe(0);
+    for (let i = 0; i < 10; i += 1) expect(await repo.countRanked()).toBe(0);
+    expect(
+      times(asked, 'draft_rank IS NOT NULL'),
+      'zero ranked players still costs a full scan, so it is held like any other answer',
+    ).toBe(1);
+  });
+
+  it('starts memoising as soon as there is something to count', async () => {
+    const { db, asked } = counting(await createTestDb());
+    const repo = new PlayerRepo(db);
+
+    expect(await repo.count()).toBe(0);
+    await repo.upsertMany(TEST_PLAYERS);
+    asked.length = 0;
+
+    const total = await repo.count();
+    expect(total).toBeGreaterThan(0);
+    for (let i = 0; i < 10; i += 1) expect(await repo.count()).toBe(total);
+    expect(times(asked, 'SELECT COUNT(*) AS n FROM players')).toBe(1);
   });
 
   it('counts a season of statistics once per season', async () => {

@@ -97,8 +97,58 @@ const PLAYER_COLUMNS: string = Object.keys({
  * See `slowRead.ts` for the measurements and the argument.
  */
 const DICTIONARY = new SlowRead<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }>();
-const TOTAL = new SlowRead<number>();
-const RANKED = new SlowRead<number>();
+
+/**
+ * The two counts hold their answer for an hour, not five minutes.
+ *
+ * Five minutes was set against the Draft board's five-second poll, where it
+ * turns 720 reads an hour into 12. It was never the right window for these
+ * two, and the clean-day insights read said so: with the dictionary fixed,
+ * `COUNT(*) FROM players WHERE active = 1 AND draft_rank IS NOT NULL` and its
+ * unfiltered twin were the two largest queries left on the account, together
+ * 1,018,556 rows across 308 calls -- 20.4% of the daily allowance to produce
+ * two integers.
+ *
+ * The memo had capped how often they run. It could not touch what a run costs,
+ * and that is the whole cost here: a `COUNT` with nothing to narrow it walks
+ * every row, 3,307 of them, every single time. The only lever left is the
+ * window, and an hour is honest for a number the 09:00 sync rewrites once a
+ * day and every other write clears by hand.
+ */
+export const COUNT_TTL_MS = 60 * 60 * 1_000;
+
+const TOTAL = new SlowRead<number>(COUNT_TTL_MS);
+const RANKED = new SlowRead<number>(COUNT_TTL_MS);
+
+/**
+ * Remember the total for the full hour, unless there is no table to count.
+ *
+ * `count()` returns zero for exactly one reason: the table is empty. That
+ * makes zero the one answer worth re-reading every time, because it is also
+ * the only one that is free -- a `COUNT` walks the rows it counts, so counting
+ * an empty table reads none. Holding it saves nothing.
+ *
+ * What holding it costs is the screen. `playerCount > 0` decides whether Setup
+ * says "Connected as Alex" or "the player list has not been downloaded", and a
+ * zero is precisely the state somebody is standing on that screen trying to
+ * leave. `upsertMany` clears these memos, so a sync that lands on the isolate
+ * the reader is already talking to shows up at once -- but nothing guarantees
+ * it is the same isolate, and an hour of an app insisting the download you just
+ * ran never happened is a bad trade for rows that were free.
+ *
+ * This deliberately does NOT apply to `countRanked()`, and the difference is
+ * the whole reason it is a named function rather than a shared wrapper. That
+ * count filters, and a filtered `COUNT` returning zero has still walked every
+ * row to find out -- a synced dictionary with no ADP imported yet answers zero
+ * at the cost of all 3,307. Re-reading on zero there would turn the memo off
+ * for the case it is most needed in. Only `upsertMany` writes `draft_rank`,
+ * and it forgets, so the hour stands on its own.
+ */
+async function dropAnEmptyTable(read: () => Promise<number>, db: Database): Promise<number> {
+  const n = await read();
+  if (n === 0) TOTAL.forget(db);
+  return n;
+}
 
 /** Drop every memo for this database. Exported for tests. */
 export function forgetPlayerReads(db: Database): void {
@@ -116,23 +166,33 @@ export class PlayerRepo {
    * A `COUNT(*)` with no `WHERE` is a full pass over the table — SQLite has no
    * stored row count to consult, and D1 bills every row it walks — so this is
    * 3,300 rows to render one number on the overview. It was asked 433 times in
-   * the day that ran the allowance out, for 28.6% of it. Memoised, because the
-   * count changes when `upsertMany` runs and at no other time.
+   * the day that ran the allowance out, for 28.6% of it. Memoised for an hour,
+   * because the count changes when `upsertMany` runs and at no other time --
+   * except for zero, which {@link dropAnEmptyTable} refuses to hold.
    */
   async count(): Promise<number> {
-    return TOTAL.get(this.db, 'all', async () => {
-      const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
-      return Number(row?.n ?? 0);
-    });
+    return dropAnEmptyTable(
+      () =>
+        TOTAL.get(this.db, 'all', async () => {
+          const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+          return Number(row?.n ?? 0);
+        }),
+      this.db,
+    );
   }
 
   /**
    * How many active players Sleeper gives a draft-order rank.
    *
    * Another full pass — neither column is indexed, and indexing them would not
-   * help much on a table this small where most rows match. Memoised on the
-   * same terms as {@link count}: a Setup diagnostic, refreshed by the write
-   * that can change it.
+   * help much on a table this small where most rows match. Memoised for the
+   * same hour as {@link count}, and refreshed by `upsertMany`, which is the
+   * only writer of `draft_rank`.
+   *
+   * Not zero-guarded, unlike its twin, and deliberately: zero here means the
+   * filter matched nothing, not that there was nothing to read. The scan
+   * happened either way, so a zero is worth holding exactly as much as any
+   * other answer. See {@link dropAnEmptyTable}.
    */
   async countRanked(): Promise<number> {
     return RANKED.get(this.db, 'all', async () => {
