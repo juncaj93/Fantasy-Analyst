@@ -19,6 +19,7 @@ import { captureDstSnapshot, replayDstSnapshot } from '../src/core/support/dstSn
 import { captureMatchupSnapshot, replayMatchupSnapshot } from '../src/core/support/matchupSnapshot.ts';
 import { captureTradeSnapshot, replayTradeSnapshot } from '../src/core/support/tradeSnapshot.ts';
 import { NO_TRADE_HISTORY } from '../src/core/trades/assemble.ts';
+import type { TrendingVelocity } from '../src/core/market/trending.ts';
 import { waiverLineup } from '../src/core/waivers/assemble.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
@@ -242,7 +243,7 @@ const WALLET: LeagueBudgetState = {
   notes: [],
 };
 
-function waiverSnapshot() {
+function waiverSnapshot(over: { wire?: StartSitInput[]; trending?: Map<string, TrendingVelocity> } = {}) {
   const mine = roster({ playerIds: MY_PLAYERS, starterIds: MY_STARTERS });
   const theirs = roster({
     rosterId: 2,
@@ -259,8 +260,8 @@ function waiverSnapshot() {
     league: league(),
     mine,
     rosters: [mine, theirs],
-    players: [...rosterInputs, ...WIRE].map((input) => input.player),
-    pool: { scanned: WIRE.length, perPosition: 5 },
+    players: [...rosterInputs, ...(over.wire ?? WIRE)].map((input) => input.player),
+    pool: { scanned: (over.wire ?? WIRE).length, perPosition: 5 },
     nflState: { season: '2026', week: 6, seasonType: 'regular' } as never,
     props,
     weeksRead: 5,
@@ -269,14 +270,15 @@ function waiverSnapshot() {
       shape,
       profile,
       rosterInputs,
-      candidateInputs: WIRE,
+      candidateInputs: over.wire ?? WIRE,
       rosteredIds,
       currentStarterIds: MY_STARTERS,
       reserveIds: [],
       rosters: [mine, theirs],
       week: 6,
       season: '2026',
-      strategy: { week: 6, finalWeek: 14, budget: WALLET, prices: NO_PRICES, trending: new Map() },
+      strategy: { week: 6, finalWeek: 14, budget: WALLET, prices: NO_PRICES, trending: over.trending ?? new Map() },
+      trending: over.trending ?? new Map(),
       budgets: WALLET,
       prices: NO_PRICES,
       observations: [],
@@ -289,6 +291,42 @@ function waiverSnapshot() {
 }
 
 describe('Waivers', () => {
+  /*
+   * The tier a replay is likeliest to lose, pinned.
+   *
+   * Which unscorable players reach the board is decided by the trending
+   * capture, and the replay rebuilds its request field by field rather than
+   * spreading the captured one — so it is the one path where a new request
+   * field can be silently dropped. A snapshot that reproduced everything except
+   * the unknown tier would still report `reproduced`, which is the failure this
+   * asserts against.
+   */
+  it('reproduces the players it could not score, which only the capture knows are worth naming', async () => {
+    const chased = candidate('fa-chased', 'Chased Rookie', 'RB', null, { team: 'CHI' });
+    const trending = new Map<string, TrendingVelocity>([
+      [
+        'fa-chased',
+        {
+          playerId: 'fa-chased',
+          rank: 2,
+          count: 22000,
+          addsPerHour: 916,
+          rankMovement: null,
+          acceleration: null,
+          entered: false,
+          heat: 0.96,
+        },
+      ],
+    ]);
+
+    const snapshot = await waiverSnapshot({ wire: [...WIRE, chased], trending });
+    const captured = snapshot.decision.output.unknowns.map((u) => u.name);
+    expect(captured, 'the capture itself should name him').toEqual(['Chased Rookie']);
+
+    const report = await replayWaiverSnapshot(snapshot);
+    expect(report.outcome, report.summary).toBe('reproduced');
+  });
+
   it('reproduces the claims in the same order, with the same bids and drops', async () => {
     const snapshot = await waiverSnapshot();
     sealed(snapshot);

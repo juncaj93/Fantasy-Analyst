@@ -23,10 +23,10 @@ import {
   rowMatches,
   strengthOf,
   type WaiverAdviceLike,
-  type WaiverCandidateLike,
+  type WaiverValueAddLike,
 } from '../src/core/waivers/board.ts';
 
-function candidate(overrides: Partial<WaiverCandidateLike> = {}): WaiverCandidateLike {
+function candidate(overrides: Partial<WaiverValueAddLike> = {}): WaiverValueAddLike {
   return {
     playerId: '2001',
     name: 'Trey Halloran',
@@ -308,5 +308,131 @@ describe('the filters', () => {
     expect(rowMatches(wr, 'FLEX')).toBe(true);
     expect(rowMatches(qb, 'FLEX')).toBe(false);
     expect(rowMatches(qb, 'WR')).toBe(false);
+  });
+});
+
+/**
+ * Three questions on one board, and the order they have to be asked in.
+ *
+ * A starter upgrade, a bench value add and a player nothing could be scored on
+ * are answers to different questions, and only the first two are
+ * recommendations. The tier is what stops the board sorting them together.
+ */
+describe('the three tiers', () => {
+  it('keeps a small starting upgrade above a large bench add', () => {
+    const board = buildWaiverBoard({
+      upgrades: [
+        {
+          slot: 'WR2',
+          accepts: ['WR'],
+          need: 'upgrade',
+          currentPlayerId: '1005',
+          currentName: 'Wes Ferrand',
+          currentScore: 9.3,
+          bar: 2.5,
+          candidates: [candidate({ playerId: 'up', name: 'Small Upgrade', gain: 2.6 })],
+        },
+      ],
+      /*
+       * A bigger number, and deliberately: the two gains are measured against
+       * different men, so the larger one is not the better move and the board
+       * must not read it as one.
+       */
+      valueAdds: [candidate({ playerId: 'va', name: 'Big Bench Add', gain: 9.9, overName: 'Last Man' })],
+      unknowns: [
+        { playerId: 'un', name: 'Trending Nobody', position: 'RB', team: 'CHI', trending: '#1 trending add', adds: 18400 },
+      ],
+    });
+
+    expect(board.rows.map((r) => r.name)).toEqual(['Small Upgrade', 'Big Bench Add', 'Trending Nobody']);
+    expect(board.rows.map((r) => r.strength.level)).toEqual(['speculative', 'value', 'unknown']);
+  });
+
+  it('labels a value add by the man it beats, not by a slot it does not fill', () => {
+    const board = buildWaiverBoard({
+      upgrades: [],
+      valueAdds: [candidate({ playerId: 'va', name: 'Bench Add', gain: 1.2, overName: 'Last Man' })],
+    });
+
+    const row = board.rows[0]!;
+    expect(row.fit.label).toBe('Better than Last Man');
+    expect(row.shortTerm.over).toBe('Last Man');
+    expect(row.strength.label).toBe('Value add');
+  });
+
+  /*
+   * The row that must never claim anything.
+   *
+   * Its whole purpose is to say the app cannot rate him. A score or a points
+   * gain on it would be the page contradicting its own badge.
+   */
+  it('gives an unscorable player a row that claims no points at all', () => {
+    const board = buildWaiverBoard({
+      upgrades: [],
+      unknowns: [
+        { playerId: 'un', name: 'Trending Nobody', position: 'RB', team: 'CHI', trending: '#2 trending add', adds: 9100 },
+      ],
+    });
+
+    const row = board.rows[0]!;
+    expect(row.score).toBeNull();
+    expect(row.faab).toBeNull();
+    expect(row.multiWeek).toBeNull();
+    /* The add count is a reason, never a number under `Proj.` or `This week`. */
+    expect(row.shortTerm.label).toBe('Not scored');
+    expect(row.reasons.join(' · ')).toContain('9,100 adds across Sleeper');
+    expect(row.strength.label).toBe('No data yet');
+    expect(row.reasons.join(' ')).toContain('Unknown, not ruled out');
+  });
+
+  /*
+   * The order this tier is actually read in.
+   *
+   * Every unknown row has a null score, so `gain` cannot separate them and the
+   * fallback is the alphabet — which would put the fortieth-most-added player
+   * above the first for no reason a reader could guess. Sleeper's own rank is
+   * the order, and this asserts it survives the board's sort rather than only
+   * the assembly's.
+   */
+  it('orders the unscorable by how hard the room is chasing them', () => {
+    const board = buildWaiverBoard({
+      upgrades: [],
+      unknowns: [
+        { playerId: 'z', name: 'Aaron Alphabetical', position: 'RB', team: 'CHI', leagueRank: 9, adds: 400 },
+        { playerId: 'a', name: 'Zeke Zulu', position: 'RB', team: 'GB', leagueRank: 1, adds: 40000 },
+      ],
+    });
+
+    expect(board.rows.map((r) => r.name)).toEqual(['Zeke Zulu', 'Aaron Alphabetical']);
+  });
+
+  it('never gives one player two rows across tiers', () => {
+    const board = buildWaiverBoard({
+      upgrades: [
+        {
+          slot: 'WR2',
+          accepts: ['WR'],
+          need: 'upgrade',
+          currentPlayerId: '1005',
+          currentName: 'Wes Ferrand',
+          currentScore: 9.3,
+          bar: 2.5,
+          candidates: [candidate({ playerId: 'dup', name: 'Both Tiers', gain: 4 })],
+        },
+      ],
+      valueAdds: [candidate({ playerId: 'dup', name: 'Both Tiers', gain: 8 })],
+    });
+
+    expect(board.rows).toHaveLength(1);
+    expect(board.rows[0]!.strength.level).toBe('solid');
+  });
+
+  it('offers a position chip for a tier that only value adds reach', () => {
+    const board = buildWaiverBoard({
+      upgrades: [],
+      valueAdds: [candidate({ playerId: 'va', name: 'Bench Back', position: 'RB', gain: 1.1 })],
+    });
+
+    expect(board.positions).toContain('RB');
   });
 });

@@ -33,6 +33,24 @@ import { recommendLineup, type LineupRecommendation } from './lineup.ts';
  */
 export const MEANINGFUL_UPGRADE_GAIN = 2.5;
 
+/**
+ * How much better an available player has to be than the man you would *drop*.
+ *
+ * The other question this page answers, and a different one from the threshold
+ * above. `MEANINGFUL_UPGRADE_GAIN` asks whether somebody is worth displacing a
+ * player you are already starting; this asks whether he is worth a roster spot
+ * at all, measured against the weakest man on your bench. Half a point of
+ * roster utility is a free upgrade to a bench slot that was doing nothing, and
+ * what stops trivial claims being recommended is the bid rather than this.
+ *
+ * It is exported because `core/waivers/planner` already had this number, under
+ * this reasoning, as its own `minNetGain`, and the two must not drift: the
+ * planner takes its targets from the board, so a board that admitted less than
+ * the planner would consider was a planner that could never use its own bar.
+ * One constant, read by both.
+ */
+export const ROSTER_SPOT_GAIN = 0.5;
+
 /** Free agents scored per slot before the list is cut. Keeps Team fast. */
 export const DEFAULT_ALTERNATIVES = 3;
 
@@ -84,9 +102,62 @@ export interface WaiverUpgrade {
   candidates: WaiverCandidate[];
 }
 
+/**
+ * A free agent worth a roster spot who beats nobody you are starting.
+ *
+ * The board's second question. A reader with no hole in their lineup still has
+ * a worst bench player, and somebody clearly better than him on the wire is a
+ * real move — the ordinary "best available" claim that a slot-shaped scan can
+ * never produce, because there is no slot for it to be an upgrade to.
+ */
+export interface WaiverValueAdd extends WaiverCandidate {
+  /** The weakest man on the bench, whom this add is measured against. */
+  overPlayerId: string | null;
+  overName: string | null;
+}
+
+/**
+ * A free agent nothing could be scored on.
+ *
+ * No market, no usage, no news and no status: `evaluatePlayer` returns a null
+ * score and there is nothing to compare. He is reported rather than dropped,
+ * because "the app knows nothing about him" is a fact about the app and not a
+ * verdict on the player, and a reader chasing a name they saw elsewhere is
+ * owed the difference. Nothing here is ranked against anybody.
+ */
+export interface WaiverUnknown {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+  statusFlag: string | null;
+}
+
 export interface WaiverAdvice {
   upgrades: WaiverUpgrade[];
-  /** Said plainly when nothing available beats what the roster already has. */
+  /**
+   * Worth a roster spot, in descending order of what they are worth.
+   *
+   * Never overlapping `upgrades`: a player offered as an answer to a starting
+   * slot is not offered again as a bench add.
+   */
+  valueAdds: WaiverValueAdd[];
+  /**
+   * Everyone the scan could not score, named rather than silently dropped.
+   *
+   * Unfiltered here on purpose. Which of them is worth a reader's attention is
+   * a league-intelligence question — whether the rest of Sleeper is adding him
+   * — and that is answered in `core/waivers/assemble.ts`, which holds the
+   * trending data this module has no business knowing about.
+   */
+  unknowns: WaiverUnknown[];
+  /**
+   * What an empty board means, said plainly. Null whenever there are rows.
+   *
+   * It distinguishes a wire that was read and lost from one that could not be
+   * read at all, because most of a real free-agent pool has nothing to score.
+   * See `emptyBoardHeadline`.
+   */
   headline: string | null;
   notes: string[];
   /** How many unrostered players were actually scored. */
@@ -118,6 +189,8 @@ export function recommendWaiverUpgrades(opts: {
   lineup?: LineupRecommendation;
   minGain?: number;
   alternatives?: number;
+  /** Players held on IR or taxi, who are not the roster spot a claim frees. */
+  reserveIds?: string[];
 }): WaiverAdvice {
   const base = opts.minGain ?? MEANINGFUL_UPGRADE_GAIN;
   const perSlot = opts.alternatives ?? DEFAULT_ALTERNATIVES;
@@ -152,6 +225,17 @@ export function recommendWaiverUpgrades(opts: {
    * user cannot take.
    */
   const playable = evaluated.filter((e) => e.score != null && !e.ruledOut && !e.lock.locked);
+  /*
+   * The ones there was nothing to read on, counted apart from the ones ruled out.
+   *
+   * `skipped` below is the whole of what the scan dropped, and it mixes three
+   * different facts: a player with no market, usage or news to score him on; a
+   * player who is genuinely unavailable; and a player whose game has started.
+   * Only the first is an admission of ignorance, and only the first may be
+   * described to a reader as unknown rather than rejected. The other two were
+   * correctly excluded and need no explaining. See `emptyBoardHeadline`.
+   */
+  const unscored = evaluated.filter((e) => e.score == null).length;
 
   const rosterEvaluations = new Map(opts.roster.map((i) => [i.player.id, evaluatePlayer(i, opts.profile)]));
 
@@ -254,17 +338,205 @@ export function recommendWaiverUpgrades(opts: {
     });
   }
 
+  /*
+   * The second question, asked of everybody the first one did not spend.
+   *
+   * Measured against the weakest man on the bench rather than against a starter,
+   * because that is who a claim actually costs: the add displaces the last
+   * player on the roster, not the one in the slot. A candidate already offered
+   * as the answer to a starting slot is not offered again here — he is one
+   * decision, and the stronger framing of it has already been made.
+   */
+  const benchFloor = weakestBench(lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
+  const valueAdds: WaiverValueAdd[] = (benchFloor == null ? [] : playable)
+    .filter((e) => !spent.has(e.playerId))
+    .map((e) => ({ evaluation: e, gain: round2((e.score ?? 0) - (benchFloor?.score ?? 0)) }))
+    .filter((c) => c.gain >= ROSTER_SPOT_GAIN && (c.evaluation.score ?? 0) > 0)
+    .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name))
+    .map(({ evaluation, gain }) => ({
+      playerId: evaluation.playerId,
+      name: evaluation.name,
+      position: evaluation.position,
+      team: evaluation.team,
+      score: evaluation.score,
+      gain,
+      reasons: valueAddReasons(evaluation, benchFloor),
+      statusFlag: evaluation.statusFlag,
+      role: { trend: evaluation.role.trend, games: evaluation.role.games },
+      overPlayerId: benchFloor?.playerId ?? null,
+      overName: benchFloor?.name ?? null,
+    }));
+
+  /*
+   * And the ones there was nothing to say about, said anyway.
+   *
+   * Ruled out is left out: he is unavailable on a fact, which is an answer
+   * rather than an absence, and naming him under "not enough data" would
+   * describe a known thing as an unknown one.
+   */
+  const unknowns: WaiverUnknown[] = evaluated
+    .filter((e) => e.score == null && !e.ruledOut)
+    .map((e) => ({
+      playerId: e.playerId,
+      name: e.name,
+      position: e.position,
+      team: e.team,
+      statusFlag: e.statusFlag,
+    }));
+
   return {
     upgrades,
-    headline:
-      upgrades.length === 0 && evaluated.length > 0
-        ? 'Your current options grade better than available waivers.'
-        : null,
+    valueAdds,
+    unknowns,
+    headline: emptyBoardHeadline({
+      upgrades: upgrades.length + valueAdds.length,
+      playable: playable.length,
+      unscored,
+    }),
     notes,
     considered: evaluated.length,
     skipped: evaluated.length - playable.length,
     threshold: base,
   };
+}
+
+/**
+ * What an empty board actually means, rather than the flattering version of it.
+ *
+ * This string is the whole of what the Waivers screen prints when nothing
+ * cleared, so it is the page's one statement about a wire the reader cannot
+ * see. It used to read `Your current options grade better than available
+ * waivers.` in every empty case, including the case where most of the wire was
+ * never compared at all: a free agent with no market, no usage and no news
+ * scores `null` and is dropped before any slot looks at him, and on a real
+ * scan that is routinely the majority of the pool. Telling a reader their
+ * roster graded better than players nobody graded is the one thing the rest of
+ * this codebase is built not to do, and it is worse here than a blank field
+ * would be, because it sounds like a finding.
+ *
+ * So the three cases are said apart:
+ *
+ *   - nobody was scorable, so there is no comparison to report and the sentence
+ *     may not imply one;
+ *   - everybody was scored and nobody was better, which is the original
+ *     sentence and stays word for word;
+ *   - some were scored and some could not be, which is the ordinary case, and
+ *     the count of the unread is the reader's cue that the wire is thin on data
+ *     rather than thin on players.
+ *
+ * The count is of players who could not be *scored*, never of everything the
+ * scan dropped: somebody on injured reserve, or somebody whose game has already
+ * started, was excluded on a fact rather than on ignorance, and folding him into
+ * this number would make the sentence claim the app knows less than it does.
+ *
+ * `unknown, not ruled out` is the phrase used deliberately: a player the app
+ * could not score has not been rejected, and a reader who wants him should not
+ * read this line as advice against him.
+ */
+function emptyBoardHeadline(counts: { upgrades: number; playable: number; unscored: number }): string | null {
+  if (counts.upgrades > 0) return null;
+  const { playable, unscored } = counts;
+
+  if (playable === 0) {
+    if (unscored === 0) return null;
+    const verb = unscored === 1 ? 'has' : 'have';
+    return `No free agent could be scored: ${freeAgents(unscored)} ${verb} no market, usage or news to read. Unknown, not ruled out.`;
+  }
+
+  if (unscored === 0) return 'Your current options grade better than available waivers.';
+
+  return (
+    `Your current options grade better than the ${freeAgents(playable)} that could be scored. ` +
+    `${cap(freeAgents(unscored))} had nothing to read: unknown, not ruled out.`
+  );
+}
+
+/**
+ * The weakest man on the bench: who a claim would actually cost.
+ *
+ * Starters are excluded because displacing one of them is the *other* question,
+ * already answered above. Reserve players are excluded too — an IR stash is not
+ * the roster spot a Tuesday claim frees, and pricing an add against a player
+ * who cannot play this week would make every add look like a bargain.
+ *
+ * **He also has to have a game.** This is the one that matters, and getting it
+ * wrong turns the whole tier into noise. A bench player on a bye, or one the
+ * market has not priced, scores near zero — not because he is worthless but
+ * because there is nothing this week to score. Measured against him, every
+ * healthy free agent on the wire clears the bar by nine points and the board
+ * fills with "value adds" that are really *better than my bye-week receiver,
+ * this Sunday only*. So the floor is drawn from bench players the market has
+ * actually priced, which is the same line `upgradeBar` draws when it charges a
+ * surcharge for thin data: a comparison is only worth making when both sides
+ * are known.
+ *
+ * Null when nobody on the bench qualifies, and the caller then claims no value
+ * adds at all. An empty bench is not a bench of zero-point players, and
+ * treating it as one would recommend the entire wire.
+ */
+function weakestBench(
+  lineup: LineupRecommendation,
+  roster: StartSitInput[],
+  evaluations: Map<string, StartSitEvaluation>,
+  reserveIds: string[],
+): StartSitEvaluation | null {
+  const starting = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const reserved = new Set(reserveIds);
+  let worst: StartSitEvaluation | null = null;
+  for (const input of roster) {
+    const id = input.player.id;
+    if (starting.has(id) || reserved.has(id)) continue;
+    const evaluation = evaluations.get(id);
+    if (!evaluation || evaluation.score == null) continue;
+    /*
+     * A ruled-out player's score is a penalty, not a valuation.
+     *
+     * The engine drives somebody who cannot play deep negative on purpose, so
+     * the lineup optimiser will never start him. Left in here he is always the
+     * weakest man on the bench by a distance, and every free agent on the wire
+     * then "beats" him by eighty points. He is also not the drop a claim
+     * actually makes: cutting an injured starter is a roster decision of its
+     * own, which is why `planner/dropCost.ts` protects him outright rather than
+     * pricing him. Same rule, applied earlier.
+     */
+    if (evaluation.ruledOut) continue;
+    if (evaluation.expectation.points == null) continue;
+    if (worst == null || evaluation.score < (worst.score ?? 0)) worst = evaluation;
+  }
+  return worst;
+}
+
+/**
+ * Why he is worth a roster spot, in the terms that decision is made in.
+ *
+ * Deliberately not `upgradeReasons`: that one opens with how he compares to the
+ * man in the slot, and there is no slot here. The comparison that matters is
+ * the bench, and naming the player who would go is what turns "best available"
+ * into a move the reader can actually picture making.
+ */
+function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation | null): string[] {
+  const reasons: string[] = [];
+  if (floor) reasons.push(`Worth more than ${floor.name}, the last man on your bench`);
+
+  const points = candidate.expectation.points;
+  if (points != null) reasons.push(`Market priced — ${points.toFixed(1)} pts expected`);
+  if (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate') {
+    reasons.push('Role increasing');
+  }
+  if (candidate.movement.direction === 'up' && candidate.movement.headline) {
+    reasons.push(candidate.movement.headline);
+  }
+  if (reasons.length === 0) reasons.push('Scores higher on the evidence available');
+  return reasons;
+}
+
+/** `1 free agent` / `14 free agents`. */
+function freeAgents(count: number): string {
+  return `${count} free agent${count === 1 ? '' : 's'}`;
+}
+
+function cap(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**

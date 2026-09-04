@@ -52,7 +52,15 @@ export type PricedBid = BidRecommendation & {
 };
 
 export function priceWaiverUpgrades(opts: {
-  advice: WaiverAdvice;
+  /*
+   * The slot-shaped half of the advice, and only that.
+   *
+   * Declared as the field it reads rather than as the whole `WaiverAdvice`,
+   * because the pricing pass has no opinion about bench value adds or about
+   * players nothing could be scored on: asking for the whole record would
+   * make every future field of it a breaking change here.
+   */
+  advice: Pick<WaiverAdvice, 'upgrades'>;
   strategy: WaiverPricingContext;
   rosteredIds: Set<string>;
   /**

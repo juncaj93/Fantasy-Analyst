@@ -301,6 +301,8 @@ export async function gatherWaiverInputs(
       week,
       season: league.season,
       strategy,
+      /* The same capture the pricing pass reads, handed over for surfacing too. */
+      trending: strategy?.trending,
       budgets: strategy?.budget ?? null,
       prices: strategy?.prices ?? null,
       /*

@@ -47,10 +47,17 @@
 
 import { DEFENCE_POSITION } from '../startsit/engine.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
-import { recommendWaiverUpgrades, type WaiverAdvice, type WaiverUpgrade } from '../startsit/waivers.ts';
+import {
+  recommendWaiverUpgrades,
+  type WaiverAdvice,
+  type WaiverUnknown,
+  type WaiverUpgrade,
+  type WaiverValueAdd,
+} from '../startsit/waivers.ts';
 import { recommendLineup, type LineupRecommendation } from '../startsit/lineup.ts';
 import { waiverMultiWeekFor } from '../contracts/integration.ts';
 import { waiverLeagueIntel, withCompetition, type WaiverIntelRoster } from './intel.ts';
+import { trendingHeadline, type TrendingVelocity } from '../market/trending.ts';
 import { priceWaiverUpgrades, type PricedBid, type WaiverPricingContext } from './pricing.ts';
 import { buildWaiverClaimPlan, type WaiverClaimPlan } from './claimPlan.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
@@ -95,6 +102,16 @@ export interface WaiverAssemblyRequest {
   season: string;
   /** Null in a league that does not bid, which removes pricing entirely. */
   strategy: WaiverPricingContext | null;
+  /**
+   * What the rest of Sleeper is adding, and how fast.
+   *
+   * Its own field rather than a reach into {@link strategy}, which is the
+   * pricing context: attention is used to *surface* players now, not only to
+   * price them, and a league that does not bid still has a wire the room is
+   * chasing. Empty is the honest state for a deployment that has taken no
+   * capture yet, and it costs the board its unknown tier rather than breaking it.
+   */
+  trending?: ReadonlyMap<string, TrendingVelocity> | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -119,6 +136,19 @@ export interface WaiverAssemblyRequest {
 export interface WaiverAssembly extends WaiverAdvice {
   /** The board as drawn: competition folded on, the DEF row left to the planner. */
   upgrades: WaiverUpgrade[];
+  /** Bench-value adds, with the multi-week read and any trending line attached. */
+  valueAdds: WaiverValueAdd[];
+  /**
+   * The unscored worth naming: those Sleeper is adding, most-added first.
+   *
+   * Narrowed from the engine's full list — see the note beside the filter.
+   */
+  unknowns: (WaiverUnknown & {
+    trending: string | null;
+    adds: number | null;
+    heat: number | null;
+    leagueRank: number;
+  })[];
   dst: DstPlan | null;
   /** What each recommended add should cost. Empty in a league that does not bid. */
   bids: PricedBid[];
@@ -133,6 +163,18 @@ export interface WaiverAssembly extends WaiverAdvice {
    * against a different one.
    */
   lineup: LineupRecommendation;
+}
+
+/**
+ * Sleeper's own line about a player, or nothing.
+ *
+ * Kept to one place so the string on a value-add row is the same string the
+ * pricing pass puts on a priced bid: two different sentences about one player's
+ * popularity, on one screen, would be the app disagreeing with itself.
+ */
+function lineFor(trending: ReadonlyMap<string, TrendingVelocity>, playerId: string): string | null {
+  const v = trending.get(playerId);
+  return v ? trendingHeadline(v, { availableInLeague: true }) : null;
 }
 
 /**
@@ -164,6 +206,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     profile,
     rosteredPlayerIds: rosteredIds,
     currentStarterIds: request.currentStarterIds,
+    reserveIds: request.reserveIds,
     lineup,
   });
 
@@ -174,11 +217,24 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    * `compareRows` sorts on strength and gain, and a level attached here is a
    * sentence on a row that had already earned its place.
    */
-  const boardIds = advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId));
+  const boardIds = [
+    ...advice.upgrades.flatMap((upgrade) => upgrade.candidates.map((c) => c.playerId)),
+    /*
+     * The value adds are on the board too, so they are valued too.
+     *
+     * A bench add is precisely the claim a multi-week read matters most for: a
+     * streamer worth one Sunday and a season-long hold look identical in this
+     * week's points, and the difference is the whole decision.
+     */
+    ...advice.valueAdds.map((c) => c.playerId),
+  ];
   const multiWeek = waiverMultiWeekFor({
     playerIds: boardIds,
     inputs: candidateInputs,
-    scores: new Map(advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const))),
+    scores: new Map([
+      ...advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const)),
+      ...advice.valueAdds.map((c) => [c.playerId, c.score] as const),
+    ]),
     profile,
     currentWeek: request.week,
   });
@@ -248,6 +304,72 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   );
 
   /*
+   * What the rest of Sleeper is doing, folded onto the board it belongs to.
+   *
+   * Two uses, and the line between them is the one `core/market/trending.ts`
+   * draws in its own header: attention is allowed to *surface* a player and to
+   * price him, and is never allowed to score him. So nothing below touches a
+   * projection or a gain. It adds a sentence to rows that already earned their
+   * place, and it decides which unscored players are worth naming at all.
+   */
+  const trending: ReadonlyMap<string, TrendingVelocity> = request.trending ?? new Map();
+
+  /*
+   * One owner for the defence, and it is still the planner.
+   *
+   * The same rule the upgrades above are filtered by, applied to the two new
+   * streams for the same reason: the planner decides `Stream PHI over BUF` or
+   * `Hold BUF`, and a generic `Value add · Tennessee DEF` beside it is a second
+   * answer to a question that already has one. Where the plan could not be
+   * computed at all, `dst` is null and the generic rows are allowed through,
+   * exactly as a generic DEF upgrade is.
+   */
+  const defenceIsPlanned = dst != null;
+  const ownsDefence = (position: string) => defenceIsPlanned && position === DEFENCE_POSITION;
+
+  const valueAdds = advice.valueAdds.filter((add) => !ownsDefence(add.position)).map((add) => {
+    const value = multiWeek.get(add.playerId);
+    const line = lineFor(trending, add.playerId);
+    return {
+      ...add,
+      ...(value ? { multiWeek: value } : {}),
+      ...(line ? { reasons: [...add.reasons, line] } : {}),
+    };
+  });
+
+  /*
+   * The unscored, narrowed to the ones the room is actually chasing.
+   *
+   * Every free agent the app could not score is a candidate here, and on a real
+   * wire that is most of the pool — a page listing forty players it has nothing
+   * to say about is worse than the empty page it replaced. Sleeper's own adds
+   * list is the filter, and it is the right one: a player nobody is adding and
+   * nothing can score is not a decision anybody is making this week, and he is
+   * still counted in the sentence under the board rather than hidden. A player
+   * being added ten thousand times *is* the decision, and he is exactly who the
+   * old board could never show.
+   *
+   * Ordered by Sleeper's published rank, carried as `leagueRank` because that is
+   * literally what it is: where a ranking put him. This tier has no other order
+   * available, every one of these rows having no score to sort on.
+   */
+  const unknowns = advice.unknowns
+    .filter((unknown) => !ownsDefence(unknown.position))
+    .map((unknown) => {
+      const v = trending.get(unknown.playerId);
+      if (!v || v.rank == null) return null;
+      return {
+        ...unknown,
+        trending: trendingHeadline(v, { availableInLeague: true }),
+        adds: v.count,
+        heat: v.heat,
+        leagueRank: v.rank,
+      };
+    })
+    .filter((u): u is NonNullable<typeof u> => u != null)
+    .sort((a, b) => a.leagueRank - b.leagueRank);
+
+  /*
    * And the claims themselves, from what this function is already holding.
    *
    * A failure is swallowed to an unsurfaced plan, on the same principle as the
@@ -258,7 +380,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       return buildWaiverClaimPlan({
         roster: rosterInputs,
         candidates: candidateInputs,
-        advice: { ...advice, upgrades, dst, faab: { bids } },
+        advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids } },
         shape,
         profile,
         reserveIds: request.reserveIds,
@@ -271,5 +393,5 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     }
   })();
 
-  return { ...advice, upgrades, dst, bids, claimPlan, lineup };
+  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, lineup };
 }

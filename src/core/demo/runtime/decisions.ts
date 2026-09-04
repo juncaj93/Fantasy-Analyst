@@ -94,6 +94,8 @@ export function demoWaiverRequest(data: ScenarioData, mine: RosterRecord): DemoW
       week,
       season: data.league.season,
       strategy: strategy ?? null,
+      /* The same capture the pricing pass reads, handed over for surfacing too. */
+      trending: strategy?.trending,
       budgets: strategy?.budget ?? null,
       prices: strategy?.prices ?? null,
       observations: bidHistory.observations,

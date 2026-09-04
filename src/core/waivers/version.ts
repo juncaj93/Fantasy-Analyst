@@ -25,4 +25,13 @@ import { composeEngineVersion } from '../engineVersion.ts';
 import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
 import { DST_ENGINE_VERSION } from '../dst/version.ts';
 
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@1', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@2`: the board answers three questions rather than one.
+ *
+ * A bench-value tier and an unscorable tier both reach the claim planner, and
+ * the planner's own `minNetGain` is now actually reachable — so a league whose
+ * inputs have not changed at all can get different claims, in a different
+ * order, at different prices. That is exactly what the head of this string is
+ * for.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@2', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
