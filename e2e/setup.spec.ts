@@ -8,11 +8,19 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { openReview } from './helpers.ts';
+import { openReview, openSetupGroup } from './helpers.ts';
 
+/**
+ * Settings, with the group holding the five steps open.
+ *
+ * The steps are inside the Data fold and a shut fold renders nothing, so this
+ * is two actions now rather than one. Everything below reads the same rows it
+ * always did; only getting to them costs a tap.
+ */
 async function openSetup(page: Page) {
   await page.goto('/');
   await page.getByTestId('tab-setup').click();
+  await openSetupGroup(page, 'data');
   await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
 }
 
@@ -44,6 +52,167 @@ test.describe('setup overview', () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  /**
+   * The screen does not explain what its own rows already say.
+   *
+   * Three paragraphs used to sit here: a subtitle summarising whether the app
+   * was ready for draft day, two lines on what System meant, and a description
+   * of what a support snapshot is. Each of them restated something the reader
+   * can see — the marks down the checklist, the state of the control, the label
+   * on the row — and between them they cost about a third of the first screen.
+   *
+   * The first one is the reason this is a test rather than a preference: it
+   * said "draft day" on a screen that was still being opened in September,
+   * because copy that summarises a state it does not hold cannot go stale
+   * loudly. Anything that puts a standing explanation back on this screen
+   * should have to argue with a failing assertion first.
+   */
+  /**
+   * Three groups, all shut, and nothing else on the first screen.
+   *
+   * The arrangement the redesign is: Data, App behavior, Account & support, in
+   * that order, each a fold that has to be opened. What this is really holding
+   * is the *nothing else* — every time something has been added to Settings it
+   * has been added at this level, and the screen's whole claim is that a reader
+   * can take in the first view without scrolling and without reading.
+   */
+  test('is three groups, in order, and nothing else', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-setup').click();
+    const groups = page.locator('[data-testid^="setup-group-"]:not([data-testid$="-toggle"]):not([data-testid$="-body"])');
+    await expect(groups).toHaveCount(3);
+    for (const [i, group] of ['data', 'behavior', 'support'].entries()) {
+      await expect(groups.nth(i)).toHaveAttribute('data-testid', `setup-group-${group}`);
+    }
+    // Named in the reader's words, not the code's.
+    await expect(page.getByTestId('setup-group-data-toggle')).toContainText('Data');
+    await expect(page.getByTestId('setup-group-behavior-toggle')).toContainText('App behavior');
+    await expect(page.getByTestId('setup-group-support-toggle')).toContainText('Account & support');
+  });
+
+  /**
+   * Every group starts shut, and this is the inconsistency the pass exists to end.
+   *
+   * Sections used to decide their own default — the rankings importer opened
+   * itself whenever no rankings were loaded, and nothing else did — so the first
+   * view of Settings was different depending on state nobody could see from the
+   * outside. A reader should be able to learn this screen once.
+   */
+  test('opens with every group shut, however the deployment is configured', async ({ page }) => {
+    // Not through `openSetup`, which opens Data: this is the screen as a reader
+    // meets it, and the assertion is worthless if the test opened something.
+    await page.goto('/');
+    await page.getByTestId('tab-setup').click();
+    for (const group of ['data', 'behavior', 'support']) {
+      await expect(page.getByTestId(`setup-group-${group}-toggle`)).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.getByTestId(`setup-group-${group}-body`)).toHaveCount(0);
+    }
+    // Not one row of any of them is on the screen, or in the document.
+    await expect(page.getByTestId('setup-step-sleeper')).toHaveCount(0);
+    await expect(page.getByTestId('draft-balance')).toHaveCount(0);
+    await expect(page.getByTestId('setup-support-snapshot')).toHaveCount(0);
+  });
+
+  /**
+   * A shut group still says whether it is worth opening.
+   *
+   * Folding fourteen rows away is only tidying if nothing that needed attention
+   * went with them. The count on the Data fold is what keeps that true, so it is
+   * asserted against the rows themselves rather than against a fixed string:
+   * whatever the fixture's state, the number on the shut control has to be the
+   * number of marked rows behind it.
+   */
+  test('the Data group counts what is waiting behind it', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('tab-setup').click();
+    const summary = await page.getByTestId('setup-group-data-toggle').innerText();
+
+    await openSetupGroup(page, 'data');
+    const marked = await page.locator('[data-testid^="setup-step-"][data-state="warn"]').count();
+    const todo = await page.locator('[data-testid^="setup-step-"][data-state="todo"]').count();
+    /*
+     * Review contributes however many items are in it, not one.
+     *
+     * It is the queue's own count — the same number `App` reads once and hands
+     * to both the row and the mark on the destination — so the row's words are
+     * where to get it rather than a second read of the API.
+     */
+    const reviewText = await page.getByTestId('setup-review').innerText();
+    const review = Number(/(\d+) items? need/.exec(reviewText)?.[1] ?? 0);
+    // The pending-tally controls appear only while an issue is unscored.
+    const tally = await page.getByTestId('copy-for-chatgpt').count();
+
+    const waiting = marked + todo + review + tally;
+    if (waiting === 0) {
+      expect(summary).toContain('All sources current');
+    } else {
+      expect(summary).toContain(`${waiting} ${waiting === 1 ? 'thing needs' : 'things need'} attention`);
+    }
+  });
+
+  /**
+   * Opening one group does not shut another, and shutting is the same control.
+   *
+   * An accordion that closes what you were reading to show you something else is
+   * a screen that will not let you compare two things — and there is nothing
+   * about these three that makes them mutually exclusive.
+   */
+  test('the groups are independent, and every one of them closes again', async ({ page }) => {
+    await openSetupGroup(page, 'data');
+    await openSetupGroup(page, 'support');
+    await expect(page.getByTestId('setup-group-data-body')).toBeVisible();
+    await expect(page.getByTestId('setup-group-support-body')).toBeVisible();
+
+    await page.getByTestId('setup-group-data-toggle').click();
+    await expect(page.getByTestId('setup-group-data-body')).toHaveCount(0);
+    await expect(page.getByTestId('setup-group-support-body')).toBeVisible();
+  });
+
+  /**
+   * And a reload puts it back to three shut folds.
+   *
+   * Deliberately not remembered. A settings screen that reopens wherever it was
+   * left is a settings screen whose first view is different every time, which is
+   * the thing this arrangement exists to stop.
+   */
+  test('forgets which groups were open', async ({ page }) => {
+    await openSetupGroup(page, 'behavior');
+    await page.reload();
+    await page.getByTestId('tab-setup').click();
+    await expect(page.getByTestId('setup-group-behavior-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('setup-group-data-toggle')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  /**
+   * Every row leads with a shape, and the shapes are all drawn.
+   *
+   * The scannability of a settings list is the whole reason it is a list: a
+   * column of identical text is the hardest possible way to find the one row you
+   * came for. `svg` rather than any element, because the last text characters in
+   * this app were glyphs like these and they rendered as colour emoji on a phone
+   * — see `icons.tsx`.
+   */
+  test('leads every row and every group with a drawn glyph', async ({ page }) => {
+    for (const group of ['data', 'behavior', 'support']) {
+      await expect(page.getByTestId(`setup-group-${group}-toggle`).locator('.fold-icon svg')).toHaveCount(1);
+    }
+    await openSetupGroup(page, 'data');
+    for (const id of ['sleeper', 'league', 'adp', 'newsletter', 'vegas']) {
+      await expect(page.getByTestId(`setup-step-${id}`).locator('.list-icon svg')).toHaveCount(1);
+    }
+    // …and the status it used to lead with is now on the other edge, still drawn.
+    await expect(page.getByTestId('setup-step-sleeper').locator('.list-row-mark svg')).toHaveCount(1);
+  });
+
+  test('does not carry standing explanations of what its rows already say', async ({ page }) => {
+    await openSetupGroup(page, 'support');
+    await page.getByTestId('setup-support-snapshot').scrollIntoViewIfNeeded();
+    const text = await page.locator('main').innerText();
+    for (const blurb of ['draft day', 'System follows your phone', 'Nothing is uploaded']) {
+      expect(text, `Setup should no longer say "${blurb}"`).not.toContain(blurb);
+    }
   });
 });
 
@@ -281,8 +450,36 @@ test.describe('setup with a populated newsletter', () => {
  * The preference lives on the device, so these run against a fresh context's
  * empty storage: System until somebody chooses otherwise, and the choice
  * applied before the first paint on the next visit.
+ *
+ * It is three glyphs at the trailing end of the navigation bar rather than a
+ * titled card above the checklist. What that has to keep is everything below:
+ * all three states offered, one of them visibly held down, the choice applied
+ * at once and still applied after a reload — a smaller control that could only
+ * do two of the three, or that hid which one was current, would be a worse
+ * setting drawn in less space.
  */
 test.describe('appearance', () => {
+  test('sits in the navigation bar as three named, full-size targets', async ({ page }) => {
+    await openSetup(page);
+
+    // In the bar, not in a card above the first step of the checklist.
+    await expect(page.locator('.nav-bar [data-testid="appearance"]')).toBeVisible();
+    await expect(page.getByTestId('appearance')).toHaveAttribute('aria-label', 'Appearance');
+
+    for (const { mode, label } of [
+      { mode: 'light', label: 'Light' },
+      { mode: 'dark', label: 'Dark' },
+      { mode: 'system', label: 'System' },
+    ]) {
+      const button = page.getByTestId(`appearance-${mode}`);
+      // The word is not on the screen any more; it is still on the button.
+      await expect(button).toHaveAttribute('aria-label', label);
+      const box = (await button.boundingBox())!;
+      expect(box.width, `${mode} is only ${box.width}px wide`).toBeGreaterThanOrEqual(44);
+      expect(box.height, `${mode} is only ${box.height}px tall`).toBeGreaterThanOrEqual(36);
+    }
+  });
+
   test('offers System, Light and Dark, and starts on System', async ({ page }) => {
     await openSetup(page);
     await expect(page.getByTestId('appearance')).toBeVisible();

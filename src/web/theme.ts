@@ -12,8 +12,6 @@
 
 export type Appearance = 'system' | 'light' | 'dark';
 
-export const APPEARANCES: readonly Appearance[] = ['system', 'light', 'dark'] as const;
-
 /** Shared with the inline boot script in index.html — keep the two in step. */
 export const STORAGE_KEY = 'fa.appearance';
 

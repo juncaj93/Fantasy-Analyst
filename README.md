@@ -245,9 +245,18 @@ writes nothing. See [docs/DATA_HEALTH.md](docs/DATA_HEALTH.md).
 
 **Setup** — the whole configuration experience in plain language: connect
 Sleeper, choose a league, import ADP, see the dedicated newsletter address and
-tell the app which sender to trust. No commands, no jargon. Appearance lives
-here too: **System** (the default, following the phone), **Light** or **Dark**,
-kept on the device and applied before the first paint.
+tell the app which sender to trust. No commands, no jargon.
+
+It opens as three groups and nothing else, every one of them shut: **Data**
+(where the numbers come from and whether they are any good — the connection
+steps, the imports, Review, Help my scores, Data health), **App behavior** (what
+the app does with them — draft board weighting, Install, Demo Mode) and
+**Account & support** (the state behind one recommendation, to send on). Each
+fold says what is behind it while it is shut, so the Data group counts anything
+waiting rather than hiding it; nothing on the screen opens itself. Appearance is
+three glyphs in the corner of the bar — **Light**, **Dark**, or **System** (the
+default, following the phone) — kept on the device and applied before the first
+paint.
 
 ## League intelligence
 

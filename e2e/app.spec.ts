@@ -8,7 +8,7 @@
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { clearMyGuys, emptyQueue, inSeason, openReview, pullToRefresh } from './helpers.ts';
+import { clearMyGuys, emptyQueue, inSeason, openReview, openSetupGroup, pullToRefresh } from './helpers.ts';
 
 /**
  * Wait for a disclosure to finish opening before reading its text.
@@ -88,6 +88,7 @@ test.describe('shell', () => {
     await expect(setup.getByTestId('review-attention')).toHaveAttribute('aria-hidden', 'true');
 
     await openTab(page, 'setup');
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-review')).toContainText(/\d+ items? need/);
   });
 
@@ -324,6 +325,7 @@ test.describe('draft room', () => {
     // on which rankings are loaded; what matters is that the step reports the
     // draft order it is using.)
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-step-adp')).toContainText('players matched');
   });
 
@@ -940,6 +942,7 @@ test.describe('draft room', () => {
     expect((await first.locator('.explain').innerText()).toLowerCase()).not.toContain('rostered');
 
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     const panel = page.getByTestId('panel-player-detail');
     await panel.locator('summary').click();
     await expect(panel.getByTestId('roster-percent-health')).toContainText(/publishes no roster percentage/i);

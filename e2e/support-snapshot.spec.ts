@@ -22,14 +22,16 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { E2E_PASSPHRASE } from './constants.ts';
+import { openSetupGroup } from './helpers.ts';
 
-/** Where the rows live: Setup → This app. */
+/** Where the rows live: Setup → Account & support. */
 const ROW = 'setup-support-snapshot';
 const CONTEXT = 'setup-support-context';
 
 async function openSetup(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByTestId('tab-setup').click();
+  await openSetupGroup(page, 'support');
   await page.getByTestId(ROW).waitFor();
 }
 
@@ -44,6 +46,7 @@ async function openSetupFrom(page: Page, tab: string): Promise<void> {
   await page.goto('/');
   await page.getByTestId(`tab-${tab}`).click();
   await page.getByTestId(`tab-setup`).click();
+  await openSetupGroup(page, 'support');
   await page.getByTestId(ROW).waitFor();
 }
 
@@ -313,6 +316,7 @@ test.describe('the context follows the reader', () => {
     await page.getByTestId('tab-setup').waitFor();
     await page.reload();
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'support');
     await expect(page.getByTestId(CONTEXT)).toContainText('Team');
   });
 
@@ -345,6 +349,7 @@ test.describe('the context follows the reader', () => {
      */
     await page.getByTestId('tab-players').click();
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'support');
     await expect(page.getByTestId(CONTEXT)).toContainText('Team');
   });
 

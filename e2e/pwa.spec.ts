@@ -16,6 +16,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { openSetupGroup } from './helpers.ts';
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
@@ -221,6 +222,7 @@ test.describe('the shell when launched from the Home Screen', () => {
     // The e2e session is a cookie; a standalone launch must still be able to
     // make changes rather than silently dropping to view-only.
     await page.getByTestId('tab-setup').click();
+    await openSetupGroup(page, 'data');
     await expect(page.getByTestId('setup-step-sleeper')).toBeVisible();
     await expect(page.getByTestId('unlock-card')).toHaveCount(0);
   });
@@ -230,6 +232,8 @@ test.describe('layout diagnostics', () => {
   test('reports who owns the bottom of the screen', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('tab-setup').click();
+    // Install is in App behavior: what the app is, on this phone.
+    await openSetupGroup(page, 'behavior');
     await page.getByTestId('panel-install').locator('summary').first().click();
     await page.getByTestId('layout-diagnostics').locator('summary').first().click();
 

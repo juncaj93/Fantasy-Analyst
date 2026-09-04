@@ -89,7 +89,12 @@ export function InstallPrompt() {
 export function InstallPanel() {
   return (
     <details className="list-details" data-testid="panel-install">
-      <summary>Install on iPhone</summary>
+      <summary>
+        <span className="list-icon">
+          <InstallIcon />
+        </span>
+        Install on iPhone
+      </summary>
       <div className="list-details-body">
         <div className="faint" style={{ marginTop: 8 }}>
           In a normal Safari tab the address field and the row of browser buttons sit below the page.
