@@ -70,25 +70,31 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #                    same name, so it does not need putting by hand)
 
 [triggers]
-# The five-minute injury check is OFF, deliberately, while the D1 daily
-# row-read quota is being brought back under control. It has been exhausted
-# three times in two days, and an app that answers every read with an error
-# until midnight UTC is worse off than one whose injury feed is a day old.
+# The five-minute injury check is back on, and the record of why it was ever
+# off belongs next to it.
 #
-#   "*/5 * * * *"   <- injury check. Restore this entry to turn it back on.
+# It was removed as a tourniquet during the D1 quota incident, when the daily
+# row-read allowance had been exhausted three times in two days and the app was
+# answering every read with an error until midnight UTC. It was removed first
+# because it was the loudest thing on the schedule, not because it was the
+# cause -- and it was not the cause. `d1 insights` attributed 0.4% of a day's
+# reads to the injury path. The actual bill was four read-path queries at 97.5%
+# and a pair of two-key ORDER BYs scanning their whole table for one row.
 #
-# Nothing else was removed: `scheduled()` still carries its `*/5` branch, so
-# putting the string back is the whole of the change. The measured evidence
-# says this tick is NOT the query burning the quota -- `d1 insights` attributes
-# 0.4% of a day's reads to the injury path and 97.5% to four read-path queries
-# -- so this is a tourniquet applied while those are fixed, not the fix. It
-# costs injury freshness between the 09:00 ticks, and Data Health will say so
-# rather than pretend otherwise.
+# Those are fixed. A full clean day now lists 49.2% of the allowance, including
+# a complete production sweep and two deploys, so there is no longer a reason
+# to pay for this tick in injury freshness.
 #
+# Every five minutes -> injury report check, plus, on the ticks that find
+#   nothing new, one week of injury catch-up and one step of last season's
+#   backfill. Not a cheap tick in the abstract -- it ingests, recomputes the
+#   players that changed, and writes. It is cheap in the only currency that
+#   was ever short here: measured against the daily row-read allowance it came
+#   to 0.4%, which is why removing it never helped.
 # Saturday 23:00 UTC and Sunday 15:00 UTC -> Vegas refresh.
 # Daily 09:00 UTC -> Sleeper player dictionary sync + last season's statistics.
 # Day-of-week must be named or 1-7 here: Cloudflare rejects "0" for Sunday.
-crons = ["0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
+crons = ["*/5 * * * *", "0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]
 
 [observability]
 enabled = true
