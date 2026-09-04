@@ -382,28 +382,35 @@ describe('the free-tier promises, as facts about the wiring', () => {
   const worker = readFileSync(fileURLToPath(new URL('../src/worker/index.ts', import.meta.url)), 'utf8');
 
   it('adds no cron trigger', () => {
-    // Three: two game-day windows and the daily 09:00, which the schedule
-    // rides. It was four until the five-minute injury tick was switched off
-    // during the D1 quota incident -- see the comment in `wrangler.toml`, and
-    // the test below, which is the one that would notice it coming back.
+    // Four of the account's five: the five-minute injury tick, two game-day
+    // Vegas windows, and the daily 09:00 that the schedule rides. The spare
+    // one is deliberately spare -- last season's backfill rides the `*/5`
+    // branch rather than claim it, because a finite walk that converges in a
+    // couple of hours should not hold a trigger slot forever.
     const crons = /crons\s*=\s*\[(.*?)\]/s.exec(wrangler)?.[1] ?? '';
-    expect(crons.split(',').filter((c) => c.trim().length > 0)).toHaveLength(3);
+    expect(crons.split(',').filter((c) => c.trim().length > 0)).toHaveLength(4);
     expect(crons).toContain('0 9 * * *');
   });
 
   /*
-   * The tourniquet, asserted rather than remembered.
+   * The tourniquet is off, and this is the test that used to hold it on.
    *
-   * A trigger removed from a config file is invisible: nothing fails, nothing
-   * logs, and the next person to read `crons` sees a list that looks
-   * deliberate. This says out loud that the five-minute tick is off on
-   * purpose, so restoring it is a decision someone makes here rather than a
-   * line that quietly reappears in a merge.
+   * It asserted the opposite for the length of the D1 quota incident: the
+   * five-minute tick was removed from `crons` as the loudest thing on the
+   * schedule, and this test existed so that restoring it had to be somebody's
+   * decision rather than a line reappearing quietly in a merge.
+   *
+   * The measurement then said the tick was 0.4% of the daily row reads and
+   * never the cause, the real causes were fixed, and a full clean day came
+   * back at 49.2% of the allowance. So the decision was made, here, and the
+   * assertion is inverted rather than deleted -- the pairing it really cares
+   * about is that the trigger and its handler branch agree. A `crons` entry
+   * with no branch is a tick that fires and does nothing; a branch with no
+   * entry is the state this incident left behind for a day.
    */
-  it('leaves the five-minute injury tick switched off, and keeps its branch', () => {
+  it('runs the five-minute injury tick, and has a branch to answer it', () => {
     const crons = /crons\s*=\s*\[(.*?)\]/s.exec(wrangler)?.[1] ?? '';
-    expect(crons, 'the five-minute tick is disabled while the D1 quota is in hand').not.toContain('*/5');
-    // The handler stays, so re-enabling is one string in `wrangler.toml`.
+    expect(crons, 'the injury tick was restored once the real causes were fixed').toContain('*/5');
     expect(worker).toContain("event.cron.startsWith('*/5')");
   });
 
