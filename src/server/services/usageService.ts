@@ -37,6 +37,7 @@ import { calendarSeason } from '../../core/season/context.ts';
 import type { Database } from '../db.ts';
 import { UsageRepo, UsageSourceRepo, type StoredUsageWeek, type UsageSourceRun } from '../repos/usage.ts';
 import { PlayerRepo } from '../repos/players.ts';
+import { SlowRead } from '../repos/slowRead.ts';
 import { normalizeName } from '../../core/identity/normalize.ts';
 import { looksAnomalous } from '../../core/injury/diff.ts';
 import { buildIdentityIndex, resolveToCanonical, type IdentityIndex } from './injuryService.ts';
@@ -64,6 +65,37 @@ export const USAGE_SOURCE = 'nflverse';
  * `buildDefenseTendencies` applies that weighting inside this window.
  */
 export const TENDENCY_WINDOW_WEEKS = 8;
+
+/**
+ * How long a built defence table stands.
+ *
+ * Six hours, against an input that changes once a day at most. See
+ * {@link UsageService.defenseTendencies} for the measurement that made this
+ * worth having and for why the window is a ceiling rather than the mechanism:
+ * every write that could falsify it calls {@link forgetDefenseTendencies}.
+ */
+export const TENDENCY_TTL_MS = 6 * 60 * 60 * 1_000;
+
+/**
+ * The built table, per database, per season.
+ *
+ * `SlowRead` rather than a plain map, for the two properties that module has
+ * already been made to have: the promise is stored, so the four assemblies a
+ * single trade-board request runs collapse onto one build instead of four; and
+ * a rejection is never remembered, so a D1 error during an incident is not
+ * pinned in front of every reader for six hours.
+ */
+const TENDENCIES = new SlowRead<DefenseTendencyIndex>(TENDENCY_TTL_MS);
+
+/**
+ * Forget the built table for this database.
+ *
+ * Called by the ingest that writes the rows it is built from, so a new week of
+ * usage is visible on the next read rather than up to six hours later.
+ */
+export function forgetDefenseTendencies(db: Database): void {
+  TENDENCIES.forget(db);
+}
 
 /**
  * One game, on a scale that does not depend on a league's settings.
@@ -170,11 +202,14 @@ export class UsageService {
   private readonly repo: UsageRepo;
   private readonly source: UsageSourceRepo;
   private readonly players: PlayerRepo;
+  /** Kept for the tendency memo, which is keyed by the database it read from. */
+  private readonly db: Database;
 
   constructor(
     db: Database,
     private readonly deps: { fetch?: FetchLike; now?: () => Date; log?: (line: string) => void } = {},
   ) {
+    this.db = db;
     this.repo = new UsageRepo(db);
     this.source = new UsageSourceRepo(db);
     this.players = new PlayerRepo(db);
@@ -347,6 +382,8 @@ export class UsageService {
     const { rows } = await this.rowsFor(fetched.usage.rows, season, fetched.publishedAt);
     if (rows.length === 0) return null;
     await this.repo.saveWeeks(rows);
+    // A week the defence table has never seen. See `defenseTendencies`.
+    forgetDefenseTendencies(this.db);
     await this.source
       .addWrites(this.now().toISOString().slice(0, 10), rows.length, this.now().toISOString())
       .catch(() => {});
@@ -453,6 +490,8 @@ export class UsageService {
     // Only the rows whose numbers moved.
     const toWrite = diff.changed.map((c) => fullByKey.get(keyOf(c))!).filter(Boolean);
     await this.repo.saveWeeks(toWrite);
+    // Numbers moved, so the table built from them is no longer the answer.
+    forgetDefenseTendencies(this.db);
     await this.source.addWrites(day, toWrite.length, fetchedAt);
 
     await this.source.recordCheck(USAGE_SOURCE, season, {
@@ -573,13 +612,7 @@ export class UsageService {
       .weeksFor(players.map((p) => p.playerId), season)
       .catch(() => new Map<string, StoredUsageWeek[]>());
 
-    for (const player of players) {
-      const stored = weeks.get(player.playerId);
-      if (!stored || stored.length === 0) continue;
-      const metrics = toRoleMetrics(player.position, stored);
-      if (metrics.length > 0) out.set(player.playerId, metrics);
-    }
-    return out;
+    return roleMetricsFrom(players, weeks);
   }
 
   /**
@@ -611,10 +644,50 @@ export class UsageService {
    * One query, one pass, and an empty index when the usage store is empty —
    * which is the ordinary state in September and makes the matchup component
    * say "no opponent tendency" rather than inventing one from four games.
+   *
+   * ## Held for {@link TENDENCY_TTL_MS}, and why that is not a cache invented
+   * to be cleared
+   *
+   * This is the most expensive read in the app that nobody asked for. It is
+   * built by `buildStartSitContext`, which every start/sit assembly needs, and
+   * the assemblies are not rare: the Matchup screen re-reads itself every
+   * thirty seconds while games are live, the trade board runs one per roster,
+   * and Team, Compare and Waivers each run one or two a visit.
+   *
+   * Measured on a week-10-shaped store (450 skill players a week, ten weeks):
+   *
+   *     4,500 rows   coverage(), to find one integer -- now a seek
+   *     3,600 rows   leagueWeeksSince(), eight weeks of four positions
+   *
+   * 8,100 rows per assembly, and a Sunday afternoon with the Matchup screen
+   * open is 120 assemblies an hour. That is 972,000 rows an hour, or a fifth of
+   * the daily allowance, to rebuild a table that cannot have changed: its only
+   * input is `player_usage_weeks`, and the only thing that writes those is the
+   * 09:00 ingest of a file nflverse publishes after the week's games finish.
+   *
+   * So the window is not a guess at how stale this may safely be. The answer
+   * changes when `saveWeeks` runs and at no other time, and `saveWeeks` calls
+   * {@link forgetDefenseTendencies}, so a fresh ingest is visible on the next
+   * read rather than at the end of the window. Six hours is the ceiling on the
+   * one case the memo cannot see -- a write from a different isolate -- and for
+   * a season-to-date model of what defences allow, six hours of staleness is
+   * not a number anybody could observe on a screen.
    */
   async defenseTendencies(season = usageSeason(this.now())): Promise<DefenseTendencyIndex> {
-    const coverage = await this.repo.coverage(season).catch(() => null);
-    const latest = coverage?.latestWeek ?? null;
+    return TENDENCIES.get(this.db, season, () => this.computeDefenseTendencies(season));
+  }
+
+  private async computeDefenseTendencies(season: string): Promise<DefenseTendencyIndex> {
+    /*
+     * The newest week, by seek rather than by counting the season.
+     *
+     * `coverage()` answers this and three other numbers, and the three others
+     * are `COUNT(DISTINCT)`, `COUNT(DISTINCT)` and `COUNT(*)` -- no index
+     * shortens any of them, so asking it here walked every row stored for the
+     * season to decide whether the model was worth building at all. Before
+     * week 3 it walked them to answer "no".
+     */
+    const latest = await this.repo.latestWeek(season).catch(() => null);
     if (latest == null || latest < DEFENSE.minWeeks) return new Map();
 
     const rows = await this.repo
@@ -761,4 +834,32 @@ export function describeUsageHealth(
     return 'Nothing has been ingested yet, so the role detector has no series to read.';
   }
   return 'Usage is current: the file is checked daily and the last ingest completed.';
+}
+
+/**
+ * The same series, derived from rows the caller already holds.
+ *
+ * `roleMetricsFor` is a read followed by a pure derivation, and
+ * `startSitInputsFor` needed both halves — so it asked for the metrics and
+ * then asked for the rows, and paid for the identical
+ * `weeksFor` query twice on every assembly. Measured on a 30-player matchup at
+ * week 10, that was 600 rows where 300 were wanted; on the trade board, which
+ * runs one assembly per roster, twelve times that.
+ *
+ * The derivation is exported rather than the second read removed, because both
+ * callers of `roleMetricsFor` are legitimate: the player card genuinely has no
+ * rows in hand and should not have to fetch them itself.
+ */
+export function roleMetricsFrom(
+  players: { playerId: string; position: string }[],
+  weeks: Map<string, StoredUsageWeek[]>,
+): Map<string, RoleMetric[]> {
+  const out = new Map<string, RoleMetric[]>();
+  for (const player of players) {
+    const stored = weeks.get(player.playerId);
+    if (!stored || stored.length === 0) continue;
+    const metrics = toRoleMetrics(player.position, stored);
+    if (metrics.length > 0) out.set(player.playerId, metrics);
+  }
+  return out;
 }

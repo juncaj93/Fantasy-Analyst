@@ -275,6 +275,33 @@ export class UsageRepo {
     return (results ?? []).map(toUsageWeek);
   }
 
+  /**
+   * The newest week stored for a season, and nothing else.
+   *
+   * {@link coverage} answers this too, and it was what every caller that only
+   * wanted the week was using. The difference is what the two cost: the four
+   * aggregates in `coverage` include two `COUNT(DISTINCT)`s and a `COUNT(*)`,
+   * none of which any index can shortcut, so answering "which week are we on"
+   * walked every row the season holds -- 4,500 by week 10, on a query whose
+   * answer is one integer.
+   *
+   * This one is a seek. `idx_player_usage_weeks_season_week` is `(season,
+   * week)`, so SQLite descends to the last entry for the season and stops:
+   * `SeekLE`, one `AggStep`, done. Verified from the bytecode rather than
+   * assumed, because the plan line for both queries names the same index and
+   * says nothing about how much of it gets walked.
+   *
+   * `coverage` stays exactly as it is for the health panel, which genuinely
+   * wants all four numbers once a screen load.
+   */
+  async latestWeek(season: string): Promise<number | null> {
+    const row = await this.db
+      .prepare('SELECT MAX(week) AS week FROM player_usage_weeks WHERE season = ?')
+      .bind(season)
+      .first<{ week: number | null }>();
+    return row?.week == null ? null : Number(row.week);
+  }
+
   /** How many players and weeks the store holds for a season. */
   async coverage(season: string): Promise<{ players: number; weeks: number; latestWeek: number | null; rows: number }> {
     const row = await this.db

@@ -135,7 +135,7 @@ import { SleeperSyncService } from './services/sleeperSync.ts';
 import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
-import { startSitInputsFor } from './services/startSitInputs.ts';
+import { startSitInputsFor, buildStartSitContext } from './services/startSitInputs.ts';
 /* And the one assembly of everything the defence planner reads. */
 import { playoffContextFor } from './services/dstPlanService.ts';
 import { NflScheduleRepo } from './repos/nflSchedule.ts';
@@ -1131,9 +1131,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
     const candidateIds = await boundedFreeAgents(db, { rosteredIds, startable: startablePositions(shape) });
 
+    /*
+     * One context for both assemblies, which is what the argument is for.
+     *
+     * `buildStartSitContext` is league-wide rather than per-player — the
+     * defence table, the slate and the fixture list — so building it twice in
+     * one request is two reads of the same rows. `decisionInputs.ts` has done
+     * this since it was written; these two call sites had not.
+     */
+    const startSitContext = await buildStartSitContext(db);
     const [rosterInputs, candidateInputs] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds),
-      startSitInputsFor(db, candidateIds),
+      startSitInputsFor(db, mine.playerIds, { context: startSitContext }),
+      startSitInputsFor(db, candidateIds, { context: startSitContext }),
     ]);
 
     const lineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
@@ -1245,9 +1254,17 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       [...(profiles?.trade ?? new Map()).entries()].map(([rosterId, cached]) => [rosterId, cached.profile]),
     );
 
+    /*
+     * Built before the loop, not inside it.
+     *
+     * This is one assembly per roster in the league, and each was rebuilding
+     * the same league-wide context — twelve reads of one slate to answer one
+     * request.
+     */
+    const boardContext = await buildStartSitContext(db);
     const teams: TradeTeam[] = [];
     for (const roster of rosters) {
-      const inputs = await startSitInputsFor(db, roster.playerIds);
+      const inputs = await startSitInputsFor(db, roster.playerIds, { context: boardContext });
       const evaluated = inputs.map((i) => evaluatePlayer(i, profile)).filter((e) => e.score != null);
       const weeksById = new Map(inputs.map((i) => [i.player.id, i.usageWeeks ?? []]));
 
@@ -2688,9 +2705,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
 
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
+    const ladderContext = await buildStartSitContext(db);
     const [mineInputs, theirsInputs] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds),
-      startSitInputsFor(db, theirs.playerIds),
+      startSitInputsFor(db, mine.playerIds, { context: ladderContext }),
+      startSitInputsFor(db, theirs.playerIds, { context: ladderContext }),
     ]);
 
     const ladder = buildLadderFor({ targetId, mineInputs, theirsInputs, shape, profile });
