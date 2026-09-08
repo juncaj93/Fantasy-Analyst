@@ -102,6 +102,29 @@ type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
  * after twenty seconds is reported by the test's own gate, in that gate's own
  * words, rather than as a timeout in here.
  */
+/**
+ * Open one of Settings' three groups, and wait for its rows.
+ *
+ * Settings is three folds — Data, App behavior, Account & support — and every
+ * one of them is shut on load; a shut fold renders no children at all, so any
+ * assertion about a Settings row has to ask for its group first.
+ *
+ * Written out here rather than imported from `e2e/helpers.ts`, for the reason
+ * this whole file duplicates assertions it shares with that suite: this one is
+ * checked out from the *released* revision, so it must judge an older UI by the
+ * assertions that shipped with it. An import would tie it to whatever `e2e/`
+ * looks like today.
+ *
+ * Idempotent in both directions: a group already open is left alone, and
+ * opening one does not shut another.
+ */
+async function openSetupGroup(page: Page, group: 'data' | 'behavior' | 'support') {
+  const toggle = page.getByTestId(`setup-group-${group}-toggle`);
+  await expect(toggle, `Settings has no ${group} group`).toBeVisible();
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId(`setup-group-${group}-body`)).toBeVisible();
+}
+
 async function open(page: Page, tab: Tab) {
   await page.getByTestId(`tab-${tab}`).click();
   await expect(page.getByTestId(`tab-${tab}`), `${tab} did not become the current destination`).toHaveAttribute(
@@ -482,6 +505,7 @@ test.describe('the deployed app', () => {
     }
 
     await open(page, 'setup');
+    await openSetupGroup(page, 'data');
     await page.getByTestId('setup-step-vegas').click();
     await expect(page.getByTestId('panel-vegas')).toBeVisible();
     await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
@@ -1121,10 +1145,35 @@ test.describe('the deployed app', () => {
     expect(reloads, 'the board reloaded itself as the card was swiped away').toEqual([]);
   });
 
-  test('Setup reads as a settings screen, and every area opens and comes back', async ({ page }) => {
+  /**
+   * Settings, as the reader meets it: three shut groups and nothing else.
+   *
+   * The first view is the whole claim. Every group is a full target, every one
+   * of them is shut — a settings screen whose first view depends on state
+   * nobody can see from outside is the thing the group pass exists to end — and
+   * Appearance is the one preference drawn outside them, in the bar.
+   */
+  test('Setup opens as three shut groups, with Appearance in the bar', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+
+    for (const group of ['data', 'behavior', 'support']) {
+      const toggle = page.getByTestId(`setup-group-${group}-toggle`);
+      await expect(toggle, `the ${group} group is missing`).toBeVisible();
+      await expect(toggle, `the ${group} group opened itself`).toHaveAttribute('aria-expanded', 'false');
+      expect((await toggle.boundingBox())!.height, `the ${group} header is under the 44px floor`).toBeGreaterThanOrEqual(44);
+    }
+
+    // Not one row of the checklist is drawn while its group is shut.
+    await expect(page.getByTestId('setup-step-sleeper')).toHaveCount(0);
+
     await expect(page.getByTestId('appearance')).toBeVisible();
+  });
+
+  test('every area of Setup opens and comes back', async ({ page }) => {
+    await page.goto('/');
+    await open(page, 'setup');
+    await openSetupGroup(page, 'data');
 
     for (const id of ['sleeper', 'league', 'adp', 'newsletter', 'vegas']) {
       const row = page.getByTestId(`setup-step-${id}`);
@@ -1135,6 +1184,13 @@ test.describe('the deployed app', () => {
     await page.getByTestId('setup-step-vegas').click();
     await expect(page.getByTestId('panel-vegas')).toBeVisible();
     await page.getByTestId('back-button').click();
+    /*
+     * And the group is still open behind the panel.
+     *
+     * Its state lives on the Settings screen, which stays mounted while a panel
+     * is pushed, so coming back lands where the reader left rather than on
+     * three shut folds.
+     */
     await expect(page.getByTestId('setup-step-vegas')).toBeVisible();
   });
 
@@ -1156,6 +1212,8 @@ test.describe('the deployed app', () => {
   test('the support snapshot row is on the deployed Settings screen', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+
+    await openSetupGroup(page, 'support');
 
     const row = page.getByTestId('setup-support-snapshot');
     await expect(row).toBeVisible();
@@ -1322,6 +1380,7 @@ test.describe('the deployed app', () => {
   test('Setup’s areas are pushed screens, and the edge stays Safari’s in a tab', async ({ page }) => {
     await page.goto('/');
     await open(page, 'setup');
+    await openSetupGroup(page, 'data');
     await page.getByTestId('setup-step-vegas').click();
     const pushed = page.getByTestId('setup-detail-vegas');
     await expect(pushed).toBeVisible();
