@@ -84,6 +84,28 @@ const PLAYER_COLUMNS: string = Object.keys({
   years_exp: true,
 } satisfies Record<keyof PlayerRow, true>).join(', ');
 
+/**
+ * The dictionary holds its answer for an hour, like the two counts beside it.
+ *
+ * Five minutes was chosen against the Draft board's five-second poll, where it
+ * turns 720 reads an hour into 12, and the note that came with it said longer
+ * would save little more because "the poll is already the only reader frequent
+ * enough for the window to matter". That was true in August. The draft is over
+ * and the season is not: the frequent readers now are the Players screen, the
+ * waiver assembly, the trade board and the roster, several of which are opened
+ * repeatedly across a Sunday afternoon, and each miss is a fresh 3,300-row
+ * read of a list the 09:00 sync last rewrote.
+ *
+ * Twelve misses an hour against one is 36,000 rows an hour of a Sunday spent
+ * moving between tabs. An hour is honest here for exactly the reason it is
+ * honest for `COUNT_TTL_MS`: the window is a ceiling on staleness across
+ * isolates, not the mechanism. Every write that can change this list — the
+ * sync, an added alias, a removed one — calls {@link forgetPlayerReads}, so a
+ * manual re-sync from Setup still shows up on the next read rather than at the
+ * end of the hour.
+ */
+export const DICTIONARY_TTL_MS = 60 * 60 * 1_000;
+
 /*
  * The three reads on this repo that `d1 insights` caught spending the daily
  * allowance, and the only three here that are both expensive and stale-safe.
@@ -96,7 +118,9 @@ const PLAYER_COLUMNS: string = Object.keys({
  *
  * See `slowRead.ts` for the measurements and the argument.
  */
-const DICTIONARY = new SlowRead<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }>();
+const DICTIONARY = new SlowRead<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }>(
+  DICTIONARY_TTL_MS,
+);
 
 /**
  * The two counts hold their answer for an hour, not five minutes.

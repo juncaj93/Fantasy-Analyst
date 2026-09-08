@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { TEST_PLAYERS, player } from './helpers/players.ts';
-import { PlayerRepo, COUNT_TTL_MS } from '../src/server/repos/players.ts';
+import { PlayerRepo, COUNT_TTL_MS, DICTIONARY_TTL_MS } from '../src/server/repos/players.ts';
 import { PlayerDetailRepo } from '../src/server/repos/playerDetail.ts';
 import { SlowRead, SLOW_READ_TTL_MS } from '../src/server/repos/slowRead.ts';
 import type { Database } from '../src/server/db.ts';
@@ -133,6 +133,24 @@ describe('the counts behind the diagnostics', () => {
       'the five-minute default is sized against a five-second poll, not against a count the 09:00 sync rewrites',
     ).toBeGreaterThan(SLOW_READ_TTL_MS);
     expect(COUNT_TTL_MS).toBe(60 * 60 * 1_000);
+  });
+
+  /*
+   * And the dictionary itself, for the season the note beside it did not
+   * anticipate.
+   *
+   * Five minutes was sized against the Draft board's five-second poll. The
+   * draft is over; the readers now are the Players screen, the waiver
+   * assembly, the trade board and the roster, opened and reopened across a
+   * Sunday, and every miss is a fresh 3,300-row read of a list last written at
+   * 09:00.
+   */
+  it('holds the dictionary for the same hour, now that the poll it was sized against is gone', () => {
+    expect(DICTIONARY_TTL_MS).toBe(COUNT_TTL_MS);
+    expect(
+      DICTIONARY_TTL_MS,
+      'every write that can change this list forgets it, so the window is a ceiling and not the mechanism',
+    ).toBeGreaterThan(SLOW_READ_TTL_MS);
   });
 
   it('honours a window longer than the default, and asks again past it', async () => {
