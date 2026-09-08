@@ -351,7 +351,16 @@ describe('the Vegas market is measured against its own weekend cadence', () => {
   /** The window `NOW` is measured against: 45h to the last clock, plus grace. */
   const WINDOW = 2700 + VEGAS_REFRESH_GRACE_MINUTES;
 
-  /** Write the row a stored weekly market leaves behind. */
+  /**
+   * Write the rows a stored weekly market leaves behind — both of them.
+   *
+   * The snapshot envelope *and* a resolved consensus row, because a real
+   * refresh writes both and the Vegas health row now reads the second one. A
+   * fixture that stopped at the envelope was fine while the screen counted
+   * envelopes and became a fixture describing a broken market the moment it
+   * counted priced players; these tests are about the age window and should
+   * not be made to depend on which of the two the row happens to measure.
+   */
   async function storedLines(db: NodeSqliteDatabase, fetchedAt: string): Promise<void> {
     await db
       .prepare(
@@ -359,6 +368,21 @@ describe('the Vegas market is measured against its own weekend cadence', () => {
          VALUES ('sportsgameodds', 'evt-1', ?, ?, '{}', 'week')`,
       )
       .bind(new Date(NOW.getTime() + 86_400_000).toISOString(), fetchedAt)
+      .run();
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO players (id, full_name, normalized_name, created_at, updated_at)
+         VALUES ('p1', 'Priced Player', 'priced player', ?, ?)`,
+      )
+      .bind(fetchedAt, fetchedAt)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO player_props (snapshot_id, player_id, source_player_name, market, line, book_count, consensus_method, raw_json, scope)
+         SELECT id, 'p1', 'Priced Player', 'receiving_yards', 55.5, 3, 'median', '{}', 'week'
+           FROM prop_snapshots WHERE event_id = 'evt-1' AND fetched_at = ?`,
+      )
+      .bind(fetchedAt)
       .run();
   }
 

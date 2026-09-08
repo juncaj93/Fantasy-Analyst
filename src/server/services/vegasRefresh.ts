@@ -269,7 +269,7 @@ export class VegasRefreshService {
    * on top of one.
    */
   private async discoverIfNeeded(
-    players: PlannedPlayer[],
+    players: readonly (PlannedPlayer & { team: string | null })[],
     budget: BudgetView,
     now: number,
     sink: { errors: string[]; blocked: string[]; manual?: boolean },
@@ -312,7 +312,7 @@ export class VegasRefreshService {
       return { entities: 0, requests: 0, events: 0 };
     }
 
-    const teams = await this.rosterTeams();
+    const teams = this.discoveryOrder(players, await this.rosterTeams());
     if (teams.length === 0) return { entities: 0, requests: 0, events: 0 };
 
     const decision = canSpend(budget, { entities: teams.length, priority: 'normal' });
@@ -330,11 +330,29 @@ export class VegasRefreshService {
 
     const from = new Date(now).toISOString();
     const to = await this.discoveryWindowEnd(now, teams);
-    // Stamped before the call, not after: a discovery that fails halfway must
-    // not become a discovery that retries on every pass for the rest of the day.
-    await settings.set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
+    const asking = teams.slice(0, decision.entities);
+    /*
+     * Stamped before the call, and only when the ask covers the whole roster.
+     *
+     * Before, always: a discovery that fails halfway must not become a
+     * discovery that retries on every pass for the rest of the day, and that
+     * property is unchanged.
+     *
+     * Only on a complete ask, because of what the stamp means. It records
+     * "this app has asked about its roster's fixtures", and after a *trimmed*
+     * ask that is not true — some teams were never mentioned. Stamping anyway
+     * is what turned a per-run entity ceiling into permanent starvation: with
+     * more roster teams than one run may buy, the same tail was cut every
+     * time, and the three-day interval then guaranteed nobody went back for
+     * it. Leaving the stamp alone lets the next scheduled clock finish the job
+     * — one extra discovery a week at worst, against players who would
+     * otherwise never be priced at all.
+     */
+    if (asking.length >= teams.length) {
+      await settings.set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
+    }
     try {
-      const result = await fetchTeams.call(this.provider, teams.slice(0, decision.entities), {
+      const result = await fetchTeams.call(this.provider, asking, {
         from,
         to,
         maxEvents: decision.entities,
@@ -519,6 +537,49 @@ export class VegasRefreshService {
     if (snapshotId == null) return;
     const index = await new PlayerRepo(this.db).buildIndex();
     await this.props.saveConsensus(snapshotId, buildConsensus(set.quotes ?? [], index));
+  }
+
+  /**
+   * Which roster teams a trimmed discovery should ask about first.
+   *
+   * A run may buy at most {@link BUDGET.maxEntitiesPerRun} entities, and a
+   * fifteen-player roster ordinarily spans more NFL teams than that. Until this
+   * existed the list went to the provider in roster order and was cut with
+   * `slice`, so the teams past the ceiling were not merely late — they were
+   * never bought, on any run, for the whole season. The cut fell in the same
+   * place every time because the roster order does not change, and the players
+   * on those teams stayed unpriced for ever while Setup reported the market
+   * healthy. Measured on a real-shaped roster spanning twelve teams: nine
+   * bought, three starved, indefinitely.
+   *
+   * So the order is by what is actually missing:
+   *
+   *   1. teams with no stored fixture that a **starter** plays for — the
+   *      players whose week is a decision this app is being asked to make;
+   *   2. the rest of the teams with no stored fixture;
+   *   3. teams already mapped to an event, which cost an entity to re-ask and
+   *      answer with what is already known.
+   *
+   * Stable within each group, so the order is reproducible; and combined with
+   * the stamp rule in `discoverIfNeeded` a roster of any size is fully covered
+   * within a few scheduled runs rather than never.
+   */
+  private discoveryOrder(players: readonly (PlannedPlayer & { team: string | null })[], teams: string[]): string[] {
+    const mapped = new Set<string>();
+    const startersWaiting = new Set<string>();
+    for (const player of players) {
+      if (!player.team) continue;
+      if (player.eventId) mapped.add(player.team);
+      else if (player.starter) startersWaiting.add(player.team);
+    }
+    const rank = (team: string): number => {
+      if (mapped.has(team)) return 2;
+      return startersWaiting.has(team) ? 0 : 1;
+    };
+    return [...teams]
+      .map((team, index) => ({ team, index, rank: rank(team) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map((entry) => entry.team);
   }
 
   /** The teams the user's own roster spans, in the provider's vocabulary. */

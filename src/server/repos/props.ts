@@ -186,18 +186,78 @@ export class PropsRepo implements SnapshotStore {
     return out;
   }
 
-  /** Freshness of the newest snapshot overall, for the UI badge. */
+  /**
+   * When the weekly market was last *fetched*, and how many games it covers.
+   *
+   * A reading about the pipeline, not about the data. A row in `prop_snapshots`
+   * exists as soon as the provider answered about a game, whether that answer
+   * carried a hundred player quotes or none at all — so `events` counts stored
+   * envelopes and says nothing whatever about whether a lineup can be ranked.
+   * That is a fine thing to report and a disastrous thing to report *as* the
+   * market: see {@link pricedPlayerCount}, and `DataHealthService.vegas()`,
+   * which needs both and must not confuse them.
+   *
+   * Deliberately still one query. Eleven callers read this, several of them on
+   * paths that run on every recommendation, and D1 bills every row walked —
+   * so the expensive question lives in its own method that only the health
+   * screen asks.
+   *
+   * `MAX(fetched_at)` rather than a bare column under `GROUP BY provider`:
+   * SQLite fills bare columns from an arbitrary row of the group unless exactly
+   * one `min()` or `max()` aggregate is present, in which case it takes them
+   * from that row. So `provider` is the newest snapshot's provider by
+   * construction, where before it was only accidentally so.
+   */
   async freshness(): Promise<{ fetchedAt: string | null; provider: string | null; events: number }> {
     const row = await this.db
       .prepare(
-        "SELECT provider, fetched_at, COUNT(DISTINCT event_id) AS events FROM prop_snapshots WHERE scope = 'week' GROUP BY provider ORDER BY fetched_at DESC LIMIT 1",
+        "SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events " +
+          "FROM prop_snapshots WHERE scope = 'week'",
       )
       .first<Record<string, unknown>>();
+    const fetchedAt = row?.['fetched_at'] == null ? null : String(row['fetched_at']);
+    if (fetchedAt == null) return { fetchedAt: null, provider: null, events: 0 };
     return {
-      fetchedAt: row ? String(row['fetched_at']) : null,
-      provider: row ? String(row['provider']) : null,
-      events: row ? Number(row['events'] ?? 0) : 0,
+      fetchedAt,
+      provider: row?.['provider'] == null ? null : String(row['provider']),
+      events: Number(row?.['events'] ?? 0),
     };
+  }
+
+  /**
+   * How many players the stored weekly market can actually price.
+   *
+   * The question {@link freshness} cannot answer and was being asked to.
+   * A consensus row, resolved to a player in this app's dictionary, on the
+   * newest snapshot of its event — which is exactly the set
+   * {@link latestForPlayers} reads, counted rather than returned, because a
+   * health screen that asked a different question of a different set of rows
+   * would end up describing a market no recommendation is using.
+   *
+   * On 8 September 2026 the two numbers came apart: Setup reported
+   * `Vegas lines: Current · 8h ago` off the envelope count while every player
+   * card in the app said no betting market had priced him. Two fixtures had
+   * been stored, with zero usable quotes between them.
+   *
+   * Its own method, and read on the health screen alone. This walks
+   * `player_props`, which the recommendation paths have no reason to pay for.
+   */
+  async pricedPlayerCount(): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT pp.player_id) AS priced
+           FROM player_props pp
+           JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+          WHERE pp.player_id IS NOT NULL
+            AND ps.scope = 'week'
+            AND ps.id = (
+              SELECT id FROM prop_snapshots s2
+               WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
+               ORDER BY s2.fetched_at DESC LIMIT 1
+            )`,
+      )
+      .first<{ priced: number }>();
+    return Number(row?.priced ?? 0);
   }
 }
 

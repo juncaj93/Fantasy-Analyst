@@ -348,7 +348,8 @@ export class DataHealthService {
   }
 
   private async vegas(): Promise<SourceReading> {
-    const freshness = await new PropsRepo(this.db).freshness();
+    const props = new PropsRepo(this.db);
+    const freshness = await props.freshness();
     const provider = this.deps.vegas;
     /*
      * The provider is asked two synchronous questions and nothing else.
@@ -386,11 +387,40 @@ export class DataHealthService {
         note: 'Connected, but no lines have been stored yet.',
       };
     }
+    /*
+     * Games stored, nobody priced — the state this row used to call `Current`.
+     *
+     * A snapshot is written the moment the provider answers about a fixture,
+     * and an answer with no player quotes in it is still an answer. So the
+     * envelope count says the refresh ran and says nothing whatever about
+     * whether a lineup can be ranked, and for as long as this row was derived
+     * from it, Setup could report a healthy market on the same afternoon every
+     * player card in the app said no betting market had priced him.
+     *
+     * `degraded` rather than `waiting`, and the difference is deliberate:
+     * waiting is what a feed that has never produced anything is doing, and
+     * this one is producing something that is not the thing recommendations
+     * read. Vegas is `critical`, so this reaches the headline and the
+     * attention count, which is the whole point — the lineup engine has
+     * already quietly fallen back to ranking on nudges by the time a reader
+     * gets here.
+     */
+    const pricedPlayers = await props.pricedPlayerCount();
+    if (pricedPlayers === 0) {
+      return {
+        id: 'vegas',
+        lastSuccessAt: freshness.fetchedAt,
+        lastAttemptAt: freshness.fetchedAt,
+        state: 'degraded',
+        note: `${freshness.events} game(s) stored, but no player has a usable line — nothing on your roster is being ranked on the market.`,
+        technical: { lastOutcome: `${freshness.provider}: 0 priced players` },
+      };
+    }
     return {
       id: 'vegas',
       lastSuccessAt: freshness.fetchedAt,
       lastAttemptAt: freshness.fetchedAt,
-      technical: { lastOutcome: freshness.provider },
+      technical: { lastOutcome: `${freshness.provider}: ${pricedPlayers} priced player(s)` },
     };
   }
 
