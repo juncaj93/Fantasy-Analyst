@@ -915,11 +915,19 @@ export function Sheet({
      *
      * One transform write per scroll event, beside the scrim's one opacity
      * write. Both are compositor properties, so neither costs a layout.
+     *
+     * **`journey` is handed in rather than measured, and that is not tidiness.**
+     * Reading `scrollHeight` here forced a second synchronous layout on every
+     * scroll, on a layer whose caller had just measured the very same two
+     * properties — and this file already records what per-frame work does to
+     * this suite: WebKit's scrolling is starved by it, and the pull-to-refresh
+     * specs sample on `requestAnimationFrame` while they swipe. Doubling the
+     * layout cost of a scroll to recompute a number the caller was holding is
+     * the sort of thing that turns those green shards amber.
      */
-    const resist = (progress: number) => {
+    const resist = (progress: number, journey: number) => {
       const box = detent.current;
       if (!box) return 0;
-      const journey = root.scrollHeight - root.clientHeight;
       if (journey <= 0) {
         box.style.transform = '';
         return 0;
@@ -1071,7 +1079,7 @@ export function Sheet({
          */
         if (detentTop > 0) {
           paint(top / detentTop);
-          held = resist(top / detentTop);
+          held = resist(top / detentTop, detentTop);
         }
         if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
         // Not the reader's movement, so it earns no speed — but it does move the
@@ -1099,7 +1107,7 @@ export function Sheet({
         window.clearTimeout(timer);
         if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
         paint(1);
-        held = resist(1);
+        held = resist(1, detentTop);
         // Corrected, not travelled. The layer is back at the card's position and
         // whatever a hand does next starts from there.
         rewind();
@@ -1107,7 +1115,7 @@ export function Sheet({
       }
       if (detentTop > 0) {
         paint(top / detentTop);
-        held = resist(top / detentTop);
+        held = resist(top / detentTop, detentTop);
       }
       /*
        * A card that has arrived at gone does not wait to be told.
