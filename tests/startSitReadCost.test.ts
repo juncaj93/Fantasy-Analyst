@@ -33,7 +33,7 @@ import { countingDb } from './helpers/countingDb.ts';
 import { player } from './helpers/players.ts';
 import { PlayerRepo } from '../src/server/repos/players.ts';
 import { UsageRepo, type StoredUsageWeek } from '../src/server/repos/usage.ts';
-import { UsageService, forgetDefenseTendencies } from '../src/server/services/usageService.ts';
+import { UsageService, forgetUsageDerivations } from '../src/server/services/usageService.ts';
 import { startSitInputsFor } from '../src/server/services/startSitInputs.ts';
 import type { Database } from '../src/server/db.ts';
 
@@ -157,7 +157,7 @@ describe('the defence table', () => {
     expect(counted.callsMatching('FROM player_usage_weeks WHERE season = ? AND season_type')).toBe(0);
 
     // What an ingest does on its way out.
-    forgetDefenseTendencies(counted.db);
+    forgetUsageDerivations(counted.db);
     await service.defenseTendencies(SEASON);
     expect(
       counted.callsMatching('FROM player_usage_weeks WHERE season = ? AND season_type'),
@@ -169,7 +169,7 @@ describe('the defence table', () => {
     const db = await seasonInProgress();
     const service = new UsageService(db);
     const built = await service.defenseTendencies(SEASON);
-    forgetDefenseTendencies(db);
+    forgetUsageDerivations(db);
     const rebuilt = await service.defenseTendencies(SEASON);
     expect([...rebuilt.keys()].sort()).toEqual([...built.keys()].sort());
     expect(rebuilt.size, 'a season this far in has tendencies to report').toBeGreaterThan(0);

@@ -1,0 +1,23 @@
+-- The "what changed recently" read stops sorting the whole event log.
+--
+-- Third instance of the defect #248 fixed on the two `*_source_runs` tables,
+-- found by sweeping every statement in the server for a query plan containing
+-- a temp B-tree rather than by waiting for it to hurt.
+--
+-- `recentEvents` asks for six rows ordered by two keys. `idx_injury_events_detected`
+-- covers the first key only, and SQLite will not use a partial ordering to
+-- satisfy a two-key sort: it walks every row in the table and builds a temp
+-- B-tree over all of them before the LIMIT takes six. The log grows by one row
+-- per designation change per player per week for as long as the app runs, and
+-- it is read twice on every visit to Setup — once by Data Health and once by
+-- the setup status — so the cost of a screen load grows with the season while
+-- the six rows it displays do not.
+--
+-- The tie-break moves from `rowid` to `event_key` in the same change, because
+-- `rowid` cannot go in an index and the column it would sit beside is the
+-- table's own primary key: unique, so the order is total, and stable, which
+-- `rowid DESC` was only incidentally. An ingest stamps every event it writes
+-- with one `detected_at`, so the tie-break decides the order of most of this
+-- list rather than an occasional collision.
+CREATE INDEX IF NOT EXISTS idx_injury_events_recent
+  ON injury_events (detected_at DESC, event_key DESC);

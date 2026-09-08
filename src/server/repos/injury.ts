@@ -339,14 +339,23 @@ export class InjurySourceRepo extends SourceStateRepo {
     return written;
   }
 
-  /** The most recent transitions, for diagnostics and for "what changed since". */
+  /**
+   * The most recent transitions, for diagnostics and for "what changed since".
+   *
+   * Ordered by `event_key` rather than `rowid` within a timestamp, and
+   * answered from `idx_injury_events_recent`. The two-key sort over an index
+   * covering one key is the #248 defect: SQLite walked the whole log and built
+   * a temp B-tree over it before the LIMIT took six rows, on a table that grows
+   * for as long as the season does and is read on every visit to Setup. See
+   * migration 0038.
+   */
   async recentEvents(limit = 20): Promise<
     { playerId: string; season: string; week: number; kind: string; from: string | null; to: string | null; detectedAt: string }[]
   > {
     const { results } = await this.db
       .prepare(
         `SELECT player_id, season, week, kind, from_value, to_value, detected_at
-           FROM injury_events ORDER BY detected_at DESC, rowid DESC LIMIT ?`,
+           FROM injury_events ORDER BY detected_at DESC, event_key DESC LIMIT ?`,
       )
       .bind(Math.max(1, limit))
       .all<Record<string, unknown>>();

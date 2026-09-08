@@ -72,7 +72,7 @@ export const TENDENCY_WINDOW_WEEKS = 8;
  * Six hours, against an input that changes once a day at most. See
  * {@link UsageService.defenseTendencies} for the measurement that made this
  * worth having and for why the window is a ceiling rather than the mechanism:
- * every write that could falsify it calls {@link forgetDefenseTendencies}.
+ * every write that could falsify it calls {@link forgetUsageDerivations}.
  */
 export const TENDENCY_TTL_MS = 6 * 60 * 60 * 1_000;
 
@@ -88,13 +88,28 @@ export const TENDENCY_TTL_MS = 6 * 60 * 60 * 1_000;
 const TENDENCIES = new SlowRead<DefenseTendencyIndex>(TENDENCY_TTL_MS);
 
 /**
- * Forget the built table for this database.
+ * How much this store holds, per database, per season.
  *
- * Called by the ingest that writes the rows it is built from, so a new week of
- * usage is visible on the next read rather than up to six hours later.
+ * The counting half of {@link UsageService.health}: two aggregates that walk
+ * the season to produce five integers, on a payload two screens read. Same
+ * window and same invalidation as the defence table — one ingest moves both,
+ * and nothing else can move either.
  */
-export function forgetDefenseTendencies(db: Database): void {
+const SIZE = new SlowRead<{
+  coverage: { players: number; weeks: number; latestWeek: number | null; rows: number };
+  ready: number;
+}>(TENDENCY_TTL_MS);
+
+/**
+ * Forget everything derived from this database's stored usage.
+ *
+ * Both memos: the defence table and the size counts. Called by the ingest that
+ * writes the rows they are built from, so a new week of usage is visible on the
+ * next read rather than up to six hours later.
+ */
+export function forgetUsageDerivations(db: Database): void {
   TENDENCIES.forget(db);
+  SIZE.forget(db);
 }
 
 /**
@@ -383,7 +398,7 @@ export class UsageService {
     if (rows.length === 0) return null;
     await this.repo.saveWeeks(rows);
     // A week the defence table has never seen. See `defenseTendencies`.
-    forgetDefenseTendencies(this.db);
+    forgetUsageDerivations(this.db);
     await this.source
       .addWrites(this.now().toISOString().slice(0, 10), rows.length, this.now().toISOString())
       .catch(() => {});
@@ -491,7 +506,7 @@ export class UsageService {
     const toWrite = diff.changed.map((c) => fullByKey.get(keyOf(c))!).filter(Boolean);
     await this.repo.saveWeeks(toWrite);
     // Numbers moved, so the table built from them is no longer the answer.
-    forgetDefenseTendencies(this.db);
+    forgetUsageDerivations(this.db);
     await this.source.addWrites(day, toWrite.length, fetchedAt);
 
     await this.source.recordCheck(USAGE_SOURCE, season, {
@@ -667,7 +682,7 @@ export class UsageService {
    *
    * So the window is not a guess at how stale this may safely be. The answer
    * changes when `saveWeeks` runs and at no other time, and `saveWeeks` calls
-   * {@link forgetDefenseTendencies}, so a fresh ingest is visible on the next
+   * {@link forgetUsageDerivations}, so a fresh ingest is visible on the next
    * read rather than at the end of the window. Six hours is the ceiling on the
    * one case the memo cannot see -- a write from a different isolate -- and for
    * a season-to-date model of what defences allow, six hours of staleness is
@@ -739,15 +754,39 @@ export class UsageService {
     return buildDefenseTendencies(games, latest);
   }
 
+  /**
+   * How much usage this store holds, and how fresh it is.
+   *
+   * The freshness half — the last run, the source state, today's writes — is
+   * read every time, because a diagnostics screen that memoises "when did this
+   * last succeed" is the one thing a diagnostics screen must never do. The
+   * *size* half is memoised, and the two are different kinds of fact.
+   *
+   * Measured at week 10: `coverage()` walks the season to produce four
+   * numbers (4,500 rows) and `playersWithGames` walks it again to produce one
+   * (another 4,500). Nine thousand rows a call, and this is called by both
+   * `/api/data-health` and `/api/setup/status` — so opening Setup and tapping
+   * Data Health costs eighteen thousand rows to display counts that changed at
+   * 09:00 and will not change again until tomorrow.
+   *
+   * Held for the same window as the defence table and dropped by the same
+   * writes, for the same reason: `saveWeeks` is the only thing that can move
+   * either number.
+   */
   async health(season = usageSeason(this.now())): Promise<UsageHealth> {
     const day = this.now().toISOString().slice(0, 10);
-    const [lastRun, coverage, state, writes, ready] = await Promise.all([
+    const [lastRun, size, state, writes] = await Promise.all([
       this.repo.latestRun().catch(() => null),
-      this.repo.coverage(season).catch(() => ({ players: 0, weeks: 0, latestWeek: null, rows: 0 })),
+      SIZE.get(this.db, season, async () => ({
+        coverage: await this.repo
+          .coverage(season)
+          .catch(() => ({ players: 0, weeks: 0, latestWeek: null, rows: 0 })),
+        ready: await this.repo.playersWithGames(season, MINIMUM_GAMES).catch(() => 0),
+      })),
       this.source.get(USAGE_SOURCE, season).catch(() => null),
       this.source.writesToday(day).catch(() => 0),
-      this.repo.playersWithGames(season, MINIMUM_GAMES).catch(() => 0),
     ]);
+    const { coverage, ready } = size;
 
     return {
       source: USAGE_SOURCE,
