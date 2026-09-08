@@ -916,6 +916,7 @@ export interface AiTallyApplyOutcome {
  * two have to account for. Type-only, so nothing reaches the bundle.
  */
 export type { DataHealthView, RunHealth, SourceHealth } from '../core/health/model.ts';
+export type { D1QuotaView, D1QuotaReading, QuotaState } from '../core/health/quota.ts';
 /** The five positions of the draft board's weighting control. Type-only. */
 import type { SignalBalance } from '../core/draft/signalBalance.ts';
 export type { SignalBalance };

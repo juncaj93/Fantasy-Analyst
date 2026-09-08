@@ -196,3 +196,28 @@ test.describe('on a phone', () => {
     }
   });
 });
+
+/**
+ * The one panel on this screen that is about the platform rather than a feed.
+ *
+ * A dev server has no Cloudflare account behind it, so what a browser can prove
+ * here is the state every deployment starts in and the one this must never
+ * turn into: it says, in words, that it is not connected — never `0%`, which is
+ * the reassuring number a reader would act on.
+ */
+test.describe('the database allowance', () => {
+  test('says it is not connected rather than showing a comforting zero', async ({ page }) => {
+    await openHealth(page);
+    const row = page.getByTestId('data-health-quota');
+    await row.waitFor();
+    await expect(row).toContainText('Daily rows read');
+    await expect(row).toContainText('Not connected');
+    await expect(row, 'a number nobody measured must never appear here').not.toContainText('0%');
+  });
+
+  test('fits a 360px phone, sentence and all', async ({ page }) => {
+    await openHealth(page);
+    await page.getByTestId('data-health-quota').waitFor();
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+});

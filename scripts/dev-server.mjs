@@ -80,6 +80,13 @@ const env = {
    * the deployed site. See docs/RELEASE.md.
    */
   releaseSha: process.env.FA_RELEASE_SHA ?? null,
+  /*
+   * Unset locally too, so the allowance panel says "not connected" rather than
+   * reporting a real account's usage from a laptop. Settable for anyone who
+   * wants to see the connected state before deploying it.
+   */
+  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? null,
+  cloudflareAnalyticsToken: process.env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,

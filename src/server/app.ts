@@ -136,6 +136,7 @@ import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
 import { startSitInputsFor, buildStartSitContext } from './services/startSitInputs.ts';
+import { D1QuotaService } from './services/d1QuotaService.ts';
 /* And the one assembly of everything the defence planner reads. */
 import { playoffContextFor } from './services/dstPlanService.ts';
 import { NflScheduleRepo } from './repos/nflSchedule.ts';
@@ -185,6 +186,17 @@ export interface AppEnv extends AuthEnv {
    * See docs/RELEASE.md.
    */
   releaseSha?: string | null;
+  /**
+   * What `GET /api/diagnostics/d1-quota` needs to ask Cloudflare how much of
+   * today's row allowance is gone: the account tag, and a token scoped to
+   * Account Analytics and nothing else.
+   *
+   * Both absent everywhere they were not injected — the dev server, tests,
+   * anyone else's deployment — and the panel says it is not connected rather
+   * than guessing at a number. See `services/d1QuotaService.ts`.
+   */
+  cloudflareAccountId?: string | null;
+  cloudflareAnalyticsToken?: string | null;
 }
 
 /**
@@ -1183,6 +1195,30 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(
       await service.forLeague(league.id, { week: requested == null ? null : Number(requested) }),
     );
+  });
+
+  /**
+   * How much of today's D1 row allowance is gone.
+   *
+   * Its own endpoint rather than a field on `/api/data-health`, and that is
+   * §18 rather than tidiness: reading data health must not leave the process,
+   * and `dataHealth.isolation.test.ts` proves it by making every transport the
+   * endpoint can reach throw. This reading is a subrequest to Cloudflare by
+   * construction — a Worker cannot see its own quota any other way — so it
+   * belongs beside it, not inside it, and a screen that shows both fetches
+   * both.
+   *
+   * Read-only twice over, like `d1-insights.yml`: a metrics API that touches no
+   * user data, and nothing here executes SQL at all. Safe to call during an
+   * incident, which is exactly when it is wanted — and it is the one panel on
+   * that screen whose cost against the allowance it reports on is zero.
+   */
+  router.get('/api/diagnostics/d1-quota', async (ctx) => {
+    const service = new D1QuotaService({
+      accountId: ctx.env.cloudflareAccountId,
+      apiToken: ctx.env.cloudflareAnalyticsToken,
+    });
+    return jsonResponse(await service.view());
   });
 
   /**
