@@ -121,8 +121,27 @@ type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 async function openSetupGroup(page: Page, group: 'data' | 'behavior' | 'support') {
   const toggle = page.getByTestId(`setup-group-${group}-toggle`);
   await expect(toggle, `Settings has no ${group} group`).toBeVisible();
-  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-  await expect(page.getByTestId(`setup-group-${group}-body`)).toBeVisible();
+  const body = page.getByTestId(`setup-group-${group}-body`);
+
+  /*
+   * Click until the group is actually open, rather than once and hopefully.
+   *
+   * A tap that lands while Settings is still settling does nothing: the status
+   * read comes back, the screen re-renders, and the fold is shut with the click
+   * already spent. Locally that never showed — the dev server answers in
+   * milliseconds — and against production it made two of these tests flaky on
+   * their first run, passing only on Playwright's retry. A flake that only
+   * appears on the deployed site is exactly the kind this file exists to catch,
+   * so it is fixed here rather than tolerated.
+   *
+   * `toPass` re-reads the state each time, so this stays idempotent: a group
+   * already open is never clicked, and a group that opened on the first attempt
+   * costs one extra assertion.
+   */
+  await expect(async () => {
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await expect(body).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 async function open(page: Page, tab: Tab) {
