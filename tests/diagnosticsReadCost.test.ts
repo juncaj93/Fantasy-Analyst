@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { countingDb } from './helpers/countingDb.ts';
 import { InjurySourceRepo } from '../src/server/repos/injury.ts';
+import { PlayerDetailRepo, forgetSeasonStatCounts } from '../src/server/repos/playerDetail.ts';
 import { UsageRepo, type StoredUsageWeek } from '../src/server/repos/usage.ts';
 import { UsageService, forgetUsageDerivations } from '../src/server/services/usageService.ts';
 import type { Database } from '../src/server/db.ts';
@@ -148,5 +149,79 @@ describe('the usage health panel', () => {
     expect(held.rows).toBe(fresh.rows);
     expect(held.playersWithEnoughGames).toBe(fresh.playersWithEnoughGames);
     expect(fresh.players, 'a seeded season has players in it').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The single largest query on the account, and the note that hid it.
+ *
+ * `gamesPlayedCounts` read 760,347 rows across 189 calls in the 24 hours to
+ * 03:00 on 9 September — 15.2% of a day's allowance — to answer how many games
+ * a full season is. Its own comment called it cheap "returning about twenty
+ * rows", which is true and is not what D1 bills: the `GROUP BY` walks every row
+ * the season holds, 4,023 of them, to produce those twenty.
+ *
+ * Its sibling `countSeasonStats` reads the same table for the same kind of
+ * reason and was memoised for exactly this. Only one of the two was held.
+ */
+describe('the season slate on a player card', () => {
+  async function seeded(): Promise<Database> {
+    const db = await createTestDb();
+    const lines = Array.from({ length: 40 }, (_, i) => ({
+      playerId: `p${i}`,
+      position: 'WR',
+      gamesPlayed: 10 + (i % 8),
+      pointsHalfPpr: 100 + i,
+      positionRankHalfPpr: i + 1,
+      providerPositionRank: i + 1,
+    }));
+    await new PlayerDetailRepo(db).saveSeasonStats('2026', lines, '2026-09-09T09:00:00.000Z');
+    return db;
+  }
+
+  it('walks the season once, not once per opened card', async () => {
+    const counted = countingDb(await seeded());
+    const repo = new PlayerDetailRepo(counted.db);
+
+    await repo.gamesPlayedCounts('2026');
+    await repo.gamesPlayedCounts('2026');
+    await repo.gamesPlayedCounts('2026');
+
+    expect(
+      counted.callsMatching('SELECT games_played AS games, COUNT(*) AS players'),
+      'three cards opened in an hour is one read of the season, not three',
+    ).toBe(1);
+  });
+
+  it('asks again for a different season', async () => {
+    const counted = countingDb(await seeded());
+    const repo = new PlayerDetailRepo(counted.db);
+    await repo.gamesPlayedCounts('2026');
+    await repo.gamesPlayedCounts('2025');
+    expect(counted.callsMatching('SELECT games_played AS games, COUNT(*) AS players')).toBe(2);
+  });
+
+  it('asks again once new stats land', async () => {
+    const db = await seeded();
+    const counted = countingDb(db);
+    const repo = new PlayerDetailRepo(counted.db);
+    await repo.gamesPlayedCounts('2026');
+    forgetSeasonStatCounts(counted.db);
+    counted.reset();
+    await repo.gamesPlayedCounts('2026');
+    expect(
+      counted.callsMatching('SELECT games_played AS games, COUNT(*) AS players'),
+      'the 09:00 refresh and a manual import both forget it, so a new week is visible at once',
+    ).toBe(1);
+  });
+
+  it('returns the same histogram it did before the memo', async () => {
+    const db = await seeded();
+    const repo = new PlayerDetailRepo(db);
+    const held = await repo.gamesPlayedCounts('2026');
+    forgetSeasonStatCounts(db);
+    const fresh = await repo.gamesPlayedCounts('2026');
+    expect(held).toEqual(fresh);
+    expect(fresh.length, 'a seeded season has a slate to report').toBeGreaterThan(0);
   });
 });

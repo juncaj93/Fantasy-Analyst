@@ -41,11 +41,44 @@ const STAT_COLUMNS = 8;
  * `slowRead.ts` — this was 13.5% of the reads on the day the allowance ran
  * out, spent entirely on a diagnostics line.
  */
-const SEASON_STAT_COUNTS = new SlowRead<number>();
+/**
+ * How long the two season-stat reads stand.
+ *
+ * An hour, matching `COUNT_TTL_MS` and for the same argument: the table behind
+ * them is rewritten by the 09:00 tick and by a manual import, both of which
+ * forget these by hand, so the window is a ceiling on staleness across isolates
+ * rather than the thing keeping them correct. The five-minute default was sized
+ * against a five-second draft poll that no longer exists.
+ */
+export const SEASON_STAT_TTL_MS = 60 * 60 * 1_000;
 
-/** Drop the memoised season-stat counts. Exported for tests. */
+const SEASON_STAT_COUNTS = new SlowRead<number>(SEASON_STAT_TTL_MS);
+
+/*
+ * The games-played histogram, memoised on the same terms as the count above it.
+ *
+ * These two read the same table for the same reason and only one of them was
+ * held, which is how this became the single largest query on the account:
+ * 760,347 rows across 189 calls in the 24 hours to 03:00 on 9 September, 15.2%
+ * of a day's allowance. Its own note called it "cheap enough to ask per opened
+ * card: one grouped scan of a single season, returning about twenty rows" —
+ * and about twenty rows is what it *returns*. What it reads is every row the
+ * season holds, 4,023 of them a call, because a `GROUP BY` over an index that
+ * covers only `season` walks the range and builds a temp B-tree over all of it.
+ *
+ * Rows returned is not what D1 bills.
+ *
+ * The value is the season's full-time slate — how many games a complete season
+ * is — which moves once a week at most and is written by the same two things
+ * that write the count: the 09:00 stats refresh and a manual import. Both call
+ * {@link forgetSeasonStatCounts}, so both now drop this too.
+ */
+const GAMES_PLAYED_COUNTS = new SlowRead<{ games: number; players: number }[]>(SEASON_STAT_TTL_MS);
+
+/** Drop the memoised season-stat reads. Exported for tests. */
 export function forgetSeasonStatCounts(db: Database): void {
   SEASON_STAT_COUNTS.forget(db);
+  GAMES_PLAYED_COUNTS.forget(db);
 }
 
 export class PlayerDetailRepo {
@@ -165,20 +198,24 @@ export class PlayerDetailRepo {
    * is a hardcoded 17 that would be wrong for a season in progress, and would
    * stay wrong silently.
    *
-   * Cheap enough to ask per opened card: one grouped scan of a single season,
-   * returning about twenty rows.
+   * NOT cheap per opened card, which is what this note used to say. It returns
+   * about twenty rows and reads 4,023 — the whole season — because the index
+   * covers `season` and the `GROUP BY` walks the range it selects. Memoised for
+   * the same hour as {@link countSeasonStats}; see {@link GAMES_PLAYED_COUNTS}.
    */
   async gamesPlayedCounts(season: string): Promise<{ games: number; players: number }[]> {
-    const { results } = await this.db
-      .prepare(
-        `SELECT games_played AS games, COUNT(*) AS players
-           FROM player_season_stats
-          WHERE season = ? AND games_played IS NOT NULL
-          GROUP BY games_played`,
-      )
-      .bind(season)
-      .all<{ games: number; players: number }>();
-    return (results ?? []).map((row) => ({ games: Number(row.games), players: Number(row.players) }));
+    return GAMES_PLAYED_COUNTS.get(this.db, season, async () => {
+      const { results } = await this.db
+        .prepare(
+          `SELECT games_played AS games, COUNT(*) AS players
+             FROM player_season_stats
+            WHERE season = ? AND games_played IS NOT NULL
+            GROUP BY games_played`,
+        )
+        .bind(season)
+        .all<{ games: number; players: number }>();
+      return (results ?? []).map((row) => ({ games: Number(row.games), players: Number(row.players) }));
+    });
   }
 
   /**
