@@ -755,3 +755,66 @@ describe('steps inside a container stay POSIX', () => {
     }
   });
 });
+
+/* ------------------------------------------ a preview is not a release */
+
+/**
+ * Preview exists so a revision can be looked at without being released, and the
+ * whole value of it rests on two properties that are one careless edit apart
+ * from being false: it must not promote a version, and it must not migrate the
+ * database it points at.
+ *
+ * The first is the difference between `wrangler versions upload` and `wrangler
+ * deploy` — one publishes a version and hands back a URL, the other makes it
+ * the version every request gets. The second is why the migration guard is
+ * there at all: this workflow deliberately skips `d1 migrations apply`, so a
+ * branch carrying a migration would run new code against the old shape, and
+ * the failures would belong to neither.
+ *
+ * Asserted structurally rather than trusted, because "it says versions upload"
+ * is exactly the kind of line that survives a hurried edit in name only.
+ */
+describe('Preview shows a revision without releasing it', () => {
+  const { yaml, text } = readWorkflow('preview.yml');
+
+  it('is started by hand and by nothing else', () => {
+    const on = triggers(yaml);
+    expect(Object.keys(on)).toEqual(['workflow_dispatch']);
+  });
+
+  it('uploads a version and never promotes one', () => {
+    expect(text).toContain('wrangler versions upload');
+    // The one line that would turn this into a release.
+    expect(text).not.toMatch(/npx wrangler deploy(?!\s+--dry-run)/);
+  });
+
+  it('does not migrate the database it is pointed at', () => {
+    expect(text).not.toContain('migrations apply');
+  });
+
+  it('refuses a revision that changes the schema', () => {
+    const names = steps(yaml, 'preview').map((step) => String(step['name'] ?? ''));
+    expect(names.some((name) => /Refuse to preview a branch that changes the schema/.test(name))).toBe(true);
+    expect(text).toContain('migrations/');
+  });
+
+  it('will not bring a database into existence', () => {
+    // `release.yml` may create one. A preview that did would be inventing
+    // production and then reading from it as though it were real.
+    expect(text).not.toContain('d1 create');
+  });
+
+  it('runs the suite before pointing anything at the real database', () => {
+    const names = steps(yaml, 'preview').map((step) => String(step['name'] ?? ''));
+    const tested = names.findIndex((name) => name.includes('Run the test suite'));
+    const uploaded = names.findIndex((name) => name.includes('Upload a preview version'));
+    expect(tested).toBeGreaterThanOrEqual(0);
+    expect(uploaded).toBeGreaterThan(tested);
+  });
+
+  it('cannot run while a release or a rollback is in flight', () => {
+    const concurrency = asMap(yaml['concurrency']);
+    expect(concurrency['group']).toBe('release');
+    expect(concurrency['cancel-in-progress']).toBe(false);
+  });
+});
