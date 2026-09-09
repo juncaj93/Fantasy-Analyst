@@ -135,11 +135,19 @@ export function resistedTravel(
  * collected would be a guess rather than a judgement. So an unmeasured push is
  * answered on distance, the way every push was answered before speed was asked.
  *
- * Distinct from {@link completesBack} in one way that matters: a back swipe
- * reads the finger as it lifts, and a sheet reads the layer once it has come to
- * rest — a scroller always decelerates to a stop, so there is no release
- * velocity left to read by then. Hence a peak over the movement rather than a
- * window at the end of it.
+ * `velocity` is the speed the movement had when the hand came off it, over
+ * {@link VELOCITY_WINDOW} — the same reading {@link completesBack} takes, with
+ * one difference forced by the mechanism. A back swipe samples a finger, which
+ * stops when the hand does; a sheet samples a scroller, which carries on. So
+ * the sheet freezes its reading at the lift rather than at the settle, because
+ * by the settle the momentum has decayed and there is nothing left to read.
+ *
+ * It is deliberately not the *fastest* moment of the movement, which is what
+ * this asked for first and what made a slow push dismiss: a deliberate hand
+ * sets off at an ordinary pace and eases into where it means to stop, so a peak
+ * reads the setting-off and never the deciding. Measured, a three-second drag
+ * easing to a halt peaked at 0.41px/ms — well clear of a threshold meant to
+ * catch exactly that push.
  */
 export function dismissesSheet(given: number, velocity: number, measured: boolean): boolean {
   if (given >= DISMISS_COMMIT) return true;
@@ -263,11 +271,14 @@ export const VELOCITY_WINDOW = 120;
 /**
  * How many recent positions are kept to judge a flick by.
  *
- * Up here with the window it serves rather than inside the hook that uses it.
- * It once served two: the sheet judged a flick this way too, until the
- * dismissal became a scroll and there stopped being a finger to sample — see
- * {@link dismissesSheet} for what the sheet reads instead, and why a window at
- * the end of a movement cannot tell it anything.
+ * Up here with the window it serves rather than beside one of its two callers:
+ * the sheet and the back swipe judge a flick the same way, and the edge swipe
+ * spent a while not doing so — see {@link useEdgeSwipeBack}.
+ *
+ * The sheet reads positions of its scrolling layer rather than of a finger,
+ * which changes nothing here and one thing there: a scroller keeps moving after
+ * the hand is off it, so the sheet stops feeding this once the finger lifts.
+ * See {@link dismissesSheet}.
  */
 const SAMPLE_LIMIT = 12;
 

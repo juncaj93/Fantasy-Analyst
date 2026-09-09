@@ -182,30 +182,48 @@ describe('the screen behind a half-completed push', () => {
  *
  * The complaint these hold: a card pulled down slowly and uncertainly to the
  * middle of the screen went away exactly as one thrown there did, because a
- * distance is all a scroll leaves behind once it has stopped. Measured on the
- * layer at 430×932, a two-and-a-half second crawl peaked at 0.17px/ms and a
- * flick at 2.68, and both dismissed.
+ * distance is all a scroll leaves behind once it has stopped.
+ *
+ * The speed they read is the one the movement had **when the hand came off**,
+ * over {@link VELOCITY_WINDOW}. It was the fastest moment of the movement
+ * first, and that shipped a bug: a deliberate hand sets off at an ordinary pace
+ * and eases into where it means to stop, so a peak reads the setting-off and
+ * never the deciding. Measured on the layer at 430×932, easing to a halt and
+ * resting before the lift: a 1200ms push released at 0.02px/ms, a 2000ms at
+ * 0.015, a 3000ms at 0.02 — against 0.48 for a brisk push that lifted while
+ * still moving, and 1.04 for a flick. Those same three pushes *peaked* at 0.41
+ * and were all dismissed as flicks.
  */
 describe('when a push takes a sheet away', () => {
-  it('lets a card go when it was pushed far and fast', () => {
-    expect(dismissesSheet(0.55, 1.06, true)).toBe(true);
+  it('lets a card go when it was pushed far and was still moving at the lift', () => {
+    // The measured brisk push, and the measured flick.
+    expect(dismissesSheet(0.59, 0.48, true)).toBe(true);
+    expect(dismissesSheet(0.84, 1.04, true)).toBe(true);
     expect(dismissesSheet(DISMISS_HOLD, DISMISS_VELOCITY, true)).toBe(true);
   });
 
-  it('brings back a slow crawl that got past the distance anyway', () => {
-    // The measured crawl: half the layer, and never above a walking pace.
-    expect(dismissesSheet(0.53, 0.17, true)).toBe(false);
+  it('brings back a push that had eased to a halt before the hand left it', () => {
+    // The three measured deliberate pushes: past the distance, released at rest.
+    expect(dismissesSheet(0.532, 0.02, true)).toBe(false);
+    expect(dismissesSheet(0.53, 0.015, true)).toBe(false);
+    expect(dismissesSheet(0.528, 0.02, true)).toBe(false);
+    // And one that was still moving, but only just: 0.18 is not a dismissal.
+    expect(dismissesSheet(0.538, 0.18, true)).toBe(false);
     expect(dismissesSheet(0.74, 0.24, true)).toBe(false);
   });
 
   it('lets a slow push go once it has gone far enough to only be meant', () => {
     // Nothing here may become the only way out: a reader who cannot flick, or
-    // would rather place the card, must still be able to finish.
+    // would rather place the card, must still be able to finish. The measured
+    // case: a deliberate push to 93%, released at 0.026px/ms, still leaves.
     expect(dismissesSheet(DISMISS_COMMIT, 0, true)).toBe(true);
+    expect(dismissesSheet(0.932, 0.026, true)).toBe(true);
     expect(dismissesSheet(0.95, 0.01, true)).toBe(true);
   });
 
   it('brings back a nudge however fast it was', () => {
+    // The measured flick that went nowhere: quick, but only a quarter out.
+    expect(dismissesSheet(0.274, 0.55, true)).toBe(false);
     expect(dismissesSheet(0.2, 5, true)).toBe(false);
     expect(dismissesSheet(0, 5, true)).toBe(false);
   });
