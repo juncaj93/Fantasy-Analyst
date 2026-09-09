@@ -166,6 +166,43 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # WHEN the rows were read, which the per-query table cannot say.
+      #
+      # `d1 insights` attributes rows to queries over a window and says nothing
+      # about their distribution inside it — so a day that spent its allowance
+      # gradually and a day that spent it in one half hour produce the same
+      # table. An exhaustion 30 minutes after the daily reset is a question
+      # about exactly that distribution.
+      #
+      # Same token, same read-only posture: a metrics API, no user data, no SQL.
+      - name: When the rows were read
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HOURS: '36'
+        run: |
+          set -euo pipefail
+          # The account tag, from the secret when it is set and from the token
+          # otherwise — `d1 insights` above resolves it the second way, so a
+          # deployment that never set the secret still works here.
+          id="${CLOUDFLARE_ACCOUNT_ID:-}"
+          if [ -z "$id" ]; then
+            id=$(npx wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || true)
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::Could not resolve the Cloudflare account id."
+            exit 1
+          fi
+          echo "account $id"
+          ACCOUNT_ID="$id" node scripts/probe-d1-usage-hours.mjs | tee hours.txt
+
+          {
+            echo '### D1 rows read over time'
+            echo ''
+            echo '```'
+            cat hours.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: d1-insights
