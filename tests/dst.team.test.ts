@@ -312,3 +312,91 @@ describe('the home flag reaches the defence model and nothing else', () => {
     expect(evaluatePlayer({ ...unpriced, home: true }, PROFILE).score).toBeNull();
   });
 });
+
+/**
+ * The empty DEF slot, and the three words that were not true of this roster.
+ *
+ * The reported symptom: a rostered Jacksonville defence, listed under Bench
+ * with a dash for a score, and a `DEF` slot above it reading `Nobody eligible
+ * yet`. That sentence is true of a half-drafted roster and false of this one —
+ * there *is* an eligible defence, and what the app cannot do is put a number on
+ * its week, because no book has quoted the game.
+ *
+ * The behaviour was right and the screen was not: `projectDst` refuses an
+ * anchor it does not have, the evaluation records exactly why, `warnings` even
+ * names the player — and then `LineupSlot` dropped all of it, so the one place
+ * a reader looks had nowhere to put the reason. These hold the reason to the
+ * slot, which is the boundary the Team screen actually reads.
+ */
+describe('an empty slot says who it could not use, and why', () => {
+  /** The state the reported roster is in: the fixture is known, the line is not. */
+  const noLine = () => defence('def_jax', 'Jacksonville', { spread: null, total: null, opponent: 'CAR' }, { team: 'JAX' });
+
+  it('names the defence rather than claiming nobody is eligible', () => {
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+    });
+    const slot = lineup.slots.find((s) => s.slot === 'DEF');
+
+    expect(slot?.playerId).toBeNull();
+    expect(slot?.vacancy.map((v) => v.name)).toEqual(['Jacksonville']);
+    expect(slot?.vacancy[0]?.reason).toContain('scored this week');
+  });
+
+  it('quotes the model’s own cause rather than paraphrasing one', () => {
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+    });
+
+    // `dstProjection.ts`'s sentence, unedited — so the screen cannot invent a
+    // more specific cause than the model was prepared to state.
+    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.detail).toBe('no game line for this defence');
+  });
+
+  it('marks the incumbent, so the row is about the player Sleeper is starting', () => {
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+    });
+
+    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.alreadyStarting).toBe(true);
+  });
+
+  it('says he is out rather than unscorable when that is the reason', () => {
+    const lineup = recommendLineup(
+      [...field(), defence('def_jax', 'Jacksonville', { spread: -7.5, total: 42.5 }, { team: 'JAX', status: 'Out' })],
+      SHAPE,
+      PROFILE,
+      { currentStarterIds: STARTERS },
+    );
+    const vacancy = lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0];
+
+    // A defence with a line and a designation is not a coverage gap, and the
+    // row must not describe it as one.
+    expect(vacancy?.reason).toContain('out');
+    expect(vacancy?.detail).toBeNull();
+  });
+
+  it('explains a slot with only a receiver behind it using the receiver', () => {
+    // Eligibility is the slot's own, so a DEF slot never explains itself with a
+    // player who could not have filled it in the first place.
+    const lineup = recommendLineup(
+      [...field(), candidate('wr9', 'Unpriced Receiver', 'WR', null), noLine()],
+      SHAPE,
+      PROFILE,
+      { currentStarterIds: STARTERS },
+    );
+
+    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy.map((v) => v.name)).toEqual(['Jacksonville']);
+  });
+
+  it('leaves a filled slot with nothing to explain', () => {
+    const lineup = recommendLineup(
+      [...field(), defence('def_jax', 'Jacksonville', { spread: -7.5, total: 42.5 }, { team: 'JAX' })],
+      SHAPE,
+      PROFILE,
+      { currentStarterIds: [...STARTERS, 'def_jax'] },
+    );
+
+    expect(lineup.slots.every((s) => (s.playerId ? s.vacancy.length === 0 : true))).toBe(true);
+  });
+});

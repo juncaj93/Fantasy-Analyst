@@ -285,6 +285,84 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     expect(context.home.size).toBe(0);
   });
 
+  /*
+   * A bye is a fact about the NFL calendar, and this app has a source for it.
+   *
+   * `unavailableReason` used to say `is on bye` for any defence with no game on
+   * its input, which is that claim inferred from a missing row in this app's own
+   * database. Two different things arrive here looking identical — a fixture
+   * never ingested, and a game no book has quoted — and neither is a bye. In
+   * week 1, where there are no byes at all, it was flatly false.
+   */
+  it('calls a bye a bye only when the schedule says so', async () => {
+    await new NflScheduleRepo(db).save(fixtures('JAX', [{ week: 3, opponent: null }]), '2026-09-01T00:00:00.000Z');
+
+    const bye = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [bye],
+      candidateInputs: [],
+      lineup: recommendLineup([bye], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    expect(plan!.current?.team).toBe('JAX');
+    expect(plan!.current?.unavailableReason).toBe('is on bye');
+  });
+
+  it('does not call an unread fixture a bye', async () => {
+    // No schedule saved at all: the honest answer is that this app has not read
+    // one, not that the NFL gave Jacksonville the week off.
+    const unknown = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 1,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [unknown],
+      candidateInputs: [],
+      lineup: recommendLineup([unknown], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    const reason = plan!.current?.unavailableReason;
+    expect(reason).not.toBe('is on bye');
+    expect(reason).toContain('no fixture');
+  });
+
+  it('says a game with no quoted line cannot be scored, which is a different sentence', async () => {
+    await new NflScheduleRepo(db).save(fixtures('JAX', [{ week: 3, opponent: 'CAR' }]), '2026-09-01T00:00:00.000Z');
+
+    const noLine = defence('def_jax', 'Jacksonville', { spread: null, total: null, opponent: 'CAR' }, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [noLine],
+      candidateInputs: [],
+      lineup: recommendLineup([noLine], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    expect(plan!.current?.unavailableReason).toBe('cannot be scored this week');
+  });
+
   it('says nothing, and reads nothing, in a league that starts no defence', async () => {
     const noDef = buildRosterShape(DST_ROSTER_POSITIONS.filter((p) => p !== 'DEF'));
     const plan = await buildDstPlan(db, {

@@ -163,20 +163,37 @@ test.describe('the recommended lineup, at a glance', () => {
   });
 
   /**
-   * A slot nothing can fill says so, rather than being quietly dropped — and
-   * says it in three words on a short row, because mid-draft there are four or
-   * five of them and the repetition was drowning the slots that *were* filled.
+   * A slot nothing can fill says so, rather than being quietly dropped.
+   *
+   * Two kinds of empty row, and they are deliberately different lengths. A slot
+   * with a rostered player behind it names him and says why he is not in it —
+   * that is the row that used to read `Nobody eligible yet` over a roster that
+   * plainly had an eligible player on it. A slot with genuinely nobody behind
+   * it keeps the three words and the short row it was cut down to, because
+   * mid-draft there are four or five of those and the repetition was drowning
+   * the slots that *were* filled.
    */
   test('shows an unfillable slot honestly, and briefly', async ({ page }) => {
     const empty = page.locator('[data-testid="starter-row"][data-starter="empty"]');
     expect(await empty.count()).toBeGreaterThan(0);
-    await expect(empty.first()).toContainText('Nobody eligible yet');
 
-    // Materially shorter than a row carrying a player, which is the point.
+    const bare = page.locator('[data-testid="starter-row"][data-starter="empty"][data-vacancy="none"]');
+    const explained = page.locator('[data-testid="starter-row"][data-starter="empty"][data-vacancy="explained"]');
     const filled = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
-    const blank = (await empty.first().boundingBox())!.height;
     const player = (await filled.boundingBox())!.height;
-    expect(blank, `an empty slot costs ${blank}px against a player's ${player}px`).toBeLessThan(player * 0.8);
+
+    if ((await bare.count()) > 0) {
+      await expect(bare.first()).toContainText('Nobody eligible yet');
+      // Materially shorter than a row carrying a player, which is the point.
+      const blank = (await bare.first().boundingBox())!.height;
+      expect(blank, `an empty slot costs ${blank}px against a player's ${player}px`).toBeLessThan(player * 0.8);
+    }
+
+    if ((await explained.count()) > 0) {
+      // It names the player and never claims nobody is eligible for him.
+      await expect(explained.first().getByTestId('vacancy-line')).toBeVisible();
+      await expect(explained.first()).not.toContainText('Nobody eligible yet');
+    }
 
     // A FLEX cannot be read off its own chip, so it still lists what it takes.
     const flex = page.locator('[data-testid="starter-row"][data-slot="FLEX"][data-starter="empty"]');

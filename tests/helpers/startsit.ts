@@ -81,7 +81,15 @@ export function signalWithNet(net: number, items = 3): PlayerSignal {
 export function defence(
   id: string,
   name: string,
-  game: { spread: number; total: number; opponent?: string } | null,
+  /**
+   * The game, as much of it as is known.
+   *
+   * `null` is "this app has no fixture for him at all". A present object with
+   * null lines is a different and much more common state — the fixture is
+   * known and no book has quoted it — and the two produce different sentences
+   * downstream, so the helper has to be able to express both.
+   */
+  game: { spread: number | null; total: number | null; opponent?: string } | null,
   extra: {
     status?: string | null;
     team?: string;

@@ -6036,6 +6036,47 @@ table.compact tr:last-child td {
 }
 
 /*
+ * The player an empty slot could not use, at the weight of a name.
+ *
+ * The rest of the line is prose about what this app does not know, and stays
+ * dim; the name inside it is the one thing on the row that is a fact about the
+ * roster, so it is set as one. Without this the sentence reads as a system
+ * message and the reader has to work out that "Jacksonville" is his defence.
+ */
+.vacancy-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/*
+ * …and the model's own sentence under it.
+ *
+ * This one is allowed to wrap. It is the only line on the row carrying the
+ * specific cause — "no game line for this defence" — and a cause truncated to
+ * an ellipsis is a cause nobody reads, which would put the screen back where it
+ * started. The row grows by one line to hold it, on the small number of slots
+ * that have one at all.
+ */
+.vacancy-detail {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  padding-left: calc(32px + var(--sp-1) + 16px);
+  white-space: normal;
+}
+
+/*
+ * An explained vacancy is worth the height a bare one is not.
+ *
+ * The rule above this collapses empty rows precisely because they used to say
+ * nothing; a row that names a player and a reason is not that row, so it takes
+ * its padding back.
+ */
+.slot-group > [data-starter='empty'][data-vacancy='explained'] {
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
+
+/*
  * …and its slot chip stands in the identity column, not beside it.
  *
  * A filled row leads with `PlayerIdentity` — a 32px pill, the cluster's 4px

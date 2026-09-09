@@ -726,33 +726,77 @@ function StarterCard({
   onOpen: () => void;
 }) {
   if (!slot.playerId || !slot.name) {
+    /*
+     * An empty slot names the player it could not use, when there is one.
+     *
+     * "Nobody eligible yet" is true of a half-drafted roster and false of a
+     * real one: Alex has a defence, the app can see it, and what it cannot do
+     * is put a number on its week. Those are different sentences and the screen
+     * used to print the first for both — which reads as the app losing the
+     * player rather than declining to guess, and is the same dishonesty the
+     * Data Health work took out of the freshness copy.
+     *
+     * The incumbent leads `vacancy`, so the first entry is the one this slot is
+     * actually about. The old three words stay for the case they were written
+     * for — a slot with genuinely nobody behind it — and for an older server
+     * that sends no `vacancy` at all.
+     */
+    const blocked = (slot.vacancy ?? [])[0] ?? null;
+    /*
+     * What this slot takes, on the one kind of slot that cannot say it itself.
+     *
+     * A `FLEX` chip names no position, so the row has always spelled out the
+     * three it accepts. That is still true when the row is explaining a player
+     * instead of counting nobody — it just moves to the second line, under the
+     * reason, rather than trailing the name.
+     */
+    const accepts = slot.accepts.length > 1 ? slot.accepts.join(', ') : null;
     return (
-      <div className="player-row" data-testid="starter-row" data-slot={slot.slot} data-starter="empty">
-        {/*
-          Three words, on a row half the height of a player's.
-
-          This has been cut twice. It used to be two lines — "Nobody eligible to
-          start here" at the weight and size of a player's name, with "Takes QB"
-          under it — and then one. One line was still too much: a roster four
-          players deep mid-draft has four or five of these, and five copies of
-          the same nine-word sentence, each on a row as tall as a real player's,
-          is a list shouting about what it does not have above the answer it
-          does. They read as repetition rather than as information, which is
-          exactly what they are.
-
-          So the sentence is now as short as it can be while still being a
-          sentence, and the row is sized for it. The slot chip beside it already
-          says which spot is open, which is why "takes QB" went: it repeated the
-          chip. What it does not repeat is kept — a FLEX takes three positions
-          and its chip cannot say which, so that one still lists them.
-        */}
+      <div
+        className="player-row"
+        data-testid="starter-row"
+        data-slot={slot.slot}
+        data-starter="empty"
+        data-vacancy={blocked ? 'explained' : 'none'}
+        /*
+         * The whole row in one sentence, the same way a filled row does it.
+         *
+         * A screen reader landing here otherwise gets a slot chip and a
+         * fragment; what it needs is which slot is open and what is standing in
+         * the way, which is exactly what the two visible lines say between them.
+         */
+        aria-label={
+          blocked
+            ? `${slot.slot}: ${blocked.name} ${blocked.reason}` +
+              (blocked.detail ? `, ${blocked.detail}` : '') +
+              (blocked.alreadyStarting ? ', and is in your Sleeper lineup' : '')
+            : `${slot.slot}: nobody eligible yet`
+        }
+      >
         <div className="player-row-top">
           <span className="slot-label">{slot.slot}</span>
-          <span className="empty-slot-line">
-            Nobody eligible yet
-            {slot.accepts.length > 1 ? <span className="faint"> · {slot.accepts.join(', ')}</span> : null}
-          </span>
+          {blocked ? (
+            <span className="empty-slot-line" data-testid="vacancy-line">
+              <span className="vacancy-name">{blocked.name}</span> {blocked.reason}
+            </span>
+          ) : (
+            <span className="empty-slot-line">
+              Nobody eligible yet
+              {accepts ? <span className="faint"> · {accepts}</span> : null}
+            </span>
+          )}
         </div>
+        {/*
+          The model's own sentence about the gap, on the line under it.
+
+          Only when there is one: a reason the model did not give is not
+          paraphrased here into something that sounds specific.
+        */}
+        {blocked && (blocked.detail || accepts) ? (
+          <div className="faint vacancy-detail">
+            {[blocked.detail, accepts ? `takes ${accepts}` : null].filter(Boolean).join(' · ')}
+          </div>
+        ) : null}
       </div>
     );
   }

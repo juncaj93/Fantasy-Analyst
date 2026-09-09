@@ -187,7 +187,12 @@ export async function assembleDstPlan(
        * and none of them means the defence is bad.
        */
       unavailable: evaluation.ruledOut || evaluation.lock.locked || evaluation.score == null,
-      unavailableReason: unavailableReason(evaluation, input),
+      unavailableReason: unavailableReason(
+        evaluation,
+        input,
+        scheduleByTeam.get(team) ?? [],
+        request.week,
+      ),
       locked: evaluation.lock.locked,
       opponent: evaluation.opponent,
       opponentImpliedTotal: evaluation.dst?.opponentImpliedTotal ?? null,
@@ -331,14 +336,35 @@ function earliestKickoff(fixtures: readonly ScheduleTeamWeek[], now: Date): stri
   return earliest == null ? null : new Date(earliest).toISOString();
 }
 
+/**
+ * Why a defence is not available this week, without claiming more than is known.
+ *
+ * `is on bye` used to be returned for any defence with no `game` on its input,
+ * and that is a statement about the NFL calendar inferred from the absence of a
+ * row in this app's own database. The two are not the same thing: a fixture
+ * this app has never ingested, and a game no book has quoted, both arrive here
+ * as a missing game and neither of them is a bye. In week 1 — where there are
+ * no byes at all — it was simply false.
+ *
+ * So the bye is now read from the schedule, which is the only source that can
+ * answer it: a bye is a row for this team in this week whose opponent is null,
+ * which is how `parseSchedule` represents one. No row means this app does not
+ * know, and it says that instead.
+ */
 function unavailableReason(
   evaluation: { ruledOut: boolean; lock: { locked: boolean }; score: number | null; statusFlag: string | null },
   input: StartSitInput,
+  fixtures: readonly ScheduleTeamWeek[],
+  week: number,
 ): string | null {
   if (evaluation.ruledOut) return `is ${(evaluation.statusFlag ?? 'out').toLowerCase()}`;
   if (evaluation.lock.locked) return 'has already kicked off';
-  if (evaluation.score == null) return input.game == null ? 'is on bye' : 'cannot be scored this week';
-  return null;
+  if (evaluation.score != null) return null;
+
+  const thisWeek = fixtures.find((f) => f.week === week) ?? null;
+  if (thisWeek && thisWeek.opponent == null) return 'is on bye';
+  if (input.game == null && thisWeek == null) return 'has no fixture this app has read yet';
+  return 'cannot be scored this week';
 }
 
 function isDefence(input: StartSitInput): boolean {

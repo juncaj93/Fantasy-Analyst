@@ -129,6 +129,45 @@ export interface LineupSlot {
   drivers: string[];
   /** Where the evidence points different ways, for the same reason. */
   conflicts: string[];
+  /**
+   * Who *would* have filled this slot, and why the app will not put him in it.
+   *
+   * Empty on every filled slot, and the whole content of an empty one. It
+   * exists because the screen used to draw an empty slot as three words —
+   * `Nobody eligible yet` — over a roster that plainly did have a defence on
+   * it, which reads as the app failing to see the player rather than as the app
+   * declining to guess at his week. The reason was computed all along: the
+   * evaluation carries it, `warnings` even names the player, and the slot threw
+   * both away before the screen could read them.
+   *
+   * The same rule as everywhere else in this codebase: unknown stays unknown,
+   * and it says which unknown. See `projection.ts` and `dstProjection.ts`.
+   */
+  vacancy: SlotVacancy[];
+}
+
+/**
+ * One rostered player who is eligible for a slot and cannot be put in it.
+ *
+ * A statement about what this app knows, never about how good the player is — a
+ * defence nobody has quoted and a defence projected two points are different
+ * things, and this is the first of them.
+ */
+export interface SlotVacancy {
+  playerId: string;
+  name: string;
+  position: string;
+  /**
+   * Why he is not in the slot, as a clause that completes his name.
+   *
+   * "Jacksonville **can't be scored this week**", with the specific cause under
+   * it in {@link detail}. Written to be read on a row rather than parsed.
+   */
+  reason: string;
+  /** The specific cause, in the vocabulary the model itself used. */
+  detail: string | null;
+  /** True when Sleeper currently has him in a starting spot, so the row is his. */
+  alreadyStarting: boolean;
 }
 
 export interface LineupSwap {
@@ -377,6 +416,17 @@ export function recommendLineup(
       locked: player ? lockedIds.has(player.playerId) : false,
       drivers: player?.drivers ?? [],
       conflicts: player?.conflicts ?? [],
+      /*
+       * An empty slot says who it could not use, and why.
+       *
+       * Read from the players this slot actually accepts rather than from the
+       * whole roster, so a DEF slot never explains itself with a receiver. The
+       * incumbent leads the list: on a slot Sleeper already has a player in,
+       * the sentence the reader needs is about *that* player.
+       */
+      vacancy: player
+        ? []
+        : vacanciesFor(s, [...undecidable, ...ruledOut], lockedIds, currentStarters),
     };
   });
 
@@ -776,6 +826,63 @@ function buildSlots(shape: RosterShape): SlotSpec[] {
   }
   for (const f of shape.flex) slots.push({ slot: f.slot, accepts: [...f.positions] });
   return slots;
+}
+
+/**
+ * The rostered players an empty slot could have used, and why it did not.
+ *
+ * Ordered so the first one is the one worth printing: the player Sleeper
+ * already has starting comes first, because on his own slot he is the subject
+ * of the sentence, and the rest fall in behind him by name so the list is
+ * stable between two renders of an unchanged roster.
+ */
+function vacanciesFor(
+  spec: SlotSpec,
+  candidates: readonly StartSitEvaluation[],
+  lockedIds: ReadonlySet<string>,
+  currentStarters: ReadonlySet<string>,
+): SlotVacancy[] {
+  return candidates
+    .filter((e) => spec.accepts.includes(e.position))
+    .map((e) => ({
+      playerId: e.playerId,
+      name: e.name,
+      position: e.position,
+      ...unscorableReason(e, lockedIds.has(e.playerId)),
+      alreadyStarting: currentStarters.has(e.playerId),
+    }))
+    .sort((a, b) => Number(b.alreadyStarting) - Number(a.alreadyStarting) || a.name.localeCompare(b.name));
+}
+
+/**
+ * Why one player could not be put in a starting slot, in two registers.
+ *
+ * `reason` is the clause a row prints after his name and is deliberately short.
+ * `detail` is the model's own sentence about the gap — "no game line for this
+ * defence" is `dstProjection.ts` talking, not this function paraphrasing it —
+ * and is null when the model did not give one, because inventing a specific
+ * cause is exactly the failure this whole lane exists to stop.
+ */
+function unscorableReason(
+  evaluation: StartSitEvaluation,
+  locked: boolean,
+): { reason: string; detail: string | null } {
+  if (evaluation.ruledOut) {
+    const designation = evaluation.injury.designation === 'ir' ? 'on injured reserve' : evaluation.injury.designation;
+    return { reason: `is ${designation}, so he is not a playable starter`, detail: null };
+  }
+  if (locked) return { reason: 'has already kicked off', detail: null };
+
+  /*
+   * The model's own words, wherever it left any.
+   *
+   * A defence carries them on `dst.reasons`; everybody else's arrive on the
+   * expectation as notes. Both are already written for a reader — they are the
+   * sentences the Data Health screen prints — so they are quoted rather than
+   * rewritten here.
+   */
+  const detail = evaluation.dst?.reasons[0] ?? evaluation.expectation.notes[0] ?? null;
+  return { reason: 'can’t be scored this week', detail };
 }
 
 /**
