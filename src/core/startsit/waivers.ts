@@ -341,30 +341,39 @@ export function recommendWaiverUpgrades(opts: {
   /*
    * The second question, asked of everybody the first one did not spend.
    *
-   * Measured against the weakest man on the bench rather than against a starter,
-   * because that is who a claim actually costs: the add displaces the last
-   * player on the roster, not the one in the slot. A candidate already offered
-   * as the answer to a starting slot is not offered again here — he is one
-   * decision, and the stronger framing of it has already been made.
+   * Measured against the bench rather than against a starter, because that is
+   * who a claim actually costs: the add displaces the last player on the
+   * roster, not the one in the slot. A candidate already offered as the answer
+   * to a starting slot is not offered again here — he is one decision, and the
+   * stronger framing of it has already been made.
+   *
+   * The bench it is measured against is **his own**, per candidate, and that is
+   * load-bearing rather than a refinement: one floor for the whole wire ranked
+   * positions against each other instead of players. See `replacementFor`.
    */
-  const benchFloor = weakestBench(lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
-  const valueAdds: WaiverValueAdd[] = (benchFloor == null ? [] : playable)
+  const valueAdds: WaiverValueAdd[] = playable
     .filter((e) => !spent.has(e.playerId))
-    .map((e) => ({ evaluation: e, gain: round2((e.score ?? 0) - (benchFloor?.score ?? 0)) }))
-    .filter((c) => c.gain >= ROSTER_SPOT_GAIN && (c.evaluation.score ?? 0) > 0)
+    .map((e) => {
+      const floor = replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
+      return { evaluation: e, floor, gain: floor == null ? null : round2((e.score ?? 0) - (floor.score ?? 0)) };
+    })
+    .filter(
+      (c): c is { evaluation: StartSitEvaluation; floor: StartSitEvaluation; gain: number } =>
+        c.floor != null && c.gain != null && c.gain >= ROSTER_SPOT_GAIN && (c.evaluation.score ?? 0) > 0,
+    )
     .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name))
-    .map(({ evaluation, gain }) => ({
+    .map(({ evaluation, floor, gain }) => ({
       playerId: evaluation.playerId,
       name: evaluation.name,
       position: evaluation.position,
       team: evaluation.team,
       score: evaluation.score,
       gain,
-      reasons: valueAddReasons(evaluation, benchFloor),
+      reasons: valueAddReasons(evaluation, floor),
       statusFlag: evaluation.statusFlag,
       role: { trend: evaluation.role.trend, games: evaluation.role.games },
-      overPlayerId: benchFloor?.playerId ?? null,
-      overName: benchFloor?.name ?? null,
+      overPlayerId: floor.playerId,
+      overName: floor.name,
     }));
 
   /*
@@ -452,58 +461,75 @@ function emptyBoardHeadline(counts: { upgrades: number; playable: number; unscor
 }
 
 /**
- * The weakest man on the bench: who a claim would actually cost.
+ * The player a candidate actually has to be better than, at his own position.
  *
- * Starters are excluded because displacing one of them is the *other* question,
- * already answered above. Reserve players are excluded too — an IR stash is not
- * the roster spot a Tuesday claim frees, and pricing an add against a player
- * who cannot play this week would make every add look like a bargain.
+ * This used to be one number for the whole wire: the weakest scorable man on
+ * the bench, whoever he was and whatever he played. That is a comparison
+ * between two different scales, and fantasy scoring makes the two scales very
+ * far apart — a starting quarterback is a twenty-point week and a fourth
+ * receiver is a five-point one, in a league that starts one quarterback. So
+ * every startable quarterback on the wire "beat" the last man on the bench by
+ * ten or more points, cleared a half-point bar without noticing it was there,
+ * and sorted to the top of the board by the size of the artefact. The reported
+ * symptom was a page that would not stop recommending backup quarterbacks; the
+ * cause was that it was ranking positions against each other rather than
+ * players.
  *
- * **He also has to have a game.** This is the one that matters, and getting it
- * wrong turns the whole tier into noise. A bench player on a bye, or one the
- * market has not priced, scores near zero — not because he is worthless but
- * because there is nothing this week to score. Measured against him, every
- * healthy free agent on the wire clears the bar by nine points and the board
- * fills with "value adds" that are really *better than my bye-week receiver,
- * this Sunday only*. So the floor is drawn from bench players the market has
- * actually priced, which is the same line `upgradeBar` draws when it charges a
- * surcharge for thin data: a comparison is only worth making when both sides
- * are known.
+ * The bar is therefore drawn from the players who compete for the **same
+ * slots** he does. For a quarterback in a one-quarterback league that is the
+ * quarterbacks, and nobody else; for a running back in a league with two flexes
+ * it is every back, receiver and tight end, because they genuinely contest the
+ * same spots and comparing them is the comparison a manager makes. What a slot
+ * accepts is read off the league's own shape rather than assumed from a name.
  *
- * Null when nobody on the bench qualifies, and the caller then claims no value
- * adds at all. An empty bench is not a bench of zero-point players, and
- * treating it as one would recommend the entire wire.
+ * Among those players the bar is the weakest one **not already starting** —
+ * genuine depth at the position, and what a claim would actually displace. When
+ * every one of them is starting there is no depth, and the answer is null
+ * rather than the weakest starter: the only argument left for that player is
+ * that he would start, which is the upgrade tier's question and carries the
+ * upgrade tier's much higher bar. Asking it here would price displacing a
+ * starter at the cost of a spare bench body, which is how a free agent a point
+ * better than the quarterback you are already playing became a recommendation.
+ *
+ * The three exclusions the bench floor already had are kept, for the reasons it
+ * had them. Reserve players are not the spot a Tuesday claim frees. A ruled-out
+ * player's score is a penalty rather than a valuation, and left in he is the
+ * weakest man by a distance and every free agent "beats" him. And a player the
+ * market has not priced scores near zero for want of anything to read rather
+ * than for want of ability — measured against him the whole wire looks like a
+ * bargain, which is the same mistake in a different costume.
+ *
+ * Null when nobody qualifies, and the caller then offers no value add for him
+ * at all. A position with nothing behind it is an empty slot, and an empty slot
+ * is the upgrade tier's question, already asked and answered above.
  */
-function weakestBench(
+function replacementFor(
+  candidate: StartSitEvaluation,
   lineup: LineupRecommendation,
   roster: StartSitInput[],
   evaluations: Map<string, StartSitEvaluation>,
   reserveIds: string[],
 ): StartSitEvaluation | null {
+  const slots = lineup.slots.filter((s) => s.accepts.includes(candidate.position));
+  if (slots.length === 0) return null;
+
   const starting = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
   const reserved = new Set(reserveIds);
-  let worst: StartSitEvaluation | null = null;
+
+  const usable: StartSitEvaluation[] = [];
   for (const input of roster) {
-    const id = input.player.id;
-    if (starting.has(id) || reserved.has(id)) continue;
-    const evaluation = evaluations.get(id);
-    if (!evaluation || evaluation.score == null) continue;
-    /*
-     * A ruled-out player's score is a penalty, not a valuation.
-     *
-     * The engine drives somebody who cannot play deep negative on purpose, so
-     * the lineup optimiser will never start him. Left in here he is always the
-     * weakest man on the bench by a distance, and every free agent on the wire
-     * then "beats" him by eighty points. He is also not the drop a claim
-     * actually makes: cutting an injured starter is a roster decision of its
-     * own, which is why `planner/dropCost.ts` protects him outright rather than
-     * pricing him. Same rule, applied earlier.
-     */
-    if (evaluation.ruledOut) continue;
+    const evaluation = evaluations.get(input.player.id);
+    if (!evaluation || reserved.has(evaluation.playerId)) continue;
+    if (evaluation.score == null || evaluation.ruledOut) continue;
     if (evaluation.expectation.points == null) continue;
-    if (worst == null || evaluation.score < (worst.score ?? 0)) worst = evaluation;
+    if (!slots.some((s) => s.accepts.includes(evaluation.position))) continue;
+    usable.push(evaluation);
   }
-  return worst;
+  if (usable.length === 0) return null;
+
+  const benched = usable.filter((e) => !starting.has(e.playerId));
+  if (benched.length === 0) return null;
+  return benched.reduce((worst, e) => ((e.score ?? 0) < (worst.score ?? 0) ? e : worst));
 }
 
 /**
