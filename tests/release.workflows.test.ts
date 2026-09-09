@@ -199,6 +199,66 @@ describe('the validated revision is the one that ships', () => {
 
 /* ------------------------------- C — production is stamped with that SHA */
 
+/**
+ * The optional secrets a deploy publishes, and the one it must never publish.
+ *
+ * Both are `wrangler secret put` from a repository secret, so turning a feature
+ * on is a paste rather than a terminal session. Both skip rather than fail when
+ * the secret is absent, because a deployment that refused for the want of an
+ * optional key would be refusing to do the job it was asked to do.
+ *
+ * The last assertion is the one with teeth. `CLOUDFLARE_API_TOKEN` is the
+ * credential this workflow authenticates with — it can replace production —
+ * and the allowance panel's token is a different, read-only one. Publishing the
+ * deploy token into the Worker would put a credential that can deploy inside
+ * the thing it deploys, and the difference between the two names is eight
+ * characters.
+ */
+describe('the optional secrets a deploy publishes', () => {
+  const { yaml } = readWorkflow('release.yml');
+  const release = steps(yaml, 'release');
+  const stepFor = (secret: string) => release.find((step) => String(step['run'] ?? '').includes(`secret put ${secret}`));
+
+  it('publishes the analytics token the allowance panel reads with', () => {
+    const step = stepFor('CLOUDFLARE_ANALYTICS_TOKEN');
+    expect(step, 'without this, setting the repository secret does nothing').toBeDefined();
+    expect(String(step?.['run'])).toContain('secrets.CLOUDFLARE_ANALYTICS_TOKEN');
+  });
+
+  it('lets a deploy without that secret finish green', () => {
+    const step = stepFor('CLOUDFLARE_ANALYTICS_TOKEN');
+    const run = String(step?.['run']);
+    expect(run, 'absent is a warning and an early return, never a failed release').toContain('::warning::');
+    expect(run).toContain('exit 0');
+  });
+
+  it('does the same for the odds key, which is the shape this copied', () => {
+    const run = String(stepFor('SPORTSGAMEODDS_API_KEY')?.['run']);
+    expect(run).toContain('::warning::');
+    expect(run).toContain('exit 0');
+  });
+
+  it('never puts the deploy token inside the Worker it deploys', () => {
+    const put = release.filter((step) => String(step['run'] ?? '').includes('secret put'));
+    for (const step of put) {
+      expect(
+        String(step['run']),
+        'CLOUDFLARE_API_TOKEN can replace production; it must never be a Worker secret',
+      ).not.toContain('secret put CLOUDFLARE_API_TOKEN');
+    }
+  });
+
+  /**
+   * The account tag is a plain var rather than a secret, and the panel needs
+   * both halves — so an empty one here is a panel that says "not connected"
+   * however good the token is.
+   */
+  it('carries the account tag the panel needs beside it', () => {
+    const toml = readFileSync(join(ROOT, 'wrangler.toml'), 'utf8');
+    expect(toml).toMatch(/^CLOUDFLARE_ACCOUNT_ID = "[0-9a-f]{32}"$/m);
+  });
+});
+
 describe('the revision reaches the running Worker', () => {
   const { yaml } = readWorkflow('release.yml');
   const stepNames = steps(yaml, 'release').map((step) => String(step['name'] ?? step['uses']));

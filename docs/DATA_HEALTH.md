@@ -308,8 +308,23 @@ Two settings, both optional:
 
 | Name | Where | What |
 | --- | --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | `wrangler.toml` `[vars]` | The account tag. An identifier, not a credential. `wrangler whoami` prints it. |
-| `CLOUDFLARE_ANALYTICS_TOKEN` | `wrangler secret put` | An API token with **Account Analytics: Read** and nothing else. |
+| `CLOUDFLARE_ACCOUNT_ID` | `wrangler.toml` `[vars]` | The account tag. An identifier, not a credential. `wrangler whoami` prints it. Already filled in. |
+| `CLOUDFLARE_ANALYTICS_TOKEN` | GitHub repository secret | An API token with **Account Analytics: Read** and nothing else. |
+
+Turning the panel on is one dashboard task and one paste:
+
+1. Cloudflare dashboard → My Profile → API Tokens → Create Token → **Account
+   Analytics: Read**, scoped to this account.
+2. Paste it into the repository's secrets as `CLOUDFLARE_ANALYTICS_TOKEN`.
+
+The next deploy publishes it to the Worker, the same way it publishes the
+passphrase and the odds key — see `release.yml`. Nobody has to open a terminal.
+To skip the wait, `wrangler secret put CLOUDFLARE_ANALYTICS_TOKEN` does the
+same thing immediately; the deploy step then keeps overwriting it with the same
+value, which is why storing it as a repository secret is still worth doing.
+
+A deploy without the secret is green and says so in a warning annotation: an
+optional diagnostic must never be able to refuse a release.
 
 Deliberately **not** the deploy token. This one lives inside a Worker that
 answers HTTP, so it is scoped to the single metrics dataset it needs: if it
