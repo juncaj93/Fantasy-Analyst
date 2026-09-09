@@ -282,6 +282,148 @@ degraded scenario cannot report itself healthy.
 
 ---
 
+## The database allowance
+
+One extra group at the bottom of the screen, and the only thing on it that is
+about the platform rather than about a feed: **how much of today's D1 row
+allowance is gone, and whether today is on pace to run out of it.**
+
+D1's free plan allows 5,000,000 rows read a day and answers everything with an
+error once that is spent, until midnight UTC. That has happened three times.
+Each time the first anybody knew of it was the app failing, and each diagnosis
+began with a question nothing in the app could answer.
+
+### What is actually obtainable
+
+A Worker **cannot** read its own quota. There is no binding, nothing on the D1
+REST resource but size and table counts, and no header on a query result that
+adds up to a daily total. What exists is the **GraphQL Analytics API** — the
+same source the dashboard's own D1 charts are drawn from — and a Worker can
+call it like any other HTTPS endpoint.
+
+So the app can show this itself, with one condition that cannot be engineered
+away: it needs an API token, and a token is a secret somebody has to make.
+
+Two settings, both optional:
+
+| Name | Where | What |
+| --- | --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | `wrangler.toml` `[vars]` | The account tag. An identifier, not a credential. `wrangler whoami` prints it. |
+| `CLOUDFLARE_ANALYTICS_TOKEN` | `wrangler secret put` | An API token with **Account Analytics: Read** and nothing else. |
+
+Deliberately **not** the deploy token. This one lives inside a Worker that
+answers HTTP, so it is scoped to the single metrics dataset it needs: if it
+leaked it could not read a row of anybody's data, change a setting, or deploy
+anything.
+
+Without both, the panel says **Not connected** and what to do about it. It does
+not estimate, and it does not count its own reads and present the total as the
+account's — the allowance is charged to the account and includes the crons, the
+Actions workflows and anything else touching the database, so a self-count
+would be an undercount wearing the authority of a measurement.
+
+### What it says
+
+    Daily rows read                                    38% of today's rows
+    1,900,000 of 5,000,000 rows read across 24,100 queries.
+    On pace for 79% by midnight UTC. Yesterday finished on 49.2%.
+
+Rows *and* queries, because the pair is what tells the two failure shapes
+apart: a hundred thousand rows across four calls is one bad query, and a
+hundred thousand across forty thousand calls is a loop nobody meant to write.
+Every incident here has turned on that distinction.
+
+The pace is the early-warning half. A day at 52% by noon is not alarming and is
+on pace for 104%, which is; the panel says so while there are still twelve
+hours to do something about it. It refuses to project from the first two hours
+of a UTC day, because one cron tick at 00:04 extrapolates to several times the
+allowance and an alarm that fires every morning is an alarm nobody reads by
+October.
+
+### Four things it refuses to do
+
+1. **A missing token is not zero rows.** No credential means "not connected",
+   in words.
+2. **A renamed field is not zero rows.** `d1-insights.yml` printed a column of
+   zeroes on its first run because it guessed at `rowsRead`/`sumRowsRead`/
+   `rows_read` and the payload used none of them. Here the metric is *found*,
+   and a response without a recognisable rows-read field reports that — naming
+   the fields it did get — rather than displaying `0%`.
+3. **An empty answer is not a quiet day.** Cloudflare's analytics lag by a few
+   minutes, so "nothing recorded for today yet" and "no reads today" are
+   different facts and only one of them is knowable.
+4. **It is not folded into the headline count.** `needsAttention` counts
+   *inputs a recommendation is built from*, and the row allowance is not one of
+   those — it is the thing that stops all of them at once. Putting it in that
+   number would make "2 inputs need attention" mean two different kinds of
+   thing.
+
+### Why it is its own endpoint
+
+`GET /api/diagnostics/d1-quota`, not a field on `/api/data-health`. §18 says
+reading data health must not leave the process, and `dataHealth.isolation.test.ts`
+proves it by making every transport that endpoint can reach throw. This reading
+is a subrequest to Cloudflare by construction, so it belongs beside data health
+rather than inside it — and a screen that shows both fetches both. It also
+means this panel failing is quiet: an unreachable Cloudflare leaves every other
+row exactly as it was.
+
+One subrequest per five minutes, and **zero database rows**. It is the only
+panel on this screen that costs nothing against the allowance it reports on.
+
+For *which query* spent the allowance rather than how much of it is gone, the
+answer is still `.github/workflows/d1-insights.yml` — `wrangler d1 insights`
+attributes rows to the query that read them, and no API a Worker can reach
+does.
+
+---
+
+## What checks production, and what it costs
+
+On 8 September the daily row allowance was spent by the thing that checks the
+app rather than by the app. Cloudflare's own analytics, bucketed at fifteen
+minutes, attribute the day like this:
+
+| What | Rows |
+| --- | --- |
+| Production browser suite — two hand-dispatched, one scheduled | ~5.06M |
+| Deploy gates | ~0.11M |
+| The Worker's own crons (09:00 sync + 288 five-minute ticks) | ~24,000 |
+| Real user traffic | indistinguishable from zero |
+| **Day total** | **5,330,262 (106.6%)** |
+
+The app answered errors from 12:30 UTC until midnight. Nothing was wrong with
+the app.
+
+Three changes, and none of them is "run it less and hope".
+
+**One width on the schedule.** The daily sweep runs 390 only, a third of the
+executions and a third of the rows. What it gives up is layout at 375 and 360
+*against production data* — and `ci.yml` already runs four widths, sharded the
+same way, against a seeded local build on every pull request. Width is a
+question about layout, and layout does not need real rows to be wrong. What
+only production can answer — the live revision, a cold boot, the API's JSON
+boundary, a real roster read, a stranger's write refused — is width-independent
+and still runs daily.
+
+**A day gets one full pass.** A dispatched run is a full pass by default,
+against the same live site, on the same day; the scheduled sweep a few hours
+later learns nothing and costs a third of the allowance. On a day that already
+had one, the sweep stands down and says so in its summary. Deploy gates do not
+count — eight specs at one width is not this check.
+
+**Every full pass asks first.** `scripts/d1-budget-guard.mjs` reads today's
+usage before the suite starts and declines when the day is already past a
+ceiling (50% by default, raisable per run). Being over the ceiling is an
+ordinary green outcome reported in the summary. *Not being able to tell* is a
+loud failure, because a full sweep is never urgent and a guard that quietly
+disabled the sweep for a month would be worse than no guard.
+
+The deploy gate is never gated on budget. It is eight checks at one width and
+the last thing standing between a bad release and production.
+
+---
+
 ## What this is not
 
 No recalibration of any fantasy model. No change to waiver, DST or trade logic.

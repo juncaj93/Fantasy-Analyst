@@ -306,11 +306,20 @@ describe('Smoke reports on the revision it was told about', () => {
   it('is called with the revision the release published', () => {
     /*
      * `full` joined `expected_sha` and `url` when the deploy gate was split
-     * from the daily sweep. It is deliberately absent from what the callers
-     * pass: a deploy wants the gate, and the gate is the default. Asserting
-     * the exact set still catches an input added and never wired up.
+     * from the daily sweep; `widths` and `ceiling_percent` joined them when the
+     * production suite turned out to be what was spending the D1 allowance.
+     * All three are deliberately absent from what the callers pass: a deploy
+     * wants the gate, the gate is the default, and neither the width matrix nor
+     * the budget ceiling applies to it. Asserting the exact set still catches an
+     * input added and never wired up.
      */
-    expect(Object.keys(inputs).sort()).toEqual(['expected_sha', 'full', 'url']);
+    expect(Object.keys(inputs).sort()).toEqual([
+      'ceiling_percent',
+      'expected_sha',
+      'full',
+      'url',
+      'widths',
+    ]);
     for (const caller of ['deploy.yml', 'rollback.yml']) {
       const { yaml: callerYaml } = readWorkflow(caller);
       const smoke = job(callerYaml, 'smoke');
@@ -321,6 +330,13 @@ describe('Smoke reports on the revision it was told about', () => {
         asMap(smoke['with'])['full'],
         `${caller} must not ask for the full sweep: 150 test executions against the live database on every deploy is what exhausted the D1 row quota`,
       ).toBeUndefined();
+      /*
+       * And it must not carry a budget ceiling either. The gate is eight checks
+       * at one width and is the last thing between a bad release and
+       * production; it is never declined for budget, so a caller passing a
+       * ceiling would be asking for a refusal that must not exist.
+       */
+      expect(asMap(smoke['with'])['ceiling_percent'], `${caller} must not budget-gate the deploy gate`).toBeUndefined();
     }
   });
 

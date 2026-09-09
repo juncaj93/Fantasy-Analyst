@@ -61,6 +61,17 @@ VEGAS_PROVIDER = "sportsgameodds"
 # You can also set/override it inside the app under Setup -> Newsletter.
 NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 
+# The Cloudflare account this Worker is deployed into.
+#
+# An identifier, not a credential — it is in the dashboard URL — and useless on
+# its own. With CLOUDFLARE_ANALYTICS_TOKEN beside it, Setup -> Data Health can
+# show how much of today's 5,000,000-row D1 allowance is gone and whether the
+# day is on pace to run out of it. Leave it empty and that panel says it is not
+# connected, which is true and is better than a number nobody measured.
+#
+# Find it with `wrangler whoami`, or in the URL of any dashboard page.
+CLOUDFLARE_ACCOUNT_ID = ""
+
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool
 #   SESSION_SECRET   random 32+ byte string used to sign session cookies
@@ -68,6 +79,15 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #   SPORTSGAMEODDS_API_KEY  when VEGAS_PROVIDER = "sportsgameodds" (the Deploy
 #                    workflow publishes this from the repository secret of the
 #                    same name, so it does not need putting by hand)
+#   CLOUDFLARE_ANALYTICS_TOKEN  read-only API token with Account Analytics:
+#                    Read and NOTHING else, so the app can ask Cloudflare how
+#                    much of today's D1 row allowance is gone. Deliberately not
+#                    the deploy token: this one lives inside a Worker that
+#                    answers HTTP, so it is scoped to the single metrics
+#                    dataset it needs and could not read a row of data, change
+#                    a setting or deploy anything if it ever leaked. Optional —
+#                    without it the allowance panel says so. See
+#                    docs/DATA_HEALTH.md.
 
 [triggers]
 # The five-minute injury check is back on, and the record of why it was ever

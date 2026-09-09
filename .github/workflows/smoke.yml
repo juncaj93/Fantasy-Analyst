@@ -23,6 +23,16 @@ on:
         required: false
         default: false
         type: boolean
+      widths:
+        description: '`all` for three widths against production, `primary` for 390 only'
+        required: false
+        default: 'all'
+        type: string
+      ceiling_percent:
+        description: 'Decline a full run when today has already read this much of the D1 allowance'
+        required: false
+        default: '50'
+        type: string
       url:
         description: 'Site to check'
         required: false
@@ -40,6 +50,16 @@ on:
         required: false
         default: true
         type: boolean
+      widths:
+        description: '`all` for three widths, `primary` for 390 only (a third of the D1 cost)'
+        required: false
+        default: 'all'
+        type: string
+      ceiling_percent:
+        description: 'Decline when today has already read this much of the D1 allowance. 100 to override.'
+        required: false
+        default: '50'
+        type: string
       url:
         description: 'Site to check (defaults to the live one)'
         required: false
@@ -61,7 +81,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Is there room in today's allowance for this?
+  #
+  # On 8 September three runs of this suite — two dispatched by hand and one
+  # scheduled — read about 5.06 million of the day's 5.33 million rows between
+  # them, and the app answered errors from 12:30 UTC until midnight. None of the
+  # three knew what the others had spent, because nothing could say.
+  #
+  # This can. It runs only in front of a `full` pass: the deploy gate is eight
+  # checks at one width and is the thing you least want declined, since it is
+  # what stands between a bad release and production.
+  #
+  # Fail closed. A full sweep is never urgent, so "cannot tell" declines — and
+  # it declines *loudly*, as a failed job rather than a skipped one, because a
+  # guard that has quietly disabled the sweep for a month is worse than no
+  # guard. Being over the ceiling is the opposite: an ordinary, expected
+  # outcome, reported in the summary and green.
+  budget:
+    if: ${{ inputs.full }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      proceed: ${{ steps.guard.outputs.proceed }}
+      percent: ${{ steps.guard.outputs.percent }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # The pinned wrangler, not whatever `npx` would fetch.
+      #
+      # This guard fails closed, so anything that stops it answering stops the
+      # sweep — and an unpinned download from the registry is a dependency on
+      # the registry being up at 07:30 every morning. `npm ci` is the same
+      # install every other job here does.
+      - run: npm ci
+      - id: guard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CEILING_PERCENT: ${{ inputs.ceiling_percent || '50' }}
+        run: |
+          set -euo pipefail
+          # The account tag from the secret when it is set, and from the token
+          # otherwise — the same discovery `d1-insights.yml` does.
+          id="${CLOUDFLARE_ACCOUNT_ID:-}"
+          if [ -z "$id" ]; then
+            id=$(npx wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || true)
+          fi
+          ACCOUNT_ID="$id" node scripts/d1-budget-guard.mjs
+
   smoke:
+    needs: budget
+    # `always()` so the deploy gate, which skips `budget` entirely, still runs.
+    # A full pass runs only when the guard said there was room.
+    if: ${{ always() && (!inputs.full || needs.budget.outputs.proceed == 'yes') }}
     # Which third of the suite, because that is what a red tick has to answer
     # first. GitHub would otherwise label these `smoke (1)`.
     name: smoke ${{ inputs.full && format('({0}/3)', matrix.shard) || '(deploy gate)' }}
@@ -213,9 +287,25 @@ jobs:
         timeout-minutes: 20
         env:
           FULL: ${{ inputs.full }}
+          WIDTHS: ${{ inputs.widths || 'all' }}
         run: |
           set -eu
-          if [ "$FULL" = "true" ]; then
+          if [ "$FULL" = "true" ] && [ "$WIDTHS" = "primary" ]; then
+            # One width, still split three ways so no shard runs long.
+            #
+            # A third of the executions and a third of the D1 cost. What it
+            # gives up is layout at 375 and 360 *against production data* —
+            # and `ci.yml` already runs all four widths, sharded the same way,
+            # against a locally seeded build on every pull request. Width is a
+            # question about layout, and layout does not need real rows to be
+            # wrong. What only production can answer — the live revision, a
+            # cold boot, the API's JSON boundary, a real roster read, a
+            # stranger's write refused — is width-independent and still runs
+            # here, every day.
+            npx playwright test --config playwright.production.config.ts \
+              --project=webkit-iphone-390 \
+              --shard=${{ matrix.shard }}/3
+          elif [ "$FULL" = "true" ]; then
             # Every width, split three ways, exactly as before.
             npx playwright test --config playwright.production.config.ts \
               --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360 \

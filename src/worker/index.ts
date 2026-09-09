@@ -86,6 +86,26 @@ export interface WorkerEnv {
    * says so instead of claiming a revision it did not check out.
    */
   RELEASE_SHA?: string;
+  /**
+   * The Cloudflare account this Worker is deployed into, so the app can ask
+   * Cloudflare's own analytics how much of today's D1 row allowance is gone.
+   *
+   * A plain var: an account tag is an identifier, not a credential, and it is
+   * useless without the token beside it. Absent means the quota panel on Data
+   * Health says it is not connected, which is a true statement about a
+   * deployment nobody has set this up on.
+   */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  /**
+   * A read-only Cloudflare API token with **Account Analytics: Read** and
+   * nothing else.
+   *
+   * A secret, set with `wrangler secret put`. Deliberately not the deploy
+   * token: this one is inside a Worker that answers HTTP, so it is scoped to
+   * the one metrics dataset it needs, and cannot read a row of anybody's data,
+   * change a setting or deploy anything if it ever leaked.
+   */
+  CLOUDFLARE_ANALYTICS_TOKEN?: string;
 }
 
 const app = createApp();
@@ -125,6 +145,8 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     SESSION_SECRET: env.SESSION_SECRET,
     inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
     releaseSha: env.RELEASE_SHA ?? null,
+    cloudflareAccountId: env.CLOUDFLARE_ACCOUNT_ID ?? null,
+    cloudflareAnalyticsToken: env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
   };
 }
 

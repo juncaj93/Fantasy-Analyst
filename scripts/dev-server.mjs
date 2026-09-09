@@ -14,11 +14,13 @@
  *   FA_DB=path.sqlite   persist to disk instead of memory
  *   NEWSLETTER_ADDRESS  dedicated inbound address shown in Settings
  *   FA_RELEASE_SHA      revision /api/health should report (default: unknown)
+ *   FA_COUNT_ROWS=path  tally every statement the app runs and write it here
+ *                       on exit. See the note on the wrapper below.
  */
 
 import { createServer } from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,10 +52,64 @@ const {
   withDemoSleeper,
 } = await import(bundlePath);
 
-const db = new NodeSqliteDatabase(dbPath);
+/**
+ * What the app asked the database, when somebody is measuring.
+ *
+ * Off unless `FA_COUNT_ROWS` names a file, and a plain passthrough when it is
+ * off — nothing here runs in an ordinary dev session.
+ *
+ * It counts **calls per distinct statement**, not rows returned, and that is
+ * the whole point. Rows returned is the number that hid the largest query on
+ * the account for a fortnight: `gamesPlayedCounts` returns about twenty rows
+ * and reads four thousand, so a counter watching its output would have called
+ * it free. What a memo changes is how *often* a statement runs, and calls are
+ * exactly that, measured exactly. Multiplying calls by the rows-per-call
+ * `d1 insights` reports for the same statement in production gives a cost in
+ * the currency D1 bills in, out of two numbers that were each measured rather
+ * than assumed.
+ */
+function countingDatabase(inner, out) {
+  const tally = new Map();
+  const note = (sql) => {
+    const key = sql.replace(/\s+/g, ' ').trim();
+    tally.set(key, (tally.get(key) ?? 0) + 1);
+  };
+  const wrap = (sql, stmt) => ({
+    bind: (...v) => wrap(sql, stmt.bind(...v)),
+    first: async (col) => {
+      note(sql);
+      return stmt.first(col);
+    },
+    all: async () => {
+      note(sql);
+      return stmt.all();
+    },
+    run: async () => stmt.run(),
+  });
+
+  let written = false;
+  const write = () => {
+    if (written) return;
+    written = true;
+    const rows = [...tally.entries()].map(([sql, calls]) => ({ calls, sql })).sort((a, b) => b.calls - a.calls);
+    writeFileSync(out, JSON.stringify({ statements: rows.length, calls: rows.reduce((n, r) => n + r.calls, 0), rows }, null, 1));
+    console.log(`[dev] wrote ${rows.length} distinct statements to ${out}`);
+  };
+  for (const signal of ['SIGTERM', 'SIGINT', 'exit']) process.on(signal, write);
+
+  return {
+    prepare: (sql) => wrap(sql, inner.prepare(sql)),
+    batch: (statements) => inner.batch(statements),
+    exec: (query) => inner.exec(query),
+  };
+}
+
+const rawDb = new NodeSqliteDatabase(dbPath);
+const countRowsTo = process.env.FA_COUNT_ROWS ?? '';
+const db = countRowsTo ? countingDatabase(rawDb, countRowsTo) : rawDb;
 // Apply every migration in order, exactly like `wrangler d1 migrations apply`.
 for (const file of (await readdir(join(root, 'migrations'))).filter((f) => f.endsWith('.sql')).sort()) {
-  await db.exec(await readFile(join(root, 'migrations', file), 'utf8'));
+  await rawDb.exec(await readFile(join(root, 'migrations', file), 'utf8'));
 }
 
 if (seed) {
@@ -80,6 +136,13 @@ const env = {
    * the deployed site. See docs/RELEASE.md.
    */
   releaseSha: process.env.FA_RELEASE_SHA ?? null,
+  /*
+   * Unset locally too, so the allowance panel says "not connected" rather than
+   * reporting a real account's usage from a laptop. Settable for anyone who
+   * wants to see the connected state before deploying it.
+   */
+  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? null,
+  cloudflareAnalyticsToken: process.env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,

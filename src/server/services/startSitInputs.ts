@@ -17,7 +17,8 @@ import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
 import { homeByTeam } from '../../core/nfl/schedule.ts';
 import { InjuryService } from './injuryService.ts';
-import { UsageService } from './usageService.ts';
+import { UsageService, roleMetricsFrom } from './usageService.ts';
+import type { StoredUsageWeek } from '../repos/usage.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { StartSitMode } from '../../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../../core/startsit/defense.ts';
@@ -63,26 +64,29 @@ export async function startSitInputsFor(
     .catch(() => new Map());
 
   /*
-   * Per-game opportunity, for the role trend.
+   * The stored weeks, read once and used for both things that need them.
    *
-   * Absent for a player with fewer than six games stored, which is the ordinary
-   * state in September and is passed through as absent rather than padded:
-   * `assessRole` answers `insufficient_data` for a short series, and that is the
-   * honest answer rather than a trend invented from four games.
+   * Two consumers: the role *trend*, which is `assessRole`'s two disagreeing
+   * series, and the raw rows, which the opportunity level, the role
+   * classification and the touchdown-dependency read each ask a different
+   * question of. Both used to fetch their own copy — `roleMetricsFor` is a
+   * `weeksFor` read plus a pure derivation, so every assembly ran the identical
+   * query twice and paid for the same rows twice. Measured on a 30-player
+   * matchup at week 10: 600 rows where 300 were wanted, on a screen that
+   * re-assembles every thirty seconds while games are live.
+   *
+   * A failure still costs those components and nothing else — an empty map is
+   * `insufficient_data` and `unknown`, which is what they said before this
+   * pipeline existed. Absent for a player with fewer than six games stored,
+   * which is the ordinary state in September and is passed through as absent
+   * rather than padded.
    */
   const usageService = new UsageService(db);
-  const usage = await usageService
-    .roleMetricsFor([...players.values()].map((p) => ({ playerId: p.id, position: p.position })))
-    .catch(() => new Map());
-  /*
-   * The stored weeks themselves, for everything the trend series cannot answer.
-   *
-   * One extra indexed read for the same players, and it is what the opportunity
-   * level, the role classification and the touchdown-dependency read are all
-   * built from. A failure costs those three components and nothing else: they
-   * report unknown, which is what they said before this pipeline existed.
-   */
-  const weeks = await usageService.weeksFor(playerIds).catch(() => new Map());
+  const weeks = await usageService.weeksFor(playerIds).catch(() => new Map<string, StoredUsageWeek[]>());
+  const usage = roleMetricsFrom(
+    [...players.values()].map((p) => ({ playerId: p.id, position: p.position })),
+    weeks,
+  );
 
   /*
    * League-wide context, built once per request rather than once per player.

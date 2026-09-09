@@ -39,7 +39,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, type DataHealthView, type SourceHealth, type StartSitRefreshReport } from '../api.ts';
+import { api, type D1QuotaView, type DataHealthView, type SourceHealth, type StartSitRefreshReport } from '../api.ts';
 import { Loading, Notice } from './common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon, PulseIcon } from './icons.tsx';
 import { ListGroup, ListRow, PushScreen } from './native.tsx';
@@ -267,6 +267,8 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
             ))}
           </ListGroup>
 
+          <QuotaGroup />
+
           <ListGroup header="Last scheduled refresh">
             {health.lastRun == null ? (
               <ListRow
@@ -326,6 +328,79 @@ const REFRESH_SOURCE_LABELS: Record<string, string> = {
   vegas: 'Vegas lines',
   weather: 'Weather',
 };
+
+/**
+ * The database allowance, and whether today is going to run out of it.
+ *
+ * The one thing on this screen that is about the platform rather than about a
+ * feed, and the one thing on it that costs the allowance it reports on
+ * nothing: a Worker cannot see its own quota, so this is a subrequest to
+ * Cloudflare's analytics and not a single database row.
+ *
+ * Its own fetch rather than a field on the health payload, because §18 says
+ * reading data health must not leave the process and `dataHealth.isolation`
+ * proves it. That separation is also why this failing is quiet: an unreachable
+ * Cloudflare, or a deployment with no token, leaves every other row on the
+ * screen exactly as it was.
+ *
+ * Not folded into the headline count above it either. `needsAttention` counts
+ * *inputs* a recommendation is built from, and the row allowance is not one —
+ * it is the thing that stops all of them at once. Putting it in that number
+ * would have made "2 inputs need attention" mean two different kinds of thing.
+ */
+function QuotaGroup() {
+  const [quota, setQuota] = useState<D1QuotaView | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void api
+      .get<D1QuotaView>('/api/diagnostics/d1-quota')
+      .then((view) => {
+        if (live) setQuota(view);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /*
+   * Three marks for four states, and `unknown` takes the neutral one.
+   *
+   * A quota nobody has connected a token for is not a warning: it is a thing
+   * that has not been set up, and drawing it in the same colour as "this runs
+   * out in two hours" is how the two stop being distinguishable.
+   */
+  const mark = quota == null ? 'unknown' : quota.state === 'critical' || quota.state === 'watch' ? 'degraded' : quota.state === 'ok' ? 'current' : 'unknown';
+
+  return (
+    <ListGroup header="Database allowance">
+      {failed ? (
+        <ListRow
+          testId="data-health-quota-failed"
+          dataState="unknown"
+          state={<StateMark state="unknown" />}
+          label="Daily rows read"
+          detail="This deployment could not be asked. The panel is a diagnostic, so it fails on its own rather than taking the screen with it."
+        />
+      ) : quota == null ? (
+        <ListRow testId="data-health-quota-loading" label="Daily rows read" detail="Asking Cloudflare…" />
+      ) : (
+        <ListRow
+          testId="data-health-quota"
+          dataState={quota.state}
+          state={<StateMark state={mark} />}
+          label="Daily rows read"
+          detail={quota.detail}
+          value={quota.headline}
+        />
+      )}
+    </ListGroup>
+  );
+}
 
 function subtitleFor(health: DataHealthView): string {
   const age = describeAge(minutesSince(health.overall.refreshedAt, new Date()));
