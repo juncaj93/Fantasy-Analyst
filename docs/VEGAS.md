@@ -227,6 +227,36 @@ lines, quarter props, first-touchdown and defensive props are dropped. One
 book, because the free plan publishes one — the provider's own consensus,
 reported as a single book rather than dressed up as agreement.
 
+### The opponent's roster is not priced, and will not be
+
+**Decided 9 September 2026 by the owner. This is a won't-do, not a backlog
+item — nobody should re-open it without a new reason.**
+
+`VegasRefreshService.rosterPlayers` reads the user's own roster and only that.
+The Matchup screen, though, projects *both* sides: `buildMatchupResponse`
+evaluates every player on both rosters, and `matchup/model.ts` refuses to
+publish a forecast when either side falls under `MIN_PROJECTED_SHARE`. So the
+opponent's starters are unpriced except where their teams happen to coincide
+with the reader's, and the head-to-head total reads "Fantasy Analyst forecast
+temporarily unavailable" while the reader's own rows carry real numbers.
+Measured on a realistic pair of rosters: the reader's side 11 of 15 priced,
+the opponent's 1 of 9, coverage 0.11 against a threshold of 0.5.
+
+That is not a bug in the Matchup screen. The screen is correctly declining to
+simulate a team it can see one player of, which is what §33 asks of it.
+
+The fix would be to price the opponent's teams as well, and it was declined on
+cost. A second roster spans about nine more teams, which roughly doubles the
+weekly spend, and — the reason that actually decided it — those teams would
+compete with the reader's *own* starters for `BUDGET.maxEntitiesPerRun`. The
+owner's judgement: opponent visibility is not worth risking the data quality of
+the lineup the app exists to set.
+
+**What this means in practice.** The head-to-head total staying unavailable in
+a week the market has not widely priced is expected behaviour, not a
+regression. The reader's own player rows are the part that must be right, and
+those are covered by the discovery-order fix above.
+
 ### What a month costs
 
 | | Entities |

@@ -32,10 +32,32 @@
  *      purpose. Benching a bye-week player for somebody the books have quoted
  *      is a real comparison and still happens; asking a reader to bench a
  *      priced starter for an unpriced bench player is the failure above.
- *   2. **With nothing priced at all, the lineup is not reordered.** There is no
- *      ranking to apply, so the starters the reader already has are kept and
- *      the reason is said out loud, rather than shuffling nine players on the
- *      strength of a news tally.
+ *   2. **An unpriced player never displaces a starter.** Asked per player, not
+ *      per roster. This was once "with nothing priced *at all*, the lineup is
+ *      not reordered", and the difference between the two is the defect
+ *      reported on 8 September 2026: one quarterback and one running back had
+ *      lines, the other seven starters did not, and one priced player anywhere
+ *      on the roster was enough to switch the whole guard off. The optimiser
+ *      then ranked seven unpriced players against each other on their news
+ *      tallies and benched a 19.4-projected back for a 5.5-projected one —
+ *      silently, because rule 1 correctly refused to print a swap card for a
+ *      move it could not price, so the lineup changed underneath a card that
+ *      said nothing.
+ *
+ *      That is the deeper fault the shape of these two rules has to fix: the
+ *      recommended lineup and the swap list were computed under different
+ *      rules, so the screen could show a reordering it also refused to
+ *      explain. They now ask the same question — has a market priced the player
+ *      being moved *in* — and the assignment enforces it by ordering priced
+ *      players, then unpriced incumbents, then unpriced bench players, so a
+ *      nudge score can decide which leftovers fill a spare slot and can never
+ *      decide who sits.
+ *
+ *      Partial coverage is the ordinary state, not an edge case: the weekly
+ *      refresh buys a bounded number of games per run, so a roster spanning
+ *      more teams than one run can reach is *always* part-priced. A guard that
+ *      only fires on a completely unpriced roster is a guard that almost never
+ *      fires.
  */
 
 import type { RosterShape } from '../sleeper/scoring.ts';
@@ -225,12 +247,15 @@ export function recommendLineup(
   const undecidable = movable.filter((e) => e.score == null);
 
   /*
-   * Whether anything on this roster has a market underneath it.
+   * Whether *nothing* on this roster has a market underneath it.
    *
-   * Not "is this player priced" — that question is asked per swap below. This
-   * is the whole-roster state: when no book has quoted anybody, there is no
-   * ranking to apply and the reader's own lineup is left where it is. See the
-   * module docblock.
+   * Narrower than it once was, and it now decides only which sentence the note
+   * at the bottom uses. It used to gate the assignment and the preference pass
+   * as well, which made both of them all-or-nothing: a single priced player
+   * turned the guard off over every unpriced one beside him. Those two ask
+   * `hasMarket` per player now, so this is a fact about the week rather than a
+   * switch — "no book has quoted anybody" and "no book has quoted these seven"
+   * are different things to tell a reader, and both are worth saying.
    */
   const unpriced = movable.every((e) => !hasMarket(e));
 
@@ -289,18 +314,16 @@ export function recommendLineup(
   const reserved = reserveLockedSlots(lockedStarters, slots);
   const openSlots = slots.map((s, index) => ({ spec: s, index })).filter(({ index }) => !reserved.has(index));
   /*
-   * With nothing priced, the incumbent holds the slot.
+   * Where the market runs out, the incumbent holds the slot.
    *
-   * The tie-break, not a second opinion: `assignBest` still fills every slot
-   * legally and optimally, it is only told which of two equally-unfounded
-   * orderings to prefer. In every week a market exists this argument is absent
-   * and the assignment is byte-for-byte what it was.
+   * Passed in every week rather than only in a completely unpriced one:
+   * `assignBest` uses it to order players a market has *not* priced, and a
+   * priced player's place in the ranking does not depend on it at all. So a
+   * fully-priced week is byte-for-byte what it was, and a part-priced one —
+   * which is most of them — stops ranking the unpriced remainder against
+   * itself on news tallies.
    */
-  const openAssignment = assignBest(
-    playable,
-    openSlots.map((o) => o.spec),
-    unpriced ? currentStarters : null,
-  );
+  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec), currentStarters);
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
   for (const [openIndex, player] of openAssignment) {
@@ -317,18 +340,22 @@ export function recommendLineup(
    */
   /*
    * Floor and Ceiling are preferences over a lineup that has already been
-   * ranked, so with nothing ranked there is nothing for them to prefer.
+   * ranked, so a player nobody has ranked is not theirs to move.
    *
    * The mechanism is "swap a starter for a bench player within
    * {@link LINEUP_PREFERENCE_TOLERANCE} points of him, when the shape
-   * improves". With no market every pair of unpriced players is inside that
-   * tolerance — the scores are nudges a point apart — so the guard that makes
-   * this worth at most a tie stops holding, and Ceiling mode would stack a
-   * lineup on correlation alone while the card underneath stayed silent about
-   * it. Balanced already returns immediately; this makes the other two behave
-   * the same way for the same reason.
+   * improves", and two unpriced players are *always* inside that tolerance —
+   * their scores are nudges a point apart — so the guard that makes this worth
+   * at most a tie stops holding and Ceiling mode would stack a lineup on
+   * correlation alone while the card underneath stayed silent about it.
+   *
+   * This used to be switched off only when the *entire* roster was unpriced,
+   * which is the same all-or-nothing mistake as rule 2 in the module docblock:
+   * one priced quarterback restored the whole pass over eight players it still
+   * could not rank. The unpriced are withheld from the pass instead, so the
+   * priced players keep their preference and Balanced still returns at once.
    */
-  const preferenceNotes = unpriced ? [] : applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
+  const preferenceNotes = applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
   notes.push(...preferenceNotes, ...placementNotes);
 
@@ -369,14 +396,25 @@ export function recommendLineup(
   /*
    * Why the card above is quiet, said once rather than on nine rows.
    *
-   * Only when the whole roster is unpriced: a note beside a mostly-priced
-   * lineup would be noise, and the per-swap rule already covers the odd
-   * unpriced player.
+   * Two sentences, because the reader is in one of two different situations
+   * and only one of them used to be described. A wholly unpriced week is the
+   * fortnight after a draft and the note has always named it. A *part*-priced
+   * week said nothing at all — and that is the state a reader is most likely
+   * to be confused by, because some rows carry a real projection and the ones
+   * beside them do not, and nothing on the screen explained why the app was
+   * declining to rank half his starters. Naming the count is what makes the
+   * quiet card legible instead of merely quiet.
    */
+  const unrankable = scored.filter((e) => !hasMarket(e));
   if (unpriced && scored.length > 0) {
     notes.push(
       'No betting market has priced this week yet, so there is nothing to rank these players against — ' +
         'your Sleeper lineup is left as it is rather than reordered on news and usage alone.',
+    );
+  } else if (unrankable.length > 0) {
+    notes.push(
+      `No betting market has priced ${unrankable.length} of your ${scored.length} players yet, so they are not ranked ` +
+        'against each other — they keep the slots you already had them in rather than being reordered on news and usage alone.',
     );
   }
 
@@ -547,11 +585,22 @@ function applyLineupPreferences(
   if (mode === 'balanced') return [];
   const notes: string[] = [];
   const started = new Set([...assignment.values()].map((e) => e.playerId));
-  const bench = playable.filter((e) => !started.has(e.playerId) && !lockedIds.has(e.playerId));
+  /*
+   * Only players a market has priced, on both sides of the trade.
+   *
+   * The tolerance below is measured in points, and points are what an unpriced
+   * player does not have — his score is a sum of nudges, so every unpriced pair
+   * reads as near-equal and the shape preference wins by default. Withholding
+   * them is the same rule the assignment and the swap card keep, asked here.
+   */
+  const bench = playable.filter(
+    (e) => !started.has(e.playerId) && !lockedIds.has(e.playerId) && hasMarket(e),
+  );
   if (bench.length === 0) return notes;
 
   for (const [index, current] of [...assignment.entries()]) {
     if (lockedIds.has(current.playerId)) continue;
+    if (!hasMarket(current)) continue;
     const spec = slots[index]!;
     const candidates = bench
       .filter((e) => spec.accepts.includes(e.position))
@@ -744,20 +793,34 @@ function assignBest(
   players: StartSitEvaluation[],
   slots: SlotSpec[],
   /**
-   * The lineup already set, to break ties with when there is no ranking.
+   * The lineup already set, so an unpriced starter cannot be displaced by an
+   * unpriced bench player.
    *
-   * Null in every ordinary week, and then this function is exactly what it
-   * was. Passed only when no player on the roster has a market — see the
-   * module docblock — where "highest score first" is an ordering over noise
-   * and preferring the reader's own starters is the one answer that asks
-   * nothing of them.
+   * Empty or null is a roster with no lineup to preserve — a fresh league, a
+   * caller that did not pass one — and there the tiers below collapse to two
+   * and the ordering is what it always was.
    */
-  prefer: ReadonlySet<string> | null = null,
+  currentStarters: ReadonlySet<string> | null = null,
 ): Map<number, StartSitEvaluation> {
-  const incumbent = (e: StartSitEvaluation): number => (prefer?.has(e.playerId) ? 0 : 1);
+  /*
+   * Priced, then unpriced-and-starting, then unpriced-and-benched.
+   *
+   * The tier comes before the score, which is what makes this a fix rather
+   * than a tie-break: within a tier the score still decides, and between
+   * tiers it cannot. A player no book has quoted therefore competes only for
+   * the slots priced players did not take, and among *those* an incumbent is
+   * ahead of a challenger — so the reader's own lineup survives a week the
+   * market has not reached, and a news tally can still sort the bench.
+   *
+   * Lexicographic on a per-player key rather than a pairwise rule, because a
+   * comparator that changed criteria depending on which two players it was
+   * handed would not be transitive and `sort` would be free to return
+   * anything.
+   */
+  const tier = (e: StartSitEvaluation): number =>
+    hasMarket(e) ? 0 : currentStarters?.has(e.playerId) ? 1 : 2;
   const order = [...players].sort(
-    (a, b) =>
-      incumbent(a) - incumbent(b) || (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name),
+    (a, b) => tier(a) - tier(b) || (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name),
   );
   // slot index -> player
   const bySlot = new Map<number, StartSitEvaluation>();

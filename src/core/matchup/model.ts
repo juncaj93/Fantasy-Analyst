@@ -249,6 +249,21 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * is a confident wrong one. Measured per side, because the failure is
    * asymmetric by nature: it is the *opponent's* coverage that nobody would
    * think to doubt.
+   *
+   * **The opponent's side is expected to be the one that trips this, and that
+   * is a decision rather than a defect.** The weekly Vegas refresh prices the
+   * reader's own roster and no other, so an opponent's starters are unpriced
+   * except by coincidence — measured at 1 of 9 against this threshold of 0.5,
+   * on a week where the reader's own side was 11 of 15. Pricing both rosters
+   * was declined by the owner on 9 September 2026: it roughly doubles the
+   * weekly spend, and the opponent's teams would compete with the reader's own
+   * starters for the per-run entity ceiling, which is the wrong thing to risk
+   * for the sake of a number about somebody else's team. See
+   * `docs/VEGAS.md`, "The opponent's roster is not priced, and will not be".
+   *
+   * So a degraded head-to-head in a thinly-priced week is this rule working.
+   * Do not "fix" it by lowering the threshold: the share is what stops a
+   * confident wrong forecast, and the coverage is what is actually missing.
    */
   const degraded =
     coverage(startingDistributions, 'mine') < MIN_PROJECTED_SHARE ||
