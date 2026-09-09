@@ -246,6 +246,32 @@ export function homeByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, b
   return out;
 }
 
+/**
+ * Which teams are playing indoors this week, from the stadium rather than a sky.
+ *
+ * `roof` is the one environmental fact in the fixture file that is a forecast:
+ * it is a property of a building, published months ahead, and it does not
+ * change on the morning of the game. That makes it the only thing this app can
+ * honestly say about conditions, since it has no weather feed at all — and it
+ * is worth saying, because "indoors" is not a mild day, it is the absence of
+ * the question. See `startsit/weather.ts`, which has always had the branch and
+ * has never been given the fact.
+ *
+ * Only `dome` and `closed` count. A `retractable` roof is a roof whose state
+ * nobody has published, and `open` is a stadium open to the sky — neither is a
+ * claim this can make, so both are simply absent and the weather component
+ * stays unknown, which is what it already was.
+ */
+export function indoorByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  for (const row of fixtures) {
+    if (!row.opponent) continue;
+    const roof = (row.roof ?? '').trim().toLowerCase();
+    if (roof === 'dome' || roof === 'closed') out.set(row.team.toUpperCase(), true);
+  }
+  return out;
+}
+
 function normaliseTeam(raw: string | undefined): string | null {
   const value = (raw ?? '').trim().toUpperCase();
   return value.length === 0 ? null : value;

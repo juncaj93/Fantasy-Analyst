@@ -15,7 +15,7 @@ import { EvidenceRepo } from '../repos/evidence.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
-import { homeByTeam } from '../../core/nfl/schedule.ts';
+import { homeByTeam, indoorByTeam } from '../../core/nfl/schedule.ts';
 import { InjuryService } from './injuryService.ts';
 import { UsageService, roleMetricsFrom } from './usageService.ts';
 import type { StoredUsageWeek } from '../repos/usage.ts';
@@ -130,6 +130,18 @@ export async function startSitInputsFor(
       ...(context.home.has((player.team ?? '').toUpperCase())
         ? { home: context.home.get((player.team ?? '').toUpperCase())! }
         : {}),
+      /*
+       * Indoors, when the fixture list says so, and nothing when it does not.
+       *
+       * The weather model has always had an indoor branch — a dome is the
+       * absence of the question rather than a mild day — and never had anything
+       * to trigger it, because nothing set `weather` at all. This does not
+       * invent a forecast: an outdoor game passes no object, so the component
+       * stays `unknown`, exactly as it was.
+       */
+      ...(context.indoor.get((player.team ?? '').toUpperCase())
+        ? { weather: { indoor: true, source: 'fixture list' } }
+        : {}),
       defenseTendencies: context.defense,
       mode: opts.mode ?? 'balanced',
       propsStale: false,
@@ -159,6 +171,17 @@ export interface StartSitContext {
    * dropping the term.
    */
   home: Map<string, boolean>;
+  /**
+   * Which teams are playing indoors, off the same fixture rows as `home`.
+   *
+   * Built from `roof`, which this app already stores and had never read. It
+   * costs no additional query — the rows are the ones `home` is derived from —
+   * and it is the only environmental fact available here, since there is no
+   * weather feed. Absent for every team playing outdoors or under a roof whose
+   * state is unpublished, which leaves the weather component unknown rather
+   * than claiming a forecast nobody has.
+   */
+  indoor: Map<string, boolean>;
 }
 
 export async function buildStartSitContext(
@@ -182,10 +205,17 @@ export async function buildStartSitContext(
    * knowing which side of a game a defence is on and the next one not. A season
    * or a week Sleeper has not published yet skips the read entirely.
    */
-  const home =
+  /*
+   * One read, two facts. `home` and `indoor` are both derived from the same
+   * fixture rows, so the second one is free — which matters on a database this
+   * app has repeatedly run to the edge of its quota.
+   */
+  const fixtures =
     state?.season && state.week != null && state.week > 0
-      ? homeByTeam(await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => []))
-      : new Map<string, boolean>();
+      ? await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => [])
+      : [];
+  const home = homeByTeam(fixtures);
+  const indoor = indoorByTeam(fixtures);
 
   const schedule: StartSitContext['schedule'] = new Map();
   for (const event of events) {
@@ -213,6 +243,6 @@ export async function buildStartSitContext(
     }
   }
 
-  return { schedule, defense, home };
+  return { schedule, defense, home, indoor };
 }
 

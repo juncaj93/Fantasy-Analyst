@@ -363,6 +363,45 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     expect(plan!.current?.unavailableReason).toBe('cannot be scored this week');
   });
 
+  /*
+   * The one environmental fact this app has, finally reaching the model that
+   * has always had a branch for it.
+   *
+   * `roof` has been ingested with every fixture since the schedule landed and
+   * was read by nothing. `assessWeather` has had an indoor branch for just as
+   * long and was never given anything to trigger it, because `startSitInputsFor`
+   * set no `weather` at all. Both halves existed; the wire between them did not.
+   */
+  it('reads indoors off the fixture list, on the same rows as home and away', async () => {
+    await new NflScheduleRepo(db).save(
+      [
+        ...fixtures('DET', [{ week: 3, opponent: 'CHI', home: true }]).map((r) => ({ ...r, roof: 'dome' })),
+        ...fixtures('CHI', [{ week: 3, opponent: 'DET', home: false }]).map((r) => ({ ...r, roof: 'dome' })),
+        ...fixtures('BUF', [{ week: 3, opponent: 'NYJ', home: true }]).map((r) => ({ ...r, roof: 'outdoors' })),
+      ],
+      '2026-09-01T00:00:00.000Z',
+    );
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+
+    const context = await buildStartSitContext(db);
+
+    expect(context.indoor.get('DET')).toBe(true);
+    expect(context.indoor.get('CHI')).toBe(true);
+    // Outdoors is an absence rather than a false: this app has no forecast for
+    // it and must not produce one.
+    expect(context.indoor.has('BUF')).toBe(false);
+  });
+
+  it('will not call a retractable roof indoors, because nobody published its state', async () => {
+    await new NflScheduleRepo(db).save(
+      fixtures('DAL', [{ week: 3, opponent: 'NYG', home: true }]).map((r) => ({ ...r, roof: 'retractable' })),
+      '2026-09-01T00:00:00.000Z',
+    );
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+
+    expect((await buildStartSitContext(db)).indoor.has('DAL')).toBe(false);
+  });
+
   it('says nothing, and reads nothing, in a league that starts no defence', async () => {
     const noDef = buildRosterShape(DST_ROSTER_POSITIONS.filter((p) => p !== 'DEF'));
     const plan = await buildDstPlan(db, {
