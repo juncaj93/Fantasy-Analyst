@@ -378,6 +378,52 @@ does.
 
 ---
 
+## What checks production, and what it costs
+
+On 8 September the daily row allowance was spent by the thing that checks the
+app rather than by the app. Cloudflare's own analytics, bucketed at fifteen
+minutes, attribute the day like this:
+
+| What | Rows |
+| --- | --- |
+| Production browser suite — two hand-dispatched, one scheduled | ~5.06M |
+| Deploy gates | ~0.11M |
+| The Worker's own crons (09:00 sync + 288 five-minute ticks) | ~24,000 |
+| Real user traffic | indistinguishable from zero |
+| **Day total** | **5,330,262 (106.6%)** |
+
+The app answered errors from 12:30 UTC until midnight. Nothing was wrong with
+the app.
+
+Three changes, and none of them is "run it less and hope".
+
+**One width on the schedule.** The daily sweep runs 390 only, a third of the
+executions and a third of the rows. What it gives up is layout at 375 and 360
+*against production data* — and `ci.yml` already runs four widths, sharded the
+same way, against a seeded local build on every pull request. Width is a
+question about layout, and layout does not need real rows to be wrong. What
+only production can answer — the live revision, a cold boot, the API's JSON
+boundary, a real roster read, a stranger's write refused — is width-independent
+and still runs daily.
+
+**A day gets one full pass.** A dispatched run is a full pass by default,
+against the same live site, on the same day; the scheduled sweep a few hours
+later learns nothing and costs a third of the allowance. On a day that already
+had one, the sweep stands down and says so in its summary. Deploy gates do not
+count — eight specs at one width is not this check.
+
+**Every full pass asks first.** `scripts/d1-budget-guard.mjs` reads today's
+usage before the suite starts and declines when the day is already past a
+ceiling (50% by default, raisable per run). Being over the ceiling is an
+ordinary green outcome reported in the summary. *Not being able to tell* is a
+loud failure, because a full sweep is never urgent and a guard that quietly
+disabled the sweep for a month would be worse than no guard.
+
+The deploy gate is never gated on budget. It is eight checks at one width and
+the last thing standing between a bad release and production.
+
+---
+
 ## What this is not
 
 No recalibration of any fantasy model. No change to waiver, DST or trade logic.

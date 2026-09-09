@@ -35,20 +35,73 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Has somebody already run this by hand today?
+  #
+  # On 8 September the answer was yes, twice, and this ran anyway. Three full
+  # passes read about 5.06 million of the day's 5.33 million rows between them
+  # and the app spent the rest of the day answering errors.
+  #
+  # A dispatched run is a full pass by default and is the *same check* this
+  # would perform, against the same live site, on the same day. Doing it again
+  # a few hours later learns nothing and costs a third of the allowance. So on
+  # a day that already had one, this stands down and says so.
+  #
+  # Only `workflow_dispatch` runs count. A deploy's smoke is the eight-spec
+  # gate at one width, which is not this check and does not substitute for it.
+  recent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      ran_today: ${{ steps.check.outputs.ran_today }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          # Runs of the reusable smoke workflow started by a person today.
+          count=$(gh api "repos/$REPO/actions/workflows/smoke.yml/runs?event=workflow_dispatch&created=>=$today" \
+                    --jq '[.workflow_runs[] | select(.created_at | startswith("'"$today"'"))] | length' 2>/dev/null || echo 0)
+          echo "manual full passes already run today: $count"
+          if [ "$count" -gt 0 ]; then
+            echo "ran_today=yes" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Daily sweep stood down"
+              echo ""
+              echo "$count full production pass(es) were already dispatched by hand today, against the same live site."
+              echo "Running a second one learns nothing and costs about a third of the daily D1 allowance."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ran_today=no" >> "$GITHUB_OUTPUT"
+          fi
+
   sweep:
+    needs: recent
+    if: ${{ needs.recent.outputs.ran_today == 'no' }}
     uses: ./.github/workflows/smoke.yml
     with:
       # The whole point of this workflow. Without it this would be the deploy
       # gate again, on a timer, checking eight specs it already checked.
       full: true
+      # One width rather than three. See the note in `smoke.yml`: `ci.yml`
+      # already runs four widths against a seeded local build on every pull
+      # request, and what only production can answer is width-independent.
+      widths: primary
 
   # Scheduled work that fails silently is scheduled work nobody is doing.
   # `Refresh draft order` failed on every run for eleven days in August and was
   # found by somebody going looking; `tests/scheduledJobAlert.test.ts` refuses a
   # scheduled workflow that has no alarm.
   alert:
-    needs: sweep
-    if: always()
+    needs: [recent, sweep]
+    # A sweep that stood down is not a sweep that failed. `skipped` reaching
+    # `alert-on-failure` would open an issue every time the guard worked, which
+    # is the fastest way to teach somebody to close these unread.
+    if: ${{ always() && needs.recent.outputs.ran_today == 'no' }}
     uses: ./.github/workflows/alert-on-failure.yml
     permissions:
       contents: read
