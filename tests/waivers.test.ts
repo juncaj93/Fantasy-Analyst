@@ -115,7 +115,9 @@ describe('a value add', () => {
     expect(advice.valueAdds[0]!.name).toBe('Free Catcher');
     expect(advice.valueAdds[0]!.overName).toBe('Fourth Catcher');
     expect(advice.valueAdds[0]!.gain).toBeGreaterThanOrEqual(ROSTER_SPOT_GAIN);
-    expect(advice.valueAdds[0]!.reasons.join(' ')).toContain('last man on your bench');
+    // The sentence names the comparison that was actually made, which is the
+    // weakest man competing for his slots rather than the weakest man outright.
+    expect(advice.valueAdds[0]!.reasons.join(' ')).toContain('weakest WR option on the bench');
   });
 
   it('is never the same player already offered as a starting upgrade', () => {

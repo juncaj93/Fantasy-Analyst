@@ -94,7 +94,14 @@ starters, built from Vegas market expectation, news signal, availability and an
 uncertainty penalty, and under them the bench folded to `Bench (6) ›` with a
 line saying whether anything back there is better. Every recommended starter is
 one phone row: a slot, a name, a projection, a club mark and a tag only when a
-tag is material. Balanced, Floor and Ceiling ask the same question three ways. Tapping one of your players opens his week in a concise
+tag is material. Where the app and Sleeper disagree, both directions are on the
+row that carries them: `On your bench` on a recommended starter Sleeper is not
+starting, `Starting in Sleeper` on a bench player it is — so a change worth
+points is never something you have to find by reading two lists against a third
+screen. A slot the app will not fill names the player it could not use and why
+(`Jacksonville can't be scored this week`, over `no game line for this
+defence`), because a rostered defence and an empty roster are different things
+and used to read the same. Balanced, Floor and Ceiling ask the same question three ways. Tapping one of your players opens his week in a concise
 card — the verdict, the role trend, the matchup, the market and the availability
 — with his full profile and the comparison one tap further on. Pull the screen
 down to refresh it. It never changes a lineup.

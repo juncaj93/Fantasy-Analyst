@@ -540,9 +540,17 @@ function replacementFor(
  * the bench, and naming the player who would go is what turns "best available"
  * into a move the reader can actually picture making.
  */
-function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation | null): string[] {
-  const reasons: string[] = [];
-  if (floor) reasons.push(`Worth more than ${floor.name}, the last man on your bench`);
+function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation): string[] {
+  /*
+   * "the last man on your bench" is what this said, and it is no longer what
+   * the floor is. It is the weakest man on the bench *who competes for his
+   * slots* — a different and usually higher bar, and the whole reason the tier
+   * stopped offering backup quarterbacks. Naming the slot keeps the sentence
+   * true and, more usefully, tells the reader which comparison was made.
+   */
+  const reasons: string[] = [
+    `Worth more than ${floor.name}, your weakest ${floor.position} option on the bench`,
+  ];
 
   const points = candidate.expectation.points;
   if (points != null) reasons.push(`Market priced — ${points.toFixed(1)} pts expected`);
