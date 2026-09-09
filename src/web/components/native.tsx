@@ -19,6 +19,8 @@ import {
   useEdgeSwipeBack,
   usePullToRefresh,
   useStandaloneMode,
+  velocityOver,
+  type Sample,
 } from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
@@ -775,46 +777,69 @@ export function Sheet({
     let held = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
     /*
-     * The fastest this movement has travelled toward gone, and where it was
-     * last seen, so the next scroll can be turned into a speed.
+     * How fast the movement was going when the hand came off it.
      *
-     * **`sampled` is the honest answer to "and if we never found out?"** A speed
-     * needs two positions and the gap between them, and there are movements this
-     * layer is given only one position for: a single `scrollTop` write moves it
-     * a whole screen inside one event, which is what a test does when its
-     * subject is a stated distance, and what a page can do to itself. Guessing
-     * "slow" there would withhold a dismissal on no evidence at all. So an
-     * unmeasured movement is judged the way it was judged before any of this —
-     * on distance — and the speed may only ever *withhold* a dismissal it has
-     * actually watched being slow.
+     * **A peak over the whole movement was tried here first, and it is wrong.**
+     * The reasoning for it was sound as far as it went — a scroller decelerates
+     * to a stop, so by the time the debounce has decided a movement is over
+     * there is no speed left to read, and the fastest moment looked like the
+     * honest summary. What that misses is that a *deliberate* push is fast at
+     * the start and slow at the end: the hand sets off at an ordinary pace and
+     * eases into where it means to stop. A peak reads only the setting-off, so
+     * every unhurried push was judged by the half-second before the reader began
+     * being careful. Measured on the layer: a three-second drag, easing to a
+     * halt, peaked at 0.41px/ms and was dismissed as a flick.
+     *
+     * So the reading is taken over the last {@link VELOCITY_WINDOW} of movement
+     * instead, which is where the intent actually lives, and it is *frozen* the
+     * moment the hand lifts. Freezing is the part that makes it work on a
+     * scroller: momentum keeps the layer moving after the finger has gone, and
+     * those scrolls would otherwise wash the reading out to nothing. This is
+     * {@link velocityOver}, the same window the back swipe judges its flicks
+     * over — the sheet is that function's second caller again.
+     *
+     * **`measured` is the honest answer to "and if we never found out?"** A
+     * speed needs two positions, and there are movements this layer is given
+     * only one for: a single `scrollTop` write moves it a whole screen inside
+     * one event, which is what a test does when its subject is a stated
+     * distance, and what a page can do to itself. Guessing "slow" there would
+     * withhold a dismissal on no evidence at all. So an unmeasured movement is
+     * judged the way it was judged before any of this — on distance — and the
+     * speed may only ever *withhold* a dismissal it has actually watched being
+     * slow.
      */
-    let peak = 0;
-    let sampled = false;
-    let lastTop = 0;
-    let lastAt = 0;
+    const recent: Sample[] = [];
+    /** Enough readings to fill the window at any frame rate, and no history. */
+    const KEEP = 12;
+    let flick = 0;
+    let measured = false;
+    let lifted = false;
     /** Begin reading a fresh movement, from wherever the layer is now. */
     const rewind = () => {
-      peak = 0;
-      sampled = false;
-      lastTop = root.scrollTop;
-      lastAt = stamp();
+      recent.length = 0;
+      flick = 0;
+      measured = false;
+      lifted = false;
     };
     /**
-     * One scroll's worth of speed.
+     * One more reading of where the layer is, while the movement is still the
+     * reader's.
      *
-     * Only movement toward gone counts. A push that wanders back up the layer
-     * mid-gesture is a reader changing their mind, and the speed of the changing
-     * has nothing to say about whether they meant to leave.
+     * Nothing is recorded once the hand is off: what the engine does with the
+     * momentum it was given is not a statement of intent, and letting its decay
+     * into the window would turn every flick into a hesitation.
+     *
+     * `scrollTop` falls as the card leaves, so the sign is flipped to give a
+     * speed *toward gone*; a movement wandering back up the layer reads as
+     * nought rather than as a negative flick.
      */
     const sample = (top: number) => {
-      const at = stamp();
-      const gap = at - lastAt;
-      const travelled = lastTop - top;
-      lastTop = top;
-      lastAt = at;
-      if (gap <= 0 || travelled <= 0) return;
-      sampled = true;
-      peak = Math.max(peak, travelled / gap);
+      if (lifted) return;
+      recent.push({ x: top, t: stamp() });
+      if (recent.length > KEEP) recent.shift();
+      if (recent.length < 2) return;
+      flick = Math.max(0, -velocityOver(recent));
+      measured = true;
     };
     /*
      * Real input: the reader has done something the layer can act on.
@@ -867,6 +892,16 @@ export function Sheet({
       // for how long, and each scroll it covers renews it.
       if (dragging) gestured();
       dragging = false;
+      /*
+       * And the speed reading closes here, with whatever the movement had.
+       *
+       * Only a hand actually leaving does this. A `pointercancel` must not: on
+       * WebKit that is the engine taking the drag over to pan with, which
+       * arrives at the *start* of a push rather than its end — freezing there
+       * would record nought for every touch drag the engine claims, which is
+       * all of them.
+       */
+      lifted = true;
     };
     const onTaken = () => {
       gestured();
@@ -894,6 +929,25 @@ export function Sheet({
     const paint = (progress: number) => {
       const back = backdrop.current;
       if (back) back.style.opacity = String(Math.max(0, Math.min(1, progress)));
+    };
+
+    /*
+     * The screen behind and the card agree about how far the dismissal has got.
+     *
+     * **They stopped agreeing the moment the card was damped.** The scrim was
+     * tied to the layer's scroll, which is the thumb's travel, while the card is
+     * drawn against {@link resistedTravel} — so past the knee the app behind
+     * kept coming back at full speed while the card slowed under the thumb.
+     * Measured on the layer: a deliberate push to 95% left the card 58% out with
+     * the screen behind 93% uncovered. That reads as the card sticking and the
+     * background carrying on without it, which is most of what "glitchy" was.
+     *
+     * So both are driven by the same number, and the one they share is the one
+     * the reader can see: how far the *card* has moved.
+     */
+    const show = (given: number, journey: number) => {
+      paint(1 - resistedTravel(Math.max(0, Math.min(1, given))));
+      held = resist(Math.max(0, Math.min(1, given)), journey);
     };
 
     /*
@@ -925,14 +979,13 @@ export function Sheet({
      * layout cost of a scroll to recompute a number the caller was holding is
      * the sort of thing that turns those green shards amber.
      */
-    const resist = (progress: number, journey: number) => {
+    const resist = (given: number, journey: number) => {
       const box = detent.current;
       if (!box) return 0;
       if (journey <= 0) {
         box.style.transform = '';
         return 0;
       }
-      const given = Math.max(0, Math.min(1, 1 - progress));
       const behind = (given - resistedTravel(given)) * journey;
       box.style.transform = behind > 0.5 ? `translate3d(0, ${-behind}px, 0)` : '';
       return behind;
@@ -1020,7 +1073,7 @@ export function Sheet({
       const detentTop = root.scrollHeight - root.clientHeight;
       if (detentTop <= 0) return;
       // How much of the push was given, and whether it was ever given quickly.
-      if (dismissesSheet(1 - root.scrollTop / detentTop, peak, sampled)) {
+      if (dismissesSheet(1 - root.scrollTop / detentTop, flick, measured)) {
         leave();
         return;
       }
@@ -1078,15 +1131,12 @@ export function Sheet({
          * than its own scroll events landing inside the reader's window.
          */
         if (detentTop > 0) {
-          paint(top / detentTop);
-          held = resist(top / detentTop, detentTop);
+          show(1 - top / detentTop, detentTop);
         }
         if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
-        // Not the reader's movement, so it earns no speed — but it does move the
-        // layer, and a stale position would turn the next real push's first
-        // scroll into a speed measured across the spring's travel as well.
-        lastTop = top;
-        lastAt = stamp();
+        // Not the reader's movement, so it earns no speed: nothing here is
+        // sampled, and the settle that started this spring emptied the readings
+        // on its way out. There is no stale position left to correct for.
         return;
       } else if (hands()) {
         // A movement already under way, which keeps its window open as it goes.
@@ -1106,16 +1156,14 @@ export function Sheet({
          */
         window.clearTimeout(timer);
         if (detentTop > 0 && top < detentTop - 1) root.scrollTop = detentTop;
-        paint(1);
-        held = resist(1, detentTop);
+        show(0, detentTop);
         // Corrected, not travelled. The layer is back at the card's position and
         // whatever a hand does next starts from there.
         rewind();
         return;
       }
       if (detentTop > 0) {
-        paint(top / detentTop);
-        held = resist(top / detentTop, detentTop);
+        show(1 - top / detentTop, detentTop);
       }
       /*
        * A card that has arrived at gone does not wait to be told.
