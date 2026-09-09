@@ -70,7 +70,7 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 # connected, which is true and is better than a number nobody measured.
 #
 # Find it with `wrangler whoami`, or in the URL of any dashboard page.
-CLOUDFLARE_ACCOUNT_ID = ""
+CLOUDFLARE_ACCOUNT_ID = "50002437b267aed0910ed9023762dc31"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool
