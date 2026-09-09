@@ -1,0 +1,221 @@
+name: Preview
+
+# Put a revision in front of one person, without putting it in front of the app.
+#
+# `deploy.yml` is the only path to production and this is deliberately not it.
+# Cloudflare can hold more than one version of a Worker at a time: `versions
+# upload` publishes one and hands back a URL that serves it, while every
+# ordinary request keeps going to the version `wrangler deploy` last promoted.
+# Nothing here shifts traffic, and running it does not change what production
+# is running.
+#
+# It exists because the repository had a gap between "green on CI" and "live":
+# the only way to look at a change against the real league was to merge it,
+# which on this repo means deploying it, which is exactly the thing somebody
+# holding a change wants to avoid. A branch could pass every test in the suite
+# and still be a thing nobody had *looked* at on a phone.
+#
+# ## What it shares with production, and what it does not
+#
+# The bindings are the ones in `wrangler.toml`, so a preview reads **the real
+# D1 database** and answers with the real roster — which is the whole point,
+# because a preview against seeded data cannot answer "is my lineup right now
+# correct". Two consequences worth stating plainly:
+#
+#   - reading is free and harmless, but a control that writes still writes.
+#     Pull-to-refresh syncs the roster, and the Data Health refresh spends real
+#     Vegas quota, exactly as they would in the live app;
+#   - **migrations are not applied here.** `release.yml` owns the schema. A
+#     branch that needs a migration cannot be honestly previewed by this
+#     workflow: it would run new code against the old shape. Preview only
+#     branches whose diff touches no `migrations/` file, which the guard below
+#     checks rather than trusts.
+#
+# Scheduled work does not run on a preview version either. Cron triggers belong
+# to the deployed Worker, so anything that only shows itself after a clock — the
+# Saturday and Sunday Vegas refreshes — has to be triggered by hand from inside
+# the app, or waited for after a real release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to preview'
+        required: true
+        type: string
+        default: 'claude/new-session-54mfpx'
+
+# Never at the same time as a release or a rollback: they share one Worker, and
+# an upload racing a promotion is a good way to be unsure what is live.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_NAME: fantasy_analyst
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          # The whole history, because the migration guard below compares
+          # against the default branch.
+          fetch-depth: 0
+
+      - name: Resolve what is actually being previewed
+        id: rev
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Previewing ${{ inputs.ref }} -> $sha"
+
+      # The one thing a preview must not do quietly.
+      #
+      # This workflow does not migrate, so a branch carrying a migration would
+      # run tomorrow's code against today's tables and produce failures that
+      # belong to neither. Refusing is the honest answer, and it names the way
+      # forward rather than leaving somebody to guess.
+      - name: Refuse to preview a branch that changes the schema
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          base="$(git merge-base origin/main HEAD)"
+          if git diff --name-only "$base" HEAD -- migrations/ | grep -q .; then
+            echo "::error::This revision changes migrations/, and a preview does not apply them. It would run new code against the old schema. Release it through the normal path instead, or preview a revision without a migration."
+            git diff --name-only "$base" HEAD -- migrations/
+            exit 1
+          fi
+          echo "No migration files touched — safe to run against the live database."
+
+      - name: Check the Cloudflare credentials are present
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Cheap, and it is the only gate a hand-started preview gets. A revision
+      # nobody has tested is not one to point at the real database.
+      - name: Run the test suite
+        run: npm test
+
+      - name: Find the database
+        id: d1
+        run: |
+          set -euo pipefail
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          # Deliberately does not create one. `release.yml` may bring a database
+          # into existence; a preview that did so would be inventing production.
+          if [ -z "$id" ]; then
+            echo "::error::No database called $DATABASE_NAME. Deploy once through the normal path before previewing against it."
+            exit 1
+          fi
+          echo "database_id=$id" >> "$GITHUB_OUTPUT"
+          echo "Using database $DATABASE_NAME ($id)"
+
+      - name: Point the config at that database
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            const id = process.argv[1];
+            const next = fs.readFileSync(file, 'utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + id + '\"');
+            fs.writeFileSync(file, next);
+          " "${{ steps.d1.outputs.database_id }}"
+          grep 'database_id' wrangler.toml
+
+      # Stamped for the same reason a release is: so `/api/health` names the
+      # revision being looked at. On a preview it is what tells you the tab you
+      # have open is the branch and not production.
+      - name: Stamp the revision into the Worker
+        env:
+          RELEASE_SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            const sha = process.argv[1];
+            const before = fs.readFileSync(file, 'utf8');
+            const after = before.replace(/^RELEASE_SHA = \"[^\"]*\"$/m, 'RELEASE_SHA = \"' + sha + '\"');
+            if (after === before) {
+              console.error('::error::wrangler.toml has no RELEASE_SHA line to stamp.');
+              process.exit(1);
+            }
+            fs.writeFileSync(file, after);
+          " "$RELEASE_SHA"
+          grep '^RELEASE_SHA' wrangler.toml
+
+      - name: Build the site
+        run: npm run build
+
+      # `versions upload`, never `deploy`. The difference is the whole file:
+      # this publishes a version and returns a URL that serves it, and leaves
+      # the promoted version alone.
+      - name: Upload a preview version
+        id: upload
+        env:
+          RELEASE_SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          set -uo pipefail
+          npx wrangler versions upload 2>&1 | tee /tmp/preview.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            if grep -qi 'subdomain' /tmp/preview.log; then
+              echo "::error::This Cloudflare account has no workers.dev subdomain, so there is nowhere to serve a preview from. Register one at Cloudflare dashboard -> Workers & Pages -> Subdomain."
+            fi
+            exit "$status"
+          fi
+          # Wrangler prints the preview address as a workers.dev URL carrying a
+          # version prefix. Taken from the log rather than constructed, because
+          # the prefix is Cloudflare's to choose.
+          url=$(grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' /tmp/preview.log | tail -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Say where it is
+        env:
+          URL: ${{ steps.upload.outputs.url }}
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Preview ready"
+            echo
+            if [ -n "$URL" ]; then
+              echo "**Open:** $URL"
+            else
+              echo "Wrangler did not print a URL. Open the version in the Cloudflare dashboard under Workers & Pages -> fantasy-analyst -> Versions."
+            fi
+            echo
+            echo "**Revision:** \`$SHA\` (\`${{ inputs.ref }}\`)"
+            echo
+            echo "Production is untouched and is still serving whatever \`deploy.yml\` last released."
+            echo
+            echo "It reads the **real** database, so the roster and the lines are yours. Looking is harmless; pull-to-refresh and the Data Health refresh still write, and still spend Vegas quota."
+            echo
+            echo "Scheduled jobs do not run on a preview version, so anything that waits for a clock has to be triggered by hand."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$URL" ]; then echo "::notice::Preview of $SHA at $URL"; fi
