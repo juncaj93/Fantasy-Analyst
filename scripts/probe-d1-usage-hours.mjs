@@ -70,11 +70,30 @@ async function fieldsOf(typeName) {
   return data?.__type?.fields ?? [];
 }
 
-const accountFields = await fieldsOf('Account');
+/*
+ * The account type's name, walked to from the schema root rather than typed in.
+ *
+ * The first version of this hardcoded `Account` and found a type with no D1
+ * fields on it — which is the same class of mistake as guessing a metric name,
+ * one level up. `viewer.accounts` is the path the query itself uses, so the
+ * type behind it is the type to introspect, whatever it is called.
+ */
+const rootName = (await graphql('{ __schema { queryType { name } } }'))?.__schema?.queryType?.name;
+const rootFields = await fieldsOf(rootName);
+const viewerType = unwrap(rootFields.find((f) => f.name === 'viewer')?.type ?? {});
+const viewerFields = await fieldsOf(viewerType);
+const accountType = unwrap(viewerFields.find((f) => f.name === 'accounts')?.type ?? {});
+console.log(`query root      : ${rootName}`);
+console.log(`viewer type     : ${viewerType}`);
+console.log(`account type    : ${accountType}`);
+
+const accountFields = await fieldsOf(accountType);
 const groups = accountFields.find((f) => f.name === 'd1AnalyticsAdaptiveGroups');
 if (!groups) {
-  console.error('This account type has no d1AnalyticsAdaptiveGroups field. Fields containing "d1":');
-  console.error(accountFields.filter((f) => /d1/i.test(f.name)).map((f) => f.name).join(', ') || '(none)');
+  console.error(`${accountType} has no d1AnalyticsAdaptiveGroups field. Fields matching d1/analytics:`);
+  console.error(
+    accountFields.filter((f) => /d1|analytics/i.test(f.name)).map((f) => f.name).join(', ') || '(none)',
+  );
   process.exit(1);
 }
 
