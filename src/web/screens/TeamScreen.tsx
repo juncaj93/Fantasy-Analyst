@@ -260,6 +260,22 @@ export function TeamScreen({
   );
 
   /*
+   * The lineup Sleeper actually holds, which is the one the reader has to change.
+   *
+   * `startingIds` above is this app's *recommendation*; this is the fact it is
+   * disagreeing with. Both are needed because a disagreement has two sides and
+   * the screen only ever drew one of them: a recommended starter Sleeper has on
+   * the bench already carries `On your bench`, and a player Sleeper is starting
+   * that this app would bench dropped into the bench list with nothing to say
+   * he was in the lineup. That is the half a reader cannot reconstruct — it is
+   * the half that costs points if it is missed.
+   */
+  const sleeperStartingIds = useMemo(
+    () => new Set((roster?.starters ?? []).map((p) => p.playerId)),
+    [roster],
+  );
+
+  /*
    * The bench, in the order the recommendation puts it.
    *
    * Best replacement first, then the players it could not score at all, then
@@ -562,6 +578,7 @@ export function TeamScreen({
               {roster.live ? null : (
                 <BenchSection
                   players={bench}
+                  startingInSleeper={sleeperStartingIds}
                   projectionOf={(playerId) => ({
                     points: evaluations.get(playerId)?.projection ?? null,
                     source: evaluations.get(playerId)?.projectionSource ?? null,
@@ -974,11 +991,21 @@ function StarterCard({
  */
 function BenchCard({
   player,
+  startingInSleeper,
   projection,
   projectionSource,
   onOpen,
 }: {
   player: RosterPlayer;
+  /**
+   * True when Sleeper has him in a starting slot and this app would not.
+   *
+   * The other half of a disagreement, and the half that was invisible. `On your
+   * bench` on a recommended starter says "put him in"; this row is the "take
+   * him out" that used to be left for the reader to work out by comparing two
+   * lists against a third screen.
+   */
+  startingInSleeper: boolean;
   /** The weekly projection, never the ranking score — see `StarterCard`. */
   projection: number | null;
   /** Whose projection it is. Travels with the number, always — see `projectionTitle`. */
@@ -993,8 +1020,10 @@ function BenchCard({
       data-starter="false"
       data-position={position.toUpperCase()}
       data-player-id={player.playerId}
+      data-in-sleeper-lineup={startingInSleeper ? 'true' : 'false'}
       aria-label={
         `${player.name}${position ? `, ${position}` : ''}, on your bench` +
+        `${startingInSleeper ? ', but starting in your Sleeper lineup' : ''}` +
         spokenProjection(projection, projectionSource) +
         `${player.status ? `, ${player.status}` : ''}`
       }
@@ -1017,11 +1046,25 @@ function BenchCard({
         {/*
           Against the name, exactly as on a starter — a direct child of the row
           rather than wrapped, so the seam either side of it is the row's own gap
-          on both. There is no `.row-tags` here because there is nothing to put
-          in it: `Locked` and `On your bench` are facts about a lineup slot, and
-          a bench player has none.
+          on both.
+
+          There is one lineup fact a bench row can carry after all, and leaving
+          it off was the asymmetry that made the two lists hard to reconcile: a
+          recommended starter Sleeper benches has always said `On your bench`,
+          and a player Sleeper is *starting* that this app would bench said
+          nothing at all. `Locked` still has no place here — it is a fact about a
+          slot this player does not hold.
         */}
         <InjuryTag status={player.status} />
+        {startingInSleeper ? (
+          <span
+            className="tag tag-warn tag-mini"
+            data-testid="in-sleeper-lineup-tag"
+            title="Starting in Sleeper — this is a change to make there"
+          >
+            Starting in Sleeper
+          </span>
+        ) : null}
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
           <span
@@ -1054,11 +1097,14 @@ function BenchCard({
  */
 function BenchSection({
   players,
+  startingInSleeper,
   projectionOf,
   summary,
   onOpen,
 }: {
   players: RosterPlayer[];
+  /** Who Sleeper currently has starting, so a recommended bench can say so. */
+  startingInSleeper: ReadonlySet<string>;
   /**
    * The weekly projection for a bench player and whose it is, or unknown.
    *
@@ -1095,6 +1141,7 @@ function BenchSection({
             <BenchCard
               key={p.playerId}
               player={p}
+              startingInSleeper={startingInSleeper.has(p.playerId)}
               projection={projectionOf(p.playerId).points}
               projectionSource={projectionOf(p.playerId).source}
               onOpen={() => onOpen(p.playerId)}

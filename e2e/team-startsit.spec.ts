@@ -201,6 +201,39 @@ test.describe('the recommended lineup, at a glance', () => {
   });
 
   /**
+   * A disagreement with Sleeper has two sides, and the screen used to draw one.
+   *
+   * `On your bench` has always marked a recommended starter Sleeper is not
+   * starting — "put him in". The other direction, a player Sleeper *is*
+   * starting that this app would bench, dropped into the bench list with
+   * nothing on it at all, so the reader had to reconcile two lists here against
+   * a third screen in Sleeper to find the change that actually costs points.
+   */
+  test('marks both directions of a disagreement with the Sleeper lineup', async ({ page }) => {
+    await page.getByTestId('bench-toggle').click();
+    const benched = page.locator('[data-testid="bench-row"][data-in-sleeper-lineup="true"]');
+
+    // Every bench row Sleeper is starting says so, and no other bench row does.
+    for (const row of await benched.all()) {
+      await expect(row.getByTestId('in-sleeper-lineup-tag')).toBeVisible();
+    }
+    const quiet = page.locator('[data-testid="bench-row"][data-in-sleeper-lineup="false"]');
+    for (const row of await quiet.all()) {
+      await expect(row.getByTestId('in-sleeper-lineup-tag')).toHaveCount(0);
+    }
+
+    /*
+     * And it actually fires. Nate Kowalski is on injured reserve and is in the
+     * seeded Sleeper lineup, which is the most ordinary way a real lineup goes
+     * wrong — set weeks ago, not looked at since. That is a change worth
+     * points, and before this the row carrying it said nothing.
+     */
+    await expect(benched).toHaveCount(1);
+    await expect(benched.first()).toContainText('Nate Kowalski');
+    await expect(benched.first()).toContainText('Starting in Sleeper');
+  });
+
+  /**
    * Nate Kowalski is on injured reserve and is one of two tight ends here. He
    * is on the bench, untinted, and the tight-end slot went to the other one.
    */

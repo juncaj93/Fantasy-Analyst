@@ -388,7 +388,17 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       ownerId: 'demo-user',
       ownerName: 'You',
       playerIds: ['1001', '1004', '1009', '1011', '1030'],
-      starterIds: ['1001', '1004', '1030'],
+      /*
+       * Kowalski is in this lineup and is on injured reserve.
+       *
+       * Deliberate, and it is the most ordinary way a real lineup goes wrong: a
+       * player the manager set weeks ago and has not looked at since. The app
+       * benches him and the Team screen has to *say* so on his row — a
+       * disagreement the reader can only otherwise find by reading two lists
+       * here against a third screen in Sleeper. Without him in here the demo
+       * never produces a recommend-bench at all.
+       */
+      starterIds: ['1001', '1004', '1030', '1009'],
       reserveIds: [],
       isMine: true,
       settings: { waiver_budget_used: 35 },

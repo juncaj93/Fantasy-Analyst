@@ -442,8 +442,16 @@ describe('API with seeded data', () => {
       get('/api/leagues/demo-league/roster', cookie),
     );
     expect(body.found).toBe(true);
-    // Two skill starters and the defence, which the seeded league starts.
-    expect(body.starters).toHaveLength(3);
+    /*
+     * Two skill starters, the defence, and the tight end on injured reserve.
+     *
+     * That fourth one is deliberate seed data rather than an oversight: a
+     * lineup set weeks ago and not looked at since is the most ordinary way a
+     * real one goes wrong, and it is what gives the Team screen a
+     * recommend-bench to draw. This endpoint reports Sleeper's lineup as it
+     * stands and passes no judgement on it — the judging happens downstream.
+     */
+    expect(body.starters).toHaveLength(4);
     expect(body.bench.length).toBeGreaterThan(0);
   });
 
