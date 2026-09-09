@@ -109,6 +109,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+      # The pinned wrangler, not whatever `npx` would fetch.
+      #
+      # This guard fails closed, so anything that stops it answering stops the
+      # sweep — and an unpinned download from the registry is a dependency on
+      # the registry being up at 07:30 every morning. `npm ci` is the same
+      # install every other job here does.
+      - run: npm ci
       - id: guard
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
