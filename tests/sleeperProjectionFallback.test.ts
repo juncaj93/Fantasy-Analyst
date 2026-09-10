@@ -463,11 +463,43 @@ describe('the matchup forecast is simulated without it', () => {
   /** Large enough that a forecast built on them could not be mistaken for one that was not. */
   const PUBLISHED = new Map([...MINE, ...THEIRS].map((id, i) => [id, 15 + i]));
 
+  /**
+   * Everything the simulator produces, and one field that is not simulated.
+   *
+   * This used to compare the two forecast objects whole. It cannot any more,
+   * and the exception is worth stating precisely rather than loosening the
+   * assertion: `suggestedMode` is carried on the forecast but is not produced
+   * by it — `suggestMode` reads the published week as a strictly-below-market
+   * fallback, so that a matchup against a roster this app does not buy lines
+   * for can be called at all. That is a posture and a sentence, not a
+   * probability.
+   *
+   * So the claim narrows to what it was always about: the distributions, the
+   * correlation, the simulation, the projected final, the win probability and
+   * the swap advice are identical with and without the feed. The one field
+   * allowed to differ is checked separately, and checked to *actually* differ —
+   * an exception nobody exercises is an exception that quietly becomes a hole.
+   */
   it('produces an identical forecast with and without the published feed', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
     expect(withIt.found).toBe(true);
-    expect(withIt.forecast).toEqual(without.forecast);
+
+    const { suggestedMode: _withMode, ...simulatedWith } = withIt.forecast!;
+    const { suggestedMode: _withoutMode, ...simulatedWithout } = without.forecast!;
+    expect(simulatedWith).toEqual(simulatedWithout);
+  });
+
+  it('lets the published week reach the posture, which is not simulated', async () => {
+    const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
+    const without = await buildMatchupResponse(sources(null), 'l1');
+
+    // Without the feed nothing is priced on either side, so there is nothing to
+    // read and Balanced is a default rather than a choice.
+    expect(without.forecast!.suggestedMode.auto).toBe(false);
+    // With it, both sides carry a number and the matchup can be called.
+    expect(withIt.forecast!.suggestedMode.auto).toBe(true);
+    expect(withIt.forecast!.suggestedMode.reasons.join(' ')).toMatch(/Rotowire/);
   });
 
   it('leaves the projected final and the win probability unknown, as a market-less week is', () => {

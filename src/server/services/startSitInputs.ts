@@ -154,7 +154,14 @@ export async function startSitInputsFor(
         ? { opponentForm: context.opponentForm.get(game.opponent.toUpperCase())! }
         : {}),
       defenseTendencies: context.defense,
-      mode: opts.mode ?? 'balanced',
+      /*
+       * Only when the caller has one. An input with no mode is not an input
+       * with Balanced on it: `assembleLineup` reads `i.mode ?? mode`, so a
+       * hardcoded default here silently outranked the mode the assembly was
+       * asked for — which is exactly what the lineup route now needs, because
+       * it resolves the week's posture *after* gathering these.
+       */
+      ...(opts.mode ? { mode: opts.mode } : {}),
       propsStale: false,
     });
   }

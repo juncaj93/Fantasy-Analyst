@@ -3933,6 +3933,46 @@ button.btn-compact {
   white-space: nowrap;
 }
 
+/*
+ * An icon-only control: square, thumb-sized, and named by its aria-label.
+ *
+ * Square rather than the pill `.btn` draws, because there is no word inside it
+ * to give the shape a reason — a 44px circle-ish square reads as a control and
+ * a wide one reads as a button missing its label. The glyph is `currentColor`,
+ * so it takes the same accent text every other control on the row does.
+ */
+button.btn-icon {
+  min-height: var(--tap);
+  width: var(--tap);
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+/*
+ * The refresh glyph, while a refresh is running.
+ *
+ * A button has no rubber band to show its work with, and two seconds of a
+ * control that looks exactly as it did is two seconds in which a reader presses
+ * it again. Honoured only where the reader has not asked for less movement.
+ */
+@keyframes fa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: fa-spin 900ms linear infinite;
+  transform-origin: 50% 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
 button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -4460,6 +4500,19 @@ label {
    */
   min-height: var(--tap);
   margin-bottom: var(--sp-2);
+}
+
+/*
+ * A control row with nothing on its leading edge.
+ *
+ * The Team row used to open with a segmented control that took the width and
+ * pushed one button to the end. With the chips gone there is nothing to fill
+ * it, and two icons floating at the left of an empty row read as leftovers —
+ * so the row pushes them to the trailing edge, where a right-handed thumb is
+ * and where every other trailing control in this app sits.
+ */
+.control-row-trailing {
+  justify-content: flex-end;
 }
 
 /* Both occupants give up their own bottom margin — the row owns it now. */

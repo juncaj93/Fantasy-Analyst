@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MODE_SUGGESTION,
+  expectedPoints,
   projectSide,
   suggestMode,
   type SidePlayer,
@@ -100,7 +101,7 @@ describe('the suggestion', () => {
     const suggestion = suggestMode({ mine: thin, opponent: roster(12), shape: SHAPE });
     expect(suggestion.auto).toBe(false);
     expect(suggestion.mode).toBe('balanced');
-    expect(suggestion.detail).toMatch(/carry a market/);
+    expect(suggestion.detail).toMatch(/carry a projection/);
   });
 
   it('is not fooled by one side simply having more priced players', () => {
@@ -205,5 +206,137 @@ describe('the tiebreak, and its bound', () => {
       'balanced',
     );
     expect(result).toBeNull();
+  });
+});
+
+/**
+ * The week as it is now, rather than as it looked on Thursday.
+ *
+ * The control this replaces could not do it: a reader who had chosen Floor on
+ * Friday was still being answered under Floor at four o'clock on Sunday, with
+ * the lead that justified it long gone. So the property under test is that the
+ * *same* function, given a week in progress, changes its mind for the reason a
+ * person would.
+ *
+ * These build the sides by hand rather than through the fixtures above, because
+ * what is being exercised is the arithmetic in `expectedPoints` — banked plus
+ * what is left of the game — and it has to be readable which number is which.
+ */
+describe('a week already under way', () => {
+  const shape = SHAPE;
+
+  /** A side of nine identical men, so a margin is easy to reason about. */
+  function side(over: Partial<SidePlayer> & { points: number }): SidePlayer[] {
+    const positions = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'K', 'DEF'];
+    return positions.map((position, i) => ({
+      playerId: `${position}-${i}`,
+      position,
+      marketPoints: over.points,
+      ...(over.actualPoints === undefined ? {} : { actualPoints: over.actualPoints }),
+      ...(over.gameRemaining === undefined ? {} : { gameRemaining: over.gameRemaining }),
+    }));
+  }
+
+  it('says nothing about live state before anybody has kicked off', () => {
+    const suggestion = suggestMode({ mine: side({ points: 12 }), opponent: side({ points: 12 }), shape });
+    expect(suggestion.live).toBe(false);
+    expect(suggestion.mine?.banked).toBe(0);
+    expect(suggestion.detail).toMatch(/the market/);
+  });
+
+  it('reads a finished player as what he scored and not as what he was going to', () => {
+    // Projected 12, actually got 2, game over. He is worth 2, not 12, and not 14.
+    const done = expectedPoints({ playerId: 'x', position: 'WR', marketPoints: 12, actualPoints: 2, gameRemaining: 0 });
+    expect(done.points).toBe(2);
+  });
+
+  it('mixes the two at half time, in the proportion of the game left', () => {
+    const half = expectedPoints({ playerId: 'x', position: 'WR', marketPoints: 12, actualPoints: 4, gameRemaining: 0.5 });
+    expect(half.points).toBe(10);
+  });
+
+  it('leaves a man who has not started on his whole projection', () => {
+    // Sleeper reports 0 for a player who has played and not scored, so a null
+    // actual is the pregame state and must not be read as a bad afternoon.
+    const pregame = expectedPoints({ playerId: 'x', position: 'WR', marketPoints: 12, gameRemaining: 1 });
+    expect(pregame.points).toBe(12);
+  });
+
+  it('turns a comfortable favourite into a coin flip when the opponent blows up', () => {
+    /*
+     * The case from the brief, in numbers. Pregame both sides project the same
+     * and the week is a coin flip. Then the opponent's men come in at double
+     * their lines while mine are still to play — and the mode has to stop
+     * telling a man who is now well behind to protect a floor.
+     */
+    const pregame = suggestMode({ mine: side({ points: 12 }), opponent: side({ points: 12 }), shape });
+    expect(pregame.state).toBe('close');
+
+    const blownUp = suggestMode({
+      mine: side({ points: 12 }),
+      opponent: side({ points: 12, actualPoints: 24, gameRemaining: 0 }),
+      shape,
+    });
+    expect(blownUp.live).toBe(true);
+    expect(blownUp.state).toBe('substantial_underdog');
+    expect(blownUp.mode).toBe('ceiling');
+    expect(blownUp.detail).toMatch(/you are about \d+ points behind/);
+  });
+
+  it('turns a coin flip into a lead worth protecting when the opponent is bombing', () => {
+    const bombing = suggestMode({
+      mine: side({ points: 12 }),
+      opponent: side({ points: 12, actualPoints: 1, gameRemaining: 0 }),
+      shape,
+    });
+    expect(bombing.state).toBe('substantial_favourite');
+    expect(bombing.mode).toBe('floor');
+    expect(bombing.reasons.join(' ')).toMatch(/already on the board/);
+  });
+});
+
+/**
+ * Speaking at all, on a roster this app deliberately does not price.
+ *
+ * The opponent is not bought from a sportsbook — the owner declined that on
+ * cost on 9 September 2026 — so on market alone his coverage is one or two
+ * slots in nine and every suggestion came back `unknown`. Rotowire's published
+ * week is already stored for the whole NFL, so it is the fallback.
+ */
+/** This fixture league starts QB, RB, RB, WR, WR, TE and a FLEX — seven slots. */
+const SHAPE_STARTERS = 7;
+
+describe('the published fallback', () => {
+  function borrowedSide(points: number): SidePlayer[] {
+    return ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'K', 'DEF'].map((position, i) => ({
+      playerId: `${position}-${i}`,
+      position,
+      marketPoints: null,
+      publishedPoints: points,
+    }));
+  }
+
+  it('lets a matchup be called when only one side carries a market', () => {
+    const mine = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'K', 'DEF'].map((position, i) => ({
+      playerId: `mine-${position}-${i}`,
+      position,
+      marketPoints: 20,
+    }));
+    const suggestion = suggestMode({ mine, opponent: borrowedSide(8), shape: SHAPE });
+
+    expect(suggestion.auto, 'an unpriced opponent used to force `unknown`').toBe(true);
+    expect(suggestion.state).toBe('substantial_favourite');
+  });
+
+  it('never prefers the published number to a market one', () => {
+    const both = expectedPoints({ playerId: 'x', position: 'WR', marketPoints: 12, publishedPoints: 3 });
+    expect(both.points).toBe(12);
+    expect(both.borrowed).toBe(false);
+  });
+
+  it('counts and names the slots it borrowed rather than hiding them', () => {
+    const suggestion = suggestMode({ mine: borrowedSide(12), opponent: borrowedSide(12), shape: SHAPE });
+    expect(suggestion.mine?.slotsBorrowed).toBe(SHAPE_STARTERS);
+    expect(suggestion.reasons.join(' ')).toMatch(/Rotowire/);
   });
 });

@@ -22,6 +22,14 @@ import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { startSitInputsFor, buildStartSitContext } from './startSitInputs.ts';
+import { MatchupRepo } from '../repos/matchup.ts';
+import { evaluatePlayer } from '../../core/startsit/engine.ts';
+import {
+  BALANCED_BY_DEFAULT,
+  suggestMode,
+  type ModeSuggestion,
+  type SidePlayer,
+} from '../../core/startsit/modeSuggest.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
@@ -102,7 +110,10 @@ async function leagueBase(db: Database, leagueId: string): Promise<LeagueDecisio
 
 export interface LineupDecisionInputs extends LeagueDecisionBase {
   inputs: StartSitInput[];
+  /** The posture the week calls for — {@link modeSuggestion}'s own answer. */
   mode: StartSitMode;
+  /** Why that posture, in the suggestion's own words, for the screen to print. */
+  modeSuggestion: ModeSuggestion;
   published: Map<string, number>;
   /** One sentence naming a position this league may not read a published total for. */
   publishedRefusal: string | null;
@@ -113,10 +124,17 @@ export async function gatherLineupInputs(
   db: Database,
   sleeper: SleeperClient,
   leagueId: string,
-  mode: StartSitMode,
 ): Promise<LineupDecisionInputs> {
   const base = await leagueBase(db, leagueId);
-  const inputs = await startSitInputsFor(db, base.mine.playerIds, { mode });
+  /*
+   * Gathered without a mode, on purpose.
+   *
+   * The posture is no longer something the caller knows when it asks for these
+   * — it is read off the week further down, from the margin against the
+   * opponent. `startSitInputsFor` therefore leaves `mode` unset on each input,
+   * and `assembleLineup`'s `i.mode ?? mode` picks up whatever is resolved.
+   */
+  const inputs = await startSitInputsFor(db, base.mine.playerIds);
 
   /*
    * Rotowire's published week, for the players this app could not price.
@@ -133,12 +151,43 @@ export async function gatherLineupInputs(
    */
   const positions = new Map(inputs.map((input) => [input.player.id, input.player.position ?? null]));
   const week = resolveWeek(null, base.nflState?.week ?? null, base.nflState?.seasonType ?? null);
+
+  /*
+   * Who the reader is playing, from the row the Matchup screen already wrote.
+   *
+   * The pairing is Sleeper's and the honest way to get it is to ask Sleeper —
+   * which is a request per Team load, on a screen that is opened many times a
+   * week. `matchup_forecasts` already carries `opponent_roster_id` for this
+   * league, season and week, on a row keyed exactly that way, so this is one
+   * indexed lookup of one row and no request at all.
+   *
+   * It is null before the Matchup screen has been opened this week, and null
+   * for a roster on a bye. Both end at Balanced with `auto: false`, which is
+   * the honest answer: no opponent read, so no opinion about the matchup.
+   */
+  const forecast = await new MatchupRepo(db)
+    .latest({ leagueId: base.league.id, season: base.league.season, week, rosterId: base.mine.rosterId })
+    .catch(() => null);
+  const opponent =
+    forecast?.opponentRosterId == null
+      ? null
+      : (base.rosters.find((r) => r.rosterId === forecast.opponentRosterId) ?? null);
+
+  /*
+   * One published read covering both rosters, rather than one per side.
+   *
+   * `publishedFor` batches by id, so folding the opponent's players into the
+   * same call is the difference between two queries and one — and the
+   * opponent's half is the whole reason `suggestMode` can speak at all about a
+   * roster this app does not buy lines for. See `core/startsit/modeSuggest.ts`.
+   */
+  const opponentIds = opponent?.playerIds ?? [];
   let published: Map<string, number>;
   try {
     published = await new SleeperProjectionService(db, sleeper).publishedFor({
       season: base.league.season,
       week,
-      playerIds: base.mine.playerIds,
+      playerIds: [...base.mine.playerIds, ...opponentIds],
       profile: base.profile,
       positionOf: (id) => positions.get(id) ?? null,
     });
@@ -146,14 +195,89 @@ export async function gatherLineupInputs(
     published = new Map();
   }
 
+  const modeSuggestion = suggestLineupMode({
+    inputs,
+    profile: base.profile,
+    rosterPositions: base.league.rosterPositions,
+    opponentIds,
+    published,
+  });
+
   return {
     ...base,
     inputs,
-    mode,
+    mode: modeSuggestion.mode,
+    modeSuggestion,
     published,
     publishedRefusal: publishedRefusalNote(base.profile, positions),
     unknownPlayers: base.mine.playerIds.length - inputs.length,
   };
+}
+
+/**
+ * Which posture this week actually calls for, read rather than asked for.
+ *
+ * The Team screen used to carry a Balanced / Floor / Ceiling control and send
+ * whichever the reader tapped. It is gone: the app is in a better position to
+ * answer that than the person holding the phone, because the answer is a fact
+ * about the margin — a substantial favourite wants his floor protected and a
+ * substantial underdog needs upside, and neither of those is a preference.
+ *
+ * `suggestMode` owns the judgement and its circularity guard owns the inputs:
+ * market expectation first, Rotowire's published week where there is no market,
+ * and nothing that a Start/Sit score could travel through. Both sides are
+ * evaluated mode-free here, which they are anyway — `expectation.points` is the
+ * sportsbook's number under the league's scoring, computed before any weight in
+ * `mode.ts` is applied.
+ *
+ * The opponent's side is projections only. This path has no live scores in it,
+ * and that is a deliberate limit rather than an oversight: the reader's own
+ * banked points would need a Sleeper request per Team load. The Matchup screen
+ * makes that request for its own reasons and passes the live figures to the
+ * same function — see `core/matchup/build.ts` — so the live reading exists,
+ * on the screen that had already paid for it.
+ */
+function suggestLineupMode(opts: {
+  inputs: StartSitInput[];
+  profile: ScoringProfile;
+  rosterPositions: readonly string[];
+  opponentIds: readonly string[];
+  published: ReadonlyMap<string, number>;
+}): ModeSuggestion {
+  if (opts.opponentIds.length === 0) {
+    return {
+      ...BALANCED_BY_DEFAULT,
+      detail: 'Balanced — no opponent lineup is known for this week yet.',
+    };
+  }
+
+  const mine: SidePlayer[] = opts.inputs.map((input) => {
+    const evaluation = evaluatePlayer(input, opts.profile);
+    return {
+      playerId: input.player.id,
+      position: evaluation.position ?? '',
+      marketPoints: evaluation.expectation.points ?? null,
+      publishedPoints: opts.published.get(input.player.id) ?? null,
+      ruledOut: evaluation.ruledOut ?? false,
+    };
+  });
+
+  /*
+   * The opponent from the published week alone.
+   *
+   * There is no start/sit evaluation for his players — this request never
+   * gathered them, and gathering a second roster's usage, injuries and props is
+   * the spend the owner declined on 9 September 2026. What is here is free:
+   * Rotowire's totals are already stored for every player in the NFL.
+   */
+  const opponent: SidePlayer[] = opts.opponentIds.map((playerId) => ({
+    playerId,
+    position: '',
+    marketPoints: null,
+    publishedPoints: opts.published.get(playerId) ?? null,
+  }));
+
+  return suggestMode({ mine, opponent, shape: buildRosterShape([...opts.rosterPositions]) });
 }
 
 /**

@@ -210,17 +210,40 @@ export class MatchupRepo {
     season: string;
     week: number;
     rosterId: number;
-  }): Promise<{ fingerprint: string | null; winProbability: number | null; at: string | null } | null> {
+  }): Promise<{
+    fingerprint: string | null;
+    winProbability: number | null;
+    at: string | null;
+    /**
+     * Who this roster is playing this week, as of the last forecast.
+     *
+     * Read by the lineup route, which needs to know whose roster to weigh the
+     * reader's against and has no other cheap way to find out — the pairing
+     * otherwise costs a Sleeper request per Team load. It is already a column
+     * on the row this query reads, so carrying it is free.
+     *
+     * Null for a roster on a bye, and null for a week whose matchup screen
+     * nobody has opened yet. Both mean the same thing to the caller: no
+     * opponent to read, so no opinion about the matchup.
+     */
+    opponentRosterId: number | null;
+  } | null> {
     const row = await this.db
       .prepare(
-        `SELECT latest_fingerprint AS fingerprint, latest_win_probability AS win, latest_forecast_at AS at
+        `SELECT latest_fingerprint AS fingerprint, latest_win_probability AS win, latest_forecast_at AS at,
+                opponent_roster_id AS opponent
            FROM matchup_forecasts
           WHERE league_id = ? AND season = ? AND week = ? AND roster_id = ?`,
       )
       .bind(opts.leagueId, opts.season, opts.week, opts.rosterId)
-      .first<{ fingerprint: string | null; win: number | null; at: string | null }>();
+      .first<{ fingerprint: string | null; win: number | null; at: string | null; opponent: number | null }>();
     if (!row) return null;
-    return { fingerprint: row.fingerprint, winProbability: row.win, at: row.at };
+    return {
+      fingerprint: row.fingerprint,
+      winProbability: row.win,
+      at: row.at,
+      opponentRosterId: row.opponent ?? null,
+    };
   }
 
   /**

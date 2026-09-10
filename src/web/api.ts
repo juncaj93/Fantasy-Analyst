@@ -1258,6 +1258,8 @@ export interface StartSitEvaluation {
 
 /** Floor, Balanced or Ceiling — which question Start/Sit is answering. */
 export type StartSitMode = 'balanced' | 'floor' | 'ceiling';
+import type { ModeSuggestion } from '../core/startsit/modeSuggest.ts';
+export type { ModeSuggestion };
 
 /** Which lineup spot a comparison is actually about. */
 export interface ComparisonSlot {
@@ -1385,6 +1387,16 @@ export interface LineupRecommendation {
   warnings: string[];
   notes: string[];
   mode?: StartSitMode;
+  /**
+   * Why that posture, from the module that chose it.
+   *
+   * The Team screen used to carry a Balanced / Floor / Ceiling control, so the
+   * reader could always see which question was being answered. The control is
+   * gone — the app reads the week's margin instead — and this is what replaces
+   * it: the answer, and the sentence explaining it, printed beside the lineup.
+   * Optional because an older server does not send it.
+   */
+  modeSuggestion?: ModeSuggestion;
   /** Availability risks that depend on the bench rather than on the player. */
   lateSwapRisks?: { playerId: string; name: string; verdict: string; detail: string; starting: boolean }[];
 }

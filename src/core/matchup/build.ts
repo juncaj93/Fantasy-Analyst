@@ -52,6 +52,7 @@ import { marketProjection } from '../startsit/projection.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
 import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
+import { GAME_MINUTES } from './distribution.ts';
 import type { SlotSpec } from './decision.ts';
 import type { PreviousInsightState } from './insights.ts';
 import type { MatchupPlayerInput, MatchupSide } from './types.ts';
@@ -249,6 +250,38 @@ export async function buildMatchupResponse(
     ...toPlayers(theirsRow, 'theirs', evaluations, slots),
   ];
 
+  /*
+   * The published fallback, read once, before anything is built from it.
+   *
+   * It used to be fetched below the forecast, and the comment there called the
+   * order of the two statements the guarantee that `buildForecast` could not
+   * see it. That was never what enforced it, and saying so was the risk: the
+   * enforcement is `toPlayer`, which fills `projection` from `marketProjection`
+   * and from nothing else, and which is where the rule is written down. A
+   * forecast built on a model this app cannot explain is one it cannot defend,
+   * and that is still true — the simulator below reads market numbers only.
+   *
+   * It moves because a second caller now needs it before the forecast exists:
+   * `suggestMode` reads it as a strictly-below-market fallback so that a side
+   * this app does not price can still be estimated. See `modeSidePlayers`.
+   *
+   * Swallowed on failure for the same reason the lineup route swallows it —
+   * this fills a blank, and a blank is a state the screen already says out loud.
+   */
+  let published: ReadonlyMap<string, number> = new Map();
+  if (sources.publishedProjections) {
+    try {
+      published = await sources.publishedProjections({
+        season: league.season,
+        week,
+        playerIds: players.map((p) => p.playerId),
+        profile,
+      });
+    } catch {
+      published = new Map();
+    }
+  }
+
   const forecastInput = {
     leagueId: league.id,
     season: league.season,
@@ -271,18 +304,24 @@ export async function buildMatchupResponse(
     /*
      * The mode suggestion is `suggestMode`'s, not this feature's.
      *
-     * The Team screen already preselects Floor, Balanced or Ceiling from the
-     * week's market margin, and a second reading of the same question — off
-     * the simulated win probability, say — would be two modules disagreeing
-     * on one screen about which lineup the user should be looking at. So the
-     * matchup carries the existing answer through rather than forming its
-     * own, which also keeps `modeSuggest.ts`'s circularity guard intact: it
-     * is fed market points here, exactly as it is on the Team screen, and
-     * never the forecast this call is about to produce.
+     * The Team screen no longer asks the reader which of Floor, Balanced and
+     * Ceiling to answer under — it reads this — and a second reading of the
+     * same question, off the simulated win probability say, would be two
+     * modules disagreeing on one screen about which lineup he should be
+     * looking at. So the matchup carries the existing answer through rather
+     * than forming its own, which also keeps `modeSuggest.ts`'s circularity
+     * guard intact: it is fed outside numbers here — market lines, Rotowire's
+     * published week, and points already on the board — and never the forecast
+     * this call is about to produce.
+     *
+     * `now` and the live scores are what make it a reading of *this* week
+     * rather than of last Thursday's expectations. That is the whole of the
+     * change: a favourite whose opponent has already banked forty is not a
+     * favourite, and the lineup should stop protecting a lead it has lost.
      */
     modeSuggestion: suggestMode({
-      mine: modeSidePlayers(mineRow, evaluations),
-      opponent: modeSidePlayers(theirsRow, evaluations),
+      mine: modeSidePlayers(mineRow, evaluations, published, now),
+      opponent: modeSidePlayers(theirsRow, evaluations, published, now),
       shape: buildRosterShape(league.rosterPositions),
     }),
   };
@@ -340,29 +379,6 @@ export async function buildMatchupResponse(
    */
   const cards: Record<string, WeeklyCard> = {};
   const inputById = new Map(inputs.map((input) => [input.player.id, input]));
-
-  /*
-   * The published fallback, fetched after the forecast and used only by cards.
-   *
-   * The order of these two statements is the guarantee: `buildForecast` above
-   * has already run, on `marketProjection` alone, and cannot see anything read
-   * here. Swallowed on failure for the same reason the lineup route swallows it
-   * — this fills a blank, and a blank is a state the screen already says out
-   * loud.
-   */
-  let published: ReadonlyMap<string, number> = new Map();
-  if (sources.publishedProjections) {
-    try {
-      published = await sources.publishedProjections({
-        season: league.season,
-        week,
-        playerIds: players.map((p) => p.playerId),
-        profile,
-      });
-    } catch {
-      published = new Map();
-    }
-  }
 
   for (const player of players) {
     const evaluation = evaluations.get(player.playerId);
@@ -497,21 +513,68 @@ function toPlayers(
  * to that module as `ruledOut` instead.
  */
 function modeSidePlayers(
-  row: { players?: string[] | null },
+  row: { players?: string[] | null; players_points?: Record<string, number> | null },
   evaluations: Map<string, StartSitEvaluation>,
+  published: ReadonlyMap<string, number>,
+  now: Date,
 ): SidePlayer[] {
+  const points = row.players_points ?? {};
+  const started = new Set(Object.keys(points));
   return (row.players ?? [])
     .filter((playerId) => playerId !== '0')
     .map((playerId) => {
       const evaluation = evaluations.get(playerId);
+      const kickoff = evaluation?.lock.kickoff ?? null;
       return {
         playerId,
         position: evaluation?.position ?? '',
         marketPoints: evaluation?.expectation.points ?? null,
+        /*
+         * Rotowire's week, for the side this app does not price.
+         *
+         * Passed to both sides rather than only the opponent's, because
+         * `expectedPoints` reads it strictly below the market and a rule that
+         * applied to one roster and not the other would be a second code path
+         * to keep in step. In practice it is the opponent who leans on it: the
+         * reader's own roster is the one the weekly refresh buys lines for.
+         */
+        publishedPoints: published.get(playerId) ?? null,
         ruledOut: evaluation?.ruledOut ?? false,
+        /*
+         * Sleeper omits a player from `players_points` until his game is under
+         * way, so presence in that map — not a zero in it — is what says he has
+         * started. A man who has played and not scored is a real 0 and must not
+         * be read as pregame.
+         */
+        actualPoints: started.has(playerId) ? (points[playerId] ?? 0) : null,
+        gameRemaining: gameRemaining(kickoff, now),
       };
     });
 }
+
+/**
+ * How much of a player's game is still to come, 0..1.
+ *
+ * `GAME_MINUTES` is imported from `matchup/distribution.ts` rather than restated
+ * here, because that module is already conditioning its live distributions on
+ * the same fraction and two constants for "how long a game lasts" would drift
+ * the moment one of them was tuned. This is not a game clock and does not
+ * pretend to be one — nothing this app can reach knows what quarter it is.
+ *
+ * Unknown kickoff reads as "not started", which is the conservative answer: it
+ * leaves the man on his full projection rather than inventing a scoreline for
+ * him.
+ */
+function gameRemaining(kickoff: string | null, now: Date): number {
+  if (!kickoff) return 1;
+  const started = Date.parse(kickoff);
+  if (!Number.isFinite(started)) return 1;
+  const elapsed = (now.getTime() - started) / 60_000;
+  if (elapsed <= 0) return 1;
+  const gone = elapsed / GAME_MINUTES;
+  return gone >= 1 ? 0 : 1 - gone;
+}
+
 
 function toPlayer(
   playerId: string,
